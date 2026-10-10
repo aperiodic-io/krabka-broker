@@ -10,7 +10,7 @@
         "prover": "alt-ergo",
         "time": 0.017
       },
-      "vc_election_has_quorum": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_election_has_quorum": { "prover": "alt-ergo", "time": 0.009 },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.015 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.021 },
       "vc_from_residual_Option_tup5_VoterReconfigurationPlan_Vec_u64_Global_tup2_usize_usize_tup2_bool_bool_Option_u64": {
@@ -18,9 +18,9 @@
         "time": 0.019
       },
       "vc_is_none_u64": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_len_tup2_bool_bool": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_len_tup2_bool_bool": { "prover": "alt-ergo", "time": 0.012 },
       "vc_len_u64": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_len_u64'0": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_len_u64'0": { "prover": "alt-ergo", "time": 0.009 },
       "vc_reconfigured_majorities_overlap": {
         "tactic": "compute_specified",
         "children": [
@@ -30,7 +30,7 @@
               { "prover": "alt-ergo", "time": 0.021 },
               { "prover": "alt-ergo", "time": 0.022 },
               { "prover": "alt-ergo", "time": 0.022 },
-              { "prover": "z3", "time": 0.009 },
+              { "prover": "z3", "time": 0.02 },
               { "prover": "alt-ergo", "time": 0.026 },
               { "prover": "alt-ergo", "time": 0.035 },
               { "prover": "alt-ergo", "time": 0.029 },
@@ -43,7 +43,7 @@
                 "children": [
                   { "prover": "alt-ergo", "time": 0.043 },
                   { "prover": "z3", "time": 0.059 },
-                  { "prover": "z3", "time": 0.012 }
+                  { "prover": "z3", "time": 0.025 }
                 ]
               },
               { "prover": "alt-ergo", "time": 0.034 },

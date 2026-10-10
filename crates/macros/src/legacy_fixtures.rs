@@ -3,10 +3,7 @@
 use moxy::{ast::ParseError, token::TokenStream};
 
 pub(crate) fn policy(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let [name, root]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
-        .try_into()
-        .expect("two arguments");
-    let name = crate::fixtures::name(name)?;
+    let (name, root) = crate::fixtures::named_root(input)?;
     Ok(moxy::template! {
         fn {{ name }}() -> ::bytes::BytesMut {
             let records = vec![{{ root }}::ParsedRecord {

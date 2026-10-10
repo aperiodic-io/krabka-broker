@@ -6,70 +6,70 @@ use assert2::assert;
 use tempfile::tempdir;
 
 use super::*;
-use crate::partition_writer::test_support::sample_batch;
+use crate::partition_writer::test_support::{observed_writer, sample_batch};
 
-#[tokio::test]
-async fn writer_fires_hw_notify_after_produce_when_rf_one() {
+async fn fixture(
+    isr: &[u64],
+) -> (
+    tempfile::TempDir,
+    mpsc::Sender<WriterMessage>,
+    crate::partition_writer::test_support::ObservedWriter,
+) {
     let dir = tempdir().expect("tempdir");
     let log = open_default_log(dir.path());
     let (tx, rx) = mpsc::channel(1);
-    let append_notify = Arc::new(Notify::new());
-    let replica_state = replica_with_isr(&[1]).await;
-    let hw_advance_notify = Arc::new(Notify::new());
-    let writer = spawn_writer(
+    let observed = observed_writer(
         dir.path(),
-        log.clone(),
+        log,
         rx,
         WriterOptions {
-            append_notify: append_notify.clone(),
-            replica_state: replica_state.clone(),
-            hw_advance_notify: hw_advance_notify.clone(),
+            replica_state: replica_with_isr(isr).await,
             ..Default::default()
         },
     );
+    (dir, tx, observed)
+}
 
-    let waiter = hw_advance_notify.notified();
+#[tokio::test]
+async fn writer_fires_hw_notify_after_produce_when_rf_one() {
+    let (_dir, tx, observed) = fixture(&[1]).await;
+
+    let waiter = observed.hw_advance_notify.notified();
     tokio::pin!(waiter);
 
-    let _ack_rx = queue_batch(&tx, sample_batch(2)).await;
+    let _ack_rx = queue_batch(
+        &tx,
+        sample_batch(crate::test_support::EmptyPayloadBatchSetup {
+            count: crate::test_support::RecordCount(2),
+        }),
+    )
+    .await;
 
     tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
         .await
         .expect("hw_advance_notify did not fire");
 
-    assert!(replica_state.lock().await.hw == 2);
+    assert!(observed.replica_state.lock().await.hw == 2);
 
     drop(tx);
-    writer.await.expect("writer join");
+    observed.writer.await.expect("writer join");
 }
 
 #[tokio::test]
 async fn writer_does_not_notify_hw_when_append_leaves_hw_unchanged() {
-    let dir = tempdir().expect("tempdir");
-    let log = open_default_log(dir.path());
-    let (tx, rx) = mpsc::channel(1);
-    let append_notify = Arc::new(Notify::new());
-    let replica_state = replica_with_isr(&[1, 2]).await;
-    let hw_advance_notify = Arc::new(Notify::new());
-    let writer = spawn_writer(
-        dir.path(),
-        log.clone(),
-        rx,
-        WriterOptions {
-            append_notify,
-            replica_state: replica_state.clone(),
-            hw_advance_notify: hw_advance_notify.clone(),
-            ..Default::default()
-        },
-    );
+    let (_dir, tx, observed) = fixture(&[1, 2]).await;
 
-    let waiter = hw_advance_notify.notified();
+    let waiter = observed.hw_advance_notify.notified();
     tokio::pin!(waiter);
 
-    let ack_rx = queue_batch(&tx, sample_batch(1)).await;
+    let ack_rx = queue_batch(
+        &tx,
+        sample_batch(crate::test_support::EmptyPayloadBatchSetup::default()),
+    )
+    .await;
     ack_rx.await.expect("ack").expect("append ok");
 
-    assert!(replica_state.lock().await.hw == 0);
+    assert!(observed.replica_state.lock().await.hw == 0);
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(10), waiter)
             .await
@@ -77,34 +77,24 @@ async fn writer_does_not_notify_hw_when_append_leaves_hw_unchanged() {
     );
 
     drop(tx);
-    writer.await.expect("writer join");
+    observed.writer.await.expect("writer join");
 }
 
 #[tokio::test]
 async fn writer_does_not_advance_hw_when_followers_lagging() {
-    let dir = tempdir().expect("tempdir");
-    let log = open_default_log(dir.path());
-    let (tx, rx) = mpsc::channel(1);
-    let append_notify = Arc::new(Notify::new());
-    let replica_state = replica_with_isr(&[1, 2, 3]).await;
-    let hw_advance_notify = Arc::new(Notify::new());
-    let writer = spawn_writer(
-        dir.path(),
-        log.clone(),
-        rx,
-        WriterOptions {
-            append_notify: append_notify.clone(),
-            replica_state: replica_state.clone(),
-            hw_advance_notify: hw_advance_notify.clone(),
-            ..Default::default()
-        },
-    );
+    let (_dir, tx, observed) = fixture(&[1, 2, 3]).await;
 
-    let ack_rx = queue_batch(&tx, sample_batch(3)).await;
+    let ack_rx = queue_batch(
+        &tx,
+        sample_batch(crate::test_support::EmptyPayloadBatchSetup {
+            count: crate::test_support::RecordCount(3),
+        }),
+    )
+    .await;
     ack_rx.await.expect("ack").expect("append ok");
 
-    assert!(replica_state.lock().await.hw == 0);
+    assert!(observed.replica_state.lock().await.hw == 0);
 
     drop(tx);
-    writer.await.expect("writer join");
+    observed.writer.await.expect("writer join");
 }

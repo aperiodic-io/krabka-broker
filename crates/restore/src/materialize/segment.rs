@@ -216,6 +216,17 @@ mod tests {
         topic_id_partition, verified_segment,
     };
 
+    // Preserve each archived batch's span even when filtering empties it.
+    fn read_restored_pair(log: &Log) -> krabka_log::ReadOutput {
+        let read = log
+            .read(Offset(0), LogConfig::default().segment_size)
+            .expect("read back");
+        check!(read.batches.len() == 2);
+        check!(read.batches[0].base_offset == 0);
+        check!(read.batches[0].last_offset_delta == 2);
+        read
+    }
+
     #[tokio::test]
     async fn keep_only_batches_round_trip_verbatim_at_their_original_offsets() {
         let (_target, args, partition, predicates) = materialization_context(&[]);
@@ -273,12 +284,7 @@ mod tests {
         // claimed, so log_end_offset already accounts for batch_b at offset 3.
         check!(log.log_end_offset() == Offset(4));
 
-        let read = log
-            .read(Offset(0), LogConfig::default().segment_size)
-            .expect("read back");
-        check!(read.batches.len() == 2);
-        check!(read.batches[0].base_offset == 0);
-        check!(read.batches[0].last_offset_delta == 2);
+        let read = read_restored_pair(&log);
         check!(read.batches[0].records.is_empty());
         check!(read.batches[1].base_offset == 3);
     }
@@ -351,15 +357,7 @@ mod tests {
         check!(outcome.end_offset == Offset(3));
 
         let log = reopen_orders(&args);
-        let read = log
-            .read(Offset(0), LogConfig::default().segment_size)
-            .expect("read back");
-        check!(read.batches.len() == 2);
-        // `last_offset_delta` stays at the archived value (2), not the
-        // shrunk-to-survivors value (0), so `batch_b` below still lands at
-        // its true offset.
-        check!(read.batches[0].base_offset == 0);
-        check!(read.batches[0].last_offset_delta == 2);
+        let read = read_restored_pair(&log);
         check!(read.batches[0].records == vec![record(0, "keep0")]);
         check!(read.batches[1].base_offset == 3);
         check!(read.batches[1].records == vec![record(0, "keep3")]);

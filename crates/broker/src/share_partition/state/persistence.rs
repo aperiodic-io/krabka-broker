@@ -154,7 +154,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        share_coordinator::coordinator::test_support::state_batch as persisted,
+        share_coordinator::coordinator::test_support::{
+            DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch as persisted,
+        },
         share_partition::state::{
             AckType, AcquiredRange,
             test_support::{LOCK, t0},
@@ -170,7 +172,13 @@ mod tests {
         check!(start == 0);
         check!(dcc == 0); // nothing terminal yet
         // Acquired persists as Available(0) but retains its delivery_count.
-        check!(batches == vec![persisted(0, 4, DS_AVAILABLE, 1)]);
+        check!(
+            batches
+                == vec![persisted(StateBatchSetup {
+                    bounds: Offset(0)..=Offset(4),
+                    ..Default::default()
+                })]
+        );
     }
 
     #[test]
@@ -323,9 +331,20 @@ mod tests {
                         1,
                         0,
                         &[
-                            persisted(2, 3, DS_AVAILABLE, 1),
-                            persisted(4, 5, DS_ACKNOWLEDGED, 1),
-                            persisted(6, 6, DS_ARCHIVED, 2),
+                            persisted(StateBatchSetup {
+                                bounds: Offset(2)..=Offset(3),
+                                ..Default::default()
+                            }),
+                            persisted(StateBatchSetup {
+                                bounds: Offset(4)..=Offset(5),
+                                delivery: FixtureDeliveryState::Acknowledged,
+                                ..Default::default()
+                            }),
+                            persisted(StateBatchSetup {
+                                bounds: Offset(6)..=Offset(6),
+                                delivery: FixtureDeliveryState::Archived,
+                                attempts: DeliveryAttemptCount(2),
+                            }),
                         ],
                     );
                 },
@@ -339,9 +358,20 @@ mod tests {
                         1,
                         0,
                         &[
-                            persisted(0, 1, DS_ACKNOWLEDGED, 1),
-                            persisted(2, 3, DS_AVAILABLE, 1),
-                            persisted(4, 4, DS_ARCHIVED, 1),
+                            persisted(StateBatchSetup {
+                                bounds: Offset(0)..=Offset(1),
+                                delivery: FixtureDeliveryState::Acknowledged,
+                                ..Default::default()
+                            }),
+                            persisted(StateBatchSetup {
+                                bounds: Offset(2)..=Offset(3),
+                                ..Default::default()
+                            }),
+                            persisted(StateBatchSetup {
+                                bounds: Offset(4)..=Offset(4),
+                                delivery: FixtureDeliveryState::Archived,
+                                ..Default::default()
+                            }),
                         ],
                     );
                 },
@@ -350,7 +380,16 @@ mod tests {
             (
                 "initialization of an all-terminal window empties it",
                 |s| {
-                    s.load_from(Offset(0), 1, 0, &[persisted(0, 3, DS_ACKNOWLEDGED, 1)]);
+                    s.load_from(
+                        Offset(0),
+                        1,
+                        0,
+                        &[persisted(StateBatchSetup {
+                            bounds: Offset(0)..=Offset(3),
+                            delivery: FixtureDeliveryState::Acknowledged,
+                            ..Default::default()
+                        })],
+                    );
                 },
                 (4, 4, 0),
             ),

@@ -38,8 +38,7 @@ use krabka_protocol::{
 };
 
 use crate::support::{
-    fetch::{fetch_partition, single_partition_fetch},
-    produce::single_partition_produce,
+    fetch::single_partition_fetch,
     records::{batch_from_records, value_record},
 };
 
@@ -57,14 +56,15 @@ async fn start_broker() -> (BrokerHandle, SocketAddr) {
 async fn create_topic_with_compression(addr: SocketAddr, topic: &str, codec: &str) {
     let req = CreateTopicsRequest {
         topics: vec![crate::support::topics::creatable_topic_with_configs(
-            topic.into(),
-            1,
-            1,
-            vec![CreatableTopicConfig {
-                name: "compression.type".into(),
-                value: Some(codec.into()),
+            crate::support::topics::ConfiguredTopicSetup {
+                name: topic.into(),
+                configs: vec![CreatableTopicConfig {
+                    name: "compression.type".into(),
+                    value: Some(codec.into()),
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
+            },
         )],
         timeout_ms: 5_000,
         ..Default::default()
@@ -96,7 +96,14 @@ async fn produce_gzip(addr: SocketAddr, topic: &str, topic_id: Uuid, value: &[u8
         attributes: Attributes::default().with_compression(CompressionType::Gzip),
         ..batch_from_records(vec![value_record(0, Some(Bytes::copy_from_slice(value)))])
     };
-    let req = single_partition_produce(topic, topic_id, 0, Some(batch.into()), (-1, 5_000));
+    let req = crate::support::produce::batch_request(
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: (topic).into(),
+            topic_id,
+            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+        },
+    );
     let version: i16 = 9;
     let (_, r): (usize, ProduceResponse) =
         kafka_wire::request_once(addr, &req, (0, version), CLIENT_ID, (1, true)).await;
@@ -107,12 +114,11 @@ async fn produce_gzip(addr: SocketAddr, topic: &str, topic_id: Uuid, value: &[u8
 async fn fetch_first_batch(addr: SocketAddr, topic: &str, topic_id: Uuid) -> RecordBatch {
     let req = FetchRequest {
         replica_id: -1,
-        ..single_partition_fetch(
-            topic,
+        ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+            topic: topic.into(),
             topic_id,
-            fetch_partition(0, 0, 1 << 20),
-            (500, 1, 1 << 20),
-        )
+            ..Default::default()
+        })
     };
     let version: i16 = 12;
     let (_, r): (usize, FetchResponse) =
@@ -224,14 +230,13 @@ fn stored_owned_batches_honor_every_codec_level() {
                 ..batch_from_records(vec![value_record(0, Some(Bytes::from(value)))])
             };
             let (base, _) = log.append(&mut batch).unwrap();
-            let mut expected = bytes::BytesMut::new();
-            batch
-                .encode_with_compression_level(&mut expected, Some(level))
-                .unwrap();
+            let expected = encoded_at_level(&batch, CompressionLevel(level));
             let stored = log
                 .read_raw(base, log.log_end_offset(), gibibytes(1))
                 .unwrap();
-            check!(stored.bytes == expected.freeze(), "{codec:?} level={level}");
+            check!(stored.bytes == expected, "{codec:?} level={level}");
         }
     }
 }
+
+krabka_macros::compression_bytes_fixture!(encoded_at_level, CompressionLevel);

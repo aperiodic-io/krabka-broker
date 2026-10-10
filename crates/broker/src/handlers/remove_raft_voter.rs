@@ -21,65 +21,57 @@ use krabka_protocol::owned::{
 };
 use krabka_raft::{reconfig::RemoveVoter, voter_requests};
 
-use crate::{
-    codes,
-    handlers::{
-        cluster_alter_denied,
-        raft_voter::{Admitted, Refusals, respond},
-    },
-};
+use crate::{codes, handlers::raft_voter::respond};
 
-crate::handlers::raft_voter::handler!(broker, version, req_bytes, ctx, {
-    let Admitted { req, image, quorum } = crate::handlers::raft_voter::admit!(
+crate::handlers::raft_voter::leader_handler!(
+    (broker, version, req_bytes, ctx),
+    (
         RemoveRaftVoterRequest,
-        (broker, version, req_bytes, ctx),
+        RemoveRaftVoterResponse,
         81,
-        cluster_alter_denied,
-        Refusals::<RemoveRaftVoterResponse>::messages(
-            Some("remove-raft-voter denied".into()),
-            Some(String::new()),
-        )
-    );
-    if let Some((error_code, error_message)) =
-        voter_requests::remove_voter_refusal(&req, &image.cluster_id().to_string(), &quorum)
+        "remove-raft-voter denied"
+    ),
+    (req, image, quorum),
     {
-        return respond::<RemoveRaftVoterResponse>(version, error_code, error_message);
-    }
+        if let Some((error_code, error_message)) =
+            voter_requests::remove_voter_refusal(&req, &image.cluster_id().to_string(), &quorum)
+        {
+            return respond::<RemoveRaftVoterResponse>(version, error_code, error_message);
+        }
 
-    let id = u64::try_from(req.voter_id).unwrap_or_default();
-    let (error_code, error_message) = voter_requests::reconfiguration_refusal(
-        broker
-            .controller
-            .remove_voter(RemoveVoter {
-                id: krabka_raft::NodeId(id),
-                directory_id: uuid::Uuid::from_bytes(req.voter_directory_id.0),
-            })
-            .await,
-        voter_requests::VoterOperation::Remove,
-        req.voter_id,
-        req.voter_directory_id,
-    );
-
-    if error_code == codes::NONE {
-        crate::handlers::audit_admin_success(
-            broker.audit_log.as_ref(),
-            ctx,
-            "RemoveRaftVoter",
-            vec![crate::handlers::audit_resource("RaftVoter", id.to_string())],
+        let id = u64::try_from(req.voter_id).unwrap_or_default();
+        let (error_code, error_message) = voter_requests::reconfiguration_refusal(
+            broker
+                .controller
+                .remove_voter(RemoveVoter {
+                    id: krabka_raft::NodeId(id),
+                    directory_id: uuid::Uuid::from_bytes(req.voter_directory_id.0),
+                })
+                .await,
+            voter_requests::VoterOperation::Remove,
+            req.voter_id,
+            req.voter_directory_id,
         );
-    }
 
-    respond::<RemoveRaftVoterResponse>(version, error_code, error_message)
-});
+        if error_code == codes::NONE {
+            crate::handlers::audit_admin_success(
+                broker.audit_log.as_ref(),
+                ctx,
+                "RemoveRaftVoter",
+                vec![crate::handlers::audit_resource("RaftVoter", id.to_string())],
+            );
+        }
+
+        respond::<RemoveRaftVoterResponse>(version, error_code, error_message)
+    }
+);
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use assert2::assert;
-    use krabka_protocol::{
-        Decode as _, owned::remove_raft_voter_response, primitives::uuid::Uuid as ProtoUuid,
-    };
+    use krabka_protocol::{owned::remove_raft_voter_response, primitives::uuid::Uuid as ProtoUuid};
 
     use crate::test_support::DenyAll;
 
@@ -114,14 +106,13 @@ mod tests {
                 error_message: Some("cannot remove the last voter".into()),
                 ..Default::default()
             };
-            let bytes = crate::handlers::encode_response(&resp, version).expect("encode");
-            let mut cur: &[u8] = &bytes;
-            let decoded = RemoveRaftVoterResponse::decode(&mut cur, version).expect("decode");
+            let (decoded, consumed) =
+                crate::test_support::round_trip_response(&resp, krabka_ids::ApiVersion(version));
             assert!(
                 (
                     decoded.error_code,
                     decoded.error_message.as_deref(),
-                    cur.is_empty(),
+                    consumed,
                 ) == (
                     codes::INVALID_REQUEST,
                     Some("cannot remove the last voter"),

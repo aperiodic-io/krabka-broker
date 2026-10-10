@@ -264,7 +264,7 @@ mod tests {
         BrokerRegistrationRecord {
             host: "legacy.example".to_owned(),
             endpoints,
-            ..crate::test_support::broker_registration(2)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
         }
     }
 

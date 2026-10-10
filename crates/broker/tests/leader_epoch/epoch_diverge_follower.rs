@@ -8,14 +8,7 @@
 
 use assert2::assert;
 
-use crate::{
-    cluster_lock,
-    epoch_harness::record,
-    support,
-    support::{
-        client::connect_client, produce::single_partition_produce, topics::create_topic_request,
-    },
-};
+use crate::{cluster_lock, epoch_harness::record, support, support::client::connect_client};
 
 /// KIP-320 follower side, end to end. A follower whose local log has a
 /// divergent suffix beyond the leader's epoch boundary must truncate that
@@ -49,20 +42,12 @@ async fn follower_truncates_in_band_on_diverging_epoch() {
     // (the same placement the replication tests use).
     let leader_addr = cluster[0].1.listen_addr.to_string();
     let admin = connect_client(leader_addr.clone(), None).await;
-    let resp = admin
-        .send(create_topic_request(
-            support::topic_on("divtrunc", &[&[1, 2, 3]]),
-            5_000,
-        ))
-        .await
-        .unwrap();
-    assert!(resp.topics[0].error_code == 0);
-    let topic_id = resp.topics[0].topic_id;
-
-    // Wait for the partition to materialize on every broker.
-    for (h, _, _) in &cluster {
-        h.wait_until_partition_present("divtrunc", 0).await;
-    }
+    let topic_id = support::topics::create_assigned_partition(
+        &admin,
+        crate::support::topics::AssignedTopicSetup::three_replicas("divtrunc"),
+        cluster.iter().map(|(broker, _, _)| broker),
+    )
+    .await;
 
     // Produce k = 8 records to the leader at epoch 0 (acks=-1 so it lands
     // on the followers too). One record per batch keeps offsets dense.
@@ -70,12 +55,13 @@ async fn follower_truncates_in_band_on_diverging_epoch() {
     let producer = connect_client(leader_addr, None).await;
     for i in 0..k {
         let prod = producer
-            .send(single_partition_produce(
-                "divtrunc",
-                topic_id,
-                0,
-                Some(record(&format!("v{i}")).into()),
-                (-1, 5_000),
+            .send(crate::support::produce::batch_request(
+                record(&format!("v{i}")),
+                crate::support::produce::SinglePartitionProduceSetup {
+                    topic: ("divtrunc").into(),
+                    topic_id,
+                    ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                },
             ))
             .await
             .unwrap();

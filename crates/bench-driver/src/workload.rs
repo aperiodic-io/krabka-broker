@@ -931,6 +931,26 @@ struct ProducerTask {
     frame_max: ClientFrameMax,
 }
 
+struct TaskMeasurements {
+    latency: Histogram<u64>,
+    interval_msgs: Vec<u64>,
+    interval_hist: Vec<Histogram<u64>>,
+    msgs: u64,
+    bytes: u64,
+}
+
+impl TaskMeasurements {
+    fn new(intervals: usize) -> Self {
+        Self {
+            latency: hist::new(),
+            interval_msgs: vec![0; intervals],
+            interval_hist: (0..intervals).map(|_| hist::new()).collect(),
+            msgs: 0,
+            bytes: 0,
+        }
+    }
+}
+
 async fn run_producer(task: ProducerTask) -> ProducerOut {
     let ProducerTask {
         idx,
@@ -1001,11 +1021,7 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
     // Counter behind each record key, so keys vary within this task. The task
     // index is folded in, so two tasks never mint the same key.
     let mut sent_records = (idx as u64) << 40;
-    let mut meas_hist = hist::new();
-    let mut iv_msgs = vec![0u64; grid.n];
-    let mut iv_hist: Vec<Histogram<u64>> = (0..grid.n).map(|_| hist::new()).collect();
-    let mut meas_msgs = 0u64;
-    let mut meas_bytes = 0u64;
+    let mut measurements = TaskMeasurements::new(grid.n);
     let mut dropped = 0u64;
     let mut recovery_unix_ms = 0u64;
     let mut latency_spike_max = Time::ZERO;
@@ -1035,12 +1051,12 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
                 Ok(_meta) => {
                     let latency = $t0.elapsed().as_time();
                     if stop.load(Ordering::Relaxed) == STATE_MEASURING {
-                        hist::record(&mut meas_hist, latency);
-                        meas_msgs += 1;
-                        meas_bytes += scenario.msg_size.bytes_u64();
+                        hist::record(&mut measurements.latency, latency);
+                        measurements.msgs += 1;
+                        measurements.bytes += scenario.msg_size.bytes_u64();
                         let iv = grid.idx(Instant::now());
-                        iv_msgs[iv] += 1;
-                        hist::record(&mut iv_hist[iv], latency);
+                        measurements.interval_msgs[iv] += 1;
+                        hist::record(&mut measurements.interval_hist[iv], latency);
                         // Recovery and the spike are measured against the
                         // shared kill marker, not against this task's own
                         // errors. The marker is published only after the pod
@@ -1152,15 +1168,15 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
     let _ = producer.close().await;
 
     ProducerOut {
-        latency: meas_hist,
-        msgs: meas_msgs,
-        bytes: meas_bytes,
+        latency: measurements.latency,
+        msgs: measurements.msgs,
+        bytes: measurements.bytes,
         dropped,
         recovery_unix_ms,
         latency_spike_max,
         error,
-        interval_msgs: iv_msgs,
-        interval_hist: iv_hist,
+        interval_msgs: measurements.interval_msgs,
+        interval_hist: measurements.interval_hist,
     }
 }
 
@@ -1229,11 +1245,7 @@ async fn run_consumer(task: ConsumerTask) -> ConsumerOut {
         }
     };
 
-    let mut meas_hist = hist::new();
-    let mut iv_msgs = vec![0u64; grid.n];
-    let mut iv_hist: Vec<Histogram<u64>> = (0..grid.n).map(|_| hist::new()).collect();
-    let mut meas_msgs = 0u64;
-    let mut meas_bytes = 0u64;
+    let mut measurements = TaskMeasurements::new(grid.n);
     let mut error = String::new();
 
     loop {
@@ -1261,18 +1273,18 @@ async fn run_consumer(task: ConsumerTask) -> ConsumerOut {
                             // and warmup-aged latency as measurement.
                             if grid.sent_in_measurement(send_nanos) {
                                 let slice = grid.idx_for_send_ns(send_nanos);
-                                hist::record(&mut meas_hist, latency);
-                                meas_msgs += 1;
-                                meas_bytes += bytes;
-                                iv_msgs[slice] += 1;
-                                hist::record(&mut iv_hist[slice], latency);
+                                hist::record(&mut measurements.latency, latency);
+                                measurements.msgs += 1;
+                                measurements.bytes += bytes;
+                                measurements.interval_msgs[slice] += 1;
+                                hist::record(&mut measurements.interval_hist[slice], latency);
                             }
                         } else if phase == STATE_MEASURING {
                             // Non-bench record, left over from an earlier run.
                             // It carries no send stamp, so the poll phase is
                             // the only thing that can place it. Count bytes and
                             // not end-to-end latency.
-                            meas_bytes += bytes;
+                            measurements.bytes += bytes;
                         }
                     }
                 }
@@ -1287,12 +1299,12 @@ async fn run_consumer(task: ConsumerTask) -> ConsumerOut {
     }
     let _ = consumer.close().await;
     ConsumerOut {
-        latency: meas_hist,
-        msgs: meas_msgs,
-        bytes: meas_bytes,
+        latency: measurements.latency,
+        msgs: measurements.msgs,
+        bytes: measurements.bytes,
         error,
-        interval_msgs: iv_msgs,
-        interval_hist: iv_hist,
+        interval_msgs: measurements.interval_msgs,
+        interval_hist: measurements.interval_hist,
     }
 }
 
@@ -1363,7 +1375,7 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::scenario::{Acks, Compression, FailoverSpec, LoadMode, ModeTag};
+    use crate::scenario::{FailoverSpec, ModeTag};
 
     fn cfg(broker_count: u32) -> DriverConfig {
         DriverConfig {
@@ -1389,24 +1401,7 @@ mod tests {
     }
 
     fn scenario(rf: i16) -> Scenario {
-        Scenario {
-            name: "x".into(),
-            mode_tag: ModeTag::Ci,
-            msg_size: bytes(100),
-            key_size: ByteSize::ZERO,
-            partitions: 1,
-            replication_factor: rf,
-            producers: 1,
-            consumers: 1,
-            mode: LoadMode::Saturate,
-            acks: Acks::Leader,
-            compression: Compression::None,
-            linger: Time::ZERO,
-            batch_size: kibibytes(16),
-            duration: secs(1),
-            warmup: Time::ZERO,
-            failover: None,
-        }
+        crate::scenario::fixture::short_scenario(rf)
     }
 
     async fn producer_broker(
@@ -1631,9 +1626,13 @@ mod tests {
     fn consumer_build_retry_defaults_preserve_policy() {
         let policy = ConsumerBuildRetryPolicy::default();
 
-        check!(policy.attempts() == 6);
-        check!(policy.initial_backoff() == millis(100));
-        check!(policy.max_backoff() == secs(2));
+        check!(
+            (
+                policy.attempts(),
+                policy.initial_backoff(),
+                policy.max_backoff()
+            ) == (6, millis(100), secs(2))
+        );
     }
 
     #[test]

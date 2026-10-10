@@ -5,7 +5,7 @@
       "vc_checked_sub": { "prover": "alt-ergo", "time": 0.009 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
       "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.009 },
-      "vc_len_LocalRetentionSegment": { "prover": "alt-ergo", "time": 0.009 },
+      "vc_len_LocalRetentionSegment": { "prover": "alt-ergo", "time": 0.021 },
       "vc_local_retention_prefix": { "prover": "z3", "time": 0.057 }
     }
   }

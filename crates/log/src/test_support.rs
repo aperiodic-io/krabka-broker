@@ -1,11 +1,11 @@
 //! Shared log, record and directory fixtures for storage tests.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, ops::RangeInclusive, path::Path};
 
 use bytes::Bytes;
 use krabka_protocol::records::{Record, RecordBatch};
 
-use crate::{Log, LogConfig};
+use crate::{Log, LogConfig, Offset, ProducerId};
 
 pub(crate) fn open_log(dir: &Path) -> Log {
     Log::open(dir, LogConfig::default()).unwrap()
@@ -69,18 +69,29 @@ pub(crate) fn stamp_entry(base: i64, last: i64, stamp: u64) -> crate::stamp_inde
     }
 }
 
-/// An explicit aborted interval; callers also use this to construct invalid entries.
-pub(crate) fn aborted_txn(
-    producer: i64,
-    start: i64,
-    last: i64,
-    stable: i64,
-) -> crate::txn_index::AbortedTxn {
+/// The ordinary four-record aborted transaction; fields remain overrideable for malformed fixtures.
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct AbortedTxnSetup {
+    #[default(ProducerId(1000))]
+    pub producer: ProducerId,
+    #[default(Offset(0)..=Offset(3))]
+    pub bounds: RangeInclusive<Offset>,
+    #[default(Offset(4))]
+    pub stable: Offset,
+}
+
+pub(crate) fn aborted_txn(setup: AbortedTxnSetup) -> crate::txn_index::AbortedTxn {
+    let AbortedTxnSetup {
+        producer,
+        bounds,
+        stable,
+    } = setup;
+    let (start_offset, last_offset) = bounds.into_inner();
     crate::txn_index::AbortedTxn {
-        start_offset: crate::Offset(start),
-        last_offset: crate::Offset(last),
-        producer_id: crate::ProducerId(producer),
-        last_stable_offset: crate::Offset(stable),
+        start_offset,
+        last_offset,
+        producer_id: producer,
+        last_stable_offset: stable,
     }
 }
 

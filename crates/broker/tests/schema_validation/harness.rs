@@ -12,20 +12,17 @@ use krabka_broker::{BrokerConfig, BrokerHandle, file_config::FileConfig};
 use krabka_client_core::Client;
 use krabka_protocol::{
     owned::{
-        create_topics_request::{CreatableTopic, CreateTopicsRequest},
-        produce_response::PartitionProduceResponse,
+        create_topics_request::CreateTopicsRequest, produce_response::PartitionProduceResponse,
     },
     primitives::uuid::Uuid as WireUuid,
-    records::{RecordBatch, RecordsPayload},
+    records::RecordBatch,
 };
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
 };
 
-use crate::support::{
-    produce::single_partition_produce, records::value_record, topics::creatable_topic,
-};
+use crate::support::{records::value_record, topics::creatable_topic};
 
 /// Kafka error 87. KIP-467 added it for "one or more records in the batch were
 /// invalid", which is what a schema rejection is.
@@ -172,7 +169,16 @@ pub fn mock_topic_fixture(
     Box::pin(async move {
         let registry = registry().await;
         let (broker, client, dir) = boot(&registry.uri()).await;
-        let id = create_topic(&broker, &client, topic, configs).await;
+        let id = create_topic(
+            &broker,
+            &client,
+            crate::harness::SchemaTopicSetup {
+                name: topic,
+                configs,
+                ..Default::default()
+            },
+        )
+        .await;
         (registry, broker, client, dir, id)
     })
 }
@@ -187,49 +193,35 @@ pub async fn produce_value(
     produce(client, topic, topic_id, batch_with_value(value)).await
 }
 
-/// Create `name` with the given topic configs and wait for its partition.
+/// Create a configured schema-validation topic and wait for its local partition.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct SchemaTopicSetup<'a> {
+    #[default("validated")]
+    pub name: &'a str,
+    #[default(VALIDATED)]
+    pub configs: &'a [(&'a str, &'a str)],
+    #[default(crate::support::topics::TopicReplicationFactor(1))]
+    pub replicas: crate::support::topics::TopicReplicationFactor,
+}
+
+/// The committed `CreateTopics` response supplies the identity, even when another
+/// bootstrap broker's Metadata image has not caught up with the commit yet.
 pub async fn create_topic(
     broker: &BrokerHandle,
     client: &Client,
-    name: &str,
-    configs: &[(&str, &str)],
+    setup: SchemaTopicSetup<'_>,
 ) -> WireUuid {
-    create_topic_rf(broker, client, name, configs, 1).await
-}
-
-/// Create `name` with an explicit replication factor, wait until `broker`
-/// has its partition, and answer the topic id.
-///
-/// The id comes from the `CreateTopics` response, which the broker sends only
-/// after the topic record commits. A `Metadata` read is not safe here: `client`
-/// can bootstrap to a broker other than `broker`, and that broker can still be
-/// one fetch behind the commit. It then answers the topic as unknown with a
-/// zero id, and a `Produce` at version 13 or later carries only that zero id.
-pub async fn create_topic_rf(
-    broker: &BrokerHandle,
-    client: &Client,
-    name: &str,
-    configs: &[(&str, &str)],
-    replication_factor: i16,
-) -> WireUuid {
-    let topic = creatable_topic(name, 1, replication_factor);
-    create_topic_from(broker, client, topic, configs).await
-}
-
-async fn create_topic_from(
-    broker: &BrokerHandle,
-    client: &Client,
-    topic: CreatableTopic,
-    configs: &[(&str, &str)],
-) -> WireUuid {
+    let topic = creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+        name: setup.name.into(),
+        replicas: setup.replicas,
+        configs: crate::support::topics::topic_configs(setup.configs.iter().copied()),
+        ..Default::default()
+    });
     let name = topic.name.clone();
     let name = name.as_str();
     let resp = client
         .send(CreateTopicsRequest {
-            topics: vec![CreatableTopic {
-                configs: crate::support::topics::topic_configs(configs.iter().copied()),
-                ..topic
-            }],
+            topics: vec![topic],
             timeout_ms: 5_000,
             ..Default::default()
         })
@@ -257,16 +249,16 @@ pub async fn produce(
     topic_id: WireUuid,
     batch: RecordBatch,
 ) -> PartitionProduceResponse {
-    let resp = client
-        .send(single_partition_produce(
-            topic,
+    let resp = crate::support::produce::send_batch(
+        &client,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: (topic).into(),
             topic_id,
-            0,
-            Some(RecordsPayload::V2(vec![batch])),
-            (1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+            ..Default::default()
+        },
+    )
+    .await;
     resp.responses[0].partition_responses[0].clone()
 }
 
@@ -279,9 +271,10 @@ pub fn boot_config(
     Box::pin(async move {
         crate::support::client::start_broker_client(
             config,
-            "schema-validation-test",
-            "broker start",
-            "client build",
+            crate::support::client::BrokerClientSetup {
+                client_id: "schema-validation-test",
+                ..Default::default()
+            },
         )
         .await
     })

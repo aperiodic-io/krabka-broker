@@ -15,19 +15,7 @@ pub(super) const VERSION: i16 = 0;
 
 krabka_macros::assignment_dirs_fixture!(assignment_request);
 
-/// Builds a request reported by broker 1 at `broker_epoch`. Most tests pass
-/// the broker's actual registered epoch (see
-/// [`crate::test_support::broker_epoch`]-style lookups on the started
-/// broker's image); the authorization and epoch tests pass a wrong one on
-/// purpose.
-pub(super) fn request(
-    broker_epoch: i64,
-    dir_uuid: uuid::Uuid,
-    topic_uuid: uuid::Uuid,
-    partition_index: i32,
-) -> AssignReplicasToDirsRequest {
-    assignment_request(1, broker_epoch, dir_uuid, topic_uuid, &[partition_index])
-}
+pub(super) use assignment_request as request;
 
 crate::test_support::decode_helper!(pub(super) AssignReplicasToDirsResponse, version = VERSION);
 

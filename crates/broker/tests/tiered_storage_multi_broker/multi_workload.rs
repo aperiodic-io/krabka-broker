@@ -104,7 +104,18 @@ pub(crate) async fn await_follower_local_eviction(log_dir: &std::path::Path) {
 }
 
 pub(crate) async fn create_tiered_topic(admin: &Client, b1: &BrokerHandle, b2: &BrokerHandle) {
-    crate::topic_fixture::create_assigned_topic(admin, TOPIC, &[1, 2], Some("1024")).await;
+    let assignment = crate::support::topics::AssignedTopicSetup::on_replicas(
+        TOPIC,
+        vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
+    );
+    crate::topic_fixture::create_assigned_topic(
+        admin,
+        crate::topic_fixture::AssignedTieredTopicSetup {
+            topic: assignment,
+            segment_bytes: Some("1024"),
+        },
+    )
+    .await;
 
     crate::topic_fixture::await_tiered_replicas(
         &[b1, b2],
@@ -125,8 +136,17 @@ pub(crate) async fn produce_and_await_remote_segments(
             value: Some(bytes::Bytes::from(format!("test-record-{index}"))),
             ..Default::default()
         }]);
-        let response =
-            crate::support::client::produce_batch(admin, TOPIC, topic_id, batch, -1, 10_000).await;
+        let response = crate::support::client::produce_batch(
+            admin,
+            batch,
+            crate::support::client::BatchProduceSetup {
+                topic: TOPIC,
+                topic_id,
+                acknowledgements: crate::support::produce::ProduceAcknowledgements::AllReplicas,
+                timeout: crate::support::produce::ProduceTimeoutMillis(10_000),
+            },
+        )
+        .await;
         assert!(response.error_code == 0, "Produce failed: {response:?}");
     }
 

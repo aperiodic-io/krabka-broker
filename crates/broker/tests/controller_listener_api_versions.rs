@@ -68,10 +68,15 @@ async fn api_versions(
     ApiVersionsResponse::decode(&mut &response[..], version).expect("decode ApiVersions")
 }
 
-async fn start_sasl_controller() -> (krabka_broker::BrokerHandle, SocketAddr, TempDir) {
+async fn controller_listener_fixture() -> (TempDir, tokio::net::TcpListener, SocketAddr) {
     let dir = TempDir::new().unwrap();
-    let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let controller_addr = controller.local_addr().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    (dir, listener, addr)
+}
+
+async fn start_sasl_controller() -> (krabka_broker::BrokerHandle, SocketAddr, TempDir) {
+    let (dir, controller, controller_addr) = controller_listener_fixture().await;
     let data_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let mut cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
     cfg.controller_listen_addr = controller_addr;
@@ -199,9 +204,7 @@ async fn sasl_controller_listener_answers_api_versions_before_authentication() {
 async fn start_plaintext_controller(
     customize: impl FnOnce(&mut BrokerConfig),
 ) -> (krabka_broker::BrokerHandle, SocketAddr, TempDir) {
-    let dir = TempDir::new().unwrap();
-    let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let controller_addr = controller.local_addr().unwrap();
+    let (dir, controller, controller_addr) = controller_listener_fixture().await;
     let mut cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
     cfg.controller_listen_addr = controller_addr;
     cfg.controller_quorum_voters = vec![(cfg.node_id, controller_addr.to_string())];

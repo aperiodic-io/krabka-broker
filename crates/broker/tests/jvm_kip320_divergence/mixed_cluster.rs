@@ -83,23 +83,10 @@ impl MixedCluster {
 /// `jvm_static_quorum_spike.rs::krabka_controller_config` plus a bound data
 /// listener.
 fn krabka_mixed_config(
-    i: usize,
-    client_port: u16,
-    advertised_host: &str,
-    own_controller_addr: SocketAddr,
-    voters: &[(u64, SocketAddr)],
-    cluster_id: Uuid,
     log_dir: &std::path::Path,
+    setup: crate::support::JvmStaticVoterSetup,
 ) -> BrokerConfig {
-    let mut cfg = support::jvm_static_voter_config(
-        i,
-        format!("0.0.0.0:{client_port}").parse().unwrap(),
-        format!("{advertised_host}:{client_port}"),
-        own_controller_addr,
-        voters,
-        cluster_id,
-        log_dir,
-    );
+    let mut cfg = support::jvm_static_voter_config(log_dir, setup);
     cfg.heartbeat_interval = krabka_units::millis(1_000);
     // Kafka's `broker.session.timeout.ms` default. The controller starts a
     // broker's session when its registration lands, and the JVM broker
@@ -157,22 +144,34 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
     let dir1 = TempDir::new().unwrap();
     let dir2 = TempDir::new().unwrap();
     let cfg1 = krabka_mixed_config(
-        0,
-        krabka_client_ports[0],
-        &advertised_host,
-        format!("0.0.0.0:{p1}").parse().unwrap(),
-        &krabka_voters,
-        cluster_id,
         dir1.path(),
+        crate::support::JvmStaticVoterSetup {
+            broker: crate::support::JvmBrokerSetup {
+                listen: format!("0.0.0.0:{}", krabka_client_ports[0])
+                    .parse()
+                    .unwrap(),
+                advertised: format!("{}:{}", advertised_host, krabka_client_ports[0]),
+                controller: format!("0.0.0.0:{p1}").parse().unwrap(),
+                voters: crate::support::controller_voters(&krabka_voters),
+                ..Default::default()
+            },
+            cluster_id,
+        },
     );
     let cfg2 = krabka_mixed_config(
-        1,
-        krabka_client_ports[1],
-        &advertised_host,
-        format!("0.0.0.0:{p2}").parse().unwrap(),
-        &krabka_voters,
-        cluster_id,
         dir2.path(),
+        crate::support::JvmStaticVoterSetup {
+            broker: crate::support::JvmBrokerSetup {
+                node: krabka_broker::NodeId(u64::try_from((1) + 1).expect("one-based node id")),
+                listen: format!("0.0.0.0:{}", krabka_client_ports[1])
+                    .parse()
+                    .unwrap(),
+                advertised: format!("{}:{}", advertised_host, krabka_client_ports[1]),
+                controller: format!("0.0.0.0:{p2}").parse().unwrap(),
+                voters: crate::support::controller_voters(&krabka_voters),
+            },
+            cluster_id,
+        },
     );
     format_at_kafka_4_0(dir1.path(), &cid_str, &cfg1).await;
     format_at_kafka_4_0(dir2.path(), &cid_str, &cfg2).await;
@@ -280,24 +279,36 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
 }
 
 /// Advance one partition epoch while retaining its replicas and directory identities.
+#[derive(Clone, Copy)]
+pub struct PartitionEpochDelta(pub i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct SingleLeaderSetup<'a> {
+    #[default("t")]
+    pub topic: &'a str,
+    #[default(krabka_broker::NodeId(1))]
+    pub leader: krabka_broker::NodeId,
+    #[default(krabka_metadata::LeaderEpoch(0))]
+    pub epoch: krabka_metadata::LeaderEpoch,
+    #[default(PartitionEpochDelta(1))]
+    pub partition_epoch_delta: PartitionEpochDelta,
+}
+
 pub fn single_leader_record(
-    topic: &str,
     previous: &krabka_metadata::PartitionRecord,
-    leader: krabka_broker::NodeId,
-    epoch: krabka_metadata::LeaderEpoch,
-    partition_epoch_delta: i32,
+    setup: SingleLeaderSetup<'_>,
 ) -> krabka_metadata::PartitionRecord {
     krabka_metadata::PartitionRecord {
-        topic: topic.to_string(),
+        topic: setup.topic.to_string(),
         partition: 0,
-        leader,
+        leader: setup.leader,
         replicas: previous.replicas.clone(),
-        isr: vec![leader],
-        leader_epoch: epoch,
+        isr: vec![setup.leader],
+        leader_epoch: setup.epoch,
         adding_replicas: vec![],
         removing_replicas: vec![],
         directories: previous.directories.clone(),
-        partition_epoch: previous.partition_epoch + partition_epoch_delta,
+        partition_epoch: previous.partition_epoch + setup.partition_epoch_delta.0,
     }
 }
 

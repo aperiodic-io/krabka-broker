@@ -62,7 +62,7 @@ async fn handle_error_scenarios_preserve_expected_rows() {
     type Case<'a> = (
         &'a str,
         Arc<dyn Authorizer>,
-        bool,
+        crate::test_support::ShareApiSupport,
         Vec<RequestGroup<'a>>,
         DescribeShareGroupOffsetsResponse,
     );
@@ -71,7 +71,7 @@ async fn handle_error_scenarios_preserve_expected_rows() {
         (
             "disabled feature preserves group error rows",
             Arc::new(crate::authorizer::AllowAllAuthorizer),
-            false,
+            crate::test_support::ShareApiSupport::Disabled,
             vec![("g1", vec![("t1", vec![0])]), ("g2", vec![("t2", vec![1])])],
             unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![
@@ -93,7 +93,7 @@ async fn handle_error_scenarios_preserve_expected_rows() {
         (
             "denied group preserves group id and error code",
             Arc::new(crate::test_support::ControllerPeerAllowed(DenyAll)),
-            true,
+            crate::test_support::ShareApiSupport::Enabled,
             vec![("g1", vec![("missing", vec![0])])],
             unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
@@ -107,7 +107,7 @@ async fn handle_error_scenarios_preserve_expected_rows() {
         (
             "an unknown topic has no data and no error",
             Arc::new(crate::authorizer::AllowAllAuthorizer),
-            true,
+            crate::test_support::ShareApiSupport::Enabled,
             vec![("g1", vec![("missing-topic", vec![3, 5])])],
             unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![tagged_wire!(DescribeShareGroupOffsetsResponseGroup {

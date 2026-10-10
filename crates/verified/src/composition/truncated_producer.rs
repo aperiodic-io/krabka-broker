@@ -4,6 +4,8 @@ use creusot_std::prelude::*;
 use super::control_truncation::physical_truncation_input_valid;
 #[cfg(creusot)]
 use super::control_truncation::whole_batch_frontier;
+#[cfg(creusot)]
+use super::producer_window::retry_row_matches;
 use super::{
     ProducerDecision, ProducerSnapshotEntryFacts, rebuilt_data_window_bounds_retry,
     whole_batch_truncation_bounds_controls,
@@ -57,11 +59,7 @@ type TruncatedRetry = (
             && (match result.3 { ProducerDecision::Duplicate { retained: slot } =>
                 slot@ == if index@ + 1 == result.1@ { 4 } else { index@ - result.2@ }, _ => false })
             && recovered_batch_coordinates(rows@[index@], base@, frontier@, result.0@)
-            && ready == (previous_hwm@ >= frontier@)
-            && request.0 == rows@[index@].producer_epoch
-            && snapshot_sequence_matches(rows@[index@], request.1@, request.2@)
-            && (forall<i: Int> result.2@ <= i && i < index@ ==>
-                !(snapshot_sequence_matches(rows@[i], request.1@, request.2@))),
+            && retry_row_matches(rows@, request, (result.2@, index@), (previous_hwm@, frontier@, ready)),
     }
     && (result.1@ == 0 ==> result.3 == if request.3 && result.0@ == 0 && request.1@ != 0 {
         ProducerDecision::OutOfOrder } else { ProducerDecision::Append })

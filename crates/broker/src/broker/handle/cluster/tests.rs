@@ -1,28 +1,44 @@
 use std::net::SocketAddr;
 
 use assert2::{assert, check};
+use krabka_raft::NodeId;
 use tokio::net::TcpListener;
 
 use super::*;
 use crate::{broker::test_support::submit_metadata_topic_partition, config::BrokerConfig};
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct StaticVoterSetup<'a> {
+    #[default(NodeId(1))]
+    node_id: NodeId,
+    #[default(SocketAddr::from(([127, 0, 0, 1], 0)))]
+    listen_addr: SocketAddr,
+    #[default(SocketAddr::from(([127, 0, 0, 1], 0)))]
+    controller_addr: SocketAddr,
+    // An empty list retains the automatic quorum used by ordinary single-broker fixtures.
+    voters: &'a [(NodeId, SocketAddr)],
+}
+
 fn static_voter_test_config(
     log_dir: &std::path::Path,
-    node_id: u64,
-    listen_addr: SocketAddr,
-    controller_addr: SocketAddr,
-    voters: &[(u64, SocketAddr)],
+    setup: StaticVoterSetup<'_>,
 ) -> BrokerConfig {
+    let StaticVoterSetup {
+        node_id,
+        listen_addr,
+        controller_addr,
+        voters,
+    } = setup;
     let mut config = BrokerConfig::for_tests(log_dir.to_path_buf());
-    config.broker_id = i32::try_from(node_id).expect("node id fits broker id");
-    config.node_id = krabka_raft::NodeId(node_id);
+    config.broker_id = i32::try_from(node_id.0).expect("node id fits broker id");
+    config.node_id = node_id;
     config.listen_addr = listen_addr;
     config.advertised_listener = listen_addr.to_string();
     config.controller_listen_addr = controller_addr;
-    config.directory_id = uuid::Uuid::from_u128(u128::from(node_id));
+    config.directory_id = uuid::Uuid::from_u128(u128::from(node_id.0));
     config.controller_quorum_voters = voters
         .iter()
-        .map(|(id, addr)| (krabka_raft::NodeId(*id), addr.to_string()))
+        .map(|(id, addr)| (*id, addr.to_string()))
         .collect();
     config
 }
@@ -39,10 +55,26 @@ async fn broker_handle_reports_non_default_node_and_voter_state() {
     let listen8 = data_listener8.local_addr().unwrap();
     let controller7 = controller_listener7.local_addr().unwrap();
     let controller8 = controller_listener8.local_addr().unwrap();
-    let voters = [(7, controller7), (8, controller8)];
+    let voters = [(NodeId(7), controller7), (NodeId(8), controller8)];
 
-    let config7 = static_voter_test_config(dir7.path(), 7, listen7, controller7, &voters);
-    let config8 = static_voter_test_config(dir8.path(), 8, listen8, controller8, &voters);
+    let config7 = static_voter_test_config(
+        dir7.path(),
+        StaticVoterSetup {
+            node_id: NodeId(7),
+            listen_addr: listen7,
+            controller_addr: controller7,
+            voters: &voters,
+        },
+    );
+    let config8 = static_voter_test_config(
+        dir8.path(),
+        StaticVoterSetup {
+            node_id: NodeId(8),
+            listen_addr: listen8,
+            controller_addr: controller8,
+            voters: &voters,
+        },
+    );
     let start = Box::pin(tokio::time::timeout(
         std::time::Duration::from_secs(10),
         async {
@@ -117,9 +149,7 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
     );
     type LeaderChangedCase<'a> = (&'a str, u128, u64, &'a [u64], i32, u64);
 
-    let dir = tempfile::tempdir().unwrap();
-    let config = BrokerConfig::for_tests(dir.path().to_path_buf());
-    let handle = Broker::start(config).await.expect("broker start");
+    let (handle, _dir) = crate::test_support::start_broker_with(|_| {}).await;
     let timeout = std::time::Duration::from_millis(75);
     let topic_id = uuid::Uuid::from_u128(0xFEED);
 
@@ -232,12 +262,15 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
     for (topic, topic_id, leader, replicas, leader_epoch, excluded) in leader_changed_cases {
         submit_metadata_topic_partition(
             &handle,
-            (topic, topic_id),
-            0,
-            leader,
-            replicas,
-            replicas,
-            leader_epoch,
+            crate::broker::test_support::MetadataPartitionSetup {
+                topic,
+                topic_id: uuid::Uuid::from_u128(topic_id),
+                leader: krabka_ids::NodeId(leader),
+                replicas: (replicas).iter().copied().map(krabka_ids::NodeId).collect(),
+                isr: (replicas).iter().copied().map(krabka_ids::NodeId).collect(),
+                leader_epoch: krabka_ids::LeaderEpoch(leader_epoch),
+                ..Default::default()
+            },
         )
         .await;
         assert!(
@@ -259,12 +292,13 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
 
     submit_metadata_topic_partition(
         &handle,
-        ("isr-len-mutant-topic", 0xF005),
-        0,
-        1,
-        &[1, 2],
-        &[1, 2],
-        3,
+        crate::broker::test_support::MetadataPartitionSetup {
+            topic: "isr-len-mutant-topic",
+            topic_id: uuid::Uuid::from_u128(0xF005),
+            replicas: [1, 2].iter().copied().map(krabka_ids::NodeId).collect(),
+            isr: [1, 2].iter().copied().map(krabka_ids::NodeId).collect(),
+            ..Default::default()
+        },
     )
     .await;
     assert!(

@@ -318,15 +318,13 @@ krabka_macros::timer_hooks! {
     fired("the armed audit timer failed; stopping the writer");
 }
 
+krabka_macros::epoch_millis_fn!(
 /// Epoch-millisecond clock for the checkpoint timestamps.
 // cargo-mutants: wall-clock read; no deterministic assertion.
 #[cfg_attr(test, mutants::skip)]
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
-}
+fn now_ms,
+i64::MAX
+);
 
 #[cfg(test)]
 mod tests {
@@ -348,24 +346,51 @@ mod tests {
         spool::PendingLosses,
     };
 
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        derive_more::Display,
+        derive_more::From,
+        derive_more::Into,
+    )]
+    struct QueueCapacity(usize);
+
+    struct MemoryWriterSetup {
+        capacity: QueueCapacity,
+        checkpoints: crate::log::test_support::CheckpointSetup,
+    }
+
+    impl Default for MemoryWriterSetup {
+        fn default() -> Self {
+            Self {
+                capacity: QueueCapacity(16),
+                checkpoints: crate::log::test_support::CheckpointSetup {
+                    frequency: crate::log::test_support::CheckpointFrequency::Every(
+                        crate::log::test_support::AuditEventCount(1_000_000),
+                    ),
+                    ..Default::default()
+                },
+            }
+        }
+    }
+
     fn memory_writer(
         directory: &std::path::Path,
-        capacity: usize,
-        signer: Option<Arc<FileEd25519Signer>>,
-        checkpoint_every_n: u64,
+        setup: MemoryWriterSetup,
     ) -> (Arc<AuditLog>, Arc<MemorySink>, tokio::task::JoinHandle<()>) {
+        let MemoryWriterSetup {
+            capacity,
+            checkpoints,
+        } = setup;
         let spool = Spool::open(directory, ROOMY_CAP).unwrap();
-        let (log, receiver) = AuditLog::new(capacity);
+        let (log, receiver) = AuditLog::new(capacity.0);
         let sink = Arc::new(MemorySink::default());
         let handle = spawn_writer(
             receiver,
-            crate::log::test_support::quiet_params(
-                sink.clone(),
-                spool,
-                Arc::new(AuditStats::new()),
-                signer,
-                checkpoint_every_n,
-            ),
+            crate::log::test_support::quiet_params(sink.clone(), spool, checkpoints),
         );
         (log, sink, handle)
     }
@@ -376,10 +401,30 @@ mod tests {
         (Arc<AuditLog>, Arc<MemorySink>, tokio::task::JoinHandle<()>),
     );
 
-    fn signed_writer(capacity: usize, checkpoint_every_n: u64) -> SignedWriterFixture {
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct SignedWriterSetup {
+        #[default(QueueCapacity(16))]
+        capacity: QueueCapacity,
+        #[default(crate::log::test_support::CheckpointFrequency::Every(
+            crate::log::test_support::AuditEventCount(1_000_000)
+        ))]
+        frequency: crate::log::test_support::CheckpointFrequency,
+    }
+
+    fn signed_writer(setup: SignedWriterSetup) -> SignedWriterFixture {
         let (signer, public_key) = test_signer();
         let directory = tempfile::tempdir().unwrap();
-        let writer = memory_writer(directory.path(), capacity, Some(signer), checkpoint_every_n);
+        let writer = memory_writer(
+            directory.path(),
+            MemoryWriterSetup {
+                capacity: setup.capacity,
+                checkpoints: crate::log::test_support::CheckpointSetup {
+                    signer: Some(signer),
+                    frequency: setup.frequency,
+                    ..Default::default()
+                },
+            },
+        );
         (public_key, directory, writer)
     }
 
@@ -417,14 +462,14 @@ mod tests {
     #[tokio::test]
     async fn emitted_events_reach_the_sink_in_order() {
         let dir = tempfile::tempdir().unwrap();
-        let (log, sink, handle) = memory_writer(dir.path(), 16, None, 1_000_000);
+        let (log, sink, handle) = memory_writer(dir.path(), MemoryWriterSetup::default());
 
-        log.emit(life(1));
-        log.emit(life(2));
-        log.emit(life(3));
-
-        // Dropping the only sender ends the writer loop cleanly.
-        finish_writer(log, handle).await;
+        crate::log::test_support::finish_lifecycle_writer(
+            log,
+            handle,
+            &[crate::NodeId(1), crate::NodeId(2), crate::NodeId(3)],
+        )
+        .await;
 
         let recs = sink.records();
         check!((recs.len(), recs[0].class) == (3, AuditEventClass::ApplicationLifecycle));
@@ -437,10 +482,13 @@ mod tests {
     async fn chained_records_carry_seq_and_prev_hash() {
         let dir = tempfile::tempdir().unwrap();
         // no signer, huge interval => no checkpoints, just chaining
-        let (log, sink, h) = memory_writer(dir.path(), 16, None, 1_000_000);
-        log.emit(life(1));
-        log.emit(life(2));
-        finish_writer(log, h).await;
+        let (log, sink, h) = memory_writer(dir.path(), MemoryWriterSetup::default());
+        crate::log::test_support::finish_lifecycle_writer(
+            log,
+            h,
+            &[crate::NodeId(1), crate::NodeId(2)],
+        )
+        .await;
 
         let recs = sink.records();
         check!(recs.len() == 2); // no checkpoints (no signer)
@@ -467,9 +515,14 @@ mod tests {
     #[tokio::test]
     async fn checkpoints_emitted_by_count_and_verify_against_recomputed_head() {
         // checkpoint every 2 records; long interval so only count triggers
-        let (pubkey, _dir, (log, sink, h)) = signed_writer(64, 2);
+        let (pubkey, _dir, (log, sink, h)) = signed_writer(SignedWriterSetup {
+            capacity: QueueCapacity(64),
+            frequency: crate::log::test_support::CheckpointFrequency::Every(
+                crate::log::test_support::AuditEventCount(2),
+            ),
+        });
         for i in 0..4 {
-            log.emit(life(i));
+            log.emit(life(crate::NodeId(i)));
         }
         finish_writer(log, h).await; // closes channel -> final checkpoint (none pending here: 4 % 2 == 0)
 
@@ -501,11 +554,13 @@ mod tests {
     #[tokio::test]
     async fn shutdown_emits_final_checkpoint_for_pending_tail() {
         // every_n large so only the shutdown path emits
-        let (pubkey, _dir, (log, sink, h)) = signed_writer(16, 1_000_000);
-        log.emit(life(1));
-        log.emit(life(2));
-        log.emit(life(3));
-        finish_writer(log, h).await;
+        let (pubkey, _dir, (log, sink, h)) = signed_writer(SignedWriterSetup::default());
+        crate::log::test_support::finish_lifecycle_writer(
+            log,
+            h,
+            &[crate::NodeId(1), crate::NodeId(2), crate::NodeId(3)],
+        )
+        .await;
 
         let recs = sink.records();
         let cps: Vec<_> = recs
@@ -544,7 +599,7 @@ mod tests {
         // The sender is still alive, so nothing but the unarmable ticker can
         // end the run: the writer stops rather than run on without a cadence,
         // and the event emitted before it noticed never reaches the sink.
-        log.emit(life(1));
+        log.emit(life(crate::NodeId(1)));
         handle.await.unwrap();
         check!(sink.records().is_empty());
         drop(log);
@@ -563,7 +618,7 @@ mod tests {
         params.spool = None;
         let handle = spawn_writer(rx, params);
 
-        log.emit(life(1));
+        log.emit(life(crate::NodeId(1)));
         finish_writer(log, handle).await;
 
         check!(stats.dropped() >= 1);
@@ -589,7 +644,7 @@ mod tests {
         params.spool = None;
         let handle = spawn_writer(rx, params);
 
-        log.emit(life(1));
+        log.emit(life(crate::NodeId(1)));
         crate::log::test_support::await_until(
             "loss marker, event, and checkpoint reached sink",
             || {
@@ -635,7 +690,7 @@ mod tests {
         } = pending_loss_writer(&sink, || Arc::clone(&stats), signer);
         let handle = spawn_writer(rx, params);
 
-        log.emit(life(1));
+        log.emit(life(crate::NodeId(1)));
         crate::log::test_support::await_until("loss marker, event, and checkpoint spooled", || {
             stats.spooled() >= 3
         })

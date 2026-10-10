@@ -79,12 +79,13 @@ async fn a_thaw_restores_writes() {
     let key = support::mint_operator_key(keys.path(), "alice-yubi", "User:alice");
     let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
         logs.path(),
-        &[&key],
-        // The proposer has to be in the set as well: a proposer outside it
+        crate::support::OperatorSaslSetup {
+            trust: crate::support::OperatorKeysSetup { keys: &[&key], approvers: // The proposer has to be in the set as well: a proposer outside it
         // would turn a rule about three people into a rule about two people
         // and a stranger. Alice still may not approve her own proposal.
-        &["User:alice", "User:bob", "User:carol"],
-        &[("alice", "pw"), ("bob", "pw"), ("carol", "pw")],
+        &["User:alice", "User:bob", "User:carol"] },
+            users: &[("alice", "pw"), ("bob", "pw"), ("carol", "pw")],
+        },
     )
     .await;
     let alice = support::sasl_client(&bootstrap, "alice", "pw").await;

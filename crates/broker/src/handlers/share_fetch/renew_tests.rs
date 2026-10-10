@@ -28,7 +28,12 @@ use krabka_protocol::{
 use crate::{
     broker::BrokerHandle,
     codes,
+    handlers::test_support::{
+        AcknowledgementBatchSetup, AcknowledgementMode, AcknowledgementPartitionSetup,
+        AcknowledgementSetup, RecordCount, ShareSessionEpoch,
+    },
     share_partition::state::RecordState::{self, Acknowledged, Acquired, Available},
+    test_support::KafkaErrorCode,
 };
 
 /// The request version that carries `IsRenewAck`.
@@ -47,41 +52,65 @@ use crate::{
 };
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(broker, "share-renew-test", name, 1).await
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "share-renew-test",
+            name,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// Appends one batch of `count` records to partition 0 of `topic`.
-async fn produce(broker: &BrokerHandle, topic: &str, count: i32) {
-    crate::handlers::test_support::produce_records(broker, topic, 0, count).await;
+async fn produce(broker: &BrokerHandle, topic: &str, count: RecordCount) {
+    crate::handlers::test_support::produce_records(
+        broker,
+        crate::handlers::test_support::ProduceRecordsSetup {
+            topic,
+            count,
+            ..Default::default()
+        },
+    )
+    .await;
 }
 
 /// The fetch limits of a `ShareFetch`.
 #[derive(Debug, Clone, Copy)]
 struct Limits {
-    max_bytes: i32,
-    max_records: i32,
+    max_bytes: FetchByteLimit,
+    max_records: RecordCount,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct FetchByteLimit(i32);
+
 const FETCH: Limits = Limits {
-    max_bytes: 1 << 20,
-    max_records: 500,
+    max_bytes: FetchByteLimit(1 << 20),
+    max_records: RecordCount(500),
 };
 
 const NO_FETCH: Limits = Limits {
-    max_bytes: 0,
-    max_records: 0,
+    max_bytes: FetchByteLimit(0),
+    max_records: RecordCount(0),
 };
 
-async fn share_fetch(
-    broker: &BrokerHandle,
-    group: &str,
-    epoch: i32,
+#[derive(Clone, krabka_macros::FieldDefaults)]
+struct RenewFetchSetup<'a> {
+    #[default("renew-group")]
+    group: &'a str,
+    #[default(ShareSessionEpoch(0))]
+    epoch: ShareSessionEpoch,
     topic_id: WireUuid,
-    is_renew_ack: bool,
+    mode: AcknowledgementMode,
+    #[default(FETCH)]
     limits: Limits,
-    batches: &[Batch],
-) -> ShareFetchResponse {
-    let request = fetch_request(group, epoch, topic_id, is_renew_ack, limits, batches);
+    batches: Vec<AcknowledgementBatchSetup>,
+}
+
+async fn share_fetch(broker: &BrokerHandle, setup: RenewFetchSetup<'_>) -> ShareFetchResponse {
+    let request = fetch_request(setup);
     share_fetch_as(broker, "share-consumer", &request).await
 }
 
@@ -90,29 +119,29 @@ async fn share_fetch_as(
     user: &str,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    crate::handlers::test_support::share_fetch_wire_as(broker, VERSION, user, request).await
+    crate::handlers::test_support::share_fetch_wire(
+        broker,
+        request,
+        crate::handlers::test_support::ShareWireSetup {
+            version: krabka_ids::ApiVersion(VERSION),
+            user,
+        },
+    )
+    .await
 }
 
 async fn share_acknowledge(
     broker: &BrokerHandle,
-    group: &str,
-    epoch: i32,
-    topic_id: WireUuid,
-    batches: &[Batch],
+    setup: AcknowledgementSetup<'_>,
 ) -> ShareAcknowledgeResponse {
-    let request = crate::handlers::test_support::acknowledge_batches_request(
-        group,
-        "member",
-        epoch,
-        topic_id,
-        (0, batches),
-        true,
-    );
-    crate::handlers::test_support::share_acknowledge_wire_as(
+    let request = crate::handlers::test_support::acknowledge_batches_request(setup);
+    crate::handlers::test_support::share_acknowledge_wire(
         broker,
-        VERSION,
-        "share-consumer",
         &request,
+        crate::handlers::test_support::ShareWireSetup {
+            version: krabka_ids::ApiVersion(VERSION),
+            ..Default::default()
+        },
     )
     .await
 }
@@ -133,37 +162,36 @@ async fn disable_renew(broker: &BrokerHandle, group: &str) {
 }
 
 /// The request under test.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 enum Call {
+    #[default]
     ShareAcknowledge,
     ShareFetch(Limits),
 }
 
-/// One scenario.
-struct Case {
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum RenewAvailability {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
+/// One scenario, overriding only the request and expectations it exercises.
+#[derive(krabka_macros::FieldDefaults)]
+struct RenewCaseSetup {
+    #[default("renew-only")]
     name: &'static str,
     call: Call,
-    renew_enabled: bool,
-    batches: &'static [Batch],
+    availability: RenewAvailability,
+    #[default(ack_batches(&[(0, 2, &[RENEW])]))]
+    batches: Vec<AcknowledgementBatchSetup>,
+    #[default(Outcome::expected(KafkaErrorCode(codes::NONE), Some(KafkaErrorCode(codes::NONE)), [Acquired, Acquired, Acquired]))]
     expected: Outcome,
 }
 
-impl Case {
-    fn new(
-        name: &'static str,
-        call: Call,
-        renew_enabled: bool,
-        batches: &'static [Batch],
-        expected: Outcome,
-    ) -> Self {
-        Self {
-            name,
-            call,
-            renew_enabled,
-            batches,
-            expected,
-        }
-    }
+/// Decode the literal acknowledgement wire tables into typed fixture ranges.
+fn ack_batches(batches: &[Batch]) -> Vec<AcknowledgementBatchSetup> {
+    AcknowledgementPartitionSetup::from_wire((0, batches)).batches
 }
 
 /// What a scenario observes: the top-level error, the partition error
@@ -178,83 +206,85 @@ struct Outcome {
 }
 
 impl Outcome {
-    fn expected(error: i16, acknowledge_error: Option<i16>, states: [RecordState; 3]) -> Self {
+    fn expected(
+        error: KafkaErrorCode,
+        acknowledge_error: Option<KafkaErrorCode>,
+        states: [RecordState; 3],
+    ) -> Self {
         Self {
-            error,
-            acknowledge_error,
+            error: error.0,
+            acknowledge_error: acknowledge_error.map(|code| code.0),
             acquired: Vec::new(),
             states: vec![(0, states[0]), (1, states[1]), (2, states[2])],
         }
     }
 }
 
-fn cases() -> Vec<Case> {
+fn cases() -> Vec<RenewCaseSetup> {
     const MIXED_BATCHES: &[Batch] = &[(0, 0, &[RENEW]), (1, 2, &[ACCEPT])];
     let mixed_outcome = || {
         Outcome::expected(
-            codes::NONE,
-            Some(codes::NONE),
+            KafkaErrorCode(codes::NONE),
+            Some(KafkaErrorCode(codes::NONE)),
             [Acquired, Acknowledged, Acknowledged],
         )
     };
     vec![
-        Case::new(
-            "renew-only",
-            Call::ShareAcknowledge,
-            true,
-            &[(0, 2, &[RENEW])],
-            Outcome::expected(
-                codes::NONE,
-                Some(codes::NONE),
+        RenewCaseSetup {
+            expected: Outcome::expected(
+                KafkaErrorCode(codes::NONE),
+                Some(KafkaErrorCode(codes::NONE)),
                 [Acquired, Acquired, Acquired],
             ),
-        ),
-        Case::new(
-            "renew-and-accept-in-another-batch",
-            Call::ShareAcknowledge,
-            true,
-            MIXED_BATCHES,
-            mixed_outcome(),
-        ),
-        Case::new(
-            "per-offset-renew-accept-release",
-            Call::ShareAcknowledge,
-            true,
-            &[(0, 2, &[RENEW, ACCEPT, RELEASE])],
-            Outcome::expected(
-                codes::NONE,
-                Some(codes::NONE),
+            ..Default::default()
+        },
+        RenewCaseSetup {
+            name: "renew-and-accept-in-another-batch",
+            batches: ack_batches(MIXED_BATCHES),
+            expected: mixed_outcome(),
+            ..Default::default()
+        },
+        RenewCaseSetup {
+            name: "per-offset-renew-accept-release",
+            batches: ack_batches(&[(0, 2, &[RENEW, ACCEPT, RELEASE])]),
+            expected: Outcome::expected(
+                KafkaErrorCode(codes::NONE),
+                Some(KafkaErrorCode(codes::NONE)),
                 [Acquired, Acknowledged, Available],
             ),
-        ),
-        Case::new(
-            "renew-disabled",
-            Call::ShareAcknowledge,
-            false,
-            &[(0, 2, &[RENEW])],
-            Outcome::expected(
-                codes::NONE,
-                Some(codes::INVALID_RECORD_STATE),
+            ..Default::default()
+        },
+        RenewCaseSetup {
+            name: "renew-disabled",
+            availability: RenewAvailability::Disabled,
+            expected: Outcome::expected(
+                KafkaErrorCode(codes::NONE),
+                Some(KafkaErrorCode(codes::INVALID_RECORD_STATE)),
                 [Acquired, Acquired, Acquired],
             ),
-        ),
-        Case::new(
-            "fetch-renew-with-max-records",
-            Call::ShareFetch(Limits {
-                max_bytes: 0,
-                max_records: 500,
+            ..Default::default()
+        },
+        RenewCaseSetup {
+            name: "fetch-renew-with-max-records",
+            call: Call::ShareFetch(Limits {
+                max_bytes: FetchByteLimit(0),
+                max_records: RecordCount(500),
             }),
-            true,
-            MIXED_BATCHES,
-            Outcome::expected(codes::INVALID_REQUEST, None, [Acquired, Acquired, Acquired]),
-        ),
-        Case::new(
-            "fetch-renew-with-zero-limits",
-            Call::ShareFetch(NO_FETCH),
-            true,
-            MIXED_BATCHES,
-            mixed_outcome(),
-        ),
+            batches: ack_batches(MIXED_BATCHES),
+            expected: Outcome::expected(
+                KafkaErrorCode(codes::INVALID_REQUEST),
+                None,
+                [Acquired, Acquired, Acquired],
+            ),
+            ..Default::default()
+        },
+        RenewCaseSetup {
+            name: "fetch-renew-with-zero-limits",
+            call: Call::ShareFetch(NO_FETCH),
+            batches: ack_batches(MIXED_BATCHES),
+            expected: mixed_outcome(),
+            ..Default::default()
+        },
     ]
 }
 
@@ -277,22 +307,54 @@ async fn renew_acknowledgements_renew_only_the_renew_offsets() {
             0,
         )
         .await;
-        if !case.renew_enabled {
+        if case.availability == RenewAvailability::Disabled {
             disable_renew(&broker, &group).await;
         }
-        let opened = share_fetch(&broker, &group, 0, topic_id, false, FETCH, &[]).await;
+        let opened = share_fetch(
+            &broker,
+            RenewFetchSetup {
+                group: &group,
+                topic_id,
+                ..Default::default()
+            },
+        )
+        .await;
         assert!(opened.error_code == codes::NONE, "{opened:?}");
-        produce(&broker, &group, 3).await;
-        let fetched = share_fetch(&broker, &group, 1, topic_id, false, FETCH, &[]).await;
+        produce(&broker, &group, RecordCount(3)).await;
+        let fetched = share_fetch(
+            &broker,
+            RenewFetchSetup {
+                group: &group,
+                epoch: ShareSessionEpoch(1),
+                topic_id,
+                ..Default::default()
+            },
+        )
+        .await;
         assert!(
             fetched.responses[0].partitions[0].acquired_records.len() == 1,
             "{fetched:?}"
         );
-        produce(&broker, &group, 2).await;
+        produce(&broker, &group, RecordCount(2)).await;
 
         let outcome = match case.call {
             Call::ShareAcknowledge => {
-                let response = share_acknowledge(&broker, &group, 2, topic_id, case.batches).await;
+                let response = share_acknowledge(
+                    &broker,
+                    AcknowledgementSetup {
+                        mode: AcknowledgementMode::Renew,
+                        partition: AcknowledgementPartitionSetup {
+                            batches: case.batches.clone(),
+                            ..Default::default()
+                        },
+                        ..AcknowledgementSetup::for_topic_session(
+                            &group,
+                            ShareSessionEpoch(2),
+                            topic_id,
+                        )
+                    },
+                )
+                .await;
                 Outcome {
                     error: response.error_code,
                     acknowledge_error: response
@@ -304,8 +366,18 @@ async fn renew_acknowledgements_renew_only_the_renew_offsets() {
                 }
             }
             Call::ShareFetch(limits) => {
-                let response =
-                    share_fetch(&broker, &group, 2, topic_id, true, limits, case.batches).await;
+                let response = share_fetch(
+                    &broker,
+                    RenewFetchSetup {
+                        group: &group,
+                        epoch: ShareSessionEpoch(2),
+                        topic_id,
+                        mode: AcknowledgementMode::Renew,
+                        limits,
+                        batches: case.batches.clone(),
+                    },
+                )
+                .await;
                 let row = response.responses.first().map(|topic| &topic.partitions[0]);
                 Outcome {
                     error: response.error_code,
@@ -366,22 +438,25 @@ async fn a_renew_fetch_answers_a_denied_topic_as_an_acknowledge_error() {
         0,
     )
     .await;
-    let request = |epoch, is_renew_ack, limits, batches| {
-        fetch_request(
-            "renew-denied",
-            epoch,
+    let request = |setup: RenewFetchSetup<'_>| {
+        fetch_request(RenewFetchSetup {
+            group: "renew-denied",
             topic_id,
-            is_renew_ack,
-            limits,
-            batches,
-        )
+            ..setup
+        })
     };
 
-    let opened = share_fetch_as(&broker, NO_TOPIC_READ, &request(0, false, FETCH, &[])).await;
+    let opened = share_fetch_as(&broker, NO_TOPIC_READ, &request(RenewFetchSetup::default())).await;
     let renewed = share_fetch_as(
         &broker,
         NO_TOPIC_READ,
-        &request(1, true, NO_FETCH, &[(0, 0, &[RENEW])]),
+        &request(RenewFetchSetup {
+            epoch: ShareSessionEpoch(1),
+            mode: AcknowledgementMode::Renew,
+            limits: NO_FETCH,
+            batches: ack_batches(&[(0, 0, &[RENEW])]),
+            ..Default::default()
+        }),
     )
     .await;
 
@@ -399,29 +474,38 @@ async fn a_renew_fetch_answers_a_denied_topic_as_an_acknowledge_error() {
     broker.shutdown().await;
 }
 
-fn fetch_request(
-    group: &str,
-    epoch: i32,
-    topic_id: WireUuid,
-    is_renew_ack: bool,
-    limits: Limits,
-    batches: &[Batch],
-) -> ShareFetchRequest {
+fn fetch_request(setup: RenewFetchSetup<'_>) -> ShareFetchRequest {
+    let RenewFetchSetup {
+        group,
+        epoch,
+        topic_id,
+        mode,
+        limits,
+        batches,
+    } = setup;
     ShareFetchRequest {
         group_id: Some(group.into()),
         member_id: Some("member".into()),
-        share_session_epoch: epoch,
+        share_session_epoch: epoch.0,
         max_wait_ms: 0,
         min_bytes: 0,
-        max_bytes: limits.max_bytes,
-        max_records: limits.max_records,
-        batch_size: limits.max_records,
-        is_renew_ack,
+        max_bytes: limits.max_bytes.0,
+        max_records: limits.max_records.0,
+        batch_size: limits.max_records.0,
+        is_renew_ack: matches!(mode, AcknowledgementMode::Renew),
         topics: vec![FetchTopic {
             topic_id,
             partitions: vec![FetchPartition {
                 partition_index: 0,
-                acknowledgement_batches: acknowledgement_batches!(FetchAcknowledgeBatch, batches),
+                acknowledgement_batches: batches
+                    .into_iter()
+                    .map(|batch| FetchAcknowledgeBatch {
+                        first_offset: batch.first_offset.0,
+                        last_offset: batch.last_offset.0,
+                        acknowledge_types: batch.types.into_iter().map(|code| code.0).collect(),
+                        ..Default::default()
+                    })
+                    .collect(),
                 ..Default::default()
             }],
             ..Default::default()

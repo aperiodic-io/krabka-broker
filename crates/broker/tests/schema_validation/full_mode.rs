@@ -17,11 +17,14 @@ async fn full_mode_checks_the_body_and_id_mode_does_not() {
     let full_mode = create_topic(
         &broker,
         &client,
-        "validated-full",
-        &[
-            ("schema.validation.value", "true"),
-            ("schema.validation.mode", "full"),
-        ],
+        crate::harness::SchemaTopicSetup {
+            name: "validated-full",
+            configs: &[
+                ("schema.validation.value", "true"),
+                ("schema.validation.mode", "full"),
+            ],
+            ..Default::default()
+        },
     )
     .await;
 

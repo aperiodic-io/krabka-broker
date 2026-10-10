@@ -6,11 +6,10 @@ use moxy::{
 };
 
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let span = input.span();
-    let tokens = Vec::from(input);
-    let parts: Vec<_> = tokens.split(TokenTree::is_punct_comma).collect();
+    let arguments = crate::fixtures::CommaArguments::new(input);
+    let parts = arguments.parts();
     let Some([TokenTree::Ident(mode)]) = parts.first().copied() else {
-        return Err(arguments_error(span));
+        return Err(arguments_error(arguments.span));
     };
     match (mode.to_string().as_str(), parts.as_slice()) {
         ("config", [_, name, namespace]) if !namespace.is_empty() => {
@@ -38,7 +37,7 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
             let expect = match *policy {
                 [TokenTree::Ident(policy)] if policy == "expect" => true,
                 [TokenTree::Ident(policy)] if policy == "unwrap" => false,
-                _ => return Err(arguments_error(span)),
+                _ => return Err(arguments_error(arguments.span)),
             };
             Ok(moxy::template! {
                 async fn {{ name }}(
@@ -71,7 +70,7 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
                 }
             })
         }
-        _ => Err(arguments_error(span)),
+        _ => Err(arguments_error(arguments.span)),
     }
 }
 
@@ -103,16 +102,23 @@ pub(crate) fn scram_users(input: TokenStream) -> Result<TokenStream, ParseError>
 pub(crate) fn assignment_dirs(input: TokenStream) -> Result<TokenStream, ParseError> {
     let name = crate::fixtures::name(input)?;
     Ok(moxy::template! {
-        fn {{ name }}(
-            broker_id: i32,
-            broker_epoch: i64,
-            dir: ::uuid::Uuid,
-            topic: ::uuid::Uuid,
-            partitions: &[i32],
-        ) -> ::krabka_protocol::owned::assign_replicas_to_dirs_request::AssignReplicasToDirsRequest {
+        #[derive(Clone, Copy, ::krabka_macros::FieldDefaults)]
+        pub(crate) struct DirectoryAssignmentSetup<'a> {
+            #[default(1)]
+            pub broker_id: i32,
+            pub broker_epoch: i64,
+            pub dir: ::uuid::Uuid,
+            #[default(::uuid::Uuid::from_u128(1))]
+            pub topic: ::uuid::Uuid,
+            #[default(&[0])]
+            pub partitions: &'a [i32],
+        }
+
+        pub(crate) fn {{ name }}(setup: DirectoryAssignmentSetup<'_>) -> ::krabka_protocol::owned::assign_replicas_to_dirs_request::AssignReplicasToDirsRequest {
             use ::krabka_protocol::owned::assign_replicas_to_dirs_request::{
                 AssignReplicasToDirsRequest, DirectoryData, TopicData, PartitionData,
             };
+            let DirectoryAssignmentSetup { broker_id, broker_epoch, dir, topic, partitions } = setup;
             use ::krabka_protocol::primitives::uuid::Uuid;
             AssignReplicasToDirsRequest {
                 broker_id,
@@ -150,20 +156,22 @@ pub(crate) fn metric_registry(input: TokenStream) -> Result<TokenStream, ParseEr
 
 /// Read epoch milliseconds with each caller's original checked conversions.
 pub(crate) fn unix_millis(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let span = input.span();
-    let tokens = Vec::from(input);
-    let parts: Vec<_> = tokens.split(TokenTree::is_punct_comma).collect();
+    let arguments = crate::fixtures::CommaArguments::new(input);
+    let parts = arguments.parts();
     let [binding, epoch_context, conversion_context] = parts.as_slice() else {
         return Err(ParseError::new(
-            span,
+            arguments.span,
             "expected name and two panic contexts",
         ));
     };
     let [visibility @ .., TokenTree::Ident(name)] = *binding else {
-        return Err(ParseError::new(span, "expected a function name"));
+        return Err(ParseError::new(arguments.span, "expected a function name"));
     };
     if epoch_context.is_empty() || conversion_context.is_empty() {
-        return Err(ParseError::new(span, "expected two panic contexts"));
+        return Err(ParseError::new(
+            arguments.span,
+            "expected two panic contexts",
+        ));
     }
     let visibility = TokenStream::from(visibility);
     let visibility = moxy::parse!({ visibility } as moxy::ast::Visibility)?;

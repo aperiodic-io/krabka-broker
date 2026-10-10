@@ -45,6 +45,17 @@ fn spawn_writer(
     )
 }
 
+async fn queued_descending_batches(
+    tx: &mpsc::Sender<WriterMessage>,
+) -> (
+    crate::partition_writer::test_support::ProduceAck,
+    crate::partition_writer::test_support::ProduceAck,
+) {
+    let later = queue_batch(tx, batch_at(NOW_MS + 60_000)).await;
+    let earlier = queue_batch(tx, batch_at(NOW_MS)).await;
+    (later, earlier)
+}
+
 /// Two produces whose delivery times descend, queued before the writer runs so
 /// that its group drain takes both into one append call.
 ///
@@ -61,8 +72,7 @@ async fn a_backwards_delivery_time_in_one_writer_group_is_refused() {
     // Both jobs are on the queue before the writer starts, so its first
     // `recv` and the `try_recv` behind it drain them into one group.
     let (tx, rx) = mpsc::channel(2);
-    let later = queue_batch(&tx, batch_at(NOW_MS + 60_000)).await;
-    let earlier = queue_batch(&tx, batch_at(NOW_MS)).await;
+    let (later, earlier) = queued_descending_batches(&tx).await;
 
     let writer = spawn_writer(dir.path(), &log, rx);
 
@@ -106,8 +116,7 @@ async fn a_backwards_delivery_time_is_admitted_without_the_setting() {
     ));
 
     let (tx, rx) = mpsc::channel(2);
-    let later = queue_batch(&tx, batch_at(NOW_MS + 60_000)).await;
-    let earlier = queue_batch(&tx, batch_at(NOW_MS)).await;
+    let (later, earlier) = queued_descending_batches(&tx).await;
 
     let writer = spawn_writer(dir.path(), &log, rx);
 

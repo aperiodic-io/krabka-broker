@@ -94,12 +94,17 @@ async fn start_host_broker_with(
             controller_bootstrap().to_string(),
         )],
         ..crate::support::jvm_broker_config(
-            1,
-            listen_addr().parse().expect("allocated addr"),
-            controller_listen().parse().expect("allocated addr"),
-            advertised_addr(),
             dir.path().to_path_buf(),
-            &[(1, controller_listen().parse().expect("allocated addr"))],
+            crate::support::JvmBrokerSetup {
+                listen: listen_addr().parse().expect("allocated addr"),
+                controller: controller_listen().parse().expect("allocated addr"),
+                advertised: (advertised_addr()).to_owned(),
+                voters: crate::support::controller_voters(&[(
+                    1,
+                    controller_listen().parse().expect("allocated addr"),
+                )]),
+                ..Default::default()
+            },
         )
     };
     adjust(&mut config);

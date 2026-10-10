@@ -85,13 +85,16 @@ mod tests {
     use super::*;
     use crate::coordinator::unified::classic_state::test_support::member_with_protocols;
 
-    #[test]
-    fn select_protocol_single_member_picks_first() {
-        let mut members = HashMap::new();
-        members.insert(
+    fn one_range_first_member() -> HashMap<String, super::super::member::Member> {
+        HashMap::from([(
             "m1".to_string(),
             member_with_protocols("m1", vec![("range", b""), ("cooperative_sticky", b"")]),
-        );
+        )])
+    }
+
+    #[test]
+    fn select_protocol_single_member_picks_first() {
+        let members = one_range_first_member();
         assert!(select_protocol(&members).as_deref() == Some("range"));
     }
 
@@ -111,11 +114,7 @@ mod tests {
 
     #[test]
     fn select_protocol_max_votes_wins() {
-        let mut members = HashMap::new();
-        members.insert(
-            "m1".to_string(),
-            member_with_protocols("m1", vec![("range", b""), ("cooperative_sticky", b"")]),
-        );
+        let mut members = one_range_first_member();
         members.insert(
             "m2".to_string(),
             member_with_protocols("m2", vec![("range", b""), ("cooperative_sticky", b"")]),
@@ -129,11 +128,7 @@ mod tests {
 
     #[test]
     fn select_protocol_tie_breaks_lexicographically() {
-        let mut members = HashMap::new();
-        members.insert(
-            "m1".to_string(),
-            member_with_protocols("m1", vec![("range", b""), ("cooperative_sticky", b"")]),
-        );
+        let mut members = one_range_first_member();
         members.insert(
             "m2".to_string(),
             member_with_protocols("m2", vec![("cooperative_sticky", b""), ("range", b"")]),

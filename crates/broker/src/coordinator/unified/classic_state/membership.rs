@@ -328,7 +328,6 @@ mod tests {
     use std::collections::HashMap;
 
     use assert2::{assert, check};
-    use bytes::Bytes;
 
     use super::*;
     use crate::coordinator::unified::classic_state::test_support::{sample_member, static_member};
@@ -355,11 +354,7 @@ mod tests {
         let mut g = ClassicGroup::new("g");
         let outcome = g.add_member(static_member("m1", "inst-a"));
         assert!(outcome == AddMemberOutcome::NewMember);
-        g.complete_rebalance("range");
-        let mut a = HashMap::new();
-        a.insert("m1".into(), Bytes::from_static(b"assignment-bytes"));
-        g.install_assignments(a);
-        assert!(g.state == GroupState::Stable);
+        super::super::test_support::stabilize_m1(&mut g);
 
         // Rejoin with the same instance id but a fresh `member_id` (the
         // client restarted; KIP-394 bootstrap gave it a new id).

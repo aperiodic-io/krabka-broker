@@ -107,10 +107,12 @@ mod tests {
             directories: vec![bad, good],
             partition_epoch: 1,
             ..crate::handlers::test_support::replicated_partition(
-                "t",
-                0,
-                krabka_audit::NodeId(2),
-                &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
+                crate::handlers::test_support::ReplicatedPartitionSetup {
+                    topic: "t",
+                    leader: krabka_audit::NodeId(2),
+                    replicas: &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
+                    ..Default::default()
+                },
             )
         })];
         assert!(changes == expected_changes);
@@ -138,7 +140,7 @@ mod tests {
             incarnation_id: Uuid::from_u128(u128::from(node_id)),
             host: format!("broker-{node_id}"),
             log_dirs: dirs.to_vec(),
-            ..crate::test_support::broker_registration(node_id)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
         }
     }
 
@@ -189,10 +191,12 @@ mod tests {
 
     fn two_replica_image(directories: &[Uuid]) -> krabka_metadata::MetadataImage {
         image_with_dir_partition(
-            krabka_audit::NodeId(1),
-            &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-            &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-            directories,
+            crate::handlers::broker_heartbeat::test_support::ElectionSetup {
+                replicas: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
+                isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
+                dirs: directories,
+                ..Default::default()
+            },
         )
     }
 

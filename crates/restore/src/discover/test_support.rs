@@ -4,7 +4,7 @@
 //! tests hand back to the scan.
 
 use clap::Parser as _;
-use krabka_ids::{LeaderEpoch, Offset};
+use krabka_ids::{LeaderEpoch, Offset, PartitionIndex};
 use krabka_remote_storage::{
     RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentState,
     RlmmCacheDump, TopicIdPartition, kafka_uuid,
@@ -47,26 +47,57 @@ pub(super) fn args_from(archive_dir: &std::path::Path, extra: &[&str]) -> Restor
 /// The directory-naming identity of one partition, factored out of
 /// [`write_artifact`]'s arguments so the helper stays under Clippy's
 /// argument-count limit.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(super) struct PartitionKey<'a> {
+    #[default("orders")]
     pub(super) topic: &'a str,
-    pub(super) partition: i32,
+    #[default(PartitionIndex(0))]
+    pub(super) partition: PartitionIndex,
+    #[default(Uuid::from_u128(1))]
     pub(super) topic_id: Uuid,
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct SegmentSetup<'a> {
+    pub(super) partition: PartitionKey<'a>,
+    #[default(Offset(0))]
+    pub(super) base_offset: Offset,
+    #[default(Uuid::from_u128(10))]
+    pub(super) segment_id: Uuid,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct ArtifactSetup<'a> {
+    pub(super) prefix: Option<&'a str>,
+    pub(super) segment: SegmentSetup<'a>,
+    #[default(".log")]
+    pub(super) suffix: &'a str,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct SnapshotSegmentSetup<'a> {
+    pub(super) segment: SegmentSetup<'a>,
+    #[default(RemoteLogSegmentState::CopySegmentFinished)]
+    pub(super) state: RemoteLogSegmentState,
+}
+
 /// Write one artifact at the exact KIP-405 archive key layout, by hand.
-pub(super) fn write_artifact(
-    root: &std::path::Path,
-    prefix: Option<&str>,
-    partition: PartitionKey<'_>,
-    base_offset: i64,
-    segment_id: Uuid,
-    suffix: &str,
-) {
+pub(super) fn write_artifact(root: &std::path::Path, setup: ArtifactSetup<'_>) {
+    let ArtifactSetup {
+        prefix,
+        segment,
+        suffix,
+    } = setup;
+    let SegmentSetup {
+        partition,
+        base_offset,
+        segment_id,
+    } = segment;
+    let base_offset = base_offset.0;
     let dir_name = format!(
         "{}-{}-{}",
         partition.topic,
-        partition.partition,
+        partition.partition.0,
         kafka_uuid(partition.topic_id)
     );
     let file_name = format!("{base_offset:020}-{}{suffix}", kafka_uuid(segment_id));
@@ -80,21 +111,16 @@ pub(super) fn write_artifact(
 }
 
 /// Write every artifact of one complete segment copy.
-pub(super) fn write_full_segment(
-    root: &std::path::Path,
-    topic: &str,
-    partition: i32,
-    topic_id: Uuid,
-    base_offset: i64,
-    segment_id: Uuid,
-) {
-    let key = PartitionKey {
-        topic,
-        partition,
-        topic_id,
-    };
+pub(super) fn write_full_segment(root: &std::path::Path, setup: SegmentSetup<'_>) {
     for suffix in FULL_SEGMENT_SUFFIXES {
-        write_artifact(root, None, key, base_offset, segment_id, suffix);
+        write_artifact(
+            root,
+            ArtifactSetup {
+                segment: setup,
+                suffix,
+                ..Default::default()
+            },
+        );
     }
 }
 
@@ -102,12 +128,20 @@ pub(super) fn write_full_segment(
 /// arguments produces.
 pub(super) fn expected_full_segment(
     store: &ArchiveStore,
-    topic: &str,
-    partition: i32,
-    topic_id: Uuid,
-    base_offset: i64,
-    segment_id: Uuid,
+    setup: SegmentSetup<'_>,
 ) -> SegmentInventory {
+    let SegmentSetup {
+        partition,
+        base_offset,
+        segment_id,
+    } = setup;
+    let PartitionKey {
+        topic,
+        partition,
+        topic_id,
+    } = partition;
+    let partition = partition.0;
+    let base_offset = base_offset.0;
     let object = |suffix: &str| {
         Some(ArchiveObject {
             key: store.key(&format!(
@@ -131,14 +165,23 @@ pub(super) fn expected_full_segment(
 }
 
 /// One RLMM-tracked segment, for a `--rlmm-snapshot` fixture.
-pub(super) fn snapshot_segment(
-    topic: &str,
-    partition: i32,
-    topic_id: Uuid,
-    segment_id: Uuid,
-    base_offset: i64,
-    state: RemoteLogSegmentState,
-) -> RemoteLogSegmentMetadata {
+pub(super) fn snapshot_segment(setup: SnapshotSegmentSetup<'_>) -> RemoteLogSegmentMetadata {
+    let SnapshotSegmentSetup {
+        segment: setup,
+        state,
+    } = setup;
+    let SegmentSetup {
+        partition,
+        base_offset,
+        segment_id,
+    } = setup;
+    let PartitionKey {
+        topic,
+        partition,
+        topic_id,
+    } = partition;
+    let partition = partition.0;
+    let base_offset = base_offset.0;
     RemoteLogSegmentMetadata::new(
         RemoteLogSegmentId::new(
             TopicIdPartition::new(topic_id, topic, partition),
@@ -165,4 +208,23 @@ pub(super) fn write_snapshot(path: &std::path::Path, dump: RlmmCacheDump) {
     }
     .write_atomic(path)
     .expect("write snapshot");
+}
+
+/// One complete orders-0 segment with caller-chosen base offset.
+pub(super) fn single_segment_archive(base_offset: Offset) -> (tempfile::TempDir, Uuid, Uuid) {
+    let archive = tempfile::tempdir().expect("temp dir");
+    let topic_id = Uuid::from_u128(1);
+    let segment_id = Uuid::from_u128(10);
+    write_full_segment(
+        archive.path(),
+        SegmentSetup {
+            partition: PartitionKey {
+                topic_id,
+                ..Default::default()
+            },
+            base_offset,
+            segment_id,
+        },
+    );
+    (archive, topic_id, segment_id)
 }

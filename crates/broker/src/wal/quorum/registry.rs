@@ -340,11 +340,8 @@ impl krabka_raft::RaftShardRouter for WalShardRouter {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use bytes::Bytes;
     use krabka_ids::Offset;
-    use krabka_log::{Log, LogConfig};
     use krabka_protocol::{
         Decode,
         owned::fetch_response::FetchResponse,
@@ -356,8 +353,19 @@ mod tests {
     use super::*;
     use crate::wal::quorum::{
         engine::WalShardEngine,
+        test_support::open_log,
         wire::{encode_fetch_for_group, fetch_request},
     };
+
+    fn value_batch() -> RecordBatch {
+        RecordBatch {
+            records: vec![Record {
+                value: Some(Bytes::from_static(b"a")),
+                ..Record::default()
+            }],
+            ..RecordBatch::default()
+        }
+    }
 
     fn placement(voters: Vec<krabka_raft::NodeId>, leader_epoch: i32) -> WalPlacement {
         WalPlacement {
@@ -390,20 +398,8 @@ mod tests {
     #[tokio::test]
     async fn wal_shard_router_serves_registered_fetch() {
         let dir = tempdir().unwrap();
-        let source = Arc::new(Mutex::new(
-            Log::open(dir.path(), LogConfig::default()).unwrap(),
-        ));
-        let mut batch = RecordBatch {
-            records: vec![Record {
-                attributes: 0,
-                offset_delta: 0,
-                timestamp_delta: 0,
-                key: None,
-                value: Some(Bytes::from_static(b"a")),
-                headers: vec![],
-            }],
-            ..Default::default()
-        };
+        let source = open_log(dir.path());
+        let mut batch = value_batch();
         source
             .lock()
             .unwrap()
@@ -458,23 +454,11 @@ mod tests {
     #[tokio::test]
     async fn wal_shard_router_reports_offset_out_of_range_with_log_bounds() {
         let dir = tempdir().unwrap();
-        let source = Arc::new(Mutex::new(
-            Log::open(dir.path(), LogConfig::default()).unwrap(),
-        ));
+        let source = open_log(dir.path());
         {
             let mut log = source.lock().unwrap();
             for offset in 0..6 {
-                let mut batch = RecordBatch {
-                    records: vec![Record {
-                        attributes: 0,
-                        offset_delta: 0,
-                        timestamp_delta: 0,
-                        key: None,
-                        value: Some(Bytes::from_static(b"a")),
-                        headers: vec![],
-                    }],
-                    ..Default::default()
-                };
+                let mut batch = value_batch();
                 log.append_at(&mut batch, Offset(offset)).unwrap();
             }
             log.sync().unwrap();
@@ -535,9 +519,7 @@ mod tests {
             partition,
         };
         let dir = tempdir().unwrap();
-        let log = Arc::new(Mutex::new(
-            Log::open(dir.path(), LogConfig::default()).unwrap(),
-        ));
+        let log = open_log(dir.path());
         registry.insert(
             shard,
             Arc::new(WalShardEngine::for_logs(
@@ -570,9 +552,7 @@ mod tests {
     #[test]
     fn claimed_voter_must_match_authenticated_node() {
         let dir = tempdir().unwrap();
-        let source = Arc::new(Mutex::new(
-            Log::open(dir.path(), LogConfig::default()).unwrap(),
-        ));
+        let source = open_log(dir.path());
         let mut batch = RecordBatch {
             records: vec![Record::default()],
             ..Default::default()
@@ -610,9 +590,7 @@ mod tests {
     #[test]
     fn wal_shard_registry_fences_mismatched_leader_epochs_before_acknowledging() {
         let dir = tempdir().unwrap();
-        let source = Arc::new(Mutex::new(
-            Log::open(dir.path(), LogConfig::default()).unwrap(),
-        ));
+        let source = open_log(dir.path());
         source
             .lock()
             .unwrap()

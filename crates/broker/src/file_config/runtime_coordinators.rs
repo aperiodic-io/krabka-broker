@@ -302,6 +302,14 @@ fn validate_share_group_order(share: &ShareGroupConfig) -> Result<(), FileConfig
 
 #[cfg(test)]
 mod tests {
+    fn applied_runtime(body: &str) -> Result<crate::config::BrokerConfig, String> {
+        let file: crate::file_config::FileConfig =
+            toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
+        let mut cfg = crate::config::BrokerConfig::default();
+        file.apply_to(&mut cfg).map_err(|error| error.to_string())?;
+        Ok(cfg)
+    }
+
     use assert2::assert;
 
     use super::*;
@@ -479,13 +487,7 @@ mod tests {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for (row, body, want) in rows {
-            let file: crate::file_config::FileConfig =
-                toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let applied = file
-                .apply_to(&mut cfg)
-                .map(|()| (*cfg.share_group).clone())
-                .map_err(|error| error.to_string());
+            let applied = applied_runtime(body).map(|cfg| (*cfg.share_group).clone());
             actual.push((row, applied));
             expected.push((row, want));
         }
@@ -528,23 +530,17 @@ mod tests {
             ),
         ];
         for (row, body, want) in rows {
-            let file: crate::file_config::FileConfig =
-                toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let applied = file
-                .apply_to(&mut cfg)
-                .map(|()| {
-                    let streams = &cfg.streams_group;
-                    (
-                        streams.session_timeout,
-                        streams.min_session_timeout,
-                        streams.max_session_timeout,
-                        streams.heartbeat_interval,
-                        streams.min_heartbeat_interval,
-                        streams.max_heartbeat_interval,
-                    )
-                })
-                .map_err(|error| error.to_string());
+            let applied = applied_runtime(body).map(|cfg| {
+                let streams = &cfg.streams_group;
+                (
+                    streams.session_timeout,
+                    streams.min_session_timeout,
+                    streams.max_session_timeout,
+                    streams.heartbeat_interval,
+                    streams.min_heartbeat_interval,
+                    streams.max_heartbeat_interval,
+                )
+            });
             assert!(applied == want.map_err(str::to_owned), "{row}");
         }
     }

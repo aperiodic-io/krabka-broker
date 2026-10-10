@@ -424,12 +424,12 @@ async fn produce_settled(producer: &Producer, topic: &str, keys: &[String]) -> V
 }
 
 fn record(topic: &str, key: &str) -> ProducerRecord {
-    crate::support::producer::producer_record(
-        topic.to_owned(),
-        Some(0),
-        Some(key.to_owned().into()),
-        Some(key.to_owned().into()),
-    )
+    crate::support::producer::producer_record(crate::support::producer::ProducerRecordSetup {
+        topic: topic.to_owned(),
+        partition: Some(krabka_ids::PartitionIndex(0)),
+        key: Some(key.to_owned().into()),
+        value: Some(key.to_owned().into()),
+    })
 }
 
 /// A producer that reports an ack only when the broker gave it one.

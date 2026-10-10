@@ -814,7 +814,7 @@ connections_max_idle = "5s"
     /// name, off by default, refused unless it is a boolean.
     #[test]
     fn apply_to_reads_unstable_api_versions_enable_from_server_properties() {
-        use crate::{api_catalog::UnstableApiVersions, config::BrokerConfig};
+        use crate::api_catalog::UnstableApiVersions;
 
         for (toml, expected) in [
             ("broker_id = 0", Ok(UnstableApiVersions::Disabled)),
@@ -835,15 +835,9 @@ connections_max_idle = "5s"
                 ),
             ),
         ] {
-            let file: FileConfig = toml::from_str(toml).unwrap();
-            let mut cfg = BrokerConfig::default();
-            let applied = file
-                .apply_to(&mut cfg)
-                .map(|()| cfg.features.unstable_api_versions)
-                .map_err(|error| match error {
-                    crate::file_config::FileConfigError::InvalidConfig(message) => message,
-                    other => other.to_string(),
-                });
+            let applied = crate::file_config::test_support::configured_feature(toml, |cfg| {
+                cfg.features.unstable_api_versions
+            });
             assert!(applied == expected, "{toml}");
         }
     }
@@ -853,8 +847,6 @@ connections_max_idle = "5s"
     #[test]
     fn apply_to_reads_unstable_feature_versions_enable_from_server_properties() {
         use krabka_raft::UnstableFeatureVersions;
-
-        use crate::config::BrokerConfig;
 
         for (toml, expected) in [
             ("broker_id = 0", Ok(UnstableFeatureVersions::Disabled)),
@@ -875,15 +867,9 @@ connections_max_idle = "5s"
                 ),
             ),
         ] {
-            let file: FileConfig = toml::from_str(toml).unwrap();
-            let mut cfg = BrokerConfig::default();
-            let applied = file
-                .apply_to(&mut cfg)
-                .map(|()| cfg.features.unstable_feature_versions)
-                .map_err(|error| match error {
-                    crate::file_config::FileConfigError::InvalidConfig(message) => message,
-                    other => other.to_string(),
-                });
+            let applied = crate::file_config::test_support::configured_feature(toml, |cfg| {
+                cfg.features.unstable_feature_versions
+            });
             assert!(applied == expected, "{toml}");
         }
     }

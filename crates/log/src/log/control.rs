@@ -244,9 +244,10 @@ mod tests {
         log::{
             Log,
             test_support::{
-                PartitionState, abort_marker, barrier_marker, barrier_marker_from_producer,
-                commit_marker, compact_test_log, compaction_ctx, control_key, control_value,
-                keyed_batch, partition_state, sample_batch, test_log, transactional_batch,
+                BarrierEpoch, BarrierMarkerSetup, PartitionState, abort_marker, barrier_marker,
+                barrier_marker_from_producer, commit_marker, compact_test_log, compaction_ctx,
+                control_key, control_value, keyed_batch, partition_state, sample_batch, test_log,
+                transactional_batch,
             },
         },
         producer_snapshot::ProducerSnapshotEntry,
@@ -534,10 +535,22 @@ mod tests {
     #[test]
     fn a_barrier_marker_leaves_an_open_transaction_untouched() {
         for (name, mut barrier) in [
-            ("no producer id", barrier_marker("nightly", 7)),
+            (
+                "no producer id",
+                barrier_marker(BarrierMarkerSetup {
+                    epoch: BarrierEpoch(7),
+                    ..Default::default()
+                }),
+            ),
             (
                 "with a producer id",
-                barrier_marker_from_producer("nightly", 7, 1000, 2),
+                barrier_marker_from_producer(crate::log::test_support::HostileBarrierSetup {
+                    marker: BarrierMarkerSetup {
+                        epoch: BarrierEpoch(7),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
             ),
         ] {
             let (_dir, mut log) = crate::log::test_support::stamped_test_log(40, 1);
@@ -575,7 +588,7 @@ mod tests {
                     log.append(&mut data).unwrap();
                 }
                 let mut batch = if is_barrier {
-                    barrier_marker("nightly", 1)
+                    barrier_marker(BarrierMarkerSetup::default())
                 } else {
                     sample_batch(1)
                 };
@@ -610,14 +623,20 @@ mod tests {
             (
                 "abort",
                 abort_marker(1000, 2),
-                vec![crate::test_support::aborted_txn(1000, 0, 3, 4)],
+                vec![crate::test_support::aborted_txn(
+                    crate::test_support::AbortedTxnSetup::default(),
+                )],
                 vec![None, None, None, None],
             ),
         ] {
             let (_dir, mut log) = crate::log::test_support::stamped_test_log(40, 1);
 
             append_open_barrier_transaction(&mut log);
-            log.append(&mut barrier_marker("nightly", 9)).unwrap(); // offset 2
+            log.append(&mut barrier_marker(BarrierMarkerSetup {
+                epoch: BarrierEpoch(9),
+                ..Default::default()
+            }))
+            .unwrap(); // offset 2
             check!(
                 log.lso() == Offset(0),
                 "case {name}: the barrier holds the LSO"
@@ -650,18 +669,27 @@ mod tests {
         let ids = [1000, 2000, 3000, -1];
         let before = {
             let mut log = crate::test_support::open_log(dir.path());
-            log.append(&mut barrier_marker("nightly", 1)).unwrap(); // 0
+            log.append(&mut barrier_marker(BarrierMarkerSetup::default()))
+                .unwrap(); // 0
 
             let mut committed = transactional_batch(1000, 2, &["a"]);
             committed.base_sequence = 0;
             log.append(&mut committed).unwrap(); // 1
-            log.append(&mut barrier_marker("nightly", 2)).unwrap(); // 2
+            log.append(&mut barrier_marker(BarrierMarkerSetup {
+                epoch: BarrierEpoch(2),
+                ..Default::default()
+            }))
+            .unwrap(); // 2
             log.append(&mut commit_marker(1000, 2)).unwrap(); // 3
 
             let mut rolled_back = transactional_batch(2000, 5, &["b", "c"]);
             rolled_back.base_sequence = 0;
             log.append(&mut rolled_back).unwrap(); // 4 and 5
-            log.append(&mut barrier_marker("nightly", 3)).unwrap(); // 6
+            log.append(&mut barrier_marker(BarrierMarkerSetup {
+                epoch: BarrierEpoch(3),
+                ..Default::default()
+            }))
+            .unwrap(); // 6
             log.append(&mut abort_marker(2000, 5)).unwrap(); // 7
 
             let mut still_open = transactional_batch(3000, 1, &["d"]);
@@ -670,8 +698,17 @@ mod tests {
             // A marker that carries the open transaction's producer id closes
             // nothing on the append path, and recovery reaches the same
             // result.
-            log.append(&mut barrier_marker_from_producer("nightly", 4, 3000, 1))
-                .unwrap(); // 9
+            log.append(&mut barrier_marker_from_producer(
+                crate::log::test_support::HostileBarrierSetup {
+                    marker: BarrierMarkerSetup {
+                        epoch: BarrierEpoch(4),
+                        ..Default::default()
+                    },
+                    producer: crate::ProducerId(3000),
+                    producer_epoch: crate::log::test_support::ProducerEpoch(1),
+                },
+            ))
+            .unwrap(); // 9
 
             partition_state(&log, &ids)
         };
@@ -699,8 +736,16 @@ mod tests {
             append_open_barrier_transaction(&mut log);
             // A marker that carries the open transaction's producer id clears
             // no stamp range, on the append path or on the recovery path.
-            log.append(&mut barrier_marker_from_producer("nightly", 5, 1000, 2))
-                .unwrap(); // offset 2
+            log.append(&mut barrier_marker_from_producer(
+                crate::log::test_support::HostileBarrierSetup {
+                    marker: BarrierMarkerSetup {
+                        epoch: BarrierEpoch(5),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ))
+            .unwrap(); // offset 2
         }
 
         let mut reopened = crate::test_support::open_log(dir.path());
@@ -724,10 +769,15 @@ mod tests {
         let (_dir, mut log) = compact_test_log();
         log.append(&mut keyed_batch(0, &[(0, b"k1", b"v0")]))
             .unwrap(); // 0
-        log.append(&mut barrier_marker("nightly", 1)).unwrap(); // 1
+        log.append(&mut barrier_marker(BarrierMarkerSetup::default()))
+            .unwrap(); // 1
         log.append(&mut keyed_batch(0, &[(0, b"k1", b"v1")]))
             .unwrap(); // 2
-        log.append(&mut barrier_marker("nightly", 2)).unwrap(); // 3
+        log.append(&mut barrier_marker(BarrierMarkerSetup {
+            epoch: BarrierEpoch(2),
+            ..Default::default()
+        }))
+        .unwrap(); // 3
         log.append(&mut keyed_batch(0, &[(0, b"tail", b"t")]))
             .unwrap(); // 4, active
 
@@ -753,7 +803,13 @@ mod tests {
             .collect();
         let want_markers: Vec<Record> = [1, 2]
             .into_iter()
-            .flat_map(|epoch| barrier_marker("nightly", epoch).records)
+            .flat_map(|epoch| {
+                barrier_marker(BarrierMarkerSetup {
+                    epoch: BarrierEpoch(epoch),
+                    ..Default::default()
+                })
+                .records
+            })
             .collect();
         check!(kept_markers == want_markers);
         // The data still dedups newest-wins around them.

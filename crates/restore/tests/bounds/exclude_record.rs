@@ -32,9 +32,8 @@ async fn exclude_key_drops_a_middle_record_without_shifting_later_offsets() {
         ]),
         plain_batch(vec![value_record(0, "keep-4")]),
     ];
-    let archive = build_archive("orders", 0, &mut fixture);
-
-    let (_target, target_dir) = run_restore(archive.path(), &["--exclude-key", "^drop"]).await;
+    let (_archive, _target, target_dir) =
+        crate::harness::restore_excluding_keys(&mut fixture).await;
 
     let expected = vec![
         RecordBatch {
@@ -63,17 +62,10 @@ async fn exclude_key_matching_every_record_of_one_batch_still_claims_its_offsets
         ]),
         plain_batch(vec![value_record(0, "keep-c")]),
     ];
-    let archive = build_archive("orders", 0, &mut fixture);
+    let (_archive, _target, target_dir) =
+        crate::harness::restore_excluding_keys(&mut fixture).await;
 
-    let (_target, target_dir) = run_restore(archive.path(), &["--exclude-key", "^drop"]).await;
-
-    let expected = vec![
-        RecordBatch {
-            records: Vec::new(),
-            ..fixture[0].clone()
-        },
-        fixture[1].clone(),
-    ];
+    let expected = crate::harness::empty_first_batch(&fixture);
     crate::harness::check_batches(&target_dir, 3, &expected);
 }
 
@@ -95,9 +87,8 @@ async fn exclude_key_dropping_a_batchs_trailing_record_survives_the_full_pipelin
         ]),
         plain_batch(vec![value_record(0, "keep-z")]),
     ];
-    let archive = build_archive("orders", 0, &mut fixture);
-
-    let (_target, target_dir) = run_restore(archive.path(), &["--exclude-key", "^drop"]).await;
+    let (_archive, _target, target_dir) =
+        crate::harness::restore_excluding_keys(&mut fixture).await;
 
     let expected = vec![
         RecordBatch {

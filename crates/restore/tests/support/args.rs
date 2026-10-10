@@ -3,12 +3,22 @@
 use std::path::Path;
 
 /// A local archive restored into standalone node 1 with an explicit controller listener.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct RestoreOptions<'a> {
+    #[default("127.0.0.1:9093")]
+    pub controller_listener: &'a str,
+    pub extra: &'a [&'a str],
+}
+
 pub fn restore_argv(
     archive_root: &Path,
     log_dir: &Path,
-    controller_listener: &str,
-    extra: &[&str],
+    options: RestoreOptions<'_>,
 ) -> Vec<String> {
+    let RestoreOptions {
+        controller_listener,
+        extra,
+    } = options;
     let mut argv = vec![
         "krabka-restore".to_owned(),
         "--archive-local".to_owned(),

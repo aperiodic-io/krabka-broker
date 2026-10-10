@@ -19,6 +19,7 @@ use crate::{
 async fn lock_timeout_redelivers() {
     let (_permit, broker, client, _dir, tid, member) =
         lock_fixture(Duration::from_millis(200), None).await;
+    let session = crate::support::share::ShareSessionSetup::joined(&member, tid);
 
     // Fetch but DO NOT acknowledge.
     acquire_initial_record(&client, &member, tid).await;
@@ -30,17 +31,11 @@ async fn lock_timeout_redelivers() {
         .await;
 
     // Next fetch (epoch 1) re-acquires the same offset at delivery_count 2.
-    let row2 = share_fetch(&client, "g1", &member, tid, 0, 1, 0).await;
-    assert!(
-        acquired_count(&row2) == 1,
-        "expired-lock offset must be re-acquired, got {:?}",
-        row2.acquired_records
-    );
-    assert!(
-        row2.acquired_records[0].delivery_count == 2,
-        "re-delivery after lock timeout must bump delivery_count to 2, got {}",
-        row2.acquired_records[0].delivery_count
-    );
+    crate::share_rpc::fetch_redelivered(
+        &client,
+        crate::support::share::ShareFetchSetup::from(session),
+    )
+    .await;
 }
 
 /// The broker archives a record that exhausts `max_delivery_attempts` without
@@ -49,9 +44,14 @@ async fn lock_timeout_redelivers() {
 async fn delivery_limit_archives() {
     let (_permit, broker, client, _dir, tid, member) =
         lock_fixture(Duration::from_millis(150), Some(2)).await;
+    let session = crate::support::share::ShareSessionSetup::joined(&member, tid);
 
     // Delivery 1 (no ack).
-    let row1 = fetch_until_acquired(&client, "g1", &member, tid, 0, 0).await;
+    let row1 = fetch_until_acquired(
+        &client,
+        crate::support::share::ShareSessionSetup::opening(&member, tid),
+    )
+    .await;
     assert!(row1.acquired_records[0].delivery_count == 1);
 
     // Wait until the lock expires and the sweeper reverts the record to Available
@@ -61,7 +61,11 @@ async fn delivery_limit_archives() {
         .await;
 
     // Delivery 2 (no ack).
-    let row2 = share_fetch(&client, "g1", &member, tid, 0, 1, 0).await;
+    let row2 = share_fetch(
+        &client,
+        crate::support::share::ShareFetchSetup::from(session),
+    )
+    .await;
     assert!(
         acquired_count(&row2) == 1 && row2.acquired_records[0].delivery_count == 2,
         "second delivery must be count 2, got {:?}",
@@ -78,12 +82,11 @@ async fn delivery_limit_archives() {
 
     // Subsequent fetch: the acquire path detects delivery_count >= max_attempts
     // and archives the record — SPSO advances, nothing is returned.
-    let row3 = share_fetch(&client, "g1", &member, tid, 0, 2, 0).await;
-    assert!(
-        acquired_count(&row3) == 0,
-        "poison record must be archived, not re-delivered, got {:?}",
-        row3.acquired_records
-    );
+    crate::share_rpc::fetch_empty(
+        &client,
+        session.fetch_at(crate::support::share::ShareSessionEpoch(2)),
+    )
+    .await;
 }
 
 /// F1 (renew): a renew-ack extends the acquisition lock. The broker does NOT
@@ -100,6 +103,7 @@ async fn delivery_limit_archives() {
 async fn renew_extends_lock_not_redelivered() {
     let (_permit, _broker, client, _dir, tid, member) =
         lock_fixture(Duration::from_millis(500), None).await;
+    let session = crate::support::share::ShareSessionSetup::joined(&member, tid);
 
     // Acquire offset 0 (lock 500ms, delivery_count 1). Epoch is now 1.
     let acquire_at = std::time::Instant::now();
@@ -109,7 +113,14 @@ async fn renew_extends_lock_not_redelivered() {
     // expires) to reset the deadline to renew-time + 500ms ≈ T0+700ms. Epoch
     // is now 2. This sleep proves renew timing; it is NOT a flaky state-guess.
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let renew = share_renew(&client, &member, tid, 1, 0, 0).await;
+    let renew = share_renew(
+        &client,
+        crate::share_rpc::ShareRenewSetup {
+            session: crate::support::share::ShareSessionSetup::joined(&member, tid),
+            ..Default::default()
+        },
+    )
+    .await;
     assert!(
         renew.error_code == NONE,
         "renew must succeed for an acquired offset, got {}",
@@ -126,12 +137,11 @@ async fn renew_extends_lock_not_redelivered() {
     if let Some(rem) = target.checked_duration_since(std::time::Instant::now()) {
         tokio::time::sleep(rem).await;
     }
-    let row2 = share_fetch(&client, "g1", &member, tid, 0, 2, 0).await;
-    assert!(
-        acquired_count(&row2) == 0,
-        "renew must keep the lock; offset 0 must NOT be re-acquired, got {:?}",
-        row2.acquired_records
-    );
+    crate::share_rpc::fetch_empty(
+        &client,
+        session.fetch_at(crate::support::share::ShareSessionEpoch(2)),
+    )
+    .await;
 }
 
 /// F1 (control): the SAME timing WITHOUT a renew re-acquires the offset after
@@ -141,6 +151,7 @@ async fn renew_extends_lock_not_redelivered() {
 async fn no_renew_redelivers_after_lock_expiry() {
     let (_permit, _broker, client, _dir, tid, member) =
         lock_fixture(Duration::from_millis(500), None).await;
+    let session = crate::support::share::ShareSessionSetup::joined(&member, tid);
 
     acquire_initial_record(&client, &member, tid).await;
 
@@ -149,17 +160,11 @@ async fn no_renew_redelivers_after_lock_expiry() {
     // re-delivered. This sleep mirrors the renew test's timing to prove that
     // WITHOUT a renew the lock IS swept; it is NOT a flaky state-guess.
     tokio::time::sleep(Duration::from_millis(800)).await;
-    let row2 = share_fetch(&client, "g1", &member, tid, 0, 1, 0).await;
-    assert!(
-        acquired_count(&row2) == 1,
-        "without renew the expired lock must re-acquire, got {:?}",
-        row2.acquired_records
-    );
-    assert!(
-        row2.acquired_records[0].delivery_count == 2,
-        "re-delivery after lock timeout must bump delivery_count to 2, got {}",
-        row2.acquired_records[0].delivery_count
-    );
+    crate::share_rpc::fetch_redelivered(
+        &client,
+        crate::support::share::ShareFetchSetup::from(session),
+    )
+    .await;
 }
 
 /// Hold the broker permit, materialize t, and join its single-record share group.
@@ -174,15 +179,26 @@ async fn lock_fixture(
     uuid::Uuid,
     String,
 ) {
-    let (permit, broker, client, dir, tid) =
-        crate::support::share::permitted_topic_fixture("t", 1, |config| {
+    let (permit, broker, client, dir, tid) = crate::support::share::permitted_topic_fixture(
+        crate::support::share::ShareTopicSetup::default(),
+        |config| {
             config.share_group.record_lock_duration = lock_duration;
             if let Some(attempts) = max_delivery_attempts {
                 config.share_group.max_delivery_attempts = attempts;
             }
-        })
-        .await;
-    let (member, _) = crate::harness::initialize_consumption(&broker, &client, tid, 1).await;
+        },
+    )
+    .await;
+    let (member, _) = crate::harness::initialize_consumption(
+        &broker,
+        &client,
+        crate::support::share::ConsumptionSetup {
+            topic_id: tid,
+            count: crate::support::share::ShareRecordCount(1),
+        },
+    )
+    .await;
+
     (permit, broker, client, dir, tid, member)
 }
 
@@ -191,7 +207,11 @@ async fn acquire_initial_record(
     member: &str,
     tid: uuid::Uuid,
 ) {
-    let row = fetch_until_acquired(client, "g1", member, tid, 0, 0).await;
+    let row = fetch_until_acquired(
+        client,
+        crate::support::share::ShareSessionSetup::opening(member, tid),
+    )
+    .await;
     assert!(acquired_count(&row) == 1, "acquire the single offset");
     assert!(row.acquired_records[0].delivery_count == 1);
 }

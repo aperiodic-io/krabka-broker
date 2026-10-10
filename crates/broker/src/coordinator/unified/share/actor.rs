@@ -54,10 +54,7 @@ use self::{
     share_state::apply_initialized,
 };
 use super::{config::ShareGroupConfig, state::ShareGroupState};
-use crate::coordinator::unified::{
-    actor::MetadataProvider,
-    offsets_log::{OffsetsLog, write_failure_code},
-};
+use crate::coordinator::unified::{actor::MetadataProvider, offsets_log::write_failure_code};
 
 #[derive(Debug)]
 pub enum ShareGroupActorMessage {
@@ -104,18 +101,11 @@ impl ShareGroupActorHandle {
         group_id: String,
         config: Arc<ShareGroupConfig>,
         metadata: Arc<dyn MetadataProvider>,
-        offsets_log: Arc<dyn OffsetsLog>,
         coordinator: Arc<super::super::GroupCoordinator>,
     ) -> Self {
-        let (tx, rx) = mpsc::channel(config.actor_mailbox_capacity);
-        let task = tokio::spawn(actor_loop(
-            group_id,
-            config,
-            metadata,
-            offsets_log,
-            coordinator,
-            rx,
-        ));
+        let (tx, task) = crate::task_util::spawn_mailbox(config.actor_mailbox_capacity, |rx| {
+            actor_loop(group_id, config, metadata, coordinator, rx)
+        });
         Self { tx, _task: task }
     }
 }
@@ -132,10 +122,10 @@ async fn actor_loop(
     group_id: String,
     config: Arc<ShareGroupConfig>,
     metadata: Arc<dyn MetadataProvider>,
-    offsets_log: Arc<dyn OffsetsLog>,
     coordinator: Arc<super::super::GroupCoordinator>,
     mut rx: mpsc::Receiver<ShareGroupActorMessage>,
 ) {
+    let offsets_log = coordinator.offsets_log.clone();
     let mut state = ShareGroupState::new(group_id);
     let mut tick_period = config.heartbeat_interval;
     let mut tick = tokio::time::interval(tick_period);

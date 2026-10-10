@@ -23,9 +23,13 @@ pub async fn create_configured_topic(
         .send(crate::support::topics::create_topic_request(
             krabka_protocol::owned::create_topics_request::CreatableTopic {
                 configs,
-                ..crate::support::topics::creatable_topic(topic, 1, 1)
+                ..crate::support::topics::creatable_topic(
+                    crate::support::topics::ConfiguredTopicSetup {
+                        name: (topic).into(),
+                        ..Default::default()
+                    },
+                )
             },
-            5_000,
         ))
         .await
         .expect("CreateTopics");
@@ -36,20 +40,26 @@ pub async fn create_configured_topic(
     );
 }
 
+#[derive(krabka_macros::FieldDefaults)]
+pub struct AssignedTieredTopicSetup<'a> {
+    pub topic: crate::support::topics::AssignedTopicSetup,
+    pub segment_bytes: Option<&'a str>,
+}
+
 /// Pin one tiered partition to the caller's ordered replica list.
 pub async fn create_assigned_topic(
     client: &krabka_client_core::Client,
-    topic: &str,
-    replicas: &[i32],
-    segment_bytes: Option<&str>,
+    setup: AssignedTieredTopicSetup<'_>,
 ) {
     let response = client
-        .send(crate::support::topics::create_topic_request(
+        .send(crate::support::topics::create_topic_request_with_setup(
             krabka_protocol::owned::create_topics_request::CreatableTopic {
-                configs: tiered_configs(segment_bytes),
-                ..crate::support::topic_on(topic, &[replicas])
+                configs: tiered_configs(setup.segment_bytes),
+                ..crate::support::topics::assigned_topic(setup.topic)
             },
-            10_000,
+            crate::support::topics::CreateTopicRequestSetup {
+                timeout: crate::support::topics::CreateTopicsTimeoutMillis(10_000),
+            },
         ))
         .await
         .expect("CreateTopics");
@@ -82,5 +92,47 @@ pub async fn await_tiered_replicas(
         }
         assert2::assert!(std::time::Instant::now() <= deadline, "{failure}");
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct TieredRecordCount(pub usize);
+
+#[derive(Clone, Copy, derive_more::Display)]
+pub struct TieredRecordIndex(pub usize);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct TieredRecordsSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    pub topic_id: krabka_protocol::primitives::uuid::Uuid,
+    #[default(TieredRecordCount(1))]
+    pub count: TieredRecordCount,
+}
+
+/// Produce one acknowledged single-record request for every caller-generated value.
+pub async fn produce_records(
+    client: &krabka_client_core::Client,
+    value: impl Fn(TieredRecordIndex) -> bytes::Bytes,
+    setup: TieredRecordsSetup<'_>,
+) {
+    for index in 0..setup.count.0 {
+        let batch =
+            crate::support::records::batch_from_records(vec![krabka_protocol::records::Record {
+                value: Some(value(TieredRecordIndex(index))),
+                ..Default::default()
+            }]);
+        let response = crate::support::client::produce_batch(
+            client,
+            batch,
+            crate::support::client::BatchProduceSetup {
+                topic: setup.topic,
+                topic_id: setup.topic_id,
+                timeout: crate::support::produce::ProduceTimeoutMillis(10_000),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert2::assert!(response.error_code == 0, "Produce failed: {response:?}");
     }
 }

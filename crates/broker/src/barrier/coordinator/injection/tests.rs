@@ -9,20 +9,31 @@ use krabka_units::millis;
 use super::*;
 use crate::{
     barrier::{
-        coordinator::test_support::{Fixture, GROUP, spec},
+        coordinator::test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
         marker::parse_barrier_marker,
         persistence::{MissingPartition, PartitionOffset, TopicOffsets},
     },
     partition_registry::PartitionRegistry,
 };
 
+async fn check_retained_epochs(coordinator: &BarrierCoordinator, expected: &[i64]) {
+    let epochs: Vec<i64> = coordinator
+        .list_cuts(GROUP)
+        .await
+        .expect("the group is live")
+        .iter()
+        .map(|cut| cut.epoch)
+        .collect();
+    assert!(epochs == expected);
+}
+
 fn marker_at(
     registry: &PartitionRegistry,
     topic: &str,
-    partition: i32,
+    partition: PartitionIndex,
     offset: Offset,
 ) -> Option<BarrierMarker> {
-    let part = registry.get(topic, PartitionIndex(partition))?;
+    let part = registry.get(topic, partition)?;
     let read = part
         .read_log(offset, krabka_units::mebibytes(1))
         .expect("read the log back");
@@ -34,7 +45,13 @@ fn marker_at(
 async fn an_injection_marks_every_partition_and_publishes_a_complete_cut() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders", "payments"], None, 4))
+        .coordinator_with_group(
+            GROUP,
+            spec(GroupSpecSetup {
+                topics: &["orders", "payments"],
+                ..Default::default()
+            }),
+        )
         .await;
 
     let outcome = coordinator
@@ -76,7 +93,7 @@ async fn an_injection_marks_every_partition_and_publishes_a_complete_cut() {
             let marker = marker_at(
                 &fixture.registry,
                 &topic.topic,
-                entry.partition.get(),
+                entry.partition,
                 entry.offset,
             );
             check!(marker.map(|m| (m.group, m.epoch)) == Some((GROUP.to_owned(), 1)));
@@ -88,7 +105,7 @@ async fn an_injection_marks_every_partition_and_publishes_a_complete_cut() {
 async fn every_injection_takes_the_next_epoch() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], None, 4))
+        .coordinator_with_group(GROUP, spec(GroupSpecSetup::default()))
         .await;
 
     let mut epochs = Vec::new();
@@ -114,7 +131,7 @@ async fn every_injection_takes_the_next_epoch() {
 async fn an_exhausted_group_epoch_rejects_injection() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], None, 4))
+        .coordinator_with_group(GROUP, spec(GroupSpecSetup::default()))
         .await;
     let entry = coordinator
         .groups
@@ -135,7 +152,7 @@ async fn a_partition_that_carries_no_marker_makes_the_cut_partial() {
     // unmarked until the deadline runs out.
     let fixture = Fixture::with_data_partitions(&[("orders", 1)]);
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], None, 4))
+        .coordinator_with_group(GROUP, spec(GroupSpecSetup::default()))
         .await;
 
     let outcome = coordinator
@@ -164,7 +181,7 @@ async fn a_partition_that_carries_no_marker_makes_the_cut_partial() {
 async fn a_topic_set_edit_applies_from_the_next_epoch() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], None, 4))
+        .coordinator_with_group(GROUP, spec(GroupSpecSetup::default()))
         .await;
     let first = coordinator
         .trigger_injection(GROUP, None)
@@ -173,7 +190,13 @@ async fn a_topic_set_edit_applies_from_the_next_epoch() {
     assert!(first.cut.topics.len() == 1);
 
     coordinator
-        .update_group(GROUP, spec(&["orders", "payments"], None, 4))
+        .update_group(
+            GROUP,
+            spec(GroupSpecSetup {
+                topics: &["orders", "payments"],
+                ..Default::default()
+            }),
+        )
         .await
         .expect("the group is updated");
     let second = coordinator
@@ -189,7 +212,13 @@ async fn a_topic_set_edit_applies_from_the_next_epoch() {
 async fn the_group_keeps_only_its_retained_cuts() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], None, 2))
+        .coordinator_with_group(
+            GROUP,
+            spec(GroupSpecSetup {
+                retained_cuts: RetainedCutCount(2),
+                ..Default::default()
+            }),
+        )
         .await;
     for _ in 0..4 {
         coordinator
@@ -198,32 +227,24 @@ async fn the_group_keeps_only_its_retained_cuts() {
             .expect("the injection runs");
     }
 
-    let epochs: Vec<i64> = coordinator
-        .list_cuts(GROUP)
-        .await
-        .expect("the group is live")
-        .iter()
-        .map(|c| c.epoch)
-        .collect();
-    assert!(epochs == vec![3, 4]);
+    check_retained_epochs(&coordinator, &[3, 4]).await;
 
     // The tombstones are durable, so a replay agrees.
     let replayed = fixture.recovered().await;
-    let after: Vec<i64> = replayed
-        .list_cuts(GROUP)
-        .await
-        .expect("the group is live")
-        .iter()
-        .map(|c| c.epoch)
-        .collect();
-    assert!(after == vec![3, 4]);
+    check_retained_epochs(&replayed, &[3, 4]).await;
 }
 
 #[tokio::test]
 async fn a_smaller_retention_drops_every_cut_below_the_new_window() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], None, 8))
+        .coordinator_with_group(
+            GROUP,
+            spec(GroupSpecSetup {
+                retained_cuts: RetainedCutCount(8),
+                ..Default::default()
+            }),
+        )
         .await;
     for _ in 0..4 {
         coordinator
@@ -232,7 +253,13 @@ async fn a_smaller_retention_drops_every_cut_below_the_new_window() {
             .expect("the injection runs");
     }
     coordinator
-        .update_group(GROUP, spec(&["orders"], None, 1))
+        .update_group(
+            GROUP,
+            spec(GroupSpecSetup {
+                retained_cuts: RetainedCutCount(1),
+                ..Default::default()
+            }),
+        )
         .await
         .expect("the group is updated");
     coordinator
@@ -240,34 +267,32 @@ async fn a_smaller_retention_drops_every_cut_below_the_new_window() {
         .await
         .expect("the injection runs");
 
-    let epochs: Vec<i64> = coordinator
-        .list_cuts(GROUP)
-        .await
-        .expect("the group is live")
-        .iter()
-        .map(|c| c.epoch)
-        .collect();
-    assert!(epochs == vec![5]);
+    check_retained_epochs(&coordinator, &[5]).await;
 
     let replayed = fixture.recovered().await;
-    let after: Vec<i64> = replayed
-        .list_cuts(GROUP)
-        .await
-        .expect("the group is live")
-        .iter()
-        .map(|c| c.epoch)
-        .collect();
-    assert!(after == vec![5]);
+    check_retained_epochs(&replayed, &[5]).await;
 }
 
 #[tokio::test]
 async fn the_scheduler_injects_only_a_group_whose_interval_elapsed() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], Some(millis(1_000)), 4))
+        .coordinator_with_group(
+            GROUP,
+            spec(GroupSpecSetup {
+                interval: Some(millis(1_000)),
+                ..Default::default()
+            }),
+        )
         .await;
     coordinator
-        .create_group("on-demand", spec(&["payments"], None, 4))
+        .create_group(
+            "on-demand",
+            spec(GroupSpecSetup {
+                topics: &["payments"],
+                ..Default::default()
+            }),
+        )
         .await
         .expect("the group is created");
 
@@ -288,7 +313,7 @@ async fn the_scheduler_injects_only_a_group_whose_interval_elapsed() {
 async fn an_injection_holds_the_group_against_a_second_caller() {
     let fixture = Fixture::new();
     let coordinator = fixture
-        .coordinator_with_group(GROUP, spec(&["orders"], None, 4))
+        .coordinator_with_group(GROUP, spec(GroupSpecSetup::default()))
         .await;
 
     let handle = coordinator

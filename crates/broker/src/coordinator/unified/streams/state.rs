@@ -69,11 +69,10 @@ pub struct StreamsTargetAssignment {
 
 /// Kafka's `TasksTuple`: a member's active, standby and warmup tasks, each by
 /// subtopology.
-pub type TasksTuple = (
-    BTreeMap<String, Vec<i32>>,
-    BTreeMap<String, Vec<i32>>,
-    BTreeMap<String, Vec<i32>>,
-);
+pub type TasksTuple = (TaskMap, TaskMap, TaskMap);
+
+/// Tasks of one role, keyed by subtopology with sorted partition lists.
+pub type TaskMap = BTreeMap<String, Vec<i32>>;
 
 /// A minimal handle for the resolved topology that lives in `topology.rs`.
 ///
@@ -209,19 +208,7 @@ impl StreamsGroupState {
         m
     }
 
-    /// The members whose session expired at `now`, without removing them:
-    /// each one is fenced on its own, as each of Kafka's session timers fences
-    /// its member.
-    #[must_use]
-    pub fn expired_members(&self, now: Instant, session_timeout: Duration) -> Vec<String> {
-        crate::coordinator::unified::expired_member_ids(
-            self.members
-                .iter()
-                .map(|(id, member)| (id.as_str(), member.last_seen)),
-            now,
-            session_timeout,
-        )
-    }
+    crate::coordinator::unified::member_helpers::expired_members_method!();
 
     crate::coordinator::unified::member_helpers::evict_expired! {
         /// Removes members whose `last_seen` is older than `session_timeout` and
@@ -437,16 +424,11 @@ impl StreamsGroupState {
             .min()
     }
 
+    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
     /// Removes every member whose rebalance timeout fired at `now` while it
     /// was still at the epoch that armed it, and returns the removed ids,
     /// sorted. This is the fence of Kafka's
     /// `scheduleStreamsGroupRebalanceTimeout`.
-    pub fn fence_rebalance_timeouts(&mut self, now: Instant) -> Vec<String> {
-        let fenced = self.rebalance_timeouts_due(now);
-        for member_id in &fenced {
-            self.remove_member(member_id);
-        }
-        fenced
     }
 
     /// The members whose rebalance timeout fired at `now`, sorted, without
@@ -548,6 +530,13 @@ mod tests {
 
     use super::{test_support::task_map, *};
 
+    fn clean_member_group() -> StreamsGroupState {
+        let mut group = StreamsGroupState::new("g");
+        group.add_or_update_member(StreamsMemberState::joining("m1", "c1", "h1"));
+        group.dirty = false;
+        group
+    }
+
     #[test]
     fn add_member_marks_dirty_first_time() {
         let mut g = StreamsGroupState::new("g");
@@ -559,9 +548,7 @@ mod tests {
 
     #[test]
     fn re_add_identical_member_keeps_clean() {
-        let mut g = StreamsGroupState::new("g");
-        g.add_or_update_member(StreamsMemberState::joining("m1", "c1", "h1"));
-        g.dirty = false;
+        let mut g = clean_member_group();
         // Re-add a member with the same id and same topology epoch.
         let mut m = StreamsMemberState::joining("m1", "c1", "h1");
         m.topology_epoch = 0;
@@ -571,9 +558,7 @@ mod tests {
 
     #[test]
     fn topology_epoch_change_marks_dirty() {
-        let mut g = StreamsGroupState::new("g");
-        g.add_or_update_member(StreamsMemberState::joining("m1", "c1", "h1"));
-        g.dirty = false;
+        let mut g = clean_member_group();
         let mut m = StreamsMemberState::joining("m1", "c1", "h1");
         m.topology_epoch = 3;
         g.add_or_update_member(m);
@@ -582,9 +567,7 @@ mod tests {
 
     #[test]
     fn remove_member_marks_dirty() {
-        let mut g = StreamsGroupState::new("g");
-        g.add_or_update_member(StreamsMemberState::joining("m1", "c1", "h1"));
-        g.dirty = false;
+        let mut g = clean_member_group();
         let removed = g.remove_member("m1");
         assert!(removed.is_some());
         assert!(g.dirty);
@@ -708,6 +691,15 @@ mod tests {
         Expected,
     );
 
+    fn unrevoked_member() -> Member {
+        Member {
+            state: StreamsMemberAssignmentState::UnrevokedTasks,
+            active: &[0],
+            active_pending: &[1],
+            ..stable("m1", "p1", 1)
+        }
+    }
+
     fn builder_rows() -> Vec<BuilderRow> {
         use StreamsMemberAssignmentState::{Stable, UnreleasedTasks, UnrevokedTasks};
 
@@ -750,12 +742,7 @@ mod tests {
             ),
             (
                 "an unrevoked member moves on once it stops reporting the task",
-                Member {
-                    state: UnrevokedTasks,
-                    active: &[0],
-                    active_pending: &[1],
-                    ..stable("m1", "p1", 1)
-                },
+                unrevoked_member(),
                 None,
                 &[0],
                 &[],
@@ -764,12 +751,7 @@ mod tests {
             ),
             (
                 "an unrevoked member that still reports the task waits",
-                Member {
-                    state: UnrevokedTasks,
-                    active: &[0],
-                    active_pending: &[1],
-                    ..stable("m1", "p1", 1)
-                },
+                unrevoked_member(),
                 None,
                 &[0],
                 &[],
@@ -778,12 +760,7 @@ mod tests {
             ),
             (
                 "an unrevoked member without owned tasks waits",
-                Member {
-                    state: UnrevokedTasks,
-                    active: &[0],
-                    active_pending: &[1],
-                    ..stable("m1", "p1", 1)
-                },
+                unrevoked_member(),
                 None,
                 &[0],
                 &[],

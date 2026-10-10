@@ -29,7 +29,7 @@ pub(super) fn resource(resource_type: i8, resource_name: &str) -> AlterConfigsRe
 pub(super) fn image_with_broker(node_id: u64) -> krabka_metadata::MetadataImage {
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
     image.apply(&MetadataRecord::V1BrokerRegistration(
-        crate::test_support::broker_registration(node_id),
+        crate::test_support::broker_registration(krabka_raft::NodeId(node_id)),
     ));
     image
 }

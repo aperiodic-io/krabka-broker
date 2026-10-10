@@ -28,6 +28,7 @@ use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use assert2::assert;
 use bytes::BytesMut;
 use krabka_broker::{Broker, BrokerHandle};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -41,6 +42,8 @@ use krabka_protocol::{
 };
 use tempfile::TempDir;
 use tokio::net::TcpStream;
+
+use crate::support::wire::ApiRequestSetup;
 
 const CLIENT_ID: &str = "krabka-offline-replicas-test";
 const TOPIC: &str = "kip112-offline-replicas";
@@ -100,7 +103,12 @@ async fn create_topic_named(addr: SocketAddr, name: &str, partitions: i32, repli
     kafka_wire::create_topic_on(
         &mut stream,
         CLIENT_ID,
-        kafka_wire::topic(name, partitions, replication),
+        kafka_wire::topic(crate::support::topics::ConfiguredTopicSetup {
+            name: (name).into(),
+            partitions: crate::support::topics::TopicPartitionCount(partitions),
+            replicas: crate::support::topics::TopicReplicationFactor(replication),
+            ..Default::default()
+        }),
     )
     .await;
 }
@@ -117,9 +125,16 @@ async fn metadata_partitions_of(addr: SocketAddr, name: &str) -> Vec<MetadataRes
     let mut body = BytesMut::new();
     req.encode(&mut body, METADATA_VERSION).unwrap();
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let resp_bytes = round_trip(&mut stream, 3, METADATA_VERSION, &body)
-        .await
-        .unwrap();
+    let resp_bytes = round_trip(
+        &mut stream,
+        ApiRequestSetup {
+            api_key: WireApiKey(3),
+            version: WireApiVersion(METADATA_VERSION),
+        },
+        &body,
+    )
+    .await
+    .unwrap();
     let mut cur: &[u8] = &resp_bytes;
     let resp = MetadataResponse::decode(&mut cur, METADATA_VERSION).unwrap();
     let topic = resp
@@ -147,9 +162,16 @@ async fn describe_topic_partitions(
     req.encode(&mut body, DESCRIBE_TOPIC_PARTITIONS_VERSION)
         .unwrap();
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let resp_bytes = round_trip(&mut stream, 75, DESCRIBE_TOPIC_PARTITIONS_VERSION, &body)
-        .await
-        .unwrap();
+    let resp_bytes = round_trip(
+        &mut stream,
+        ApiRequestSetup {
+            api_key: WireApiKey(75),
+            version: WireApiVersion(DESCRIBE_TOPIC_PARTITIONS_VERSION),
+        },
+        &body,
+    )
+    .await
+    .unwrap();
     let mut cur: &[u8] = &resp_bytes;
     let resp = DescribeTopicPartitionsResponse::decode(&mut cur, DESCRIBE_TOPIC_PARTITIONS_VERSION)
         .unwrap();

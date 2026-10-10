@@ -381,6 +381,31 @@ mod tests {
         format!("krabka_protocol::owned::{snake}_request::{request}::decode(&mut cur, version,)?")
     }
 
+    /// Synchronous typed adapters share a decode/encode envelope in the golden expansion.
+    fn sync_adapter(snake: &str, api: &str, request: &str, fallible: bool) -> String {
+        let error_event = ".inspect_err(|error| ::tracing::error!(error = %error))";
+        let fallibility = if fallible { "?" } else { "" };
+        format!(
+            "{signature} {{
+                let span = ::tracing::info_span!(\"handle_{snake}\", api = \"{api}\", version,);
+                let _entered = span.enter();
+                Box::pin(::std::future::ready(
+                    ((|| {{
+                        use krabka_protocol::Decode as _;
+                        let mut cur = body;
+                        let req = {decode};
+                        let resp = crate::handlers::{snake}::handle(broker, &req, version, ctx){fallibility};
+                        crate::handlers::encode_response(&resp, version)
+                    }})()){error_event},
+                ))
+            }}
+            {registration}",
+            signature = context_signature(snake),
+            decode = decode(snake, request),
+            registration = registration("context", api, snake),
+        )
+    }
+
     /// Every section kind's expansion of a one-entry table: its adapter, with
     /// or without the `handle_<snake>` span and its `ERROR` event, and its
     /// registration.
@@ -497,51 +522,15 @@ mod tests {
             ),
             (
                 "typed_sync: DescribeAcls;",
-                format!(
-                    "{signature} {{
-                        let span = ::tracing::info_span!(\"handle_describe_acls\",
-                            api = \"DescribeAcls\", version,);
-                        let _entered = span.enter();
-                        Box::pin(::std::future::ready(
-                            ((|| {{
-                                use krabka_protocol::Decode as _;
-                                let mut cur = body;
-                                let req = {decode};
-                                let resp = crate::handlers::describe_acls::handle(
-                                    broker, &req, version, ctx)?;
-                                crate::handlers::encode_response(&resp, version)
-                            }})()){error_event},
-                        ))
-                    }}
-                    {registration}",
-                    signature = context_signature("describe_acls"),
-                    decode = decode("describe_acls", "DescribeAclsRequest"),
-                    registration = registration("context", "DescribeAcls", "describe_acls"),
-                ),
+                sync_adapter("describe_acls", "DescribeAcls", "DescribeAclsRequest", true),
             ),
             (
                 "typed_infallible: ListConfigResources;",
-                format!(
-                    "{signature} {{
-                        let span = ::tracing::info_span!(\"handle_list_config_resources\",
-                            api = \"ListConfigResources\", version,);
-                        let _entered = span.enter();
-                        Box::pin(::std::future::ready(
-                            ((|| {{
-                                use krabka_protocol::Decode as _;
-                                let mut cur = body;
-                                let req = {decode};
-                                let resp = crate::handlers::list_config_resources::handle(
-                                    broker, &req, version, ctx);
-                                crate::handlers::encode_response(&resp, version)
-                            }})()){error_event},
-                        ))
-                    }}
-                    {registration}",
-                    signature = context_signature("list_config_resources"),
-                    decode = decode("list_config_resources", "ListConfigResourcesRequest"),
-                    registration =
-                        registration("context", "ListConfigResources", "list_config_resources",),
+                sync_adapter(
+                    "list_config_resources",
+                    "ListConfigResources",
+                    "ListConfigResourcesRequest",
+                    false,
                 ),
             ),
             (

@@ -66,39 +66,51 @@ pub(crate) async fn push_topic_configs(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
     use assert2::assert;
     use krabka_metadata::{
         BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord, NodeId,
     };
-    use tempfile::tempdir;
     use uuid::Uuid;
 
     use super::*;
     use crate::{
         api_catalog::UnstableApiVersions,
         replicator_supervisor::test_support::{
-            MaterializeFixture, await_until, single_partition_image,
+            await_until, materialized_partition_with_config, single_partition_image,
         },
     };
 
+    #[derive(Clone, Copy)]
+    struct PushedConfigSetup<'a> {
+        base: &'a LogConfig,
+        unstable: UnstableApiVersions,
+        what: &'a str,
+    }
+
+    impl Default for PushedConfigSetup<'_> {
+        fn default() -> Self {
+            Self {
+                base: crate::replicator_supervisor::test_support::MaterializeSetup::default()
+                    .log_config,
+                unstable: UnstableApiVersions::Disabled,
+                what: "log config updated",
+            }
+        }
+    }
+
     async fn pushed_config(
         image: &MetadataImage,
-        base: &LogConfig,
-        unstable: UnstableApiVersions,
-        what: &str,
+        setup: PushedConfigSetup<'_>,
         ready: impl Fn(&LogConfig) -> bool,
     ) -> LogConfig {
-        let dir = tempdir().expect("tempdir");
-        let partitions = Arc::new(PartitionRegistry::new());
-        MaterializeFixture::default().materialize(
-            &partitions,
-            "t",
-            &[dir.path().to_path_buf()],
+        let PushedConfigSetup {
             base,
-            "materialize",
-        );
+            unstable,
+            what,
+        } = setup;
+        let (_dir, partitions) = materialized_partition_with_config(base);
         let desired = HashSet::from([("t".to_owned(), 0)]);
         push_topic_configs(&desired, &partitions, image, base, NodeId(1), unstable).await;
         let part = partitions.get("t", PartitionIndex(0)).expect("partition");
@@ -128,9 +140,11 @@ mod tests {
         };
         let snap = pushed_config(
             &img,
-            &base,
-            UnstableApiVersions::Disabled,
-            "retention.ms=60s applied to partition log",
+            PushedConfigSetup {
+                base: &base,
+                what: "retention.ms=60s applied to partition log",
+                ..Default::default()
+            },
             |config| config.retention == Some(krabka_units::minutes(1)),
         )
         .await;
@@ -217,9 +231,11 @@ mod tests {
 
             let snap = pushed_config(
                 &img,
-                &LogConfig::default(),
-                unstable,
-                "the push reached the partition log",
+                PushedConfigSetup {
+                    unstable,
+                    what: "the push reached the partition log",
+                    ..Default::default()
+                },
                 |config| config.retention == Some(krabka_units::minutes(1)),
             )
             .await;
@@ -234,9 +250,10 @@ mod tests {
         // No overrides → the writer retains the default log config.
         let snap = pushed_config(
             &img,
-            &LogConfig::default(),
-            UnstableApiVersions::Disabled,
-            "default retention applied to partition log",
+            PushedConfigSetup {
+                what: "default retention applied to partition log",
+                ..Default::default()
+            },
             |config| config.retention == LogConfig::default().retention,
         )
         .await;
@@ -280,9 +297,10 @@ mod tests {
 
         let snap = pushed_config(
             &img,
-            &LogConfig::default(),
-            UnstableApiVersions::Disabled,
-            "dynamic broker defaults applied to the partition log",
+            PushedConfigSetup {
+                what: "dynamic broker defaults applied to the partition log",
+                ..Default::default()
+            },
             |config| config.max_message_size == krabka_units::bytes(4_194_304),
         )
         .await;

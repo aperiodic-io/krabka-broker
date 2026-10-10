@@ -14,8 +14,19 @@ use krabka_protocol::owned::delete_share_group_offsets_request::{
 
 use crate::{
     describe::{describe_all_offsets, describe_until},
-    harness::{NONE, broker_test_permit, fetch_until_acquired, leave},
+    harness::{NONE, fetch_until_acquired, leave},
 };
+
+fn delete_topic_request() -> DeleteShareGroupOffsetsRequest {
+    DeleteShareGroupOffsetsRequest {
+        group_id: "g1".into(),
+        topics: vec![DeleteShareGroupOffsetsRequestTopic {
+            topic_name: "t".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
 
 /// Delete removes the durable share-state for a topic of an empty group.
 ///
@@ -23,21 +34,11 @@ use crate::{
 /// `start_offset` -1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_removes_topic() {
-    let (_permit, broker, client, _dir, tid) =
-        crate::support::share::permitted_topic_fixture("t", 1, |_| {}).await;
-    let (member, _epoch) = crate::harness::initialize_consumption(&broker, &client, tid, 3).await;
-    let _ = fetch_until_acquired(&client, "g1", &member, tid, 0, 0).await;
+    let (_permit, _broker, client, _dir, _tid, member, _) = crate::harness::acquired_topic().await;
     leave(&client, "g1", &member).await;
 
     let resp = client
-        .send(DeleteShareGroupOffsetsRequest {
-            group_id: "g1".into(),
-            topics: vec![DeleteShareGroupOffsetsRequestTopic {
-                topic_name: "t".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        })
+        .send(delete_topic_request())
         .await
         .expect("DeleteShareGroupOffsets");
     check!(
@@ -84,16 +85,25 @@ async fn delete_removes_topic() {
 /// restart.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_rewrites_metadata_topic_absent_after_restart() {
-    let _permit = broker_test_permit().await;
-    let dir = tempfile::TempDir::new().unwrap();
-    let log_dir = dir.path().to_path_buf();
+    let crate::harness::InitializedRestartFixture {
+        _permit,
+        _dir,
+        log_dir,
+        topic: initial,
+    } = crate::harness::initialized_restart_fixture(
+        crate::support::share::ShareRecordSeedSetup::default(),
+    )
+    .await;
 
     let tid;
     {
-        let (broker, client, topic, member) =
-            crate::harness::initialized_topic(log_dir.clone(), 3).await;
+        let (broker, client, topic, member) = initial;
         tid = topic;
-        let _ = fetch_until_acquired(&client, "g1", &member, tid, 0, 0).await;
+        let _ = fetch_until_acquired(
+            &client,
+            crate::support::share::ShareSessionSetup::opening(&member, tid),
+        )
+        .await;
 
         // Sanity: a describe with no topic list enumerates the initialized
         // partitions for "t" — partition [0] is present before the delete.
@@ -107,14 +117,7 @@ async fn delete_rewrites_metadata_topic_absent_after_restart() {
         leave(&client, "g1", &member).await;
 
         let resp = client
-            .send(DeleteShareGroupOffsetsRequest {
-                group_id: "g1".into(),
-                topics: vec![DeleteShareGroupOffsetsRequestTopic {
-                    topic_name: "t".into(),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            })
+            .send(delete_topic_request())
             .await
             .expect("DeleteShareGroupOffsets");
         assert!(

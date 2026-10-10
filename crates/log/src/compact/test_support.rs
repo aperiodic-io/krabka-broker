@@ -110,17 +110,26 @@ pub(super) fn superseded_records() -> Vec<Record> {
     ]
 }
 
-/// A transactional batch containing exactly one keyed record.
-pub(super) fn transactional_record(
-    base_offset: i64,
-    producer_id: i64,
-    key: &[u8],
-    value: &[u8],
-) -> RecordBatch {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct TransactionalRecordSetup<'a> {
+    pub offset: Offset,
+    #[default(ProducerId(1000))]
+    pub producer: ProducerId,
+    #[default((b"k", b"v"))]
+    pub payload: (&'a [u8], &'a [u8]),
+}
+
+/// One transactional keyed record, retaining the protocol's epoch/sequence defaults.
+pub(super) fn transactional_record(setup: TransactionalRecordSetup<'_>) -> RecordBatch {
+    let TransactionalRecordSetup {
+        offset,
+        producer,
+        payload: (key, value),
+    } = setup;
     RecordBatch {
-        base_offset,
+        base_offset: offset.0,
         last_offset_delta: 0,
-        producer_id,
+        producer_id: producer.0,
         attributes: Attributes::default().with_transactional(true),
         records: vec![make_record(0, Some(key), Some(value))],
         ..RecordBatch::default()

@@ -264,7 +264,12 @@ mod tests {
         // Txn batch was the first append: start_offset = 0.
         // last_offset = abort marker's base_offset + last_offset_delta = 3 + 0 = 3.
         // (The 3-record txn batch occupies offsets 0-2; the marker lands at offset 3.)
-        assert2::assert!(entries == [crate::test_support::aborted_txn(1000, 0, 3, 4)]);
+        assert2::assert!(
+            entries
+                == [crate::test_support::aborted_txn(
+                    crate::test_support::AbortedTxnSetup::default()
+                )]
+        );
     }
 
     /// An earlier completed transaction, still held in `unreplicated`
@@ -294,7 +299,16 @@ mod tests {
         // Producer 1000's transaction started at offset 0: that is the
         // earlier unreplicated start, and it must be the recorded LSO, not
         // producer 2000's own last_offset + 1.
-        assert2::assert!(entries == [crate::test_support::aborted_txn(2000, 3, 4, 0)]);
+        assert2::assert!(
+            entries
+                == [crate::test_support::aborted_txn(
+                    crate::test_support::AbortedTxnSetup {
+                        producer: crate::ProducerId(2000),
+                        bounds: crate::Offset(3)..=crate::Offset(4),
+                        stable: crate::Offset(0)
+                    }
+                )]
+        );
     }
 
     #[test]
@@ -310,7 +324,9 @@ mod tests {
 
         assert2::assert!(
             log.aborted_in_range(Offset(0), marker_base)
-                == [crate::test_support::aborted_txn(1000, 0, 3, 4)]
+                == [crate::test_support::aborted_txn(
+                    crate::test_support::AbortedTxnSetup::default()
+                )]
         );
     }
 

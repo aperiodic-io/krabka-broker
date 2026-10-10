@@ -1,0 +1,119 @@
+(* #"/workspace/crates/verified/src/log_index.rs" 21 8 21 78 *)
+
+let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
+let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 62 16 62 28
+let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
+let%span slog_index = "/workspace/crates/verified/src/log_index.rs" 22 25 22 31
+let%span slog_index'0 = "/workspace/crates/verified/src/log_index.rs" 23 25 23 38
+let%span slog_index'1 = "/workspace/crates/verified/src/log_index.rs" 28 22 28 29
+let%span slog_index'2 = "/workspace/crates/verified/src/log_index.rs" 26 24 27 53
+let%span slog_index'3 = "/workspace/crates/verified/src/log_index.rs" 25 24 25 91
+let%span slog_index'4 = "/workspace/crates/verified/src/log_index.rs" 24 24 24 59
+let%span slog_index'5 = "/workspace/crates/verified/src/log_index.rs" 30 31 30 40
+let%span slog_index'6 = "/workspace/crates/verified/src/log_index.rs" 30 43 30 44
+let%span slog_index'7 = "/workspace/crates/verified/src/log_index.rs" 30 31 30 44
+let%span slog_index'8 = "/workspace/crates/verified/src/log_index.rs" 30 26 30 44
+let%span slog_index'9 = "/workspace/crates/verified/src/log_index.rs" 31 19 31 31
+let%span slog_index'10 = "/workspace/crates/verified/src/log_index.rs" 31 19 31 33
+let%span slog_index'11 = "/workspace/crates/verified/src/log_index.rs" 32 31 32 32
+let%span slog_index'12 = "/workspace/crates/verified/src/log_index.rs" 32 20 32 32
+let%span slog_index'13 = "/workspace/crates/verified/src/log_index.rs" 13 19 14 48
+let%span slog_index'14 = "/workspace/crates/verified/src/log_index.rs" 15 18 15 43
+let%span slog_index'15 = "/workspace/crates/verified/src/log_index.rs" 16 18 16 89
+let%span slog_index'16 = "/workspace/crates/verified/src/log_index.rs" 17 18 18 49
+
+use creusot.int.UInt64
+use creusot.slice.Slice64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type tup2_u32_u32 = { f0: UInt32.t; f1: UInt32.t }
+
+let len_tup2_u32_u32 (self_: Slice64.slice tup2_u32_u32) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#sslice] Seq.length (Slice64.view self_)
+    = UInt64.t'int result}
+    (! return {result}) ]
+
+predicate gt_log_usize [@inline:trivial] (self: UInt64.t) (other: UInt64.t) = [%#sord] UInt64.lt other self
+
+meta "rewrite_def" predicate gt_log_usize
+
+predicate well_founded_relation_usize [@inline:trivial] (self: UInt64.t) (other: UInt64.t) =
+  [%#swell_founded] gt_log_usize self other
+
+meta "rewrite_def" predicate well_founded_relation_usize
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let upper_offset_cursor [#"/workspace/crates/verified/src/log_index.rs" 21 8 21 78]
+  (entries: Slice64.slice tup2_u32_u32) (target: UInt32.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:upper_offset_cursor requires] [%#slog_index'13] forall i: int, j: int. 0 <= i
+      /\ i < j /\ j < Seq.length (Slice64.view entries)
+    -> UInt32.t'int (Seq.get (Slice64.view entries) i).f0 <= UInt32.t'int (Seq.get (Slice64.view entries) j).f0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &lo <- [%#slog_index] (0: UInt64.t) ] s1
+    | s1 = len_tup2_u32_u32 [%#slog_index'0] {entries} (fun (_x: UInt64.t) -> [ &hi <- _x ] s2)
+    | s2 = bb2 ]
+  | bb2 = bb2invariant
+    [ bb2 = {[@expl:loop variant] well_founded_relation_usize variant_old_bb2 ([%#slog_index'1] UInt64.sub hi lo)}
+      bb2invariant
+    | bb2invariant = {[@expl:loop invariant #0] [%#slog_index'4] UInt64.t'int lo <= UInt64.t'int hi
+      /\ UInt64.t'int hi <= Seq.length (Slice64.view entries)}
+      {[@expl:loop invariant #1] [%#slog_index'3] forall i: int. 0 <= i /\ i < UInt64.t'int lo
+        -> UInt32.t'int (Seq.get (Slice64.view entries) i).f0 <= UInt32.t'int target}
+      {[@expl:loop invariant #2] [%#slog_index'2] forall i: int. UInt64.t'int hi <= i
+          /\ i < Seq.length (Slice64.view entries)
+        -> not UInt32.t'int (Seq.get (Slice64.view entries) i).f0 <= UInt32.t'int target}
+      (! [ &variant_old_bb2 <- [%#slog_index'1] UInt64.sub hi lo ] s0)
+      [ s0 = [ &_34 <- UInt64.lt lo hi ] s1 | s1 = any [ br0 -> {_34 = false} (! bb10) | br1 -> {_34} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = UInt64.sub [%#slog_index'5] {hi} {lo} (fun (_x: UInt64.t) -> [ &_40 <- _x ] s1)
+        | s1 = [ &_43 <- ([%#slog_index'6] (2: UInt64.t)) = ([%#slog_index'7] (0: UInt64.t)) ] s2
+        | s2 = {[@expl:division by zero] [%#slog_index'7] not _43} s3
+        | s3 = UInt64.div [%#slog_index'7] {_40} {[%#slog_index'6] (2: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &_39 <- _x ] s4)
+        | s4 = UInt64.add [%#slog_index'8] {lo} {_39} (fun (_x: UInt64.t) -> [ &mid <- _x ] s5)
+        | s5 = [ &_46 <- mid ] s6
+        | s6 = [ &_47 <- Slice64.length entries ] s7
+        | s7 = [ &_48 <- UInt64.lt _46 _47 ] s8
+        | s8 = {[@expl:index in bounds] [%#slog_index'9] _48} s9
+        | s9 = Slice64.get [%#slog_index'10] <tup2_u32_u32> {entries} {_46}
+            (fun (r: tup2_u32_u32) -> [ &_45 <- r.f0 ] s10)
+        | s10 = [ &_44 <- UInt32.le _45 target ] s11
+        | s11 = any [ br0 -> {_44 = false} (! bb8) | br1 -> {_44} (! bb7) ] ]
+      | bb7 = s0
+        [ s0 = UInt64.add [%#slog_index'12] {mid} {[%#slog_index'11] (1: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &lo <- _x ] s1)
+        | s1 = bb2 ]
+      | bb8 = s0 [ s0 = [ &hi <- mid ] s1 | s1 = bb2 ] ] ]
+  | bb10 = s0 [ s0 = [ &_ret <- lo ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & entries: Slice64.slice tup2_u32_u32 = entries
+  | & target: UInt32.t = target
+  | & lo: UInt64.t = Any.any_l ()
+  | & hi: UInt64.t = Any.any_l ()
+  | & _34: bool = Any.any_l ()
+  | & mid: UInt64.t = Any.any_l ()
+  | & _39: UInt64.t = Any.any_l ()
+  | & _40: UInt64.t = Any.any_l ()
+  | & _43: bool = Any.any_l ()
+  | & _44: bool = Any.any_l ()
+  | & _45: UInt32.t = Any.any_l ()
+  | & _46: UInt64.t = Any.any_l ()
+  | & _47: UInt64.t = Any.any_l ()
+  | & _48: bool = Any.any_l ()
+  | & variant_old_bb2: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:upper_offset_cursor ensures] ([@stop_split] [@expl:upper_offset_cursor ensures #0] [%#slog_index'14] UInt64.t'int result
+      <= Seq.length (Slice64.view entries))
+    /\ ([@stop_split] [@expl:upper_offset_cursor ensures #1] [%#slog_index'15] forall i: int. 0 <= i
+          /\ i < UInt64.t'int result -> UInt32.t'int (Seq.get (Slice64.view entries) i).f0 <= UInt32.t'int target)
+    /\ ([@stop_split] [@expl:upper_offset_cursor ensures #2] [%#slog_index'16] forall i: int. UInt64.t'int result <= i
+        /\ i < Seq.length (Slice64.view entries)
+      -> not UInt32.t'int (Seq.get (Slice64.view entries) i).f0 <= UInt32.t'int target)}
+    (! return {result}) ]

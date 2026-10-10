@@ -42,7 +42,12 @@ impl Member {
             }]
         };
         let resp = client
-            .send(follow_up(GROUP, &self.id, self.epoch, Some(owned)))
+            .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+                group: GROUP,
+                member_id: &self.id,
+                epoch: crate::support::streams::StreamsMemberEpoch(self.epoch),
+                active: Some(owned),
+            }))
             .await
             .expect("heartbeat");
         assert!(resp.error_code == 0, "heartbeat error: {resp:?}");

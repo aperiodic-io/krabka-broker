@@ -325,7 +325,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::segment::test_support::{DENSE_INDEX, NO_LIMIT, sample_batch, seeded_segment};
+    use crate::segment::test_support::{DENSE_INDEX, NO_LIMIT, sample_batch};
 
     /// Truncating to a relative offset keeps every batch that ends before it,
     /// and leaves the segment describing exactly what it kept.
@@ -343,8 +343,15 @@ mod tests {
         // Three batches: offsets 100..=101, 102..=103, 104..=105, with
         // timestamps 500, 600, 700.
         for i in 0..3i64 {
-            seg.append(&sample_batch(100 + i * 2, 2, 500 + i * 100), DENSE_INDEX)
-                .unwrap();
+            seg.append(
+                &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                    offset: crate::Offset(100 + i * 2),
+                    records: crate::segment::test_support::RecordCount(2),
+                    timestamp: crate::segment::test_support::RecordTimestamp(500 + i * 100),
+                }),
+                DENSE_INDEX,
+            )
+            .unwrap();
         }
         let full_size = seg.size();
         check!(seg.last_offset() == Offset(105));
@@ -382,8 +389,7 @@ mod tests {
     /// Sealing is what `is_sealed` reports.
     #[test]
     fn is_sealed_follows_seal() {
-        let dir = tempdir().unwrap();
-        let mut seg = seeded_segment(dir.path(), 0, &[(0, 2, 100)]);
+        let (_dir, mut seg) = crate::segment::test_support::two_record_fixture();
         check!(!seg.is_sealed(), "a fresh segment is open");
         seg.seal().unwrap();
         check!(seg.is_sealed(), "a sealed segment reports it");
@@ -422,8 +428,15 @@ mod tests {
         for (label, batches, expected) in cases {
             let (_dir, mut seg) = crate::segment::test_support::test_segment();
             for (base, timestamp, interval) in batches {
-                seg.append(&sample_batch(base, 1, timestamp), interval)
-                    .unwrap();
+                seg.append(
+                    &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                        offset: crate::Offset(base),
+                        timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+                        ..Default::default()
+                    }),
+                    interval,
+                )
+                .unwrap();
             }
             seg.seal().unwrap();
             check!(
@@ -443,14 +456,14 @@ mod tests {
     /// returns batch B.
     #[test]
     fn truncate_to_relative_uses_batch_last_offset() {
-        let dir = tempdir().unwrap();
-        let mut seg = seeded_segment(
-            dir.path(),
-            0,
-            &[
-                (0, 3, 100), // offsets 0..=2
-                (3, 3, 200), // offsets 3..=5
-            ],
+        let (_dir, mut seg) = crate::segment::test_support::seeded_fixture(
+            crate::segment::test_support::SeededSegmentSetup {
+                batches: &[
+                    crate::segment::test_support::THREE_RECORD_BATCH, // offsets 0..=2
+                    crate::segment::test_support::SECOND_THREE_RECORD_BATCH, // offsets 3..=5
+                ],
+                ..Default::default()
+            },
         );
         assert2::assert!(seg.last_offset() == 5);
 
@@ -458,14 +471,18 @@ mod tests {
         seg.truncate_to_relative(3).unwrap();
         let read = seg.read(Offset(0), NO_LIMIT).unwrap();
         assert2::assert!(seg.last_offset() == Offset(2));
-        assert2::assert!(read == vec![sample_batch(0, 3, 100)]);
+        assert2::assert!(
+            read == vec![sample_batch(
+                crate::segment::test_support::THREE_RECORD_BATCH
+            )]
+        );
         let expected_size: usize = read.iter().map(RecordBatch::encoded_len).sum();
         assert2::assert!(seg.size().bytes_usize() == expected_size);
     }
 
     #[test]
     fn truncate_to_relative_rejects_an_absolute_offset_overflow() {
-        let (_dir, mut seg) = crate::segment::test_support::segment_at(i64::MAX);
+        let (_dir, mut seg) = crate::segment::test_support::segment_at(crate::Offset(i64::MAX));
 
         let error = seg
             .truncate_to_relative(1)
@@ -476,7 +493,14 @@ mod tests {
     #[test]
     fn flush_succeeds() {
         let (_dir, mut seg) = crate::segment::test_support::test_segment();
-        seg.append(&sample_batch(0, 1, 42), kibibytes(4)).unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                timestamp: crate::segment::test_support::RecordTimestamp(42),
+                ..Default::default()
+            }),
+            kibibytes(4),
+        )
+        .unwrap();
         seg.flush().unwrap();
     }
 }

@@ -16,32 +16,37 @@ fn update_voter_matches_the_stored_key_as_voter_node_is_voter_does() {
         // The ApiVersions range check precedes the voter lookup.
         (
             "old range",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             incompatible,
             D::IncompatibleVoter,
         ),
-        ("unknown id", voters(3, 1), target(Absent), D::VoterNotFound),
+        (
+            "unknown id",
+            voters(VoterCount(3), KraftFeatureLevel(1)),
+            target(Absent),
+            D::VoterNotFound,
+        ),
         (
             "other directory",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentOtherDirectory),
             D::DirectoryMismatch,
         ),
         (
             "legacy directory",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentUnknownDirectory),
-            plan(3, 1, true, false),
+            plan(ReconfigurationPlanSetup::default()),
         ),
         (
             "same directory",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentSameDirectory),
-            plan(3, 1, true, false),
+            plan(ReconfigurationPlanSetup::default()),
         ),
         (
             "preflight unknown id",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             target(Absent),
             D::VoterNotFound,
         ),
@@ -49,21 +54,29 @@ fn update_voter_matches_the_stored_key_as_voter_node_is_voter_does() {
         // Kafka's id-only version-0 match.
         (
             "preflight other",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             target(PresentOtherDirectory),
             D::DirectoryMismatch,
         ),
         (
             "preflight same",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             target(PresentSameDirectory),
-            plan(3, 0, false, false),
+            plan(ReconfigurationPlanSetup {
+                level: KraftFeatureLevel(0),
+                voters: ControlRecordWrite::Skip,
+                ..Default::default()
+            }),
         ),
         (
             "preflight legacy",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             target(PresentUnknownDirectory),
-            plan(3, 0, false, false),
+            plan(ReconfigurationPlanSetup {
+                level: KraftFeatureLevel(0),
+                voters: ControlRecordWrite::Skip,
+                ..Default::default()
+            }),
         ),
     ];
     for (case, current, voter, expected) in cases {
@@ -78,7 +91,7 @@ fn update_voter_matches_the_stored_key_as_voter_node_is_voter_does() {
 fn kraft_version_finalization_is_only_the_zero_to_one_upgrade() {
     let lacking = CurrentVoterSet {
         all_voters_support_requested: false,
-        ..voters(3, 0)
+        ..voters(VoterCount(3), KraftFeatureLevel(0))
     };
     let finalize = |requested_kraft_version| VoterChangeRequest {
         kind: VoterChangeKind::FinalizeKraftVersion,
@@ -87,19 +100,19 @@ fn kraft_version_finalization_is_only_the_zero_to_one_upgrade() {
     let cases = [
         (
             "already finalized",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             finalize(1),
             D::InvalidVersionTransition,
         ),
         (
             "no-op level",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             finalize(0),
             D::InvalidVersionTransition,
         ),
         (
             "unknown level",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             finalize(2),
             D::InvalidVersionTransition,
         ),
@@ -111,9 +124,12 @@ fn kraft_version_finalization_is_only_the_zero_to_one_upgrade() {
         ),
         (
             "admitted",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             finalize(1),
-            plan(3, 1, true, true),
+            plan(ReconfigurationPlanSetup {
+                kraft: ControlRecordWrite::Emit,
+                ..Default::default()
+            }),
         ),
     ];
     for (case, current, change, expected) in cases {

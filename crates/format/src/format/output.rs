@@ -208,16 +208,7 @@ mod tests {
     /// `golden_records` in `bootstrap.records.bin`: the version header, then
     /// one `u32` little-endian length and the wincode record. The broker's
     /// reader pins the same bytes.
-    #[rustfmt::skip]
-    const GOLDEN_RECORDS_BIN: &[u8] = &[
-        0x00, 0x00, // version 0
-        30, 0, 0, 0, // length 30
-        17, 0, 0, 0, // variant 17, V1FeatureLevel
-        16, 0, 0, 0, 0, 0, 0, 0, // name length 16
-        b'm', b'e', b't', b'a', b'd', b'a', b't', b'a',
-        b'.', b'v', b'e', b'r', b's', b'i', b'o', b'n',
-        30, 0, // level 30
-    ];
+    const GOLDEN_RECORDS_BIN: &[u8] = include_bytes!("../../tests/fixtures/bootstrap.records.bin");
 
     /// `golden_records` in `bootstrap.json`, for the cluster id below.
     const GOLDEN_MANIFEST: &str = r#"{

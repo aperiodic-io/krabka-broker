@@ -20,7 +20,8 @@ pub use crate::support::streams::{
 };
 
 pub async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    crate::support::streams::boot(false).await
+    crate::support::streams::boot(crate::support::streams::ElectionReadiness::CoordinatorReady)
+        .await
 }
 
 pub use crate::support::client::{connect_c1 as connect, create_topic};

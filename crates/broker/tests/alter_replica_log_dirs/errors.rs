@@ -8,16 +8,16 @@
 use assert2::assert;
 use krabka_broker::Broker;
 
-use crate::{
-    harness::{start_two_dir_broker, wait_all_partitions},
-    wire::{alter_replica_log_dirs, create_topic},
-};
+use crate::{harness::start_two_dir_broker, wire::alter_replica_log_dirs};
 
 #[tokio::test]
 async fn alter_replica_log_dirs_rejects_unknown_target() {
-    let (handle, _primary, _extra, addr) = start_two_dir_broker().await;
-    create_topic(addr, "t", 1).await;
-    wait_all_partitions(&handle, "t", 1).await;
+    let (handle, _primary, _extra, addr) =
+        crate::two_dir_topic::start(crate::two_dir_topic::Setup {
+            client_id: crate::wire::CLIENT_ID,
+            ..Default::default()
+        })
+        .await;
 
     let bogus = tempfile::tempdir().unwrap();
     let resp = alter_replica_log_dirs(addr, bogus.path(), "t", vec![0]).await;

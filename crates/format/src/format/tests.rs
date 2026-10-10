@@ -502,12 +502,20 @@ const UNREADABLE: &[u8] = b"version=one\n";
 
 /// The argv of a run under `root`: `--metadata-log-dir` when `metadata` names
 /// one, a `--log-dir` for each of `log_dirs`, `--node-id 1`, and then `extra`.
-fn argv_under(
-    root: &Path,
-    metadata: Option<&str>,
-    log_dirs: &[&str],
-    extra: &[&str],
-) -> Vec<String> {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct FormatArgvSetup<'a> {
+    metadata: Option<&'a str>,
+    #[default(&["a"])]
+    log_dirs: &'a [&'a str],
+    extra: &'a [&'a str],
+}
+
+fn argv_under(root: &Path, setup: FormatArgvSetup<'_>) -> Vec<String> {
+    let FormatArgvSetup {
+        metadata,
+        log_dirs,
+        extra,
+    } = setup;
     let mut argv = vec!["krabka-format".to_owned()];
     if let Some(dir) = metadata {
         argv.push("--metadata-log-dir".to_owned());
@@ -595,8 +603,15 @@ fn the_metadata_log_directory_leads_the_directory_set() {
     ];
     for (what, metadata, log_dirs, extra, want) in cases {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let plan = plan_of(argv_under(tmp.path(), *metadata, log_dirs, extra))
-            .unwrap_or_else(|(code, message)| panic!("{what}: exit {code}: {message}"));
+        let plan = plan_of(argv_under(
+            tmp.path(),
+            FormatArgvSetup {
+                metadata: *metadata,
+                log_dirs,
+                extra,
+            },
+        ))
+        .unwrap_or_else(|(code, message)| panic!("{what}: exit {code}: {message}"));
 
         let got: Vec<(PathBuf, DirectoryKind)> = plan
             .targets
@@ -640,8 +655,15 @@ fn the_directory_id_belongs_to_the_metadata_log_directory() {
     ];
     for (what, extra, kind) in cases {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let plan = plan_of(argv_under(tmp.path(), Some("m"), &["a"], &extra))
-            .unwrap_or_else(|(code, message)| panic!("{what}: exit {code}: {message}"));
+        let plan = plan_of(argv_under(
+            tmp.path(),
+            FormatArgvSetup {
+                metadata: Some("m"),
+                extra: &extra,
+                ..Default::default()
+            },
+        ))
+        .unwrap_or_else(|(code, message)| panic!("{what}: exit {code}: {message}"));
 
         let [metadata, data] = plan.targets.as_slice() else {
             panic!("{what}: {:?}", plan.targets);
@@ -728,7 +750,15 @@ async fn only_the_metadata_log_directory_gets_the_bootstrap_files() {
     ];
     for (what, metadata, log_dirs, extra, want) in cases {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let code = crate::run_from_args(argv_under(tmp.path(), *metadata, log_dirs, extra)).await;
+        let code = crate::run_from_args(argv_under(
+            tmp.path(),
+            FormatArgvSetup {
+                metadata: *metadata,
+                log_dirs,
+                extra,
+            },
+        ))
+        .await;
         check!(code == EXIT_OK, "{what}");
 
         let got: Vec<(String, Vec<String>)> = want
@@ -802,7 +832,15 @@ fn an_unreadable_metadata_log_directory_is_named() {
         std::fs::create_dir_all(&broken).expect("mkdir");
         std::fs::write(broken.join(META_PROPERTIES), UNREADABLE).expect("write");
 
-        let got = plan_of(argv_under(tmp.path(), metadata, log_dirs, &[])).map(|plan| {
+        let got = plan_of(argv_under(
+            tmp.path(),
+            FormatArgvSetup {
+                metadata,
+                log_dirs,
+                ..Default::default()
+            },
+        ))
+        .map(|plan| {
             (
                 plan.targets
                     .into_iter()
@@ -835,7 +873,9 @@ fn an_unreadable_metadata_log_directory_is_named() {
 #[tokio::test]
 async fn a_directory_of_another_node_is_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    check!(crate::run_from_args(argv_under(tmp.path(), None, &["a"], &[])).await == EXIT_OK);
+    check!(
+        crate::run_from_args(argv_under(tmp.path(), FormatArgvSetup::default())).await == EXIT_OK
+    );
     let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
     let message = format!(
         "Stored node id 1 doesn't match previous node id 2 in {}. If you moved your data, make \

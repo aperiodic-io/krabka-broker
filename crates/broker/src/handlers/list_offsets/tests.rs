@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     codes,
-    handlers::list_offsets::test_support::test_context,
+    handlers::{list_offsets::test_support::test_context, test_support::CreateTopicSetup},
     test_support::{
         DenyAll, peer, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
     },
@@ -250,11 +250,11 @@ async fn duplicate_partitions_get_invalid_request_on_every_row() {
     let client = client_for(&broker_handle).await;
     client
         .send(crate::handlers::test_support::configured_topic_request(
-            TOPIC,
-            &[],
-            2,
-            1,
-            5_000,
+            CreateTopicSetup {
+                topic: TOPIC,
+                num_partitions: crate::handlers::test_support::TopicPartitionCount(2),
+                ..Default::default()
+            },
         ))
         .await
         .expect("CreateTopics");

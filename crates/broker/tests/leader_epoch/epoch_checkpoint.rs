@@ -9,7 +9,7 @@ use assert2::check;
 
 use crate::{
     epoch_harness::{boot_single, create_topic, record, set_leader_epoch, topic_id_for},
-    support::{client::connect_client, produce::single_partition_produce},
+    support::client::connect_client,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -21,12 +21,13 @@ async fn epoch_checkpoint_byte_compat() {
     let client = connect_client(bootstrap.clone(), None).await;
     let topic_id = topic_id_for(&client, "ckpt").await;
     client
-        .send(single_partition_produce(
-            "ckpt",
-            topic_id,
-            0,
-            Some(record("v0").into()),
-            (1, 5_000),
+        .send(crate::support::produce::batch_request(
+            record("v0"),
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: ("ckpt").into(),
+                topic_id,
+                ..Default::default()
+            },
         ))
         .await
         .expect("produce");
@@ -34,12 +35,13 @@ async fn epoch_checkpoint_byte_compat() {
     // Bump epoch to 1 + produce another.
     set_leader_epoch(&broker, "ckpt", 1).await;
     client
-        .send(single_partition_produce(
-            "ckpt",
-            topic_id,
-            0,
-            Some(record("v1").into()),
-            (1, 5_000),
+        .send(crate::support::produce::batch_request(
+            record("v1"),
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: ("ckpt").into(),
+                topic_id,
+                ..Default::default()
+            },
         ))
         .await
         .expect("produce");

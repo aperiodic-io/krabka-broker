@@ -189,25 +189,41 @@ impl Segment {
 mod tests {
     use assert2::check;
     use krabka_units::prelude::{bytes, mebibytes};
-    use tempfile::tempdir;
 
     use super::*;
     use crate::segment::test_support::{
-        DENSE_INDEX, NO_LIMIT, sample_batch, seeded_segment, test_batch_at, test_segment,
+        DENSE_INDEX, NO_LIMIT, sample_batch, test_batch_at, test_segment,
     };
 
     /// A fetch reads nothing when it starts past the segment, and nothing when
     /// it starts at or past the limit. Either condition alone is enough --
     /// joined with `&&` a fetch would have to be both before it read nothing.
+    #[derive(Clone, Copy)]
+    struct BatchCount(i64);
+
+    fn append_two_record_batches(seg: &mut Segment, count: BatchCount) {
+        for i in 0..count.0 {
+            seg.append(
+                &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                    offset: crate::Offset(i * 2),
+                    records: crate::segment::test_support::RecordCount(2),
+                    timestamp: crate::segment::test_support::RecordTimestamp(100 + i),
+                }),
+                DENSE_INDEX,
+            )
+            .unwrap();
+        }
+    }
+
     #[test]
     fn a_fetch_past_the_segment_or_at_the_limit_reads_nothing() {
-        let dir = tempdir().unwrap();
-        let seg = seeded_segment(
-            dir.path(),
-            0,
-            &[
-                (0, 3, 100), // offsets 0..=2
-            ],
+        let (_dir, seg) = crate::segment::test_support::seeded_fixture(
+            crate::segment::test_support::SeededSegmentSetup {
+                batches: &[
+                    crate::segment::test_support::THREE_RECORD_BATCH, // offsets 0..=2
+                ],
+                ..Default::default()
+            },
         );
 
         let past = seg.read_raw(Offset(3), Offset(99), NO_LIMIT).unwrap();
@@ -234,9 +250,21 @@ mod tests {
         // batches before the one asked for -- with a dense index it would jump
         // straight there and never step at all.
         let sparse = mebibytes(1);
-        seg.append(&sample_batch(0, 2, 100), sparse).unwrap(); // 0..=1
-        seg.append(&sample_batch(2, 2, 200), sparse).unwrap(); // 2..=3
-        seg.append(&sample_batch(4, 2, 300), sparse).unwrap(); // 4..=5
+        seg.append(
+            &sample_batch(crate::segment::test_support::TWO_RECORD_BATCH),
+            sparse,
+        )
+        .unwrap(); // 0..=1
+        seg.append(
+            &sample_batch(crate::segment::test_support::SECOND_TWO_RECORD_BATCH),
+            sparse,
+        )
+        .unwrap(); // 2..=3
+        seg.append(
+            &sample_batch(crate::segment::test_support::THIRD_TWO_RECORD_BATCH),
+            sparse,
+        )
+        .unwrap(); // 4..=5
 
         let read = seg
             .read_raw_with_policy(
@@ -264,10 +292,7 @@ mod tests {
     #[test]
     fn a_batch_too_large_for_the_first_read_is_fetched_from_its_own_position() {
         let (_dir, mut seg) = crate::segment::test_support::test_segment();
-        for i in 0..4i64 {
-            seg.append(&sample_batch(i * 2, 2, 100 + i), DENSE_INDEX)
-                .unwrap();
-        }
+        append_two_record_batches(&mut seg, BatchCount(4));
 
         // A one-byte budget makes the first read header-sized, so the batch
         // cannot fit it and takes the read-one-batch path.
@@ -283,14 +308,29 @@ mod tests {
 
     #[test]
     fn batch_too_large_with_nonzero_start_pos_and_pos() {
-        let dir = tempdir().unwrap();
-        let mut seg = seeded_segment(dir.path(), 0, &[(0, 2, 100)]);
+        let (_dir, mut seg) = crate::segment::test_support::two_record_fixture();
         let p1 = seg.log_size;
-        seg.append(&sample_batch(2, 2, 200), DENSE_INDEX).unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SECOND_TWO_RECORD_BATCH),
+            DENSE_INDEX,
+        )
+        .unwrap();
         let b1_len = seg.log_size - p1;
         let no_index = mebibytes(1);
-        seg.append(&sample_batch(4, 2, 300), no_index).unwrap();
-        seg.append(&sample_batch(6, 2, 400), no_index).unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::THIRD_TWO_RECORD_BATCH),
+            no_index,
+        )
+        .unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                offset: crate::Offset(6),
+                records: crate::segment::test_support::RecordCount(2),
+                timestamp: crate::segment::test_support::RecordTimestamp(400),
+            }),
+            no_index,
+        )
+        .unwrap();
 
         let budget = bytes(u32::try_from(b1_len).unwrap() + 61);
         let read = seg.read_raw(Offset(4), Offset(99), budget).unwrap();
@@ -304,10 +344,7 @@ mod tests {
     #[test]
     fn the_byte_budget_bounds_how_much_a_fetch_returns() {
         let (_dir, mut seg) = crate::segment::test_support::test_segment();
-        for i in 0..6i64 {
-            seg.append(&sample_batch(i * 2, 2, 100 + i), DENSE_INDEX)
-                .unwrap();
-        }
+        append_two_record_batches(&mut seg, BatchCount(6));
 
         let everything = seg.read_raw(Offset(0), Offset(99), NO_LIMIT).unwrap();
         let clipped = seg.read_raw(Offset(0), Offset(99), bytes(1)).unwrap();
@@ -322,7 +359,10 @@ mod tests {
             everything.last_offset
         );
 
-        let batch_size = u32::try_from(sample_batch(0, 2, 100).encoded_len()).unwrap();
+        let batch_size = u32::try_from(
+            sample_batch(crate::segment::test_support::TWO_RECORD_BATCH).encoded_len(),
+        )
+        .unwrap();
         let two_batches = seg
             .read_raw(Offset(0), Offset(99), bytes(batch_size * 2))
             .unwrap();
@@ -349,7 +389,7 @@ mod tests {
         let (dir, mut seg) = test_segment();
         let mut wire = bytes::BytesMut::new();
         for off in 0..3i64 {
-            let b = test_batch_at(off);
+            let b = test_batch_at(crate::Offset(off));
             seg.append(&b, DENSE_INDEX).unwrap();
             b.encode(&mut wire).unwrap();
         }
@@ -366,7 +406,7 @@ mod tests {
         let (dir, mut seg) = test_segment();
         let mut expected = bytes::BytesMut::new();
         for off in 0..3i64 {
-            let batch = test_batch_at(off);
+            let batch = test_batch_at(crate::Offset(off));
             seg.append(&batch, DENSE_INDEX).unwrap();
             if off < 2 {
                 batch.encode(&mut expected).unwrap();
@@ -382,7 +422,7 @@ mod tests {
     #[test]
     fn read_raw_returns_at_least_one_batch_over_budget() {
         let (dir, mut seg) = test_segment();
-        let batch = test_batch_at(0);
+        let batch = test_batch_at(crate::Offset(0));
         let mut expected = bytes::BytesMut::new();
         batch.encode(&mut expected).unwrap();
         seg.append(&batch, DENSE_INDEX).unwrap();

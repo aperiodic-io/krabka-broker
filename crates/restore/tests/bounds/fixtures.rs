@@ -82,21 +82,7 @@ pub(crate) fn transactional_batch(producer_id: i64, records: Vec<Record>) -> Rec
     }
 }
 
-/// A 4-byte control-marker key: `(version=0: i16, marker_type: i16)` BE.
-fn control_key(marker_type: i16) -> Bytes {
-    let mut buf = [0u8; 4];
-    buf[0..2].copy_from_slice(&0i16.to_be_bytes());
-    buf[2..4].copy_from_slice(&marker_type.to_be_bytes());
-    Bytes::from(buf.to_vec())
-}
-
-/// A control-marker value: `(version=0: i16, coordinator epoch: i32)` BE.
-fn control_value(coordinator_epoch: i32) -> Bytes {
-    let mut buf = [0u8; 6];
-    buf[0..2].copy_from_slice(&0i16.to_be_bytes());
-    buf[2..6].copy_from_slice(&coordinator_epoch.to_be_bytes());
-    Bytes::from(buf.to_vec())
-}
+krabka_macros::control_marker_fixture!(control_marker);
 
 /// A COMMIT control batch (`marker_type=1`) for `producer_id`, matching the
 /// shape `crates/log/src/log.rs`'s own `commit_marker` test helper builds.

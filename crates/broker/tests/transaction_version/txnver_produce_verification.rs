@@ -13,21 +13,25 @@ use std::time::Duration;
 
 use assert2::assert;
 use krabka_client_core::Client;
+use krabka_ids::ProducerId;
 use krabka_protocol::{
     owned::{
         list_offsets_request::ListOffsetsRequest, produce_request::ProduceRequest,
         produce_response::PartitionProduceResponse,
     },
-    records::{Attributes, RecordBatch},
+    records::RecordBatch,
 };
 
 use crate::{
     support::{
         discovery::coordinator_lookup_request,
         offsets::{list_offset_partition, single_partition_list_offsets},
-        produce::single_partition_produce,
-        records::{batch_from_records, value_record},
-        transactions::end_transaction_request,
+        records::{
+            BatchTransaction, ProducerSequence, TransactionProbeBatchSetup, transaction_probe_batch,
+        },
+        transactions::{
+            ProducerEpoch, ProducerEpochOffset, ProducerIdentity, end_transaction_request,
+        },
     },
     txnver_harness::{admin_client, boot_single, create_topic},
 };
@@ -44,8 +48,8 @@ const TRANSACTIONAL_ID_AUTHORIZATION_FAILED: i16 = 53;
 #[derive(Clone, Copy, Debug)]
 struct Producer {
     transactional_id: &'static str,
-    id: i64,
-    epoch: i16,
+    id: ProducerId,
+    epoch: ProducerEpoch,
 }
 
 /// What a case does before its probe.
@@ -61,61 +65,72 @@ enum Setup {
     Committed,
 }
 
-/// The batch a case sends.
 #[derive(Clone, Copy, Debug)]
-struct Probe {
-    version: i16,
-    with_transactional_id: bool,
-    transactional: bool,
-    epoch_offset: i16,
-    base_sequence: i32,
+struct ProduceVersion(i16);
+
+#[derive(Clone, Copy, Default)]
+enum TransactionIdPresence {
+    #[default]
+    Included,
+    Omitted,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AppendOutcome {
+    Appended,
+    Refused,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RefusalStage {
+    TransactionCheck,
+    Log,
+}
+
+/// The batch a case sends; ordinary probes name only their differences.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct Probe {
+    #[default(ProduceVersion(11))]
+    version: ProduceVersion,
+    transaction_id: TransactionIdPresence,
+    transaction: BatchTransaction,
+    epoch_offset: ProducerEpochOffset,
+    base_sequence: ProducerSequence,
+}
+
+#[derive(Clone, Copy)]
 struct Case {
     name: &'static str,
     setup: Setup,
     probe: Probe,
     expected_code: i16,
     expected_message: Option<&'static str>,
-    appends: bool,
+    append: AppendOutcome,
     /// The log itself refused the batch, after the transaction check passed.
     /// Kafka answers that refusal with the partition's real log start offset
     /// (`ReplicaManager.processFailedRecord`), and a refusal before the
     /// append with -1.
-    refused_by_log: bool,
-}
-
-fn batch(producer: Producer, epoch: i16, base_sequence: i32, transactional: bool) -> RecordBatch {
-    RecordBatch {
-        attributes: Attributes::default().with_transactional(transactional),
-        producer_id: producer.id,
-        producer_epoch: epoch,
-        base_sequence,
-        last_offset_delta: 0,
-        max_timestamp: 1,
-        ..batch_from_records(vec![value_record(0, Some(bytes::Bytes::from_static(b"v")))])
-    }
+    refusal: RefusalStage,
 }
 
 async fn produce_at(
     client: &Client,
-    version: i16,
+    version: ProduceVersion,
     topic: &str,
     transactional_id: Option<&str>,
     batch: RecordBatch,
 ) -> PartitionProduceResponse {
     let request = ProduceRequest {
         transactional_id: transactional_id.map(str::to_owned),
-        ..single_partition_produce(
-            topic,
-            krabka_protocol::primitives::uuid::Uuid::default(),
-            0,
-            Some(batch.into()),
-            (-1, 5_000),
+        ..crate::support::produce::batch_request(
+            batch,
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: (topic).into(),
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
         )
     };
-    let response = match version {
+    let response = match version.0 {
         10 => {
             client
                 .send(crate::support::wire::At::<_, 10>(request))
@@ -189,8 +204,8 @@ async fn init(client: &Client, transactional_id: &'static str) -> Producer {
     .await;
     Producer {
         transactional_id,
-        id: response.producer_id,
-        epoch: response.producer_epoch,
+        id: ProducerId(response.producer_id),
+        epoch: ProducerEpoch(response.producer_epoch),
     }
 }
 
@@ -200,10 +215,15 @@ async fn add_partition(client: &Client, producer: Producer, topic: &str) {
         || async {
             let response = client
                 .send(crate::support::transaction_wire::partitions_request(
-                    producer.transactional_id,
-                    (producer.id, producer.epoch),
-                    false,
-                    vec![added.clone()],
+                    crate::support::transaction_wire::TransactionPartitionsSetup {
+                        transactional_id: producer.transactional_id,
+                        producer: crate::support::transactions::ProducerIdentity::from_wire((
+                            producer.id.0,
+                            producer.epoch.0,
+                        )),
+                        topics: vec![added.clone()],
+                        ..Default::default()
+                    },
                 ))
                 .await
                 .expect("AddPartitionsToTxn");
@@ -216,9 +236,14 @@ async fn add_partition(client: &Client, producer: Producer, topic: &str) {
 }
 
 async fn set_up(client: &Client, case: &Case) -> Producer {
-    create_topic(client, case.name, 1).await;
+    create_topic(
+        client,
+        case.name,
+        crate::support::topics::TopicPartitionCount(1),
+    )
+    .await;
     let mut producer = init(client, case.name).await;
-    if case.probe.epoch_offset < 0 {
+    if case.probe.epoch_offset.0 < 0 {
         // A second InitProducerId bumps the epoch, so a batch can carry an
         // epoch below the producer's one.
         producer = init(client, case.name).await;
@@ -229,10 +254,18 @@ async fn set_up(client: &Client, case: &Case) -> Producer {
     if matches!(case.setup, Setup::Open | Setup::Committed) {
         let row = produce_at(
             client,
-            11,
+            ProduceVersion(11),
             case.name,
             Some(case.name),
-            batch(producer, producer.epoch, 0, true),
+            transaction_probe_batch(TransactionProbeBatchSetup {
+                producer: ProducerIdentity {
+                    id: producer.id,
+                    epoch: producer.epoch,
+                },
+                sequence: ProducerSequence(0),
+                transaction: BatchTransaction::Transactional,
+                ..Default::default()
+            }),
         )
         .await;
         assert!(row.error_code == 0, "{}: setup produce {row:?}", case.name);
@@ -241,8 +274,13 @@ async fn set_up(client: &Client, case: &Case) -> Producer {
         let end = client
             .send(end_transaction_request(
                 case.name,
-                (producer.id, producer.epoch),
-                true,
+                crate::support::transactions::EndTransactionSetup {
+                    producer: crate::support::transactions::ProducerIdentity::from_wire((
+                        producer.id.0,
+                        producer.epoch.0,
+                    )),
+                    ..Default::default()
+                },
             ))
             .await
             .expect("EndTxn");
@@ -253,49 +291,48 @@ async fn set_up(client: &Client, case: &Case) -> Producer {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_transactional_produce_needs_a_verified_transaction() {
-    let at = |version, transactional, base_sequence| Probe {
-        version,
-        with_transactional_id: true,
-        transactional,
-        epoch_offset: 0,
-        base_sequence,
-    };
     let cases = [
         Case {
             name: "v10-partition-not-added",
             setup: Setup::Nothing,
-            probe: at(10, true, 0),
+            probe: Probe {
+                version: ProduceVersion(10),
+                ..Default::default()
+            },
             expected_code: INVALID_TXN_STATE,
             expected_message: Some("Partition was not added to the transaction"),
-            appends: false,
-            refused_by_log: false,
+            append: AppendOutcome::Refused,
+            refusal: RefusalStage::TransactionCheck,
         },
         Case {
             name: "v11-partition-not-added",
             setup: Setup::Nothing,
-            probe: at(11, true, 0),
+            probe: Probe::default(),
             expected_code: TRANSACTION_ABORTABLE,
             expected_message: None,
-            appends: false,
-            refused_by_log: false,
+            append: AppendOutcome::Refused,
+            refusal: RefusalStage::TransactionCheck,
         },
         Case {
             name: "v11-partition-added",
             setup: Setup::Added,
-            probe: at(11, true, 0),
+            probe: Probe::default(),
             expected_code: 0,
             expected_message: None,
-            appends: true,
-            refused_by_log: false,
+            append: AppendOutcome::Appended,
+            refusal: RefusalStage::TransactionCheck,
         },
         Case {
             name: "v12-partition-not-added",
             setup: Setup::Nothing,
-            probe: at(12, true, 0),
+            probe: Probe {
+                version: ProduceVersion(12),
+                ..Default::default()
+            },
             expected_code: 0,
             expected_message: None,
-            appends: true,
-            refused_by_log: false,
+            append: AppendOutcome::Appended,
+            refusal: RefusalStage::TransactionCheck,
         },
         // This is the #694 hijack path: a transactional batch with no
         // request-level transactional_id must be refused by the
@@ -306,45 +343,52 @@ async fn a_transactional_produce_needs_a_verified_transaction() {
             name: "v11-no-transactional-id",
             setup: Setup::Added,
             probe: Probe {
-                with_transactional_id: false,
-                ..at(11, true, 0)
+                transaction_id: TransactionIdPresence::Omitted,
+                ..Probe::default()
             },
             expected_code: TRANSACTIONAL_ID_AUTHORIZATION_FAILED,
             expected_message: None,
-            appends: false,
-            refused_by_log: false,
+            append: AppendOutcome::Refused,
+            refusal: RefusalStage::TransactionCheck,
         },
         Case {
             name: "open-transaction-stale-epoch",
             setup: Setup::Open,
             probe: Probe {
-                epoch_offset: -1,
-                ..at(11, true, 1)
+                epoch_offset: ProducerEpochOffset(-1),
+                ..Probe {
+                    base_sequence: ProducerSequence(1),
+                    ..Default::default()
+                }
             },
             expected_code: INVALID_PRODUCER_EPOCH,
             expected_message: None,
-            appends: false,
-            refused_by_log: false,
+            append: AppendOutcome::Refused,
+            refusal: RefusalStage::TransactionCheck,
         },
         Case {
             name: "open-transaction-non-transactional-batch",
             setup: Setup::Open,
-            probe: at(11, false, 1),
+            probe: Probe {
+                transaction: BatchTransaction::Ordinary,
+                base_sequence: ProducerSequence(1),
+                ..Default::default()
+            },
             expected_code: INVALID_TXN_STATE,
             expected_message: None,
-            appends: false,
-            refused_by_log: true,
+            append: AppendOutcome::Refused,
+            refusal: RefusalStage::Log,
         },
         // The broker runs at transaction version 2, so the commit marker
         // bumped the producer epoch. A replay at the old epoch is stale.
         Case {
             name: "committed-replay-of-the-last-batch",
             setup: Setup::Committed,
-            probe: at(11, true, 0),
+            probe: Probe::default(),
             expected_code: INVALID_PRODUCER_EPOCH,
             expected_message: None,
-            appends: false,
-            refused_by_log: false,
+            append: AppendOutcome::Refused,
+            refusal: RefusalStage::TransactionCheck,
         },
     ];
 
@@ -359,13 +403,17 @@ async fn a_transactional_produce_needs_a_verified_transaction() {
             &client,
             case.probe.version,
             case.name,
-            case.probe.with_transactional_id.then_some(case.name),
-            batch(
-                producer,
-                producer.epoch + case.probe.epoch_offset,
-                case.probe.base_sequence,
-                case.probe.transactional,
-            ),
+            matches!(case.probe.transaction_id, TransactionIdPresence::Included)
+                .then_some(case.name),
+            transaction_probe_batch(TransactionProbeBatchSetup {
+                producer: ProducerIdentity {
+                    id: producer.id,
+                    epoch: ProducerEpoch(producer.epoch.0 + case.probe.epoch_offset.0),
+                },
+                sequence: case.probe.base_sequence,
+                transaction: case.probe.transaction,
+                ..Default::default()
+            }),
         )
         .await;
         let after = log_end(&client, case.name).await;
@@ -375,9 +423,15 @@ async fn a_transactional_produce_needs_a_verified_transaction() {
             PartitionProduceResponse {
                 index: 0,
                 error_code: case.expected_code,
-                base_offset: if case.appends { before } else { -1 },
+                base_offset: if case.append == AppendOutcome::Appended {
+                    before
+                } else {
+                    -1
+                },
                 log_append_time_ms: -1,
-                log_start_offset: if case.appends || case.refused_by_log {
+                log_start_offset: if case.append == AppendOutcome::Appended
+                    || case.refusal == RefusalStage::Log
+                {
                     0
                 } else {
                     -1
@@ -385,7 +439,7 @@ async fn a_transactional_produce_needs_a_verified_transaction() {
                 error_message: case.expected_message.map(str::to_owned),
                 ..Default::default()
             },
-            i64::from(case.appends),
+            i64::from(case.append == AppendOutcome::Appended),
         ));
     }
     broker.shutdown().await;

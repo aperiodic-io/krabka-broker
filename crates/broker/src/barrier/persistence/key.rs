@@ -3,19 +3,7 @@
 //! The key is the one part of the format that all three record kinds share, so
 //! the kind tag, the key struct, and the key codec live together here.
 
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{
-        fixed::{get_i16, get_i64, put_i16, put_i64},
-        string_bytes::get_string_owned,
-    },
-};
-
-use super::{
-    NO_EPOCH, RECORD_VERSION,
-    primitives::{expect_end, expect_version},
-};
-use crate::{coordinator::unified::persistence::put_string, error::BrokerError};
+use super::{NO_EPOCH, primitives as codec};
 
 /// Which of the three record kinds a key names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,14 +29,16 @@ impl RecordKind {
 }
 
 impl TryFrom<i16> for RecordKind {
-    type Error = ProtocolError;
+    type Error = codec::ProtocolError;
 
     fn try_from(value: i16) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Group),
             1 => Ok(Self::InjectionStart),
             2 => Ok(Self::Cut),
-            _ => Err(ProtocolError::InvalidValue("unknown barrier record kind")),
+            _ => Err(codec::ProtocolError::InvalidValue(
+                "unknown barrier record kind",
+            )),
         }
     }
 }
@@ -94,30 +84,30 @@ impl RecordKey {
 /// Encode a record key.
 ///
 /// # Errors
-/// Returns [`BrokerError::Protocol`] when the group name is longer than 32767
+/// Returns [`codec::BrokerError::Protocol`] when the group name is longer than 32767
 /// bytes, which the `i16` length cannot carry.
-pub(crate) fn encode_key(key: &RecordKey) -> Result<Vec<u8>, BrokerError> {
+pub(crate) fn encode_key(key: &RecordKey) -> Result<Vec<u8>, codec::BrokerError> {
     let mut out = Vec::with_capacity(12 + key.group.len());
-    put_i16(&mut out, RECORD_VERSION);
-    put_i16(&mut out, key.kind.code());
-    put_string(&mut out, &key.group)?;
-    put_i64(&mut out, key.epoch);
+    codec::put_i16(&mut out, codec::RECORD_VERSION);
+    codec::put_i16(&mut out, key.kind.code());
+    codec::put_string(&mut out, &key.group)?;
+    codec::put_i64(&mut out, key.epoch);
     Ok(out)
 }
 
 /// Decode a record key.
 ///
 /// # Errors
-/// Returns a [`ProtocolError`] when the key is truncated, carries a version
-/// other than [`RECORD_VERSION`], names an unknown record kind, holds a
+/// Returns a [`codec::ProtocolError`] when the key is truncated, carries a version
+/// other than [`codec::RECORD_VERSION`], names an unknown record kind, holds a
 /// non-UTF-8 group name, or has trailing bytes.
-pub(crate) fn decode_key(bytes: &[u8]) -> Result<RecordKey, ProtocolError> {
+pub(crate) fn decode_key(bytes: &[u8]) -> Result<RecordKey, codec::ProtocolError> {
     let mut cur = bytes;
-    expect_version(&mut cur)?;
-    let kind = RecordKind::try_from(get_i16(&mut cur)?)?;
-    let group = get_string_owned(&mut cur)?;
-    let epoch = get_i64(&mut cur)?;
-    expect_end(cur)?;
+    codec::expect_version(&mut cur)?;
+    let kind = RecordKind::try_from(codec::get_i16(&mut cur)?)?;
+    let group = codec::get_string_owned(&mut cur)?;
+    let epoch = codec::get_i64(&mut cur)?;
+    codec::expect_end(cur)?;
     Ok(RecordKey { kind, group, epoch })
 }
 

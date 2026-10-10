@@ -104,7 +104,9 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
                     port: 19_092,
                     protocol: krabka_security::ListenerProtocol::Plaintext,
                 }],
-                ..crate::test_support::broker_registration(handle.node_id() + 1)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(
+                    handle.node_id() + 1,
+                ))
             },
         ))
         .await
@@ -135,12 +137,22 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     let partition_isr = [partition_leader, handle.node_id()];
     submit_metadata_topic_partition(
         &handle,
-        (topic, 0xCAFE),
-        0,
-        partition_leader,
-        &partition_isr,
-        &partition_isr,
-        3,
+        crate::broker::test_support::MetadataPartitionSetup {
+            topic,
+            topic_id: uuid::Uuid::from_u128(0xCAFE),
+            leader: krabka_ids::NodeId(partition_leader),
+            replicas: partition_isr
+                .iter()
+                .copied()
+                .map(krabka_ids::NodeId)
+                .collect(),
+            isr: partition_isr
+                .iter()
+                .copied()
+                .map(krabka_ids::NodeId)
+                .collect(),
+            ..Default::default()
+        },
     )
     .await;
     handle.wait_until_partition_present(topic, 0).await;
@@ -206,7 +218,14 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     assert!(!snapshot.bytes.is_empty());
 
     let local_topic = "handle-local-log-mutant-topic";
-    let local_part = local_partition_with_records(dir.path(), local_topic, 0, &[b"a", b"b"]);
+    let local_part = local_partition_with_records(
+        dir.path(),
+        crate::broker::test_support::LocalPartitionSetup {
+            topic: local_topic,
+            values: &[b"a", b"b"],
+            ..Default::default()
+        },
+    );
     assert!(!handle.partition_exists_for_test(local_topic, 0));
     broker.partitions.insert(
         local_topic.into(),
@@ -231,17 +250,55 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     handle.shutdown().await;
 }
 
-#[tokio::test]
-async fn start_and_shutdown_clean() {
-    let dir = tempdir().unwrap();
-    let config = BrokerConfig::for_tests(dir.path().to_path_buf());
+async fn start_default_broker(dir: &std::path::Path) -> (BrokerHandle, Arc<Broker>, SocketAddr) {
+    let config = BrokerConfig::for_tests(dir.to_path_buf());
     let handle = Broker::start(config).await.unwrap();
     let broker = handle.broker_arc_for_test();
     let addr = handle.listen_addr();
-    let partition = local_partition_with_records(dir.path(), "shutdown", 0, &[]);
+    (handle, broker, addr)
+}
+
+struct ShutdownFixture {
+    handle: BrokerHandle,
+    broker: Arc<Broker>,
+    addr: SocketAddr,
+    partition: Arc<crate::partition::Partition>,
+}
+
+async fn shutdown_fixture(
+    root: &std::path::Path,
+    setup: crate::broker::test_support::LocalPartitionSetup<'_>,
+) -> ShutdownFixture {
+    let (handle, broker, addr) = start_default_broker(root).await;
+    let (topic, index) = (setup.topic, setup.partition);
+    let partition = local_partition_with_records(root, setup);
     broker
         .partitions
-        .insert("shutdown".into(), PartitionIndex(0), partition.clone());
+        .insert(topic.into(), index, partition.clone());
+    ShutdownFixture {
+        handle,
+        broker,
+        addr,
+        partition,
+    }
+}
+
+#[tokio::test]
+async fn start_and_shutdown_clean() {
+    let dir = tempdir().unwrap();
+    let ShutdownFixture {
+        handle,
+        broker,
+        addr,
+        partition,
+    } = shutdown_fixture(
+        dir.path(),
+        crate::broker::test_support::LocalPartitionSetup {
+            topic: "shutdown",
+            ..Default::default()
+        },
+    )
+    .await;
     assert!(addr.port() != 0);
     let stream = tokio::net::TcpStream::connect(addr)
         .await
@@ -267,14 +324,19 @@ async fn start_and_shutdown_clean() {
 #[tokio::test]
 async fn dropping_handle_stops_idle_connections_and_partition_writers() {
     let dir = tempdir().unwrap();
-    let config = BrokerConfig::for_tests(dir.path().to_path_buf());
-    let handle = Broker::start(config).await.unwrap();
-    let broker = handle.broker_arc_for_test();
-    let addr = handle.listen_addr();
-    let partition = local_partition_with_records(dir.path(), "drop-shutdown", 0, &[]);
-    broker
-        .partitions
-        .insert("drop-shutdown".into(), PartitionIndex(0), partition.clone());
+    let ShutdownFixture {
+        handle,
+        broker,
+        addr,
+        partition,
+    } = shutdown_fixture(
+        dir.path(),
+        crate::broker::test_support::LocalPartitionSetup {
+            topic: "drop-shutdown",
+            ..Default::default()
+        },
+    )
+    .await;
     let stream = tokio::net::TcpStream::connect(addr)
         .await
         .expect("listener accepts before handle drop");
@@ -322,18 +384,7 @@ async fn a_fatal_controller_fault_latches_self_shutdown_and_names_its_reason() {
     check!(!*should_shutdown.borrow());
     check!(handle.fatal_fault().is_none());
 
-    handle
-        .submit_metadata_record_for_test(finalize_unstable_metadata_version())
-        .await
-        .expect("the unsupported level commits before the controller stops");
-
-    tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        should_shutdown.wait_for(|down| *down),
-    )
-    .await
-    .expect("the fault did not latch the self-shutdown flag within 30s")
-    .expect("the self-shutdown flag closed");
+    latch_unsupported_fault(&handle, &mut should_shutdown).await;
     check!(handle.fatal_fault().as_deref() == Some(UNSUPPORTED_LEVEL_FAULT));
 
     // The flag is latched, so there is no leadership drain to wait for.
@@ -413,17 +464,7 @@ async fn only_a_stop_without_a_fatal_fault_leaves_a_clean_shutdown_proof() {
             .expect("broker start");
         if faulted {
             let mut should_shutdown = handle.should_shutdown_rx();
-            handle
-                .submit_metadata_record_for_test(finalize_unstable_metadata_version())
-                .await
-                .expect("the unsupported level commits before the controller stops");
-            tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                should_shutdown.wait_for(|down| *down),
-            )
-            .await
-            .expect("the fault did not latch the self-shutdown flag within 30s")
-            .expect("the self-shutdown flag closed");
+            latch_unsupported_fault(&handle, &mut should_shutdown).await;
         }
 
         handle.shutdown().await;
@@ -433,4 +474,22 @@ async fn only_a_stop_without_a_fatal_fault_leaves_a_clean_shutdown_proof() {
             "{name}"
         );
     }
+}
+
+async fn latch_unsupported_fault(
+    handle: &BrokerHandle,
+    should_shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) {
+    handle
+        .submit_metadata_record_for_test(finalize_unstable_metadata_version())
+        .await
+        .expect("the unsupported level commits before the controller stops");
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        should_shutdown.wait_for(|down| *down),
+    )
+    .await
+    .expect("the fault did not latch the self-shutdown flag within 30s")
+    .expect("the self-shutdown flag closed");
 }

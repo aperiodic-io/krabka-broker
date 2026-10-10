@@ -10,9 +10,7 @@
 use std::net::SocketAddr;
 
 use assert2::assert;
-use krabka_broker::{
-    BootstrapMode, Broker, BrokerConfig, BrokerHandle, config::InterBrokerCredentials,
-};
+use krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::InterBrokerCredentials};
 use krabka_protocol::{owned::create_topics_request::CreateTopicsRequest, records::RecordBatch};
 use krabka_security::{ListenerProtocol, SaslMechanism};
 use tempfile::TempDir;
@@ -21,7 +19,6 @@ use crate::{
     harness::admin_plain_password,
     support::{
         client::connect_client,
-        produce::single_partition_produce,
         records::{batch_from_records, value_record},
     },
 };
@@ -44,19 +41,22 @@ async fn reserve_listeners(n: usize) -> (Vec<SocketAddr>, Vec<tokio::net::TcpLis
 /// `listen_addr`. The test clients use it, because they do not speak SASL
 /// yet. The second listener is a `SASL_PLAINTEXT` inter-broker listener.
 /// The replicator and the heartbeat use it against the peer broker.
-fn sasl_two_listener_config(
-    i: usize,
-    plaintext_addrs: &[SocketAddr],
-    sasl_addrs: &[SocketAddr],
-    controller_addrs: &[SocketAddr],
-    voters: &[(u64, SocketAddr)],
-    log_dir: &std::path::Path,
-    mode: BootstrapMode,
-) -> BrokerConfig {
-    let listen = plaintext_addrs[i];
-    let sasl = sasl_addrs[i];
-    let mut cfg =
-        crate::support::broker_config(i, plaintext_addrs, controller_addrs, voters, log_dir, mode);
+const DEFAULT_SASL_ENDPOINTS: [SocketAddr; 1] = [SocketAddr::V4(std::net::SocketAddrV4::new(
+    std::net::Ipv4Addr::LOCALHOST,
+    0,
+))];
+
+#[derive(krabka_macros::FieldDefaults)]
+struct SaslNodeSetup<'a> {
+    cluster: crate::support::ClusterNodeSetup<'a>,
+    #[default(&DEFAULT_SASL_ENDPOINTS)]
+    sasl_addrs: &'a [SocketAddr],
+}
+
+fn sasl_two_listener_config(log_dir: &std::path::Path, setup: SaslNodeSetup<'_>) -> BrokerConfig {
+    let listen = setup.cluster.client_addrs[setup.cluster.index.0];
+    let sasl = setup.sasl_addrs[setup.cluster.index.0];
+    let mut cfg = crate::support::broker_config(log_dir, setup.cluster);
     cfg.listeners = vec![
         crate::support::listeners::listener("PLAINTEXT", listen, ListenerProtocol::Plaintext),
         crate::support::listeners::listener(
@@ -95,23 +95,30 @@ async fn start_two_node_sasl() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
 
     let dir0 = TempDir::new().unwrap();
     let cfg0 = sasl_two_listener_config(
-        0,
-        &plaintext_addrs,
-        &sasl_addrs,
-        &controller_addrs,
-        &voters,
         dir0.path(),
-        BootstrapMode::Bootstrap,
+        SaslNodeSetup {
+            cluster: crate::support::ClusterNodeSetup {
+                client_addrs: &plaintext_addrs,
+                controller_addrs: &controller_addrs,
+                voters: crate::support::controller_voters(&voters),
+                ..Default::default()
+            },
+            sasl_addrs: &sasl_addrs,
+        },
     );
     let dir1 = TempDir::new().unwrap();
     let cfg1 = sasl_two_listener_config(
-        1,
-        &plaintext_addrs,
-        &sasl_addrs,
-        &controller_addrs,
-        &voters,
         dir1.path(),
-        BootstrapMode::Bootstrap,
+        SaslNodeSetup {
+            cluster: crate::support::ClusterNodeSetup {
+                index: crate::support::NodeIndex(1),
+                client_addrs: &plaintext_addrs,
+                controller_addrs: &controller_addrs,
+                voters: crate::support::controller_voters(&voters),
+                ..Default::default()
+            },
+            sasl_addrs: &sasl_addrs,
+        },
     );
     // KIP-595 static-quorum bootstrap: both brokers boot with the same
     // static voter set and elect among themselves over the SASL controller
@@ -181,12 +188,13 @@ async fn two_broker_sasl_plaintext_replication() {
         )
     };
     let prod = producer
-        .send(single_partition_produce(
-            "sasl-repl",
-            topic_id,
-            0,
-            Some(batch.into()),
-            (-1, 5_000),
+        .send(crate::support::produce::batch_request(
+            batch,
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: ("sasl-repl").into(),
+                topic_id,
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
         ))
         .await
         .unwrap();

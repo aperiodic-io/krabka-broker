@@ -491,42 +491,35 @@ mod tests {
         mock.stop();
     }
 
-    #[tokio::test]
-    async fn quorum_forwarder_error_code_two_maps_to_topic_exists() {
+    async fn rejected_submission(code: i16, leader: i64, topic: &str) -> RaftError {
         let mock = crate::test_support::mock_request_broker(
             krabka_raft::API_KEY_SUBMIT_CHANGE,
-            move || submit_change_response_body(2, -1),
+            move || submit_change_response_body(code, leader),
             api_versions_response_v0,
         )
         .await;
         let forwarder = forwarder(mock.addr, Arc::new(Mutex::new(Vec::new())), Some(NodeId(1)));
-
-        let err = forwarder
-            .submit_change(vec![topic_record("already-exists")])
+        let error = forwarder
+            .submit_change(vec![topic_record(topic)])
             .await
-            .expect_err("metadata error");
+            .expect_err("metadata submission rejected");
+        mock.stop();
+        error
+    }
+
+    #[tokio::test]
+    async fn quorum_forwarder_error_code_two_maps_to_topic_exists() {
+        let err = rejected_submission(2, -1, "already-exists").await;
 
         assert2::assert!(matches!(
             err,
             RaftError::Metadata(krabka_metadata::MetadataError::TopicExists(_))
         ));
-        mock.stop();
     }
 
     #[tokio::test]
     async fn quorum_forwarder_not_leader_response_preserves_positive_hint() {
-        let mock = crate::test_support::mock_request_broker(
-            krabka_raft::API_KEY_SUBMIT_CHANGE,
-            move || submit_change_response_body(1, 7),
-            api_versions_response_v0,
-        )
-        .await;
-        let forwarder = forwarder(mock.addr, Arc::new(Mutex::new(Vec::new())), Some(NodeId(1)));
-
-        let err = forwarder
-            .submit_change(vec![topic_record("redirect")])
-            .await
-            .expect_err("not leader");
+        let err = rejected_submission(1, 7, "redirect").await;
 
         assert2::assert!(matches!(
             err,
@@ -534,23 +527,11 @@ mod tests {
                 current_leader: Some(NodeId(7))
             }
         ));
-        mock.stop();
     }
 
     #[tokio::test]
     async fn quorum_forwarder_negative_leader_hint_is_unknown() {
-        let mock = crate::test_support::mock_request_broker(
-            krabka_raft::API_KEY_SUBMIT_CHANGE,
-            move || submit_change_response_body(3, -1),
-            api_versions_response_v0,
-        )
-        .await;
-        let forwarder = forwarder(mock.addr, Arc::new(Mutex::new(Vec::new())), Some(NodeId(1)));
-
-        let err = forwarder
-            .submit_change(vec![topic_record("unknown-leader")])
-            .await
-            .expect_err("not leader");
+        let err = rejected_submission(3, -1, "unknown-leader").await;
 
         assert2::assert!(matches!(
             err,
@@ -558,6 +539,5 @@ mod tests {
                 current_leader: None
             }
         ));
-        mock.stop();
     }
 }

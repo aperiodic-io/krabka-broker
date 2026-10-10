@@ -16,10 +16,11 @@ use crate::{
     remote_log_manager::{
         test_support as fixtures,
         test_support::{
-            FakeWormArchive, TEST_COPY_TIMEOUT, archived_backends, copy_exports, local_backends,
-            missing_remote_reads, seed_finished_segments, synth_export, tier, tp,
+            FakeWormArchive, archived_backends, copy_exports, local_backends, missing_remote_reads,
+            seed_finished_segments, synth_export, tier, tp,
         },
     },
+    test_support::UnixMillis,
     time_util::now_ms,
 };
 
@@ -195,7 +196,18 @@ fn local_bytes_not_yet_copied_count_toward_the_remote_size_budget() {
 /// and a 40-byte active segment, so a 100-byte local log.
 #[test]
 fn only_local_size_counts_the_segments_above_the_highest_remote_offset() {
-    let sealed = [synth_export(0, 9, 0, 30), synth_export(10, 19, 0, 30)];
+    let sealed = [
+        synth_export(fixtures::SegmentExportSetup {
+            timestamp: UnixMillis(0),
+            size: bytes(30),
+            ..Default::default()
+        }),
+        synth_export(fixtures::SegmentExportSetup {
+            bounds: Offset(10)..=Offset(19),
+            timestamp: UnixMillis(0),
+            size: bytes(30),
+        }),
+    ];
     let local = LocalLogFootprint {
         sealed: &sealed,
         size: bytes(100),
@@ -823,12 +835,14 @@ async fn a_retention_pass_records_its_delete_requests_errors_and_lag() {
     let (rlmm, _rsm_impl, rsm) = refusing_backends();
     let metrics = crate::metrics::BrokerMetrics::new();
     let index_cache = Arc::new(krabka_remote_storage::RemoteIndexCache::disabled());
-    let tier = fixtures::tier_with_resources(
+    let tier = fixtures::configured_tier(
         &rsm,
         &rlmm,
-        (&metrics, &index_cache),
-        ArchiveMode::Mutable,
-        TEST_COPY_TIMEOUT,
+        fixtures::TierSetup {
+            metrics: &metrics,
+            index_cache: &index_cache,
+            ..Default::default()
+        },
     );
     let cfg = LogConfig {
         retention: Some(millis(1)),

@@ -2,17 +2,33 @@ use assert2::check;
 
 use super::*;
 
-fn policy(
-    retention_ms: Option<i64>,
-    retention_bytes: Option<u64>,
-    log_start_offset: i64,
-    now_ms: i64,
-) -> DisklessRetentionPolicy {
+#[derive(Clone, Copy)]
+struct RetentionMillis(i64);
+
+#[derive(Clone, Copy)]
+struct RetentionBytes(u64);
+
+#[derive(Clone, Copy, Default)]
+struct LogicalOffset(i64);
+
+#[derive(Clone, Copy)]
+struct UnixMillis(i64);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct DisklessRetentionSetup {
+    retention: Option<RetentionMillis>,
+    bytes: Option<RetentionBytes>,
+    start: LogicalOffset,
+    #[default(UnixMillis(1_000))]
+    now: UnixMillis,
+}
+
+fn policy(setup: DisklessRetentionSetup) -> DisklessRetentionPolicy {
     DisklessRetentionPolicy {
-        retention_ms,
-        retention_bytes,
-        log_start_offset,
-        now_ms,
+        retention_ms: setup.retention.map(|duration| duration.0),
+        retention_bytes: setup.bytes.map(|limit| limit.0),
+        log_start_offset: setup.start.0,
+        now_ms: setup.now.0,
     }
 }
 

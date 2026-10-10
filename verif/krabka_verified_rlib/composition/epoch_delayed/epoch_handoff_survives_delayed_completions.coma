@@ -31,9 +31,10 @@ let%span sproducer_snapshot'0 = "/workspace/crates/verified/src/producer_snapsho
 let%span sproducer_snapshot'1 = "/workspace/crates/verified/src/producer_snapshot.rs" 33 8 34 88
 let%span sproducer_snapshot'2 = "/workspace/crates/verified/src/producer_snapshot.rs" 47 16 49 54
 let%span sproducer_snapshot'3 = "/workspace/crates/verified/src/producer_snapshot.rs" 61 16 65 41
-let%span sproducer_window = "/workspace/crates/verified/src/composition/producer_window.rs" 19 11 19 33
-let%span sproducer_window'0 = "/workspace/crates/verified/src/composition/producer_window.rs" 20 11 21 63
-let%span sproducer_window'1 = "/workspace/crates/verified/src/composition/producer_window.rs" 22 10 47 142
+let%span sproducer_window = "/workspace/crates/verified/src/composition/producer_window.rs" 34 11 34 33
+let%span sproducer_window'0 = "/workspace/crates/verified/src/composition/producer_window.rs" 35 11 36 63
+let%span sproducer_window'1 = "/workspace/crates/verified/src/composition/producer_window.rs" 37 10 58 142
+let%span sproducer_window'2 = "/workspace/crates/verified/src/composition/producer_window.rs" 21 16 25 72
 let%span scompleted_producer = "/workspace/crates/verified/src/composition/completed_producer.rs" 46 11 46 53
 let%span scompleted_producer'0 = "/workspace/crates/verified/src/composition/completed_producer.rs" 47 11 47 109
 let%span scompleted_producer'1 = "/workspace/crates/verified/src/composition/completed_producer.rs" 48 11 48 81
@@ -525,6 +526,17 @@ predicate recovered_batch_coordinates [#"/workspace/crates/verified/src/producer
   [%#sproducer_snapshot'2] base = Int64.to_int row.last_offset - Int32.to_int row.offset_delta
   /\ frontier = Int64.to_int row.last_offset + 1 /\ 0 <= base /\ base < frontier /\ frontier <= end'
 
+type tup2_Int_Int = { f0'7: int; f1'7: int }
+
+type tup3_Int_Int_bool = { f0'8: int; f1'8: int; f2'8: bool }
+
+predicate retry_row_matches [#"/workspace/crates/verified/src/composition/producer_window.rs" 15 0 20 9] (rows: Seq.seq t_ProducerSnapshotEntryFacts) (request: tup4_i16_i32_i32_bool) (window: tup2_Int_Int) (publication: tup3_Int_Int_bool) =
+  [%#sproducer_window'2] publication.f2'8 = ge_log_Int publication.f0'8 publication.f1'8
+  /\ request.f0'5 = (Seq.get rows window.f1'7).producer_epoch
+  /\ snapshot_sequence_matches (Seq.get rows window.f1'7) (Int32.to_int request.f1'5) (Int32.to_int request.f2'5)
+  /\ (forall i: int. window.f0'7 <= i /\ i < window.f1'7
+    -> not snapshot_sequence_matches (Seq.get rows i) (Int32.to_int request.f1'5) (Int32.to_int request.f2'5))
+
 function nonduplicate_snapshot_decision [#"/workspace/crates/verified/src/producer_snapshot.rs" 55 0 60 21] (incoming_epoch: int) (epoch: int) (sequence: int) (last_sequence'0: int) : t_ProducerDecision
  = [%#sproducer_snapshot'3] if incoming_epoch < epoch then
     Fenced'0
@@ -584,11 +596,10 @@ let rebuilt_data_window_bounds_retry (end': Int64.t) (hwm: Int64.t) (rows: Slice
             | _ -> false
             end
         /\ recovered_batch_coordinates (Seq.get (Slice64.view rows) (UInt64.t'int index)) (Int64.to_int base) (Int64.to_int frontier) (Int64.to_int end')
-        /\ ready = ge_log_Int (Int64.to_int hwm) (Int64.to_int frontier)
-        /\ request.f0'5 = (Seq.get (Slice64.view rows) (UInt64.t'int index)).producer_epoch
-        /\ snapshot_sequence_matches (Seq.get (Slice64.view rows) (UInt64.t'int index)) (Int32.to_int request.f1'5) (Int32.to_int request.f2'5)
-        /\ (forall i: int. UInt64.t'int result.f0'6 <= i /\ i < UInt64.t'int index
-          -> not snapshot_sequence_matches (Seq.get (Slice64.view rows) i) (Int32.to_int request.f1'5) (Int32.to_int request.f2'5))
+        /\ retry_row_matches (Slice64.view rows) request { f0'7 = UInt64.t'int result.f0'6;
+                                                           f1'7 = UInt64.t'int index } { f0'8 = Int64.to_int hwm;
+                                                                                         f1'8 = Int64.to_int frontier;
+                                                                                         f2'8 = ready }
         end
     /\ (Seq.length (Slice64.view rows) = 0
       -> result.f1'6
@@ -607,13 +618,13 @@ let unwrap_tup4_usize_i64_i64_bool (self_: t_Option_tup4_usize_i64_i64_bool) (re
     = self_}
     (! return {result}) ]
 
-type tup3_i64_i64_bool = { f0'7: Int64.t; f1'7: Int64.t; f2'7: bool }
+type tup3_i64_i64_bool = { f0'9: Int64.t; f1'9: Int64.t; f2'9: bool }
 
 type tup4_InitProducerIdIdentityDecision_Vec_tup2_bool_ProducerDecision_Global_ProducerDecision_tup3_i64_i64_bool = {
-  f0'8: t_InitProducerIdIdentityDecision;
-  f1'8: t_Vec_tup2_bool_ProducerDecision_Global;
-  f2'8: t_ProducerDecision;
-  f3'8: tup3_i64_i64_bool }
+  f0'10: t_InitProducerIdIdentityDecision;
+  f1'10: t_Vec_tup2_bool_ProducerDecision_Global;
+  f2'10: t_ProducerDecision;
+  f3'10: tup3_i64_i64_bool }
 
 meta "compute_max_steps" 1000000
 
@@ -748,8 +759,8 @@ let epoch_handoff_survives_delayed_completions [#"/workspace/crates/verified/src
     | s8 = [ &base <- _134.f1'3 ] s9
     | s9 = [ &frontier <- _134.f2'3 ] s10
     | s10 = [ &ready <- _134.f3'3 ] s11
-    | s11 = [ &_139 <- { f0'7 = base; f1'7 = frontier; f2'7 = ready } ] s12
-    | s12 = [ &_ret <- { f0'8 = identity; f1'8 = outcomes; f2'8 = decision'0; f3'8 = _139 } ] s13
+    | s11 = [ &_139 <- { f0'9 = base; f1'9 = frontier; f2'9 = ready } ] s12
+    | s12 = [ &_ret <- { f0'10 = identity; f1'10 = outcomes; f2'10 = decision'0; f3'10 = _139 } ] s13
     | s13 = return {_ret} ] ]
   [ & _ret: tup4_InitProducerIdIdentityDecision_Vec_tup2_bool_ProducerDecision_Global_ProducerDecision_tup3_i64_i64_bool = Any.any_l ()
   | & end': Int64.t = end'
@@ -816,22 +827,22 @@ let epoch_handoff_survives_delayed_completions [#"/workspace/crates/verified/src
   | & variant_old_bb12: int = Any.any_l () ])
   [ return
     (result: tup4_InitProducerIdIdentityDecision_Vec_tup2_bool_ProducerDecision_Global_ProducerDecision_tup3_i64_i64_bool) ->
-  {[@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures] ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #0] [%#sepoch_delayed'32] result.f0'8
+  {[@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures] ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #0] [%#sepoch_delayed'32] result.f0'10
       = Retry)
-    /\ ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #1] [%#sepoch_delayed'33] Seq.length (view_Vec_tup2_bool_ProducerDecision_Global result.f1'8)
+    /\ ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #1] [%#sepoch_delayed'33] Seq.length (view_Vec_tup2_bool_ProducerDecision_Global result.f1'10)
         = Seq.length (Slice64.view delayed)
-      /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_tup2_bool_ProducerDecision_Global result.f1'8)
-        -> not (Seq.get (view_Vec_tup2_bool_ProducerDecision_Global result.f1'8) i).f0'1
-        /\ (Seq.get (view_Vec_tup2_bool_ProducerDecision_Global result.f1'8) i).f1'1 = Fenced'0))
-    /\ ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #2] [%#sepoch_delayed'34] match result.f2'8 with
+      /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_tup2_bool_ProducerDecision_Global result.f1'10)
+        -> not (Seq.get (view_Vec_tup2_bool_ProducerDecision_Global result.f1'10) i).f0'1
+        /\ (Seq.get (view_Vec_tup2_bool_ProducerDecision_Global result.f1'10) i).f1'1 = Fenced'0))
+    /\ ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #2] [%#sepoch_delayed'34] match result.f2'10 with
         | Duplicate'0 retained -> UInt64.t'int retained = 4
         | _ -> false
         end)
-    /\ ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #3] [%#sepoch_delayed'35] Int64.to_int result.f3'8.f0'7
+    /\ ([@stop_split] [@expl:epoch_handoff_survives_delayed_completions ensures #3] [%#sepoch_delayed'35] Int64.to_int result.f3'10.f0'9
       = Int64.to_int first.last_offset - Int32.to_int first.offset_delta
-    /\ Int64.to_int result.f3'8.f1'7 = Int64.to_int first.last_offset + 1
-    /\ 0 <= Int64.to_int result.f3'8.f0'7
-    /\ Int64.to_int result.f3'8.f0'7 < Int64.to_int result.f3'8.f1'7
-    /\ Int64.to_int result.f3'8.f1'7 <= Int64.to_int end'
-    /\ result.f3'8.f2'7 = ge_log_Int (Int64.to_int hwm) (Int64.to_int result.f3'8.f1'7))}
+    /\ Int64.to_int result.f3'10.f1'9 = Int64.to_int first.last_offset + 1
+    /\ 0 <= Int64.to_int result.f3'10.f0'9
+    /\ Int64.to_int result.f3'10.f0'9 < Int64.to_int result.f3'10.f1'9
+    /\ Int64.to_int result.f3'10.f1'9 <= Int64.to_int end'
+    /\ result.f3'10.f2'9 = ge_log_Int (Int64.to_int hwm) (Int64.to_int result.f3'10.f1'9))}
     (! return {result}) ]

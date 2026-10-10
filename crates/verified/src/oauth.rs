@@ -51,6 +51,20 @@ model_types! {
     }
 }
 
+open_logic! {
+/// Session admissibility at the clock when token validation completes.
+pub(crate) fn oauth_session_admissible_at(facts: OAuthSessionFacts, now: Int) -> bool {
+    pearlite! {
+        facts.expiry == OAuthExpiryPresence::Present
+            && facts.token_expires_at_ms@ > now
+            && facts.token_expires_at_ms@ - now <= i64::MAX@
+            && (facts.cap == OAuthSessionCap::Disabled || facts.cap_ms@ > 0)
+            && (facts.authentication == OAuthAuthenticationKind::Initial
+                || facts.principal == OAuthPrincipalMatch::Matches)
+    }
+}
+}
+
 /// Whether a validated token may bind a session: it carries an expiry
 /// strictly in the future, its remaining lifetime fits an `i64`, an enabled
 /// cap is positive, and a reauthentication keeps the prior principal
@@ -60,14 +74,7 @@ model_types! {
 #[cfg_attr(test, mutants::skip)]
 #[logic(open(crate))]
 pub fn oauth_session_admissible(facts: OAuthSessionFacts) -> bool {
-    pearlite! {
-        facts.expiry == OAuthExpiryPresence::Present
-            && facts.token_expires_at_ms@ > facts.now_ms@
-            && facts.token_expires_at_ms@ - facts.now_ms@ <= i64::MAX@
-            && (facts.cap == OAuthSessionCap::Disabled || facts.cap_ms@ > 0)
-            && (facts.authentication == OAuthAuthenticationKind::Initial
-                || facts.principal == OAuthPrincipalMatch::Matches)
-    }
+    pearlite! { oauth_session_admissible_at(facts, facts.now_ms@) }
 }
 
 /// The session lifetime: the token's remaining lifetime, bounded above by an

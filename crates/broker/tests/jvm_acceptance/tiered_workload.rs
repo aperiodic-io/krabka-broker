@@ -117,10 +117,9 @@ pub(crate) fn produce_records(topic: &str, n: usize) {
         use std::fmt::Write as _;
         let _ = writeln!(payload, "record-{i:04}");
     }
-    let mut child_command = crate::support::jvm_docker_command(
-        KAFKA_IMAGE,
-        &[],
-        &[
+    let mut child_command = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE,
+        args: &[
             "kafka-console-producer",
             "--bootstrap-server",
             broker0_advertised(),
@@ -133,8 +132,9 @@ pub(crate) fn produce_records(topic: &str, n: usize) {
             "--producer-property",
             "max.in.flight.requests.per.connection=1",
         ],
-        true,
-    );
+        input: crate::support::ContainerInput::Attached,
+        ..Default::default()
+    });
     let producer_out = crate::support::jvm_stdin_output(&mut child_command, payload.as_bytes());
     assert!(
         producer_out.status.success(),

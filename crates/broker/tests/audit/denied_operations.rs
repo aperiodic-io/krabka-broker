@@ -11,7 +11,7 @@ use krabka_broker::coordinator::AUDIT_TOPIC;
 use crate::{
     support,
     support::{
-        fetch::{fetch_partition, single_partition_fetch},
+        fetch::single_partition_fetch,
         topics::{creatable_topic, create_topic_request},
     },
 };
@@ -53,10 +53,12 @@ async fn denied_operation_returns_topic_authorization_failed() {
     // Attempt a create that will be denied.
     let resp = p
         .client
-        .send(create_topic_request(
-            creatable_topic("denied-topic", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("denied-topic").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .unwrap();
 
@@ -74,10 +76,16 @@ async fn denied_operation_returns_topic_authorization_failed() {
     let fr = p
         .client
         .send(single_partition_fetch(
-            AUDIT_TOPIC,
-            topic_id,
-            fetch_partition(0, 0, 1 << 20),
-            (100, 0, 1 << 20),
+            crate::support::fetch::SinglePartitionFetchSetup {
+                topic: AUDIT_TOPIC.into(),
+                topic_id,
+                limits: crate::support::fetch::FetchLimits {
+                    wait: crate::support::fetch::RequestWaitMillis(100),
+                    minimum: crate::support::fetch::FetchByteLimit(0),
+                    maximum: crate::support::fetch::FetchByteLimit(1 << 20),
+                },
+                ..Default::default()
+            },
         ))
         .await
         .unwrap();

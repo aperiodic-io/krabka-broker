@@ -404,7 +404,10 @@ mod tests {
         test_support::{flush_record, orders_partition, test_index_log, test_partition},
         *,
     };
-    use crate::diskless::index_log::test_support::{PacedReplayLog, ReplayPace};
+    use crate::{
+        diskless::index_log::test_support::{PacedReplayLog, ReplayPace},
+        test_support::FreezeSetup,
+    };
 
     // Keep field evaluation order, including metrics and readiness allocation.
     macro_rules! test_context {
@@ -538,7 +541,13 @@ mod tests {
             partitions.insert(
                 "orders".into(),
                 krabka_ids::PartitionIndex(partition),
-                test_partition(root, "orders", partition, true, NodeId(1)),
+                test_partition(
+                    root,
+                    crate::diskless::flusher::test_support::FlusherPartitionSetup {
+                        partition: krabka_ids::PartitionIndex(partition),
+                        ..Default::default()
+                    },
+                ),
             );
         }
         let (topic_id, image) = orders_image(2);
@@ -651,7 +660,13 @@ mod tests {
         let cache = index.cache();
         for key in ["diskless-wal/9/old.ckwl", "diskless-wal/7/new.ckwl"] {
             index
-                .publish_flush(&flush_record(topic_id, key, (0, 2, 0), 6))
+                .publish_flush(&flush_record(
+                    crate::diskless::index_log::test_support::WalFlushSetup {
+                        topic_id,
+                        object_key: key,
+                        ..crate::diskless::index_log::test_support::WalFlushSetup::three_records()
+                    },
+                ))
                 .await
                 .unwrap();
             wait_for_object(&cache, topic_id, key).await;
@@ -704,7 +719,13 @@ mod tests {
         let index = test_index_log().await;
         let cache = index.cache();
         index
-            .publish_flush(&flush_record(topic_id, object_key, (0, 2, 0), 6))
+            .publish_flush(&flush_record(
+                crate::diskless::index_log::test_support::WalFlushSetup {
+                    topic_id,
+                    object_key,
+                    ..crate::diskless::index_log::test_support::WalFlushSetup::three_records()
+                },
+            ))
             .await
             .unwrap();
         wait_for_object(&cache, topic_id, object_key).await;
@@ -754,12 +775,14 @@ mod tests {
                 .put(&Path::from(object_key), PutPayload::from_static(b"object"))
                 .await
                 .unwrap();
-            let record = flush_record(
+            let record = flush_record(crate::diskless::index_log::test_support::WalFlushSetup {
                 topic_id,
                 object_key,
-                (first_offset, last_offset, max_timestamp_ms),
-                6,
-            );
+                first_offset: krabka_log::Offset(first_offset),
+                last_offset: krabka_log::Offset(last_offset),
+                max_timestamp: crate::test_support::UnixMillis(max_timestamp_ms),
+                byte_len: krabka_units::bytes(6),
+            });
             index.publish_flush(&record).await.unwrap();
             assert!(
                 index
@@ -848,12 +871,11 @@ mod tests {
         retention_fixture!(dir, topic_id, context, store, handle; mut image);
         set_retention(&handle, krabka_units::millis(1));
         image.apply(&MetadataRecord::V1TopicFreeze(
-            crate::test_support::topic_freeze_record(
-                "orders",
-                krabka_metadata::PatternType::Literal,
-                true,
-                "a cutover is in flight",
-            ),
+            crate::test_support::topic_freeze_record(FreezeSetup {
+                pattern_type: krabka_metadata::PatternType::Literal,
+                reason: "a cutover is in flight",
+                ..Default::default()
+            }),
         ));
         let partitions = [flush_partition(topic_id, &handle)];
 
@@ -1037,10 +1059,14 @@ mod tests {
             .await
             .unwrap();
         seed.publish_flush(&flush_record(
-            topic_id,
-            "diskless-wal/7/seed.ckwl",
-            (0, 2, 0),
-            10,
+            crate::diskless::index_log::test_support::WalFlushSetup {
+                topic_id,
+                object_key: "diskless-wal/7/seed.ckwl",
+                first_offset: krabka_log::Offset(0),
+                last_offset: krabka_log::Offset(2),
+                max_timestamp: crate::test_support::UnixMillis(0),
+                ..Default::default()
+            },
         ))
         .await
         .unwrap();
@@ -1229,8 +1255,22 @@ mod tests {
     async fn worker_flushes_only_led_diskless_partitions_and_stops() {
         let dir = tempdir().unwrap();
         let led = orders_partition(dir.path());
-        let follower = test_partition(dir.path(), "orders", 1, true, NodeId(2));
-        let local = test_partition(dir.path(), "orders", 2, false, NodeId(1));
+        let follower = test_partition(
+            dir.path(),
+            crate::diskless::flusher::test_support::FlusherPartitionSetup {
+                partition: krabka_ids::PartitionIndex(1),
+                leader: NodeId(2),
+                ..Default::default()
+            },
+        );
+        let local = test_partition(
+            dir.path(),
+            crate::diskless::flusher::test_support::FlusherPartitionSetup {
+                partition: krabka_ids::PartitionIndex(2),
+                storage: crate::test_support::StorageMode::Local,
+                ..Default::default()
+            },
+        );
         let partitions = Arc::new(PartitionRegistry::new());
         partitions.insert("orders".into(), krabka_ids::PartitionIndex(0), led);
         partitions.insert("orders".into(), krabka_ids::PartitionIndex(1), follower);

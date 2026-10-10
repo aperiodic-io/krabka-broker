@@ -25,6 +25,31 @@ use qubit_clock::{
     MonotonicClock, MonotonicInstant, StdMonotonicClock, StdTimer, TimeError, Timer, TimerFuture,
 };
 
+/// Cadence and metadata authority shared by local log-maintenance sweeps.
+#[derive(Clone)]
+pub(crate) struct MetadataSweepConfig {
+    pub interval: krabka_units::Time,
+    /// Production uses a real-time timer; tests may inject a manual timeline.
+    pub timer: Arc<dyn Timer>,
+    /// Re-read once per sweep so freezes and thaws take effect at the next tick.
+    /// With no authority, the sweep resolves no freeze and leaves partitions eligible.
+    pub metadata: Option<Arc<dyn crate::metadata_source::MetadataSource>>,
+}
+
+impl MetadataSweepConfig {
+    pub(crate) fn system(interval: krabka_units::Time) -> Self {
+        Self {
+            interval,
+            timer: system_timer(),
+            metadata: None,
+        }
+    }
+
+    pub(crate) fn current_image(&self) -> Option<Arc<krabka_metadata::MetadataImage>> {
+        self.metadata.as_ref().map(|source| source.current_image())
+    }
+}
+
 /// Returns `instant` in milliseconds since the Unix epoch.
 ///
 /// The value saturates to `0` if `instant` falls before the epoch. It
@@ -127,6 +152,32 @@ impl Timer for RuntimeTimer {
         }))
     }
 }
+
+/// Share the cadence while keeping each task's concrete sweep future in its context.
+macro_rules! run_sweeps {
+    ($timer:expr, $cadence:expr, $shutdown:expr, $task:expr, $sweep:block, $on_shutdown:block $(,)?) => {{
+        let timer = $timer;
+        let cadence = $cadence;
+        let shutdown = $shutdown;
+        let task = $task;
+        let Some(mut tick) = $crate::time_util::arm(timer, cadence.0, task) else { return; };
+        loop {
+            tokio::select! {
+                outcome = &mut tick => {
+                    if !$crate::time_util::fired(outcome, task) { return; }
+                    $sweep
+                    let Some(next) = $crate::time_util::arm(timer, cadence.1, task) else { return; };
+                    tick = next;
+                }
+                () = shutdown.cancelled() => {
+                    $on_shutdown
+                    return;
+                }
+            }
+        }
+    }};
+}
+pub(crate) use run_sweeps;
 
 #[cfg(test)]
 mod tests {

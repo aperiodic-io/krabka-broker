@@ -41,6 +41,8 @@ use krabka_protocol::{
 use krabka_security::{ListenerProtocol, SaslMechanism, SecretBytes};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
+use crate::support::acl::ClusterAclSetup;
+
 mod support;
 
 /// `DefaultKafkaPrincipalBuilder.serialize(new KafkaPrincipal("User",
@@ -48,24 +50,18 @@ mod support;
 /// `"User"`, compact string `"alice"`, `token_authenticated = false`, empty
 /// tagged fields. A forwarding JVM broker puts exactly these bytes in
 /// `EnvelopeRequest.request_principal`.
-const JVM_USER_ALICE: &[u8] = &[
-    0x00, 0x00, 0x05, b'U', b's', b'e', b'r', 0x06, b'a', b'l', b'i', b'c', b'e', 0x00, 0x00,
-];
+const JVM_USER_ALICE: &[u8] = krabka_macros::jvm_principal_golden!(alice, false);
 
 /// The same serialization for `new KafkaPrincipal("User", "bob")`. It differs
 /// from [`JVM_USER_ALICE`] only in the compact string and its length prefix;
 /// the `token_authenticated` byte is `0x00` in both.
-const JVM_USER_BOB: &[u8] = &[
-    0x00, 0x00, 0x05, b'U', b's', b'e', b'r', 0x04, b'b', b'o', b'b', 0x00, 0x00,
-];
+const JVM_USER_BOB: &[u8] = krabka_macros::jvm_principal_golden!(bob, false);
 
 /// `JVM_USER_ALICE` with its `token_authenticated` byte set, which is what
 /// `DefaultKafkaPrincipalBuilder.serialize` writes for a client that
 /// authenticated with a delegation token. The two constants differ in that one
 /// byte and nothing else, so a test that sends both isolates the flag.
-const JVM_USER_ALICE_VIA_TOKEN: &[u8] = &[
-    0x00, 0x00, 0x05, b'U', b's', b'e', b'r', 0x06, b'a', b'l', b'i', b'c', b'e', 0x01, 0x00,
-];
+const JVM_USER_ALICE_VIA_TOKEN: &[u8] = krabka_macros::jvm_principal_golden!(alice, true);
 
 /// The address a forwarding broker copies out of its own client's connection
 /// into `client_host_address`. `EnvelopeRequest.Builder` is handed
@@ -104,35 +100,11 @@ async fn start_forwarder() -> (BrokerHandle, tempfile::TempDir) {
     .await
 }
 
-/// A Kafka request frame: the length prefix, the request header, and the body.
-///
-/// The header is v2 — with a trailing tagged-fields byte — when `flexible`,
-/// and v1 otherwise. `client_id` is a `NULLABLE_STRING` with an i16 length in
-/// both, which is why it is written the same way either way.
-fn request_frame(
-    api_key: i16,
-    api_version: i16,
-    correlation_id: i32,
-    client_id: Option<&str>,
-    flexible: bool,
-    body: &[u8],
-) -> Bytes {
-    let mut frame = BytesMut::new();
-    frame.put_i16(api_key);
-    frame.put_i16(api_version);
-    frame.put_i32(correlation_id);
-    match client_id {
-        Some(id) => {
-            frame.put_i16(i16::try_from(id.len()).expect("client id length"));
-            frame.put_slice(id.as_bytes());
-        }
-        None => frame.put_i16(-1),
-    }
-    if flexible {
-        frame.put_u8(0);
-    }
-    frame.put_slice(body);
+krabka_macros::request_frame_fixture!(request_payload);
 
+/// A Kafka request with its length prefix, nullable client ID and supplied tagged bytes.
+fn request_frame(setup: RequestFrameSetup<'_>) -> Bytes {
+    let frame = request_payload(setup);
     let mut out = BytesMut::with_capacity(4 + frame.len());
     out.put_i32(i32::try_from(frame.len()).expect("frame length"));
     out.put_slice(&frame);
@@ -196,14 +168,14 @@ async fn send_envelope_on(
 ) -> EnvelopeResponse {
     const ENVELOPE_CORRELATION_ID: i32 = 99;
 
-    let frame = request_frame(
-        envelope_request::API_KEY,
-        0,
-        ENVELOPE_CORRELATION_ID,
-        Some("forwarding-broker"),
-        true,
-        &encode(envelope, 0),
-    );
+    let frame = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(envelope_request::API_KEY),
+        correlation_id: FrameCorrelationId(ENVELOPE_CORRELATION_ID),
+        client_id: Some("forwarding-broker".as_bytes()),
+        tagged: Some(&[0]),
+        body: &encode(envelope, 0),
+        ..Default::default()
+    });
     let response = exchange(stream, frame).await;
 
     let mut cur = response.as_ref();
@@ -223,22 +195,24 @@ async fn send_envelope_on(
 fn embedded_create_topics(topic: &str) -> Bytes {
     let version = krabka_protocol::owned::create_topics_request::MAX_VERSION;
     let body = encode(
-        &crate::support::topics::create_topic_request(
-            crate::support::topics::creatable_topic(topic, 1, 1),
-            5_000,
-        ),
+        &crate::support::topics::create_topic_request(crate::support::topics::creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (topic).into(),
+                ..Default::default()
+            },
+        )),
         version,
     );
     // The length prefix belongs to the outer connection, not to `request_data`
     // — KIP-590 wraps the header and body only.
-    let framed = request_frame(
-        krabka_protocol::owned::create_topics_request::API_KEY,
-        version,
-        EMBEDDED_CORRELATION_ID,
-        Some("adminclient-1"),
-        true,
-        &body,
-    );
+    let framed = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(krabka_protocol::owned::create_topics_request::API_KEY),
+        api_version: krabka_ids::ApiVersion(version),
+        correlation_id: FrameCorrelationId(EMBEDDED_CORRELATION_ID),
+        client_id: Some("adminclient-1".as_bytes()),
+        tagged: Some(&[0]),
+        body: &body,
+    });
     framed.slice(4..)
 }
 
@@ -337,17 +311,17 @@ async fn an_envelope_the_controller_refuses_reports_kafkas_own_error_code() {
     let (broker, _dir) = start_broker().await;
     let addr = broker.controller_addr();
 
-    let produce = request_frame(
-        krabka_protocol::owned::produce_request::API_KEY,
-        krabka_protocol::owned::produce_request::MAX_VERSION,
-        7,
-        Some("adminclient-1"),
-        true,
-        &encode(
+    let produce = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(krabka_protocol::owned::produce_request::API_KEY),
+        api_version: krabka_ids::ApiVersion(krabka_protocol::owned::produce_request::MAX_VERSION),
+        correlation_id: FrameCorrelationId(7),
+        client_id: Some("adminclient-1".as_bytes()),
+        tagged: Some(&[0]),
+        body: &encode(
             &ProduceRequest::default(),
             krabka_protocol::owned::produce_request::MAX_VERSION,
         ),
-    )
+    })
     .slice(4..);
 
     let cases = [
@@ -384,7 +358,10 @@ async fn an_envelope_the_controller_refuses_reports_kafkas_own_error_code() {
 /// so neither carries a tagged-fields byte and the reply starts with the
 /// correlation id followed straight by the body.
 async fn advertised_api_versions(addr: std::net::SocketAddr) -> ApiVersionsResponse {
-    let frame = request_frame(18, 0, 1, Some("probe"), false, &[]);
+    let frame = request_frame(RequestFrameSetup {
+        client_id: Some("probe".as_bytes()),
+        ..Default::default()
+    });
     let response = round_trip(addr, frame).await;
 
     let mut cur = response.as_ref();
@@ -455,9 +432,11 @@ async fn a_forwarded_request_authorizes_against_the_embedded_client_host() {
     for (principal, host) in [("User:alice", "10.1.2.3"), ("User:bob", "127.0.0.1")] {
         broker
             .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(
-                principal,
-                host,
-                AclOperation::Create,
+                ClusterAclSetup {
+                    principal,
+                    host,
+                    operation: AclOperation::Create,
+                },
             ))
             .await
             .expect("seed host ACL");
@@ -550,9 +529,7 @@ async fn a_forwarded_allocate_producer_ids_needs_cluster_action_for_the_embedded
     broker.wait_until_brokers_registered(1).await;
     broker
         .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(
-            "User:alice",
-            "*",
-            AclOperation::ClusterAction,
+            ClusterAclSetup::default(),
         ))
         .await
         .expect("seed ClusterAction ACL");
@@ -565,13 +542,13 @@ async fn a_forwarded_allocate_producer_ids_needs_cluster_action_for_the_embedded
     let broker_id = i32::try_from(registered.node_id.0).expect("broker id");
 
     let version = allocate_producer_ids_request::MAX_VERSION;
-    let request_data = request_frame(
-        allocate_producer_ids_request::API_KEY,
-        version,
-        EMBEDDED_CORRELATION_ID,
-        Some("forwarding-broker"),
-        true,
-        &encode(
+    let request_data = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(allocate_producer_ids_request::API_KEY),
+        api_version: krabka_ids::ApiVersion(version),
+        correlation_id: FrameCorrelationId(EMBEDDED_CORRELATION_ID),
+        client_id: Some("forwarding-broker".as_bytes()),
+        tagged: Some(&[0]),
+        body: &encode(
             &AllocateProducerIdsRequest {
                 broker_id,
                 broker_epoch: registered.broker_epoch,
@@ -579,7 +556,7 @@ async fn a_forwarded_allocate_producer_ids_needs_cluster_action_for_the_embedded
             },
             version,
         ),
-    )
+    })
     .slice(4..);
 
     let cases = [
@@ -676,20 +653,22 @@ async fn an_embedded_version_the_broker_does_not_serve_is_refused() {
     let (broker, _dir) = start_broker().await;
 
     let beyond = krabka_protocol::owned::create_topics_request::MAX_VERSION + 1;
-    let request_data = request_frame(
-        krabka_protocol::owned::create_topics_request::API_KEY,
-        beyond,
-        EMBEDDED_CORRELATION_ID,
-        Some("adminclient-1"),
-        true,
-        &encode(
-            &crate::support::topics::create_topic_request(
-                crate::support::topics::creatable_topic(TOPIC, 1, 1),
-                5_000,
-            ),
+    let request_data = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(krabka_protocol::owned::create_topics_request::API_KEY),
+        api_version: krabka_ids::ApiVersion(beyond),
+        correlation_id: FrameCorrelationId(EMBEDDED_CORRELATION_ID),
+        client_id: Some("adminclient-1".as_bytes()),
+        tagged: Some(&[0]),
+        body: &encode(
+            &crate::support::topics::create_topic_request(crate::support::topics::creatable_topic(
+                crate::support::topics::ConfiguredTopicSetup {
+                    name: (TOPIC).into(),
+                    ..Default::default()
+                },
+            )),
             krabka_protocol::owned::create_topics_request::MAX_VERSION,
         ),
-    )
+    })
     .slice(4..);
 
     let response = send_envelope(
@@ -716,14 +695,14 @@ async fn an_embedded_request_the_controller_cannot_parse_is_answered_in_the_enve
     let (broker, _dir) = start_broker().await;
     let create_topics_version = krabka_protocol::owned::create_topics_request::MAX_VERSION;
     let embedded = |api_key: i16, version: i16, body: &[u8]| {
-        request_frame(
-            api_key,
-            version,
-            EMBEDDED_CORRELATION_ID,
-            Some("adminclient-1"),
-            true,
+        request_frame(RequestFrameSetup {
+            api_key: krabka_ids::ApiKey(api_key),
+            api_version: krabka_ids::ApiVersion(version),
+            correlation_id: FrameCorrelationId(EMBEDDED_CORRELATION_ID),
+            client_id: Some("adminclient-1".as_bytes()),
+            tagged: Some(&[0]),
             body,
-        )
+        })
         .slice(4..)
     };
     let truncated_body = {
@@ -803,20 +782,20 @@ async fn an_embedded_trunk_api_key_is_refused_unless_unstable_api_versions_are_e
         })
         .await;
         let version = unregister_controller_request::MAX_VERSION;
-        let request_data = request_frame(
-            unregister_controller_request::API_KEY,
-            version,
-            EMBEDDED_CORRELATION_ID,
-            Some("adminclient-1"),
-            true,
-            &encode(
+        let request_data = request_frame(RequestFrameSetup {
+            api_key: krabka_ids::ApiKey(unregister_controller_request::API_KEY),
+            api_version: krabka_ids::ApiVersion(version),
+            correlation_id: FrameCorrelationId(EMBEDDED_CORRELATION_ID),
+            client_id: Some("adminclient-1".as_bytes()),
+            tagged: Some(&[0]),
+            body: &encode(
                 &UnregisterControllerRequest {
                     controller_id: 9,
                     ..Default::default()
                 },
                 version,
             ),
-        )
+        })
         .slice(4..);
 
         let response = send_envelope(
@@ -861,14 +840,14 @@ fn embedded_create_delegation_token() -> Bytes {
         },
         version,
     );
-    request_frame(
-        create_delegation_token_request::API_KEY,
-        version,
-        EMBEDDED_CORRELATION_ID,
-        Some("adminclient-1"),
-        true,
-        &body,
-    )
+    request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(create_delegation_token_request::API_KEY),
+        api_version: krabka_ids::ApiVersion(version),
+        correlation_id: FrameCorrelationId(EMBEDDED_CORRELATION_ID),
+        client_id: Some("adminclient-1".as_bytes()),
+        tagged: Some(&[0]),
+        body: &body,
+    })
     .slice(4..)
 }
 
@@ -916,20 +895,19 @@ fn decode_embedded<R: for<'de> krabka_protocol::Decode<'de>>(
 async fn sasl_plain(stream: &mut tokio::net::TcpStream, user: &str, password: &str) {
     let handshake = exchange(
         stream,
-        request_frame(
-            krabka_protocol::owned::sasl_handshake_request::API_KEY,
-            1,
-            1,
-            Some("forwarding-broker"),
-            false,
-            &encode(
+        request_frame(RequestFrameSetup {
+            api_key: krabka_ids::ApiKey(krabka_protocol::owned::sasl_handshake_request::API_KEY),
+            api_version: krabka_ids::ApiVersion(1),
+            client_id: Some("forwarding-broker".as_bytes()),
+            body: &encode(
                 &SaslHandshakeRequest {
                     mechanism: "PLAIN".to_owned(),
                     unknown_tagged_fields: UnknownTaggedFields::default(),
                 },
                 1,
             ),
-        ),
+            ..Default::default()
+        }),
     )
     .await;
     let mut cur = handshake.as_ref();
@@ -954,20 +932,20 @@ async fn sasl_plain(stream: &mut tokio::net::TcpStream, user: &str, password: &s
     auth_bytes.extend_from_slice(password.as_bytes());
     let authenticate = exchange(
         stream,
-        request_frame(
-            krabka_protocol::owned::sasl_authenticate_request::API_KEY,
-            2,
-            2,
-            Some("forwarding-broker"),
-            true,
-            &encode(
+        request_frame(RequestFrameSetup {
+            api_key: krabka_ids::ApiKey(krabka_protocol::owned::sasl_authenticate_request::API_KEY),
+            api_version: krabka_ids::ApiVersion(2),
+            correlation_id: FrameCorrelationId(2),
+            client_id: Some("forwarding-broker".as_bytes()),
+            tagged: Some(&[0]),
+            body: &encode(
                 &SaslAuthenticateRequest {
                     auth_bytes: Bytes::from(auth_bytes),
                     unknown_tagged_fields: UnknownTaggedFields::default(),
                 },
                 2,
             ),
-        ),
+        }),
     )
     .await;
     let mut cur = authenticate.as_ref();

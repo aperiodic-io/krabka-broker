@@ -348,7 +348,7 @@ mod tests {
 
     use super::*;
     use crate::barrier::{
-        coordinator::test_support::{Fixture, GROUP, spec},
+        coordinator::test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
         persistence::{RecordKind, decode_key},
     };
 
@@ -380,20 +380,68 @@ mod tests {
     #[test]
     fn a_definition_must_name_at_least_one_usable_topic() {
         let cases: &[(&str, GroupSpec, bool)] = &[
-            ("good", spec(&["orders"], Some(millis(1_000)), 4), true),
-            ("no interval", spec(&["orders"], None, 1), true),
-            ("no topic", spec(&[], None, 4), false),
-            ("empty topic name", spec(&["orders", ""], None, 4), false),
             (
-                "duplicate topic",
-                spec(&["orders", "orders"], None, 4),
+                "good",
+                spec(GroupSpecSetup {
+                    interval: Some(millis(1_000)),
+                    ..Default::default()
+                }),
+                true,
+            ),
+            (
+                "no interval",
+                spec(GroupSpecSetup {
+                    retained_cuts: RetainedCutCount(1),
+                    ..Default::default()
+                }),
+                true,
+            ),
+            (
+                "no topic",
+                spec(GroupSpecSetup {
+                    topics: &[],
+                    ..Default::default()
+                }),
                 false,
             ),
-            ("no retention", spec(&["orders"], None, 0), false),
-            ("negative retention", spec(&["orders"], None, -1), false),
+            (
+                "empty topic name",
+                spec(GroupSpecSetup {
+                    topics: &["orders", ""],
+                    ..Default::default()
+                }),
+                false,
+            ),
+            (
+                "duplicate topic",
+                spec(GroupSpecSetup {
+                    topics: &["orders", "orders"],
+                    ..Default::default()
+                }),
+                false,
+            ),
+            (
+                "no retention",
+                spec(GroupSpecSetup {
+                    retained_cuts: RetainedCutCount(0),
+                    ..Default::default()
+                }),
+                false,
+            ),
+            (
+                "negative retention",
+                spec(GroupSpecSetup {
+                    retained_cuts: RetainedCutCount(-1),
+                    ..Default::default()
+                }),
+                false,
+            ),
             (
                 "zero interval",
-                spec(&["orders"], Some(Time::ZERO), 4),
+                spec(GroupSpecSetup {
+                    interval: Some(Time::ZERO),
+                    ..Default::default()
+                }),
                 false,
             ),
         ];
@@ -413,7 +461,12 @@ mod tests {
                 "group of {length} bytes"
             );
             check!(
-                validate_spec(&spec(&["orders", long.as_str()], None, 4)).is_ok() == ok,
+                validate_spec(&spec(GroupSpecSetup {
+                    topics: &["orders", long.as_str()],
+                    ..Default::default()
+                }))
+                .is_ok()
+                    == ok,
                 "topic of {length} bytes"
             );
         }
@@ -426,11 +479,19 @@ mod tests {
         let min_interval = krabka_units::secs(1);
 
         // Good spec
-        let good = spec(&["t1", "t2"], Some(krabka_units::secs(2)), 5);
+        let good = spec(GroupSpecSetup {
+            topics: &["t1", "t2"],
+            interval: Some(krabka_units::secs(2)),
+            retained_cuts: RetainedCutCount(5),
+        });
         assert!(validate_spec_limits(&good, max_topics, max_retained_cuts, min_interval).is_ok());
 
         // Too many topics
-        let too_many_topics = spec(&["t1", "t2", "t3", "t4"], Some(krabka_units::secs(2)), 5);
+        let too_many_topics = spec(GroupSpecSetup {
+            topics: &["t1", "t2", "t3", "t4"],
+            interval: Some(krabka_units::secs(2)),
+            retained_cuts: RetainedCutCount(5),
+        });
         assert!(
             validate_spec_limits(
                 &too_many_topics,
@@ -442,14 +503,22 @@ mod tests {
         );
 
         // Too many cuts
-        let too_many_cuts = spec(&["t1"], Some(krabka_units::secs(2)), 15);
+        let too_many_cuts = spec(GroupSpecSetup {
+            topics: &["t1"],
+            interval: Some(krabka_units::secs(2)),
+            retained_cuts: RetainedCutCount(15),
+        });
         assert!(
             validate_spec_limits(&too_many_cuts, max_topics, max_retained_cuts, min_interval)
                 .is_err()
         );
 
         // Interval below minimum
-        let interval_too_short = spec(&["t1"], Some(krabka_units::millis(500)), 5);
+        let interval_too_short = spec(GroupSpecSetup {
+            topics: &["t1"],
+            interval: Some(krabka_units::millis(500)),
+            retained_cuts: RetainedCutCount(5),
+        });
         assert!(
             validate_spec_limits(
                 &interval_too_short,
@@ -466,7 +535,7 @@ mod tests {
         let fixture = Fixture::new();
         let coordinator = fixture.coordinator().await;
         coordinator
-            .create_group(GROUP, spec(&["orders"], None, 4))
+            .create_group(GROUP, spec(GroupSpecSetup::default()))
             .await
             .expect("the group is created");
         coordinator

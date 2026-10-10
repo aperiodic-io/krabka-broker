@@ -69,7 +69,12 @@ async fn init_producer_id(client: &Client, tid: &str) -> (i64, i16) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         let resp = client
-            .send(init_producer_request(Some(tid.into()), 60_000, (-1, -1)))
+            .send(init_producer_request(
+                crate::support::transactions::InitProducerSetup {
+                    transactional_id: Some(tid.into()),
+                    ..Default::default()
+                },
+            ))
             .await
             .expect("InitProducerId");
         if resp.error_code == 0 {
@@ -103,10 +108,12 @@ async fn add_partition_ongoing(
     let added_topic = crate::support::transaction_wire::transaction_topic(topic, vec![partition]);
     let add = client
         .send(crate::support::transaction_wire::partitions_request(
-            tid,
-            (pid, epoch),
-            false,
-            vec![added_topic],
+            crate::support::transaction_wire::TransactionPartitionsSetup {
+                transactional_id: tid,
+                producer: crate::support::transactions::ProducerIdentity::from_wire((pid, epoch)),
+                topics: vec![added_topic],
+                ..Default::default()
+            },
         ))
         .await
         .expect("AddPartitionsToTxn add");
@@ -131,7 +138,15 @@ async fn commit_via_end_txn(client: &Client, tid: &str, pid: i64, epoch: i16) ->
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let resp = client
-            .send(end_transaction_request(tid, (pid, epoch), true))
+            .send(end_transaction_request(
+                tid,
+                crate::support::transactions::EndTransactionSetup {
+                    producer: crate::support::transactions::ProducerIdentity::from_wire((
+                        pid, epoch,
+                    )),
+                    ..Default::default()
+                },
+            ))
             .await
             .expect("EndTxn");
         // 15/16: coordinator still loading — keep retrying until the deadline.
@@ -173,7 +188,12 @@ async fn assert_ongoing_txn_survives_restart(case: &RecoveryCase) {
             Some("krabka-txnv-test"),
         )
         .await;
-        create_topic(&client, case.topic, 1).await;
+        create_topic(
+            &client,
+            case.topic,
+            crate::support::topics::TopicPartitionCount(1),
+        )
+        .await;
         if let Some(level) = case.downgrade_to {
             downgrade_transaction_version(&client, level).await;
         }

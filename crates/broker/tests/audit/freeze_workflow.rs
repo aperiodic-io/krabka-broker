@@ -210,13 +210,17 @@ pub(super) async fn boot_workflow_cluster() -> Cluster {
 
     let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
         &log_dir,
-        &[&alice_key],
-        &[ALICE, BOB, CAROL],
-        &[
-            ("alice", "alice-pw"),
-            ("bob", "bob-pw"),
-            ("carol", "carol-pw"),
-        ],
+        crate::support::OperatorSaslSetup {
+            trust: crate::support::OperatorKeysSetup {
+                keys: &[&alice_key],
+                approvers: &[ALICE, BOB, CAROL],
+            },
+            users: &[
+                ("alice", "alice-pw"),
+                ("bob", "bob-pw"),
+                ("carol", "carol-pw"),
+            ],
+        },
     )
     .await;
     broker.wait_until_partition_present(AUDIT_TOPIC, 0).await;

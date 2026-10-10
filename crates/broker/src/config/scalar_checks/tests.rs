@@ -5,7 +5,9 @@ use assert2::assert;
 use krabka_units::{gibibytes, millis, nanos};
 
 use super::*;
-use crate::config::test_support::{RuntimeInvalidator, assert_invalid_runtime, base};
+use crate::config::test_support::{
+    RuntimeInvalidator, assert_invalid_runtime, assert_invalid_runtime_cases, base,
+};
 
 #[test]
 fn rejects_non_positive_runtime_scalars() {
@@ -256,11 +258,7 @@ fn rejects_invalid_additional_runtime_scalars() {
         ),
     ];
 
-    for (expected, invalidate) in cases {
-        let mut config = BrokerConfig::default();
-        invalidate(&mut config);
-        assert_invalid_runtime(&config, expected);
-    }
+    assert_invalid_runtime_cases(cases.iter().copied());
 }
 
 #[test]
@@ -329,11 +327,7 @@ fn rejects_expiry_settings_outside_the_kafka_int_millisecond_range() {
         ),
     ];
 
-    for (expected, invalidate) in cases {
-        let mut config = BrokerConfig::default();
-        invalidate(&mut config);
-        assert_invalid_runtime(&config, expected);
-    }
+    assert_invalid_runtime_cases(cases.iter().copied());
 }
 
 /// A zero cadence disables the sweep, so it is a value the whole-config check

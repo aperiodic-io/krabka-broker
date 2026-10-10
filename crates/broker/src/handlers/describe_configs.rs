@@ -102,6 +102,9 @@ mod resources;
 mod static_configs;
 mod wire;
 
+#[cfg(test)]
+mod test_support;
+
 use self::{
     authz::{denied_result, resource_authz_failure},
     entry::EntryOptions,

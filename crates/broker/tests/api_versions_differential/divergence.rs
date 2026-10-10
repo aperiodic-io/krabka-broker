@@ -153,19 +153,33 @@ pub(crate) struct DivergenceReport {
     pub(crate) apis: Vec<ApiRow>,
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct DivergenceSetup<'a> {
+    #[default(RECORDED)]
+    intents: Intents<'a>,
+    #[default("mirror.gcr.io/apache/kafka:4.3.1")]
+    oracle_image: &'a str,
+}
+
 impl DivergenceReport {
     /// Join krabka's advertised table against the oracle's.
     pub(crate) fn build(oracle_image: &str, krabka: &[ApiVersion], kafka: &[ApiVersion]) -> Self {
-        Self::build_with(RECORDED, oracle_image, krabka, kafka)
+        Self::build_with(
+            krabka,
+            kafka,
+            DivergenceSetup {
+                oracle_image,
+                ..Default::default()
+            },
+        )
     }
 
     /// [`Self::build`] against `intents` rather than the recorded tables.
-    fn build_with(
-        intents: Intents<'_>,
-        oracle_image: &str,
-        krabka: &[ApiVersion],
-        kafka: &[ApiVersion],
-    ) -> Self {
+    fn build_with(krabka: &[ApiVersion], kafka: &[ApiVersion], setup: DivergenceSetup<'_>) -> Self {
+        let DivergenceSetup {
+            intents,
+            oracle_image,
+        } = setup;
         let mut keys: Vec<i16> = krabka
             .iter()
             .chain(kafka)
@@ -286,7 +300,14 @@ mod tests {
     }
 
     fn build(oracle: &str, krabka: &[ApiVersion], kafka: &[ApiVersion]) -> DivergenceReport {
-        DivergenceReport::build_with(SAMPLE, oracle, krabka, kafka)
+        DivergenceReport::build_with(
+            krabka,
+            kafka,
+            DivergenceSetup {
+                intents: SAMPLE,
+                oracle_image: oracle,
+            },
+        )
     }
 
     #[test]

@@ -139,6 +139,24 @@ mod tests {
         };
     }
 
+    fn secret_write(
+        authz: &AuditingAuthorizer,
+        image: &krabka_metadata::MetadataImage,
+        principal: &krabka_security::Principal,
+        host: &SocketAddr,
+    ) -> AuthorizationResult {
+        authz.authorize(
+            image,
+            &AuthorizationRequest {
+                principal,
+                host,
+                resource_type: ResourceType::Topic,
+                resource_name: "secrets",
+                operation: AclOperation::Write,
+            },
+        )
+    }
+
     fn denied_label() -> crate::metrics::AuthorizationDeniedLabel {
         crate::metrics::AuthorizationDeniedLabel {
             operation: "Write".to_string(),
@@ -149,16 +167,7 @@ mod tests {
     #[tokio::test]
     async fn deny_decision_emits_audit_record() {
         denial_fixture!(rx, metrics, authz, principal, host, image);
-        let result = authz.authorize(
-            &image,
-            &AuthorizationRequest {
-                principal: &principal,
-                host: &host,
-                resource_type: ResourceType::Topic,
-                resource_name: "secrets",
-                operation: AclOperation::Write,
-            },
-        );
+        let result = secret_write(&authz, &image, &principal, &host);
         check!(result == AuthorizationResult::Deny);
 
         let ev = rx.try_recv().expect("an audit event was emitted");
@@ -195,16 +204,7 @@ mod tests {
         let principal = principal("anonymous");
         let host: SocketAddr = "10.0.0.9:5555".parse().unwrap();
         let image = krabka_metadata::MetadataImage::default();
-        let result = authz.authorize(
-            &image,
-            &AuthorizationRequest {
-                principal: &principal,
-                host: &host,
-                resource_type: ResourceType::Topic,
-                resource_name: "secrets",
-                operation: AclOperation::Write,
-            },
-        );
+        let result = secret_write(&authz, &image, &principal, &host);
 
         check!(result == AuthorizationResult::Deny);
         let denied = metrics

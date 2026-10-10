@@ -419,6 +419,13 @@ mod tests {
             ("two topics", &[(METADATA_TOPIC, &[0]), ("other", &[0])]),
             ("no topic", &[]),
         ];
+        // The oracle remains separate from production response construction.
+        let expected_partition = |partition_index| PartitionData {
+            partition_index,
+            error_code: 3,
+            error_message: Some(UNKNOWN_TOPIC_OR_PARTITION_MESSAGE.into()),
+            ..Default::default()
+        };
         for (label, topics) in rows {
             let expected = DescribeQuorumResponse {
                 topics: topics
@@ -427,12 +434,7 @@ mod tests {
                         topic_name: (*name).into(),
                         partitions: partitions
                             .iter()
-                            .map(|&partition_index| PartitionData {
-                                partition_index,
-                                error_code: 3,
-                                error_message: Some(UNKNOWN_TOPIC_OR_PARTITION_MESSAGE.into()),
-                                ..Default::default()
-                            })
+                            .map(|&index| expected_partition(index))
                             .collect(),
                         ..Default::default()
                     })

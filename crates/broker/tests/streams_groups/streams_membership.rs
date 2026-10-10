@@ -72,7 +72,12 @@ async fn leave_removes_member() {
 
     // Leave: member_epoch == -1.
     let leave = client
-        .send(follow_up("streams-app-4", &member_id, -1, None))
+        .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            group: "streams-app-4",
+            member_id: &member_id,
+            epoch: crate::support::streams::StreamsMemberEpoch(-1),
+            ..Default::default()
+        }))
         .await
         .expect("leave heartbeat");
     assert!(leave.error_code == 0, "leave failed: {leave:?}");

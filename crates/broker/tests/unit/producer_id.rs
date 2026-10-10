@@ -36,8 +36,10 @@ async fn init_producer_id_without_coordinator_bootstrap_returns_not_coordinator(
     let r = p
         .client
         .send(crate::support::transactions::new_producer_request(
-            Some("tx-1".into()),
-            60_000,
+            crate::support::transactions::InitProducerSetup {
+                transactional_id: Some("tx-1".into()),
+                ..Default::default()
+            },
         ))
         .await
         .expect("InitProducerId");
@@ -83,8 +85,10 @@ async fn init_producer_id_with_transactional_id_returns_real_pid() {
     let r = p
         .client
         .send(crate::support::transactions::new_producer_request(
-            Some("my-tid".into()),
-            60_000,
+            crate::support::transactions::InitProducerSetup {
+                transactional_id: Some("my-tid".into()),
+                ..Default::default()
+            },
         ))
         .await
         .expect("InitProducerId");
@@ -107,8 +111,10 @@ async fn init_producer_id_with_same_tid_bumps_epoch() {
     let r1 = p
         .client
         .send(crate::support::transactions::new_producer_request(
-            Some("stable-tid".into()),
-            60_000,
+            crate::support::transactions::InitProducerSetup {
+                transactional_id: Some("stable-tid".into()),
+                ..Default::default()
+            },
         ))
         .await
         .expect("InitProducerId 1");
@@ -117,8 +123,10 @@ async fn init_producer_id_with_same_tid_bumps_epoch() {
     let r2 = p
         .client
         .send(crate::support::transactions::new_producer_request(
-            Some("stable-tid".into()),
-            60_000,
+            crate::support::transactions::InitProducerSetup {
+                transactional_id: Some("stable-tid".into()),
+                ..Default::default()
+            },
         ))
         .await
         .expect("InitProducerId 2");

@@ -15,7 +15,7 @@ use uuid::Uuid;
 use super::{
     HotTailTarget, QuorumWalStore,
     engine::{self, WalShardEngine},
-    test_support::{append_source, batch, local_replicas, open_log, partition_store, source_log},
+    test_support::{append_source, batch, local_replicas, open_log, source_log},
 };
 use crate::{error::BrokerError, wal::WalStore};
 
@@ -128,11 +128,9 @@ async fn quorum_wal_store_populates_hot_tail_after_durable_sync() {
 #[tokio::test]
 async fn quorum_wal_store_can_commit_a_source_prefix_without_regressing() {
     let dir = tempfile::tempdir().unwrap();
-    let source = source_log(dir.path());
-    let store = partition_store(dir.path(), source, 3);
+    let store = super::test_support::fresh_partition_store(dir.path());
 
-    let (_results, first) = append_source(&store, 1).await;
-    let (_results, second) = append_source(&store, 1).await;
+    let (first, second) = super::test_support::append_two(&store).await;
     assert!(store.sync_durable(first).await.unwrap() == Offset(1));
     assert!(store.sync_durable(second).await.unwrap() == Offset(2));
     assert!(store.sync_durable(first).await.unwrap() == Offset(2));

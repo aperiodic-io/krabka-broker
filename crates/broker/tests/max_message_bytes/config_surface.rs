@@ -12,9 +12,6 @@ use crate::{
     wire::{MAX_MESSAGE_BYTES, accepted, create_topic, produce_batch_of_wire_len, too_large},
 };
 
-/// `IncrementalAlterConfigs` `config_operation` SET.
-const CONFIG_OP_SET: i8 = 0;
-
 /// `ConfigSource::DYNAMIC_TOPIC_CONFIG`, which is what a stored topic
 /// override reports.
 const CONFIG_SOURCE_DYNAMIC_TOPIC: i8 = 1;
@@ -71,14 +68,7 @@ async fn create_topics_accepts_the_key_and_describe_configs_echoes_it() {
 /// produce, which is the failure an operator would be least able to explain.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_incremental_alter_raises_the_cap_for_the_next_produce() {
-    let p = support::start().await;
-    let topic = create_topic(
-        &p.broker,
-        &p.client,
-        "orders",
-        &[(MAX_MESSAGE_BYTES, &CAP.to_string())],
-    )
-    .await;
+    let (p, topic) = crate::wire::orders_fixture(&[(MAX_MESSAGE_BYTES, &CAP.to_string())]).await;
 
     check!(produce_batch_of_wire_len(&p.client, "orders", topic, CAP + 1).await == too_large());
 
@@ -135,10 +125,12 @@ async fn describe_max_message_bytes(client: &Client, topic: &str) -> DescribeCon
 async fn set_max_message_bytes(client: &Client, topic: &str, value: &str) -> (i16, Option<String>) {
     crate::support::configs::alter_topic_config(
         client,
-        topic,
-        MAX_MESSAGE_BYTES,
-        CONFIG_OP_SET,
-        Some(value),
+        crate::support::configs::TopicConfigMutationSetup {
+            topic,
+            name: MAX_MESSAGE_BYTES,
+            value: Some(value),
+            ..Default::default()
+        },
     )
     .await
 }

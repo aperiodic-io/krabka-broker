@@ -71,8 +71,22 @@ async fn records_that_fail_validation_are_rejected_and_not_appended() {
 async fn an_unvalidated_topic_accepts_what_a_validated_one_rejects() {
     let registry = registry().await;
     let (broker, client, _dir) = boot(&registry.uri()).await;
-    let control = create_topic(&broker, &client, "control", &[]).await;
-    let validated = create_topic(&broker, &client, "validated", VALIDATED).await;
+    let control = create_topic(
+        &broker,
+        &client,
+        crate::harness::SchemaTopicSetup {
+            name: "control",
+            configs: &[],
+            ..Default::default()
+        },
+    )
+    .await;
+    let validated = create_topic(
+        &broker,
+        &client,
+        crate::harness::SchemaTopicSetup::default(),
+    )
+    .await;
 
     let unframed = Bytes::from_static(b"plain text");
 

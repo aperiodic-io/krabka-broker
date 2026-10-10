@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/oauth.rs" 102 0 102 80 *)
+(* #"/workspace/crates/verified/src/oauth.rs" 109 0 109 80 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span snum = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/num.rs" 328 20 329 89
@@ -11,13 +11,14 @@ let%span scmp'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span scmp'1 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/cmp.rs" 78 36 78 40
 let%span scmp'2 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/cmp.rs" 79 26 79 79
 let%span scmp'3 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/cmp.rs" 80 26 80 77
-let%span soauth = "/workspace/crates/verified/src/oauth.rs" 115 27 115 28
-let%span soauth'0 = "/workspace/crates/verified/src/oauth.rs" 119 34 119 85
-let%span soauth'1 = "/workspace/crates/verified/src/oauth.rs" 123 36 123 71
-let%span soauth'2 = "/workspace/crates/verified/src/oauth.rs" 126 40 126 85
-let%span soauth'3 = "/workspace/crates/verified/src/oauth.rs" 92 10 100 1
-let%span soauth'4 = "/workspace/crates/verified/src/oauth.rs" 64 8 69 67
-let%span soauth'5 = "/workspace/crates/verified/src/oauth.rs" 81 8 81 72
+let%span soauth = "/workspace/crates/verified/src/oauth.rs" 122 27 122 28
+let%span soauth'0 = "/workspace/crates/verified/src/oauth.rs" 126 34 126 85
+let%span soauth'1 = "/workspace/crates/verified/src/oauth.rs" 130 36 130 71
+let%span soauth'2 = "/workspace/crates/verified/src/oauth.rs" 133 40 133 85
+let%span soauth'3 = "/workspace/crates/verified/src/oauth.rs" 99 10 107 1
+let%span soauth'4 = "/workspace/crates/verified/src/oauth.rs" 77 16 77 65
+let%span soauth'5 = "/workspace/crates/verified/src/oauth.rs" 88 8 88 72
+let%span soauth'6 = "/workspace/crates/verified/src/oauth.rs" 58 8 63 67
 
 use creusot.int.Int64
 use creusot.prelude.Any
@@ -94,14 +95,17 @@ let checked_add (self_: Int64.t) (rhs: Int64.t) (return (x: t_Option_i64)) = any
       -> Int64.to_int r = Int64.to_int self_ + Int64.to_int rhs)}
     (! return {result}) ]
 
-predicate oauth_session_admissible [#"/workspace/crates/verified/src/oauth.rs" 62 0 62 65] (facts: t_OAuthSessionFacts) =
-  [%#soauth'4] facts.expiry = Present
-  /\ gt_log_Int (Int64.to_int facts.token_expires_at_ms) (Int64.to_int facts.now_ms)
-  /\ Int64.to_int facts.token_expires_at_ms - Int64.to_int facts.now_ms <= Int64.to_int const_MAX
+predicate oauth_session_admissible_at [#"/workspace/crates/verified/src/oauth.rs" 56 0 56 85] (facts: t_OAuthSessionFacts) (now: int) =
+  [%#soauth'6] facts.expiry = Present
+  /\ gt_log_Int (Int64.to_int facts.token_expires_at_ms) now
+  /\ Int64.to_int facts.token_expires_at_ms - now <= Int64.to_int const_MAX
   /\ (facts.cap = Disabled \/ gt_log_Int (Int64.to_int facts.cap_ms) 0)
   /\ (facts.authentication = Initial \/ facts.principal = Matches)
 
-function oauth_session_lifetime [#"/workspace/crates/verified/src/oauth.rs" 79 0 79 62] (facts: t_OAuthSessionFacts) : int
+predicate oauth_session_admissible [#"/workspace/crates/verified/src/oauth.rs" 76 0 76 65] (facts: t_OAuthSessionFacts) =
+  [%#soauth'4] oauth_session_admissible_at facts (Int64.to_int facts.now_ms)
+
+function oauth_session_lifetime [#"/workspace/crates/verified/src/oauth.rs" 86 0 86 62] (facts: t_OAuthSessionFacts) : int
  = [%#soauth'5] let token_lifetime = Int64.to_int facts.token_expires_at_ms - Int64.to_int facts.now_ms in if facts.cap
     = Enabled
   /\ Int64.to_int facts.cap_ms < token_lifetime then
@@ -114,7 +118,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let oauth_session_admission [#"/workspace/crates/verified/src/oauth.rs" 102 0 102 80] (facts: t_OAuthSessionFacts)
+let oauth_session_admission [#"/workspace/crates/verified/src/oauth.rs" 109 0 109 80] (facts: t_OAuthSessionFacts)
   (return (x: t_OAuthSessionDecision)) = (! bb0
   [ bb0 = any [ br0 -> {facts.expiry = Missing} (! bb2) | br1 -> {facts.expiry = Present} (! bb3) ]
   | bb3 = s0

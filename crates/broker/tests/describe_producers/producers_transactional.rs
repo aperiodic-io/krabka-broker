@@ -12,28 +12,33 @@ use crate::{
         create_topic, init_transactional_producer, topic_id_for, transactional_batch,
     },
     support,
-    support::produce::single_partition_produce,
 };
 
 #[tokio::test]
 async fn transactional_fields_follow_open_and_completed_transactions() {
     let p = support::start().await;
-    create_topic(&p.client, "transactions", 1).await;
+    create_topic(
+        &p.client,
+        crate::support::topics::CreateTopicSetup {
+            topic: "transactions",
+            ..Default::default()
+        },
+    )
+    .await;
     let topic_id = topic_id_for(&p.client, "transactions").await;
     let (pid, epoch) = init_transactional_producer(&p, "describe-producers-tid").await;
 
     let produce_response = p
         .client
-        .send(ProduceRequest {
-            transactional_id: Some("describe-producers-tid".into()),
-            ..single_partition_produce(
-                "transactions",
-                topic_id,
-                0,
-                Some(transactional_batch(pid, epoch, 0, &["first"]).into()),
-                (-1, 5_000),
-            )
-        })
+        .send(transaction_values_request(
+            topic_id,
+            crate::support::records::ProducerValuesSetup {
+                pid: krabka_ids::ProducerId(pid),
+                epoch: crate::support::transactions::ProducerEpoch(epoch),
+                values: &["first"],
+                ..Default::default()
+            },
+        ))
         .await
         .expect("transactional Produce");
     assert!(produce_response.responses[0].partition_responses[0].error_code == 0);
@@ -49,14 +54,18 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
         .client
         .send(WriteTxnMarkersRequest {
             markers: vec![crate::support::transactions::transaction_marker(
-                (pid, epoch),
-                true,
-                17,
-                1,
-                vec![crate::support::transactions::marker_topic(
-                    "transactions".into(),
-                    vec![0],
-                )],
+                crate::support::transactions::TransactionMarkerSetup {
+                    producer: crate::support::transactions::ProducerIdentity::from_wire((
+                        pid, epoch,
+                    )),
+                    coordinator_epoch: crate::support::transactions::CoordinatorEpoch(17),
+                    transaction_version: crate::support::transactions::TransactionVersion(1),
+                    topics: vec![crate::support::transactions::marker_topic(
+                        "transactions".into(),
+                        vec![0],
+                    )],
+                    ..Default::default()
+                },
             )],
             ..Default::default()
         })
@@ -68,16 +77,15 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
 
     let produce_response = p
         .client
-        .send(ProduceRequest {
-            transactional_id: Some("describe-producers-tid".into()),
-            ..single_partition_produce(
-                "transactions",
-                topic_id,
-                0,
-                Some(transactional_batch(pid, epoch, 1, &["second"]).into()),
-                (-1, 5_000),
-            )
-        })
+        .send(transaction_values_request(
+            topic_id,
+            crate::support::records::ProducerValuesSetup {
+                pid: krabka_ids::ProducerId(pid),
+                epoch: crate::support::transactions::ProducerEpoch(epoch),
+                base_seq: crate::support::records::ProducerSequence(1),
+                values: &["second"],
+            },
+        ))
         .await
         .expect("second transactional Produce");
     assert!(produce_response.responses[0].partition_responses[0].error_code == 0);
@@ -107,4 +115,21 @@ async fn check_transaction_state(
     let producer_row = &describe.topics[0].partitions[0].active_producers[0];
     check!(producer_row.current_txn_start_offset == expected.0);
     check!(producer_row.coordinator_epoch == expected.1);
+}
+
+fn transaction_values_request(
+    topic_id: krabka_protocol::primitives::uuid::Uuid,
+    values: crate::support::records::ProducerValuesSetup<'_>,
+) -> ProduceRequest {
+    ProduceRequest {
+        transactional_id: Some("describe-producers-tid".into()),
+        ..crate::support::produce::batch_request(
+            transactional_batch(values),
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: ("transactions").into(),
+                topic_id,
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
+        )
+    }
 }

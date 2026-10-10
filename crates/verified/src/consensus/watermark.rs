@@ -3,6 +3,15 @@ use creusot_std::prelude::*;
 #[cfg(creusot)]
 use super::{count_ge, count_ge_prefix, hwm_member_at, lemma_hwm_member_maximal};
 
+open_logic! {
+/// The current watermark and follower acknowledgements fit within the log.
+fn watermark_inputs_bounded(current: Int, end: Int, followers: Seq<i64>) -> bool {
+    pearlite! {
+        current <= end && (forall<k: Int> 0 <= k && k < followers.len() ==> followers[k]@ <= end)
+    }
+}
+}
+
 #[requires(1 <= majority@ && majority@ <= follower_offsets@.len() + 1)]
 #[ensures(result == (count_ge(log_end@, follower_offsets@, cand@, leader_counts) >= majority@))]
 pub(super) fn candidate_has_majority(
@@ -55,9 +64,7 @@ pub(super) fn candidate_has_majority(
 /// loop that mirrors the definition.
 #[requires(1 <= majority@ && majority@ <= follower_offsets@.len() + 1)]
 #[requires(leader_counts || majority@ <= follower_offsets@.len())]
-#[requires(current_hwm@ <= log_end@)]
-#[requires(forall<k: Int> 0 <= k && k < follower_offsets@.len()
-    ==> follower_offsets@[k]@ <= log_end@)]
+#[requires(watermark_inputs_bounded(current_hwm@, log_end@, follower_offsets@))]
 #[ensures(result@ >= current_hwm@)]
 #[ensures(result@ <= log_end@)]
 #[ensures(forall<v: Int> v > epoch_start_offset@
@@ -127,9 +134,7 @@ pub fn recompute_high_watermark(
 /// A caller that needs Raft's current-term rule, the gate on the leader's
 /// first record of its own epoch, uses [`recompute_high_watermark`] instead.
 #[requires(1 <= majority@ && majority@ <= follower_offsets@.len() + 1)]
-#[requires(current@ <= log_end@)]
-#[requires(forall<k: Int> 0 <= k && k < follower_offsets@.len()
-    ==> follower_offsets@[k]@ <= log_end@)]
+#[requires(watermark_inputs_bounded(current@, log_end@, follower_offsets@))]
 #[ensures(result@ >= current@)]
 #[ensures(result@ <= log_end@)]
 #[ensures(forall<v: Int> count_ge(log_end@, follower_offsets@, v, true) >= majority@

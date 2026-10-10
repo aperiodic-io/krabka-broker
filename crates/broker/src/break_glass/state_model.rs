@@ -26,7 +26,7 @@ use krabka_metadata::{
     BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, MetadataImage, MetadataRecord,
 };
 use krabka_units::millis;
-use stateright::{Checker, Model, Property};
+use stateright::{Model, Property};
 use uuid::Uuid;
 
 use crate::{
@@ -36,7 +36,6 @@ use crate::{
         handlers::approve::{self, Attempt},
     },
     config::BreakGlassConfig,
-    model_check::run_bfs,
     operator_keys::OperatorKeys,
 };
 
@@ -115,16 +114,7 @@ fn record(state: &ProposalState) -> BreakGlassProposalRecord {
         reason: "incident 42".to_owned(),
         created_at_ms: 0,
         expires_at_ms: EXPIRES_AT,
-        approvals: state
-            .approvals
-            .iter()
-            .map(|principal| BreakGlassApproval {
-                principal: (*principal).to_owned(),
-                approved_at_ms: 0,
-                key_id: String::new(),
-                signature: Vec::new(),
-            })
-            .collect(),
+        approvals: model_approvals(&state.approvals),
         consumed_at_ms: i64::from(state.consumed),
         withdrawn: state.withdrawn,
     }
@@ -145,28 +135,10 @@ impl BreakGlassModel {
     /// Apply one approval or one withdrawal through the real handler decision.
     fn settle(&self, state: &mut ProposalState, principal: &'static str, withdraw: bool) {
         let stored = record(state);
-        let attempt = Attempt {
-            principal,
-            key_id: "",
-            signature: &[],
-            withdraw,
-            now_ms: state.now_ms,
-        };
-        if let Ok(updated) =
-            approve::decide(self.policy(), &OperatorKeys::default(), &stored, &attempt)
+        if let Ok(updated) = model_settle(self.policy(), &stored, principal, withdraw, state.now_ms)
         {
             state.withdrawn = updated.withdrawn;
-            state.approvals = updated
-                .approvals
-                .iter()
-                .map(|approval| {
-                    self.principals
-                        .iter()
-                        .copied()
-                        .find(|name| *name == approval.principal)
-                        .expect("an approval names a principal of the model universe")
-                })
-                .collect();
+            state.approvals = model_approval_principals(&self.principals, &updated.approvals);
         }
     }
 
@@ -184,7 +156,7 @@ impl BreakGlassModel {
 }
 
 /// How many different principals appear in `approvals`.
-fn distinct(approvals: &[&'static str]) -> usize {
+pub(super) fn distinct(approvals: &[&'static str]) -> usize {
     let mut seen: Vec<&str> = Vec::with_capacity(approvals.len());
     for principal in approvals {
         if !seen.contains(principal) {
@@ -291,17 +263,12 @@ pub(super) fn config(
 }
 
 fn run(model: BreakGlassModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, TARGET_STATE_COUNT);
-    assert2::assert!(
-        checker.unique_state_count() < MAX_UNIQUE_STATES,
-        "[{label}] unique-state bound exceeded"
-    );
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    crate::model_check::check_model(
+        model,
         label,
+        (MAX_DEPTH, TARGET_STATE_COUNT, MAX_UNIQUE_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }
 
 #[test]
@@ -334,4 +301,52 @@ fn three_approvals_of_four_approvers() {
         "three_approvals_of_four_approvers",
         PINNED_UNIQUE_STATES_THREE_OF_FOUR,
     );
+}
+
+/// Project the model's ordered principals into unsigned stored approvals.
+pub(super) fn model_approvals(principals: &[&str]) -> Vec<BreakGlassApproval> {
+    principals
+        .iter()
+        .map(|principal| BreakGlassApproval {
+            principal: (*principal).to_owned(),
+            approved_at_ms: 0,
+            key_id: String::new(),
+            signature: Vec::new(),
+        })
+        .collect()
+}
+
+/// Resolve stored approval names back to the model's static principal universe.
+pub(super) fn model_approval_principals(
+    principals: &[&'static str],
+    approvals: &[BreakGlassApproval],
+) -> Vec<&'static str> {
+    approvals
+        .iter()
+        .map(|approval| {
+            principals
+                .iter()
+                .copied()
+                .find(|name| *name == approval.principal)
+                .expect("an approval names a principal of the model universe")
+        })
+        .collect()
+}
+
+/// Apply an unsigned model step through the real approval decision.
+pub(super) fn model_settle(
+    policy: BreakGlassPolicy<'_>,
+    stored: &BreakGlassProposalRecord,
+    principal: &str,
+    withdraw: bool,
+    now_ms: i64,
+) -> Result<BreakGlassProposalRecord, crate::break_glass::handlers::Refusal> {
+    let attempt = Attempt {
+        principal,
+        key_id: "",
+        signature: &[],
+        withdraw,
+        now_ms,
+    };
+    approve::decide(policy, &OperatorKeys::default(), stored, &attempt)
 }

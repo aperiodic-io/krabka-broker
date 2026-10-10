@@ -185,11 +185,8 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
-    use crate::quota::test_support::image_with_quota as quota_image;
 
-    fn img_with_quota(entity: Vec<(&str, Option<&str>)>, rate: f64) -> MetadataImage {
-        quota_image(entity, "controller_mutation_rate", rate)
-    }
+    crate::quota::test_support::image_builder!(img_with_quota, "controller_mutation_rate");
 
     #[test]
     fn zero_mutations_returns_zero_delay() {

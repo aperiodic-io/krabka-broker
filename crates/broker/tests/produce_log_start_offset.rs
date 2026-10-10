@@ -72,18 +72,22 @@ const PRODUCER_ID: i64 = 777;
 /// with it in `log_append_time_ms`.
 const BATCH_MAX_TIMESTAMP: i64 = 12_345;
 
-/// An accepted produce reports the partition's real log start offset.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_accepted_produce_reports_the_trimmed_log_start_offset() {
-    let p = support::start().await;
-    let topic_id = create_topic(&p.broker, &p.client, "orders").await;
-
+async fn seeded_orders() -> (support::InProcess, WireUuid) {
+    let process = Box::pin(support::start()).await;
+    let topic = create_topic(&process.broker, &process.client, "orders").await;
     for offset in 0..APPENDED_BEFORE_TRIM {
         check!(
-            produce(&p.client, "orders", topic_id).await == accepted(offset, 0),
+            produce(&process.client, "orders", topic).await == accepted(offset, 0),
             "the untrimmed partition starts at 0"
         );
     }
+    (process, topic)
+}
+
+/// An accepted produce reports the partition's real log start offset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_accepted_produce_reports_the_trimmed_log_start_offset() {
+    let (p, topic_id) = seeded_orders().await;
 
     check!(
         trim(&p.client, "orders", TRIM_TO).await
@@ -111,12 +115,8 @@ async fn an_accepted_produce_reports_the_trimmed_log_start_offset() {
 /// a fix that reached only the append would leave this one at -1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_idempotent_retry_reports_the_trimmed_log_start_offset() {
-    let p = support::start().await;
-    let topic_id = create_topic(&p.broker, &p.client, "orders").await;
+    let (p, topic_id) = seeded_orders().await;
 
-    for offset in 0..APPENDED_BEFORE_TRIM {
-        check!(produce(&p.client, "orders", topic_id).await == accepted(offset, 0));
-    }
     check!(trim(&p.client, "orders", TRIM_TO).await.low_watermark == TRIM_TO);
 
     let first = produce_as(&p.client, "orders", topic_id, PRODUCER_ID, 0).await;
@@ -146,10 +146,12 @@ async fn create_topic(
     name: &str,
 ) -> WireUuid {
     let response = client
-        .send(create_topic_request(
-            creatable_topic(name.to_owned(), 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: name.to_owned(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics");
     assert!(response.topics[0].error_code == codes::NONE, "{response:?}");
@@ -181,7 +183,16 @@ async fn produce_as(
         base_sequence,
         ..batch_from_records(vec![value_record(0, Some(Bytes::from_static(b"frame")))])
     };
-    crate::support::client::produce_batch(client, topic, topic_id, batch, 1, 5_000).await
+    crate::support::client::produce_batch(
+        client,
+        batch,
+        crate::support::client::BatchProduceSetup {
+            topic,
+            topic_id,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// Trim partition 0 of `topic` to `offset` and hand back the whole row.

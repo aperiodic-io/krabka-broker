@@ -18,52 +18,81 @@ use crate::{
     test_support::FakeMetadataSource,
 };
 
-pub fn img_with_partition(
-    topic: &str,
-    partition: i32,
-    leader: u64,
-    replicas: &[u64],
-    isr: &[u64],
-) -> MetadataImage {
-    image_with_dirs(topic, partition, leader, replicas, isr, &[])
+#[derive(Clone, Copy, Default)]
+pub enum ElrFinalization {
+    #[default]
+    Unchanged,
+    Enabled,
 }
 
-fn image_with_dirs(
-    topic: &str,
-    partition: i32,
-    leader: u64,
-    replicas: &[u64],
-    isr: &[u64],
-    dirs: &[Uuid],
-) -> MetadataImage {
+#[derive(Clone, Copy)]
+pub struct ElectionSetup<'a> {
+    pub topic: &'a str,
+    pub partition: krabka_ids::PartitionIndex,
+    pub leader: NodeId,
+    pub replicas: &'a [NodeId],
+    pub isr: &'a [NodeId],
+    pub dirs: &'a [Uuid],
+    pub configs: &'a [(&'a str, &'a str)],
+    pub elr: ElrFinalization,
+}
+
+impl Default for ElectionSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "t",
+            partition: krabka_ids::PartitionIndex(0),
+            leader: NodeId(1),
+            replicas: &[NodeId(1), NodeId(2), NodeId(3)],
+            isr: &[NodeId(1), NodeId(2), NodeId(3)],
+            dirs: &[],
+            configs: &[],
+            elr: ElrFinalization::Unchanged,
+        }
+    }
+}
+
+pub fn img_with_partition(setup: ElectionSetup<'_>) -> MetadataImage {
     let mut img = MetadataImage::new(Uuid::nil());
     img.apply(&MetadataRecord::V1Topic(TopicRecord {
-        name: topic.into(),
+        name: setup.topic.into(),
         topic_id: Uuid::nil(),
         partitions: 1,
-        replication_factor: i16::try_from(replicas.len()).unwrap(),
+        replication_factor: i16::try_from(setup.replicas.len()).unwrap(),
     }));
-    img.apply(&MetadataRecord::V1Partition(seed_partition(
-        topic, partition, leader, replicas, isr, dirs,
-    )));
+    img.apply(&MetadataRecord::V1Partition(seed_partition(setup)));
+    if matches!(setup.elr, ElrFinalization::Enabled) {
+        crate::test_support::finalize_elr_version(&mut img);
+    }
+    if !setup.configs.is_empty() {
+        set_topic_configs(
+            &mut img,
+            TopicConfigSetup {
+                topic: setup.topic,
+                entries: setup.configs,
+            },
+        );
+    }
     img
 }
 
 /// Input partition for election tests, before any leader or ISR change.
-pub fn seed_partition(
-    topic: &str,
-    partition: i32,
-    leader: u64,
-    replicas: &[u64],
-    isr: &[u64],
-    dirs: &[Uuid],
-) -> PartitionRecord {
+pub fn seed_partition(setup: ElectionSetup<'_>) -> PartitionRecord {
+    let ElectionSetup {
+        topic,
+        partition,
+        leader,
+        replicas,
+        isr,
+        dirs,
+        ..
+    } = setup;
     PartitionRecord {
         topic: topic.into(),
-        partition,
-        leader: NodeId(leader),
-        replicas: replicas.iter().copied().map(NodeId).collect(),
-        isr: isr.iter().copied().map(NodeId).collect(),
+        partition: partition.0,
+        leader,
+        replicas: replicas.to_vec(),
+        isr: isr.to_vec(),
         leader_epoch: LeaderEpoch(5),
         adding_replicas: vec![],
         removing_replicas: vec![],
@@ -99,27 +128,53 @@ pub async fn failover_with_alive(
 
 /// Independent expected result of a clean election for the three-replica fixture.
 pub fn expected_clean_election(
-    leader: u64,
-    isr: &[u64],
+    leader: NodeId,
+    isr: &[NodeId],
     directories: Vec<Uuid>,
 ) -> PartitionRecord {
-    expected_partition("t", leader, isr, LeaderEpoch(6), directories)
+    expected_partition(ExpectedPartitionSetup {
+        leader,
+        isr,
+        directories,
+        ..Default::default()
+    })
 }
 
 /// Independent expected partition after one change to the three-replica fixture.
-pub fn expected_partition(
-    topic: &str,
-    leader: u64,
-    isr: &[u64],
-    leader_epoch: LeaderEpoch,
-    directories: Vec<Uuid>,
-) -> PartitionRecord {
+pub struct ExpectedPartitionSetup<'a> {
+    pub topic: &'a str,
+    pub leader: NodeId,
+    pub isr: &'a [NodeId],
+    pub leader_epoch: LeaderEpoch,
+    pub directories: Vec<Uuid>,
+}
+
+impl Default for ExpectedPartitionSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "t",
+            leader: NodeId(2),
+            isr: &[NodeId(2), NodeId(3)],
+            leader_epoch: LeaderEpoch(6),
+            directories: vec![],
+        }
+    }
+}
+
+pub fn expected_partition(setup: ExpectedPartitionSetup<'_>) -> PartitionRecord {
+    let ExpectedPartitionSetup {
+        topic,
+        leader,
+        isr,
+        leader_epoch,
+        directories,
+    } = setup;
     PartitionRecord {
         topic: topic.into(),
         partition: 0,
-        leader: NodeId(leader),
+        leader,
         replicas: vec![NodeId(1), NodeId(2), NodeId(3)],
-        isr: isr.iter().copied().map(NodeId).collect(),
+        isr: isr.to_vec(),
         leader_epoch,
         adding_replicas: vec![],
         removing_replicas: vec![],
@@ -200,16 +255,16 @@ pub fn recovery_handle_for_tests() -> crate::unclean_recovery::UncleanRecoveryHa
     crate::unclean_recovery::UncleanRecoveryHandle::for_tests(tx)
 }
 
-/// Apply a `V1TopicConfig` override on top of an existing image. This
-/// matches the runtime path where `AlterConfigs` writes the record.
-pub fn set_topic_config(img: &mut MetadataImage, topic: &str, key: &str, value: &str) {
-    set_topic_configs(img, topic, &[(key, value)]);
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct TopicConfigSetup<'a> {
+    #[default("t")]
+    pub topic: &'a str,
+    pub entries: &'a [(&'a str, &'a str)],
 }
 
-/// [`set_topic_config`] for several keys at once. A `V1TopicConfig` record
-/// replaces the topic's whole override map, so a test that needs two keys has
-/// to publish them in one record.
-pub fn set_topic_configs(img: &mut MetadataImage, topic: &str, entries: &[(&str, &str)]) {
+/// Apply the complete override map in one record, with ELR state in its own records.
+pub fn set_topic_configs(img: &mut MetadataImage, setup: TopicConfigSetup<'_>) {
+    let TopicConfigSetup { topic, entries } = setup;
     let overrides: BTreeMap<String, String> = entries
         .iter()
         .filter(|(key, _)| *key != crate::config_keys::ELIGIBLE_LEADER_REPLICAS)
@@ -336,17 +391,7 @@ pub fn register_broker_with_dirs(img: &mut MetadataImage, id: u64, log_dirs: Vec
         krabka_metadata::BrokerRegistrationRecord {
             incarnation_id: Uuid::from_u128(u128::from(id)),
             log_dirs,
-            ..crate::test_support::broker_registration(id)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(id))
         },
     ));
-}
-
-pub fn img_with_dirs(
-    topic: &str,
-    leader: u64,
-    replicas: &[u64],
-    isr: &[u64],
-    dirs: &[uuid::Uuid],
-) -> MetadataImage {
-    image_with_dirs(topic, 0, leader, replicas, isr, dirs)
 }

@@ -172,11 +172,9 @@ mod tests {
     use crate::{quota::test_support::image_with_quota as quota_image, throttle::TokenBucket};
 
     fn img_with_quota(
-        entity: Vec<(&str, Option<&str>)>,
-        key: &str,
-        value: f64,
+        setup: crate::quota::test_support::QuotaRecordSetup<'_>,
     ) -> Arc<MetadataImage> {
-        Arc::new(quota_image(entity, key, value))
+        Arc::new(quota_image(setup))
     }
 
     /// A refresh keeps each bucket at the rate its consumer created it with
@@ -197,7 +195,11 @@ mod tests {
             let bucket = buckets.get_or_create(quota_key, &key, created_at);
 
             refresh_buckets(
-                &img_with_quota(vec![("user", Some("alice"))], quota_key, value),
+                &img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+                    key: quota_key,
+                    value: crate::quota::test_support::QuotaValue(value),
+                    ..Default::default()
+                }),
                 &buckets,
             );
 
@@ -210,21 +212,26 @@ mod tests {
 
     #[test]
     fn refresh_updates_existing_bucket_rate() {
-        let buckets = Arc::new(QuotaBuckets::new());
-        let key: EntityKey = vec![("user".into(), Some("alice".into()))];
-        let b = buckets.get_or_create("producer_byte_rate", &key, 0.0);
+        let (buckets, b) = crate::quota::test_support::alice_bucket(
+            crate::quota::test_support::UserBucketSetup::default(),
+        );
         assert!(b.byte_rate() == bucket_rate(0.0));
 
-        let img = img_with_quota(vec![("user", Some("alice"))], "producer_byte_rate", 2048.0);
+        let img = img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            value: crate::quota::test_support::QuotaValue(2048.0),
+            ..Default::default()
+        });
         refresh_buckets(&img, &buckets);
         assert!(b.byte_rate() == bucket_rate(2048.0));
     }
 
     #[test]
     fn refresh_zeroes_bucket_when_quota_removed_from_image() {
-        let buckets = Arc::new(QuotaBuckets::new());
-        let key: EntityKey = vec![("user".into(), Some("alice".into()))];
-        let b = buckets.get_or_create("producer_byte_rate", &key, 1024.0);
+        let (buckets, b) =
+            crate::quota::test_support::alice_bucket(crate::quota::test_support::UserBucketSetup {
+                rate: crate::quota::test_support::QuotaValue(1024.0),
+                ..Default::default()
+            });
         assert!(b.byte_rate() == bucket_rate(1024.0));
 
         let empty = Arc::new(MetadataImage::new(uuid::Uuid::nil()));
@@ -248,7 +255,11 @@ mod tests {
             let key: EntityKey = vec![("ip".into(), Some("127.0.0.1".into()))];
             let b = buckets.get_or_create("connection_creation_rate", &key, 1.0);
 
-            let img = img_with_quota(vec![("ip", entity_name)], "connection_creation_rate", rate);
+            let img = img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("ip", entity_name)],
+                key: "connection_creation_rate",
+                value: crate::quota::test_support::QuotaValue(rate),
+            });
             refresh_buckets(&img, &buckets);
             assert!(b.byte_rate() == bucket_rate(expected), "{case}");
         }
@@ -262,11 +273,11 @@ mod tests {
         let buckets = Arc::new(QuotaBuckets::new());
         let key: EntityKey = vec![("ip".into(), Some("::1".into()))];
         let b = buckets.get_or_create("connection_creation_rate", &key, 1.0);
-        let img = img_with_quota(
-            vec![("ip", Some("0:0:0:0:0:0:0:1"))],
-            "connection_creation_rate",
-            3.0,
-        );
+        let img = img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            entity: vec![("ip", Some("0:0:0:0:0:0:0:1"))],
+            key: "connection_creation_rate",
+            value: crate::quota::test_support::QuotaValue(3.0),
+        });
 
         let _ = buckets.ip_names().update(&img);
         refresh_buckets(&img, &buckets);
@@ -288,11 +299,11 @@ mod tests {
         let buckets = Arc::new(QuotaBuckets::new());
         let key: EntityKey = vec![("ip".into(), Some(peer.to_string()))];
         let b = buckets.get_or_create("connection_creation_rate", &key, 1.0);
-        let img = img_with_quota(
-            vec![("ip", Some("localhost"))],
-            "connection_creation_rate",
-            3.0,
-        );
+        let img = img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            entity: vec![("ip", Some("localhost"))],
+            key: "connection_creation_rate",
+            value: crate::quota::test_support::QuotaValue(3.0),
+        });
         let (_tx, rx) = watch::channel(img);
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(run(rx, Arc::clone(&buckets), shutdown.clone()));
@@ -387,11 +398,18 @@ mod tests {
     }
 
     fn db_image() -> Arc<MetadataImage> {
-        img_with_quota(vec![("ip", Some("db"))], "connection_creation_rate", 3.0)
+        img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            entity: vec![("ip", Some("db"))],
+            key: "connection_creation_rate",
+            value: crate::quota::test_support::QuotaValue(3.0),
+        })
     }
 
     fn other_image() -> Arc<MetadataImage> {
-        img_with_quota(vec![("user", Some("alice"))], "producer_byte_rate", 1.0)
+        img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            value: crate::quota::test_support::QuotaValue(1.0),
+            ..Default::default()
+        })
     }
 
     /// A host name whose lookup failed is looked up again when its wait is
@@ -499,11 +517,18 @@ mod tests {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for (quota_key, rate, want) in cases {
-            let buckets = Arc::new(QuotaBuckets::new());
-            let key: EntityKey = vec![("user".into(), Some("alice".into()))];
-            let b = buckets.get_or_create(quota_key, &key, 1024.0);
+            let (buckets, b) = crate::quota::test_support::alice_bucket(
+                crate::quota::test_support::UserBucketSetup {
+                    key: quota_key,
+                    rate: crate::quota::test_support::QuotaValue(1024.0),
+                },
+            );
 
-            let img = img_with_quota(vec![("user", Some("alice"))], quota_key, rate);
+            let img = img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+                key: quota_key,
+                value: crate::quota::test_support::QuotaValue(rate),
+                ..Default::default()
+            });
             refresh_buckets(&img, &buckets);
             actual.push((quota_key, rate.to_string(), b.byte_rate()));
             expected.push((quota_key, rate.to_string(), bucket_rate(want)));
@@ -526,21 +551,9 @@ mod tests {
             ("client-id".into(), Some("app1".into())),
             ("user".into(), Some("alice".into())),
         ];
-        let alice = || quota_record(vec![("user", Some("alice"))], "producer_byte_rate", 1_000.0);
-        let app1 = || {
-            quota_record(
-                vec![("client-id", Some("app1"))],
-                "producer_byte_rate",
-                200.0,
-            )
-        };
-        let alice_app1 = || {
-            quota_record(
-                vec![("user", Some("alice")), ("client-id", Some("app1"))],
-                "producer_byte_rate",
-                5_000.0,
-            )
-        };
+        let alice = || quota_record(crate::quota::test_support::QuotaRecordSetup::default());
+        let app1 = || crate::quota::test_support::app1_producer_quota();
+        let alice_app1 = || crate::quota::test_support::alice_app1_producer_quota();
         // (label, bucket key, quotas the bucket was made under, quotas after
         // the alter, the rate the bucket keeps)
         let cases = [
@@ -605,7 +618,10 @@ mod tests {
         let drained = b.try_consume(5);
 
         refresh_buckets(
-            &img_with_quota(vec![("user", Some("alice"))], "producer_byte_rate", rate),
+            &img_with_quota(crate::quota::test_support::QuotaRecordSetup {
+                value: crate::quota::test_support::QuotaValue(rate),
+                ..Default::default()
+            }),
             &buckets,
         );
 

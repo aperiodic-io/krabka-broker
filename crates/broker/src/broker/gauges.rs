@@ -345,9 +345,7 @@ mod tests {
                 partition_epoch: 0,
             },
         ));
-        let metrics = crate::metrics::BrokerMetrics::new();
-        let mut config = BrokerConfig::for_tests(std::path::PathBuf::new());
-        config.gauge_poll_interval = millis(1);
+        let (metrics, mut config) = gauge_fixture();
         config.default_min_insync_replicas = 2;
         let shutdown = CancellationToken::new();
         spawn_broker_gauge_updater(
@@ -379,6 +377,13 @@ mod tests {
         shutdown.cancel();
     }
 
+    fn gauge_fixture() -> (crate::metrics::BrokerMetrics, BrokerConfig) {
+        let metrics = crate::metrics::BrokerMetrics::new();
+        let mut config = BrokerConfig::for_tests(std::path::PathBuf::new());
+        config.gauge_poll_interval = millis(1);
+        (metrics, config)
+    }
+
     /// A dir that goes offline under live traffic has to reach the scrape.
     /// The registry is the only thing that knows about the flip, and
     /// `DescribeLogDirs` reports it only to a client that asks.
@@ -386,9 +391,7 @@ mod tests {
     async fn broker_gauge_publishes_the_offline_log_dir_count() {
         let dir = tempfile::tempdir().expect("log root");
         let log_dirs = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
-        let metrics = crate::metrics::BrokerMetrics::new();
-        let mut config = BrokerConfig::for_tests(std::path::PathBuf::new());
-        config.gauge_poll_interval = millis(1);
+        let (metrics, config) = gauge_fixture();
         let shutdown = CancellationToken::new();
         spawn_broker_gauge_updater(
             (Arc::new(PartitionRegistry::new()), log_dirs.clone()),
@@ -433,7 +436,7 @@ mod tests {
             image.apply(&krabka_metadata::MetadataRecord::V1BrokerRegistration(
                 krabka_metadata::BrokerRegistrationRecord {
                     rack: Some(node_rack.to_string()),
-                    ..crate::test_support::broker_registration(node_id)
+                    ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
                 },
             ));
         }
@@ -447,18 +450,14 @@ mod tests {
         for partition in 0..=led {
             let leader = if partition < led { 1 } else { 2 };
             image.apply(&krabka_metadata::MetadataRecord::V1Partition(
-                krabka_metadata::PartitionRecord {
-                    topic: "stretch-topic".into(),
-                    partition,
-                    leader: krabka_metadata::NodeId(leader),
-                    replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-                    isr: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-                    leader_epoch: krabka_metadata::LeaderEpoch(0),
-                    adding_replicas: Vec::new(),
-                    removing_replicas: Vec::new(),
-                    directories: Vec::new(),
-                    partition_epoch: 0,
-                },
+                crate::handlers::test_support::replicated_partition(
+                    crate::handlers::test_support::ReplicatedPartitionSetup {
+                        topic: "stretch-topic",
+                        partition: krabka_ids::PartitionIndex(partition),
+                        leader: krabka_metadata::NodeId(leader),
+                        ..Default::default()
+                    },
+                ),
             ));
         }
         image

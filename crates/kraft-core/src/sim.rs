@@ -187,9 +187,11 @@ impl Sim {
     /// Panics if `leader` is not present in the simulated cluster. Callers must
     /// elect or add the node before they append through it.
     pub fn leader_append(&mut self, leader: NodeId, n: usize) {
-        let epoch = self.nodes[&leader].machine.quorum_state().leader_epoch;
-        let node = self.nodes.get_mut(&leader).unwrap();
-        node.log.append_in_epoch(epoch, n);
+        let epoch = self
+            .nodes
+            .get_mut(&leader)
+            .expect("no entry found for key")
+            .append_in_current_epoch(n);
         self.record(
             TraceAction::Append {
                 node: leader.0,

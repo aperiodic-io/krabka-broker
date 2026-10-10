@@ -3,11 +3,9 @@
 //! segment files on disk behind it, and the block that makes their deletion
 //! fail with a real `io::Error`.
 
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::Arc;
 
 use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_metadata::NodeId;
 use krabka_protocol::records::{Record, RecordBatch};
 use tempfile::TempDir;
 
@@ -37,11 +35,9 @@ fn epoch_batch(base: i64, value: &[u8]) -> RecordBatch {
 /// expiry the moment the sweep looks at it.
 pub(super) async fn expired_partition(
     root: &TempDir,
-    topic: &str,
-    leader: NodeId,
-    log_dir_status: crate::log_dir_status::LogDirRegistry,
+    setup: crate::test_support::CommittedPartitionSetup<'_>,
 ) -> Arc<Partition> {
-    let part_dir = crate::log_dir::partition_dir(root.path(), topic, 0);
+    let part_dir = crate::log_dir::partition_dir(root.path(), setup.topic, setup.partition.0);
     std::fs::create_dir_all(&part_dir).expect("create partition dir");
     let cfg = krabka_log::LogConfig {
         segment_size: krabka_units::bytes(64),
@@ -53,24 +49,7 @@ pub(super) async fn expired_partition(
         let mut batch = epoch_batch(idx, format!("value-{idx}").as_bytes());
         log.append(&mut batch).expect("append expired batch");
     }
-    let part = crate::broker::spawn_partition(
-        topic.to_string(),
-        PartitionIndex(0),
-        root.path().to_path_buf(),
-        log,
-        log_dir_status,
-        Arc::new(crate::producer_state::ProducerState::new()),
-        false,
-    );
-    part.current_leader.store(leader.0, Ordering::Relaxed);
-    // Retention now bounds every eviction reason at the high watermark
-    // (Kafka's `deletableSegments`), so a fixture whose replica state never
-    // advanced past 0 would see nothing evicted. A replica that has caught
-    // up: `set_follower_hw` clamps to the local log end, so this leaves the
-    // whole log committed, the same fixture pattern
-    // `cleaner::test_support::compactable_partition` uses.
-    part.set_follower_hw(krabka_log::Offset(i64::MAX)).await;
-    part
+    crate::test_support::committed_partition(root.path(), log, setup).await
 }
 
 /// The base offsets of the segment files currently on disk for `topic`.

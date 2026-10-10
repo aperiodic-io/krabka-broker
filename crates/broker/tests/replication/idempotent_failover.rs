@@ -22,14 +22,13 @@ use krabka_broker::{BrokerConfig, BrokerHandle, codes};
 use krabka_protocol::{
     owned::produce_response::{LeaderIdAndEpoch, PartitionProduceResponse},
     primitives::uuid::Uuid as WireUuid,
-    records::{RecordBatch, RecordsPayload},
+    records::RecordBatch,
 };
 use tempfile::TempDir;
 
 use crate::{
     support,
     support::{
-        produce::single_partition_produce,
         records::{batch_from_records, value_record},
         topics::create_topic_request,
     },
@@ -105,10 +104,7 @@ async fn create_topic(cluster: &Cluster, topic: &str, replicas: &[i32]) -> WireU
     )
     .await;
     let response = admin
-        .send(create_topic_request(
-            support::topic_on(topic, &[replicas]),
-            5_000,
-        ))
+        .send(create_topic_request(support::topic_on(topic, &[replicas])))
         .await
         .expect("CreateTopics");
     assert!(response.topics[0].error_code == codes::NONE);
@@ -132,16 +128,12 @@ async fn produce(
         "producer client",
     )
     .await;
-    let response = client
-        .send(single_partition_produce(
-            topic.to_owned(),
-            topic_id,
-            0,
-            Some(RecordsPayload::V2(vec![batch])),
-            (-1, 30_000),
-        ))
-        .await
-        .expect("Produce");
+    let response = crate::support::produce::send_batch(
+        &client,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {topic: topic.to_owned(), topic_id, ..crate::support::produce::SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()},
+    )
+    .await;
     response.responses[0].partition_responses[0].clone()
 }
 

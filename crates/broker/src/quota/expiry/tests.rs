@@ -45,6 +45,11 @@ fn throttle_series(metrics: &BrokerMetrics) -> Vec<String> {
         .collect()
 }
 
+fn check_expired(buckets: &QuotaBuckets, metrics: &BrokerMetrics) {
+    check!(buckets.len() == 0);
+    check!(throttle_series(metrics).is_empty());
+}
+
 #[test]
 fn an_inactive_bucket_and_its_metric_series_are_both_dropped() {
     let (buckets, metrics) = alice_fixture();
@@ -54,8 +59,7 @@ fn an_inactive_bucket_and_its_metric_series_are_both_dropped() {
     // below "just now" expires it.
     sweep(&buckets, &metrics, millis(0));
 
-    check!(buckets.len() == 0);
-    check!(throttle_series(&metrics).is_empty());
+    check_expired(&buckets, &metrics);
 }
 
 #[test]
@@ -91,8 +95,7 @@ fn a_user_bucket_releases_the_series_of_its_own_key() {
 
     sweep(&buckets, &metrics, millis(0));
 
-    check!(buckets.len() == 0);
-    check!(throttle_series(&metrics).is_empty());
+    check_expired(&buckets, &metrics);
 }
 
 /// Kafka charges every quota under its own config key, and the series is

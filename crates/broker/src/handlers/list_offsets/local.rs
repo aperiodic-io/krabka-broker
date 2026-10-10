@@ -133,11 +133,17 @@ mod tests {
         let clock: Arc<dyn qubit_clock::WallClock> = Arc::new(qubit_clock::StdWallClock::new());
         let partition = crate::delivery::test_support::scheduled_partition(
             logs,
-            topic,
-            policy,
-            &ACTIVATIONS,
-            broker.config.node_id.get(),
             &clock,
+            crate::delivery::test_support::ScheduleSetup {
+                topic,
+                policy,
+                activations: ACTIVATIONS
+                    .iter()
+                    .copied()
+                    .map(crate::test_support::UnixMillis)
+                    .collect(),
+                leader: krabka_ids::NodeId(broker.config.node_id.get()),
+            },
         );
         crate::delivery::test_support::register(&broker.partitions, &partition);
         install_partition_leader_record(broker_handle, topic, broker.config.node_id.get()).await;
@@ -168,10 +174,12 @@ mod tests {
                 krabka_metadata::PartitionRecord {
                     directories: vec![uuid::Uuid::nil()],
                     ..crate::handlers::test_support::replicated_partition(
-                        topic,
-                        0,
-                        krabka_audit::NodeId(leader),
-                        &[krabka_audit::NodeId(leader)],
+                        crate::handlers::test_support::ReplicatedPartitionSetup {
+                            topic,
+                            leader: krabka_audit::NodeId(leader),
+                            replicas: &[krabka_audit::NodeId(leader)],
+                            ..Default::default()
+                        },
                     )
                 },
             ))
@@ -294,11 +302,16 @@ mod tests {
         let clock: Arc<dyn qubit_clock::WallClock> = timeline.new_wall_clock(wall_at(NOW_MS));
         let partition = crate::delivery::test_support::scheduled_partition(
             &logs,
-            TOPIC,
-            DeliveryPolicy::Scheduled,
-            &[NOW_MS - 60_000, NOW_MS + 10_000],
-            OTHER_BROKER,
             &clock,
+            crate::delivery::test_support::ScheduleSetup {
+                topic: TOPIC,
+                activations: vec![
+                    crate::test_support::UnixMillis(NOW_MS - 60_000),
+                    crate::test_support::UnixMillis(NOW_MS + 10_000),
+                ],
+                leader: krabka_ids::NodeId(OTHER_BROKER),
+                ..Default::default()
+            },
         );
         crate::delivery::test_support::register(&broker.partitions, &partition);
         install_partition_leader_record(&broker_handle, TOPIC, broker.config.node_id.get()).await;

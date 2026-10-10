@@ -77,10 +77,61 @@ use crate::{
 
 /// The localhost ECDSA pair used by reload and socket-drain tests.
 pub(crate) fn localhost_ecdsa_pair() -> (rcgen::Certificate, rcgen::KeyPair) {
+    ecdsa_pair_for_host("localhost")
+}
+
+/// A fresh self-signed ECDSA fixture with the caller's exact host SAN.
+pub(crate) fn ecdsa_pair_for_host(host: &str) -> (rcgen::Certificate, rcgen::KeyPair) {
+    let params = rcgen::CertificateParams::new(vec![host.to_string()]).unwrap();
     let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-    let params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
     let cert = params.self_signed(&key).unwrap();
     (cert, key)
+}
+
+/// Advertise every finalized feature from zero through its finalized level.
+pub(crate) fn finalized_broker_features(
+    image: &krabka_metadata::MetadataImage,
+) -> Vec<krabka_protocol::owned::broker_registration_request::Feature> {
+    image
+        .finalized_features()
+        .iter()
+        .map(
+            |(name, level)| krabka_protocol::owned::broker_registration_request::Feature {
+                name: name.clone(),
+                min_supported_version: 0,
+                max_supported_version: *level,
+                ..Default::default()
+            },
+        )
+        .collect()
+}
+
+/// Generate a real Ed25519 pair for signing and trust-set fixtures.
+pub(crate) fn fresh_ed25519_key() -> ring::signature::Ed25519KeyPair {
+    use ring::signature::Ed25519KeyPair;
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).expect("generate pkcs8");
+    Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("parse pkcs8")
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct OperatorKeyFileSetup<'a> {
+    #[default("alice.pub")]
+    pub name: &'a str,
+    #[default("write public key")]
+    pub context: &'a str,
+}
+
+/// Stage an operator public key while returning the private signing pair to its owner.
+pub(crate) fn ed25519_public_key_file(
+    dir: &std::path::Path,
+    setup: OperatorKeyFileSetup<'_>,
+) -> (ring::signature::Ed25519KeyPair, std::path::PathBuf) {
+    use ring::signature::KeyPair as _;
+    let pair = fresh_ed25519_key();
+    let path = dir.join(setup.name);
+    std::fs::write(&path, pair.public_key().as_ref()).expect(setup.context);
+    (pair, path)
 }
 
 /// Binds an HTTPS fixture with a fresh loopback certificate and returns the
@@ -88,9 +139,7 @@ pub(crate) fn localhost_ecdsa_pair() -> (rcgen::Certificate, rcgen::KeyPair) {
 pub(crate) async fn loopback_tls_listener()
 -> (tokio::net::TcpListener, TlsAcceptor, std::path::PathBuf) {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let params = rcgen::CertificateParams::new(vec!["127.0.0.1".to_string()]).unwrap();
-    let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-    let cert = params.self_signed(&key).unwrap();
+    let (cert, key) = ecdsa_pair_for_host("127.0.0.1");
     let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
     let cert_path = dir.path().join("cert.pem");
     std::fs::write(&cert_path, cert.pem()).unwrap();
@@ -109,34 +158,169 @@ pub(crate) async fn loopback_tls_listener()
     (listener, TlsAcceptor::from(Arc::new(server_cfg)), cert_path)
 }
 
+/// Serve concurrent TLS connections with the caller's protocol handler until shutdown.
+pub(crate) async fn serve_loopback_tls<F, Fut>(
+    handler: F,
+) -> (
+    std::net::SocketAddr,
+    tokio_util::sync::CancellationToken,
+    std::path::PathBuf,
+)
+where
+    F: Fn(tokio_rustls::server::TlsStream<tokio::net::TcpStream>) -> Fut + Clone + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let (listener, acceptor, cert_path) = loopback_tls_listener().await;
+    let addr = listener.local_addr().unwrap();
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let srv_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                () = srv_shutdown.cancelled() => break,
+                Ok((sock, _peer)) = listener.accept() => {
+                    let acceptor = acceptor.clone();
+                    let handler = handler.clone();
+                    tokio::spawn(async move {
+                        let Ok(tls) = acceptor.accept(sock).await else { return };
+                        handler(tls).await;
+                    });
+                }
+            }
+        }
+    });
+    (addr, shutdown, cert_path)
+}
+
+/// Own the temporary directory alongside its replica until the caller drops both.
+pub(crate) fn temporary_partition(
+    setup: StandalonePartitionSetup<'_>,
+) -> (tempfile::TempDir, Arc<crate::partition::Partition>) {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let partition = open_partition(directory.path(), setup);
+    (directory, partition)
+}
+
 /// Opens a local replica with a running writer in the supplied log directory.
 pub(crate) fn open_partition(
     log_dir: &std::path::Path,
-    topic: &str,
-    partition: i32,
+    setup: StandalonePartitionSetup<'_>,
 ) -> Arc<crate::partition::Partition> {
-    let path = crate::log_dir::partition_dir(log_dir, topic, partition);
+    let path = crate::log_dir::partition_dir(log_dir, setup.topic, setup.partition.0);
     std::fs::create_dir_all(&path).expect("create partition directory");
     let log = krabka_log::Log::open(&path, krabka_log::LogConfig::default()).expect("open log");
-    spawn_standalone_partition(log_dir, topic, partition, log, false)
+    spawn_standalone_partition(log_dir, log, setup)
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum StorageMode {
+    #[default]
+    Local,
+    Diskless,
+}
+
+impl StorageMode {
+    pub(crate) fn from_wire(diskless: bool) -> Self {
+        if diskless {
+            Self::Diskless
+        } else {
+            Self::Local
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum FreezeState {
+    #[default]
+    Frozen,
+    Thawed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub(crate) struct PartitionCount(pub i32);
+
+impl Default for PartitionCount {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub(crate) struct ReplicationFactor(pub i16);
+
+impl Default for ReplicationFactor {
+    fn default() -> Self {
+        Self(3)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub(crate) struct PartitionEpoch(pub i32);
+
+/// An expected Kafka response code, including deliberately invalid fixture values.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub(crate) struct KafkaErrorCode(pub i16);
+
+/// A wall-clock coordinate, distinct from a record offset or a duration.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub(crate) struct UnixMillis(pub i64);
+
 /// Start a standalone writer over the caller's already-opened log.
+#[derive(Clone, Copy)]
+pub(crate) struct StandalonePartitionSetup<'a> {
+    pub topic: &'a str,
+    pub partition: krabka_ids::PartitionIndex,
+    pub storage: StorageMode,
+}
+
+impl Default for StandalonePartitionSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "orders",
+            partition: krabka_ids::PartitionIndex::default(),
+            storage: StorageMode::Local,
+        }
+    }
+}
+
 pub(crate) fn spawn_standalone_partition(
     log_dir: &std::path::Path,
-    topic: &str,
-    partition: i32,
     log: krabka_log::Log,
-    diskless: bool,
+    setup: StandalonePartitionSetup<'_>,
 ) -> Arc<crate::partition::Partition> {
+    let StandalonePartitionSetup {
+        topic,
+        partition,
+        storage,
+    } = setup;
     crate::broker::spawn_partition(
         topic.to_owned(),
-        krabka_ids::PartitionIndex(partition),
+        partition,
         log_dir.to_path_buf(),
         log,
         crate::log_dir_status::LogDirRegistry::default(),
         Arc::new(crate::producer_state::ProducerState::new()),
-        diskless,
+        storage == StorageMode::Diskless,
     )
 }
 
@@ -183,7 +367,10 @@ pub(crate) async fn start_controller() -> (BrokerHandle, SocketAddr, tempfile::T
 }
 
 /// Builds non-transactional records with explicit values and a shared timestamp.
-pub(crate) fn static_records_batch(values: &[&'static [u8]], timestamp_ms: i64) -> RecordBatch {
+pub(crate) fn static_records_batch(
+    values: &[&'static [u8]],
+    timestamp_ms: UnixMillis,
+) -> RecordBatch {
     let records = values
         .iter()
         .enumerate()
@@ -198,14 +385,51 @@ pub(crate) fn static_records_batch(values: &[&'static [u8]], timestamp_ms: i64) 
         .collect();
     fixture_records_batch(
         records,
-        i32::try_from(values.len()).expect("record count fits i32") - 1,
+        RecordOffsetDelta(i32::try_from(values.len()).expect("record count fits i32") - 1),
         timestamp_ms,
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecordCount(pub i32);
+
+impl Default for RecordCount {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct RepeatedRecordsSetup {
+    pub count: RecordCount,
+    pub timestamp: UnixMillis,
+}
+
+#[derive(Clone, Copy)]
+struct RecordOffsetDelta(i32);
+
+/// Partition fixtures append records with a deterministic wall-clock timestamp.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct PartitionRecordsSetup {
+    pub count: RecordCount,
+    #[default(UnixMillis(1_700_000_000))]
+    pub timestamp: UnixMillis,
+}
+
+pub(crate) fn partition_records_batch(setup: PartitionRecordsSetup) -> RecordBatch {
+    repeated_records_batch(RepeatedRecordsSetup {
+        count: setup.count,
+        timestamp: setup.timestamp,
+    })
+}
+
 /// Builds a batch of identical values, preserving the explicit count header.
-pub(crate) fn repeated_records_batch(count: i32, timestamp_ms: i64) -> RecordBatch {
-    let records = (0..count)
+pub(crate) fn repeated_records_batch(setup: RepeatedRecordsSetup) -> RecordBatch {
+    let RepeatedRecordsSetup {
+        count,
+        timestamp: timestamp_ms,
+    } = setup;
+    let records = (0..count.0)
         .map(|offset_delta| Record {
             attributes: 0,
             offset_delta,
@@ -215,22 +439,22 @@ pub(crate) fn repeated_records_batch(count: i32, timestamp_ms: i64) -> RecordBat
             headers: vec![],
         })
         .collect();
-    fixture_records_batch(records, count - 1, timestamp_ms)
+    fixture_records_batch(records, RecordOffsetDelta(count.0 - 1), timestamp_ms)
 }
 
 /// Supplies the common non-transactional header for fixture records.
-pub(crate) fn fixture_records_batch(
+fn fixture_records_batch(
     records: Vec<Record>,
-    last_offset_delta: i32,
-    timestamp_ms: i64,
+    last_offset_delta: RecordOffsetDelta,
+    timestamp_ms: UnixMillis,
 ) -> RecordBatch {
     RecordBatch {
         base_offset: 0,
         partition_leader_epoch: -1,
         attributes: Attributes::default(),
-        last_offset_delta,
-        base_timestamp: timestamp_ms,
-        max_timestamp: timestamp_ms,
+        last_offset_delta: last_offset_delta.0,
+        base_timestamp: timestamp_ms.0,
+        max_timestamp: timestamp_ms.0,
         producer_id: -1,
         producer_epoch: -1,
         base_sequence: -1,
@@ -265,16 +489,36 @@ pub(crate) fn string_pairs(values: &[(&str, &str)]) -> std::collections::BTreeMa
 }
 
 /// The signed-action placeholder metadata used by retention freeze fixtures.
-pub(crate) fn topic_freeze_record(
-    scope: &str,
-    pattern_type: krabka_metadata::PatternType,
-    frozen: bool,
-    reason: &str,
-) -> krabka_metadata::TopicFreezeRecord {
+#[derive(Clone, Copy)]
+pub(crate) struct FreezeSetup<'a> {
+    pub scope: &'a str,
+    pub pattern_type: krabka_metadata::PatternType,
+    pub state: FreezeState,
+    pub reason: &'a str,
+}
+
+impl Default for FreezeSetup<'_> {
+    fn default() -> Self {
+        Self {
+            scope: "orders",
+            pattern_type: krabka_metadata::PatternType::Literal,
+            state: FreezeState::Frozen,
+            reason: "DR cutover",
+        }
+    }
+}
+
+pub(crate) fn topic_freeze_record(setup: FreezeSetup<'_>) -> krabka_metadata::TopicFreezeRecord {
+    let FreezeSetup {
+        scope,
+        pattern_type,
+        state,
+        reason,
+    } = setup;
     krabka_metadata::TopicFreezeRecord {
         scope: scope.to_owned(),
         pattern_type,
-        frozen,
+        frozen: state == FreezeState::Frozen,
         reason: reason.to_owned(),
         set_by: "User:alice".to_owned(),
         set_at_ms: 1_770_000_000_000,
@@ -282,6 +526,94 @@ pub(crate) fn topic_freeze_record(
         key_id: String::new(),
         signature: Vec::new(),
     }
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct FrozenTopicsImageSetup {
+    #[default(uuid::Uuid::from_u128(0x5150))]
+    pub cluster: uuid::Uuid,
+}
+
+/// One live DR-cutover freeze per scope, in the requested cluster image.
+pub(crate) fn frozen_topics_image(
+    scopes: &[(&str, krabka_metadata::PatternType)],
+    setup: FrozenTopicsImageSetup,
+) -> MetadataImage {
+    let mut image = MetadataImage::new(setup.cluster);
+    for &(scope, pattern_type) in scopes {
+        image.apply(&krabka_metadata::MetadataRecord::V1TopicFreeze(
+            topic_freeze_record(FreezeSetup {
+                scope,
+                pattern_type,
+                ..Default::default()
+            }),
+        ));
+    }
+    image
+}
+
+pub(crate) fn topic_thaw_record(
+    scope: &str,
+    pattern_type: krabka_metadata::PatternType,
+) -> krabka_metadata::TopicFreezeRecord {
+    krabka_metadata::TopicFreezeRecord {
+        set_by: "User:bob".to_owned(),
+        set_at_ms: 1_770_000_100_000,
+        proposal_id: uuid::Uuid::from_u128(7),
+        ..topic_freeze_record(FreezeSetup {
+            scope,
+            pattern_type,
+            state: crate::test_support::FreezeState::Thawed,
+            reason: "",
+        })
+    }
+}
+
+/// A topic-only image for policy tests, before any partitions are installed.
+#[derive(Clone, Copy)]
+pub(crate) struct TopicSetup<'a> {
+    pub topic: &'a str,
+    pub topic_id: uuid::Uuid,
+    pub partitions: PartitionCount,
+    pub replication_factor: ReplicationFactor,
+}
+
+impl Default for TopicSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "orders",
+            topic_id: uuid::Uuid::from_u128(1),
+            partitions: PartitionCount::default(),
+            replication_factor: ReplicationFactor::default(),
+        }
+    }
+}
+
+impl TopicSetup<'_> {
+    /// Topic metadata for fixtures whose partition records have one replica.
+    pub(crate) fn single_replica() -> Self {
+        Self {
+            replication_factor: ReplicationFactor(1),
+            ..Self::default()
+        }
+    }
+}
+
+pub(crate) fn topic_image(setup: TopicSetup<'_>) -> MetadataImage {
+    let TopicSetup {
+        topic,
+        topic_id,
+        partitions,
+        replication_factor,
+    } = setup;
+    let mut image = MetadataImage::new(uuid::Uuid::nil());
+    image.apply(&MetadataRecord::V1Topic(TopicRecord {
+        name: topic.into(),
+        topic_id,
+        partitions: partitions.0,
+        replication_factor: replication_factor.0,
+    }));
+    image
 }
 
 /// Apply one topic before constructing its partition fixture.
@@ -301,55 +633,70 @@ pub(crate) fn topic_partition_image(
     image
 }
 
-/// The directory-aware partition image used by controller failover fixtures.
-pub(crate) fn directory_partition_image(
-    leader: NodeId,
-    replicas: impl ExactSizeIterator<Item = NodeId>,
-    isr: impl Iterator<Item = NodeId>,
-    directories: &[uuid::Uuid],
-) -> MetadataImage {
-    let mut image = MetadataImage::new(uuid::Uuid::nil());
-    image.apply(&MetadataRecord::V1Topic(TopicRecord {
-        name: "t".into(),
-        topic_id: uuid::Uuid::nil(),
-        partitions: 1,
-        replication_factor: i16::try_from(replicas.len()).unwrap(),
-    }));
-    image.apply(&MetadataRecord::V1Partition(PartitionRecord {
-        topic: "t".into(),
-        partition: 0,
-        leader,
-        replicas: replicas.collect(),
-        isr: isr.collect(),
-        leader_epoch: krabka_metadata::LeaderEpoch(5),
-        adding_replicas: vec![],
-        removing_replicas: vec![],
-        directories: directories.to_vec(),
-        partition_epoch: 0,
-    }));
-    image
-}
-
 krabka_macros::topic_record_fixture!(single_partition_topic);
 
 /// Seeds the one-partition reassignment fixtures with the fixed leader epoch.
-pub(crate) fn reassignment_partition(
-    replicas: &[u64],
-    isr: &[u64],
-    changing: (&[u64], &[u64]),
-    leader: u64,
-) -> PartitionRecord {
-    let (adding, removing) = changing;
+#[derive(Clone)]
+pub(crate) struct ReassignmentSetup<'a> {
+    pub replicas: Vec<NodeId>,
+    pub isr: Vec<NodeId>,
+    pub adding: Vec<NodeId>,
+    pub removing: Vec<NodeId>,
+    pub leader: NodeId,
+    pub directories: &'a [uuid::Uuid],
+}
+
+impl Default for ReassignmentSetup<'_> {
+    fn default() -> Self {
+        Self {
+            replicas: vec![NodeId(1), NodeId(2), NodeId(3)],
+            isr: vec![NodeId(1), NodeId(2), NodeId(3)],
+            adding: vec![],
+            removing: vec![],
+            leader: NodeId(1),
+            directories: &[],
+        }
+    }
+}
+
+impl ReassignmentSetup<'_> {
+    /// An in-flight replacement with the new replica already in the ISR.
+    pub(crate) fn replacing_replica(removed: NodeId, added: NodeId) -> Self {
+        let mut replicas = Self::default().replicas;
+        replicas.push(added);
+        Self {
+            isr: replicas.clone(),
+            replicas,
+            adding: vec![added],
+            removing: vec![removed],
+            ..Default::default()
+        }
+    }
+}
+
+pub(crate) fn replica_nodes(ids: &[u64]) -> Vec<NodeId> {
+    ids.iter().copied().map(NodeId).collect()
+}
+
+pub(crate) fn reassignment_partition(setup: ReassignmentSetup<'_>) -> PartitionRecord {
+    let ReassignmentSetup {
+        replicas,
+        isr,
+        adding,
+        removing,
+        leader,
+        directories,
+    } = setup;
     PartitionRecord {
         topic: "foo".into(),
         partition: 0,
-        leader: NodeId(leader),
-        replicas: replicas.iter().copied().map(NodeId).collect(),
-        isr: isr.iter().copied().map(NodeId).collect(),
+        leader,
+        replicas,
+        isr,
         leader_epoch: krabka_metadata::LeaderEpoch(5),
-        adding_replicas: adding.iter().copied().map(NodeId).collect(),
-        removing_replicas: removing.iter().copied().map(NodeId).collect(),
-        directories: vec![],
+        adding_replicas: adding,
+        removing_replicas: removing,
+        directories: directories.to_vec(),
         partition_epoch: 0,
     }
 }
@@ -382,22 +729,61 @@ pub(crate) fn elr_model_image(
 }
 
 /// A single-partition ISR proposal with epochs read explicitly by its caller.
-pub(crate) fn alter_partition_request(
-    topic_id: WireUuid,
-    broker: (i32, i64),
-    partition: (i32, i32),
-    new_isr: &[i32],
-) -> AlterPartitionRequest {
+#[derive(Clone, Copy, Default)]
+pub(crate) struct WireBrokerId(pub i32);
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BrokerEpoch(pub i64);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct IsrBrokerIdentity {
+    #[default(WireBrokerId(1))]
+    pub id: WireBrokerId,
+    pub epoch: BrokerEpoch,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct IsrPartitionEpochs {
+    pub leader: krabka_metadata::LeaderEpoch,
+    pub partition: PartitionEpoch,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct IsrProposalSetup<'a> {
+    pub topic_id: WireUuid,
+    pub broker: IsrBrokerIdentity,
+    pub partition: IsrPartitionEpochs,
+    pub new_isr: &'a [WireBrokerId],
+}
+
+impl Default for IsrProposalSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic_id: WireUuid::default(),
+            broker: IsrBrokerIdentity::default(),
+            partition: IsrPartitionEpochs::default(),
+            new_isr: &[WireBrokerId(1)],
+        }
+    }
+}
+
+pub(crate) fn alter_partition_request(setup: IsrProposalSetup<'_>) -> AlterPartitionRequest {
+    let IsrProposalSetup {
+        topic_id,
+        broker,
+        partition,
+        new_isr,
+    } = setup;
     AlterPartitionRequest {
-        broker_id: broker.0,
-        broker_epoch: broker.1,
+        broker_id: broker.id.0,
+        broker_epoch: broker.epoch.0,
         topics: vec![AlterPartitionTopic {
             topic_id,
             partitions: vec![AlterPartitionPartition {
                 partition_index: 0,
-                leader_epoch: partition.0,
-                partition_epoch: partition.1,
-                new_isr: new_isr.to_vec(),
+                leader_epoch: partition.leader.0,
+                partition_epoch: partition.partition.0,
+                new_isr: new_isr.iter().map(|id| id.0).collect(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -406,37 +792,84 @@ pub(crate) fn alter_partition_request(
     }
 }
 
+/// Identity of the seeded ELR partition; epochs still come from separate live snapshots.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct LiveIsrSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    #[default(WireUuid([9; 16]))]
+    pub topic_id: WireUuid,
+    #[default(krabka_metadata::LeaderEpoch(7))]
+    pub leader_epoch: krabka_metadata::LeaderEpoch,
+    /// v2 keeps the plain ISR list, avoiding the v3 broker-epoch eligibility extension.
+    #[default(krabka_ids::ApiVersion(2))]
+    pub version: krabka_ids::ApiVersion,
+    #[default(&[WireBrokerId(1)])]
+    pub new_isr: &'a [WireBrokerId],
+}
+
 /// Send a real ISR proposal using the caller's wire identity and separate epoch snapshots.
 pub(crate) async fn propose_isr(
     broker: &Arc<Broker>,
-    topic: &str,
-    identity: (WireUuid, i32, i16),
-    new_isr: &[i32],
+    setup: LiveIsrSetup<'_>,
 ) -> AlterPartitionResponse {
-    let (topic_id, leader_epoch, version) = identity;
+    let LiveIsrSetup {
+        topic,
+        topic_id,
+        leader_epoch,
+        version,
+        new_isr,
+    } = setup;
     let principal = principal("replica");
     let peer = peer();
     let ctx = request_context(&principal, &peer, "broker-client");
     // The controller checks the sender's broker epoch and the row's partition
     // epoch. Keep the two image snapshots in the original request-read order.
     let image = broker.controller.current_image();
-    let request = alter_partition_request(
+    let request = alter_partition_request(IsrProposalSetup {
         topic_id,
-        (1, image.broker_epoch(NodeId(1)).unwrap_or(-1)),
-        (
-            leader_epoch,
-            broker
-                .controller
-                .current_image()
-                .partition(topic, 0)
-                .expect("partition")
-                .partition_epoch,
-        ),
+        broker: IsrBrokerIdentity {
+            epoch: BrokerEpoch(image.broker_epoch(NodeId(1)).unwrap_or(-1)),
+            ..Default::default()
+        },
+        partition: IsrPartitionEpochs {
+            leader: leader_epoch,
+            partition: PartitionEpoch(
+                broker
+                    .controller
+                    .current_image()
+                    .partition(topic, 0)
+                    .expect("partition")
+                    .partition_epoch,
+            ),
+        },
         new_isr,
-    );
-    crate::handlers::alter_partition::handle(broker, request, version, &ctx)
+    });
+    crate::handlers::alter_partition::handle(broker, request, version.0, &ctx)
         .await
         .expect("AlterPartition")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IsrResponseCheck {
+    EnvelopeAndPartition,
+    PartitionOnly,
+}
+
+/// Propose an ISR change and verify its partition result, optionally checking the envelope first.
+pub(crate) async fn accepted_isr_proposal(
+    broker: &Arc<Broker>,
+    setup: LiveIsrSetup<'_>,
+    response_check: IsrResponseCheck,
+) {
+    let response = propose_isr(broker, setup).await;
+    if response_check == IsrResponseCheck::EnvelopeAndPartition {
+        assert2::assert!(response.error_code == crate::codes::NONE);
+    }
+    assert2::assert!(
+        response.topics[0].partitions[0].error_code == crate::codes::NONE,
+        "AlterPartition refused the proposal: {response:?}"
+    );
 }
 
 /// Authorizer that denies every request. It drives the authorization-failure
@@ -771,13 +1204,13 @@ pub(crate) async fn lead_transaction_state_partitions(
 ///
 /// A test spells out each field its scenario depends on and takes the rest
 /// from here: `BrokerRegistrationRecord { fenced: true,
-/// ..broker_registration(2) }`.
-pub(crate) fn broker_registration(node_id: u64) -> krabka_metadata::BrokerRegistrationRecord {
+/// ..broker_registration(NodeId(2)) }`.
+pub(crate) fn broker_registration(node_id: NodeId) -> krabka_metadata::BrokerRegistrationRecord {
     krabka_metadata::BrokerRegistrationRecord {
         fenced: false,
         in_controlled_shutdown: false,
         cordoned_log_dirs: None,
-        node_id: krabka_raft::NodeId(node_id),
+        node_id,
         broker_epoch: 0,
         incarnation_id: uuid::Uuid::nil(),
         host: "127.0.0.1".into(),
@@ -786,6 +1219,16 @@ pub(crate) fn broker_registration(node_id: u64) -> krabka_metadata::BrokerRegist
         log_dirs: vec![],
         endpoints: vec![],
         features: std::collections::BTreeMap::new(),
+    }
+}
+
+/// A named plaintext endpoint using the caller's host and port.
+pub(crate) fn plaintext_broker_endpoint(host: &str, port: u16) -> krabka_metadata::BrokerEndpoint {
+    krabka_metadata::BrokerEndpoint {
+        name: "PLAINTEXT".into(),
+        host: host.into(),
+        port,
+        protocol: krabka_security::ListenerProtocol::Plaintext,
     }
 }
 
@@ -807,7 +1250,7 @@ pub(crate) async fn wait_for_controller_leader(broker: &Broker) {
 }
 
 /// Register `node_id` as a remote broker in the controller's image.
-pub(crate) async fn seed_remote_broker(handle: &BrokerHandle, node_id: u64) {
+pub(crate) async fn seed_remote_broker(handle: &BrokerHandle, node_id: NodeId) {
     handle
         .broker_arc_for_test()
         .controller
@@ -907,6 +1350,17 @@ pub(crate) fn decode_response<T: Decode<'static>>(bytes: &Bytes, version: i16) -
     resp
 }
 
+/// Encode and decode a response while returning the decoder's consumption result.
+pub(crate) fn round_trip_response<T: Encode + Decode<'static>>(
+    response: &T,
+    version: krabka_ids::ApiVersion,
+) -> (T, bool) {
+    let bytes = crate::handlers::encode_response(response, version.0).expect("encode");
+    let mut cursor: &[u8] = &bytes;
+    let decoded = T::decode(&mut cursor, version.0).expect("decode");
+    (decoded, cursor.is_empty())
+}
+
 /// An authorizer that reads the grants from the principal name.
 ///
 /// The name is a `+`-separated list of `<ResourceType>:<AclOperation>` grants,
@@ -938,12 +1392,32 @@ impl crate::authorizer::Authorizer for GrantsInPrincipalName {
 
 /// A literal `Allow` ACL for `principal` (such as `User:alice`) from any host,
 /// to `operation` on the `resource_type` resource named `resource_name`.
-pub(crate) fn allow_acl(
-    resource_type: krabka_metadata::ResourceType,
-    resource_name: &str,
-    principal: &str,
-    operation: krabka_metadata::AclOperation,
-) -> krabka_metadata::AclEntry {
+#[derive(Clone, Copy)]
+pub(crate) struct AllowAclSetup<'a> {
+    pub resource_type: krabka_metadata::ResourceType,
+    pub resource_name: &'a str,
+    pub principal: &'a str,
+    pub operation: krabka_metadata::AclOperation,
+}
+
+impl Default for AllowAclSetup<'_> {
+    fn default() -> Self {
+        Self {
+            resource_type: krabka_metadata::ResourceType::Topic,
+            resource_name: "orders",
+            principal: "User:alice",
+            operation: krabka_metadata::AclOperation::Read,
+        }
+    }
+}
+
+pub(crate) fn allow_acl(setup: AllowAclSetup<'_>) -> krabka_metadata::AclEntry {
+    let AllowAclSetup {
+        resource_type,
+        resource_name,
+        principal,
+        operation,
+    } = setup;
     krabka_metadata::AclEntry {
         resource_type,
         resource_name: resource_name.to_string(),
@@ -953,6 +1427,26 @@ pub(crate) fn allow_acl(
         operation,
         permission_type: krabka_metadata::PermissionType::Allow,
     }
+}
+
+/// Independent cluster `DescribeConfigs` implication cases shared by configuration APIs.
+pub(crate) fn describe_configs_acl_cases<'a, R>(
+    allowed: &'a R,
+    denied: &'a R,
+) -> Vec<(&'static str, Option<krabka_metadata::AclOperation>, &'a R)> {
+    use krabka_metadata::AclOperation;
+    vec![
+        ("no-grant", None, denied),
+        ("describe", Some(AclOperation::Describe), denied),
+        ("alter", Some(AclOperation::Alter), denied),
+        (
+            "describe-configs",
+            Some(AclOperation::DescribeConfigs),
+            allowed,
+        ),
+        ("alter-configs", Some(AclOperation::AlterConfigs), allowed),
+        ("all", Some(AclOperation::All), allowed),
+    ]
 }
 
 /// Commit one literal `Allow` ACL for `User:<user>` on the cluster resource.
@@ -969,10 +1463,12 @@ pub(crate) async fn grant_cluster_operation(
         .broker_arc_for_test()
         .controller
         .submit_change(vec![MetadataRecord::V1AccessControlEntry(allow_acl(
-            krabka_metadata::ResourceType::Cluster,
-            crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
-            &format!("User:{user}"),
-            operation,
+            crate::test_support::AllowAclSetup {
+                resource_type: krabka_metadata::ResourceType::Cluster,
+                resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+                principal: &format!("User:{user}"),
+                operation,
+            },
         ))])
         .await
         .expect("commit cluster acl");
@@ -995,10 +1491,12 @@ pub(crate) async fn grant_topic_operation(
         .broker_arc_for_test()
         .controller
         .submit_change(vec![MetadataRecord::V1AccessControlEntry(allow_acl(
-            krabka_metadata::ResourceType::Topic,
-            topic,
-            &format!("User:{user}"),
-            operation,
+            crate::test_support::AllowAclSetup {
+                resource_name: topic,
+                principal: &format!("User:{user}"),
+                operation,
+                ..Default::default()
+            },
         ))])
         .await
         .expect("commit topic acl");
@@ -1186,16 +1684,28 @@ pub(crate) async fn start_group_broker_no_audit(
     .await
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) enum ShareApiSupport {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ShareBrokerSetup {
+    pub support: ShareApiSupport,
+}
+
 /// Like [`start_group_broker`], but it also waits until the share coordinator
-/// serves `__share_group_state`. With `share_enabled` false it then finalizes
+/// serves `__share_group_state`. Disabled support then finalizes
 /// `share.version` at 0, which turns the share-group APIs off.
 pub(crate) async fn start_share_broker(
     authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
-    share_enabled: bool,
+    setup: ShareBrokerSetup,
 ) -> (BrokerHandle, tempfile::TempDir) {
     let (handle, dir) = start_group_broker(authorizer).await;
     handle.wait_until_share_coordinator_ready().await;
-    if !share_enabled {
+    if matches!(setup.support, ShareApiSupport::Disabled) {
         finalize_share_version(&handle.broker_arc_for_test(), 0).await;
     }
     (handle, dir)
@@ -1359,11 +1869,18 @@ pub(crate) async fn await_until(what: &str, mut cond: impl FnMut() -> bool) {
 
 /// Plaintext controller transport for fixtures with no configured voters.
 pub(crate) fn plaintext_controller_dialer() -> crate::controller_endpoint::ControllerDialer {
+    plaintext_controller_dialer_with_voters(Vec::new())
+}
+
+/// The same transport with a statically configured controller quorum.
+pub(crate) fn plaintext_controller_dialer_with_voters(
+    voters: Vec<(krabka_raft::NodeId, String)>,
+) -> crate::controller_endpoint::ControllerDialer {
     crate::controller_endpoint::ControllerDialer {
         outbound_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
         listener_protocol: krabka_security::ListenerProtocol::Plaintext,
         server_name: "localhost".to_owned(),
-        quorum_voters: Vec::new(),
+        quorum_voters: voters,
     }
 }
 
@@ -1374,6 +1891,14 @@ impl FakeMetadataSource {
             .image(image)
             .controller_bound_addr(SocketAddr::from(([127, 0, 0, 1], 0)))
             .build()
+    }
+
+    /// Use a test-owned publication channel, independently of successful submits.
+    pub(crate) fn published_image_channel(image_tx: watch::Sender<Arc<MetadataImage>>) -> Self {
+        Self {
+            image_tx,
+            ..Self::static_image(MetadataImage::new(uuid::Uuid::nil()))
+        }
     }
 
     /// A builder over an empty image with no elected leader, no committed
@@ -2109,8 +2634,14 @@ impl krabka_raft::OutboundDialer for RecordingDialer {
 
 krabka_macros::keyed_record_batch_fixture!(keyed_records_batch);
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct EmptyPayloadBatchSetup {
+    pub count: RecordCount,
+}
+
 /// An empty-payload fixture batch with the protocol's original default headers.
-pub(crate) fn default_records_batch(n: i32) -> RecordBatch {
+pub(crate) fn default_records_batch(setup: EmptyPayloadBatchSetup) -> RecordBatch {
+    let n = setup.count.0;
     let mut batch = RecordBatch {
         last_offset_delta: n - 1,
         ..RecordBatch::default()
@@ -2122,4 +2653,449 @@ pub(crate) fn default_records_batch(n: i32) -> RecordBatch {
         });
     }
     batch
+}
+
+/// Explicit values with the protocol's default batch header and leader epoch zero.
+pub(crate) fn default_value_records_batch(values: &[&'static [u8]]) -> RecordBatch {
+    RecordBatch {
+        partition_leader_epoch: 0,
+        ..static_records_batch(values, UnixMillis(0))
+    }
+}
+
+pub(crate) fn single_value_batch(value: &'static [u8]) -> RecordBatch {
+    default_value_records_batch(&[value])
+}
+
+/// Spawn a caught-up replica whose entire local log is committed.
+/// Cleaner and retention fixtures must advance the high watermark through
+/// the follower path, which clamps it to the local log end.
+pub(crate) struct CommittedPartitionSetup<'a> {
+    pub topic: &'a str,
+    pub partition: krabka_ids::PartitionIndex,
+    pub leader: krabka_metadata::NodeId,
+    pub registry: crate::log_dir_status::LogDirRegistry,
+}
+
+impl Default for CommittedPartitionSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "orders",
+            partition: krabka_ids::PartitionIndex(0),
+            leader: krabka_metadata::NodeId(1),
+            registry: crate::log_dir_status::LogDirRegistry::default(),
+        }
+    }
+}
+
+pub(crate) async fn committed_partition(
+    root: &std::path::Path,
+    log: krabka_log::Log,
+    setup: CommittedPartitionSetup<'_>,
+) -> Arc<crate::partition::Partition> {
+    let CommittedPartitionSetup {
+        topic,
+        partition,
+        leader,
+        registry,
+    } = setup;
+    let part = crate::broker::spawn_partition(
+        topic.to_owned(),
+        partition,
+        root.to_path_buf(),
+        log,
+        registry,
+        Arc::new(crate::producer_state::ProducerState::new()),
+        false,
+    );
+    part.current_leader.store(leader.0, Ordering::Relaxed);
+    part.set_follower_hw(krabka_log::Offset(i64::MAX)).await;
+    part
+}
+
+/// Finalize ELR and seed a topic, its partition and minimum ISR together.
+pub(crate) fn elr_topic_records(
+    partition: PartitionRecord,
+    topic_id: uuid::Uuid,
+    min_isr: &str,
+) -> Vec<MetadataRecord> {
+    let topic = partition.topic.clone();
+    vec![
+        MetadataRecord::V1FeatureLevel(krabka_metadata::FeatureLevelRecord {
+            name: crate::features::ELR_VERSION.into(),
+            level: 1,
+        }),
+        MetadataRecord::V1Topic(TopicRecord {
+            name: topic.clone(),
+            topic_id,
+            partitions: 1,
+            replication_factor: i16::try_from(partition.replicas.len()).unwrap(),
+        }),
+        MetadataRecord::V1Partition(partition),
+        MetadataRecord::V1TopicConfig(TopicConfigRecord {
+            topic,
+            overrides: [(
+                crate::config_keys::MIN_INSYNC_REPLICAS.to_owned(),
+                min_isr.to_owned(),
+            )]
+            .into_iter()
+            .collect(),
+        }),
+    ]
+}
+
+/// Keep both temporary directories alive while callers use their paths.
+pub(crate) fn two_log_dirs() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Vec<std::path::PathBuf>,
+) {
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let paths = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+    (a, b, paths)
+}
+
+/// Wire topology edge shared by authorization and actor cases.
+pub(crate) fn source_to_repartition()
+-> krabka_protocol::owned::streams_group_heartbeat_request::Subtopology {
+    krabka_protocol::owned::streams_group_heartbeat_request::Subtopology {
+        subtopology_id: "0".into(),
+        source_topics: vec!["orders".into()],
+        repartition_sink_topics: vec!["rp".into()],
+        ..Default::default()
+    }
+}
+
+/// Describe a topic independently of the create response's config conversion.
+type TopicConfigOverrides = std::collections::BTreeMap<String, String>;
+static NO_TOPIC_OVERRIDES: TopicConfigOverrides = TopicConfigOverrides::new();
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct DescribedCreationSetup<'a> {
+    #[default(krabka_metadata::NodeId(1))]
+    pub node: krabka_metadata::NodeId,
+    #[default("t")]
+    pub topic: &'a str,
+    #[default(&NO_TOPIC_OVERRIDES)]
+    pub overrides: &'a TopicConfigOverrides,
+}
+
+pub(crate) fn described_creation_configs(
+    image: &krabka_metadata::MetadataImage,
+    setup: DescribedCreationSetup<'_>,
+) -> Vec<krabka_protocol::owned::create_topics_response::CreatableTopicConfigs> {
+    crate::handlers::describe_configs::effective_topic_configs(
+        image,
+        setup.node,
+        setup.topic,
+        setup.overrides,
+        crate::api_catalog::UnstableApiVersions::Disabled,
+        &std::collections::BTreeMap::new(),
+    )
+    .into_iter()
+    .map(
+        |entry| krabka_protocol::owned::create_topics_response::CreatableTopicConfigs {
+            name: entry.name,
+            value: entry.value,
+            read_only: entry.read_only,
+            config_source: entry.config_source,
+            is_sensitive: entry.is_sensitive,
+            ..Default::default()
+        },
+    )
+    .collect()
+}
+
+/// A fresh log and deterministic timestamps bracketing its segment age limit.
+pub(crate) struct SegmentAgeFixture {
+    pub(crate) log: krabka_log::Log,
+    pub(crate) config: krabka_log::LogConfig,
+    pub(crate) dir: tempfile::TempDir,
+    pub(crate) roll_ms: i64,
+    pub(crate) first_ms: i64,
+}
+
+pub(crate) fn segment_age_fixture() -> SegmentAgeFixture {
+    use krabka_units::convert::TimeExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let config = krabka_log::LogConfig::default();
+    let roll_ms = config.segment_roll_interval.millis_i64_trunc();
+    let log = krabka_log::Log::open(dir.path(), config.clone()).unwrap();
+    SegmentAgeFixture {
+        dir,
+        config,
+        log,
+        roll_ms,
+        first_ms: 1_700_000_000_000,
+    }
+}
+
+/// Owned configuration values from the same key/value table used by each test.
+pub(crate) fn config_map(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+/// Wait for spawned tasks to enter their bodies before testing their cleanup.
+pub(crate) async fn wait_tasks_started(ready: impl Fn() -> bool, context: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while !ready() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect(context);
+}
+
+/// Describe the partitions of a single topic with the standard fixture page limit.
+pub(crate) fn topic_partitions_request(
+    topic: &str,
+) -> krabka_protocol::owned::describe_topic_partitions_request::DescribeTopicPartitionsRequest {
+    use krabka_protocol::owned::describe_topic_partitions_request::{
+        DescribeTopicPartitionsRequest, TopicRequest,
+    };
+    DescribeTopicPartitionsRequest {
+        topics: vec![TopicRequest {
+            name: topic.into(),
+            ..Default::default()
+        }],
+        response_partition_limit: 2000,
+        ..Default::default()
+    }
+}
+
+/// Start the one-partition transaction fixture with grants encoded in principal names.
+pub(crate) async fn start_transaction_grant_broker() -> (BrokerHandle, tempfile::TempDir) {
+    start_broker_no_audit_with(|cfg| {
+        configure_single_partition_transactions(
+            cfg,
+            Arc::new(ControllerPeerAllowed(GrantsInPrincipalName)),
+        );
+    })
+    .await
+}
+
+/// A scripted wire response after its correlation id, including flexible header tags.
+pub(crate) fn scripted_response_body(body: &impl Encode, version: i16, flexible: bool) -> Vec<u8> {
+    let mut out = bytes::BytesMut::new();
+    if flexible {
+        bytes::BufMut::put_u8(&mut out, 0);
+    }
+    body.encode(&mut out, version)
+        .expect("encode the scripted answer");
+    out.to_vec()
+}
+
+/// Kafka's common offset/transaction append-error translations, independent of either mapper.
+pub(crate) const COORDINATOR_WRITE_ERROR_CASES: [(i16, i16); 7] = [
+    (
+        crate::codes::NOT_ENOUGH_REPLICAS,
+        crate::codes::COORDINATOR_NOT_AVAILABLE,
+    ),
+    (
+        crate::codes::REQUEST_TIMED_OUT,
+        crate::codes::COORDINATOR_NOT_AVAILABLE,
+    ),
+    (
+        crate::codes::NOT_LEADER_OR_FOLLOWER,
+        crate::codes::NOT_COORDINATOR,
+    ),
+    (
+        crate::codes::KAFKA_STORAGE_ERROR,
+        crate::codes::NOT_COORDINATOR,
+    ),
+    (
+        crate::codes::MESSAGE_TOO_LARGE,
+        crate::codes::UNKNOWN_SERVER_ERROR,
+    ),
+    (
+        crate::codes::RECORD_LIST_TOO_LARGE,
+        crate::codes::UNKNOWN_SERVER_ERROR,
+    ),
+    (
+        crate::codes::UNKNOWN_SERVER_ERROR,
+        crate::codes::UNKNOWN_SERVER_ERROR,
+    ),
+];
+
+/// One heartbeat expiring after the fixed ten-millisecond test window.
+pub(crate) async fn expired_broker_fixture(
+    broker: u64,
+) -> (
+    crate::heartbeat::controller_state::TestClock,
+    crate::heartbeat::controller_state::ControllerLivenessState,
+    Vec<crate::heartbeat::controller_state::LivenessTransition>,
+) {
+    use crate::heartbeat::controller_state::{ControllerLivenessState, TestClock};
+    let clock = TestClock::new();
+    let liveness =
+        ControllerLivenessState::with_test_clock(std::time::Duration::from_millis(10), &clock);
+    liveness.record_heartbeat(broker).await;
+    clock.advance(std::time::Duration::from_millis(11));
+    let transitions = liveness.tick().await;
+    (clock, liveness, transitions)
+}
+
+/// A controller voter, independent of broker registrations.
+pub(crate) struct VoterImageSetup {
+    pub node: krabka_ids::NodeId,
+    pub endpoints: Vec<krabka_metadata::VoterEndpoint>,
+}
+
+impl Default for VoterImageSetup {
+    fn default() -> Self {
+        Self {
+            node: krabka_ids::NodeId(1),
+            endpoints: vec![krabka_metadata::VoterEndpoint {
+                name: "CONTROLLER".to_owned(),
+                host: "127.0.0.1".to_owned(),
+                port: 9093,
+            }],
+        }
+    }
+}
+
+pub(crate) fn voter_image(setup: VoterImageSetup) -> krabka_metadata::MetadataImage {
+    let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
+    image.apply(&krabka_metadata::MetadataRecord::V1Voters(
+        krabka_metadata::VotersRecord {
+            voters: krabka_metadata::VoterSet::from_voters([krabka_metadata::Voter {
+                id: setup.node,
+                directory_id: uuid::Uuid::nil(),
+                endpoints: setup.endpoints,
+                kraft_version: krabka_metadata::KRaftVersionRange::default(),
+            }]),
+        },
+    ));
+    image
+}
+
+/// Start the allow-all fixture and wait for its local controller to lead.
+pub(crate) async fn started_controller_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+    let (handle, dir) =
+        start_broker_with_authorizer(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+    let broker = handle.broker_arc_for_test();
+    wait_for_controller_leader(&broker).await;
+    (handle, dir, broker)
+}
+
+/// Append a fixture batch through the partition's real log.
+pub(crate) fn append_partition_batch(
+    partition: &crate::partition::Partition,
+    batch: &mut RecordBatch,
+) {
+    partition
+        .log
+        .lock()
+        .expect("partition log lock")
+        .append(batch)
+        .expect("append");
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum OAuthTokenContents {
+    Nonempty,
+    Empty,
+}
+
+/// Keep the token file's directory alive while callers exercise config parsing or validation.
+pub(crate) fn oauth_token_file(
+    contents: OAuthTokenContents,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let token_path = dir.path().join("token");
+    let bytes = match contents {
+        OAuthTokenContents::Nonempty => "header.payload.\n",
+        OAuthTokenContents::Empty => "\n",
+    };
+    std::fs::write(&token_path, bytes).unwrap();
+    (dir, token_path)
+}
+
+pub(crate) fn listener_time_overrides(
+    overrides: &[(&str, krabka_units::Time)],
+) -> std::collections::BTreeMap<String, krabka_units::Time> {
+    overrides
+        .iter()
+        .map(|(name, value)| ((*name).to_string(), *value))
+        .collect()
+}
+
+/// Keep a sweep's log root alive alongside its initially empty registry.
+pub(crate) fn sweep_registry_fixture() -> (
+    tempfile::TempDir,
+    Arc<crate::partition_registry::PartitionRegistry>,
+) {
+    (
+        tempfile::tempdir().expect("log root"),
+        Arc::new(crate::partition_registry::PartitionRegistry::new()),
+    )
+}
+
+/// Block on the blocking pool until a sweep has armed its one interval timer.
+pub(crate) async fn park_manual_timer(clock: &Arc<qubit_clock::ManualMonotonicClock>) -> bool {
+    let waiters = Arc::clone(clock);
+    tokio::task::spawn_blocking(move || waiters.wait_for_waiters(1, Duration::from_secs(5)))
+        .await
+        .unwrap()
+}
+
+use krabka_metadata::NodeId as InSyncReplicaId;
+use uuid::Uuid as ReplicaDirectory;
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct InSyncPartitionSetup<'a> {
+    #[default("t")]
+    pub topic: &'a str,
+    pub partition: krabka_ids::PartitionIndex,
+    #[default(krabka_metadata::LeaderEpoch(0))]
+    pub leader_epoch: krabka_metadata::LeaderEpoch,
+    #[default(vec![InSyncReplicaId(1), InSyncReplicaId(2)])]
+    pub replicas: Vec<InSyncReplicaId>,
+    pub directories: Vec<ReplicaDirectory>,
+}
+
+/// A fully in-sync assignment whose first replica leads, retaining exact directory slots.
+pub(crate) fn in_sync_partition(setup: InSyncPartitionSetup<'_>) -> PartitionRecord {
+    PartitionRecord {
+        topic: setup.topic.to_string(),
+        partition: setup.partition.0,
+        leader: setup.replicas[0],
+        isr: setup.replicas.clone(),
+        replicas: setup.replicas,
+        leader_epoch: setup.leader_epoch,
+        directories: setup.directories,
+        adding_replicas: vec![],
+        removing_replicas: vec![],
+        partition_epoch: 0,
+    }
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct StreamsJoinSetup<'a> {
+    #[default("g")]
+    pub group_id: &'a str,
+    #[default("m1")]
+    pub member_id: &'a str,
+}
+
+/// A streams join reporting empty owned task sets and its complete topology.
+pub(crate) fn streams_join_request(
+    topology: krabka_protocol::owned::streams_group_heartbeat_request::Topology,
+    setup: StreamsJoinSetup<'_>,
+) -> krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
+    krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
+        group_id: setup.group_id.into(),
+        member_id: setup.member_id.into(),
+        member_epoch: 0,
+        rebalance_timeout_ms: 1_000,
+        active_tasks: Some(vec![]),
+        standby_tasks: Some(vec![]),
+        warmup_tasks: Some(vec![]),
+        topology: Some(topology),
+        ..Default::default()
+    }
 }

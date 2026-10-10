@@ -128,12 +128,7 @@ mod tests {
 
     #[tokio::test]
     async fn unavailable_snapshot_includes_dead_but_not_unknown_brokers() {
-        let clock = TestClock::new();
-        let liveness =
-            ControllerLivenessState::with_clock(Duration::from_millis(10), clock.clock());
-        liveness.record_heartbeat(2).await;
-        clock.advance(Duration::from_millis(11));
-        let _ = liveness.tick().await;
+        let (_clock, liveness, _) = crate::test_support::expired_broker_fixture(2).await;
 
         let unavailable = liveness.unavailable_snapshot().await;
         assert!(unavailable.contains(&2));

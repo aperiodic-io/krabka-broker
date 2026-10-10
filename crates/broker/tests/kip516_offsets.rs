@@ -31,10 +31,12 @@ use crate::support::start_ready_group as start;
 async fn offset_commit_and_fetch_by_topic_id_round_trip() {
     let p = start().await;
     p.client
-        .send(create_topic_request(
-            creatable_topic("o_topic", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("o_topic").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("create topic");
     let id = topic_id_for(&p.client, "o_topic").await;
@@ -93,13 +95,7 @@ async fn offset_fetch_unresolved_topic_id_returns_unknown_topic_id() {
     const UNKNOWN_TOPIC_ID: i16 = 100;
 
     let p = start().await;
-    let cases = [
-        (
-            "non-zero id",
-            WireUuid(uuid::Uuid::from_u128(0xabad_1dea).into_bytes()),
-        ),
-        ("zero id", WireUuid::ZERO),
-    ];
+    let cases = support::topics::unresolved_topic_ids(0xabad_1dea);
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (label, topic_id) in cases {
@@ -148,10 +144,12 @@ async fn offset_fetch_unresolved_topic_id_returns_unknown_topic_id() {
 async fn offset_commit_unresolved_topic_id_returns_unknown_topic_id() {
     let p = start().await;
     p.client
-        .send(create_topic_request(
-            creatable_topic("oc_known", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("oc_known").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("create topic");
     let known = topic_id_for(&p.client, "oc_known").await;
@@ -214,10 +212,12 @@ async fn offset_commit_unresolved_topic_id_returns_unknown_topic_id() {
 async fn offset_fetch_all_echoes_topic_id() {
     let p = start().await;
     p.client
-        .send(create_topic_request(
-            creatable_topic("fa_topic", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("fa_topic").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("create topic");
     let id = topic_id_for(&p.client, "fa_topic").await;

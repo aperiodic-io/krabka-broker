@@ -129,3 +129,24 @@ where
     let mut cursor = bytes;
     T::decode(&mut cursor, version).expect("decode")
 }
+
+/// A single partition queried through the quorum wire API.
+pub(super) fn quorum_request(
+    topic: &str,
+    partition: i32,
+) -> krabka_protocol::owned::describe_quorum_request::DescribeQuorumRequest {
+    use krabka_protocol::owned::describe_quorum_request::{
+        DescribeQuorumRequest, PartitionData, TopicData,
+    };
+    DescribeQuorumRequest {
+        topics: vec![TopicData {
+            topic_name: topic.to_owned(),
+            partitions: vec![PartitionData {
+                partition_index: partition,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}

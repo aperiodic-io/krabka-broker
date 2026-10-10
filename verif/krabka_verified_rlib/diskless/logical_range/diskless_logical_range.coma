@@ -1,61 +1,56 @@
 (* #"/workspace/crates/verified/src/diskless/logical_range.rs" 194 0 194 86 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
-let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
-let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 195 17 195 23
-let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 196 17 196 30
-let%span slogical_range'1 = "/workspace/crates/verified/src/diskless/logical_range.rs" 201 14 201 23
-let%span slogical_range'2 = "/workspace/crates/verified/src/diskless/logical_range.rs" 199 16 200 39
-let%span slogical_range'3 = "/workspace/crates/verified/src/diskless/logical_range.rs" 198 16 198 81
-let%span slogical_range'4 = "/workspace/crates/verified/src/diskless/logical_range.rs" 197 16 197 51
-let%span slogical_range'5 = "/workspace/crates/verified/src/diskless/logical_range.rs" 203 23 203 32
-let%span slogical_range'6 = "/workspace/crates/verified/src/diskless/logical_range.rs" 203 35 203 36
-let%span slogical_range'7 = "/workspace/crates/verified/src/diskless/logical_range.rs" 203 23 203 36
-let%span slogical_range'8 = "/workspace/crates/verified/src/diskless/logical_range.rs" 203 18 203 36
-let%span slogical_range'9 = "/workspace/crates/verified/src/diskless/logical_range.rs" 204 11 204 23
-let%span slogical_range'10 = "/workspace/crates/verified/src/diskless/logical_range.rs" 204 11 204 25
-let%span slogical_range'11 = "/workspace/crates/verified/src/diskless/logical_range.rs" 205 23 205 24
-let%span slogical_range'12 = "/workspace/crates/verified/src/diskless/logical_range.rs" 205 12 205 24
-let%span slogical_range'13 = "/workspace/crates/verified/src/diskless/logical_range.rs" 210 13 210 14
-let%span slogical_range'14 = "/workspace/crates/verified/src/diskless/logical_range.rs" 213 21 213 22
-let%span slogical_range'15 = "/workspace/crates/verified/src/diskless/logical_range.rs" 213 16 213 22
-let%span slogical_range'16 = "/workspace/crates/verified/src/diskless/logical_range.rs" 214 20 214 34
-let%span slogical_range'17 = "/workspace/crates/verified/src/diskless/logical_range.rs" 214 20 214 36
-let%span slogical_range'18 = "/workspace/crates/verified/src/diskless/logical_range.rs" 216 19 216 32
-let%span slogical_range'19 = "/workspace/crates/verified/src/diskless/logical_range.rs" 179 11 180 40
-let%span slogical_range'20 = "/workspace/crates/verified/src/diskless/logical_range.rs" 181 11 182 39
-let%span slogical_range'21 = "/workspace/crates/verified/src/diskless/logical_range.rs" 183 10 192 1
+let%span slog_index = "/workspace/crates/verified/src/log_index.rs" 13 19 14 48
+let%span slog_index'0 = "/workspace/crates/verified/src/log_index.rs" 15 18 15 43
+let%span slog_index'1 = "/workspace/crates/verified/src/log_index.rs" 16 18 16 89
+let%span slog_index'2 = "/workspace/crates/verified/src/log_index.rs" 17 18 18 49
+let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 195 13 195 69
+let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 196 13 196 14
+let%span slogical_range'1 = "/workspace/crates/verified/src/diskless/logical_range.rs" 199 21 199 22
+let%span slogical_range'2 = "/workspace/crates/verified/src/diskless/logical_range.rs" 199 16 199 22
+let%span slogical_range'3 = "/workspace/crates/verified/src/diskless/logical_range.rs" 200 20 200 34
+let%span slogical_range'4 = "/workspace/crates/verified/src/diskless/logical_range.rs" 200 20 200 36
+let%span slogical_range'5 = "/workspace/crates/verified/src/diskless/logical_range.rs" 202 19 202 32
+let%span slogical_range'6 = "/workspace/crates/verified/src/diskless/logical_range.rs" 179 11 180 40
+let%span slogical_range'7 = "/workspace/crates/verified/src/diskless/logical_range.rs" 181 11 182 39
+let%span slogical_range'8 = "/workspace/crates/verified/src/diskless/logical_range.rs" 183 10 192 1
 
-use creusot.int.UInt64
 use creusot.slice.Slice64
 use creusot.int.Int64
+use creusot.int.UInt64
 use seq.Seq
 use creusot.prelude.Any
 use int.Int
 
 type tup2_i64_i64 = { f0: Int64.t; f1: Int64.t }
 
+let upper_range_cursor (entries: Slice64.slice tup2_i64_i64) (target: Int64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:upper_range_cursor requires] [%#slog_index] forall i: int, j: int. 0 <= i
+      /\ i < j /\ j < Seq.length (Slice64.view entries)
+    -> Int64.to_int (Seq.get (Slice64.view entries) i).f0 <= Int64.to_int (Seq.get (Slice64.view entries) j).f0}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:upper_range_cursor ensures] ([@stop_split] [@expl:upper_range_cursor ensures #0] [%#slog_index'0] UInt64.t'int result
+      <= Seq.length (Slice64.view entries))
+    /\ ([@stop_split] [@expl:upper_range_cursor ensures #1] [%#slog_index'1] forall i: int. 0 <= i
+          /\ i < UInt64.t'int result -> Int64.to_int (Seq.get (Slice64.view entries) i).f0 <= Int64.to_int target)
+    /\ ([@stop_split] [@expl:upper_range_cursor ensures #2] [%#slog_index'2] forall i: int. UInt64.t'int result <= i
+        /\ i < Seq.length (Slice64.view entries)
+      -> not Int64.to_int (Seq.get (Slice64.view entries) i).f0 <= Int64.to_int target)}
+    (! return {result}) ]
+
+type t_Option_usize = None | Some UInt64.t
+
 let len_tup2_i64_i64 (self_: Slice64.slice tup2_i64_i64) (return (x: UInt64.t)) = any
   [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#sslice] Seq.length (Slice64.view self_)
     = UInt64.t'int result}
     (! return {result}) ]
 
-predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other <= self
-
-meta "rewrite_def" predicate ge_log_Int
-
 predicate gt_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other < self
 
 meta "rewrite_def" predicate gt_log_Int
-
-predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
-  [%#swell_founded] ge_log_Int self 0 /\ gt_log_Int self other
-
-meta "rewrite_def" predicate well_founded_relation_Int
-
-type t_Option_usize = None | Some UInt64.t
 
 meta "compute_max_steps" 1000000
 
@@ -63,100 +58,52 @@ meta "select_lsinst" "all"
 
 let diskless_logical_range [#"/workspace/crates/verified/src/diskless/logical_range.rs" 194 0 194 86]
   (entries: Slice64.slice tup2_i64_i64) (requested: Int64.t) (return (x: t_Option_usize)) =
-{[@stop_split] [@expl:diskless_logical_range requires] ([@stop_split] [@expl:diskless_logical_range requires #0] [%#slogical_range'19] forall i: int. 0
+{[@stop_split] [@expl:diskless_logical_range requires] ([@stop_split] [@expl:diskless_logical_range requires #0] [%#slogical_range'6] forall i: int. 0
           <= i
         /\ i < Seq.length (Slice64.view entries)
       -> Int64.to_int (Seq.get (Slice64.view entries) i).f0 <= Int64.to_int (Seq.get (Slice64.view entries) i).f1)
-  /\ ([@stop_split] [@expl:diskless_logical_range requires #1] [%#slogical_range'20] forall i: int, j: int. 0 <= i
+  /\ ([@stop_split] [@expl:diskless_logical_range requires #1] [%#slogical_range'7] forall i: int, j: int. 0 <= i
       /\ i < j /\ j < Seq.length (Slice64.view entries)
     -> Int64.to_int (Seq.get (Slice64.view entries) i).f1 < Int64.to_int (Seq.get (Slice64.view entries) j).f0)}
   (! bb0
   [ bb0 = s0
-    [ s0 = [ &lo <- [%#slogical_range] (0: UInt64.t) ] s1
-    | s1 = len_tup2_i64_i64 [%#slogical_range'0] {entries} (fun (_x: UInt64.t) -> [ &hi <- _x ] s2)
-    | s2 = bb2 ]
-  | bb2 = bb2invariant
-    [ bb2 = {[@expl:loop variant] well_founded_relation_Int variant_old_bb2 ([%#slogical_range'1] UInt64.t'int hi
-      - UInt64.t'int lo)}
-      bb2invariant
-    | bb2invariant = {[@expl:loop invariant #0] [%#slogical_range'4] UInt64.t'int lo <= UInt64.t'int hi
-      /\ UInt64.t'int hi <= Seq.length (Slice64.view entries)}
-      {[@expl:loop invariant #1] [%#slogical_range'3] forall i: int. 0 <= i /\ i < UInt64.t'int lo
-        -> Int64.to_int (Seq.get (Slice64.view entries) i).f0 <= Int64.to_int requested}
-      {[@expl:loop invariant #2] [%#slogical_range'2] forall i: int. UInt64.t'int hi <= i
-          /\ i < Seq.length (Slice64.view entries)
-        -> Int64.to_int requested < Int64.to_int (Seq.get (Slice64.view entries) i).f0}
-      (! [ &variant_old_bb2 <- [%#slogical_range'1] UInt64.t'int hi - UInt64.t'int lo ] s0)
-      [ s0 = [ &_31 <- UInt64.lt lo hi ] s1 | s1 = any [ br0 -> {_31 = false} (! bb10) | br1 -> {_31} (! bb4) ] ]
-      [ bb4 = s0
-        [ s0 = UInt64.sub [%#slogical_range'5] {hi} {lo} (fun (_x: UInt64.t) -> [ &_37 <- _x ] s1)
-        | s1 = [ &_40 <- ([%#slogical_range'6] (2: UInt64.t)) = ([%#slogical_range'7] (0: UInt64.t)) ] s2
-        | s2 = {[@expl:division by zero] [%#slogical_range'7] not _40} s3
-        | s3 = UInt64.div [%#slogical_range'7] {_37} {[%#slogical_range'6] (2: UInt64.t)}
-            (fun (_x: UInt64.t) -> [ &_36 <- _x ] s4)
-        | s4 = UInt64.add [%#slogical_range'8] {lo} {_36} (fun (_x: UInt64.t) -> [ &mid <- _x ] s5)
-        | s5 = [ &_43 <- mid ] s6
-        | s6 = [ &_44 <- Slice64.length entries ] s7
-        | s7 = [ &_45 <- UInt64.lt _43 _44 ] s8
-        | s8 = {[@expl:index in bounds] [%#slogical_range'9] _45} s9
-        | s9 = Slice64.get [%#slogical_range'10] <tup2_i64_i64> {entries} {_43}
-            (fun (r: tup2_i64_i64) -> [ &_42 <- r.f0 ] s10)
-        | s10 = [ &_41 <- Int64.le _42 requested ] s11
-        | s11 = any [ br0 -> {_41 = false} (! bb8) | br1 -> {_41} (! bb7) ] ]
-      | bb7 = s0
-        [ s0 = UInt64.add [%#slogical_range'12] {mid} {[%#slogical_range'11] (1: UInt64.t)}
-            (fun (_x: UInt64.t) -> [ &lo <- _x ] s1)
-        | s1 = bb2 ]
-      | bb8 = s0 [ s0 = [ &hi <- mid ] s1 | s1 = bb2 ] ] ]
-  | bb10 = s0
-    [ s0 = [ &_51 <- lo = ([%#slogical_range'13] (0: UInt64.t)) ] s1
-    | s1 = any [ br0 -> {_51 = false} (! bb12) | br1 -> {_51} (! bb11) ] ]
-  | bb11 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
-  | bb12 = s0
-    [ s0 = UInt64.sub [%#slogical_range'15] {lo} {[%#slogical_range'14] (1: UInt64.t)}
+    [ s0 = upper_range_cursor [%#slogical_range] {entries} {requested} (fun (_x: UInt64.t) -> [ &lo <- _x ] s1)
+    | s1 = [ &_14 <- lo = ([%#slogical_range'0] (0: UInt64.t)) ] s2
+    | s2 = any [ br0 -> {_14 = false} (! bb3) | br1 -> {_14} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = UInt64.sub [%#slogical_range'2] {lo} {[%#slogical_range'1] (1: UInt64.t)}
         (fun (_x: UInt64.t) -> [ &floor <- _x ] s1)
-    | s1 = [ &_59 <- floor ] s2
-    | s2 = [ &_60 <- Slice64.length entries ] s3
-    | s3 = [ &_61 <- UInt64.lt _59 _60 ] s4
-    | s4 = {[@expl:index in bounds] [%#slogical_range'16] _61} s5
-    | s5 = Slice64.get [%#slogical_range'17] <tup2_i64_i64> {entries} {_59}
-        (fun (r: tup2_i64_i64) -> [ &_58 <- r.f1 ] s6)
-    | s6 = [ &_56 <- Int64.le requested _58 ] s7
-    | s7 = any [ br0 -> {_56 = false} (! bb15) | br1 -> {_56} (! bb14) ] ]
-  | bb14 = s0 [ s0 = [ &_ret <- Some floor ] s1 | s1 = return {_ret} ]
-  | bb15 = s0
-    [ s0 = len_tup2_i64_i64 [%#slogical_range'18] {entries} (fun (_x: UInt64.t) -> [ &_65 <- _x ] s1)
-    | s1 = [ &_63 <- UInt64.lt lo _65 ] s2
-    | s2 = any [ br0 -> {_63 = false} (! bb18) | br1 -> {_63} (! bb17) ] ]
-  | bb17 = s0 [ s0 = [ &_ret <- Some lo ] s1 | s1 = return {_ret} ]
-  | bb18 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
+    | s1 = [ &_22 <- floor ] s2
+    | s2 = [ &_23 <- Slice64.length entries ] s3
+    | s3 = [ &_24 <- UInt64.lt _22 _23 ] s4
+    | s4 = {[@expl:index in bounds] [%#slogical_range'3] _24} s5
+    | s5 = Slice64.get [%#slogical_range'4] <tup2_i64_i64> {entries} {_22}
+        (fun (r: tup2_i64_i64) -> [ &_21 <- r.f1 ] s6)
+    | s6 = [ &_19 <- Int64.le requested _21 ] s7
+    | s7 = any [ br0 -> {_19 = false} (! bb6) | br1 -> {_19} (! bb5) ] ]
+  | bb5 = s0 [ s0 = [ &_ret <- Some floor ] s1 | s1 = return {_ret} ]
+  | bb6 = s0
+    [ s0 = len_tup2_i64_i64 [%#slogical_range'5] {entries} (fun (_x: UInt64.t) -> [ &_28 <- _x ] s1)
+    | s1 = [ &_26 <- UInt64.lt lo _28 ] s2
+    | s2 = any [ br0 -> {_26 = false} (! bb9) | br1 -> {_26} (! bb8) ] ]
+  | bb8 = s0 [ s0 = [ &_ret <- Some lo ] s1 | s1 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Option_usize = Any.any_l ()
   | & entries: Slice64.slice tup2_i64_i64 = entries
   | & requested: Int64.t = requested
   | & lo: UInt64.t = Any.any_l ()
-  | & hi: UInt64.t = Any.any_l ()
-  | & _31: bool = Any.any_l ()
-  | & mid: UInt64.t = Any.any_l ()
-  | & _36: UInt64.t = Any.any_l ()
-  | & _37: UInt64.t = Any.any_l ()
-  | & _40: bool = Any.any_l ()
-  | & _41: bool = Any.any_l ()
-  | & _42: Int64.t = Any.any_l ()
-  | & _43: UInt64.t = Any.any_l ()
-  | & _44: UInt64.t = Any.any_l ()
-  | & _45: bool = Any.any_l ()
-  | & _51: bool = Any.any_l ()
+  | & _14: bool = Any.any_l ()
   | & floor: UInt64.t = Any.any_l ()
-  | & _56: bool = Any.any_l ()
-  | & _58: Int64.t = Any.any_l ()
-  | & _59: UInt64.t = Any.any_l ()
-  | & _60: UInt64.t = Any.any_l ()
-  | & _61: bool = Any.any_l ()
-  | & _63: bool = Any.any_l ()
-  | & _65: UInt64.t = Any.any_l ()
-  | & variant_old_bb2: int = Any.any_l () ])
+  | & _19: bool = Any.any_l ()
+  | & _21: Int64.t = Any.any_l ()
+  | & _22: UInt64.t = Any.any_l ()
+  | & _23: UInt64.t = Any.any_l ()
+  | & _24: bool = Any.any_l ()
+  | & _26: bool = Any.any_l ()
+  | & _28: UInt64.t = Any.any_l () ])
   [ return (result: t_Option_usize) ->
-  {[@stop_split] [@expl:diskless_logical_range ensures] [%#slogical_range'21] match result with
+  {[@stop_split] [@expl:diskless_logical_range ensures] [%#slogical_range'8] match result with
       | Some index -> UInt64.t'int index < Seq.length (Slice64.view entries)
       /\ (Int64.to_int (Seq.get (Slice64.view entries) (UInt64.t'int index)).f0 <= Int64.to_int requested
         /\ Int64.to_int requested <= Int64.to_int (Seq.get (Slice64.view entries) (UInt64.t'int index)).f1

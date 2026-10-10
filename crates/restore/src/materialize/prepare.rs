@@ -9,7 +9,7 @@
 //! dry run takes exactly the path a real run takes.
 
 use bytes::{Bytes, BytesMut};
-use krabka_ids::{LeaderEpoch, ProducerId};
+use krabka_ids::ProducerId;
 use krabka_log::{FilteredBatch, VerbatimBatch, filter_batch};
 use krabka_protocol::records::{
     Attributes, RecordBatch, RecordBatchBorrowed, RecordBatchHeader, RecordsError,
@@ -69,7 +69,7 @@ pub(crate) fn prepare_batch(
             Ok((prepare_owned_batch(batch.to_owned()?)?, BatchTally::Kept))
         }
         BatchDecision::Keep => {
-            let verbatim = verbatim_from_header(header, batch_bytes, batch.attributes());
+            let verbatim = VerbatimBatch::from_header(header, batch_bytes);
             Ok((PreparedBatch::Verbatim(verbatim), BatchTally::Kept))
         }
         BatchDecision::Empty => Ok((
@@ -121,7 +121,7 @@ fn prepare_filtered_batch(
 
     Ok(match filtered {
         FilteredBatch::Unchanged => {
-            let verbatim = verbatim_from_header(header, batch_bytes, batch.attributes());
+            let verbatim = VerbatimBatch::from_header(header, batch_bytes);
             (PreparedBatch::Verbatim(verbatim), BatchTally::Kept)
         }
         FilteredBatch::Filtered(rewritten) => {
@@ -225,24 +225,6 @@ fn prepare_owned_batch(batch: RecordBatch) -> Result<PreparedBatch, RestoreError
 
 fn invalid_rewrite(reason: &str) -> RestoreError {
     RecordsError::RecordParse(format!("invalid restored batch rewrite: {reason}")).into()
-}
-
-/// Build the [`VerbatimBatch`] that reproduces `header`'s archived bytes unchanged: every field the log needs for offset assignment, LSO tracking, and the leader-epoch checkpoint, copied straight from the header the producer wrote.
-fn verbatim_from_header(
-    header: &RecordBatchHeader,
-    bytes: Bytes,
-    attributes: Attributes,
-) -> VerbatimBatch {
-    VerbatimBatch {
-        bytes,
-        last_offset_delta: header.last_offset_delta.get(),
-        max_timestamp: header.max_timestamp.get(),
-        leader_epoch: LeaderEpoch(header.partition_leader_epoch.get()),
-        producer_id: ProducerId(header.producer_id.get()),
-        producer_epoch: header.producer_epoch.get(),
-        base_sequence: header.base_sequence.get(),
-        is_transactional: attributes.is_transactional(),
-    }
 }
 
 /// Build a zero-record batch that claims `header`'s archived offset range without holding any of its records: `base_offset` and `last_offset_delta` are copied unchanged, so the target log's end offset still advances by the batch's full archived span. See [`BatchDecision::Empty`].

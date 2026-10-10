@@ -20,7 +20,10 @@ use crate::jvm_acceptance::{
 #[ignore = "requires Docker"]
 async fn jvm_kafka_configs_describe_users_scram_credentials_end_to_end() {
     let (h1, _h2, _h3, _cfg1, _cfg2, _cfg3, _d1, _d2, _d3) =
-        start_three_broker_sasl_plaintext_jvm_cluster_with_users(ADMIN, ADMIN_PASS, &[]).await;
+        start_three_broker_sasl_plaintext_jvm_cluster_with_users(
+            crate::jvm_acceptance::SaslClusterSetup::default(),
+        )
+        .await;
     nc_check_connectivity();
 
     let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);

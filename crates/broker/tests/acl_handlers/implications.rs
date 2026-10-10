@@ -4,7 +4,7 @@
 
 use assert2::assert;
 
-use crate::{acl_admin::create_topic_as_admin, polling::retry_metadata_until_topic_visible};
+use crate::polling::named_metadata_as_alice;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn implication_metadata_describes_after_read_acl() {
@@ -17,32 +17,12 @@ async fn implication_metadata_describes_after_write_acl() {
 }
 
 async fn metadata_implication(operation: krabka_metadata::AclOperation) {
-    let (handle, _dir, _) = crate::sasl_cluster::start_admin_alice().await;
-    let addr = handle.listen_addr();
-
-    create_topic_as_admin(addr, "foo", 1).await;
-
-    // Read and Write both imply Describe without a separate Describe ACL.
-    handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(
-            "foo",
-            "User:alice",
-            operation,
-        ))
-        .await
-        .expect("seed implication ACL for alice");
+    // Read and Write each imply Describe without a separate Describe ACL.
+    let (handle, _dir, addr) = crate::sasl_cluster::start_alice_topic_grant(operation).await;
 
     // Wait for raft commit-then-apply, then ask Metadata for foo by name.
     // Pre-13b would have returned TOPIC_AUTHORIZATION_FAILED (29).
-    let resp = retry_metadata_until_topic_visible(
-        addr,
-        "alice",
-        b"wonderland",
-        "foo",
-        Some(vec!["foo".to_string()]),
-    )
-    .await
-    .expect("Metadata must round-trip");
+    let resp = named_metadata_as_alice(addr, "foo").await;
     handle.shutdown().await;
 
     assert!(resp.topics.len() == 1, "one topic row in response");

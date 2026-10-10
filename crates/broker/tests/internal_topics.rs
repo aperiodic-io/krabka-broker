@@ -89,7 +89,12 @@ async fn create_every_topic(p: &support::InProcess) {
         .send(CreateTopicsRequest {
             topics: TOPICS
                 .iter()
-                .map(|(name, _)| creatable_topic(*name, 1, 1))
+                .map(|(name, _)| {
+                    creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+                        name: (*name).into(),
+                        ..Default::default()
+                    })
+                })
                 .collect(),
             timeout_ms: 10_000,
             ..Default::default()

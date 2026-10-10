@@ -95,9 +95,8 @@ struct WithFlattened {
     outer: Option<u32>,
 }
 
-#[test]
-fn a_field_with_its_own_command_attribute_is_left_alone() {
-    let shapes = WithFlattened::augment_args(Command::new("flattened"))
+fn argument_names(command: &Command) -> Vec<(Option<String>, Option<String>)> {
+    command
         .get_arguments()
         .map(|arg| {
             (
@@ -105,7 +104,12 @@ fn a_field_with_its_own_command_attribute_is_left_alone() {
                 arg.get_env().map(|env| env.to_string_lossy().into_owned()),
             )
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+#[test]
+fn a_field_with_its_own_command_attribute_is_left_alone() {
+    let shapes = argument_names(&WithFlattened::augment_args(Command::new("flattened")));
     let expected = [
         (Some("grouped".to_owned()), None),
         (Some("outer".to_owned()), Some("KRABKA_OUTER".to_owned())),
@@ -125,15 +129,7 @@ struct Prefixed {
 #[test]
 fn the_prefix_argument_replaces_krabka_in_every_variable() {
     let command = Prefixed::augment_args(Command::new("prefixed"));
-    let shapes = command
-        .get_arguments()
-        .map(|arg| {
-            (
-                arg.get_long().map(str::to_owned),
-                arg.get_env().map(|env| env.to_string_lossy().into_owned()),
-            )
-        })
-        .collect::<Vec<_>>();
+    let shapes = argument_names(&command);
     let expected = [
         ("server-name", "BENCH_SERVER_NAME"),
         ("ca-path", "BENCH_CA_PATH"),

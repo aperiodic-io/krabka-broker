@@ -119,17 +119,27 @@ async fn readyz_names_each_condition_as_startup_advances() {
     );
 }
 
+async fn running_probe_fixture() -> (
+    tempfile::TempDir,
+    HealthState,
+    std::net::SocketAddr,
+    krabka_broker::BrokerHandle,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let state = HealthState::new(DEFAULT_READINESS_MAX_METADATA_LAG);
+    let probes = serve_probes(state.clone()).await;
+    let handle = Broker::start_with_health(loopback_config(dir.path()), state.clone())
+        .await
+        .unwrap();
+    (dir, state, probes, handle)
+}
+
 /// A broker that is up stays ready: the metadata condition is evaluated live
 /// on every request, so a probe some way past startup must not start failing
 /// on its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn readyz_stays_200_while_the_broker_runs() {
-    let log_dir = tempfile::tempdir().unwrap();
-    let state = HealthState::new(DEFAULT_READINESS_MAX_METADATA_LAG);
-    let probes = serve_probes(state.clone()).await;
-    let handle = Broker::start_with_health(loopback_config(log_dir.path()), state)
-        .await
-        .unwrap();
+    let (_log_dir, _state, probes, handle) = running_probe_fixture().await;
 
     for _ in 0..3 {
         let (status, _) = get(probes, "/readyz").await;
@@ -142,12 +152,7 @@ async fn readyz_stays_200_while_the_broker_runs() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn readyz_is_503_when_shutting_down() {
-    let log_dir = tempfile::tempdir().unwrap();
-    let state = HealthState::new(DEFAULT_READINESS_MAX_METADATA_LAG);
-    let probes = serve_probes(state.clone()).await;
-    let handle = Broker::start_with_health(loopback_config(log_dir.path()), state.clone())
-        .await
-        .unwrap();
+    let (_log_dir, state, probes, handle) = running_probe_fixture().await;
 
     let (status, body) = get(probes, "/readyz").await;
     check!(status.contains("200 OK"), "{status}");

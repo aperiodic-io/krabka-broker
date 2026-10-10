@@ -112,10 +112,10 @@ pub(crate) fn required_tokens(
     }
 }
 
-/// Read one of the two explicit modes accepted by a field-group attribute.
-pub(crate) fn mode(
+/// Read one of the explicit modes accepted by a field-group attribute.
+pub(crate) fn mode<const N: usize>(
     tokens: TokenStream,
-    modes: [&'static str; 2],
+    modes: [&'static str; N],
 ) -> Result<&'static str, ParseError> {
     let tokens: Vec<_> = tokens.into_iter().collect();
     if let [TokenTree::Ident(name)] = tokens.as_slice()
@@ -125,7 +125,10 @@ pub(crate) fn mode(
     }
     Err(ParseError::new(
         Span::call_site(),
-        format!("expected `{}` or `{}`", modes[0], modes[1]),
+        format!(
+            "expected one of {}",
+            modes.map(|mode| format!("`{mode}`")).join(", ")
+        ),
     ))
 }
 
@@ -161,4 +164,15 @@ pub(crate) fn arguments(input: TokenStream, count: usize) -> Result<Vec<TokenStr
         ));
     }
     Ok(arguments)
+}
+
+/// Reject arguments on an attribute macro that accepts only its annotated item.
+pub(crate) fn no_arguments(tokens: TokenStream, macro_name: &str) -> Result<(), ParseError> {
+    if let Some(token) = tokens.into_iter().next() {
+        return Err(ParseError::new(
+            token.span(),
+            format!("{macro_name} takes no arguments"),
+        ));
+    }
+    Ok(())
 }

@@ -27,7 +27,7 @@ use std::{
 };
 
 use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId, config::NodeRole};
+use krabka_broker::{BootstrapMode, Broker, BrokerHandle, NodeId, config::NodeRole};
 use krabka_client_admin::{AdminClient, AdminError, RaftVoterEndpoint};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -98,12 +98,14 @@ async fn start(
         None,
     )
     .expect("krabka-format wrote meta.properties");
-    let mut config = BrokerConfig::for_tests(log_dir.to_path_buf());
-    config.broker_id = i32::try_from(node.id).expect("node id");
-    config.node_id = NodeId(node.id);
-    config.listen_addr = node.client_addr;
-    config.advertised_listener = node.client_addr.to_string();
-    config.controller_listen_addr = node.controller_addr;
+    let mut config = crate::support::addressed_node_config(
+        log_dir,
+        crate::support::AddressedNodeSetup {
+            node: krabka_broker::NodeId(node.id),
+            client: node.client_addr,
+            controller: node.controller_addr,
+        },
+    );
     config.controller_quorum_voters = vec![];
     config.bootstrap_servers = bootstrap.iter().map(ToString::to_string).collect();
     config.roles = roles;

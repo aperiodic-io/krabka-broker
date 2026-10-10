@@ -738,18 +738,33 @@ mod tests {
         }
     }
 
-    fn parsed(
+    #[derive(Clone, Copy)]
+    struct ParsedApiVersion(i16);
+
+    #[derive(Clone, Copy, Default)]
+    enum BodyEncoding {
+        #[default]
+        Flexible,
+        Legacy,
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct ParsedSetup<'a> {
+        #[default(SASL_AUTHENTICATE_KEY)]
         api_key: ApiKeyCode,
-        api_version: i16,
-        body: &[u8],
-        body_flexible: bool,
-    ) -> crate::network::request::ParsedRequest<'_> {
+        #[default(ParsedApiVersion(2))]
+        api_version: ParsedApiVersion,
+        body: &'a [u8],
+        encoding: BodyEncoding,
+    }
+
+    fn parsed(setup: ParsedSetup<'_>) -> crate::network::request::ParsedRequest<'_> {
         crate::network::request::ParsedRequest {
-            api_key,
-            api_version,
+            api_key: setup.api_key,
+            api_version: setup.api_version.0,
             correlation_id: 7,
-            body,
-            body_flexible,
+            body: setup.body,
+            body_flexible: matches!(setup.encoding, BodyEncoding::Flexible),
             client_id: None,
         }
     }
@@ -789,7 +804,10 @@ mod tests {
     ) -> SaslFrameOutcome {
         try_handle_sasl_frame(
             broker,
-            &parsed(SASL_AUTHENTICATE_KEY, 2, body, true),
+            &parsed(ParsedSetup {
+                body,
+                ..Default::default()
+            }),
             auth,
             &sasl_listener(mechanisms),
             &mut SaslSession::default(),
@@ -842,7 +860,12 @@ mod tests {
         check!(
             try_handle_sasl_frame(
                 &broker,
-                &parsed(3, 12, &metadata, true),
+                &parsed(ParsedSetup {
+                    api_key: 3,
+                    api_version: ParsedApiVersion(12),
+                    body: &metadata,
+                    ..Default::default()
+                }),
                 &mut auth,
                 &sasl_listener(&mechanisms),
                 &mut SaslSession::default(),
@@ -862,7 +885,12 @@ mod tests {
         );
         let outcome = try_handle_sasl_frame(
             &broker,
-            &parsed(SASL_HANDSHAKE_KEY, 1, &handshake, false),
+            &parsed(ParsedSetup {
+                api_key: SASL_HANDSHAKE_KEY,
+                api_version: ParsedApiVersion(1),
+                body: &handshake,
+                encoding: BodyEncoding::Legacy,
+            }),
             &mut auth,
             &sasl_listener(&mechanisms),
             &mut SaslSession::default(),
@@ -884,7 +912,12 @@ mod tests {
         let mut guessing = crate::network::auth::ConnectionAuth::Anonymous;
         try_handle_sasl_frame(
             &broker,
-            &parsed(SASL_HANDSHAKE_KEY, 1, &handshake, false),
+            &parsed(ParsedSetup {
+                api_key: SASL_HANDSHAKE_KEY,
+                api_version: ParsedApiVersion(1),
+                body: &handshake,
+                encoding: BodyEncoding::Legacy,
+            }),
             &mut guessing,
             &sasl_listener(&mechanisms),
             &mut SaslSession::default(),
@@ -914,7 +947,10 @@ mod tests {
         let mut bare = crate::network::auth::ConnectionAuth::Anonymous;
         let outcome = try_handle_sasl_frame(
             &broker,
-            &parsed(SASL_AUTHENTICATE_KEY, 2, &good, true),
+            &parsed(ParsedSetup {
+                body: &good,
+                ..Default::default()
+            }),
             &mut bare,
             &sasl_listener(&mechanisms),
             &mut SaslSession::default(),
@@ -952,7 +988,12 @@ mod tests {
         );
         try_handle_sasl_frame(
             &broker,
-            &parsed(SASL_HANDSHAKE_KEY, 1, &scram_handshake, false),
+            &parsed(ParsedSetup {
+                api_key: SASL_HANDSHAKE_KEY,
+                api_version: ParsedApiVersion(1),
+                body: &scram_handshake,
+                encoding: BodyEncoding::Legacy,
+            }),
             &mut scram,
             &sasl_listener(&[SaslMechanism::ScramSha512]),
             &mut SaslSession::default(),

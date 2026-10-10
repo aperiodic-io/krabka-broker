@@ -9,9 +9,7 @@
 
 use assert2::assert;
 
-use crate::harness::{
-    ACCEPT, NONE, ShareAck, acquired_count, broker_test_permit, fetch_until_acquired, share_ack,
-};
+use crate::harness::{acquired_count, fetch_until_acquired};
 
 /// Lag restore: `delivery_complete_count` survives a broker restart.
 ///
@@ -23,35 +21,35 @@ use crate::harness::{
 async fn delivery_complete_count_restored_across_restart() {
     const N: i64 = 4;
     const COMPLETE: i32 = 3; // N - 1
-    let _permit = broker_test_permit().await;
-    let dir = tempfile::TempDir::new().unwrap();
-    let log_dir = dir.path().to_path_buf();
+    let crate::harness::InitializedRestartFixture {
+        _permit,
+        _dir,
+        log_dir,
+        topic: initial,
+    } = crate::harness::initialized_restart_fixture(crate::support::share::ShareRecordSeedSetup {
+        count: crate::support::share::ShareRecordCount(N),
+    })
+    .await;
 
     let tid;
     {
-        let (broker, client, topic, member) =
-            crate::harness::initialized_topic(log_dir.clone(), N).await;
+        let (broker, client, topic, member) = initial;
         tid = topic;
 
         // Acquire 0..N-1 and Accept 1..N-1: the SPSO stays at 0 behind the
         // still-acquired offset 0, and the window holds N-1 terminal records.
-        let row = fetch_until_acquired(&client, "g1", &member, tid, 0, 0).await;
-        assert!(acquired_count(&row) == N, "must acquire all {N} offsets");
-        let ack = share_ack(
+        let row = fetch_until_acquired(
             &client,
-            ShareAck {
-                group: "g1",
-                member: &member,
-                topic_id: tid,
-                partition: 0,
-                epoch: 1,
-                first: 1,
-                last: N - 1,
-                ack_type: ACCEPT,
-            },
+            crate::support::share::ShareSessionSetup::opening(&member, tid),
         )
         .await;
-        assert!(ack.error_code == NONE, "accept error: {}", ack.error_code);
+        assert!(acquired_count(&row) == N, "must acquire all {N} offsets");
+        crate::support::share::acknowledge_success(
+            &client,
+            crate::support::share::ShareAck::prefix_for(&member, tid, krabka_ids::Offset(N - 1))
+                .starting_at(krabka_ids::Offset(1)),
+        )
+        .await;
 
         // Wait until the persisted summary reflects the count before restarting.
         broker

@@ -628,9 +628,29 @@ mod tests {
 
     use super::{super::coalesce::test_support::FakeBroker, *};
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum BrokerRegistration {
+        Registered,
+        AwaitingRegistration,
+    }
+
+    #[derive(Clone, Copy)]
+    struct FixtureTopicId(u8);
+
+    #[derive(Clone, Copy)]
+    struct RoundRecordCount(usize);
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct ProduceRoundSetup {
+        #[default(FixtureTopicId(1))]
+        id: FixtureTopicId,
+        #[default(RoundRecordCount(1))]
+        records: RoundRecordCount,
+    }
+
     /// An image with the topic `dlq.g`, one partition for each of `leaders`,
     /// as `(leader, whether that broker is registered)`.
-    fn image_with_topic(leaders: &[(u64, bool)]) -> MetadataImage {
+    fn image_with_topic(leaders: &[(NodeId, BrokerRegistration)]) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1Topic(TopicRecord {
             name: "dlq.g".into(),
@@ -642,12 +662,12 @@ mod tests {
             image.apply(&MetadataRecord::V1Partition(PartitionRecord {
                 topic: "dlq.g".into(),
                 partition: i32::try_from(index).unwrap(),
-                leader: NodeId(*leader),
-                replicas: vec![NodeId(*leader)],
-                isr: vec![NodeId(*leader)],
+                leader: *leader,
+                replicas: vec![*leader],
+                isr: vec![*leader],
                 ..Default::default()
             }));
-            if *registered {
+            if *registered == BrokerRegistration::Registered {
                 image.apply(&MetadataRecord::V1BrokerRegistration(
                     BrokerRegistrationRecord {
                         host: "h".into(),
@@ -659,12 +679,12 @@ mod tests {
         image
     }
 
-    fn target(partition: i32, leader: u64) -> Target {
+    fn target(partition: PartitionIndex, leader: NodeId) -> Target {
         Target {
             topic: "dlq.g".into(),
             topic_id: uuid::Uuid::from_bytes([7; 16]),
-            partition,
-            leader: NodeId(leader),
+            partition: partition.0,
+            leader,
             max_message_bytes: 1_048_588,
         }
     }
@@ -674,9 +694,17 @@ mod tests {
     /// with a leader that is registered.
     #[test]
     fn the_target_follows_the_source_partition_and_waits_for_a_leader() {
-        let ready = image_with_topic(&[(1, true), (2, true), (3, true)]);
+        let ready = image_with_topic(&[
+            (NodeId(1), BrokerRegistration::Registered),
+            (NodeId(2), BrokerRegistration::Registered),
+            (NodeId(3), BrokerRegistration::Registered),
+        ]);
         // Partition 1 is led by node 9, which has not registered.
-        let no_leader = image_with_topic(&[(1, true), (9, false), (3, true)]);
+        let no_leader = image_with_topic(&[
+            (NodeId(1), BrokerRegistration::Registered),
+            (NodeId(9), BrokerRegistration::AwaitingRegistration),
+            (NodeId(3), BrokerRegistration::Registered),
+        ]);
 
         let actual = [
             resolve_target(&ready, "dlq.g", 4, 1_048_588),
@@ -688,21 +716,24 @@ mod tests {
         assert!(
             actual
                 == [
-                    Ok(target(1, 2)),
-                    Ok(target(0, 1)),
+                    Ok(target(PartitionIndex(1), NodeId(2))),
+                    Ok(target(PartitionIndex(0), NodeId(1))),
                     Err("DLQ topic dlq.g-1 has no leader that is up yet".to_owned()),
                     Err("DLQ topic missing is not in the metadata image".to_owned()),
                 ]
         );
     }
 
-    fn produce_response(index: i32, error_code: i16) -> ProduceResponse {
+    fn produce_response(
+        index: PartitionIndex,
+        error_code: crate::test_support::KafkaErrorCode,
+    ) -> ProduceResponse {
         ProduceResponse {
             responses: vec![TopicProduceResponse {
                 topic_id: WireUuid([7; 16]),
                 partition_responses: vec![PartitionProduceResponse {
-                    index,
-                    error_code,
+                    index: index.0,
+                    error_code: error_code.0,
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -724,16 +755,43 @@ mod tests {
     /// no row for the partition.
     #[test]
     fn a_produce_answer_is_done_retried_or_final() {
-        let target = target(1, 2);
+        let target = target(PartitionIndex(1), NodeId(2));
         let cases = [
-            (produce_response(1, codes::NONE), "done"),
-            (produce_response(1, codes::NOT_LEADER_OR_FOLLOWER), "retry"),
-            (produce_response(1, codes::MESSAGE_TOO_LARGE), "fatal"),
             (
-                produce_response(1, codes::TOPIC_AUTHORIZATION_FAILED),
+                produce_response(
+                    PartitionIndex(1),
+                    crate::test_support::KafkaErrorCode(codes::NONE),
+                ),
+                "done",
+            ),
+            (
+                produce_response(
+                    PartitionIndex(1),
+                    crate::test_support::KafkaErrorCode(codes::NOT_LEADER_OR_FOLLOWER),
+                ),
+                "retry",
+            ),
+            (
+                produce_response(
+                    PartitionIndex(1),
+                    crate::test_support::KafkaErrorCode(codes::MESSAGE_TOO_LARGE),
+                ),
                 "fatal",
             ),
-            (produce_response(0, codes::NONE), "fatal"),
+            (
+                produce_response(
+                    PartitionIndex(1),
+                    crate::test_support::KafkaErrorCode(codes::TOPIC_AUTHORIZATION_FAILED),
+                ),
+                "fatal",
+            ),
+            (
+                produce_response(
+                    PartitionIndex(0),
+                    crate::test_support::KafkaErrorCode(codes::NONE),
+                ),
+                "fatal",
+            ),
             (ProduceResponse::default(), "fatal"),
         ];
 
@@ -765,7 +823,11 @@ mod tests {
         };
         let both = ProduceResponse {
             responses: [other_topic.responses.clone(), {
-                produce_response(1, codes::NOT_LEADER_OR_FOLLOWER).responses
+                produce_response(
+                    PartitionIndex(1),
+                    crate::test_support::KafkaErrorCode(codes::NOT_LEADER_OR_FOLLOWER),
+                )
+                .responses
             }]
             .concat(),
             ..Default::default()
@@ -773,15 +835,24 @@ mod tests {
 
         assert!(
             [
-                outcome(&classify_produce(&other_topic, &target(1, 2))),
-                outcome(&classify_produce(&both, &target(1, 2))),
+                outcome(&classify_produce(
+                    &other_topic,
+                    &target(PartitionIndex(1), NodeId(2))
+                )),
+                outcome(&classify_produce(
+                    &both,
+                    &target(PartitionIndex(1), NodeId(2))
+                )),
             ] == ["fatal", "retry"]
         );
     }
 
     /// A produce round of the tests: `records` records for partition 0 of the
     /// topic `dlq.<id>`.
-    fn round_of(id: u8, records: usize) -> (Target, RecordBatch) {
+    fn round_of(setup: ProduceRoundSetup) -> (Target, RecordBatch) {
+        let ProduceRoundSetup { id, records } = setup;
+        let id = id.0;
+        let records = records.0;
         let target = Target {
             topic: format!("dlq.{id}"),
             topic_id: uuid::Uuid::from_bytes([id; 16]),
@@ -800,6 +871,56 @@ mod tests {
             ..Default::default()
         };
         (target, batch)
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct CoalescedWriteSetup {
+        #[default(RoundRecordCount(2))]
+        first_records: RoundRecordCount,
+        #[default(RoundRecordCount(1))]
+        second_records: RoundRecordCount,
+    }
+
+    struct CoalescedWrites {
+        sender: Coalescer<FakeBroker>,
+        metrics: BrokerMetrics,
+        first: Target,
+        first_batch: RecordBatch,
+        second: Target,
+        second_batch: RecordBatch,
+    }
+
+    impl CoalescedWrites {
+        async fn first_write(&self) -> Result<(), DlqError> {
+            produce_round(
+                &self.sender,
+                &self.metrics,
+                "g1",
+                &self.first,
+                || NodeId(1),
+                &self.first_batch,
+            )
+            .await
+        }
+    }
+
+    fn coalesced_writes(broker: FakeBroker, setup: CoalescedWriteSetup) -> CoalescedWrites {
+        let (first, first_batch) = round_of(ProduceRoundSetup {
+            records: setup.first_records,
+            ..Default::default()
+        });
+        let (second, second_batch) = round_of(ProduceRoundSetup {
+            id: FixtureTopicId(2),
+            records: setup.second_records,
+        });
+        CoalescedWrites {
+            sender: Coalescer::new(broker),
+            metrics: BrokerMetrics::new(),
+            first,
+            first_batch,
+            second,
+            second_batch,
+        }
     }
 
     /// The answer of a broker that gives every partition the code that
@@ -871,19 +992,17 @@ mod tests {
                 }
             }))
         });
-        let sender = Coalescer::new(broker.clone());
-        let metrics = BrokerMetrics::new();
-        let ((first, first_batch), (second, second_batch)) = (round_of(1, 2), round_of(2, 1));
+        let writes = coalesced_writes(broker.clone(), CoalescedWriteSetup::default());
 
         let (done, refused) = futures_util::future::join(
-            produce_round(&sender, &metrics, "g1", &first, || NodeId(1), &first_batch),
+            writes.first_write(),
             produce_round(
-                &sender,
-                &metrics,
+                &writes.sender,
+                &writes.metrics,
                 "g2",
-                &second,
+                &writes.second,
                 || NodeId(1),
-                &second_batch,
+                &writes.second_batch,
             ),
         )
         .await;
@@ -893,8 +1012,8 @@ mod tests {
                 done,
                 refused,
                 topics_sent(&broker),
-                meters(&metrics, "g1"),
-                meters(&metrics, "g2"),
+                meters(&writes.metrics, "g1"),
+                meters(&writes.metrics, "g2"),
             ) == (
                 Ok(()),
                 Err(DlqError::Write(format!(
@@ -923,24 +1042,28 @@ mod tests {
                 }
             }))
         });
-        let sender = Coalescer::new(broker.clone());
-        let metrics = BrokerMetrics::new();
-        let ((first, first_batch), (second, second_batch)) = (round_of(1, 1), round_of(2, 3));
+        let writes = coalesced_writes(
+            broker.clone(),
+            CoalescedWriteSetup {
+                first_records: RoundRecordCount(1),
+                second_records: RoundRecordCount(3),
+            },
+        );
         let leaders = std::cell::Cell::new(0_u64);
 
         let (done, retried) = futures_util::future::join(
-            produce_round(&sender, &metrics, "g1", &first, || NodeId(1), &first_batch),
+            writes.first_write(),
             produce_round(
-                &sender,
-                &metrics,
+                &writes.sender,
+                &writes.metrics,
                 "g2",
-                &second,
+                &writes.second,
                 || {
                     // The leader moves to node 2 after the first attempt.
                     leaders.set(leaders.get() + 1);
                     NodeId(leaders.get())
                 },
-                &second_batch,
+                &writes.second_batch,
             ),
         )
         .await;
@@ -950,8 +1073,8 @@ mod tests {
                 done,
                 retried,
                 topics_sent(&broker),
-                meters(&metrics, "g1"),
-                meters(&metrics, "g2"),
+                meters(&writes.metrics, "g1"),
+                meters(&writes.metrics, "g2"),
             ) == (
                 Ok(()),
                 Ok(()),
@@ -988,7 +1111,7 @@ mod tests {
         for (broker, reason) in cases {
             let sender = Coalescer::new(broker.clone());
             let metrics = BrokerMetrics::new();
-            let (target, batch) = round_of(1, 1);
+            let (target, batch) = round_of(ProduceRoundSetup::default());
 
             let written =
                 produce_round(&sender, &metrics, "g1", &target, || NodeId(1), &batch).await;
@@ -1018,7 +1141,10 @@ mod tests {
         });
         let sender = Coalescer::new(broker.clone());
         let metrics = BrokerMetrics::new();
-        let (target, batch) = round_of(1, 2);
+        let (target, batch) = round_of(ProduceRoundSetup {
+            records: RoundRecordCount(2),
+            ..Default::default()
+        });
         let write = produce_round(&sender, &metrics, "g1", &target, || NodeId(1), &batch);
         tokio::pin!(write);
 

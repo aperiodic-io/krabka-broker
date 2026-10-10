@@ -37,4 +37,3 @@ goal vc_sum_prefix: if limit <= 0 then
   else
     [@expl:variant decreases] well_founded_relation_Int ([%#squorum_survives_any_single_site_loss] limit) ([%#squorum_survives_any_single_site_loss] limit
     - 1)
-

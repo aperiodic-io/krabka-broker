@@ -13,8 +13,8 @@
       },
       "vc_time_index_scan_start": { "prover": "alt-ergo", "time": 0.012 },
       "vc_validated_remote_and_local_time_starts_agree": {
-        "prover": "z3",
-        "time": 0.201
+        "prover": "alt-ergo",
+        "time": 0.416
       }
     }
   }

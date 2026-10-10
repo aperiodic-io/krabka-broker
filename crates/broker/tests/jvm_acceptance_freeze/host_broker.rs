@@ -56,12 +56,14 @@ pub(super) async fn start_jvm_broker(adjust: impl FnOnce(&mut BrokerConfig)) -> 
         .expect("an allocated controller address");
 
     let mut config = support::jvm_broker_config(
-        1,
-        listen,
-        controller,
-        &listeners.advertised,
         dir.path().to_path_buf(),
-        &[(1, controller)],
+        crate::support::JvmBrokerSetup {
+            listen,
+            controller,
+            advertised: listeners.advertised.clone(),
+            voters: crate::support::controller_voters(&[(1, controller)]),
+            ..Default::default()
+        },
     );
     adjust(&mut config);
 

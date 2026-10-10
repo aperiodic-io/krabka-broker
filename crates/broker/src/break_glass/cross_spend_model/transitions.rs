@@ -8,20 +8,17 @@
 //! answer into the next state. No rule the broker owns is restated here, so a
 //! rule this model checks is the rule the broker runs.
 
-use krabka_metadata::{
-    BreakGlassApproval, BreakGlassProposalRecord, MetadataImage, MetadataRecord,
-};
+use krabka_metadata::{BreakGlassProposalRecord, MetadataImage, MetadataRecord};
 use uuid::Uuid;
 
-use super::universe::{EXPIRES_AT, PROPOSALS, ProposalSpec, Request, Universe, distinct};
+use super::universe::{EXPIRES_AT, PROPOSALS, ProposalSpec, Request, Universe};
 use crate::{
     break_glass::{
         config::BreakGlassPolicy,
         gate,
-        handlers::approve::{self, Attempt},
+        state_model::{distinct, model_approval_principals, model_approvals, model_settle},
     },
     config::BreakGlassConfig,
-    operator_keys::OperatorKeys,
 };
 
 pub(super) struct CrossSpendModel {
@@ -50,16 +47,7 @@ impl CrossSpendModel {
             reason: "incident 42".to_owned(),
             created_at_ms: 0,
             expires_at_ms: EXPIRES_AT,
-            approvals: proposal
-                .approvals
-                .iter()
-                .map(|principal| BreakGlassApproval {
-                    principal: (*principal).to_owned(),
-                    approved_at_ms: 0,
-                    key_id: String::new(),
-                    signature: Vec::new(),
-                })
-                .collect(),
+            approvals: model_approvals(&proposal.approvals),
             // `0` is the unconsumed sentinel.
             consumed_at_ms: i64::from(proposal.consumed),
             withdrawn: proposal.withdrawn,
@@ -93,29 +81,11 @@ impl CrossSpendModel {
         withdraw: bool,
     ) {
         let stored = self.record(index, state);
-        let attempt = Attempt {
-            principal,
-            key_id: "",
-            signature: &[],
-            withdraw,
-            now_ms: state.now_ms,
-        };
-        if let Ok(updated) =
-            approve::decide(self.policy(), &OperatorKeys::default(), &stored, &attempt)
+        if let Ok(updated) = model_settle(self.policy(), &stored, principal, withdraw, state.now_ms)
         {
             let proposal = &mut state.proposals[index];
             proposal.withdrawn = updated.withdrawn;
-            proposal.approvals = updated
-                .approvals
-                .iter()
-                .map(|approval| {
-                    self.principals
-                        .iter()
-                        .copied()
-                        .find(|name| *name == approval.principal)
-                        .expect("an approval names a principal of the model universe")
-                })
-                .collect();
+            proposal.approvals = model_approval_principals(&self.principals, &updated.approvals);
         }
     }
 

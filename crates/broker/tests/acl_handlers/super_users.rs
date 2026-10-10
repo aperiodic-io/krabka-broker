@@ -35,9 +35,13 @@ async fn multi_super_user_both_can_provision() {
         creations: vec![topic_allow_creation("t-admin", "User:bob", OPERATION_READ)],
         ..Default::default()
     };
-    let admin_resp = drive_create_acls_as_plain(addr, "admin", b"admin-secret", admin_req)
-        .await
-        .expect("CreateAcls as admin must round-trip");
+    let admin_resp = drive_create_acls_as_plain(
+        addr,
+        admin_req,
+        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+    )
+    .await
+    .expect("CreateAcls as admin must round-trip");
     assert!(admin_resp.results.len() == 1);
     assert!(
         admin_resp.results[0].error_code == 0,
@@ -50,9 +54,17 @@ async fn multi_super_user_both_can_provision() {
         creations: vec![topic_allow_creation("t-ops", "User:carol", OPERATION_WRITE)],
         ..Default::default()
     };
-    let ops_resp = drive_create_acls_as_plain(addr, "ops-bot", b"ops-secret", ops_req)
-        .await
-        .expect("CreateAcls as ops-bot must round-trip");
+    let ops_resp = drive_create_acls_as_plain(
+        addr,
+        ops_req,
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: crate::framing::CLIENT_ID,
+            user: "ops-bot",
+            password: (b"ops-secret").to_vec(),
+        },
+    )
+    .await
+    .expect("CreateAcls as ops-bot must round-trip");
     assert!(ops_resp.results.len() == 1);
     assert!(
         ops_resp.results[0].error_code == 0,
@@ -69,9 +81,16 @@ async fn multi_super_user_both_can_provision() {
         ],
         ..Default::default()
     };
-    let alice_resp = drive_create_acls_as_plain(addr, "alice", b"wonderland", alice_req)
-        .await
-        .expect("CreateAcls request must round-trip even when denied");
+    let alice_resp = drive_create_acls_as_plain(
+        addr,
+        alice_req,
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: crate::framing::CLIENT_ID,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("CreateAcls request must round-trip even when denied");
     handle.shutdown().await;
 
     assert!(alice_resp.results.len() == 2);

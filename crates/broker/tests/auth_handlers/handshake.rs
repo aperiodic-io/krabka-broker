@@ -8,6 +8,7 @@
 
 use assert2::{assert, check};
 use bytes::BytesMut;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -22,7 +23,14 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::harness::round_trip;
+use crate::{
+    harness::round_trip,
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    support::wire::{
+        CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+        SocketExchangeSetup,
+    },
+};
 
 /// `ApiVersions`, `api_key` 18, is on the pre-auth allowlist and must succeed
 /// without any SASL exchange.
@@ -38,11 +46,10 @@ async fn api_versions_reachable_pre_auth_on_sasl_listener() {
     let av_resp: ApiVersionsResponse = crate::kafka_wire::exchange(
         &mut stream,
         &ApiVersionsRequest::default(),
-        18,
-        0,
-        1,
-        "krabka-sasl-test",
-        false,
+        WireExchangeSetup {
+            client_id: "krabka-sasl-test",
+            ..Default::default()
+        },
     )
     .await
     .expect("ApiVersions round-trip");
@@ -83,13 +90,19 @@ async fn metadata_rejected_pre_auth_on_sasl_listener() {
     md_req.encode(&mut md_body, 12).unwrap();
 
     // Build the frame manually: header + body, then length-prefix.
-    let frame = crate::support::wire::request_frame(
-        (3, 12, 1, true),
-        "krabka-t19-test",
-        &md_body,
-        Some(32 + md_body.len()),
-        None,
-    );
+    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+        api_key: krabka_ids::ApiKey(3),
+        version: krabka_ids::ApiVersion(12),
+        header: crate::support::wire::HeaderEncoding::Flexible,
+        client_id: "krabka-t19-test",
+        body: &md_body,
+        capacity: Some(
+            <krabka_units::ByteSize as krabka_units::convert::ByteSizeExt>::from_bytes(
+                u64::try_from(32 + md_body.len()).expect("frame capacity fits u64"),
+            ),
+        ),
+        ..Default::default()
+    });
 
     crate::support::wire::write_frame(&mut stream, &frame, None)
         .await
@@ -123,9 +136,17 @@ async fn unsupported_mechanism_answers_33_then_closes() {
     }
     .encode(&mut sh_body, 1)
     .unwrap();
-    let sh_resp_bytes = round_trip(&mut stream, 17, 1, 1, false, &sh_body)
-        .await
-        .expect("SaslHandshake(GSSAPI) must get a response (not a TCP close)");
+    let sh_resp_bytes = round_trip(
+        &mut stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            ..Default::default()
+        },
+        &sh_body,
+    )
+    .await
+    .expect("SaslHandshake(GSSAPI) must get a response (not a TCP close)");
     let mut cur: &[u8] = &sh_resp_bytes;
     let sh_resp =
         SaslHandshakeResponse::decode(&mut cur, 1).expect("SaslHandshakeResponse must decode");
@@ -150,17 +171,35 @@ async fn unsupported_mechanism_answers_33_then_closes() {
     .encode(&mut plain_body, 1)
     .unwrap();
     assert!(
-        round_trip(&mut stream, 17, 1, 2, false, &plain_body)
-            .await
-            .is_err(),
+        round_trip(
+            &mut stream,
+            SocketExchangeSetup {
+                api_key: WireApiKey(17),
+                version: WireApiVersion(1),
+                correlation: WireCorrelationId(2),
+                ..Default::default()
+            },
+            &plain_body
+        )
+        .await
+        .is_err(),
         "the connection must be closed after UNSUPPORTED_SASL_MECHANISM"
     );
 
     // ── 3. A new connection may negotiate PLAIN.
     let mut retry = TcpStream::connect(addr).await.unwrap();
-    let plain_resp_bytes = round_trip(&mut retry, 17, 1, 3, false, &plain_body)
-        .await
-        .expect("SaslHandshake(PLAIN) on a new connection");
+    let plain_resp_bytes = round_trip(
+        &mut retry,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            correlation: WireCorrelationId(3),
+            ..Default::default()
+        },
+        &plain_body,
+    )
+    .await
+    .expect("SaslHandshake(PLAIN) on a new connection");
     let mut plain_cur: &[u8] = &plain_resp_bytes;
     let plain_resp = SaslHandshakeResponse::decode(&mut plain_cur, 1)
         .expect("SaslHandshakeResponse must decode");
@@ -189,9 +228,17 @@ async fn plain_handshake(stream: &mut TcpStream, version: i16) -> SaslHandshakeR
     }
     .encode(&mut body, version)
     .unwrap();
-    let bytes = round_trip(stream, 17, version, 1, false, &body)
-        .await
-        .expect("SaslHandshake round-trip");
+    let bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(version),
+            ..Default::default()
+        },
+        &body,
+    )
+    .await
+    .expect("SaslHandshake round-trip");
     let mut cur: &[u8] = &bytes;
     SaslHandshakeResponse::decode(&mut cur, version).expect("SaslHandshakeResponse must decode")
 }
@@ -227,9 +274,18 @@ async fn v0_handshake_runs_the_exchange_as_raw_tokens() {
     let mut md_body = BytesMut::new();
     MetadataRequest::default().encode(&mut md_body, 12).unwrap();
     check!(
-        round_trip(&mut stream, 3, 12, 2, true, &md_body)
-            .await
-            .is_ok()
+        round_trip(
+            &mut stream,
+            SocketExchangeSetup {
+                api_key: WireApiKey(3),
+                version: WireApiVersion(12),
+                correlation: WireCorrelationId(2),
+                header: RequestHeaderEncoding::Flexible
+            },
+            &md_body
+        )
+        .await
+        .is_ok()
     );
 
     handle.shutdown().await;
@@ -261,9 +317,18 @@ async fn api_versions_after_the_handshake_answers_34_then_closes() {
     ApiVersionsRequest::default()
         .encode(&mut av_body, 3)
         .unwrap();
-    let resp_bytes = round_trip(&mut stream, 18, 3, 2, true, &av_body)
-        .await
-        .expect("ApiVersions gets an error response");
+    let resp_bytes = round_trip(
+        &mut stream,
+        SocketExchangeSetup {
+            version: WireApiVersion(3),
+            correlation: WireCorrelationId(2),
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+        &av_body,
+    )
+    .await
+    .expect("ApiVersions gets an error response");
     let mut cur: &[u8] = &resp_bytes;
     let resp = ApiVersionsResponse::decode(&mut cur, 3).expect("ApiVersionsResponse must decode");
     assert!(

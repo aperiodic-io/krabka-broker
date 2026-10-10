@@ -350,7 +350,10 @@ fn populated_log(log_dir: &std::path::Path) -> Log {
     )
     .unwrap();
     for _ in 0..12 {
-        let mut b = batch_of(2, 64);
+        let mut b = batch_of(crate::test_support::KeyedBatchSetup {
+            records: crate::test_support::KeyedRecordCount(2),
+            ..Default::default()
+        });
         log.append(&mut b).unwrap();
     }
     log.sync().unwrap();
@@ -394,9 +397,11 @@ fn copy_log_to_reader(log: &Log, remote_dir: &std::path::Path) -> RemoteReader {
         for (e, st) in &epochs {
             let _ = writeln!(s, "{e} {st}");
         }
-        let data = crate::remote_log_manager::export_segment_data(ex, false, || {
-            bytes::Bytes::from(s.into_bytes())
-        });
+        let data = crate::remote_log_manager::export_segment_data(
+            ex,
+            crate::remote_log_manager::ProducerSnapshotExport::Omit,
+            || bytes::Bytes::from(s.into_bytes()),
+        );
         rsm.copy_log_segment_data(&md, &data).unwrap();
         rlmm.update_remote_log_segment_metadata(
             krabka_remote_storage::RemoteLogSegmentMetadataUpdate {

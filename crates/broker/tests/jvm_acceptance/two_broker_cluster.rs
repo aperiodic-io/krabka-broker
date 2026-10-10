@@ -24,9 +24,11 @@ async fn start_configured(
     let ([first, second], _, [first_dir, second_dir]) =
         super::three_broker_cluster::start_sasl_cluster(
             super::ports::cluster_listeners(),
-            admin,
-            password,
-            &[],
+            crate::jvm_acceptance::SaslClusterSetup {
+                admin,
+                admin_pass: password,
+                ..Default::default()
+            },
             adjust,
         )
         .await;

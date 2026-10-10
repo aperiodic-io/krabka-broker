@@ -67,6 +67,16 @@ fn plain_batch() -> RecordBatch {
     }
 }
 
+fn rejected_batch(batch: &RecordBatch) -> i16 {
+    prepare_for_topic!(
+        PartitionPayload::Slice(encode(batch)),
+        None,
+        &crate::metrics::BrokerMetrics::new(),
+        13
+    )
+    .unwrap_err()
+}
+
 #[test]
 fn message_count_reports_v2_record_total() {
     // Multi-record batch so the count can't be mistaken for a constant.
@@ -170,14 +180,7 @@ fn rejects_client_log_append_time() {
     b.attributes = b
         .attributes
         .with_timestamp_type(TimestampType::LogAppendTime);
-    let wire = encode(&b);
-    let err = prepare_for_topic!(
-        PartitionPayload::Slice(wire),
-        None,
-        &crate::metrics::BrokerMetrics::new(),
-        13
-    )
-    .unwrap_err();
+    let err = rejected_batch(&b);
     assert!(err == crate::codes::INVALID_TIMESTAMP);
 }
 
@@ -185,14 +188,7 @@ fn rejects_client_log_append_time() {
 fn rejects_client_control_batch() {
     let mut b = plain_batch();
     b.attributes = Attributes::default().with_control(true);
-    let wire = encode(&b);
-    let err = prepare_for_topic!(
-        PartitionPayload::Slice(wire),
-        None,
-        &crate::metrics::BrokerMetrics::new(),
-        13
-    )
-    .unwrap_err();
+    let err = rejected_batch(&b);
     assert!(err == crate::codes::INVALID_RECORD);
 }
 

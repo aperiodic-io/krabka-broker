@@ -20,48 +20,57 @@ use crate::test_support::{DenyAll, start_broker_with_authorizer as start_broker,
 
 crate::test_support::context_helper!(client_id = "broker-client");
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct EmptyAlterPartitionSetup {
+    #[default(krabka_ids::ApiVersion(alter_partition_response::MAX_VERSION))]
+    version: krabka_ids::ApiVersion,
+    expected: crate::test_support::KafkaErrorCode,
+}
+
+async fn check_empty_alter_partition(
+    broker: &crate::broker::Broker,
+    ctx: &crate::handlers::RequestContext<'_>,
+    setup: EmptyAlterPartitionSetup,
+) {
+    let request = request_with_topics(broker, Vec::new());
+    let response = super::handle(broker, request, setup.version.0, ctx)
+        .await
+        .expect("handle");
+    let expected = unthrottled_wire!(AlterPartitionResponse {
+        error_code: setup.expected.0,
+        topics: Vec::new(),
+    });
+    assert!(response == expected);
+}
+
 #[tokio::test]
 async fn handle_denies_cluster_action_for_whole_request() {
-    let version = alter_partition_response::MAX_VERSION;
     broker_fixture!(
         (broker_handle, _dir, broker),
         deny_all,
         context(ctx, "replica")
     );
-    let req = request_with_topics(&broker, Vec::new());
-
-    let resp = super::handle(&broker, req, version, &ctx)
-        .await
-        .expect("handle");
-
-    let expected = unthrottled_wire!(AlterPartitionResponse {
-        error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-        topics: Vec::new(),
-    });
-    assert!(resp == expected);
+    check_empty_alter_partition(
+        &broker,
+        &ctx,
+        EmptyAlterPartitionSetup {
+            expected: crate::test_support::KafkaErrorCode(codes::CLUSTER_AUTHORIZATION_FAILED),
+            ..Default::default()
+        },
+    )
+    .await;
     broker_handle.shutdown().await;
 }
 
 #[tokio::test]
 async fn leader_accepts_empty_alter_partition_request() {
-    let version = alter_partition_response::MAX_VERSION;
     broker_fixture!(
         (broker_handle, _dir, broker),
         allow_all,
         context(ctx, "replica"),
         controller_leader
     );
-    let req = request_with_topics(&broker, Vec::new());
-
-    let resp = super::handle(&broker, req, version, &ctx)
-        .await
-        .expect("handle");
-
-    let expected = unthrottled_wire!(AlterPartitionResponse {
-        error_code: codes::NONE,
-        topics: Vec::new(),
-    });
-    assert!(resp == expected);
+    check_empty_alter_partition(&broker, &ctx, EmptyAlterPartitionSetup::default()).await;
     broker_handle.shutdown().await;
 }
 
@@ -159,7 +168,10 @@ async fn topic_row_error_follows_version_and_topic_id() {
             partition_index,
             leader_epoch: 5,
             new_isr: vec![1],
-            new_isr_with_epochs: vec![super::test_support::bs(1, -1)],
+            new_isr_with_epochs: vec![super::test_support::bs(
+                crate::test_support::WireBrokerId(1),
+                crate::test_support::BrokerEpoch(-1),
+            )],
             partition_epoch,
             ..Default::default()
         };
@@ -245,7 +257,10 @@ async fn a_stale_sender_broker_epoch_refuses_the_whole_request() {
                     partitions: vec![ReqPartitionData {
                         partition_index: 0,
                         leader_epoch: 5,
-                        new_isr_with_epochs: vec![super::test_support::bs(1, -1)],
+                        new_isr_with_epochs: vec![super::test_support::bs(
+                            crate::test_support::WireBrokerId(1),
+                            crate::test_support::BrokerEpoch(-1),
+                        )],
                         ..Default::default()
                     }],
                     ..Default::default()

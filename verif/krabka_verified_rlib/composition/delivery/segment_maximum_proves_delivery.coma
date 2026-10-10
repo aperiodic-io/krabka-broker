@@ -1,13 +1,13 @@
-(* #"/workspace/crates/verified/src/composition/delivery.rs" 36 0 40 9 *)
+(* #"/workspace/crates/verified/src/composition/delivery.rs" 46 0 50 9 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span stimestamp = "/workspace/crates/verified/src/timestamp.rs" 43 10 50 1
-let%span sdelivery = "/workspace/crates/verified/src/composition/delivery.rs" 41 10 41 51
-let%span sdelivery'0 = "/workspace/crates/verified/src/composition/delivery.rs" 42 69 42 87
-let%span sdelivery'1 = "/workspace/crates/verified/src/composition/delivery.rs" 42 50 42 54
-let%span sdelivery'2 = "/workspace/crates/verified/src/composition/delivery.rs" 42 23 42 93
-let%span sdelivery'3 = "/workspace/crates/verified/src/composition/delivery.rs" 43 16 43 20
-let%span sdelivery'4 = "/workspace/crates/verified/src/composition/delivery.rs" 33 10 35 51
+let%span sdelivery = "/workspace/crates/verified/src/composition/delivery.rs" 51 10 51 51
+let%span sdelivery'0 = "/workspace/crates/verified/src/composition/delivery.rs" 52 69 52 87
+let%span sdelivery'1 = "/workspace/crates/verified/src/composition/delivery.rs" 52 50 52 54
+let%span sdelivery'2 = "/workspace/crates/verified/src/composition/delivery.rs" 52 23 52 93
+let%span sdelivery'3 = "/workspace/crates/verified/src/composition/delivery.rs" 53 16 53 20
+let%span sdelivery'4 = "/workspace/crates/verified/src/composition/delivery.rs" 43 10 45 51
 let%span sdelivery'5 = "/workspace/crates/verified/src/delivery.rs" 12 10 14 52
 
 use creusot.slice.Slice64
@@ -60,7 +60,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let segment_maximum_proves_delivery [#"/workspace/crates/verified/src/composition/delivery.rs" 36 0 40 9]
+let segment_maximum_proves_delivery [#"/workspace/crates/verified/src/composition/delivery.rs" 46 0 50 9]
   (activations: Slice64.slice Int64.t) (uncertainty: Int64.t) (now: Int64.t) (return (x: bool)) = (! bb0
   [ bb0 = s0
     [ s0 = earliest_max_timestamp_index [%#sdelivery] {activations} (fun (_x: t_Option_usize) -> [ &_8 <- _x ] s1)

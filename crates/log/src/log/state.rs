@@ -674,15 +674,7 @@ mod tests {
     #[test]
     fn log_size_sums_the_sealed_segments_and_the_active_one() {
         let dir = tempdir().unwrap();
-        // A tiny segment cap, so appending rolls and leaves sealed segments
-        // behind the active one -- with only an active segment the fold has
-        // nothing to add and the accumulator is returned untouched.
-        let mut log = crate::test_support::segmented_log(dir.path(), kibibytes(1));
-        crate::log::test_support::append_samples(&mut log, 40, 4);
-        check!(
-            !log.segments.is_empty(),
-            "the appends should have rolled a segment"
-        );
+        let log = crate::log::test_support::rolled_sample_log(dir.path());
 
         let expected = log.segments.iter().map(Segment::size).fold(
             log.active.as_ref().map_or(ByteSize::ZERO, Segment::size),

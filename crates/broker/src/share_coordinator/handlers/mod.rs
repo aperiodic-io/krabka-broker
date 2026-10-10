@@ -154,13 +154,22 @@ pub(crate) mod test_support {
         share_coordinator::{
             bootstrap,
             config::ShareCoordinatorConfig,
-            coordinator::{ShareCoordinator, test_support::state_batch},
+            coordinator::{
+                ShareCoordinator,
+                test_support::{
+                    DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+                },
+            },
             persistence::StateBatch,
         },
     };
 
-    pub(crate) fn batch(first_offset: i64, last_offset: i64) -> StateBatch {
-        state_batch(first_offset, last_offset, 2, 3)
+    pub(crate) fn batch(bounds: std::ops::RangeInclusive<Offset>) -> StateBatch {
+        state_batch(StateBatchSetup {
+            bounds,
+            delivery: FixtureDeliveryState::Acknowledged,
+            attempts: DeliveryAttemptCount(3),
+        })
     }
 
     pub(crate) fn open_all_state_partitions(
@@ -195,20 +204,35 @@ pub(crate) mod test_support {
         ))
     }
 
+    use crate::test_support::PartitionCount;
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    pub(crate) struct StateFixtureSetup {
+        #[default(uuid::Uuid::from_bytes([33; 16]))]
+        pub topic: uuid::Uuid,
+        #[default(PartitionCount(1))]
+        pub partitions: PartitionCount,
+        pub partition: PartitionIndex,
+    }
+
     /// A led coordinator with partition state at epoch 17 and start offset 90.
     pub(crate) async fn initialized_state(
         log_dir: &Path,
-        topic: uuid::Uuid,
-        partitions: i32,
-        partition: i32,
+        setup: StateFixtureSetup,
     ) -> (Arc<ShareCoordinator>, krabka_metadata::MetadataImage) {
+        let StateFixtureSetup {
+            topic,
+            partitions,
+            partition,
+        } = setup;
         let coordinator = coordinator(log_dir);
         let image = crate::share_coordinator::coordinator::test_support::image_with_topic(
-            topic, partitions,
+            topic,
+            partitions.0,
         );
         coordinator.lead_all_partitions_for_test().await;
         coordinator
-            .initialize(&image, "share-group", topic, partition, 17, Offset(90))
+            .initialize(&image, "share-group", topic, partition.0, 17, Offset(90))
             .await
             .expect("initialize state");
         (coordinator, image)
@@ -217,13 +241,14 @@ pub(crate) mod test_support {
     /// Stored read fixtures: leader epoch 3, start offset 101 and one terminal batch.
     pub(crate) async fn stored_state(
         log_dir: &Path,
-        topic: uuid::Uuid,
-        partitions: i32,
-        partition: i32,
+        setup: StateFixtureSetup,
     ) -> (Arc<ShareCoordinator>, krabka_metadata::MetadataImage) {
-        let (coordinator, image) = initialized_state(log_dir, topic, partitions, partition).await;
+        let StateFixtureSetup {
+            topic, partition, ..
+        } = setup;
+        let (coordinator, image) = initialized_state(log_dir, setup).await;
         coordinator
-            .read(&image, "share-group", topic, partition, 3)
+            .read(&image, "share-group", topic, partition.0, 3)
             .await
             .expect("raise the stored leader epoch");
         coordinator
@@ -231,11 +256,11 @@ pub(crate) mod test_support {
                 &image,
                 "share-group",
                 topic,
-                partition,
+                partition.0,
                 crate::share_coordinator::coordinator::test_support::share_write(
                     (17, 3),
                     (101, 9),
-                    vec![batch(101, 105)],
+                    vec![batch(Offset(101)..=Offset(105))],
                 ),
             )
             .await
@@ -260,13 +285,23 @@ pub(crate) mod test_support {
             }
         };
         ($response:ident, $result:ident, $partition:ident; keyed) => {
-            fn response(topic_id: uuid::Uuid, partition: i32, error_code: i16, message: Option<&str>) -> $response {
+            #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+            struct StateResponseSetup<'a> {
+                #[default(TOPIC)]
+                topic: uuid::Uuid,
+                partition: krabka_ids::PartitionIndex,
+                #[default($crate::test_support::KafkaErrorCode($crate::codes::NONE))]
+                code: $crate::test_support::KafkaErrorCode,
+                message: Option<&'a str>,
+            }
+
+            fn response(setup: StateResponseSetup<'_>) -> $response {
                 super::super::test_support::response_fixture!(@value $response, $result,
-                    krabka_protocol::primitives::uuid::Uuid(*topic_id.as_bytes()),
+                    krabka_protocol::primitives::uuid::Uuid(*setup.topic.as_bytes()),
                     vec![$partition {
-                        partition,
-                        error_code,
-                        error_message: message.map(str::to_owned),
+                        partition: setup.partition.0,
+                        error_code: setup.code.0,
+                        error_message: setup.message.map(str::to_owned),
                         unknown_tagged_fields: krabka_protocol::tagged_fields::UnknownTaggedFields(vec![]),
                     }]
                 )
@@ -338,9 +373,11 @@ pub(crate) mod test_support {
                 let dir = tempfile::TempDir::new().expect("tempdir");
                 let (coordinator, image) = super::super::test_support::stored_state(
                     dir.path(),
-                    $topic,
-                    $partitions,
-                    $partition,
+                    $crate::share_coordinator::handlers::test_support::StateFixtureSetup {
+                        topic: $topic,
+                        partitions: $crate::test_support::PartitionCount($partitions),
+                        partition: krabka_ids::PartitionIndex($partition),
+                    },
                 )
                 .await;
                 super::super::test_support::retain_leadership(&coordinator, led).await;

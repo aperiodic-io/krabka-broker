@@ -528,6 +528,13 @@ mod tests {
 
     /// A topic delete takes the per-topic series with it, and the partition
     /// series of that topic go with the partitions the delete removed.
+    fn delete_topic(source: &FakeMetadataSource, mut live: Vec<MetadataRecord>) {
+        live.push(MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
+            name: TOPIC.into(),
+        }));
+        source.set_records(&live);
+    }
+
     #[tokio::test]
     async fn deleting_a_topic_evicts_its_topic_and_partition_series() {
         let metrics = BrokerMetrics::new();
@@ -541,11 +548,7 @@ mod tests {
         assert!(before.contains(&partition_pair(TOPIC, 0)));
         assert!(before.contains(&format!("topic=\"{TOPIC}\"")));
 
-        let mut deleted = live;
-        deleted.push(MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
-            name: TOPIC.into(),
-        }));
-        source.set_records(&deleted);
+        delete_topic(&source, live);
 
         let after = scrape_until(&metrics, |body| !body.contains(TOPIC)).await;
         check!(!after.contains(TOPIC));
@@ -596,11 +599,7 @@ mod tests {
         let unhosted = partition_pair(TOPIC, 1);
         assert!(scrape(&metrics).contains(&unhosted));
 
-        let mut deleted = live;
-        deleted.push(MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
-            name: TOPIC.into(),
-        }));
-        source.set_records(&deleted);
+        delete_topic(&source, live);
 
         let after = scrape_until(&metrics, |body| !body.contains(TOPIC)).await;
         check!(!after.contains(&partition_pair(TOPIC, 0)));

@@ -24,6 +24,17 @@ use crate::{
     wire::{CONTROL, accepted, create_topic, now_ms, refused},
 };
 
+async fn check_frozen_then_shutdown(
+    broker: BrokerHandle,
+    client: &Client,
+    frozen: WireUuid,
+    control: WireUuid,
+) {
+    crate::wire::check_produce!(&broker, client;
+        "orders", frozen => refused("literal", "orders", "incident", 0), CONTROL, control => accepted(1));
+    broker.shutdown().await;
+}
+
 /// [`support::start_with_operator_key`] with `freeze.require_signature` on.
 ///
 /// The harness helper takes the default, and a running broker's configuration
@@ -130,9 +141,7 @@ async fn a_signed_freeze_round_trips_with_its_key_id_and_signature_intact() {
     );
     check!(verifies_locally(&key, &cluster, &entries[0]));
 
-    crate::wire::check_produce!(&broker, &client;
-        "orders", frozen => refused("literal", "orders", "incident", 0), CONTROL, control => accepted(1));
-    broker.shutdown().await;
+    check_frozen_then_shutdown(broker, &client, frozen, control).await;
 }
 
 /// An unsigned thaw is refused whatever `freeze.require_signature` says.
@@ -236,9 +245,7 @@ async fn a_signature_captured_from_a_freeze_is_refused_as_a_thaw() {
     }
 
     check!(wait_for_registry_len(&client, 1).await[0].scope == "orders");
-    crate::wire::check_produce!(&broker, &client;
-        "orders", frozen => refused("literal", "orders", "incident", 0), CONTROL, control => accepted(1));
-    broker.shutdown().await;
+    check_frozen_then_shutdown(broker, &client, frozen, control).await;
 }
 
 /// A signature survives a controller restart and still verifies from the
@@ -287,9 +294,7 @@ async fn a_signature_survives_a_controller_restart_and_still_verifies() {
 
     let frozen = support::topic_id_for(&client, "orders").await;
     let control = support::topic_id_for(&client, CONTROL).await;
-    crate::wire::check_produce!(&broker, &client;
-        "orders", frozen => refused("literal", "orders", "incident", 0), CONTROL, control => accepted(1));
-    broker.shutdown().await;
+    check_frozen_then_shutdown(broker, &client, frozen, control).await;
 }
 
 async fn operator_fixture(

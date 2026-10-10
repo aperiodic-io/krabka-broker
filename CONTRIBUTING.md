@@ -147,17 +147,16 @@ with a line saying why; anything else it reports is a link to fix.
 
 ## Duplicate Code
 
-Run `aspect check-cpd --base origin/main` before submitting Rust refactors.
-The required CPD job uses native PMD 7.28.0 at **100 tokens**, comparing every
-Rust source with the PR target revision (or the previous main revision).
-Existing repeats are allowed; new repeated token sequences and additional
-copies fail. Formatting, comments, and file moves do not increase the allowance.
-Removing repeats reduces the allowance for subsequent changes.
+Run `aspect check-cpd` before submitting Rust refactors. The required CPD job
+uses **jscpd 5.4.1** at **60 tokens / 5 lines**, ignoring whitespace and comments.
+Every duplicate fails; there is no baseline allowance or suppression list.
+The scan includes all tracked and non-ignored untracked Rust sources, including
+tests and hidden directories, copied into an isolated inventory.
 
-The task requires Git, JDK 17 or newer, curl, unzip, and tar. It verifies pinned
-downloads and writes reports to `.cpd/`; CI retains these as the `cpd` artifact.
-See the [checker documentation](tools/cpd/README.md) for the lexer fix and
-comparison details.
+The task requires Git, Node.js 18 or newer, and npm. `npm ci` verifies the pinned
+detector and its platform binary against the committed lockfile. Reports and
+the source inventory go to `.cpd/`; CI retains these as the `cpd` artifact.
+See the [checker documentation](tools/cpd/README.md) for details.
 
 ## Submit a Change
 

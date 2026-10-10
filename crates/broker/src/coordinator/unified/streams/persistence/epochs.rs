@@ -250,14 +250,7 @@ mod tests {
                 b"\x02\x00\x04\x00\x00\x00\x03\x01\x0c\x03\x02a\x021\x00\x02b\x0322\x00",
             ),
         ];
-        for (row, value, trailer) in rows {
-            let bytes = value.encode();
-            assert!(bytes[..] == [HEAD, trailer].concat()[..], "{row}");
-            assert!(
-                StreamsGroupMetadataValue::decode(&bytes).unwrap() == value,
-                "{row}"
-            );
-        }
+        check_metadata_trailers(HEAD, rows);
     }
 
     /// Kafka trunk's KIP-1331 tags 2 and 3 follow the 4.3.1 tags, each only
@@ -297,9 +290,16 @@ mod tests {
                 b"\x02\x00\x04\x00\x00\x00\x04\x03\x04\x00\x00\x00\x00",
             ),
         ];
+        check_metadata_trailers(HEAD, rows);
+    }
+
+    fn check_metadata_trailers(
+        head: &[u8],
+        rows: impl IntoIterator<Item = (&'static str, StreamsGroupMetadataValue, &'static [u8])>,
+    ) {
         for (row, value, trailer) in rows {
             let bytes = value.encode();
-            assert!(bytes[..] == [HEAD, trailer].concat()[..], "{row}");
+            assert!(bytes[..] == [head, trailer].concat()[..], "{row}");
             assert!(
                 StreamsGroupMetadataValue::decode(&bytes).unwrap() == value,
                 "{row}"

@@ -209,10 +209,7 @@ fn runtime_file_config_rejects_relational_conflicts() {
     )];
 
     for (source, message) in cases {
-        let file: FileConfig = toml::from_str(source).expect("parse runtime config");
-        let mut cfg = crate::config::BrokerConfig::default();
-        let error = file
-            .apply_to(&mut cfg)
+        let error = crate::file_config::test_support::configured(source, "parse runtime config")
             .expect_err("relational conflict must fail");
         assert!(error.to_string().contains(message));
     }

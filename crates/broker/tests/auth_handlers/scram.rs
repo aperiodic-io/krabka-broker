@@ -9,7 +9,10 @@ use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse
 use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
-use crate::harness::{alice_password, wrong_scram_password};
+use crate::{
+    harness::{alice_password, wrong_scram_password},
+    kafka_wire::{SaslAuthenticateSetup, SaslHandshakeSetup, ScramAuthenticationSetup},
+};
 
 /// Happy-path drive of a SASL/SCRAM-SHA-512 session.
 ///
@@ -105,10 +108,12 @@ pub async fn drive_sasl_scram_session(
     let mut stream = TcpStream::connect(addr).await?;
     crate::kafka_wire::sasl_scram_authenticate_on(
         &mut stream,
-        "krabka-sasl-test",
-        user,
-        password,
-        mechanism,
+        &ScramAuthenticationSetup {
+            client_id: "krabka-sasl-test",
+            user,
+            password: (password).into(),
+            mechanism,
+        },
     )
     .await?;
     crate::harness::metadata_probe(&mut stream, 5).await
@@ -118,22 +123,30 @@ pub async fn drive_sasl_scram_session(
 /// response, whose `session_lifetime_ms` is the KIP-368 window.
 pub async fn scram_authenticate(
     stream: &mut TcpStream,
-    corr: &mut i32,
-    user: &str,
-    password: &str,
-    mechanism: SaslMechanism,
+    corr: &mut crate::support::wire::CorrelationId,
+    setup: &ScramAuthenticationSetup<'_>,
 ) -> Result<SaslAuthenticateResponse, io::Error> {
-    *corr += 1;
-    crate::kafka_wire::sasl_handshake_on(stream, "krabka-sasl-test", *corr, mechanism.wire_name())
-        .await?;
+    corr.0 += 1;
+    crate::kafka_wire::sasl_handshake_on(
+        stream,
+        SaslHandshakeSetup {
+            client_id: setup.client_id,
+            correlation: *corr,
+            mechanism: setup.mechanism.wire_name(),
+        },
+    )
+    .await?;
 
-    let (client_first, client) = krabka_macros::scram_client_first!(user, password, mechanism)?;
-    *corr += 1;
+    let (client_first, client) =
+        krabka_macros::scram_client_first!(setup.user, setup.password.as_str(), setup.mechanism)?;
+    corr.0 += 1;
     let first = crate::kafka_wire::sasl_authenticate_on(
         stream,
-        "krabka-sasl-test",
-        *corr,
         bytes::Bytes::from(client_first),
+        SaslAuthenticateSetup {
+            client_id: setup.client_id,
+            correlation: *corr,
+        },
     )
     .await?;
     if first.error_code != 0 {
@@ -143,12 +156,14 @@ pub async fn scram_authenticate(
     let (client_final, _client) = client
         .step(&first.auth_bytes)
         .map_err(|e| io::Error::other(format!("scram client step: {e:?}")))?;
-    *corr += 1;
+    corr.0 += 1;
     crate::kafka_wire::sasl_authenticate_on(
         stream,
-        "krabka-sasl-test",
-        *corr,
         bytes::Bytes::from(client_final),
+        SaslAuthenticateSetup {
+            client_id: setup.client_id,
+            correlation: *corr,
+        },
     )
     .await
 }

@@ -22,9 +22,6 @@ use tokio::sync::Mutex;
 use crate::partition::LogOffset;
 
 #[cfg(test)]
-#[macro_use]
-mod commit_macro;
-#[cfg(test)]
 mod completed_commit;
 mod decision;
 mod entry;
@@ -36,6 +33,8 @@ mod replication_mirror;
 mod restart_agreement;
 #[cfg(test)]
 mod snapshot_tail;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -201,7 +200,17 @@ impl ProducerState {
     fn handle(&self, topic: &str, partition: PartitionIndex) -> Arc<Mutex<PartitionProducerState>> {
         // `get` first to avoid allocating the topic `String` on the hot
         // path (the topic almost always already exists).
-        let parts = if let Some(existing) = self.by_topic.get(topic) {
+        let parts = self.topic_partitions(topic);
+        parts
+            .entry(partition)
+            .or_insert_with(|| Arc::new(Mutex::new(PartitionProducerState::default())))
+            .value()
+            .clone()
+    }
+
+    /// Get the topic's partition map without allocating its key on a hit.
+    fn topic_partitions(&self, topic: &str) -> Arc<PartitionMap> {
+        if let Some(existing) = self.by_topic.get(topic) {
             existing.value().clone()
         } else {
             self.by_topic
@@ -209,12 +218,7 @@ impl ProducerState {
                 .or_insert_with(|| Arc::new(DashMap::new()))
                 .value()
                 .clone()
-        };
-        parts
-            .entry(partition)
-            .or_insert_with(|| Arc::new(Mutex::new(PartitionProducerState::default())))
-            .value()
-            .clone()
+        }
     }
 
     /// Read-only snapshot of every tracked producer entry on

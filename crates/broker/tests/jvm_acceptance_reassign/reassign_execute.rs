@@ -19,10 +19,10 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
     let (cluster, _admin_props, admin_mount) =
         Box::pin(crate::cluster::reassignment_cluster(TOPIC)).await;
 
-    let mut producer = crate::support::jvm_docker_command(
-        KAFKA_IMAGE_TXN,
-        &[&admin_mount],
-        &[
+    let mut producer = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE_TXN,
+        mounts: &[&admin_mount],
+        args: &[
             "kafka-console-producer",
             "--topic",
             TOPIC,
@@ -31,8 +31,8 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
             "--producer.config",
             "/client.properties",
         ],
-        true,
-    )
+        input: crate::support::ContainerInput::Attached,
+    })
     .stdin(Stdio::piped())
     .spawn()
     .expect("spawn kafka-console-producer");
@@ -304,12 +304,12 @@ async fn reassign_partitions_additional_keeps_the_reassignment_already_running()
         bootstrap: &advertised,
     };
 
-    side.create_assigned_topic(
-        TOPIC,
-        "1,1",
-        CLIENT_PROPS,
-        &[ToolFile::new(CLIENT_PROPS, &props)],
-    );
+    side.create_assigned_topic(crate::oracle::AssignedTopicCommandSetup {
+        topic: TOPIC,
+        assignment: "1,1",
+        props_path: CLIENT_PROPS,
+        files: &[ToolFile::new(CLIENT_PROPS, &props)],
+    });
     for partition in 0..2 {
         brokers
             .h1

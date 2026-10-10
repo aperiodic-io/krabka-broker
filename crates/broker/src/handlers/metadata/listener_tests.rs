@@ -14,7 +14,6 @@ use krabka_metadata::{
     TopicRecord,
 };
 use krabka_protocol::owned::{
-    describe_topic_partitions_request::{DescribeTopicPartitionsRequest, TopicRequest},
     metadata_request::{MetadataRequest, MetadataRequestTopic},
     metadata_response::{MetadataResponse, MetadataResponseBroker},
 };
@@ -49,7 +48,7 @@ fn registration(
                 protocol: krabka_security::ListenerProtocol::Plaintext,
             })
             .collect(),
-        ..crate::test_support::broker_registration(node_id)
+        ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
     })
 }
 
@@ -304,14 +303,7 @@ async fn describe_topic_partitions_answers_no_leader_for_a_leader_without_the_li
         false,
         "PLAINTEXT",
     );
-    let request = DescribeTopicPartitionsRequest {
-        topics: vec![TopicRequest {
-            name: TOPIC.into(),
-            ..Default::default()
-        }],
-        response_partition_limit: 2000,
-        ..Default::default()
-    };
+    let request = crate::test_support::topic_partitions_request(TOPIC);
 
     let response = crate::handlers::describe_topic_partitions::handle(&broker, request, 0, &ctx)
         .await

@@ -8,6 +8,7 @@
 use std::io;
 
 use bytes::BytesMut;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -26,7 +27,13 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::wire::round_trip;
+use crate::{
+    support::wire::{
+        CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+        SocketExchangeSetup,
+    },
+    wire::round_trip,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Delegation-token wire helpers — encode one request at the negotiated MAX
@@ -52,7 +59,17 @@ pub(crate) async fn send_create_delegation_token<S: AsyncRead + AsyncWrite + Unp
     let mut body = BytesMut::new();
     req.encode(&mut body, CREATE_DT_VERSION)
         .map_err(|e| io::Error::other(format!("CreateDelegationToken encode: {e}")))?;
-    let resp_bytes = round_trip(stream, 38, CREATE_DT_VERSION, corr_id, true, &body).await?;
+    let resp_bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(38),
+            version: WireApiVersion(CREATE_DT_VERSION),
+            correlation: WireCorrelationId(corr_id),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &body,
+    )
+    .await?;
     let mut cur: &[u8] = &resp_bytes;
     CreateDelegationTokenResponse::decode(&mut cur, CREATE_DT_VERSION)
         .map_err(|e| io::Error::other(format!("CreateDelegationToken decode: {e}")))
@@ -66,7 +83,17 @@ pub(crate) async fn send_renew_delegation_token(
     let mut body = BytesMut::new();
     req.encode(&mut body, RENEW_DT_VERSION)
         .map_err(|e| io::Error::other(format!("RenewDelegationToken encode: {e}")))?;
-    let resp_bytes = round_trip(stream, 39, RENEW_DT_VERSION, corr_id, true, &body).await?;
+    let resp_bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(39),
+            version: WireApiVersion(RENEW_DT_VERSION),
+            correlation: WireCorrelationId(corr_id),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &body,
+    )
+    .await?;
     let mut cur: &[u8] = &resp_bytes;
     RenewDelegationTokenResponse::decode(&mut cur, RENEW_DT_VERSION)
         .map_err(|e| io::Error::other(format!("RenewDelegationToken decode: {e}")))
@@ -80,7 +107,17 @@ pub(crate) async fn send_expire_delegation_token(
     let mut body = BytesMut::new();
     req.encode(&mut body, EXPIRE_DT_VERSION)
         .map_err(|e| io::Error::other(format!("ExpireDelegationToken encode: {e}")))?;
-    let resp_bytes = round_trip(stream, 40, EXPIRE_DT_VERSION, corr_id, true, &body).await?;
+    let resp_bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(40),
+            version: WireApiVersion(EXPIRE_DT_VERSION),
+            correlation: WireCorrelationId(corr_id),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &body,
+    )
+    .await?;
     let mut cur: &[u8] = &resp_bytes;
     ExpireDelegationTokenResponse::decode(&mut cur, EXPIRE_DT_VERSION)
         .map_err(|e| io::Error::other(format!("ExpireDelegationToken decode: {e}")))
@@ -94,8 +131,32 @@ pub(crate) async fn send_describe_delegation_token(
     let mut body = BytesMut::new();
     req.encode(&mut body, DESCRIBE_DT_VERSION)
         .map_err(|e| io::Error::other(format!("DescribeDelegationToken encode: {e}")))?;
-    let resp_bytes = round_trip(stream, 41, DESCRIBE_DT_VERSION, corr_id, true, &body).await?;
+    let resp_bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(41),
+            version: WireApiVersion(DESCRIBE_DT_VERSION),
+            correlation: WireCorrelationId(corr_id),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &body,
+    )
+    .await?;
     let mut cur: &[u8] = &resp_bytes;
     DescribeDelegationTokenResponse::decode(&mut cur, DESCRIBE_DT_VERSION)
         .map_err(|e| io::Error::other(format!("DescribeDelegationToken decode: {e}")))
+}
+
+/// Independent wire expectations for a freshly created token's identity and HMAC.
+pub fn check_created_identity(
+    response: &CreateDelegationTokenResponse,
+    owner: &str,
+    requester: &str,
+) {
+    assert2::check!(response.principal_type == "User");
+    assert2::check!(response.principal_name == owner);
+    assert2::check!(response.token_requester_principal_type == "User");
+    assert2::check!(response.token_requester_principal_name == requester);
+    assert2::check!(!response.token_id.is_empty(), "token_id must be set");
+    assert2::check!(response.hmac.len() == 64, "HMAC length must be 64 bytes");
 }

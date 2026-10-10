@@ -57,38 +57,34 @@ mod tests {
     use crate::file_config::FileConfig;
 
     #[test]
-    fn apply_to_parses_multi_voter_quorum_in_order() {
-        let src = r#"
-controller_quorum_voters = ["0@127.0.0.1:9093", "1@127.0.0.2:9093", "2@127.0.0.3:9093"]
-"#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(src).unwrap();
-
-        // Host:port carried verbatim (parsed, NOT DNS-resolved) so the dialer
-        // re-resolves each peer per connect.
-        let expected: Vec<(krabka_raft::NodeId, String)> = vec![
-            (krabka_audit::NodeId(0), "127.0.0.1:9093".to_string()),
-            (krabka_audit::NodeId(1), "127.0.0.2:9093".to_string()),
-            (krabka_audit::NodeId(2), "127.0.0.3:9093".to_string()),
+    fn quorum_voters_keep_wire_order_and_hosts_without_dns_resolution() {
+        use krabka_audit::NodeId;
+        let cases = [
+            (
+                r#"controller_quorum_voters = ["0@127.0.0.1:9093", "1@127.0.0.2:9093", "2@127.0.0.3:9093"]"#,
+                vec![
+                    (NodeId(0), "127.0.0.1:9093"),
+                    (NodeId(1), "127.0.0.2:9093"),
+                    (NodeId(2), "127.0.0.3:9093"),
+                ],
+            ),
+            // An offline StatefulSet hostname must be retained for per-connect resolution.
+            (
+                r#"controller_quorum_voters = ["0@demo-broker-0-0.demo-broker-headless.default.svc.cluster.local:9093"]"#,
+                vec![(
+                    NodeId(0),
+                    "demo-broker-0-0.demo-broker-headless.default.svc.cluster.local:9093",
+                )],
+            ),
         ];
-        assert!(cfg.controller_quorum_voters == expected);
-    }
-    #[test]
-    fn apply_to_keeps_unresolvable_hostname_without_dns() {
-        // A peer FQDN that does not resolve right now (a `StatefulSet` peer
-        // whose A record isn't published yet, or simply offline) MUST be
-        // accepted and carried verbatim — the old resolve-at-startup path
-        // would have failed the whole broker boot here. The dialer resolves it
-        // later, per connect, so a peer coming up on a new pod IP is reachable.
-        let src = r#"
-controller_quorum_voters = ["0@demo-broker-0-0.demo-broker-headless.default.svc.cluster.local:9093"]
-"#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(src).unwrap();
-
-        let expected: Vec<(krabka_raft::NodeId, String)> = vec![(
-            krabka_audit::NodeId(0),
-            "demo-broker-0-0.demo-broker-headless.default.svc.cluster.local:9093".to_string(),
-        )];
-        assert!(cfg.controller_quorum_voters == expected);
+        for (source, expected) in cases {
+            let cfg = crate::file_config::test_support::configured_unwrap_parse(source).unwrap();
+            let expected: Vec<(krabka_raft::NodeId, String)> = expected
+                .into_iter()
+                .map(|(node, host)| (node, host.to_string()))
+                .collect();
+            assert!(cfg.controller_quorum_voters == expected, "{source}");
+        }
     }
     #[test]
     fn apply_to_rejects_malformed_quorum_voters() {

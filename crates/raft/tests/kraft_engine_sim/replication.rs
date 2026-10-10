@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use krabka_raft::RaftError;
 
-use crate::harness::{
-    STAGGERED_TIMEOUTS, await_single_leader, await_until, start_engines, topic_record,
-};
+use crate::harness::{await_single_leader, await_until, start_engines, topic_record};
 
 /// 2. `submit_change` on a follower forwards to the leader, commits through
 ///    record-carrying replication, and the topic appears in ALL three images.
@@ -17,7 +15,14 @@ async fn follower_submit_change_propagates() {
     let (net, ids) = crate::harness::three_voter_network();
     let cid = uuid::Uuid::from_u128(200);
 
-    let _dirs = start_engines(&net, &ids, cid, &STAGGERED_TIMEOUTS);
+    let _dirs = start_engines(
+        &net,
+        crate::harness::SimClusterSetup {
+            ids: &ids,
+            cluster_id: cid,
+            ..Default::default()
+        },
+    );
 
     let (leader, _epoch) = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
 

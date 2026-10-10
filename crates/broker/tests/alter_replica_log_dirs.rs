@@ -25,6 +25,8 @@ mod kafka_wire;
 // `alter_replica_log_dirs/` directory, which keeps the parts out of `tests/`
 // where every `.rs` file would become another test binary.
 mod support;
+#[path = "support/two_dir_topic.rs"]
+mod two_dir_topic;
 
 #[path = "alter_replica_log_dirs/cordoned.rs"]
 mod cordoned;

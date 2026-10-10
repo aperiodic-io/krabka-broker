@@ -29,7 +29,7 @@ crate_tests(
     # TLS certificates, Kerberos keytabs and captured Kafka frames. The TLS
     # material is `include_str!`ed by the suites that serve it and the keytabs
     # are opened at run time, so both lists are needed.
-    compile_data = glob(["tests/fixtures/**"]),
+    compile_data = glob(["tests/fixtures/**"]) + ["//crates/format:tests/fixtures/bootstrap.records.bin"],
     # Measure elapsed wall-clock time and assert a bound on it, so they are
     # timing-sensitive the way //crates/raft's engine simulation is: they pass in
     # the test run and fail under coverage instrumentation, which is a statement

@@ -321,13 +321,23 @@ async fn rf_three_remote_leader_uses_committed_high_watermark() {
     .await;
     let fetched: FetchResponse = data_client
         .send(single_partition_fetch(
-            TOPIC,
-            WireUuid(*topic_id.as_bytes()),
-            FetchPartition {
-                current_leader_epoch: leader_epoch.0,
-                ..fetch_partition(data_partition, i64::MAX, 0)
+            crate::support::fetch::SinglePartitionFetchSetup {
+                topic: TOPIC.into(),
+                topic_id: WireUuid(*topic_id.as_bytes()),
+                partition: FetchPartition {
+                    current_leader_epoch: leader_epoch.0,
+                    ..fetch_partition(crate::support::fetch::FetchPartitionSetup {
+                        partition: krabka_ids::PartitionIndex(data_partition),
+                        offset: krabka_ids::Offset(i64::MAX),
+                        maximum: crate::support::fetch::FetchByteLimit(0),
+                    })
+                },
+                limits: crate::support::fetch::FetchLimits {
+                    wait: crate::support::fetch::RequestWaitMillis(0),
+                    minimum: crate::support::fetch::FetchByteLimit(0),
+                    maximum: crate::support::fetch::FetchByteLimit(0),
+                },
             },
-            (0, 0, 0),
         ))
         .await
         .unwrap();

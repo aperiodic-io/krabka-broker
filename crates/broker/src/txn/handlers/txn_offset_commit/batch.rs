@@ -220,7 +220,14 @@ mod tests {
         registry.insert(
             OFFSETS_TOPIC.into(),
             PartitionIndex(OFFSETS_PARTITION),
-            open_partition(dir.path(), OFFSETS_TOPIC, OFFSETS_PARTITION),
+            open_partition(
+                dir.path(),
+                crate::test_support::StandalonePartitionSetup {
+                    topic: OFFSETS_TOPIC,
+                    partition: krabka_ids::PartitionIndex(OFFSETS_PARTITION),
+                    ..Default::default()
+                },
+            ),
         );
         (dir, registry)
     }

@@ -34,7 +34,9 @@ use crate::{
         start_single_broker_plaintext, start_single_broker_plaintext_with_conn_caps,
         start_single_broker_sasl_plaintext_with_users,
     },
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
     quota_admin::{drive_alter_client_quotas_sasl, drive_describe_client_quotas_sasl},
+    support::wire::CorrelationId as WireCorrelationId,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,14 +53,14 @@ async fn ip_quota_alter_then_describe_round_trip() {
 
     let alter_resp = drive_alter_client_quotas_sasl(
         addr,
-        crate::CLIENT_ID,
-        "admin",
-        "admin-secret",
         vec![(
             vec![("ip".into(), Some("127.0.0.1".into()))],
             vec![("connection_creation_rate".into(), 2.0, false)],
         )],
-        false,
+        &crate::kafka_wire::quotas::QuotaAlterSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+            ..Default::default()
+        },
     )
     .await;
     assert!(alter_resp[0].1 == 0, "alter should succeed");
@@ -76,11 +78,11 @@ async fn ip_quota_alter_then_describe_round_trip() {
 
     let desc = drive_describe_client_quotas_sasl(
         addr,
-        crate::CLIENT_ID,
-        "admin",
-        "admin-secret",
         vec![("ip".into(), /*ANY*/ 2, None)],
-        false,
+        &crate::kafka_wire::quotas::QuotaDescribeSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+            ..Default::default()
+        },
     )
     .await;
     assert!(desc.len() == 1);
@@ -170,22 +172,46 @@ async fn closes_the_second_connection_from_loopback(entity_name: &str) {
     tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
 
     let mut first = connect_from([127, 0, 0, 1]).await;
-    let served =
-        kafka_wire::round_trip(&mut first, 18, 0, 1, CLIENT_ID, false, &api_versions()).await;
+    let served = kafka_wire::round_trip(
+        &mut first,
+        WireExchangeSetup {
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
+        &api_versions(),
+    )
+    .await;
     assert!(served.is_ok(), "first connection is served: {served:?}");
 
     let mut throttled = connect_from([127, 0, 0, 1]).await;
     let body = api_versions();
     let throttled_task = tokio::spawn(async move {
-        kafka_wire::round_trip(&mut throttled, 18, 0, 2, CLIENT_ID, false, &body).await
+        kafka_wire::round_trip(
+            &mut throttled,
+            WireExchangeSetup {
+                correlation: WireCorrelationId(2),
+                client_id: CLIENT_ID,
+                ..Default::default()
+            },
+            &body,
+        )
+        .await
     });
     // Let the accept loop take the throttled connection before the next one.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let started = std::time::Instant::now();
     let mut other = connect_from([127, 0, 0, 2]).await;
-    let other_served =
-        kafka_wire::round_trip(&mut other, 18, 0, 3, CLIENT_ID, false, &api_versions()).await;
+    let other_served = kafka_wire::round_trip(
+        &mut other,
+        WireExchangeSetup {
+            correlation: WireCorrelationId(3),
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
+        &api_versions(),
+    )
+    .await;
     let other_elapsed = started.elapsed();
     assert!(
         other_served.is_ok(),
@@ -253,15 +279,30 @@ async fn max_connections_per_ip_refuses_excess_and_frees_on_close() {
     // Connection 1: within the per-IP cap (0 -> 1). A successful round-trip
     // proves the broker accepted it; keep the stream open to hold the slot.
     let mut c1 = TcpStream::connect(addr).await.expect("connect c1");
-    kafka_wire::round_trip(&mut c1, 18, 0, 1, CLIENT_ID, false, &av_body)
-        .await
-        .expect("c1 ApiVersions succeeds (within cap)");
+    kafka_wire::round_trip(
+        &mut c1,
+        WireExchangeSetup {
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
+        &av_body,
+    )
+    .await
+    .expect("c1 ApiVersions succeeds (within cap)");
 
     // Connection 2 from the same IP exceeds the per-IP cap. The broker accepts
     // the socket then immediately drops it (no handler spawned), so the
     // request round-trip fails (peer closed the connection).
     let mut c2 = TcpStream::connect(addr).await.expect("tcp connect c2");
-    let c2_result = kafka_wire::round_trip(&mut c2, 18, 0, 1, CLIENT_ID, false, &av_body).await;
+    let c2_result = kafka_wire::round_trip(
+        &mut c2,
+        WireExchangeSetup {
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
+        &av_body,
+    )
+    .await;
     assert!(
         c2_result.is_err(),
         "c2 must be refused while c1 holds the only per-IP slot, got {c2_result:?}"
@@ -273,9 +314,16 @@ async fn max_connections_per_ip_refuses_excess_and_frees_on_close() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         let mut c3 = TcpStream::connect(addr).await.expect("connect c3");
-        if kafka_wire::round_trip(&mut c3, 18, 0, 1, CLIENT_ID, false, &av_body)
-            .await
-            .is_ok()
+        if kafka_wire::round_trip(
+            &mut c3,
+            WireExchangeSetup {
+                client_id: CLIENT_ID,
+                ..Default::default()
+            },
+            &av_body,
+        )
+        .await
+        .is_ok()
         {
             break;
         }

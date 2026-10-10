@@ -1,15 +1,16 @@
-(* #"/workspace/crates/verified/src/quota.rs" 166 0 166 93 *)
+(* #"/workspace/crates/verified/src/quota.rs" 169 0 169 93 *)
 
-let%span squota = "/workspace/crates/verified/src/quota.rs" 122 10 123 60
-let%span squota'0 = "/workspace/crates/verified/src/quota.rs" 124 10 126 78
-let%span squota'1 = "/workspace/crates/verified/src/quota.rs" 127 10 130 63
-let%span squota'2 = "/workspace/crates/verified/src/quota.rs" 131 10 133 78
-let%span squota'3 = "/workspace/crates/verified/src/quota.rs" 134 10 137 65
-let%span squota'4 = "/workspace/crates/verified/src/quota.rs" 138 10 142 65
-let%span squota'5 = "/workspace/crates/verified/src/quota.rs" 143 10 148 65
-let%span squota'6 = "/workspace/crates/verified/src/quota.rs" 149 10 155 67
-let%span squota'7 = "/workspace/crates/verified/src/quota.rs" 156 10 164 67
+let%span squota = "/workspace/crates/verified/src/quota.rs" 131 10 132 60
+let%span squota'0 = "/workspace/crates/verified/src/quota.rs" 133 10 135 78
+let%span squota'1 = "/workspace/crates/verified/src/quota.rs" 136 10 139 63
+let%span squota'2 = "/workspace/crates/verified/src/quota.rs" 140 10 142 78
+let%span squota'3 = "/workspace/crates/verified/src/quota.rs" 143 10 146 65
+let%span squota'4 = "/workspace/crates/verified/src/quota.rs" 147 10 151 65
+let%span squota'5 = "/workspace/crates/verified/src/quota.rs" 152 10 154 65
+let%span squota'6 = "/workspace/crates/verified/src/quota.rs" 155 10 158 67
+let%span squota'7 = "/workspace/crates/verified/src/quota.rs" 159 10 167 67
 let%span squota'8 = "/workspace/crates/verified/src/quota.rs" 115 16 117 57
+let%span squota'9 = "/workspace/crates/verified/src/quota.rs" 123 16 126 59
 
 use creusot.prelude.Any
 
@@ -36,14 +37,18 @@ type t_UserClientQuotaPrecedence =
   | DefaultClient
   | None
 
-predicate exact_user_quota_absent [#"/workspace/crates/verified/src/quota.rs" 114 0 114 63] (facts: t_UserClientQuotaFacts) =
+predicate exact_user_quota_absent [#"/workspace/crates/verified/src/quota.rs" 114 0 114 67] (facts: t_UserClientQuotaFacts) =
   [%#squota'8] facts.exact_pair = Absent /\ facts.exact_user_default_client = Absent /\ facts.exact_user = Absent
+
+predicate all_user_quota_absent [#"/workspace/crates/verified/src/quota.rs" 122 0 122 61] (facts: t_UserClientQuotaFacts) =
+  [%#squota'9] exact_user_quota_absent facts
+  /\ facts.default_user_exact_client = Absent /\ facts.default_pair = Absent /\ facts.default_user = Absent
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let user_client_quota_precedence [#"/workspace/crates/verified/src/quota.rs" 166 0 166 93]
+let user_client_quota_precedence [#"/workspace/crates/verified/src/quota.rs" 169 0 169 93]
   (facts: t_UserClientQuotaFacts) (return (x: t_UserClientQuotaPrecedence)) = (! bb0
   [ bb0 = any [ br0 -> {facts.exact_pair = Absent} (! bb1) | br1 -> {facts.exact_pair = Present} (! bb3) ]
   | bb1 = s0 [ s0 = [ &_30 <- false ] s1 | s1 = bb4 ]
@@ -116,14 +121,9 @@ let user_client_quota_precedence [#"/workspace/crates/verified/src/quota.rs" 166
       = (exact_user_quota_absent facts
       /\ facts.default_user_exact_client = Absent /\ facts.default_pair = Absent /\ facts.default_user = Present))
     /\ ([@stop_split] [@expl:user_client_quota_precedence ensures #6] [%#squota'5] (result = ExactClient)
-      = (exact_user_quota_absent facts
-      /\ facts.default_user_exact_client = Absent
-      /\ facts.default_pair = Absent /\ facts.default_user = Absent /\ facts.exact_client = Present))
+      = (all_user_quota_absent facts /\ facts.exact_client = Present))
     /\ ([@stop_split] [@expl:user_client_quota_precedence ensures #7] [%#squota'6] (result = DefaultClient)
-      = (exact_user_quota_absent facts
-      /\ facts.default_user_exact_client = Absent
-      /\ facts.default_pair = Absent
-      /\ facts.default_user = Absent /\ facts.exact_client = Absent /\ facts.default_client = Present))
+      = (all_user_quota_absent facts /\ facts.exact_client = Absent /\ facts.default_client = Present))
     /\ ([@stop_split] [@expl:user_client_quota_precedence ensures #8] [%#squota'7] (result = None)
     = (not (facts.exact_pair = Present
     \/ facts.exact_user_default_client = Present

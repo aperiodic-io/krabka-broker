@@ -781,16 +781,7 @@ mod tests {
 
     /// `golden_records` as a 1.0 `krabka format` writes them: the version
     /// header, then one `u32` little-endian length and the wincode record.
-    #[rustfmt::skip]
-    const GOLDEN_BYTES: &[u8] = &[
-        0x00, 0x00, // version 0
-        30, 0, 0, 0, // length 30
-        17, 0, 0, 0, // variant 17, V1FeatureLevel
-        16, 0, 0, 0, 0, 0, 0, 0, // name length 16
-        b'm', b'e', b't', b'a', b'd', b'a', b't', b'a',
-        b'.', b'v', b'e', b'r', b's', b'i', b'o', b'n',
-        30, 0, // level 30
-    ];
+    const GOLDEN_BYTES: &[u8] = include_bytes!("../../format/tests/fixtures/bootstrap.records.bin");
 
     #[test]
     fn the_encoder_produces_the_golden_bytes() {
@@ -816,6 +807,13 @@ mod tests {
     /// typed source. A file `krabka format` wrote before 1.0 starts with the
     /// first record's `u32` little-endian length, which reads as an unknown
     /// version.
+    fn refused_records(bytes: &[u8]) -> (tempfile::TempDir, BrokerError) {
+        let dir = tempfile::tempdir().unwrap();
+        write_records_file(dir.path(), bytes);
+        let error = load_bootstrap_records(dir.path()).unwrap_err();
+        (dir, error)
+    }
+
     #[test]
     fn a_missing_or_unknown_version_is_refused() {
         let mut pre_1_0 = Vec::new();
@@ -850,9 +848,7 @@ mod tests {
             ),
         ];
         for (what, bytes, want) in cases {
-            let dir = tempfile::tempdir().unwrap();
-            write_records_file(dir.path(), &bytes);
-            let error = load_bootstrap_records(dir.path()).unwrap_err();
+            let (dir, error) = refused_records(&bytes);
             let BrokerError::BootstrapFile { path, source } = error else {
                 panic!("{what}: not a bootstrap file error: {error}");
             };
@@ -890,9 +886,7 @@ mod tests {
             ("a zero-length body", framed(&0u32.to_le_bytes()), "decode:"),
         ];
         for (what, bytes, want) in cases {
-            let dir = tempfile::tempdir().unwrap();
-            write_records_file(dir.path(), &bytes);
-            let error = load_bootstrap_records(dir.path()).unwrap_err();
+            let (_dir, error) = refused_records(&bytes);
             let BrokerError::BootstrapFile { source, .. } = error else {
                 panic!("{what}: not a bootstrap file error: {error}");
             };

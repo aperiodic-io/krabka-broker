@@ -12,6 +12,14 @@ use crate::{
     file_config::{FileConfig, FileConfigError},
 };
 
+fn check_operator_key_refusal(file: FileConfig, cfg: &mut crate::config::BrokerConfig, case: &str) {
+    assert!(let Err(error) = file.apply_to(cfg), "case {case}");
+    check!(
+        matches!(error, FileConfigError::OperatorKeys(_)),
+        "case {case}"
+    );
+}
+
 // A well-formed 32-byte Ed25519 public key file plus the TOML
 // `[[operator_keys]]` entry that points at it. The bytes never verify a
 // signature here; only the length is checked at load.
@@ -175,15 +183,25 @@ fn background_unclean_recovery_accepts_exactly_three_spellings() {
     }
 }
 
+/// Apply privileged-action sections beside the fixture's Alice operator key.
+fn configured_privileged_actions(
+    directory: &TempDir,
+    sections: &str,
+) -> crate::config::BrokerConfig {
+    let source = format!(
+        "{}\n{sections}",
+        operator_key_fixture(directory, "alice-yubi", "User:alice")
+    );
+    crate::file_config::test_support::configured(&source, "parse config").expect("apply config")
+}
+
 #[test]
 fn freeze_and_break_glass_sections_apply_their_documented_defaults() {
     let dir = TempDir::new().expect("tempdir");
-    let toml = format!(
-        "{}\n[freeze]\n[break_glass]\napprovers = [\"User:alice\", \"User:bob\"]\n",
-        operator_key_fixture(&dir, "alice-yubi", "User:alice")
+    let cfg = configured_privileged_actions(
+        &dir,
+        "[freeze]\n[break_glass]\napprovers = [\"User:alice\", \"User:bob\"]\n",
     );
-    let cfg =
-        crate::file_config::test_support::configured(&toml, "parse config").expect("apply config");
 
     check!(cfg.freeze == crate::config::FreezeConfig::default());
     check!(
@@ -221,16 +239,14 @@ fn absent_privileged_action_sections_retain_the_broker_defaults() {
 #[test]
 fn freeze_and_break_glass_values_replace_the_broker_defaults() {
     let dir = TempDir::new().expect("tempdir");
-    let toml = format!(
-        "{}\n[freeze]\nmax_entries = 25\nrequire_signature = true\n\
+    let cfg = configured_privileged_actions(
+        &dir,
+        "[freeze]\nmax_entries = 25\nrequire_signature = true\n\
          signature_max_skew = \"90s\"\n\
          [break_glass]\napprovers = [\"User:alice\", \"User:bob\", \"User:carol\"]\n\
          required_approvals = 3\nproposal_ttl = \"2h\"\n\
          signed_actions = [\"delete_topic\"]\nbackground_unclean_recovery = \"require\"\n",
-        operator_key_fixture(&dir, "alice-yubi", "User:alice")
     );
-    let cfg =
-        crate::file_config::test_support::configured(&toml, "parse config").expect("apply config");
 
     check!(
         cfg.freeze
@@ -326,11 +342,7 @@ fn demanding_a_signature_with_no_operator_key_is_a_startup_error() {
         let file: FileConfig = toml::from_str(toml).expect("parse config");
         let mut cfg = crate::config::BrokerConfig::default();
 
-        assert!(let Err(error) = file.apply_to(&mut cfg), "case {name}");
-        check!(
-            matches!(error, FileConfigError::OperatorKeys(_)),
-            "case {name}"
-        );
+        check_operator_key_refusal(file, &mut cfg, name);
     }
 }
 
@@ -459,11 +471,7 @@ fn an_unloadable_operator_key_is_a_startup_error() {
         let file: FileConfig = toml::from_str(&toml).expect("parse operator_keys section");
         let mut cfg = crate::config::BrokerConfig::default();
 
-        assert!(let Err(error) = file.apply_to(&mut cfg), "case {name}");
-        check!(
-            matches!(error, FileConfigError::OperatorKeys(_)),
-            "case {name}"
-        );
+        check_operator_key_refusal(file, &mut cfg, name);
         check!(cfg.operator_keys.is_empty(), "case {name}");
     }
 }

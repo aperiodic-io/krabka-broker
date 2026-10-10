@@ -39,34 +39,22 @@ async fn the_cache_counters_move_on_a_validated_produce() {
     let (_registry, broker, client, _dir, id) =
         crate::harness::mock_topic_fixture("validated", VALIDATED).await;
 
-    check!(broker.metrics().schema_validation_cache_misses.get() == 0);
-    check!(broker.metrics().schema_validation_cache_hits.get() == 0);
-
-    // First produce of this id: nothing cached, so one registry round trip.
-    crate::harness::check_value_append(
-        &broker,
-        &client,
-        "validated",
-        id,
-        Some(framed(KNOWN_ID, b"anything")),
-        (0, None),
-    )
-    .await;
-    check!(broker.metrics().schema_validation_cache_misses.get() == 1);
-    check!(broker.metrics().schema_validation_cache_hits.get() == 0);
-
-    // Same id inside the TTL: served from the cache, and counted as a hit.
-    crate::harness::check_value_append(
-        &broker,
-        &client,
-        "validated",
-        id,
-        Some(framed(KNOWN_ID, b"anything")),
-        (0, None),
-    )
-    .await;
-    check!(broker.metrics().schema_validation_cache_misses.get() == 1);
-    check!(broker.metrics().schema_validation_cache_hits.get() == 1);
+    // The first produce loads the schema; the next is served within its TTL.
+    for (misses, hits) in [(0, 0), (1, 0), (1, 1)] {
+        check!(broker.metrics().schema_validation_cache_misses.get() == misses);
+        check!(broker.metrics().schema_validation_cache_hits.get() == hits);
+        if hits == 0 {
+            crate::harness::check_value_append(
+                &broker,
+                &client,
+                "validated",
+                id,
+                Some(framed(KNOWN_ID, b"anything")),
+                (0, None),
+            )
+            .await;
+        }
+    }
 
     broker.shutdown().await;
 }

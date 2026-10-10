@@ -85,7 +85,7 @@ use krabka_protocol::{
 use crate::support::{
     configs::feature_update,
     discovery::api_versions_request_for,
-    sasl::scram_upsertion,
+    sasl::{ScramAlgorithm, ScramIterations, ScramUpsertionSetup, scram_upsertion},
     topics::{creatable_topic, create_topic_request},
 };
 
@@ -322,10 +322,12 @@ async fn controller_listener_serves_the_topic_lifecycle() {
     let connection = dial_controller(&broker).await;
 
     let created = connection
-        .send(create_topic_request(
-            creatable_topic("controller-lifecycle", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("controller-lifecycle").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics over the controller listener");
 
@@ -500,15 +502,13 @@ async fn controller_listener_serves_the_scram_write_path() {
 
     let altered = connection
         .send(AlterUserScramCredentialsRequest {
-            upsertions: vec![scram_upsertion(
-                "alice",
-                SCRAM_SHA_256,
-                8_192,
-                (
-                    Bytes::from_static(b"salt-bytes"),
-                    Bytes::from_static(b"salted-password-bytes"),
-                ),
-            )],
+            upsertions: vec![scram_upsertion(ScramUpsertionSetup {
+                mechanism: ScramAlgorithm::Sha256,
+                iterations: ScramIterations(8_192),
+                salt: Bytes::from_static(b"salt-bytes"),
+                salted_password: Bytes::from_static(b"salted-password-bytes"),
+                ..Default::default()
+            })],
             ..Default::default()
         })
         .await
@@ -540,27 +540,29 @@ async fn controller_listener_serves_the_scram_write_path() {
         .expect("DescribeUserScramCredentials over the controller listener");
     connection.close();
 
-    check!(
-        described
-            == DescribeUserScramCredentialsResponse {
-                throttle_time_ms: 0,
-                error_code: 0,
-                error_message: None,
-                results: vec![DescribeUserScramCredentialsResult {
-                    user: "alice".into(),
-                    error_code: 0,
-                    error_message: None,
-                    credential_infos: vec![CredentialInfo {
-                        mechanism: SCRAM_SHA_256,
-                        iterations: 8_192,
-                        unknown_tagged_fields: UnknownTaggedFields::default(),
-                    }],
-                    unknown_tagged_fields: UnknownTaggedFields::default(),
-                }],
-                unknown_tagged_fields: UnknownTaggedFields::default(),
-            }
-    );
+    check!(described == alice_scram_credentials());
     broker.shutdown().await;
+}
+
+/// Independent expected stored SCRAM response, including each empty tag collection.
+fn alice_scram_credentials() -> DescribeUserScramCredentialsResponse {
+    DescribeUserScramCredentialsResponse {
+        throttle_time_ms: 0,
+        error_code: 0,
+        error_message: None,
+        results: vec![DescribeUserScramCredentialsResult {
+            user: "alice".into(),
+            error_code: 0,
+            error_message: None,
+            credential_infos: vec![CredentialInfo {
+                mechanism: SCRAM_SHA_256,
+                iterations: 8_192,
+                unknown_tagged_fields: UnknownTaggedFields::default(),
+            }],
+            unknown_tagged_fields: UnknownTaggedFields::default(),
+        }],
+        unknown_tagged_fields: UnknownTaggedFields::default(),
+    }
 }
 
 /// `AssignReplicasToDirs` is a context dispatch, so it also covers the
@@ -579,10 +581,12 @@ async fn controller_listener_serves_assign_replicas_to_dirs() {
         .broker_epoch;
 
     let created = connection
-        .send(create_topic_request(
-            creatable_topic("controller-dirs", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("controller-dirs").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics over the controller listener");
     assert!(let [created_topic] = &created.topics[..]);
@@ -646,18 +650,9 @@ async fn controller_listener_serves_unregister_controller() {
 
     let (broker, _dir) = start_trunk_broker().await;
     broker
-        .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1ControllerRegistration(
-            krabka_metadata::ControllerRegistrationRecord {
-                node_id: NodeId(7),
-                incarnation_id: uuid::Uuid::from_u128(7),
-                zk_migration_ready: false,
-                endpoints: Vec::new(),
-                features: std::collections::BTreeMap::from([(
-                    "metadata.version".to_owned(),
-                    (7, krabka_metadata::metadata_version::METADATA_VERSION_MAX),
-                )]),
-            },
-        ))
+        .submit_metadata_record_for_test(crate::support::configs::controller_registration(NodeId(
+            7,
+        )))
         .await
         .expect("seed the registration");
     let connection = dial_controller(&broker).await;
@@ -728,10 +723,12 @@ async fn controller_only_node_places_no_replica_on_itself() {
     let connection = dial_controller(&broker).await;
 
     let created = connection
-        .send(create_topic_request(
-            creatable_topic("controller-only-placement", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("controller-only-placement").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics over a controller-only listener");
     connection.close();

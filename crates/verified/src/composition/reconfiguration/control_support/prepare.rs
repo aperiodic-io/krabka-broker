@@ -6,11 +6,10 @@ use super::*;
 /// prefixes, common log identity, directory/epoch facts and actual control
 /// encoding remain host obligations. `KRaft` Fetch positions do not prove fsync.
 #[requires(control_inputs_coherent(old@, state.1, reports@))]
-#[ensures((result != None) == (control_request_admitted(old@, state, request, node, target)
-    && (control_record_count(state.1.kraft_version, request.kind) == 0
-        || (base@ >= 0 && base@ + control_record_count(state.1.kraft_version, request.kind) <= i64::MAX@
+#[ensures((result != None) == control_supported_request(old@, state, request, (node, target),
+    (base@ >= 0 && base@ + control_record_count(state.1.kraft_version, request.kind) <= i64::MAX@
             && control_prefix_majorities(old@, reports@, request.kind, node,
-                base@ + control_record_count(state.1.kraft_version, request.kind))))))]
+                base@ + control_record_count(state.1.kraft_version, request.kind)))))]
 #[ensures(match result { None => true, Some((plan, next, deltas, support)) =>
     admitted_plan(state.1, request.kind, plan)
     && next@.len() == plan.next_voter_count@ && next@.len() > 0

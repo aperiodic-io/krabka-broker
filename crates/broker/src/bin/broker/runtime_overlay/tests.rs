@@ -323,6 +323,17 @@ fn file_runtime_with_nondefault_values() -> krabka_broker::file_config::FileConf
     .expect("parse runtime file config")
 }
 
+fn nondefault_runtime_config() -> (BrokerConfig, Option<krabka_units::Time>) {
+    let mut config = BrokerConfig::default();
+    let file = file_runtime_with_nondefault_values();
+    let shutdown = file
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.controlled_shutdown_drain_timeout);
+    file.apply_to(&mut config).expect("apply file runtime");
+    (config, shutdown)
+}
+
 #[test]
 fn explicit_cli_default_runtime_values_override_file() {
     let _guard = env_guard();
@@ -337,28 +348,13 @@ fn explicit_cli_default_runtime_values_override_file() {
         "--offsets-topic-replication-factor=3",
     ])
     .expect("parse explicit CLI defaults");
-    let mut config = BrokerConfig::default();
-    let file = file_runtime_with_nondefault_values();
-    let file_shutdown = file
-        .runtime
-        .as_ref()
-        .and_then(|runtime| runtime.controlled_shutdown_drain_timeout);
-    file.apply_to(&mut config).expect("apply file runtime");
+    let (mut config, file_shutdown) = nondefault_runtime_config();
 
     let shutdown = args
         .apply_runtime_to(&mut config, file_shutdown)
         .expect("overlay CLI runtime");
 
-    assert!(
-        (
-            config.cleaner_interval,
-            shutdown,
-            config.auto_join_voter_request_timeout,
-            config.share_coordinator.state_topic_replication_factor,
-            config.transaction_state_replication_factor,
-            config.offsets_topic_replication_factor,
-        ) == (secs(30), secs(20), secs(30), 3, 3, 3)
-    );
+    check_default_runtime_overlay(&config, shutdown);
 }
 
 #[test]
@@ -376,28 +372,13 @@ fn explicit_env_default_runtime_values_override_file() {
         ],
         || {
             let args = Args::try_parse_from(["krabka-broker"]).expect("parse env defaults");
-            let mut config = BrokerConfig::default();
-            let file = file_runtime_with_nondefault_values();
-            let file_shutdown = file
-                .runtime
-                .as_ref()
-                .and_then(|runtime| runtime.controlled_shutdown_drain_timeout);
-            file.apply_to(&mut config).expect("apply file runtime");
+            let (mut config, file_shutdown) = nondefault_runtime_config();
 
             let shutdown = args
                 .apply_runtime_to(&mut config, file_shutdown)
                 .expect("overlay env runtime");
 
-            assert!(
-                (
-                    config.cleaner_interval,
-                    shutdown,
-                    config.auto_join_voter_request_timeout,
-                    config.share_coordinator.state_topic_replication_factor,
-                    config.transaction_state_replication_factor,
-                    config.offsets_topic_replication_factor,
-                ) == (secs(30), secs(20), secs(30), 3, 3, 3)
-            );
+            check_default_runtime_overlay(&config, shutdown);
         },
     );
 }
@@ -553,5 +534,18 @@ fn queued_max_requests_flag_reaches_the_runtime_config() {
             .queued_max_requests
             .map(krabka_broker::config_value::PositiveCount::into_value)
             == Some(5)
+    );
+}
+
+fn check_default_runtime_overlay(config: &BrokerConfig, shutdown: krabka_units::Time) {
+    assert!(
+        (
+            config.cleaner_interval,
+            shutdown,
+            config.auto_join_voter_request_timeout,
+            config.share_coordinator.state_topic_replication_factor,
+            config.transaction_state_replication_factor,
+            config.offsets_topic_replication_factor,
+        ) == (secs(30), secs(20), secs(30), 3, 3, 3)
     );
 }

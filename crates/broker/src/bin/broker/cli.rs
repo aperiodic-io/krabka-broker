@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::runtime_args::RuntimeArgs;
 
+#[krabka_macros::runtime_policy_fields(node_cli)]
 #[krabka_macros::krabka_env]
 #[derive(Debug, Parser)]
 #[command(
@@ -177,28 +178,6 @@ pub struct Args {
     /// `controller.quorum.auto.join.enable`.
     #[arg(long, env = "KRABKA_CONTROLLER_AUTO_JOIN")]
     pub controller_auto_join: bool,
-
-    /// KIP-853 observer promotion lag bound.
-    #[arg(long, env = "KRABKA_OBSERVER_LAG_BOUND")]
-    pub observer_lag_bound: Option<u64>,
-
-    /// Broker heartbeat interval in milliseconds.
-    pub heartbeat_interval: Option<Time>,
-
-    /// Broker heartbeat timeout in milliseconds.
-    pub heartbeat_timeout: Option<Time>,
-
-    /// Follower lag timeout in milliseconds before ISR shrink.
-    pub replica_lag_time_max: Option<Time>,
-
-    /// Controller election timeout in milliseconds.
-    pub controller_election_timeout: Option<Time>,
-
-    /// Controller heartbeat interval in milliseconds.
-    pub controller_heartbeat_interval: Option<Time>,
-
-    /// Consecutive controller fetch misses tolerated before election.
-    pub controller_fetch_miss_limit: Option<u32>,
 
     /// Capacity of the metadata Raft command queue.
     #[arg(

@@ -33,6 +33,17 @@ const fn m(id: &'static str, process: &'static str) -> M {
     }
 }
 
+const fn m_active(
+    id: &'static str,
+    process: &'static str,
+    active: &'static [(&'static str, &'static [i32])],
+) -> M {
+    M {
+        active,
+        ..m(id, process)
+    }
+}
+
 fn role(tasks: &[(&str, &[i32])]) -> BTreeMap<String, Vec<i32>> {
     tasks
         .iter()
@@ -99,13 +110,7 @@ fn active_rows() -> Vec<Row> {
         Row {
             // A current owner keeps only its quota; the rest move at once.
             name: "sticky within quota",
-            members: vec![
-                M {
-                    active: &[("s", &[0, 1, 2, 3])],
-                    ..m("A", "p1")
-                },
-                m("B", "p2"),
-            ],
+            members: vec![m_active("A", "p1", &[("s", &[0, 1, 2, 3])]), m("B", "p2")],
             partitions: 4,
             stateful: true,
             standby_replicas: 0,
@@ -137,23 +142,14 @@ fn active_rows() -> Vec<Row> {
         Row {
             name: "shouldAssignTasksToClientWithPreviousWarmupTasks",
             members: vec![
-                M {
-                    active: &[("s", &[0, 1, 2])],
-                    ..m("member1", "process1")
-                },
-                M {
-                    active: &[("s", &[3, 4, 5])],
-                    ..m("member2", "process2")
-                },
+                m_active("member1", "process1", &[("s", &[0, 1, 2])]),
+                m_active("member2", "process2", &[("s", &[3, 4, 5])]),
                 M {
                     active: &[("s", &[6, 7])],
                     warmup: &[("s", &[8])],
                     ..m("member3", "process3")
                 },
-                M {
-                    active: &[("s", &[9])],
-                    ..m("member4", "process4")
-                },
+                m_active("member4", "process4", &[("s", &[9])]),
             ],
             partitions: 12,
             stateful: true,
@@ -169,14 +165,8 @@ fn active_rows() -> Vec<Row> {
         Row {
             name: "shouldAssignStandbyTaskToClientWithPreviousWarmupTaskOverLessLoadedClient",
             members: vec![
-                M {
-                    active: &[("s", &[0])],
-                    ..m("member1", "process1")
-                },
-                M {
-                    active: &[("s", &[1])],
-                    ..m("member2", "process2")
-                },
+                m_active("member1", "process1", &[("s", &[0])]),
+                m_active("member2", "process2", &[("s", &[1])]),
                 M {
                     active: &[("s", &[2])],
                     warmup: &[("s", &[1])],
@@ -193,14 +183,8 @@ fn active_rows() -> Vec<Row> {
         Row {
             name: "shouldPreferMoreCaughtUpCandidateRegardlessOfPrevStandbyOrPrevWarmupRole",
             members: vec![
-                M {
-                    active: &[("s", &[0])],
-                    ..m("member1", "process1")
-                },
-                M {
-                    active: &[("s", &[1])],
-                    ..m("member2", "process2")
-                },
+                m_active("member1", "process1", &[("s", &[0])]),
+                m_active("member2", "process2", &[("s", &[1])]),
                 M {
                     standby: &[("s", &[0])],
                     offsets: &[("s", 0, 100)],
@@ -247,10 +231,7 @@ fn standby_rows() -> Vec<Row> {
                     standby: &[("s", &[2])],
                     ..m("member2", "process2")
                 },
-                M {
-                    active: &[("s", &[1])],
-                    ..m("member3", "process3")
-                },
+                m_active("member3", "process3", &[("s", &[1])]),
                 m("member4", "process4"),
             ],
             partitions: 3,
@@ -262,10 +243,7 @@ fn standby_rows() -> Vec<Row> {
         Row {
             name: "shouldRankCurrentOwnersAheadOfReportedTaskOffsetsAndMostCaughtUpFirst",
             members: vec![
-                M {
-                    active: &[("s", &[0])],
-                    ..m("member1", "process1")
-                },
+                m_active("member1", "process1", &[("s", &[0])]),
                 M {
                     standby: &[("s", &[0, 1])],
                     ..m("member2", "process2")
@@ -414,10 +392,11 @@ fn range_assigns_each_member_a_task_of_every_subtopology() {
     // Kafka's `shouldRangeAssignTasksWhenScalingUp`: member2 is new, and each
     // member ends with one active and one standby task of each subtopology.
     let members = [
-        member(&M {
-            active: &[("s1", &[0, 1]), ("s2", &[0, 1])],
-            ..m("member1", "process1")
-        }),
+        member(&m_active(
+            "member1",
+            "process1",
+            &[("s1", &[0, 1]), ("s2", &[0, 1])],
+        )),
         member(&m("member2", "process2")),
     ];
     let input = AssignorInput {

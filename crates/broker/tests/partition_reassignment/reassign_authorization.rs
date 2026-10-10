@@ -7,7 +7,6 @@
 use std::time::{Duration, Instant};
 
 use assert2::assert;
-use krabka_metadata::AclOperation;
 
 use crate::{
     plaintext_cluster::wait_partition_exists,
@@ -15,6 +14,7 @@ use crate::{
         create_topic_as_admin, drive_alter_reassignments_sasl_plain,
         start_single_broker_sasl_plaintext_with_users,
     },
+    support::acl::TopicAclSetup,
 };
 
 /// Test 4: alice, who authenticated over SASL/PLAIN and holds no ACLs, sends
@@ -35,11 +35,11 @@ async fn non_super_user_denied() {
     // irrelevant — any non-empty `image.acls` flips the shim off and forces
     // the authorizer to evaluate every request.
     handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(
-            "__compat_shim_disable__",
-            "User:admin",
-            AclOperation::Read,
-        ))
+        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+            topic: "__compat_shim_disable__",
+            principal: "User:admin",
+            ..Default::default()
+        }))
         .await
         .expect("seed dummy ACL");
 
@@ -51,7 +51,17 @@ async fn non_super_user_denied() {
         .wait_for_image(|img| img.all_acls().next().is_some())
         .await;
 
-    create_topic_as_admin(addr, crate::plaintext_wire::CLIENT_ID, "foo", 1, 1).await;
+    create_topic_as_admin(
+        addr,
+        crate::kafka_wire::AutomaticTopicSetup {
+            client_id: crate::plaintext_wire::CLIENT_ID,
+            topic: crate::support::topics::ConfiguredTopicSetup {
+                name: ("foo").into(),
+                ..Default::default()
+            },
+        },
+    )
+    .await;
     wait_partition_exists(&handle, "foo", 0).await;
 
     // Retry up to 5s to absorb raft apply latency on slow runners.

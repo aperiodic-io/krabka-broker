@@ -69,6 +69,13 @@ type StateProjection = (
 );
 
 impl DpState {
+    pub(super) fn in_sync_nodes(&self) -> Vec<krabka_audit::NodeId> {
+        (0..super::bounds::NB_U8)
+            .filter(|&broker| super::bounds::has(self.isr, broker))
+            .map(|broker| krabka_audit::NodeId(super::bounds::node(broker)))
+            .collect()
+    }
+
     pub(super) fn leader_leo(&self) -> i64 {
         model_offset(self.log[usize::from(self.leader)].len())
     }

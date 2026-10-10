@@ -208,10 +208,19 @@ fn truncate_index<Key>(
     Ok(())
 }
 
-/// Retain matching sidecar entries, reporting whether a rewrite is necessary.
-pub(crate) fn changed_entries<T: Copy>(entries: &[T], keep: impl Fn(&T) -> bool) -> Option<Vec<T>> {
+/// Rewrite retained sidecar entries only when truncation changed the set.
+/// The caller publishes the new entries only after the rewrite succeeds.
+pub(crate) fn rewrite_retained_entries<T: Copy>(
+    entries: &[T],
+    keep: impl Fn(&T) -> bool,
+    rewrite: impl FnOnce(&[T]) -> Result<(), LogError>,
+) -> Result<Option<Vec<T>>, LogError> {
     let retained: Vec<_> = entries.iter().copied().filter(keep).collect();
-    (retained.len() != entries.len()).then_some(retained)
+    if retained.len() == entries.len() {
+        return Ok(None);
+    }
+    rewrite(&retained)?;
+    Ok(Some(retained))
 }
 
 /// Read a fixed-width sidecar, treating only a missing file as an empty index.

@@ -17,6 +17,18 @@ pub fn trim_store_frontiers_valid(facts: DeleteRecordsTrimFacts, wal: Int, local
 }
 }
 
+open_logic! {
+/// The completed floor bounds the replay cursor within visibility caps.
+pub(super) fn trim_cursor_bounded(facts: DeleteRecordsTrimFacts, stores: (Int, Int), floor: Int, cursor: Int) -> bool {
+    pearlite! {
+        floor == trim_frontier(facts).max(stores.0).max(stores.1)
+            && 0 <= floor && floor <= cursor && cursor <= facts.log_end@
+            && floor <= facts.high_watermark@
+            && (!facts.has_delivery_watermark || floor <= facts.delivery_watermark@)
+    }
+}
+}
+
 /// Fold completed durable steps, including arbitrary pauses/failed attempts.
 /// A true trace entry means the selected store reached the planned frontier;
 /// it does not mean an RPC acknowledged it. I/O/atomic checkpointing are external.
@@ -116,10 +128,7 @@ pub fn trim_frontier(facts: DeleteRecordsTrimFacts) -> Int {
     Err(error) => trim_rejection(facts, error),
     Ok((floor, selected, cursor)) => trim_well_formed(facts)
         && (facts.requested@ == -1 || facts.requested@ <= facts.high_watermark@)
-        && floor@ == trim_frontier(facts).max(wal_start@).max(local_start@)
-        && 0 <= floor@ && floor@ <= cursor@ && cursor@ <= facts.log_end@
-        && floor@ <= facts.high_watermark@
-        && (!facts.has_delivery_watermark || floor@ <= facts.delivery_watermark@)
+        && trim_cursor_bounded(facts, (wal_start@, local_start@), floor@, cursor@)
         && match selected {
             None => trim_has_no_snapshot(snapshots@, floor, facts.log_end, cursor),
             Some(index) => index@ < snapshots@.len() && floor@ < snapshots@[index@]@ && snapshots@[index@]@ <= facts.log_end@

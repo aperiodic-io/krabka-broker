@@ -92,7 +92,16 @@ async fn connect() -> Client {
 /// Create `topic` (`partitions` partitions) and wait until this broker leads
 /// partition 0.
 async fn create_topic(broker: &BrokerHandle, client: &Client, topic: &str, partitions: i32) {
-    support::client::create_led_topic(broker, client, topic, partitions).await;
+    support::client::create_led_topic(
+        broker,
+        client,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            num_partitions: crate::support::topics::TopicPartitionCount(partitions),
+            ..Default::default()
+        },
+    )
+    .await;
 }
 
 /// Finalize `streams.version` to level 1 so the heartbeat/describe handlers
@@ -123,7 +132,12 @@ async fn keepalive(client: &Client, group: &str, member_id: &str, epoch: i32) {
         ..Default::default()
     }]);
     let _ = client
-        .send(follow_up(group, member_id, epoch, active))
+        .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            group,
+            member_id,
+            epoch: crate::support::streams::StreamsMemberEpoch(epoch),
+            active,
+        }))
         .await;
 }
 

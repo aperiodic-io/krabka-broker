@@ -105,26 +105,18 @@ mod tests {
     /// 0 with an eight-byte payload unless it is the default 0.
     #[test]
     fn target_assignment_metadata_bytes_match_kafka_schema() {
-        // (case, value, Kafka's bytes)
-        let rows: [(&str, TargetAssignmentMetadataValue, &[u8]); 2] = [
-            (
-                "a converted classic group: the time is unknown",
-                TargetAssignmentMetadataValue {
-                    assignment_epoch: 12,
-                    assignment_timestamp_ms: 0,
-                },
-                b"\x00\x00\x00\x00\x00\x0c\x00",
-            ),
-            (
-                "an assignment that finished at 2026-10-07T00:00:00Z",
-                TargetAssignmentMetadataValue {
-                    assignment_epoch: 12,
-                    assignment_timestamp_ms: 1_791_331_200_000,
-                },
-                b"\x00\x00\x00\x00\x00\x0c\x01\x00\x08\x00\x00\x01\xa1\x13\xa8\xec\x00",
-            ),
-        ];
-        for (case, value, bytes) in rows {
+        let rows = crate::coordinator::unified::test_support::assignment_metadata_golden_cases(
+            crate::coordinator::unified::test_support::AssignmentMetadataGoldenSetup {
+                unknown_time_description: "a converted classic group: the time is unknown",
+            },
+        );
+        for row in rows {
+            let case = row.description;
+            let bytes = row.bytes;
+            let value = TargetAssignmentMetadataValue {
+                assignment_epoch: row.epoch.0,
+                assignment_timestamp_ms: row.timestamp.0,
+            };
             check!(&value.encode()[..] == bytes, "{case}");
             check!(
                 TargetAssignmentMetadataValue::decode(bytes).unwrap() == value,

@@ -76,10 +76,11 @@ pub async fn create_topic_with_configs(
     let resp = client
         .send(CreateTopicsRequest {
             topics: vec![crate::support::topics::creatable_topic_with_configs(
-                name.into(),
-                1,
-                1,
-                configs,
+                crate::support::topics::ConfiguredTopicSetup {
+                    name: name.into(),
+                    configs,
+                    ..Default::default()
+                },
             )],
             timeout_ms: 5_000,
             ..Default::default()
@@ -121,11 +122,12 @@ pub async fn produce_payload(
 ) -> Result<i64, i16> {
     let resp = client
         .send(single_partition_produce(
-            topic,
-            topic_id,
-            0,
-            Some(records),
-            (1, 5_000),
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: (topic).into(),
+                topic_id,
+                records: Some(records),
+                ..Default::default()
+            },
         ))
         .await
         .expect("Produce");
@@ -154,12 +156,18 @@ pub async fn fetch_first_batch(
     let resp = client
         .send(FetchRequest {
             replica_id: -1,
-            ..single_partition_fetch(
-                topic,
+            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+                topic: topic.into(),
                 topic_id,
-                fetch_partition(0, 0, 8 << 20),
-                (1_000, 1, 8 << 20),
-            )
+                partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
+                    maximum: crate::support::fetch::FetchByteLimit(8 << 20),
+                    ..Default::default()
+                }),
+                limits: crate::support::fetch::FetchLimits::wait_for_data_with_maximum(
+                    crate::support::fetch::RequestWaitMillis(1_000),
+                    crate::support::fetch::FetchByteLimit(8 << 20),
+                ),
+            })
         })
         .await
         .expect("Fetch");

@@ -8,11 +8,11 @@
 //! or that another member of the same process still runs in another role, is
 //! held back, and the member waits in `UnreleasedTasks`.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
-use super::{StreamsMemberAssignmentState, StreamsMemberState, task_map::normalize_task_map};
-
-type TaskMap = BTreeMap<String, Vec<i32>>;
+use super::{
+    StreamsMemberAssignmentState, StreamsMemberState, TaskMap, task_map::normalize_task_map,
+};
 
 /// The tasks of the three roles, in the order active, standby, warmup.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -304,6 +304,8 @@ fn compute_next_assignment(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use assert2::check;
 
     use super::*;

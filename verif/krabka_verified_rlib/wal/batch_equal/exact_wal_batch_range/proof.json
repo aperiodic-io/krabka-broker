@@ -5,7 +5,7 @@
       "vc_checked_add": { "prover": "alt-ergo", "time": 0.019 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.02 },
       "vc_exact_wal_batch_range": { "prover": "z3", "time": 0.071 },
-      "vc_len_i64": { "prover": "alt-ergo", "time": 0.022 }
+      "vc_len_i64": { "prover": "alt-ergo", "time": 0.01 }
     }
   }
 }

@@ -126,10 +126,9 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
 
     // 2. Produce 5 records under 3 keys — k1 has three values (v1, v2, v4);
     //    only v4 should survive compaction.
-    let mut child_command = crate::support::jvm_docker_command(
-        KAFKA_IMAGE,
-        &[],
-        &[
+    let mut child_command = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE,
+        args: &[
             "kafka-console-producer",
             "--bootstrap-server",
             broker0_advertised(),
@@ -152,8 +151,9 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
             "--producer-property",
             "max.in.flight.requests.per.connection=1",
         ],
-        true,
-    );
+        input: crate::support::ContainerInput::Attached,
+        ..Default::default()
+    });
     // First 5 records: the actual workload. After that, a burst of "pad"
     // records under a sentinel key forces the active segment past
     // `SEGMENT_SIZE` so v5 ends up sealed (otherwise the compactor

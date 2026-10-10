@@ -815,16 +815,21 @@ mod tests {
         }
     }
 
+    fn unreachable_local_config() -> (Config, tempfile::TempDir) {
+        let (mut cfg, log_dir) = test_config(image_with_leader(LEADER_ID));
+        ensure_local_partition(&cfg).unwrap();
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        cfg.leader_port = listener.local_addr().unwrap().port();
+        drop(listener);
+        (cfg, log_dir)
+    }
+
     /// A lookup that never reached the leader says nothing about the log, so
     /// nothing is deleted: the row backs off and asks again. This is the case
     /// that separates the tiered restart from a reset on a transient failure.
     #[tokio::test]
     async fn a_failed_earliest_local_lookup_backs_off_without_touching_the_log() {
-        let (mut cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
-        ensure_local_partition(&cfg).unwrap();
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        cfg.leader_port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let (cfg, _log_dir) = unreachable_local_config();
         let before = cfg
             .partitions
             .get(&cfg.topic, cfg.partition)
@@ -969,11 +974,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_epoch_fence_surfaces_connection_failure_for_local_partition() {
-        let (mut cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
-        ensure_local_partition(&cfg).unwrap();
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        cfg.leader_port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let (cfg, _log_dir) = unreachable_local_config();
 
         let err = handle_epoch_fence(&cfg).await.unwrap_err();
 

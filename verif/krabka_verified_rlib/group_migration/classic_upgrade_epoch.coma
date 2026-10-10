@@ -1,11 +1,11 @@
-(* #"/workspace/crates/verified/src/group_migration.rs" 37 0 41 16 *)
+(* #"/workspace/crates/verified/src/group_migration.rs" 42 0 46 16 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
-let%span sgroup_migration = "/workspace/crates/verified/src/group_migration.rs" 45 25 45 26
-let%span sgroup_migration'0 = "/workspace/crates/verified/src/group_migration.rs" 45 29 45 30
-let%span sgroup_migration'1 = "/workspace/crates/verified/src/group_migration.rs" 31 10 31 81
-let%span sgroup_migration'2 = "/workspace/crates/verified/src/group_migration.rs" 32 10 32 66
-let%span sgroup_migration'3 = "/workspace/crates/verified/src/group_migration.rs" 33 10 35 43
+let%span sgroup_migration = "/workspace/crates/verified/src/group_migration.rs" 50 25 50 26
+let%span sgroup_migration'0 = "/workspace/crates/verified/src/group_migration.rs" 50 29 50 30
+let%span sgroup_migration'1 = "/workspace/crates/verified/src/group_migration.rs" 38 10 38 81
+let%span sgroup_migration'2 = "/workspace/crates/verified/src/group_migration.rs" 39 10 40 48
+let%span sgroup_migration'3 = "/workspace/crates/verified/src/group_migration.rs" 30 16 31 71
 
 use creusot.int.Int32
 use creusot.prelude.Any
@@ -17,35 +17,34 @@ predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other
 
 meta "rewrite_def" predicate ge_log_Int
 
+predicate migration_epoch_matches [#"/workspace/crates/verified/src/group_migration.rs" 29 0 29 59] (input: int) (output: int) =
+  [%#sgroup_migration'3] ge_log_Int output 0 /\ (ge_log_Int input 0 /\ output = input \/ input < 0 /\ output = 0)
+
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let classic_upgrade_epoch [#"/workspace/crates/verified/src/group_migration.rs" 37 0 41 16] (consumer_protocol: bool)
+let classic_upgrade_epoch [#"/workspace/crates/verified/src/group_migration.rs" 42 0 46 16] (consumer_protocol: bool)
   (every_subscription_decodable: bool) (generation: Int32.t) (return (x: t_Option_i32)) = (! bb0
   [ bb0 = any [ br0 -> {consumer_protocol = false} (! bb2) | br1 -> {consumer_protocol} (! bb1) ]
   | bb1 = any [ br0 -> {every_subscription_decodable = false} (! bb2) | br1 -> {every_subscription_decodable} (! bb3) ]
   | bb3 = s0
-    [ s0 = [ &_15 <- Int32.lt generation ([%#sgroup_migration] (0: Int32.t)) ] s1
-    | s1 = any [ br0 -> {_15 = false} (! bb5) | br1 -> {_15} (! bb4) ] ]
-  | bb4 = s0 [ s0 = [ &_14 <- [%#sgroup_migration'0] (0: Int32.t) ] s1 | s1 = bb6 ]
-  | bb5 = s0 [ s0 = [ &_14 <- generation ] s1 | s1 = bb6 ]
-  | bb6 = s0 [ s0 = [ &_ret <- Some _14 ] s1 | s1 = return {_ret} ]
+    [ s0 = [ &_14 <- Int32.lt generation ([%#sgroup_migration] (0: Int32.t)) ] s1
+    | s1 = any [ br0 -> {_14 = false} (! bb5) | br1 -> {_14} (! bb4) ] ]
+  | bb4 = s0 [ s0 = [ &_13 <- [%#sgroup_migration'0] (0: Int32.t) ] s1 | s1 = bb6 ]
+  | bb5 = s0 [ s0 = [ &_13 <- generation ] s1 | s1 = bb6 ]
+  | bb6 = s0 [ s0 = [ &_ret <- Some _13 ] s1 | s1 = return {_ret} ]
   | bb2 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Option_i32 = Any.any_l ()
   | & consumer_protocol: bool = consumer_protocol
   | & every_subscription_decodable: bool = every_subscription_decodable
   | & generation: Int32.t = generation
-  | & _14: Int32.t = Any.any_l ()
-  | & _15: bool = Any.any_l () ])
+  | & _13: Int32.t = Any.any_l ()
+  | & _14: bool = Any.any_l () ])
   [ return (result: t_Option_i32) ->
   {[@stop_split] [@expl:classic_upgrade_epoch ensures] ([@stop_split] [@expl:classic_upgrade_epoch ensures #0] [%#sgroup_migration'1] (result
         <> None)
       = (consumer_protocol /\ every_subscription_decodable))
     /\ ([@stop_split] [@expl:classic_upgrade_epoch ensures #1] [%#sgroup_migration'2] forall epoch: Int32.t. result
-          = Some epoch -> ge_log_Int (Int32.to_int epoch) 0)
-    /\ ([@stop_split] [@expl:classic_upgrade_epoch ensures #2] [%#sgroup_migration'3] forall epoch: Int32.t. result
-        = Some epoch
-      -> ge_log_Int (Int32.to_int generation) 0 /\ Int32.to_int epoch = Int32.to_int generation
-      \/ Int32.to_int generation < 0 /\ Int32.to_int epoch = 0)}
+        = Some epoch -> migration_epoch_matches (Int32.to_int generation) (Int32.to_int epoch))}
     (! return {result}) ]

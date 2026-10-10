@@ -3,6 +3,7 @@ use creusot_std::prelude::*;
 #[cfg(creusot)]
 use super::delivery::{
     scheduled_activation_due, scheduled_batches_valid, scheduled_inputs_coherent,
+    scheduled_prefix_covers_pending,
 };
 use super::{
     FetchWatermarks, committed_fetch_excludes_unstable, fetch_visibility,
@@ -24,9 +25,8 @@ type ScheduledStablePrefix = (i64, i64, FetchVisibility, FetchVisibility);
         || exists<i: Int> 0 <= i && i < starts@.len() && starts@[i]@ > w.log_end@,
     Some((delivery, lso, consumer, follower)) => scheduled_batches_valid(batches@, w.log_start@, w.log_end@)
         && w.log_start@ <= delivery@ && delivery@ <= w.log_end@ && lso@ <= w.log_end@
-        && (forall<i: Int> 0 <= i && i < batches@.len()
-            && !scheduled_activation_due(activations@[i]@, uncertainty@, now@)
-            ==> delivery@ <= batches@[i].0@ && consumer.limit_offset@ <= batches@[i].0@)
+        && scheduled_prefix_covers_pending(batches@, activations@, (uncertainty@, now@), delivery@)
+        && scheduled_prefix_covers_pending(batches@, activations@, (uncertainty@, now@), consumer.limit_offset@)
         && (delivery@ == w.log_end@ || exists<i: Int> 0 <= i && i < batches@.len()
             && delivery@ == batches@[i].0@
             && !scheduled_activation_due(activations@[i]@, uncertainty@, now@))

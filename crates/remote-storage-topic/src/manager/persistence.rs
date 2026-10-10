@@ -245,10 +245,12 @@ mod tests {
     async fn shutdown_flushes_a_snapshot_covering_applied_events() {
         let dir = snapshot_test_dir("mgr-snap");
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
-        let m = crate::manager::test_support::start_manager_in(log.clone(), dir.clone()).unwrap();
-        m.reconcile_assignment(&(0..log.partition_count()).collect::<Vec<_>>())
-            .await;
-        crate::manager::test_support::seed_finished(&m, &[(10, 0, 99)]).await;
+        let m = crate::manager::test_support::start_seeded_manager_in(
+            log.clone(),
+            dir.clone(),
+            &[(10, 0, 99)],
+        )
+        .await;
 
         m.shutdown_and_flush().await;
 
@@ -277,12 +279,9 @@ mod tests {
         // First lifetime: seed three finished segments, then shutdown-flush.
         let pre_cache;
         {
-            let m =
-                crate::manager::test_support::start_manager_in(log.clone(), dir.clone()).unwrap();
-            m.reconcile_assignment(&(0..log.partition_count()).collect::<Vec<_>>())
-                .await;
-            crate::manager::test_support::seed_finished(
-                &m,
+            let m = crate::manager::test_support::start_seeded_manager_in(
+                log.clone(),
+                dir.clone(),
                 &[(10, 0, 99), (11, 100, 199), (12, 200, 299)],
             )
             .await;

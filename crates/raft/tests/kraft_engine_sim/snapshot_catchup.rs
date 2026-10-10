@@ -17,10 +17,7 @@ use krabka_raft::kraft::{
 };
 
 use crate::{
-    harness::{
-        STAGGERED_TIMEOUTS, await_single_leader, await_until, build_engine_with_snapshot_interval,
-        topic_record,
-    },
+    harness::{STAGGERED_TIMEOUTS, await_single_leader, await_until, build_engine, topic_record},
     sim_net::SimNet,
 };
 
@@ -34,18 +31,32 @@ fn start_snapshot_pair(
         .into_iter()
         .map(|id| {
             let idx = usize::try_from(id.0 - 1).unwrap();
-            let (ctrl, dir) = build_engine_with_snapshot_interval(
-                id,
-                voters,
-                cid,
-                STAGGERED_TIMEOUTS[idx],
+            let (ctrl, dir) = build_engine(
                 net,
-                interval,
+                crate::harness::SimEngineSetup {
+                    me: id,
+                    ids: voters,
+                    cluster_id: cid,
+                    election_timeout: STAGGERED_TIMEOUTS[idx],
+                    snapshot_interval_records: crate::harness::SnapshotRecordCount(interval),
+                },
             );
             net.register(id, ctrl);
             (id, dir)
         })
         .collect()
+}
+
+async fn elected_snapshot_pair(
+    net: &SimNet,
+    ids: &[NodeId],
+    cluster_id: uuid::Uuid,
+    interval: u64,
+) -> (HashMap<NodeId, tempfile::TempDir>, NodeId, u32) {
+    let dirs = start_snapshot_pair(net, ids, cluster_id, interval);
+    let (leader, epoch) =
+        await_single_leader(net, &[NodeId(1), NodeId(2)], Duration::from_secs(10)).await;
+    (dirs, leader, epoch)
 }
 
 fn fetch_from_zero(epoch: u32) -> bytes::Bytes {
@@ -154,13 +165,15 @@ async fn lagging_follower_catches_up_via_snapshot() {
     // Now bring the lagging node 3 up on a FRESH empty tempdir: its LEO is 0,
     // far below the leader's pruned log_start, so it can ONLY catch up by
     // fetching the snapshot.
-    let (lag_ctrl, lag_dir) = build_engine_with_snapshot_interval(
-        NodeId(3),
-        &ids,
-        cid,
-        STAGGERED_TIMEOUTS[2],
+    let (lag_ctrl, lag_dir) = build_engine(
         &net,
-        interval,
+        crate::harness::SimEngineSetup {
+            me: NodeId(3),
+            ids: &ids,
+            cluster_id: cid,
+            election_timeout: STAGGERED_TIMEOUTS[2],
+            snapshot_interval_records: crate::harness::SnapshotRecordCount(interval),
+        },
     );
     net.register(NodeId(3), lag_ctrl);
     dirs.insert(NodeId(3), lag_dir);
@@ -198,10 +211,8 @@ async fn follower_that_pruned_independently_redirects_a_lagging_fetch_to_the_lea
     let cid = uuid::Uuid::from_u128(501);
     let interval = 5u64;
 
-    let dirs = start_snapshot_pair(&net, &ids, cid, interval);
-
+    let (dirs, leader, epoch) = elected_snapshot_pair(&net, &ids, cid, interval).await;
     let live = [NodeId(1), NodeId(2)];
-    let (leader, epoch) = await_single_leader(&net, &live, Duration::from_secs(10)).await;
     assert2::assert!(leader == NodeId(1));
     let follower = NodeId(2);
 
@@ -318,9 +329,8 @@ async fn a_snapshot_fetch_in_flight_survives_the_leader_rolling_to_a_new_checkpo
     let cid = uuid::Uuid::from_u128(502);
     let interval = 5u64;
 
-    let dirs = start_snapshot_pair(&net, &ids, cid, interval);
+    let (dirs, leader, epoch) = elected_snapshot_pair(&net, &ids, cid, interval).await;
     let live = [NodeId(1), NodeId(2)];
-    let (leader, epoch) = await_single_leader(&net, &live, Duration::from_secs(10)).await;
     let leader_dir = dirs[&leader].path().to_path_buf();
 
     let submit = async |name: String, id: u128| {

@@ -498,10 +498,11 @@ mod tests {
     use assert2::{assert, check};
     use krabka_metadata::{
         BrokerConfigRecord, BrokerRegistrationRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage,
-        MetadataRecord, PartitionRecord, TopicConfigRecord, TopicRecord,
+        MetadataRecord, PartitionRecord, TopicConfigRecord,
     };
 
     use super::*;
+    use crate::test_support::TopicSetup;
 
     /// Shorthand for wrapping a raw offset in the test asserts below.
     fn o(v: i64) -> Offset {
@@ -525,18 +526,38 @@ mod tests {
 
     #[test]
     fn new_state_has_zero_hw_and_empty_membership() {
-        let s = fresh();
-        let expected = ReplicaState {
-            isr: HashSet::new(),
-            replicas: HashSet::new(),
-            per_follower: HashMap::new(),
-            follower_log_start: HashMap::new(),
-            hw: Offset(0),
-            current_leader_epoch: LeaderEpoch(0),
-            leader: None,
-            policy: LeaderPolicy::unscanned(),
-        };
-        assert!(s == expected);
+        let ReplicaState {
+            isr,
+            replicas,
+            per_follower,
+            follower_log_start,
+            hw,
+            current_leader_epoch,
+            leader,
+            policy,
+        } = fresh();
+        // Destructure every field so adding state also requires updating this independent pin.
+        assert!(
+            (
+                isr.is_empty(),
+                replicas.is_empty(),
+                per_follower.is_empty(),
+                follower_log_start.is_empty(),
+                hw,
+                current_leader_epoch,
+                leader,
+                policy
+            ) == (
+                true,
+                true,
+                true,
+                true,
+                Offset(0),
+                LeaderEpoch(0),
+                None,
+                LeaderPolicy::unscanned()
+            )
+        );
     }
 
     #[test]
@@ -618,40 +639,22 @@ mod tests {
         check!(s.follower_progress(NodeId(9)) == (o(0), None));
     }
 
+    /// Removing a replica drops its progress; shrinking only the ISR keeps
+    /// the catching-up replica's progress for later ISR readmission.
     #[test]
-    fn install_isr_drops_stale_follower_leo_for_removed_replicas() {
-        // Node 3 leaves the *replica set* entirely (e.g. reassignment) →
-        // its progress entry is dropped.
-        let mut s = fresh_with_isr(&[1, 2, 3], now());
-        s.update_follower_leo(NodeId(3), o(75), o(100), now());
-        s.install_isr(
-            &[NodeId(1), NodeId(2)],
-            &[NodeId(1), NodeId(2)],
-            NodeId(1),
-            now(),
-        );
-        assert!(!s.per_follower.contains_key(&NodeId(3)));
-    }
-
-    #[test]
-    fn install_isr_keeps_catching_up_replica_shrunk_from_isr() {
-        // Node 3 is shrunk out of the ISR but stays a replica (it's
-        // catching back up). Its fetch-driven progress must survive an
-        // ISR reinstall so isr_maintenance can later expand it back in.
-        let mut s = fresh_with_isr(&[1, 2, 3], now());
-        s.update_follower_leo(NodeId(3), o(75), o(100), now());
-        // Committed ISR shrinks to {1,2}; replica set is still {1,2,3}.
-        s.install_isr(
-            &[NodeId(1), NodeId(2)],
-            &[NodeId(1), NodeId(2), NodeId(3)],
-            NodeId(1),
-            now(),
-        );
-        assert!(
-            s.per_follower.contains_key(&NodeId(3)),
-            "a replica catching up toward ISR re-admission must keep its progress"
-        );
-        assert!(s.per_follower.get(&NodeId(3)).map(|f| f.leo) == Some(o(75)));
+    fn install_isr_retains_progress_only_for_remaining_replicas() {
+        for (replicas, expected) in [
+            (&[NodeId(1), NodeId(2)][..], None),
+            (&[NodeId(1), NodeId(2), NodeId(3)][..], Some(o(75))),
+        ] {
+            let mut s = fresh_with_isr(&[1, 2, 3], now());
+            s.update_follower_leo(NodeId(3), o(75), o(100), now());
+            s.install_isr(&[NodeId(1), NodeId(2)], replicas, NodeId(1), now());
+            assert!(
+                s.per_follower.get(&NodeId(3)).map(|f| f.leo) == expected,
+                "{replicas:?}"
+            );
+        }
     }
 
     #[test]
@@ -1068,14 +1071,10 @@ mod tests {
     }
 
     fn policy_image() -> MetadataImage {
-        let mut image = MetadataImage::new(uuid::Uuid::nil());
-        image.apply(&MetadataRecord::V1Topic(TopicRecord {
-            name: "t".into(),
-            topic_id: uuid::Uuid::from_u128(1),
-            partitions: 1,
-            replication_factor: 3,
-        }));
-        image
+        crate::test_support::topic_image(TopicSetup {
+            topic: "t",
+            ..Default::default()
+        })
     }
 
     /// The policy the ISR scan reads out of the metadata image: the topic's
@@ -1089,7 +1088,7 @@ mod tests {
                 in_controlled_shutdown,
                 broker_epoch,
                 host: "localhost".to_string(),
-                ..crate::test_support::broker_registration(node)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
             })
         };
         let mut image = policy_image();

@@ -28,15 +28,13 @@ use assert2::{assert, check};
 use fixtures::orders_image as image_with_orders_partitions;
 use krabka_ids::PartitionIndex;
 use krabka_object_store::fault::{FaultInjectingStore, FaultKind, FaultPolicy, OpFault, StoreOp};
-use krabka_remote_storage::{
-    RemoteLogMetadataManager, RemoteLogSegmentState, RemoteStorageManager, S3RemoteStorage,
-};
+use krabka_remote_storage::{RemoteLogSegmentState, RemoteStorageManager, S3RemoteStorage};
 
 use super::*;
 use crate::{
-    metrics::{BrokerMetrics, TopicLabel},
+    metrics::TopicLabel,
     remote_log_manager::{
-        RemoteTier, test_support as fixtures,
+        test_support as fixtures,
         test_support::{
             TEST_COPY_TIMEOUT, copy_exports, partition_snapshot,
             rolled_tiered_partition_with_config,
@@ -102,24 +100,6 @@ fn orders_label() -> TopicLabel {
     }
 }
 
-/// A tier over `rsm` with its own metrics, so each case reads counters only
-/// it moved.
-fn faulty_tier<'a>(
-    rsm: &'a Arc<dyn RemoteStorageManager>,
-    rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
-    metrics: &'a BrokerMetrics,
-    index_cache: &'a Arc<krabka_remote_storage::RemoteIndexCache>,
-    copy_timeout: Time,
-) -> RemoteTier<'a> {
-    fixtures::tier_with_resources(
-        rsm,
-        rlmm,
-        (metrics, index_cache),
-        ArchiveMode::Mutable,
-        copy_timeout,
-    )
-}
-
 /// Keep both the partition and object-store guards through the fault assertions.
 macro_rules! faulty_copy_fixture {
     ($local:ident, $partition:ident, $exports:ident, $config:ident, $store:ident, $rsm:ident, $make:expr) => {
@@ -140,7 +120,15 @@ async fn a_healthy_store_finishes_every_copy() {
     fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
 
     let copied = copy_exports(
-        &faulty_tier(&rsm, &rlmm, &metrics, &index_cache, TEST_COPY_TIMEOUT),
+        &fixtures::configured_tier(
+            &rsm,
+            &rlmm,
+            fixtures::TierSetup {
+                metrics: &metrics,
+                index_cache: &index_cache,
+                ..Default::default()
+            },
+        ),
         exports.clone(),
     )
     .await;
@@ -177,7 +165,15 @@ async fn a_throttling_store_finishes_nothing_and_moves_the_error_and_lag_series(
         throttling_store
     );
     fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
-    let tier = faulty_tier(&rsm, &rlmm, &metrics, &index_cache, TEST_COPY_TIMEOUT);
+    let tier = fixtures::configured_tier(
+        &rsm,
+        &rlmm,
+        fixtures::TierSetup {
+            metrics: &metrics,
+            index_cache: &index_cache,
+            ..Default::default()
+        },
+    );
 
     let copied = copy_exports(&tier, exports.clone()).await;
 
@@ -229,7 +225,16 @@ async fn a_stalled_copy_is_abandoned_at_its_deadline() {
 
     let started = std::time::Instant::now();
     let copied = copy_exports(
-        &faulty_tier(&rsm, &rlmm, &metrics, &index_cache, SHORT_COPY_DEADLINE),
+        &fixtures::configured_tier(
+            &rsm,
+            &rlmm,
+            fixtures::TierSetup {
+                metrics: &metrics,
+                index_cache: &index_cache,
+                copy_timeout: SHORT_COPY_DEADLINE,
+                ..Default::default()
+            },
+        ),
         vec![exports[0].clone()],
     )
     .await;
@@ -277,7 +282,16 @@ async fn a_stalled_partition_does_not_stop_the_sweep_reaching_the_next() {
     tick_all(
         &partitions,
         &*controller,
-        &faulty_tier(&rsm, &rlmm, &metrics, &index_cache, SHORT_COPY_DEADLINE),
+        &fixtures::configured_tier(
+            &rsm,
+            &rlmm,
+            fixtures::TierSetup {
+                metrics: &metrics,
+                index_cache: &index_cache,
+                copy_timeout: SHORT_COPY_DEADLINE,
+                ..Default::default()
+            },
+        ),
         NodeId(1),
         1,
         SweepConcurrency::default(),
@@ -327,7 +341,16 @@ async fn local_retention_keeps_segments_whose_copy_never_finished() {
         fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
 
         let copied = copy_exports(
-            &faulty_tier(&rsm, &rlmm, &metrics, &index_cache, copy_timeout),
+            &fixtures::configured_tier(
+                &rsm,
+                &rlmm,
+                fixtures::TierSetup {
+                    metrics: &metrics,
+                    index_cache: &index_cache,
+                    copy_timeout,
+                    ..Default::default()
+                },
+            ),
             exports.clone(),
         )
         .await;

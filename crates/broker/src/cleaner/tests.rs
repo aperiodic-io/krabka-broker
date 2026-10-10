@@ -4,8 +4,8 @@
 
 use assert2::{assert, check};
 use krabka_ids::PartitionIndex;
-use krabka_metadata::NodeId;
 use krabka_units::secs;
+use qubit_clock::Timer;
 
 use super::*;
 use crate::{
@@ -17,14 +17,13 @@ use crate::{
 async fn run_ticks_until_shutdown() {
     use qubit_clock::{ManualMonotonicClock, MonotonicClock as _};
 
-    let dir = tempfile::tempdir().expect("log root");
-    let registry = Arc::new(PartitionRegistry::new());
+    let (dir, registry) = crate::test_support::sweep_registry_fixture();
     let partition = compactable_partition(
         &dir,
-        "run-compact",
-        0,
-        NodeId(7),
-        krabka_log::CleanupPolicy::Compact,
+        crate::cleaner::test_support::CompactionSetup {
+            topic: "run-compact",
+            ..Default::default()
+        },
     )
     .await;
     let before = record_count(&partition);
@@ -57,11 +56,7 @@ async fn run_ticks_until_shutdown() {
     // `wait_for_waiters` runs on a blocking thread so it never stalls the
     // current-thread runtime that must drive the cleaner task and the
     // partition writer actor to completion.
-    let waiters = Arc::clone(&clock);
-    let parked =
-        tokio::task::spawn_blocking(move || waiters.wait_for_waiters(1, Duration::from_secs(5)))
-            .await
-            .unwrap();
+    let parked = crate::test_support::park_manual_timer(&clock).await;
     assert!(
         parked,
         "cleaner should park on the interval timer after the first sweep"
@@ -78,11 +73,7 @@ async fn run_ticks_until_shutdown() {
     clock
         .advance(interval.to_std())
         .expect("manual time moves forward");
-    let waiters = Arc::clone(&clock);
-    let parked_again =
-        tokio::task::spawn_blocking(move || waiters.wait_for_waiters(1, Duration::from_secs(5)))
-            .await
-            .unwrap();
+    let parked_again = crate::test_support::park_manual_timer(&clock).await;
     assert!(
         parked_again,
         "cleaner should re-park on the interval timer after the second sweep"
@@ -108,10 +99,8 @@ async fn spawn_on(
     usize,
 ) {
     let registry = Arc::new(PartitionRegistry::new());
-    let partition =
-        compactable_partition(dir, topic, 0, NodeId(7), krabka_log::CleanupPolicy::Compact).await;
-    let before = record_count(&partition);
-    registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
+    let (partition, before) =
+        super::test_support::register_compactable(dir, &registry, topic).await;
     let task = tokio::spawn(run(
         registry,
         CleanerConfig {
@@ -125,31 +114,26 @@ async fn spawn_on(
     (task, partition, before)
 }
 
-#[tokio::test]
-async fn run_stops_without_sweeping_when_the_first_deadline_is_refused() {
+/// Both initial timer failures end the task before it can compact the partition.
+async fn check_initial_timer_failure(topic: &str, failure: TimerFailure) {
     let dir = tempfile::tempdir().expect("log root");
-    let timer = BrokenTimer::dead(TimerFailure::Registration);
-    let (task, partition, before) = spawn_on(&dir, "unarmable", timer.injectable()).await;
-
-    // Nobody cancels the token, so the task can only end by giving up on its
-    // ticker — and it gives up before the start-up sweep, so the compactable
-    // partition is left exactly as it was.
+    let timer = BrokenTimer::dead(failure);
+    let (task, partition, before) = spawn_on(&dir, topic, timer.injectable()).await;
     task.await.expect("cleaner task exits");
     check!(record_count(&partition) == before);
     check!(timer.registrations() == 1);
 }
 
 #[tokio::test]
-async fn run_stops_when_the_first_deadline_is_armed_but_never_completes() {
-    let dir = tempfile::tempdir().expect("log root");
-    let timer = BrokenTimer::dead(TimerFailure::Completion);
-    let (task, partition, before) = spawn_on(&dir, "unfired", timer.injectable()).await;
+async fn run_stops_without_sweeping_when_the_first_deadline_is_refused() {
+    // Nobody cancels the token; refusal of the first deadline ends the task.
+    check_initial_timer_failure("unarmable", TimerFailure::Registration).await;
+}
 
-    // The deadline registers, so the loop reaches its select — and then fails,
-    // which ends the task on the other of the two timer paths.
-    task.await.expect("cleaner task exits");
-    check!(record_count(&partition) == before);
-    check!(timer.registrations() == 1);
+#[tokio::test]
+async fn run_stops_when_the_first_deadline_is_armed_but_never_completes() {
+    // Registration succeeds, then the failed deadline ends the select loop.
+    check_initial_timer_failure("unfired", TimerFailure::Completion).await;
 }
 
 #[tokio::test]

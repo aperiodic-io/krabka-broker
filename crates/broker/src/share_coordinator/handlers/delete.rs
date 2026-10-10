@@ -56,6 +56,7 @@ async fn delete_state(
 #[cfg(test)]
 mod tests {
     use assert2::check;
+    use krabka_ids::PartitionIndex;
     use krabka_log::Offset;
     use krabka_protocol::{
         owned::delete_share_group_state_request::{DeleteStateData, PartitionData},
@@ -68,6 +69,7 @@ mod tests {
         share_coordinator::coordinator::test_support::{
             Logged, image_with_topic, logged_records, logged_since,
         },
+        test_support::KafkaErrorCode,
     };
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([31; 16]);
@@ -96,7 +98,7 @@ mod tests {
                 "a key with state is tombstoned",
                 true,
                 request("g", TOPIC, &[0]),
-                response(TOPIC, 0, codes::NONE, None),
+                response(StateResponseSetup::default()),
                 vec![Logged::Tombstone],
                 false,
             ),
@@ -104,7 +106,10 @@ mod tests {
                 "a key with no state writes nothing",
                 true,
                 request("g", TOPIC, &[1]),
-                response(TOPIC, 1, codes::NONE, None),
+                response(StateResponseSetup {
+                    partition: PartitionIndex(1),
+                    ..Default::default()
+                }),
                 vec![],
                 true,
             ),
@@ -112,12 +117,12 @@ mod tests {
                 "a negative partition",
                 true,
                 request("g", TOPIC, &[-1]),
-                response(
-                    TOPIC,
-                    -1,
-                    codes::INVALID_REQUEST,
-                    Some("The partition id cannot be a negative number."),
-                ),
+                response(StateResponseSetup {
+                    partition: PartitionIndex(-1),
+                    code: KafkaErrorCode(codes::INVALID_REQUEST),
+                    message: Some("The partition id cannot be a negative number."),
+                    ..Default::default()
+                }),
                 vec![],
                 true,
             ),
@@ -125,7 +130,12 @@ mod tests {
                 "a partition past the partition count",
                 true,
                 request("g", TOPIC, &[2]),
-                response(TOPIC, 2, codes::UNKNOWN_TOPIC_OR_PARTITION, unknown),
+                response(StateResponseSetup {
+                    partition: PartitionIndex(2),
+                    code: KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    message: unknown,
+                    ..Default::default()
+                }),
                 vec![],
                 true,
             ),
@@ -133,7 +143,12 @@ mod tests {
                 "a topic id the image does not hold",
                 true,
                 request("g", UNKNOWN_TOPIC, &[0]),
-                response(UNKNOWN_TOPIC, 0, codes::UNKNOWN_TOPIC_OR_PARTITION, unknown),
+                response(StateResponseSetup {
+                    topic: UNKNOWN_TOPIC,
+                    code: KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    message: unknown,
+                    ..Default::default()
+                }),
                 vec![],
                 true,
             ),
@@ -157,14 +172,13 @@ mod tests {
                 "a state partition this broker does not lead",
                 false,
                 request("g", TOPIC, &[0]),
-                response(
-                    TOPIC,
-                    0,
-                    codes::NOT_COORDINATOR,
-                    Some(
+                response(StateResponseSetup {
+                    code: KafkaErrorCode(codes::NOT_COORDINATOR),
+                    message: Some(
                         "Unable to delete share group state: This is not the correct coordinator.",
                     ),
-                ),
+                    ..Default::default()
+                }),
                 vec![],
                 // The resignation itself drops the in-memory keys.
                 false,

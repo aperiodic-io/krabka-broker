@@ -89,7 +89,7 @@ mod tests {
     fn broker_record(node_id: NodeId) -> BrokerRegistrationRecord {
         BrokerRegistrationRecord {
             host: "broker-host".into(),
-            ..crate::test_support::broker_registration(node_id.0)
+            ..crate::test_support::broker_registration(node_id)
         }
     }
 

@@ -1,35 +1,10 @@
-"""Reject new native PMD Rust CPD matches of at least 100 tokens.
+"""Reject Rust duplicates with pinned jscpd on the complete Git inventory."""
 
-The allowance comes from source at an immutable Git revision, not an editable
-list of findings. A dedicated CI job supplies the PR base or main's previous
-head; local runs default to origin/main. Reports retain the full Rust inventory.
-
-    aspect check-cpd --base origin/main
-"""
-
-# The checker needs PMD's Java token APIs, which AXL cannot call directly.
-# Everything around it, including dependency verification, is an AXL task.
-PMD_VERSION = "7.28.0"
-PMD_SHA256 = "f974ba571f7bc01c73fffe11bade25fbc1f438698f9e9c00e416e8d65e9fbac2"
-ANTLR_SHA256 = "eae2dfa119a64327444672aff63e9ec35a20180dc5b8090b7a6ab85125df4d76"
-GRAMMAR_SHA256 = "a4dd0de83cbd192377bbc3656c6a20ffa763352a289d66ebdbee85bc18d5e9c4"
-PMD_URL = "https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.28.0/pmd-dist-7.28.0-bin.zip"
-ANTLR_URL = "https://www.antlr.org/download/antlr-4.13.2-complete.jar"
-GRAMMAR_URL = "https://raw.githubusercontent.com/pmd/pmd/pmd_releases/7.28.0/pmd-rust/src/main/antlr4/net/sourceforge/pmd/lang/rust/ast/RustLexer.g4"
+MINIMUM_TOKENS = 60
+MINIMUM_LINES = 5
 
 def rust_paths(nul_separated):
     return sorted({path: True for path in nul_separated.split("\x00") if path.endswith(".rs")})
-
-def patch_grammar(text):
-    # PMD admits a backslash as unescaped string content, which can swallow a
-    # closing quote and skip valid Rust. Preserve all other lexer rules.
-    if len(text.split('~["]')) != 3:
-        fail("the pinned Rust grammar no longer has exactly the two expected string rules")
-    return text.replace('~["]', '~["\\\\]')
-
-def checksum_matches(output, expected):
-    fields = output.split()
-    return len(fields) >= 2 and fields[0] == expected
 
 def _capture(ctx, argv, root):
     result = ctx.std.process.command(argv[0]).args(argv[1:]).current_dir(root).stdout("piped").stderr("piped").spawn().wait_with_output()
@@ -44,69 +19,15 @@ def _must(ctx, argv, root):
     if _run(ctx, argv, root) != 0:
         fail("command failed: %s" % " ".join(argv))
 
-def _artifact(ctx, work, root, name, url, digest, cached = ""):
-    path = cached if cached.startswith("/") else root + "/" + cached
-    if not cached:
-        path = work + "/" + name
-    if not cached:
-        _must(ctx, ["curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3", url, "--output", path], work)
-    if not checksum_matches(_capture(ctx, ["sha256sum", path], work), digest):
-        fail("checksum mismatch: %s" % name)
-    return path
-
-def _prepare(ctx, work, root):
-    pmd = _artifact(ctx, work, root, "pmd.zip", PMD_URL, PMD_SHA256, ctx.args.pmd_archive)
-    antlr = _artifact(ctx, work, root, "antlr.jar", ANTLR_URL, ANTLR_SHA256, ctx.args.antlr_jar)
-    grammar = _artifact(ctx, work, root, "RustLexer.g4", GRAMMAR_URL, GRAMMAR_SHA256, ctx.args.rust_grammar)
-    _must(ctx, ["unzip", "-q", pmd, "-d", work], root)
-    patched = work + "/RustLexer.g4"
-    ctx.std.fs.write(patched, patch_grammar(ctx.std.fs.read_to_string(grammar)))
-    generated = work + "/generated"
-    _must(ctx, ["java", "-jar", antlr, "-Dlanguage=Java", "-package", "net.sourceforge.pmd.lang.rust.ast", "-o", generated, patched], root)
-    classes = work + "/classes"
-    ctx.std.fs.create_dir_all(classes)
-    lib = work + "/pmd-bin-" + PMD_VERSION + "/lib"
-    jars = ":".join(sorted([lib + "/" + entry.path for entry in ctx.std.fs.read_dir(lib) if entry.is_file and entry.path.endswith(".jar")]))
-    _must(ctx, ["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-source", "17", "-target", "17", "-cp", jars, "-d", classes, generated + "/RustLexer.java", root + "/tools/cpd/CheckCpd.java", root + "/tools/cpd/CheckCpdTest.java"], root)
-    return classes + ":" + jars
-
-def snapshot_sources(ctx, work, root, requested):
-    base = _capture(ctx, ["git", "rev-parse", "--verify", "--end-of-options", requested + "^{commit}"], root).strip()
-    revision = base
-    ctx.std.io.stdout.write("CPD allowance: %s (requested base %s)\n" % (revision, base))
-    baseline = work + "/base"
-    candidate = work + "/head"
-    ctx.std.fs.create_dir_all(baseline)
+def snapshot_sources(ctx, work, root):
+    candidate = work + "/sources"
     ctx.std.fs.create_dir_all(candidate)
-    archive = work + "/base.tar"
-    _must(ctx, ["git", "archive", "--format=tar", "--output=" + archive, revision, "--", "*.rs"], root)
-    _must(ctx, ["tar", "-xf", archive, "-C", baseline], root)
-
-    # Archive attributes may omit or rewrite files; verify every original blob.
-    tree = _capture(ctx, ["git", "ls-tree", "-r", "-z", revision], root)
-    count = 0
-    for entry in tree.split("\x00"):
-        if not entry:
-            continue
-        info, path = entry.split("\t", 1)
-        if not path.endswith(".rs"):
-            continue
-        mode, kind, digest = info.split()
-        if kind != "blob" or mode not in ["100644", "100755"]:
-            fail("unsupported baseline Rust source: %s" % path)
-        source = baseline + "/" + path
-        if not ctx.std.fs.exists(source):
-            fail("baseline archive omitted Rust source: %s" % path)
-        if _capture(ctx, ["git", "hash-object", "--no-filters", source], root).strip() != digest:
-            fail("baseline archive changed Rust source: %s" % path)
-        count += 1
-    if not count:
-        fail("baseline has no Rust source")
     tracked = _capture(ctx, ["git", "ls-files", "--stage", "-z", "--", "*.rs"], root)
     if any([entry.startswith("120000 ") for entry in tracked.split("\x00") if entry]):
         fail("Rust symlinks are unsupported; CPD must read every source file")
     paths = rust_paths(_capture(ctx, ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "*.rs"], root))
     deleted = rust_paths(_capture(ctx, ["git", "diff", "--name-only", "--diff-filter=D", "-z", "HEAD", "--", "*.rs"], root))
+    copied = []
     for path in paths:
         source = root + "/" + path
         if not ctx.std.fs.exists(source):
@@ -118,30 +39,82 @@ def snapshot_sources(ctx, work, root, requested):
         destination = candidate + "/" + path
         ctx.std.fs.create_dir_all(destination.rsplit("/", 1)[0])
         ctx.std.fs.copy(source, destination)
-    return baseline, candidate, revision
+        copied.append(path)
+    if not copied:
+        fail("no Rust sources in the Git inventory")
+    return candidate, copied
+
+def detector_args(config, source, output, minimum_tokens = MINIMUM_TOKENS):
+    return [
+        "--config",
+        config,
+        "--format",
+        "rust",
+        "--mode",
+        "weak",
+        "--min-tokens",
+        str(minimum_tokens),
+        "--min-lines",
+        str(MINIMUM_LINES),
+        "--max-size",
+        "100mb",
+        "--max-lines",
+        "1000000",
+        "--no-gitignore",
+        "--fail-on-empty",
+        "--exit-code",
+        "1",
+        "--reporters",
+        "console,json",
+        "--output",
+        output,
+        source,
+    ]
+
+def repository_report(report, sources, root):
+    """Keep JSON locations usable after the temporary snapshot is removed."""
+    for clone in report.get("duplicates", []):
+        for field in ["firstFile", "secondFile"]:
+            location = clone[field]
+            name = location["name"]
+            prefix = sources + "/"
+            if name.startswith(prefix):
+                location["name"] = root + "/" + name[len(prefix):]
+    return report
 
 def _impl(ctx: TaskContext) -> int:
     root = ctx.std.env.bazel_root_dir()
-    work = ctx.std.fs.mkdtemp(prefix = "krabka-cpd-")
+    work = ctx.std.fs.mkdtemp(prefix = "krabka-jscpd-")
     ctx.defer(ctx.std.fs.remove_dir_all, work)
-    baseline, candidate, revision = snapshot_sources(ctx, work, root, ctx.args.base)
+    sources, paths = snapshot_sources(ctx, work, root)
     output = ctx.args.output if ctx.args.output.startswith("/") else root + "/" + ctx.args.output
     ctx.std.fs.create_dir_all(output)
-    ctx.std.fs.write(output + "/baseline-revision.txt", revision + "\n")
-    classpath = _prepare(ctx, work, root)
-    java = ["java", "-Xmx" + ctx.args.heap, "-XX:ActiveProcessorCount=2", "-cp", classpath]
-    _must(ctx, java + ["net.sourceforge.pmd.cpd.CheckCpdTest"], root)
-    return _run(ctx, java + ["net.sourceforge.pmd.cpd.CheckCpd", baseline, candidate, output], root)
+    ctx.std.fs.write(output + "/source-inventory.json", json.encode(paths) + "\n")
+    detector, config = prepare_detector(ctx, work, root)
+    path = output + "/jscpd-report.json"
+    if ctx.std.fs.exists(path):
+        ctx.std.fs.remove_file(path)
+    status = _run(ctx, detector + detector_args(config, sources, output), root)
+    if ctx.std.fs.exists(path):
+        report = repository_report(json.decode(ctx.std.fs.read_to_string(path)), sources, root)
+        ctx.std.fs.write(path, json.encode(report) + "\n")
+    return status
+
+def prepare_detector(ctx, work, root):
+    # npm ci verifies every artifact against the committed lockfile integrity.
+    for name in ["package.json", "package-lock.json"]:
+        ctx.std.fs.copy(root + "/tools/cpd/" + name, work + "/" + name)
+    _must(ctx, ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", work], root)
+
+    # An explicit empty config prevents a local .jscpd.json from relaxing CI.
+    config = work + "/config.json"
+    ctx.std.fs.write(config, "{}\n")
+    return ["node", work + "/node_modules/jscpd/run-jscpd.js"], config
 
 check_cpd = task(
-    summary = "Reject new Rust CPD matches of 100 or more tokens",
+    summary = "Reject Rust duplicates with pinned jscpd",
     implementation = _impl,
     args = {
-        "base": args.string(default = "origin/main", description = "Immutable CI base, or a local Git revision."),
-        "output": args.string(default = ".cpd", description = "Directory for both CPD reports and regressions."),
-        "heap": args.string(default = "5g", description = "Java heap limit; CI runs this independently of Rust builds."),
-        "pmd_archive": args.string(default = "", description = "Reuse a local PMD archive after checking its pinned digest."),
-        "antlr_jar": args.string(default = "", description = "Reuse a local ANTLR jar after checking its pinned digest."),
-        "rust_grammar": args.string(default = "", description = "Reuse a local unmodified Rust grammar after checking its pinned digest."),
+        "output": args.string(default = ".cpd", description = "Directory for jscpd reports and the Rust source inventory."),
     },
 )

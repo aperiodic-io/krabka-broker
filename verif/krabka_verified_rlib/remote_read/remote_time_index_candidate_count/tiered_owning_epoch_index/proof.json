@@ -4,7 +4,7 @@
     "Coma": {
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.017 },
       "vc_len_i64": { "prover": "alt-ergo", "time": 0.008 },
-      "vc_tiered_owning_epoch_index": { "prover": "z3", "time": 0.012 }
+      "vc_tiered_owning_epoch_index": { "prover": "z3", "time": 0.027 }
     }
   }
 }

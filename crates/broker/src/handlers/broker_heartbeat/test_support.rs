@@ -9,7 +9,6 @@
 use std::sync::Arc;
 
 use krabka_metadata::{MetadataImage, NodeId};
-use uuid::Uuid;
 
 use crate::{
     heartbeat::controller_state::ControllerLivenessState, test_support::FakeMetadataSource,
@@ -27,19 +26,9 @@ pub(super) fn fake_source(image: MetadataImage) -> Arc<FakeMetadataSource> {
     )
 }
 
-pub(super) fn image_with_dir_partition(
-    leader: NodeId,
-    replicas: &[NodeId],
-    isr: &[NodeId],
-    dirs: &[Uuid],
-) -> MetadataImage {
-    crate::test_support::directory_partition_image(
-        leader,
-        replicas.iter().copied(),
-        isr.iter().copied(),
-        dirs,
-    )
-}
+pub(super) use crate::leader_election::test_support::{
+    ElectionSetup, img_with_partition as image_with_dir_partition,
+};
 
 pub(super) async fn liveness_with(alive: &[NodeId]) -> Arc<ControllerLivenessState> {
     let l = ControllerLivenessState::new(krabka_units::secs(10));

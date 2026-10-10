@@ -31,19 +31,26 @@ async fn start() -> support::InProcess {
     p
 }
 
+fn join_setup() -> crate::support::classic::ClassicJoinSetup {
+    crate::support::classic::ClassicJoinSetup {
+        group_id: GROUP.into(),
+        timeouts: crate::support::classic::ClassicTimeouts {
+            rebalance: krabka_units::millis(1_500),
+            ..Default::default()
+        },
+        protocol_type: PROTOCOL_TYPE.into(),
+        protocols: vec![join_protocol(PROTOCOL_NAME, bytes::Bytes::new())],
+        ..Default::default()
+    }
+}
+
 async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
     // Step 1: empty member_id → broker returns MEMBER_ID_REQUIRED with a
     // generated id. KIP-559 doesn't require fields here (the group state
     // hasn't recorded a protocol yet).
     let r1 = p
         .client
-        .send(classic_join_request(
-            GROUP,
-            String::new(),
-            (30_000, 1_500),
-            PROTOCOL_TYPE,
-            vec![join_protocol(PROTOCOL_NAME, bytes::Bytes::new())],
-        ))
+        .send(classic_join_request(join_setup()))
         .await
         .expect("JoinGroup (bootstrap)");
     assert!(r1.error_code == 79, "expected MEMBER_ID_REQUIRED");
@@ -54,11 +61,10 @@ async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
     let r2 = p
         .client
         .send(classic_join_request(
-            GROUP,
-            mid.clone(),
-            (30_000, 1_500),
-            PROTOCOL_TYPE,
-            vec![join_protocol(PROTOCOL_NAME, bytes::Bytes::new())],
+            crate::support::classic::ClassicJoinSetup {
+                member_id: mid.clone(),
+                ..join_setup()
+            },
         ))
         .await
         .expect("JoinGroup");
@@ -93,15 +99,17 @@ async fn sync_group_response_carries_protocol_type_and_name_on_success() {
     let r3 = p
         .client
         .send(classic_sync_request(
-            GROUP,
-            generation,
-            mid.clone(),
-            Some(PROTOCOL_TYPE.into()),
-            Some(PROTOCOL_NAME.into()),
-            vec![sync_assignment(
-                mid.clone(),
-                bytes::Bytes::from_static(b"asgn"),
-            )],
+            crate::support::classic::ClassicSyncSetup {
+                group_id: (GROUP).into(),
+                generation_id: crate::support::classic::GenerationId(generation),
+                member_id: mid.clone(),
+                protocol_type: Some(PROTOCOL_TYPE.into()),
+                protocol_name: Some(PROTOCOL_NAME.into()),
+                assignments: vec![sync_assignment(
+                    mid.clone(),
+                    bytes::Bytes::from_static(b"asgn"),
+                )],
+            },
         ))
         .await
         .expect("SyncGroup");
@@ -133,11 +141,11 @@ async fn join_group_inconsistent_protocol_error_carries_no_protocol_fields() {
     let r = p
         .client
         .send(classic_join_request(
-            GROUP,
-            String::new(),
-            (30_000, 1_500),
-            "stream",
-            vec![join_protocol("doesnt-matter", bytes::Bytes::new())],
+            crate::support::classic::ClassicJoinSetup {
+                protocol_type: ("stream").into(),
+                protocols: vec![join_protocol("doesnt-matter", bytes::Bytes::new())],
+                ..join_setup()
+            },
         ))
         .await
         .expect("JoinGroup");
@@ -164,12 +172,14 @@ async fn sync_group_error_carries_no_protocol_fields() {
     let r = p
         .client
         .send(classic_sync_request(
-            GROUP,
-            generation,
-            "ghost-member",
-            Some(PROTOCOL_TYPE.into()),
-            Some(PROTOCOL_NAME.into()),
-            vec![],
+            crate::support::classic::ClassicSyncSetup {
+                group_id: (GROUP).into(),
+                generation_id: crate::support::classic::GenerationId(generation),
+                member_id: ("ghost-member").into(),
+                protocol_type: Some(PROTOCOL_TYPE.into()),
+                protocol_name: Some(PROTOCOL_NAME.into()),
+                ..Default::default()
+            },
         ))
         .await
         .expect("SyncGroup");

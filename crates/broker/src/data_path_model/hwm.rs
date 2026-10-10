@@ -51,10 +51,7 @@ pub(super) fn real_hwm(s: &DpState, base: Instant, min_isr: usize) -> i64 {
     let leader = s.leader;
     let leader_leo = s.leader_leo();
     let leader_log = &s.log[usize::from(leader)];
-    let isr_nodes: Vec<krabka_audit::NodeId> = (0..NB_U8)
-        .filter(|&b| has(s.isr, b))
-        .map(|b| krabka_audit::NodeId(node(b)))
-        .collect();
+    let isr_nodes = s.in_sync_nodes();
     let replica_nodes: Vec<krabka_audit::NodeId> =
         (0..NB_U8).map(|b| krabka_audit::NodeId(node(b))).collect();
     let mut rs = ReplicaState::new();

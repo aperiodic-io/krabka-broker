@@ -83,14 +83,7 @@ impl AppendError {
 /// Kafka's `handleOperationException` mapping from an append error code to
 /// the code of the coordinator answer.
 fn operation_error_code(append_code: ShareErrorCode) -> ShareErrorCode {
-    match append_code {
-        codes::UNKNOWN_TOPIC_OR_PARTITION
-        | codes::NOT_ENOUGH_REPLICAS
-        | codes::REQUEST_TIMED_OUT => codes::COORDINATOR_NOT_AVAILABLE,
-        codes::NOT_LEADER_OR_FOLLOWER | codes::KAFKA_STORAGE_ERROR => codes::NOT_COORDINATOR,
-        codes::MESSAGE_TOO_LARGE => codes::UNKNOWN_SERVER_ERROR,
-        other => other,
-    }
+    codes::coordinator_append_error(append_code)
 }
 
 /// The message of the append error, before the mapping.

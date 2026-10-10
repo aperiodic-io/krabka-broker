@@ -135,18 +135,7 @@
 /// (Linux `rustix` vs Apple/BSD `nix`), not by this macro.
 macro_rules! sendfile_cfg {
     ($($item:item)*) => {
-        $(
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "macos",
-                target_os = "ios",
-                target_os = "tvos",
-                target_os = "watchos",
-                target_os = "freebsd",
-                target_os = "dragonfly",
-            ))]
-            $item
-        )*
+        $(krabka_macros::sendfile_platform! { $item })*
     };
 }
 pub(crate) use sendfile_cfg;
@@ -216,6 +205,8 @@ mod handlers;
 pub mod health;
 pub(crate) mod heartbeat;
 pub(crate) mod host_port;
+#[cfg(not(target_family = "wasm"))]
+mod http_server;
 pub(crate) mod incarnation;
 pub(crate) mod internal_topics;
 pub(crate) mod isr_maintenance;

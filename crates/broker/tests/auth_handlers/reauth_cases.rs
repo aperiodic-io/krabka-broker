@@ -3,16 +3,22 @@
 use std::ops::RangeInclusive;
 
 use assert2::check;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
 use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
-use crate::{harness, plain, scram};
+use crate::{
+    harness,
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    plain, scram,
+    support::wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+};
 
 pub struct Session {
     broker: krabka_broker::BrokerHandle,
     stream: TcpStream,
-    correlation: i32,
+    correlation: WireCorrelationId,
     mechanism: SaslMechanism,
     _dir: tempfile::TempDir,
 }
@@ -30,7 +36,7 @@ impl Session {
         Self {
             broker,
             stream,
-            correlation: 0,
+            correlation: WireCorrelationId(0),
             mechanism,
             _dir: dir,
         }
@@ -42,8 +48,11 @@ impl Session {
                 plain::plain_authenticate(
                     &mut self.stream,
                     &mut self.correlation,
-                    user,
-                    harness::alice_password().as_bytes(),
+                    &crate::kafka_wire::PlainAuthenticationSetup {
+                        client_id: "krabka-sasl-test",
+                        user,
+                        ..Default::default()
+                    },
                 )
                 .await
             }
@@ -51,9 +60,12 @@ impl Session {
                 scram::scram_authenticate(
                     &mut self.stream,
                     &mut self.correlation,
-                    user,
-                    &harness::alice_password(),
-                    self.mechanism,
+                    &crate::kafka_wire::ScramAuthenticationSetup {
+                        client_id: "krabka-sasl-test",
+                        user,
+                        mechanism: self.mechanism,
+                        ..Default::default()
+                    },
                 )
                 .await
             }
@@ -64,15 +76,18 @@ impl Session {
     async fn metadata(
         &mut self,
     ) -> std::io::Result<krabka_protocol::owned::metadata_response::MetadataResponse> {
-        self.correlation += 1;
+        self.correlation.0 += 1;
         crate::kafka_wire::exchange(
             &mut self.stream,
             &krabka_protocol::owned::metadata_request::MetadataRequest::default(),
-            3,
-            12,
-            self.correlation,
-            "krabka-sasl-test",
-            true,
+            WireExchangeSetup {
+                api_key: WireApiKey(3),
+                version: WireApiVersion(12),
+                correlation: self.correlation,
+                client_id: "krabka-sasl-test",
+                header: RequestHeaderEncoding::Flexible,
+                ..Default::default()
+            },
         )
         .await
     }

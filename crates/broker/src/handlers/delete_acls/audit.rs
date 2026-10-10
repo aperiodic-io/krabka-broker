@@ -50,18 +50,19 @@ mod tests {
             codes::NONE,
             None,
             vec![matching_acl_result(&acl(
-                "orders",
-                "User:alice",
-                AclOperation::Read,
+                crate::test_support::AllowAclSetup::default(),
             ))],
         );
         let failed = filter_result(
             codes::COORDINATOR_NOT_AVAILABLE,
             Some("submit failed".into()),
             vec![matching_acl_result(&acl(
-                "payments",
-                "User:bob",
-                AclOperation::Write,
+                crate::test_support::AllowAclSetup {
+                    resource_name: "payments",
+                    principal: "User:bob",
+                    operation: AclOperation::Write,
+                    ..Default::default()
+                },
             ))],
         );
 

@@ -11,35 +11,89 @@ const COMPLETE_COMMIT: i8 = 4;
 
 const COMPLETE_ABORT: i8 = 5;
 
-fn marker(
-    producer_epoch: i16,
-    coordinator_epoch: i32,
-    is_commit: bool,
-    is_offsets_partition: bool,
-) -> TransactionMarkerRequest {
+use krabka_ids::ProducerId;
+
+#[derive(Clone, Copy, Default)]
+struct ProducerEpoch(i16);
+
+#[derive(Clone, Copy, Default)]
+struct CoordinatorEpoch(i32);
+
+#[derive(Clone, Copy)]
+struct TransactionStateCode(i8);
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum TransactionOutcome {
+    #[default]
+    Commit,
+    Abort,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum MarkerTarget {
+    #[default]
+    Offsets,
+    Data,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum PendingTransaction {
+    #[default]
+    Present,
+    Absent,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct MarkerSetup {
+    #[default(ProducerId(1))]
+    producer_id: ProducerId,
+    producer_epoch: ProducerEpoch,
+    coordinator_epoch: CoordinatorEpoch,
+    outcome: TransactionOutcome,
+    target: MarkerTarget,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct MarkerPartitionSetup {
+    producer_epoch: ProducerEpoch,
+    coordinator_epoch: CoordinatorEpoch,
+    pending: PendingTransaction,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct TransactionSnapshotSetup {
+    #[default(ProducerId(7))]
+    producer_id: ProducerId,
+    #[default(ProducerEpoch(3))]
+    producer_epoch: ProducerEpoch,
+    #[default(TransactionStateCode(PREPARE_ABORT))]
+    state: TransactionStateCode,
+}
+
+fn marker(setup: MarkerSetup) -> TransactionMarkerRequest {
     TransactionMarkerRequest {
-        producer_id: 1,
-        producer_epoch,
-        coordinator_epoch,
-        is_commit,
-        is_offsets_partition,
+        producer_id: setup.producer_id.0,
+        producer_epoch: setup.producer_epoch.0,
+        coordinator_epoch: setup.coordinator_epoch.0,
+        is_commit: setup.outcome == TransactionOutcome::Commit,
+        is_offsets_partition: setup.target == MarkerTarget::Offsets,
     }
 }
 
-fn partition(
-    producer_epoch: i16,
-    coordinator_epoch: i32,
-    has_pending_transaction: bool,
-) -> TransactionMarkerPartitionState {
+fn partition(setup: MarkerPartitionSetup) -> TransactionMarkerPartitionState {
     TransactionMarkerPartitionState {
-        producer_epoch,
-        coordinator_epoch,
-        has_pending_transaction,
+        producer_epoch: setup.producer_epoch.0,
+        coordinator_epoch: setup.coordinator_epoch.0,
+        has_pending_transaction: setup.pending == PendingTransaction::Present,
     }
 }
 
-fn snapshot(pid: i64, epoch: i16, state: i8) -> TransactionSnapshot {
-    TransactionSnapshot { pid, epoch, state }
+fn snapshot(setup: TransactionSnapshotSetup) -> TransactionSnapshot {
+    TransactionSnapshot {
+        pid: setup.producer_id.0,
+        epoch: setup.producer_epoch.0,
+        state: setup.state.0,
+    }
 }
 
 mod pid_install_rejects_malformed_misplaced_and_colliding_records;

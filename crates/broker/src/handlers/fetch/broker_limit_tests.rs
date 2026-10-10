@@ -18,16 +18,29 @@ async fn broker_fetch_cap_bounds_consumer_fetch_and_keeps_first_batch_progress()
     })
     .await;
     let topic = "broker-fetch-cap";
-    let topic_id =
-        crate::handlers::test_support::create_topic(&broker, "fetch-cap-test", topic, 1).await;
-    crate::handlers::test_support::produce_records(&broker, topic, 0, 2).await;
-    crate::handlers::test_support::produce_records(&broker, topic, 0, 2).await;
+    let topic_id = crate::handlers::test_support::create_topic(
+        &broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "fetch-cap-test",
+            name: topic,
+            ..Default::default()
+        },
+    )
+    .await;
+    for _ in 0..2 {
+        crate::handlers::test_support::produce_records(
+            &broker,
+            crate::handlers::test_support::ProduceRecordsSetup {
+                topic,
+                count: crate::handlers::test_support::RecordCount(2),
+                ..Default::default()
+            },
+        )
+        .await;
+    }
 
     let response = super::test_support::fetch_wire(
         &broker,
-        krabka_protocol::owned::fetch_request::MAX_VERSION,
-        "consumer",
-        "consumer-client",
         &FetchRequest {
             max_wait_ms: 0,
             min_bytes: 0,
@@ -44,6 +57,11 @@ async fn broker_fetch_cap_bounds_consumer_fetch_and_keeps_first_batch_progress()
                 }],
                 ..Default::default()
             }],
+            ..Default::default()
+        },
+        super::test_support::FetchWireSetup {
+            user: "consumer",
+            client_id: "consumer-client",
             ..Default::default()
         },
     )

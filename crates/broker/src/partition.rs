@@ -387,7 +387,13 @@ mod tests {
             .expect("log mutex")
             .set_stamp_source(Arc::new(FixedStamp(4242)))
             .expect("set stamp source");
-        append_records(&p, 3); // offsets 0..=2, each stamped 4242
+        append_records(
+            &p,
+            crate::test_support::PartitionRecordsSetup {
+                count: crate::test_support::RecordCount(3),
+                ..Default::default()
+            },
+        ); // offsets 0..=2, each stamped 4242
 
         check!(p.stamp_for_offset(Offset(0)) == Some(4242));
         check!(p.stamp_for_offset(Offset(2)) == Some(4242));
@@ -399,7 +405,13 @@ mod tests {
     #[tokio::test]
     async fn log_size_in_reports_the_logs_size_for_its_own_directory_only() {
         let (p, _dir) = test_partition(Arc::new(Notify::new()));
-        append_records(&p, 3);
+        append_records(
+            &p,
+            crate::test_support::PartitionRecordsSetup {
+                count: crate::test_support::RecordCount(3),
+                ..Default::default()
+            },
+        );
         let (log_dir, size) = {
             let log = p.log.lock().expect("log mutex");
             (log.dir().to_path_buf(), log.size())

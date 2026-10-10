@@ -13,18 +13,19 @@ use krabka_client_consumer::{AutoOffsetReset, Consumer};
 use krabka_client_producer::Producer;
 
 use crate::{
-    harness::{
-        count_topic_dirs, start_two_dir_broker, wait_all_partitions, wait_for_move_complete,
-    },
-    wire::{alter_replica_log_dirs, create_topic},
+    harness::{count_topic_dirs, wait_for_move_complete},
+    wire::alter_replica_log_dirs,
 };
 
 #[tokio::test]
 async fn alter_replica_log_dirs_moves_partitions_to_target_dir() {
-    let (handle, primary, extra, addr) = start_two_dir_broker().await;
     let n: i32 = 2;
-    create_topic(addr, "t", n).await;
-    wait_all_partitions(&handle, "t", n).await;
+    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
+        client_id: crate::wire::CLIENT_ID,
+        partitions: crate::support::topics::TopicPartitionCount(n),
+        ..Default::default()
+    })
+    .await;
 
     // Identify which dir holds which partitions today (placement is
     // least-loaded; with n=2 each dir gets one). Pick the source dir
@@ -98,9 +99,11 @@ async fn alter_replica_log_dirs_moves_partitions_to_target_dir() {
 /// `append_at` loop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_replica_log_dirs_preserves_records_across_move() {
-    let (handle, primary, extra, addr) = start_two_dir_broker().await;
-    create_topic(addr, "t", 1).await;
-    wait_all_partitions(&handle, "t", 1).await;
+    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
+        client_id: crate::wire::CLIENT_ID,
+        ..Default::default()
+    })
+    .await;
 
     let bootstrap = addr.to_string();
     let producer = Producer::builder()

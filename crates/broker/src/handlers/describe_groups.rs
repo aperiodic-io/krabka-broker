@@ -208,23 +208,44 @@ mod tests {
         test_support::{DenyAll, peer, principal, test_ctx},
     };
 
-    const VERSION: i16 = krabka_protocol::owned::describe_groups_response::MAX_VERSION;
+    const VERSION: krabka_ids::ApiVersion =
+        krabka_ids::ApiVersion(krabka_protocol::owned::describe_groups_response::MAX_VERSION);
 
     crate::test_support::context_helper!(client_id = "admin-client");
 
-    fn request(groups: &[&str], include_ops: bool) -> DescribeGroupsRequest {
+    #[derive(Clone, Copy, Default)]
+    enum OperationsDisclosure {
+        #[default]
+        Omit,
+        Include,
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct GroupDescribeSetup<'a> {
+        #[default(&["classic-a"])]
+        groups: &'a [&'a str],
+        operations: OperationsDisclosure,
+    }
+
+    fn request(setup: GroupDescribeSetup<'_>) -> DescribeGroupsRequest {
         DescribeGroupsRequest {
-            groups: groups.iter().map(|g| (*g).to_string()).collect(),
-            include_authorized_operations: include_ops,
+            groups: setup.groups.iter().map(|g| (*g).to_string()).collect(),
+            include_authorized_operations: matches!(
+                setup.operations,
+                OperationsDisclosure::Include
+            ),
             ..Default::default()
         }
     }
 
     /// A `DescribedGroup` carrying only an error: every projection field keeps
     /// its wire default, `authorized_operations` included.
-    fn error_row(group_id: &str, error_code: i16) -> DescribedGroup {
+    fn error_row(
+        group_id: &str,
+        error_code: crate::test_support::KafkaErrorCode,
+    ) -> DescribedGroup {
         tagged_wire!(DescribedGroup {
-            error_code,
+            error_code: error_code.0,
             error_message: None,
             group_id: group_id.to_string(),
             group_state: String::new(),
@@ -237,11 +258,11 @@ mod tests {
 
     async fn drive(
         broker: &Broker,
-        version: i16,
+        version: krabka_ids::ApiVersion,
         req: &DescribeGroupsRequest,
     ) -> DescribeGroupsResponse {
         test_ctx!(ctx, "admin");
-        handle(broker, req.clone(), version, &ctx)
+        handle(broker, req.clone(), version.0, &ctx)
             .await
             .expect("handle")
     }
@@ -255,13 +276,27 @@ mod tests {
             crate::test_support::start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
 
-        let resp = drive(&broker, VERSION, &request(&["group-a", "group-b"], false)).await;
+        let resp = drive(
+            &broker,
+            VERSION,
+            &request(GroupDescribeSetup {
+                groups: &["group-a", "group-b"],
+                ..Default::default()
+            }),
+        )
+        .await;
 
         assert!(
             resp == unthrottled_wire!(DescribeGroupsResponse {
                 groups: vec![
-                    error_row("group-a", codes::GROUP_AUTHORIZATION_FAILED),
-                    error_row("group-b", codes::GROUP_AUTHORIZATION_FAILED),
+                    error_row(
+                        "group-a",
+                        crate::test_support::KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED)
+                    ),
+                    error_row(
+                        "group-b",
+                        crate::test_support::KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED)
+                    ),
                 ],
             })
         );
@@ -270,12 +305,25 @@ mod tests {
 
     /// A `Dead` row as `GroupMetadataManager.describeGroups` answers a group
     /// its `classicGroup` lookup rejects.
-    fn dead(group_id: &str, error_code: i16, message: Option<&str>, ops: i32) -> DescribedGroup {
+    #[derive(Clone, Copy)]
+    struct AuthorizedGroupOperations(i32);
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct DeadGroupSetup<'a> {
+        #[default("never-seen")]
+        group: &'a str,
+        error: crate::test_support::KafkaErrorCode,
+        message: Option<&'a str>,
+        #[default(AuthorizedGroupOperations(i32::MIN))]
+        operations: AuthorizedGroupOperations,
+    }
+
+    fn dead(setup: DeadGroupSetup<'_>) -> DescribedGroup {
         DescribedGroup {
             group_state: "Dead".into(),
-            error_message: message.map(str::to_string),
-            authorized_operations: ops,
-            ..error_row(group_id, error_code)
+            error_message: setup.message.map(str::to_string),
+            authorized_operations: setup.operations.0,
+            ..error_row(setup.group, setup.error)
         }
     }
 
@@ -298,51 +346,64 @@ mod tests {
         // (version, group, include flag, expected row)
         let rows = [
             (
-                5,
+                krabka_ids::ApiVersion(5),
                 "never-seen",
-                false,
-                dead("never-seen", codes::NONE, None, i32::MIN),
+                OperationsDisclosure::Omit,
+                dead(DeadGroupSetup::default()),
             ),
             (
-                5,
+                krabka_ids::ApiVersion(5),
                 "never-seen",
-                true,
-                dead("never-seen", codes::NONE, None, all_bits),
+                OperationsDisclosure::Include,
+                dead(DeadGroupSetup {
+                    operations: AuthorizedGroupOperations(all_bits),
+                    ..Default::default()
+                }),
             ),
             (
-                6,
+                krabka_ids::ApiVersion(6),
                 "never-seen",
-                true,
-                dead(
-                    "never-seen",
-                    codes::GROUP_ID_NOT_FOUND,
-                    Some("Group never-seen not found."),
-                    i32::MIN,
-                ),
+                OperationsDisclosure::Include,
+                dead(DeadGroupSetup {
+                    error: crate::test_support::KafkaErrorCode(codes::GROUP_ID_NOT_FOUND),
+                    message: Some("Group never-seen not found."),
+                    ..Default::default()
+                }),
             ),
             (
-                5,
+                krabka_ids::ApiVersion(5),
                 "next-gen",
-                false,
-                dead("next-gen", codes::NONE, None, i32::MIN),
+                OperationsDisclosure::Omit,
+                dead(DeadGroupSetup {
+                    group: "next-gen",
+                    ..Default::default()
+                }),
             ),
             (
-                6,
+                krabka_ids::ApiVersion(6),
                 "next-gen",
-                false,
-                dead(
-                    "next-gen",
-                    codes::GROUP_ID_NOT_FOUND,
-                    Some("Group next-gen is not a classic group."),
-                    i32::MIN,
-                ),
+                OperationsDisclosure::Omit,
+                dead(DeadGroupSetup {
+                    group: "next-gen",
+                    error: crate::test_support::KafkaErrorCode(codes::GROUP_ID_NOT_FOUND),
+                    message: Some("Group next-gen is not a classic group."),
+                    ..Default::default()
+                }),
             ),
         ];
         broker_fixture!((broker_handle, _dir, broker), group_allow_all);
         let _ = broker.group_coordinator.get_or_create_consumer("next-gen");
 
         for (version, group, include_ops, expected) in rows {
-            let resp = drive(&broker, version, &request(&[group], include_ops)).await;
+            let resp = drive(
+                &broker,
+                version,
+                &request(GroupDescribeSetup {
+                    groups: &[group],
+                    operations: include_ops,
+                }),
+            )
+            .await;
 
             assert!(
                 resp == unthrottled_wire!(DescribeGroupsResponse {
@@ -396,7 +457,7 @@ mod tests {
             protocol_type: "consumer".into(),
             protocol_data: protocol_data.into(),
             members: vec![m],
-            ..error_row("classic", codes::NONE)
+            ..error_row("classic", crate::test_support::KafkaErrorCode(codes::NONE))
         };
         // (view, expected row)
         let rows = [
@@ -429,7 +490,7 @@ mod tests {
         broker_fixture!((broker_handle, _dir, broker), group_allow_all);
         let _ = broker.group_coordinator.get_or_create_classic("classic-a");
 
-        let resp = drive(&broker, VERSION, &request(&["classic-a"], false)).await;
+        let resp = drive(&broker, VERSION, &request(GroupDescribeSetup::default())).await;
 
         assert!(
             resp == unthrottled_wire!(DescribeGroupsResponse {
@@ -459,7 +520,15 @@ mod tests {
         let broker = broker_handle.broker_arc_for_test();
         let _ = broker.group_coordinator.get_or_create_classic("classic-a");
 
-        let resp = drive(&broker, VERSION, &request(&["classic-a"], true)).await;
+        let resp = drive(
+            &broker,
+            VERSION,
+            &request(GroupDescribeSetup {
+                operations: OperationsDisclosure::Include,
+                ..Default::default()
+            }),
+        )
+        .await;
 
         request_identity!((p, peer), principal("admin"));
         let expected = authorized_operations_bits(
@@ -482,10 +551,12 @@ mod tests {
 
     fn allow(group: &str, operation: AclOperation) -> krabka_metadata::MetadataRecord {
         krabka_metadata::MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-            ResourceType::Group,
-            group,
-            "User:admin",
-            operation,
+            crate::test_support::AllowAclSetup {
+                resource_type: ResourceType::Group,
+                resource_name: group,
+                principal: "User:admin",
+                operation,
+            },
         ))
     }
 
@@ -499,7 +570,7 @@ mod tests {
         DescribedGroup {
             group_state: "Empty".into(),
             authorized_operations,
-            ..error_row(group_id, codes::NONE)
+            ..error_row(group_id, crate::test_support::KafkaErrorCode(codes::NONE))
         }
     }
 
@@ -513,17 +584,23 @@ mod tests {
         let rows = [
             (
                 vec![AclOperation::Describe],
-                false,
+                OperationsDisclosure::Omit,
                 vec![
-                    error_row("denied", codes::GROUP_AUTHORIZATION_FAILED),
+                    error_row(
+                        "denied",
+                        crate::test_support::KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED),
+                    ),
                     empty_row("allowed", i32::MIN),
                 ],
             ),
             (
                 vec![AclOperation::Describe, AclOperation::AlterConfigs],
-                true,
+                OperationsDisclosure::Include,
                 vec![
-                    error_row("denied", codes::GROUP_AUTHORIZATION_FAILED),
+                    error_row(
+                        "denied",
+                        crate::test_support::KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED),
+                    ),
                     empty_row(
                         "allowed",
                         bit(AclOperation::Describe)
@@ -534,9 +611,12 @@ mod tests {
             ),
             (
                 vec![AclOperation::All],
-                true,
+                OperationsDisclosure::Include,
                 vec![
-                    error_row("denied", codes::GROUP_AUTHORIZATION_FAILED),
+                    error_row(
+                        "denied",
+                        crate::test_support::KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED),
+                    ),
                     empty_row(
                         "allowed",
                         bit(AclOperation::Read)
@@ -564,7 +644,10 @@ mod tests {
             let resp = drive(
                 &broker,
                 VERSION,
-                &request(&["allowed", "denied"], include_ops),
+                &request(GroupDescribeSetup {
+                    groups: &["allowed", "denied"],
+                    operations: include_ops,
+                }),
             )
             .await;
 

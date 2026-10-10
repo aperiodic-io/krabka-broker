@@ -65,7 +65,14 @@ async fn connect(bootstrap: &str) -> Arc<Client> {
 /// coordinator refuses a read or a write of a topic partition that the
 /// metadata image does not hold.
 async fn create_topic(client: &Client, name: &str) -> uuid::Uuid {
-    let id = crate::support::client::create_topic_with(client, name, 1, 1, 5_000).await;
+    let id = crate::support::client::create_topic_with(
+        client,
+        crate::support::topics::CreateTopicSetup {
+            topic: name,
+            ..Default::default()
+        },
+    )
+    .await;
     uuid::Uuid::from_bytes(id.0)
 }
 

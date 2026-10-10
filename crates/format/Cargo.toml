@@ -48,5 +48,6 @@ tracing-subscriber = { workspace = true }
 assert2 = { workspace = true }
 
 [dev-dependencies]
+krabka-ids = { version = "0.6.0" }
 krabka-broker = { version = "1.0.1", path = "../broker" }
 tempfile = { workspace = true }

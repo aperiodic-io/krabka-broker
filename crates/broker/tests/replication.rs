@@ -20,7 +20,6 @@ use tempfile::TempDir;
 use crate::support::{
     client::connect_client,
     offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-    produce::single_partition_produce,
     records::{batch_from_records, value_record},
     topics::create_topic_request,
 };
@@ -46,10 +45,7 @@ async fn create_replicated_partition(
     let leader_addr = cluster[0].1.listen_addr.to_string();
     let admin = connect_client(leader_addr.clone(), None).await;
     let name = topic.name.clone();
-    let response = admin
-        .send(create_topic_request(topic, 5_000))
-        .await
-        .unwrap();
+    let response = admin.send(create_topic_request(topic)).await.unwrap();
     assert!(response.topics[0].error_code == 0);
     // Produce v13 identifies topics by the CreateTopics-assigned UUID (KIP-516).
     let topic_id = response.topics[0].topic_id;
@@ -67,7 +63,16 @@ async fn metrics_cluster(topic: &str) -> (Cluster, std::net::SocketAddr) {
     .expect("3-broker cluster");
     support::wait_for_all_brokers_registered(&cluster, 3).await;
     let admin = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
-    support::client::create_topic_with(&admin, topic, 12, 3, 5_000).await;
+    support::client::create_topic_with(
+        &admin,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            num_partitions: crate::support::topics::TopicPartitionCount(12),
+            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            ..Default::default()
+        },
+    )
+    .await;
     for (handle, _, _) in &cluster {
         for partition in 0..12 {
             handle.wait_until_partition_present(topic, partition).await;
@@ -88,7 +93,9 @@ async fn replication_factor_three_propagates_to_all_followers() {
         create_replicated_partition(&cluster, support::topic_on("repl", &[&[1, 2, 3]])).await;
 
     let producer = connect_client(leader_addr, None).await;
-    let batch = support::client::value_batch(20);
+    let batch = support::client::value_batch(crate::support::client::ValueBatchSetup {
+        records: crate::support::client::ValueRecordCount(20),
+    });
     produce_replicated(&producer, "repl", topic_id, batch).await;
 
     // Wait until every broker's local log shows log_end_offset >= 20.
@@ -239,20 +246,16 @@ async fn delete_records_moves_every_replica_log_start_before_it_answers() {
     // cluster[0] is node 1, and the topic pins it as the leader of partition 0.
     let leader_addr = cluster[0].1.listen_addr.to_string();
     let client = connect_client(leader_addr, None).await;
-    let resp = client
-        .send(create_topic_request(
-            support::topic_on("trimmed", &[&[1, 2, 3]]),
-            5_000,
-        ))
-        .await
-        .unwrap();
-    assert!(resp.topics[0].error_code == 0);
-    let topic_id = resp.topics[0].topic_id;
-    for (h, _, _) in &cluster {
-        h.wait_until_partition_present("trimmed", 0).await;
-    }
+    let topic_id = support::topics::create_assigned_partition(
+        &client,
+        crate::support::topics::AssignedTopicSetup::three_replicas("trimmed"),
+        cluster.iter().map(|(broker, _, _)| broker),
+    )
+    .await;
 
-    let batch = support::client::value_batch(20);
+    let batch = support::client::value_batch(crate::support::client::ValueBatchSetup {
+        records: crate::support::client::ValueRecordCount(20),
+    });
     produce_replicated(&client, "trimmed", topic_id, batch).await;
     for (h, _, _) in &cluster {
         h.wait_until_local_log_end_offset("trimmed", 0, 20).await;
@@ -389,12 +392,13 @@ async fn produce_replicated(
     batch: RecordBatch,
 ) {
     let response = client
-        .send(single_partition_produce(
-            topic,
-            topic_id,
-            0,
-            Some(batch.into()),
-            (-1, 5_000),
+        .send(crate::support::produce::batch_request(
+            batch,
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: (topic).into(),
+                topic_id,
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
         ))
         .await
         .unwrap();

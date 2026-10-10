@@ -132,10 +132,10 @@ async fn jvm_kafka_leader_election_preferred() {
     // kafka-leader-election is NOT present in cp-kafka:6.1.1 (Kafka 2.7).
     // cp-kafka:7.5.0 (Kafka 3.5) ships it. The tool sends `ElectLeaders`
     // (api_key 43) which the Rust broker now handles via T4/T5.
-    let out = crate::support::jvm_docker_command(
-        KAFKA_IMAGE_TXN,
-        &[&admin_mount],
-        &[
+    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE_TXN,
+        mounts: &[&admin_mount],
+        args: &[
             "kafka-leader-election",
             "--election-type",
             "preferred",
@@ -148,8 +148,8 @@ async fn jvm_kafka_leader_election_preferred() {
             "--admin.config",
             "/client.properties",
         ],
-        false,
-    )
+        ..Default::default()
+    })
     .output()
     .expect("spawn kafka-leader-election");
 

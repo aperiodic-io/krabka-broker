@@ -18,15 +18,119 @@ pub(super) const DENSE_INDEX: ByteSize = ByteSize::ZERO;
 /// budget never clips the result.
 pub(super) const NO_LIMIT: ByteSize = gibibytes(4);
 
-pub(super) fn sample_batch(base_offset: i64, n: i32, ts_base: i64) -> RecordBatch {
+#[derive(Clone, Copy, Default)]
+pub(super) struct RecordCount(pub i32);
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct RecordTimestamp(pub i64);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct SampleBatchSetup {
+    pub offset: Offset,
+    #[default(RecordCount(1))]
+    pub records: RecordCount,
+    pub timestamp: RecordTimestamp,
+}
+
+/// A one-record first batch at timestamp 100, reused by read and recovery fixtures.
+pub(super) const ONE_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(0),
+    records: RecordCount(1),
+    timestamp: RecordTimestamp(100),
+};
+
+pub(super) const TWO_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    records: RecordCount(2),
+    ..ONE_RECORD_BATCH
+};
+pub(super) const THREE_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    records: RecordCount(3),
+    ..ONE_RECORD_BATCH
+};
+pub(super) const SECOND_SINGLE_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(1),
+    timestamp: RecordTimestamp(200),
+    ..ONE_RECORD_BATCH
+};
+pub(super) const THIRD_SINGLE_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(2),
+    timestamp: RecordTimestamp(300),
+    ..ONE_RECORD_BATCH
+};
+pub(super) const TWO_RECORD_AFTER_THREE_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(3),
+    records: RecordCount(2),
+    timestamp: RecordTimestamp(200),
+};
+pub(super) const SECOND_THREE_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(3),
+    records: RecordCount(3),
+    timestamp: RecordTimestamp(200),
+};
+pub(super) const FIRST_HEADER_WALK_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(10),
+    records: RecordCount(5),
+    timestamp: RecordTimestamp(1000),
+};
+pub(super) const SECOND_HEADER_WALK_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(15),
+    records: RecordCount(5),
+    timestamp: RecordTimestamp(2000),
+};
+pub(super) const SECOND_TWO_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(2),
+    records: RecordCount(2),
+    timestamp: RecordTimestamp(200),
+};
+pub(super) const THIRD_TWO_RECORD_BATCH: SampleBatchSetup = SampleBatchSetup {
+    offset: Offset(4),
+    records: RecordCount(2),
+    timestamp: RecordTimestamp(300),
+};
+
+/// The two timestamp ranges used to search offsets 0 through 4.
+pub(super) const FIVE_OFFSET_TIMESTAMP_BATCHES: &[SampleBatchSetup] =
+    &[THREE_RECORD_BATCH, TWO_RECORD_AFTER_THREE_BATCH];
+
+/// The pair used to round-trip and fetch across the second batch's interior.
+pub(super) const FIRST_LARGE_TIMESTAMP_BATCH: SampleBatchSetup = SampleBatchSetup {
+    timestamp: RecordTimestamp(1_000_000),
+    ..THREE_RECORD_BATCH
+};
+pub(super) const SECOND_LARGE_TIMESTAMP_BATCH: SampleBatchSetup = SampleBatchSetup {
+    timestamp: RecordTimestamp(2_000_000),
+    ..TWO_RECORD_AFTER_THREE_BATCH
+};
+
+pub(super) const INDEXED_READ_BATCHES: &[SampleBatchSetup] = &[
+    SampleBatchSetup {
+        offset: Offset(100),
+        ..THREE_RECORD_BATCH
+    },
+    SampleBatchSetup {
+        offset: Offset(103),
+        ..TWO_RECORD_AFTER_THREE_BATCH
+    },
+    SampleBatchSetup {
+        offset: Offset(105),
+        ..THIRD_SINGLE_RECORD_BATCH
+    },
+];
+
+pub(super) fn sample_batch(setup: SampleBatchSetup) -> RecordBatch {
+    let SampleBatchSetup {
+        offset,
+        records,
+        timestamp,
+    } = setup;
     let mut b = RecordBatch {
-        base_offset,
-        base_timestamp: ts_base,
-        max_timestamp: ts_base + i64::from(n - 1),
-        last_offset_delta: n - 1,
+        base_offset: offset.0,
+        base_timestamp: timestamp.0,
+        max_timestamp: timestamp.0 + i64::from(records.0 - 1),
+        last_offset_delta: records.0 - 1,
         ..RecordBatch::default()
     };
-    for i in 0..n {
+    for i in 0..records.0 {
         b.records
             .push(crate::test_support::numbered_record(i, i64::from(i)));
     }
@@ -34,57 +138,74 @@ pub(super) fn sample_batch(base_offset: i64, n: i32, ts_base: i64) -> RecordBatc
 }
 
 pub(super) fn test_segment() -> (tempfile::TempDir, Segment) {
-    segment_at(0)
+    segment_at(Offset(0))
 }
 
-pub(super) fn segment_at(base: i64) -> (tempfile::TempDir, Segment) {
+pub(super) fn segment_at(base: Offset) -> (tempfile::TempDir, Segment) {
     let dir = tempdir().unwrap();
-    let seg = Segment::create(dir.path(), Offset(base)).unwrap();
+    let seg = Segment::create(dir.path(), base).unwrap();
     (dir, seg)
 }
 
-pub(super) fn test_batch_at(off: i64) -> RecordBatch {
-    crate::test_support::single_record_batch(off, 1_000, Bytes::from(format!("v{off}")))
+pub(super) fn test_batch_at(off: Offset) -> RecordBatch {
+    crate::test_support::single_record_batch(off.0, 1_000, Bytes::from(format!("v{}", off.0)))
 }
 
-pub(super) fn seeded_segment(
-    dir: &std::path::Path,
-    base_offset: i64,
-    batches: &[(i64, i32, i64)],
-) -> Segment {
-    populated_segment(dir, base_offset, batches, DENSE_INDEX)
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct SeededSegmentSetup<'a> {
+    pub offset: Offset,
+    pub batches: &'a [SampleBatchSetup],
+    #[default(DENSE_INDEX)]
+    pub index_interval: ByteSize,
 }
 
-pub(super) fn populated_segment(
-    dir: &std::path::Path,
-    base_offset: i64,
-    batches: &[(i64, i32, i64)],
-    interval: ByteSize,
-) -> Segment {
-    let mut segment = Segment::create(dir, Offset(base_offset)).unwrap();
-    for &(base, count, timestamp) in batches {
+pub(super) fn seeded_segment(dir: &std::path::Path, setup: SeededSegmentSetup<'_>) -> Segment {
+    let mut segment = Segment::create(dir, setup.offset).unwrap();
+    for &batch in setup.batches {
         segment
-            .append(&sample_batch(base, count, timestamp), interval)
+            .append(&sample_batch(batch), setup.index_interval)
             .unwrap();
     }
     segment
+}
+
+pub(super) fn seeded_fixture(setup: SeededSegmentSetup<'_>) -> (tempfile::TempDir, Segment) {
+    let dir = tempdir().unwrap();
+    let segment = seeded_segment(dir.path(), setup);
+    (dir, segment)
+}
+
+pub(super) fn three_single_record_batches() -> Vec<RecordBatch> {
+    sample_batches(&[
+        ONE_RECORD_BATCH,
+        SECOND_SINGLE_RECORD_BATCH,
+        THIRD_SINGLE_RECORD_BATCH,
+    ])
+}
+
+/// An ordinary dense-index segment holding the first two records.
+pub(super) fn two_record_fixture() -> (tempfile::TempDir, Segment) {
+    seeded_fixture(SeededSegmentSetup {
+        batches: &[TWO_RECORD_BATCH],
+        ..Default::default()
+    })
 }
 
 pub(super) fn indexed_segment() -> (tempfile::TempDir, Segment) {
     let dir = tempdir().unwrap();
     let segment = seeded_segment(
         dir.path(),
-        100,
-        &[(100, 3, 100), (103, 2, 200), (105, 1, 300)],
+        crate::segment::test_support::SeededSegmentSetup {
+            offset: crate::Offset(100),
+            batches: INDEXED_READ_BATCHES,
+            ..Default::default()
+        },
     );
     (dir, segment)
 }
 
-pub(super) fn sample_batches(batches: &[(i64, i32, i64)]) -> Vec<RecordBatch> {
-    batches
-        .iter()
-        .map(|&(base, count, timestamp)| sample_batch(base, count, timestamp))
-        .collect()
+pub(super) fn sample_batches(batches: &[SampleBatchSetup]) -> Vec<RecordBatch> {
+    batches.iter().copied().map(sample_batch).collect()
 }
 
 /// `seg` with its I/O routed through a fresh

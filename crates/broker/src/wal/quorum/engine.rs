@@ -138,16 +138,12 @@ impl WalShardEngine {
                 recover_durable_prefix(&replicas, strict_majority(expected_voters))?
             }
         };
-        Ok(Self {
+        Ok(Self::with_frontiers(
             replicas,
             expected_voters,
-            durable_watermark: AtomicI64::new(durable_watermark.0),
-            local_durable: AtomicI64::new(durable_watermark.0),
-            distributed_required: AtomicBool::new(false),
-            distributed: Mutex::new(None),
-            durable_advanced: Notify::new(),
-            observability: OnceLock::new(),
-        })
+            durable_watermark,
+            durable_watermark,
+        ))
     }
 
     pub(crate) fn new_distributed(
@@ -172,31 +168,41 @@ impl WalShardEngine {
             log.sync()?;
             (log_start, log.log_end_offset())
         };
-        Ok(Self {
-            replicas: vec![WalReplica::new(source)],
+        Ok(Self::with_frontiers(
+            vec![WalReplica::new(source)],
             expected_voters,
-            durable_watermark: AtomicI64::new(log_start.0),
+            log_start,
+            local_durable,
+        ))
+    }
+
+    fn with_frontiers(
+        replicas: Vec<WalReplica>,
+        expected_voters: usize,
+        durable_watermark: Offset,
+        local_durable: Offset,
+    ) -> Self {
+        Self {
+            replicas,
+            expected_voters,
+            durable_watermark: AtomicI64::new(durable_watermark.0),
             local_durable: AtomicI64::new(local_durable.0),
             distributed_required: AtomicBool::new(false),
             distributed: Mutex::new(None),
             durable_advanced: Notify::new(),
             observability: OnceLock::new(),
-        })
+        }
     }
 
     #[cfg(test)]
     fn for_model(replicas: Vec<WalReplica>, durable_watermark: Offset) -> Self {
         let expected_voters = replicas.len();
-        Self {
+        Self::with_frontiers(
             replicas,
             expected_voters,
-            durable_watermark: AtomicI64::new(durable_watermark.0),
-            local_durable: AtomicI64::new(durable_watermark.0),
-            distributed_required: AtomicBool::new(false),
-            distributed: Mutex::new(None),
-            durable_advanced: Notify::new(),
-            observability: OnceLock::new(),
-        }
+            durable_watermark,
+            durable_watermark,
+        )
     }
 
     #[cfg(test)]
@@ -584,10 +590,12 @@ mod tests {
     use crate::wal::quorum::test_support::batch;
 
     fn configured_engine(path: &Path) -> WalShardEngine {
-        let log = Log::open(path, LogConfig::default()).unwrap();
-        let engine = WalShardEngine::new_distributed(Arc::new(Mutex::new(log)), 3).unwrap();
-        engine.configure_distributed(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
-        engine
+        let source = crate::wal::quorum::test_support::open_log(path);
+        crate::wal::quorum::test_support::distributed_engine(
+            &source,
+            3,
+            &[NodeId(1), NodeId(2), NodeId(3)],
+        )
     }
 
     fn log_with_records(path: &Path, records: usize) -> Arc<Mutex<Log>> {

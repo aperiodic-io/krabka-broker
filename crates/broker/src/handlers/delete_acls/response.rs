@@ -76,28 +76,20 @@ mod tests {
     use krabka_metadata::{AclOperation, PatternType};
 
     use super::*;
-    use crate::handlers::delete_acls::test_support::{
-        OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED,
-        PERMISSION_ALLOW, RESOURCE_TYPE_TOPIC, acl,
-    };
+    use crate::handlers::delete_acls::test_support::{OPERATION_WRITE, PATTERN_TYPE_PREFIXED, acl};
 
     #[test]
     fn helpers_preserve_matching_acl_and_submit_error_fields() {
-        let matched = matching_acl_result(&acl("orders", "User:alice", AclOperation::Read));
-        let expected_matched = tagged_wire!(DeleteAclsMatchingAcl {
-            error_code: codes::NONE,
-            error_message: None,
-            resource_type: RESOURCE_TYPE_TOPIC,
-            resource_name: "orders".into(),
-            pattern_type: PATTERN_TYPE_LITERAL,
-            principal: "User:alice".into(),
-            host: "*".into(),
-            operation: OPERATION_READ,
-            permission_type: PERMISSION_ALLOW,
-        });
+        let matched = matching_acl_result(&acl(crate::test_support::AllowAclSetup::default()));
+        let expected_matched = crate::handlers::acl_test_support::expected_deleted_orders_acl();
         assert!(matched == expected_matched);
 
-        let mut prefixed_acl = acl("orders-", "User:bob", AclOperation::Write);
+        let mut prefixed_acl = acl(crate::test_support::AllowAclSetup {
+            resource_name: "orders-",
+            principal: "User:bob",
+            operation: AclOperation::Write,
+            ..Default::default()
+        });
         prefixed_acl.pattern_type = PatternType::Prefixed;
         let matched = matching_acl_result(&prefixed_acl);
         assert!(matched.pattern_type == PATTERN_TYPE_PREFIXED);

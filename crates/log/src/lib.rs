@@ -75,18 +75,7 @@
 /// The cfg set therefore cannot drift between them.
 macro_rules! sendfile_cfg {
     ($($item:item)*) => {
-        $(
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "macos",
-                target_os = "ios",
-                target_os = "tvos",
-                target_os = "watchos",
-                target_os = "freebsd",
-                target_os = "dragonfly",
-            ))]
-            $item
-        )*
+        $(krabka_macros::sendfile_platform! { $item })*
     };
 }
 pub(crate) use sendfile_cfg;

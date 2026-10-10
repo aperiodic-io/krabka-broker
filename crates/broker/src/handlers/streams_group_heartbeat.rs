@@ -152,7 +152,6 @@ mod tests {
 
     use crate::{
         broker::Broker,
-        handlers::{group_heartbeat_test_support::acl_authorizer, group_read_denied},
         test_support::{peer, principal},
     };
 
@@ -185,10 +184,12 @@ mod tests {
             .controller
             .submit_change(
                 crate::handlers::group_heartbeat_test_support::topic_with_partitions(
-                    name,
-                    uuid::Uuid::new_v4(),
-                    1,
-                    broker.config.node_id,
+                    crate::handlers::group_heartbeat_test_support::GroupTopicSetup {
+                        name,
+                        topic_id: uuid::Uuid::new_v4(),
+                        partitions: crate::test_support::PartitionCount(1),
+                        node: broker.config.node_id,
+                    },
                 ),
             )
             .await
@@ -215,15 +216,11 @@ mod tests {
         };
 
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
-            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        let (broker_handle, _dir, broker) = configured_streams_broker(|cfg| {
             cfg.streams_group.enable = true;
             cfg.default_replication_factor = 1;
         })
         .await;
-        broker_handle.wait_until_group_coordinator_ready().await;
-        let broker = broker_handle.broker_arc_for_test();
-        set_streams_version(&broker, 1).await;
         request_identity!((principal, peer, ctx), principal("alice"), test_context);
         let config = |name: &str, value: &str| KeyValue {
             key: name.into(),
@@ -701,6 +698,31 @@ mod tests {
 
     crate::test_support::context_helper!(client_id = "streams-client");
 
+    async fn configured_streams_broker(
+        configure: impl FnOnce(&mut crate::config::BrokerConfig),
+    ) -> (crate::broker::BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+        let (handle, directory) = crate::test_support::start_group_broker_with(|cfg| {
+            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+            configure(cfg);
+        })
+        .await;
+        let broker = handle.broker_arc_for_test();
+        set_streams_version(&broker, 1).await;
+        (handle, directory, broker)
+    }
+
+    async fn check_protocol_disabled(enabled: bool, level: i16, group_id: &str) {
+        let version = streams_group_heartbeat_response::MAX_VERSION;
+        broker_fixture!((broker_handle, _dir, broker), start_broker(enabled));
+        set_streams_version(&broker, level).await;
+        request_identity!((principal, peer, ctx), principal("alice"), test_context);
+        let resp = handle(&broker, request(group_id), version, &ctx)
+            .await
+            .expect("handle");
+        assert!(resp.error_code == codes::UNSUPPORTED_VERSION, "{resp:?}");
+        broker_handle.shutdown().await;
+    }
+
     async fn start_broker(
         streams_enabled: bool,
     ) -> (crate::broker::BrokerHandle, tempfile::TempDir) {
@@ -742,14 +764,10 @@ mod tests {
         use crate::coordinator::unified::streams::actor::response::error_resp;
 
         const LAG: i64 = 4_321;
-        let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
-            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        let (broker_handle, _dir, broker) = configured_streams_broker(|cfg| {
             cfg.streams_group.acceptable_recovery_lag = LAG;
         })
         .await;
-        broker_handle.wait_until_group_coordinator_ready().await;
-        let broker = broker_handle.broker_arc_for_test();
-        set_streams_version(&broker, 1).await;
         request_identity!((principal, peer, ctx), principal("alice"), test_context);
         // Through the dispatch registry: v0 drops the int64 lag on the wire.
         let heartbeat = |req: StreamsGroupHeartbeatRequest, version: i16| {
@@ -804,14 +822,10 @@ mod tests {
             config::KEY_RACK_AWARE_ASSIGNMENT_TAGS, topology::status,
         };
 
-        let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
-            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        let (broker_handle, _dir, broker) = configured_streams_broker(|cfg| {
             cfg.streams_group.rack_aware_assignment_tags = vec!["zone".into()];
         })
         .await;
-        broker_handle.wait_until_group_coordinator_ready().await;
-        let broker = broker_handle.broker_arc_for_test();
-        set_streams_version(&broker, 1).await;
         broker
             .controller
             .submit_change(vec![MetadataRecord::V1GroupConfig(
@@ -861,40 +875,12 @@ mod tests {
 
     #[tokio::test]
     async fn handle_unfinalized_feature_returns_unsupported_version_with_read_allowed() {
-        let version = streams_group_heartbeat_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), start_broker(true));
-        set_streams_version(&broker, 0).await;
-        request_identity!((principal, peer, ctx), principal("alice"), test_context);
-        let resp = handle(
-            &broker,
-            request("streams-app-disabled-feature"),
-            version,
-            &ctx,
-        )
-        .await
-        .expect("handle");
-
-        assert!(resp.error_code == codes::UNSUPPORTED_VERSION, "{resp:?}");
-        broker_handle.shutdown().await;
+        check_protocol_disabled(true, 0, "streams-app-disabled-feature").await;
     }
 
     #[tokio::test]
     async fn handle_disabled_config_returns_unsupported_version_when_feature_finalized() {
-        let version = streams_group_heartbeat_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), start_broker(false));
-        set_streams_version(&broker, 1).await;
-        request_identity!((principal, peer, ctx), principal("alice"), test_context);
-        let resp = handle(
-            &broker,
-            request("streams-app-disabled-config"),
-            version,
-            &ctx,
-        )
-        .await
-        .expect("handle");
-
-        assert!(resp.error_code == codes::UNSUPPORTED_VERSION, "{resp:?}");
-        broker_handle.shutdown().await;
+        check_protocol_disabled(false, 1, "streams-app-disabled-config").await;
     }
 
     #[tokio::test]
@@ -952,15 +938,12 @@ mod tests {
     fn group_read_denied_yields_group_authorization_failed() {
         use krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse;
 
-        let authorizer = acl_authorizer();
-        let image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("ANONYMOUS"),
-            client_id = "streams-client"
+        crate::handlers::group_heartbeat_test_support::check_group_read_denied(
+            crate::handlers::group_heartbeat_test_support::GroupAclSetup {
+                client_id: "streams-client",
+                ..Default::default()
+            },
         );
-
-        assert!(group_read_denied(&authorizer, &image, &ctx, "g"));
 
         let bytes = crate::handlers::encode_response(
             &reply(codes::GROUP_AUTHORIZATION_FAILED, None),

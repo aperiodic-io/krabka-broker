@@ -26,6 +26,21 @@ use super::{
 };
 use crate::{api_catalog::UnstableApiVersions, codes};
 
+/// The live facts used by either broker-configuration mutation API.
+#[derive(Clone, Copy)]
+pub(crate) struct BrokerConfigContext<'a> {
+    pub image: &'a krabka_metadata::MetadataImage,
+    pub serving: NodeId,
+    pub log_dirs: &'a [std::path::PathBuf],
+    pub unstable: UnstableApiVersions,
+}
+
+impl BrokerConfigContext<'_> {
+    pub fn resource_node(&self, name: &str) -> Result<NodeId, (i16, String)> {
+        broker_resource_node(name, self.serving)
+    }
+}
+
 /// Kafka's `ServerTopicConfigSynonyms.TOPIC_CONFIG_SYNONYMS`: the broker key
 /// that sets the cluster-wide default of each topic key, for the topic keys
 /// krabka carries. `DynamicLogConfig.RECONFIGURABLE_CONFIGS` is exactly this
@@ -478,13 +493,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
-
-    fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-            .collect()
-    }
+    use crate::test_support::config_map as map;
 
     #[test]
     fn broker_resource_names_follow_kafkas_node_id_rule() {

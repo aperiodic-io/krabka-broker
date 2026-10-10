@@ -9,13 +9,18 @@
 use std::net::SocketAddr;
 
 use bytes::BytesMut;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{Decode, Encode};
 use tokio::net::TcpStream;
 
 use crate::{
     CLIENT_ID, kafka_wire,
-    support::configs::{
-        describe_resource, incremental_config, incremental_request, incremental_resource,
+    kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+    support::{
+        configs::{
+            describe_resource, incremental_config, incremental_request, incremental_resource,
+        },
+        wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
 
@@ -32,9 +37,16 @@ pub async fn drive_incremental_alter_configs(
     pass: &str,
     resources: ConfigResources,
 ) -> i16 {
-    let mut stream = kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, user, pass.as_bytes())
-        .await
-        .expect("SASL authenticate for IncrementalAlterConfigs");
+    let mut stream = kafka_wire::sasl_plain_authenticate(
+        addr,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            user,
+            password: (pass.as_bytes()).to_vec(),
+        },
+    )
+    .await
+    .expect("SASL authenticate for IncrementalAlterConfigs");
     incremental_alter_configs_on(&mut stream, resources).await
 }
 
@@ -76,15 +88,31 @@ pub async fn drive_describe_configs(
         ..Default::default()
     };
 
-    let mut stream = kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, user, pass.as_bytes())
-        .await
-        .expect("SASL authenticate for DescribeConfigs");
+    let mut stream = kafka_wire::sasl_plain_authenticate(
+        addr,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            user,
+            password: (pass.as_bytes()).to_vec(),
+        },
+    )
+    .await
+    .expect("SASL authenticate for DescribeConfigs");
     let mut body = BytesMut::new();
     req.encode(&mut body, VERSION)
         .expect("encode DescribeConfigs");
-    let resp_bytes = kafka_wire::round_trip(&mut stream, 32, VERSION, 1, CLIENT_ID, false, &body)
-        .await
-        .expect("DescribeConfigs round-trip");
+    let resp_bytes = kafka_wire::round_trip(
+        &mut stream,
+        WireExchangeSetup {
+            api_key: WireApiKey(32),
+            version: WireApiVersion(VERSION),
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
+        &body,
+    )
+    .await
+    .expect("DescribeConfigs round-trip");
     let mut cur: &[u8] = &resp_bytes;
     let resp =
         DescribeConfigsResponse::decode(&mut cur, VERSION).expect("decode DescribeConfigsResponse");
@@ -107,8 +135,8 @@ async fn incremental_alter_configs_on(stream: &mut TcpStream, resources: ConfigR
 
     use krabka_protocol::owned::incremental_alter_configs_response::IncrementalAlterConfigsResponse;
 
-    let req = incremental_request(
-        resources
+    let req = incremental_request(crate::support::configs::IncrementalConfigsSetup {
+        resources: resources
             .into_iter()
             .map(|(resource_type, resource_name, configs)| {
                 incremental_resource(
@@ -117,19 +145,34 @@ async fn incremental_alter_configs_on(stream: &mut TcpStream, resources: ConfigR
                     configs
                         .into_iter()
                         .map(|(name, value, config_operation)| {
-                            incremental_config(name, value, config_operation)
+                            incremental_config(
+                                name,
+                                value,
+                                crate::support::configs::ConfigOperation::from_wire(
+                                    config_operation,
+                                ),
+                            )
                         })
                         .collect(),
                 )
             })
             .collect(),
-        false,
-    );
+        ..Default::default()
+    });
 
-    let resp: IncrementalAlterConfigsResponse =
-        kafka_wire::exchange(stream, &req, 44, VERSION, 1, CLIENT_ID, true)
-            .await
-            .expect("IncrementalAlterConfigs round-trip");
+    let resp: IncrementalAlterConfigsResponse = kafka_wire::exchange(
+        stream,
+        &req,
+        WireExchangeSetup {
+            api_key: WireApiKey(44),
+            version: WireApiVersion(VERSION),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("IncrementalAlterConfigs round-trip");
 
     resp.responses.first().map_or(0, |r| r.error_code)
 }

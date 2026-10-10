@@ -37,10 +37,13 @@ async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
 
 async fn create_topic(client: &Client, topic: &str, partitions: i32) {
     let resp = client
-        .send(create_topic_request(
-            creatable_topic(topic, partitions, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (topic).into(),
+                partitions: crate::support::topics::TopicPartitionCount(partitions),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics");
     assert!(
@@ -172,18 +175,21 @@ async fn classic_group_locked_against_next_gen() {
     // Kafka's `validateOnlineUpgrade` refuses to upgrade it; an empty classic
     // group would be replaced instead.
     let join = |member_id: String| {
-        classic_join_request(
-            "g3",
+        classic_join_request(crate::support::classic::ClassicJoinSetup {
+            group_id: ("g3").into(),
             member_id,
-            (30_000, 60_000),
-            "connect",
-            vec![
+            timeouts: crate::support::classic::ClassicTimeouts {
+                rebalance: krabka_units::millis(60_000),
+                ..Default::default()
+            },
+            protocol_type: ("connect").into(),
+            protocols: vec![
                 krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol {
                     name: "default".into(),
                     ..Default::default()
                 },
             ],
-        )
+        })
     };
     let required = client.send(join(String::new())).await.unwrap();
     let joined = client.send(join(required.member_id)).await.unwrap();

@@ -79,26 +79,62 @@ mod tests {
             },
             persistence::ShareSnapshotValue,
         },
+        test_support::KafkaErrorCode,
     };
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([32; 16]);
     const UNKNOWN_TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([33; 16]);
 
-    fn request(
-        group_id: &str,
-        topic_id: uuid::Uuid,
-        partition: i32,
-        state_epoch: i32,
-        start_offset: i64,
-    ) -> InitializeShareGroupStateRequest {
+    use krabka_ids::PartitionIndex;
+
+    #[derive(Clone, Copy, Default)]
+    struct InitializationEpoch(i32);
+    #[derive(Clone, Copy, Default)]
+    struct SnapshotEpoch(i32);
+    #[derive(Clone, Copy, Default)]
+    struct DeliveryCompleteCount(i32);
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct InitializationSetup<'a> {
+        #[default("g")]
+        group: &'a str,
+        #[default(TOPIC)]
+        topic: uuid::Uuid,
+        partition: PartitionIndex,
+        #[default(InitializationEpoch(1))]
+        epoch: InitializationEpoch,
+        offset: Offset,
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct SnapshotSetup {
+        snapshot_epoch: SnapshotEpoch,
+        #[default(InitializationEpoch(1))]
+        state_epoch: InitializationEpoch,
+        offset: Offset,
+        delivery_complete: DeliveryCompleteCount,
+    }
+
+    #[derive(Clone, Copy)]
+    enum StateLeadership {
+        Led,
+        Follower,
+    }
+    #[derive(Clone, Copy)]
+    enum InitializationRules {
+        Kafka431,
+        Trunk,
+    }
+
+    fn request(setup: InitializationSetup<'_>) -> InitializeShareGroupStateRequest {
         InitializeShareGroupStateRequest {
-            group_id: group_id.into(),
+            group_id: setup.group.into(),
             topics: vec![InitializeStateData {
-                topic_id: ProtoUuid(*topic_id.as_bytes()),
+                topic_id: ProtoUuid(*setup.topic.as_bytes()),
                 partitions: vec![PartitionData {
-                    partition,
-                    state_epoch,
-                    start_offset,
+                    partition: setup.partition.0,
+                    state_epoch: setup.epoch.0,
+                    start_offset: setup.offset.0,
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -109,18 +145,13 @@ mod tests {
 
     super::super::test_support::response_fixture!(InitializeShareGroupStateResponse, InitializeStateResult, PartitionResult; keyed);
 
-    fn snapshot(
-        snapshot_epoch: i32,
-        state_epoch: i32,
-        start_offset: i64,
-        delivery_complete_count: i32,
-    ) -> Logged {
+    fn snapshot(setup: SnapshotSetup) -> Logged {
         Logged::Snapshot(ShareSnapshotValue {
-            snapshot_epoch,
-            state_epoch,
+            snapshot_epoch: setup.snapshot_epoch.0,
+            state_epoch: setup.state_epoch.0,
             leader_epoch: 0,
-            start_offset: Offset(start_offset),
-            delivery_complete_count,
+            start_offset: setup.offset,
+            delivery_complete_count: setup.delivery_complete.0,
             create_timestamp: NOW_MS,
             write_timestamp: NOW_MS,
             state_batches: vec![],
@@ -131,7 +162,7 @@ mod tests {
     /// `ShareCoordinatorShard.initializeState` answers it.
     struct Row {
         name: &'static str,
-        led: bool,
+        leadership: StateLeadership,
         request: InitializeShareGroupStateRequest,
         response: InitializeShareGroupStateResponse,
         /// The summary of the requested key after the request.
@@ -140,58 +171,99 @@ mod tests {
         appended: Vec<Logged>,
     }
 
-    /// The rows under Kafka 4.3.1's rules, or under Kafka trunk's when `trunk`.
-    fn rows(trunk: bool) -> Vec<Row> {
+    /// The rows under Kafka 4.3.1's rules, or under Kafka trunk's when using trunk rules.
+    fn rows(rules: InitializationRules) -> Vec<Row> {
+        let trunk = matches!(rules, InitializationRules::Trunk);
         let fenced = "The coordinator rejected the request because the state epoch did not match.";
         let unknown = "This server does not host this topic-partition.";
         vec![
             // Trunk takes a repeat as a no-op; 4.3.1 writes a new snapshot.
             Row {
                 name: "an equal epoch and start offset",
-                led: true,
-                request: request("g", TOPIC, 0, 5, 10),
-                response: response(TOPIC, 0, codes::NONE, None),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    epoch: InitializationEpoch(5),
+                    offset: Offset(10),
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup::default()),
                 summary: Some((5, 0, Offset(10), 0)),
                 appended: if trunk {
                     vec![]
                 } else {
-                    vec![snapshot(1, 5, 10, 0)]
+                    vec![snapshot(SnapshotSetup {
+                        snapshot_epoch: SnapshotEpoch(1),
+                        state_epoch: InitializationEpoch(5),
+                        offset: Offset(10),
+                        ..Default::default()
+                    })]
                 },
             },
             Row {
                 name: "an equal epoch with a new start offset writes the next snapshot",
-                led: true,
-                request: request("g", TOPIC, 0, 5, 20),
-                response: response(TOPIC, 0, codes::NONE, None),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    epoch: InitializationEpoch(5),
+                    offset: Offset(20),
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup::default()),
                 summary: Some((5, 0, Offset(20), 0)),
-                appended: vec![snapshot(1, 5, 20, 0)],
+                appended: vec![snapshot(SnapshotSetup {
+                    snapshot_epoch: SnapshotEpoch(1),
+                    state_epoch: InitializationEpoch(5),
+                    offset: Offset(20),
+                    ..Default::default()
+                })],
             },
             Row {
                 name: "an older epoch is fenced",
-                led: true,
-                request: request("g", TOPIC, 0, 4, 10),
-                response: response(TOPIC, 0, codes::FENCED_STATE_EPOCH, Some(fenced)),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    epoch: InitializationEpoch(4),
+                    offset: Offset(10),
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup {
+                    code: KafkaErrorCode(codes::FENCED_STATE_EPOCH),
+                    message: Some(fenced),
+                    ..Default::default()
+                }),
                 summary: Some((5, 0, Offset(10), 0)),
                 appended: vec![],
             },
             Row {
                 name: "a new key at an uninitialized start offset",
-                led: true,
-                request: request("g", TOPIC, 1, 1, -1),
-                response: response(TOPIC, 1, codes::NONE, None),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    partition: PartitionIndex(1),
+                    offset: Offset(-1),
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup {
+                    partition: PartitionIndex(1),
+                    ..Default::default()
+                }),
                 summary: Some((1, 0, Offset(-1), -1)),
-                appended: vec![snapshot(0, 1, -1, -1)],
+                appended: vec![snapshot(SnapshotSetup {
+                    offset: Offset(-1),
+                    delivery_complete: DeliveryCompleteCount(-1),
+                    ..Default::default()
+                })],
             },
             Row {
                 name: "a negative partition",
-                led: true,
-                request: request("g", TOPIC, -1, 1, 0),
-                response: response(
-                    TOPIC,
-                    -1,
-                    codes::INVALID_REQUEST,
-                    Some("The partition id cannot be a negative number."),
-                ),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    partition: PartitionIndex(-1),
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup {
+                    partition: PartitionIndex(-1),
+                    code: KafkaErrorCode(codes::INVALID_REQUEST),
+                    message: Some("The partition id cannot be a negative number."),
+                    ..Default::default()
+                }),
                 summary: None,
                 appended: vec![],
             },
@@ -200,68 +272,94 @@ mod tests {
             if trunk {
                 Row {
                     name: "a negative state epoch",
-                    led: true,
-                    request: request("g", TOPIC, 0, -1, 0),
-                    response: response(
-                        TOPIC,
-                        0,
-                        codes::INVALID_REQUEST,
-                        Some("The state epoch cannot be a negative number."),
-                    ),
+                    leadership: StateLeadership::Led,
+                    request: request(InitializationSetup {
+                        epoch: InitializationEpoch(-1),
+                        ..Default::default()
+                    }),
+                    response: response(StateResponseSetup {
+                        code: KafkaErrorCode(codes::INVALID_REQUEST),
+                        message: Some("The state epoch cannot be a negative number."),
+                        ..Default::default()
+                    }),
                     summary: Some((5, 0, Offset(10), 0)),
                     appended: vec![],
                 }
             } else {
                 Row {
                     name: "a state epoch of -1",
-                    led: true,
-                    request: request("g", TOPIC, 0, -1, 0),
-                    response: response(TOPIC, 0, codes::NONE, None),
+                    leadership: StateLeadership::Led,
+                    request: request(InitializationSetup {
+                        epoch: InitializationEpoch(-1),
+                        ..Default::default()
+                    }),
+                    response: response(StateResponseSetup::default()),
                     summary: Some((-1, 0, Offset(0), 0)),
-                    appended: vec![snapshot(1, -1, 0, 0)],
+                    appended: vec![snapshot(SnapshotSetup {
+                        snapshot_epoch: SnapshotEpoch(1),
+                        state_epoch: InitializationEpoch(-1),
+                        ..Default::default()
+                    })],
                 }
             },
             Row {
                 name: "a partition past the partition count",
-                led: true,
-                request: request("g", TOPIC, 3, 1, 0),
-                response: response(TOPIC, 3, codes::UNKNOWN_TOPIC_OR_PARTITION, Some(unknown)),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    partition: PartitionIndex(3),
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup {
+                    partition: PartitionIndex(3),
+                    code: KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    message: Some(unknown),
+                    ..Default::default()
+                }),
                 summary: None,
                 appended: vec![],
             },
             Row {
                 name: "a topic id the image does not hold",
-                led: true,
-                request: request("g", UNKNOWN_TOPIC, 0, 1, 0),
-                response: response(
-                    UNKNOWN_TOPIC,
-                    0,
-                    codes::UNKNOWN_TOPIC_OR_PARTITION,
-                    Some(unknown),
-                ),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    topic: UNKNOWN_TOPIC,
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup {
+                    topic: UNKNOWN_TOPIC,
+                    code: KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    message: Some(unknown),
+                    ..Default::default()
+                }),
                 summary: None,
                 appended: vec![],
             },
             Row {
                 name: "an empty group id",
-                led: true,
-                request: request("", TOPIC, 0, 6, 0),
+                leadership: StateLeadership::Led,
+                request: request(InitializationSetup {
+                    group: "",
+                    epoch: InitializationEpoch(6),
+                    ..Default::default()
+                }),
                 response: InitializeShareGroupStateResponse::default(),
                 summary: Some((5, 0, Offset(10), 0)),
                 appended: vec![],
             },
             Row {
                 name: "a state partition this broker does not lead",
-                led: false,
-                request: request("g", TOPIC, 0, 6, 0),
-                response: response(
-                    TOPIC,
-                    0,
-                    codes::NOT_COORDINATOR,
-                    Some(
+                leadership: StateLeadership::Follower,
+                request: request(InitializationSetup {
+                    epoch: InitializationEpoch(6),
+                    ..Default::default()
+                }),
+                response: response(StateResponseSetup {
+                    code: KafkaErrorCode(codes::NOT_COORDINATOR),
+                    message: Some(
                         "Unable to initialize share group state: This is not the correct coordinator.",
                     ),
-                ),
+                    ..Default::default()
+                }),
                 summary: None,
                 appended: vec![],
             },
@@ -273,10 +371,11 @@ mod tests {
     /// partition 0 of a three-partition topic.
     #[tokio::test]
     async fn initialize_state_answers_as_kafka() {
-        for (trunk, row) in [false, true]
+        for (rules, row) in [InitializationRules::Kafka431, InitializationRules::Trunk]
             .into_iter()
-            .flat_map(|trunk| rows(trunk).into_iter().map(move |row| (trunk, row)))
+            .flat_map(|rules| rows(rules).into_iter().map(move |row| (rules, row)))
         {
+            let trunk = matches!(rules, InitializationRules::Trunk);
             let dir = tempfile::TempDir::new().expect("tempdir");
             let coordinator = super::super::test_support::coordinator_with(
                 dir.path(),
@@ -302,7 +401,7 @@ mod tests {
             let topic_id = uuid::Uuid::from_bytes(topic.0);
             let state_partition = coordinator.state_partition_for(&key_group, &topic_id, partition);
             let before = logged_records(&coordinator, state_partition).len();
-            if !row.led {
+            if matches!(row.leadership, StateLeadership::Follower) {
                 coordinator
                     .refresh_leader_partitions(&MetadataImage::default())
                     .await

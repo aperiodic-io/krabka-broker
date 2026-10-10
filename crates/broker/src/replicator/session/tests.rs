@@ -22,6 +22,13 @@ fn row(fetch_offset: i64) -> FetchPartition {
     }
 }
 
+fn established_session(rows: &[(&str, i32, i64)]) -> FollowerFetchSession {
+    let mut session = FollowerFetchSession::default();
+    session.build(wanted(rows));
+    check!(session.handle_response(codes::NONE, 42) == SessionOutcome::Usable);
+    session
+}
+
 fn wanted(rows: &[(&str, i32, i64)]) -> WantedRows {
     rows.iter()
         .map(|(topic, partition, offset)| (key(topic, *partition), row(*offset)))
@@ -68,9 +75,7 @@ fn the_first_request_names_every_partition_and_asks_for_a_session() {
 
 #[test]
 fn a_later_request_carries_only_the_partitions_whose_offset_moved() {
-    let mut session = FollowerFetchSession::default();
-    session.build(wanted(&[("a", 0, 10), ("a", 1, 20)]));
-    check!(session.handle_response(codes::NONE, 42) == SessionOutcome::Usable);
+    let mut session = established_session(&[("a", 0, 10), ("a", 1, 20)]);
 
     // Partition 1 appended; partition 0 is caught up and unchanged.
     let request = session.build(wanted(&[("a", 0, 10), ("a", 1, 25)]));
@@ -83,9 +88,7 @@ fn a_later_request_carries_only_the_partitions_whose_offset_moved() {
 
 #[test]
 fn a_round_that_changed_nothing_sends_no_partition_rows_at_all() {
-    let mut session = FollowerFetchSession::default();
-    session.build(wanted(&[("a", 0, 10)]));
-    session.handle_response(codes::NONE, 42);
+    let mut session = established_session(&[("a", 0, 10)]);
 
     let request = session.build(wanted(&[("a", 0, 10)]));
 
@@ -95,9 +98,7 @@ fn a_round_that_changed_nothing_sends_no_partition_rows_at_all() {
 
 #[test]
 fn a_partition_this_follower_stopped_following_is_forgotten_once() {
-    let mut session = FollowerFetchSession::default();
-    session.build(wanted(&[("a", 0, 10), ("a", 1, 20), ("b", 0, 30)]));
-    session.handle_response(codes::NONE, 42);
+    let mut session = established_session(&[("a", 0, 10), ("a", 1, 20), ("b", 0, 30)]);
 
     let dropped = session.build(wanted(&[("a", 0, 10)]));
     let after = session.build(wanted(&[("a", 0, 10)]));
@@ -117,9 +118,7 @@ fn a_partition_this_follower_stopped_following_is_forgotten_once() {
 
 #[test]
 fn a_partition_the_follower_added_is_sent_even_when_the_round_is_incremental() {
-    let mut session = FollowerFetchSession::default();
-    session.build(wanted(&[("a", 0, 10)]));
-    session.handle_response(codes::NONE, 42);
+    let mut session = established_session(&[("a", 0, 10)]);
 
     let request = session.build(wanted(&[("a", 0, 10), ("a", 1, 0)]));
 
@@ -145,9 +144,7 @@ fn a_refused_session_drops_the_round_and_makes_the_next_request_full() {
         codes::FETCH_SESSION_ID_NOT_FOUND,
         codes::INVALID_FETCH_SESSION_EPOCH,
     ] {
-        let mut session = FollowerFetchSession::default();
-        session.build(wanted(&[("a", 0, 10), ("a", 1, 20)]));
-        session.handle_response(codes::NONE, 42);
+        let mut session = established_session(&[("a", 0, 10), ("a", 1, 20)]);
         session.build(wanted(&[("a", 0, 11), ("a", 1, 20)]));
 
         check!(session.handle_response(refusal, 0) == SessionOutcome::SessionLost);
@@ -175,9 +172,7 @@ fn a_leader_that_grants_no_session_keeps_every_request_full() {
 
 #[test]
 fn a_reset_after_a_lost_request_re_sends_everything() {
-    let mut session = FollowerFetchSession::default();
-    session.build(wanted(&[("a", 0, 10), ("a", 1, 20)]));
-    session.handle_response(codes::NONE, 42);
+    let mut session = established_session(&[("a", 0, 10), ("a", 1, 20)]);
 
     // The next request never reached the leader, so what it holds is unknown.
     session.reset();
@@ -191,9 +186,7 @@ fn a_reset_after_a_lost_request_re_sends_everything() {
 /// refusing the session, so the round is applied and the session survives.
 #[test]
 fn a_top_level_error_that_is_not_a_session_error_leaves_the_session_alone() {
-    let mut session = FollowerFetchSession::default();
-    session.build(wanted(&[("a", 0, 10)]));
-    session.handle_response(codes::NONE, 42);
+    let mut session = established_session(&[("a", 0, 10)]);
     session.build(wanted(&[("a", 0, 11)]));
 
     check!(session.handle_response(codes::UNKNOWN_SERVER_ERROR, 42) == SessionOutcome::Usable);

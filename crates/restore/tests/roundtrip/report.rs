@@ -10,7 +10,6 @@ use krabka_restore::{
     MetadataRestoreReport, PartitionReport, ReportFormat, RestoreReport, SegmentOutcome, restore,
 };
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-use uuid::Uuid;
 
 use crate::{args::restore_args, fixture::build_fixture};
 
@@ -58,8 +57,10 @@ async fn authenticated_object_count_covers_only_the_selected_topic() {
     let args = restore_args(
         fixture.archive_root.path(),
         target.path(),
-        "127.0.0.1:9093",
-        &refs,
+        crate::args::RestoreOptions {
+            extra: &refs,
+            ..Default::default()
+        },
     );
 
     let report = restore(&args).await.unwrap();
@@ -72,22 +73,12 @@ async fn authenticated_object_count_covers_only_the_selected_topic() {
 #[tokio::test]
 async fn json_report_matches_the_fixtures_exact_record_and_segment_counts() {
     let fixture = build_fixture();
-    let target = tempfile::tempdir().expect("target parent");
-    let log_dir = target.path().join("restored");
-    let cluster_id = Uuid::new_v4();
-    let args = restore_args(
-        fixture.archive_root.path(),
-        &log_dir,
-        "127.0.0.1:9093",
-        &["--cluster-id", &cluster_id.to_string()],
-    );
-
-    let report = restore(&args).await.expect("restore");
+    let restored = crate::restored::fresh_restore(fixture.archive_root.path()).await;
 
     let expected = RestoreReport {
         dry_run: false,
-        log_dir: log_dir.clone(),
-        cluster_id,
+        log_dir: restored.log_dir.clone(),
+        cluster_id: restored.cluster_id,
         authentication: None,
         diskless: None,
         metadata: MetadataRestoreReport {
@@ -133,13 +124,13 @@ async fn json_report_matches_the_fixtures_exact_record_and_segment_counts() {
             .collect(),
         skipped: Vec::new(),
     };
-    check!(report == expected);
+    check!(restored.report == expected);
 
     // Also render and reparse as JSON, exercising the `--report json` path
     // itself rather than only the underlying struct it renders.
-    let json = report.render(ReportFormat::Json);
+    let json = restored.report.render(ReportFormat::Json);
     let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-    check!(value["cluster_id"] == serde_json::json!(cluster_id.to_string()));
+    check!(value["cluster_id"] == serde_json::json!(restored.cluster_id.to_string()));
     check!(value["partitions"][0]["topic"] == serde_json::json!("orders"));
     check!(value["partitions"][0]["partition"] == serde_json::json!(0));
     check!(

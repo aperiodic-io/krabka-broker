@@ -298,40 +298,17 @@ mod tests {
     /// of joining the old broker once more.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_answers_parked_joiners_and_followers_not_coordinator() {
-        use krabka_protocol::owned::{
-            join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
-            sync_group_request::SyncGroupRequest,
-        };
+        use krabka_protocol::owned::sync_group_request::SyncGroupRequest;
 
-        use crate::coordinator::unified::actor::{
-            JoinResult, SyncResult,
-            test_support::{rpc, subscription_blob},
-        };
+        use crate::coordinator::unified::actor::{JoinResult, SyncResult, test_support::rpc};
 
         // A member that waits in `JoinGroup`, behind the initial delay.
         let (coord, _log) = make_coordinator();
         let handle = coord.get_or_create_classic("g");
         coord.mark_classic("g");
         let member_id = rpc::classic_join(&handle, "", "t").await.member_id;
-        let join_rx = rpc::begin(&handle, |join_tx| GroupActorMessage::ClassicJoin {
-            req: JoinGroupRequest {
-                group_id: "g".into(),
-                member_id: member_id.clone(),
-                protocol_type: "consumer".into(),
-                protocols: vec![JoinGroupRequestProtocol {
-                    name: "range".into(),
-                    metadata: subscription_blob(&["t"]),
-                    ..Default::default()
-                }],
-                session_timeout_ms: 30_000,
-                rebalance_timeout_ms: 60_000,
-                ..Default::default()
-            },
-            version: 4,
-            client_id: "client-a".into(),
-            client_host: "127.0.0.1".into(),
-            regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
-            reply: join_tx,
+        let join_rx = rpc::begin(&handle, |reply| {
+            rpc::classic_join_message(&member_id, "t", reply)
         })
         .await;
         rpc::shutdown(&handle).await;

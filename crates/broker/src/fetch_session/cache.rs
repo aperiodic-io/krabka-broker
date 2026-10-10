@@ -172,22 +172,40 @@ impl FetchSessionCache {
 #[cfg(test)]
 mod tests {
     use assert2::assert;
-    use krabka_protocol::{
-        owned::fetch_request::ForgottenTopic, primitives::uuid::Uuid as WireUuid,
-    };
+    use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
     use super::*;
     use crate::fetch_session::{
         SessionDecision,
-        test_support::{NAME_FETCH_VERSION, req, topic},
+        test_support::{
+            ForgottenTopicSetup, NAME_FETCH_VERSION, SessionAllocationSetup, SessionKeySetup,
+            SessionRequestSetup, allocate_session, allocated_cache, forgotten_topic, req,
+            session_key, topic,
+        },
     };
+
+    #[derive(Clone, Copy)]
+    struct CachedPartitionCount(usize);
+
+    /// Classification applies the partition diff before the count is inspected.
+    fn check_incremental_count(
+        cache: &FetchSessionCache,
+        request: &krabka_protocol::owned::fetch_request::FetchRequest,
+        expected: CachedPartitionCount,
+    ) {
+        assert!(matches!(
+            cache.classify(request, NAME_FETCH_VERSION),
+            SessionDecision::Incremental { .. }
+        ));
+        assert!(cache.total_partitions_cached() == expected.0);
+    }
 
     #[test]
     fn is_empty_tracks_session_lifecycle() {
         let cache = FetchSessionCache::new(10);
         assert!(cache.is_empty());
 
-        let id = cache.try_allocate(false, false, "alice".into(), vec![]);
+        let id = allocate_session(&cache, SessionAllocationSetup::default());
         assert!(!cache.is_empty());
 
         cache.close(id);
@@ -197,16 +215,14 @@ mod tests {
     #[test]
     fn finalize_incremental_updates_last_state() {
         let cache = FetchSessionCache::new(10);
-        let key = FetchSessionKey {
-            topic_name: "t".into(),
-            topic_id: WireUuid::ZERO,
-            partition: 0,
-        };
-        let id = cache.try_allocate(
-            false,
-            false,
-            "a".into(),
-            vec![(key.clone(), CachedPartitionState::default())],
+        let key = session_key(SessionKeySetup::default());
+        let id = allocate_session(
+            &cache,
+            SessionAllocationSetup {
+                principal: "a".into(),
+                partitions: vec![(key.clone(), CachedPartitionState::default())],
+                ..Default::default()
+            },
         );
         let sent = vec![(
             key.clone(),
@@ -223,56 +239,86 @@ mod tests {
         assert!(s.last_log_start_offset == 7);
     }
 
+    fn cached_partition(
+        partition: krabka_ids::PartitionIndex,
+    ) -> (FetchSessionKey, CachedPartitionState) {
+        (
+            FetchSessionKey {
+                topic_name: "t".into(),
+                topic_id: WireUuid::ZERO,
+                partition: partition.0,
+            },
+            CachedPartitionState::default(),
+        )
+    }
+
     #[test]
     fn total_partitions_cached_sums_across_sessions() {
         let cache = FetchSessionCache::new(10);
-        let mk = |p| {
-            (
-                FetchSessionKey {
-                    topic_name: "t".into(),
-                    topic_id: WireUuid::ZERO,
-                    partition: p,
-                },
-                CachedPartitionState::default(),
-            )
-        };
-        cache.try_allocate(false, false, "a".into(), vec![mk(0), mk(1)]);
-        cache.try_allocate(false, false, "b".into(), vec![mk(2), mk(3), mk(4)]);
+        allocate_session(
+            &cache,
+            SessionAllocationSetup {
+                principal: "a".into(),
+                partitions: vec![
+                    cached_partition(krabka_ids::PartitionIndex(0)),
+                    cached_partition(krabka_ids::PartitionIndex(1)),
+                ],
+                ..Default::default()
+            },
+        );
+        allocate_session(
+            &cache,
+            SessionAllocationSetup {
+                principal: "b".into(),
+                partitions: vec![
+                    cached_partition(krabka_ids::PartitionIndex(2)),
+                    cached_partition(krabka_ids::PartitionIndex(3)),
+                    cached_partition(krabka_ids::PartitionIndex(4)),
+                ],
+                ..Default::default()
+            },
+        );
         assert!(cache.total_partitions_cached() == 5);
+    }
+
+    fn two_partition_cache() -> (FetchSessionCache, FetchSessionId) {
+        allocated_cache(SessionAllocationSetup {
+            principal: "a".into(),
+            partitions: vec![
+                cached_partition(krabka_ids::PartitionIndex(0)),
+                cached_partition(krabka_ids::PartitionIndex(1)),
+            ],
+            ..Default::default()
+        })
     }
 
     #[test]
     fn counters_track_merge_forget_and_close() {
-        let cache = FetchSessionCache::new(10);
-        let mk = |p| {
-            (
-                FetchSessionKey {
-                    topic_name: "t".into(),
-                    topic_id: WireUuid::ZERO,
-                    partition: p,
-                },
-                CachedPartitionState::default(),
-            )
-        };
-        // Two partitions on allocate.
-        let id = cache.try_allocate(false, false, "a".into(), vec![mk(0), mk(1)]);
+        let (cache, id) = two_partition_cache();
         assert!(cache.len() == 1);
         assert!(cache.total_partitions_cached() == 2);
 
         // Incremental that forgets partition 1 and adds partitions 2 and 3:
         // net partition count goes 2 -> 3.
-        let forgotten = vec![ForgottenTopic {
-            topic: "t".into(),
-            topic_id: WireUuid::ZERO,
-            partitions: vec![1],
+        let forgotten = vec![forgotten_topic(ForgottenTopicSetup {
+            partitions: vec![krabka_ids::PartitionIndex(1)],
             ..Default::default()
-        }];
-        let r = req(id, 1, vec![topic("t", &[0, 2, 3])], forgotten);
-        assert!(matches!(
-            cache.classify(&r, NAME_FETCH_VERSION),
-            SessionDecision::Incremental { .. }
-        ));
-        assert!(cache.total_partitions_cached() == 3);
+        })];
+        let r = req(SessionRequestSetup {
+            topics: vec![topic(
+                "t",
+                &[
+                    krabka_ids::PartitionIndex(0),
+                    krabka_ids::PartitionIndex(2),
+                    krabka_ids::PartitionIndex(3),
+                ],
+            )],
+            forgotten,
+            ..SessionRequestSetup::incremental(
+                crate::fetch_session::test_support::RequestSessionId(id),
+            )
+        });
+        check_incremental_count(&cache, &r, CachedPartitionCount(3));
 
         // Close drops the whole session and its partitions.
         cache.close(id);
@@ -282,60 +328,56 @@ mod tests {
 
     #[test]
     fn counters_track_large_incremental_add_delta() {
-        let cache = FetchSessionCache::new(10);
-        let mk = |p| {
-            (
-                FetchSessionKey {
-                    topic_name: "t".into(),
-                    topic_id: WireUuid::ZERO,
-                    partition: p,
-                },
-                CachedPartitionState::default(),
+        let (cache, id) = two_partition_cache();
+
+        let r = req(SessionRequestSetup {
+            topics: vec![topic(
+                "t",
+                &[
+                    krabka_ids::PartitionIndex(0),
+                    krabka_ids::PartitionIndex(1),
+                    krabka_ids::PartitionIndex(2),
+                    krabka_ids::PartitionIndex(3),
+                    krabka_ids::PartitionIndex(4),
+                ],
+            )],
+            ..SessionRequestSetup::incremental(
+                crate::fetch_session::test_support::RequestSessionId(id),
             )
-        };
-        let id = cache.try_allocate(false, false, "a".into(), vec![mk(0), mk(1)]);
-
-        let r = req(id, 1, vec![topic("t", &[0, 1, 2, 3, 4])], vec![]);
-        assert!(matches!(
-            cache.classify(&r, NAME_FETCH_VERSION),
-            SessionDecision::Incremental { .. }
-        ));
-
-        assert!(cache.total_partitions_cached() == 5);
+        });
+        check_incremental_count(&cache, &r, CachedPartitionCount(5));
     }
 
     #[test]
     fn counters_track_large_incremental_forget_delta() {
         let cache = FetchSessionCache::new(10);
-        let mk = |p| {
-            (
-                FetchSessionKey {
-                    topic_name: "t".into(),
-                    topic_id: WireUuid::ZERO,
-                    partition: p,
-                },
-                CachedPartitionState::default(),
-            )
-        };
-        let id = cache.try_allocate(
-            false,
-            false,
-            "a".into(),
-            vec![mk(0), mk(1), mk(2), mk(3), mk(4)],
+        let id = allocate_session(
+            &cache,
+            SessionAllocationSetup {
+                principal: "a".into(),
+                partitions: vec![
+                    cached_partition(krabka_ids::PartitionIndex(0)),
+                    cached_partition(krabka_ids::PartitionIndex(1)),
+                    cached_partition(krabka_ids::PartitionIndex(2)),
+                    cached_partition(krabka_ids::PartitionIndex(3)),
+                    cached_partition(krabka_ids::PartitionIndex(4)),
+                ],
+                ..Default::default()
+            },
         );
-        let forgotten = vec![ForgottenTopic {
-            topic: "t".into(),
-            topic_id: WireUuid::ZERO,
-            partitions: vec![2, 3, 4],
+        let forgotten = vec![forgotten_topic(ForgottenTopicSetup {
+            partitions: vec![
+                krabka_ids::PartitionIndex(2),
+                krabka_ids::PartitionIndex(3),
+                krabka_ids::PartitionIndex(4),
+            ],
             ..Default::default()
-        }];
+        })];
 
-        let r = req(id, 1, vec![], forgotten);
-        assert!(matches!(
-            cache.classify(&r, NAME_FETCH_VERSION),
-            SessionDecision::Incremental { .. }
+        let r = req(SessionRequestSetup::forgetting(
+            crate::fetch_session::test_support::RequestSessionId(id),
+            forgotten,
         ));
-
-        assert!(cache.total_partitions_cached() == 2);
+        check_incremental_count(&cache, &r, CachedPartitionCount(2));
     }
 }

@@ -55,17 +55,50 @@ async fn start(authorizer: Arc<dyn Authorizer>) -> (BrokerHandle, tempfile::Temp
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(broker, "share-fetch-resolution-test", name, 1)
-        .await
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "share-fetch-resolution-test",
+            name,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// A request for partition 0 of `topic_id`, in the share session of `member`.
 /// With `acknowledge`, the row carries one acknowledgement batch.
-fn request(member: &str, epoch: i32, topic_id: WireUuid, acknowledge: bool) -> ShareFetchRequest {
+use crate::handlers::test_support::ShareSessionEpoch;
+
+#[derive(Clone, Copy, Default)]
+enum AcknowledgementPresence {
+    #[default]
+    None,
+    AcceptFirstRecord,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct TopicResolutionSetup<'a> {
+    #[default("member")]
+    member: &'a str,
+    #[default(ShareSessionEpoch(0))]
+    epoch: ShareSessionEpoch,
+    #[default(WireUuid::ZERO)]
+    topic_id: WireUuid,
+    acknowledgements: AcknowledgementPresence,
+}
+
+fn request(setup: TopicResolutionSetup<'_>) -> ShareFetchRequest {
+    let TopicResolutionSetup {
+        member,
+        epoch,
+        topic_id,
+        acknowledgements,
+    } = setup;
     ShareFetchRequest {
         group_id: Some("resolution-group".into()),
         member_id: Some(member.into()),
-        share_session_epoch: epoch,
+        share_session_epoch: epoch.0,
         max_wait_ms: 0,
         min_bytes: 0,
         max_bytes: 1_048_576,
@@ -76,7 +109,10 @@ fn request(member: &str, epoch: i32, topic_id: WireUuid, acknowledge: bool) -> S
             partitions: vec![FetchPartition {
                 partition_index: 0,
                 partition_max_bytes: 1_048_576,
-                acknowledgement_batches: if acknowledge {
+                acknowledgement_batches: if matches!(
+                    acknowledgements,
+                    AcknowledgementPresence::AcceptFirstRecord
+                ) {
                     vec![AcknowledgementBatch {
                         first_offset: 0,
                         last_offset: 0,
@@ -99,7 +135,15 @@ async fn share_fetch(
     version: i16,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    crate::handlers::test_support::share_fetch_wire(broker, version, request).await
+    crate::handlers::test_support::share_fetch_wire(
+        broker,
+        request,
+        crate::handlers::test_support::ShareWireSetup {
+            version: krabka_ids::ApiVersion(version),
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// The empty record set, as a client decodes it. Kafka's
@@ -138,8 +182,16 @@ async fn drive(
             TopicRef::Zero => WireUuid::ZERO,
         };
         let member = format!("member-{row}");
-        let response =
-            share_fetch(broker, case.version, &request(&member, 0, topic_id, false)).await;
+        let response = share_fetch(
+            broker,
+            case.version,
+            &request(TopicResolutionSetup {
+                member: &member,
+                topic_id,
+                ..Default::default()
+            }),
+        )
+        .await;
         actual.push((case.version, case.topic, response));
         let partition = PartitionData {
             partition_index: 0,
@@ -222,9 +274,27 @@ async fn a_piggybacked_acknowledgement_on_an_unresolved_id_answers_unknown_topic
     let mut actual = Vec::new();
     for topic_id in [UNKNOWN_ID, WireUuid::ZERO] {
         let member = format!("member-{}", topic_id.0[0]);
-        let opened = share_fetch(&broker, version, &request(&member, 0, topic_id, false)).await;
-        let acknowledged =
-            share_fetch(&broker, version, &request(&member, 1, topic_id, true)).await;
+        let opened = share_fetch(
+            &broker,
+            version,
+            &request(TopicResolutionSetup {
+                member: &member,
+                topic_id,
+                ..Default::default()
+            }),
+        )
+        .await;
+        let acknowledged = share_fetch(
+            &broker,
+            version,
+            &request(TopicResolutionSetup {
+                member: &member,
+                epoch: ShareSessionEpoch(1),
+                topic_id,
+                acknowledgements: AcknowledgementPresence::AcceptFirstRecord,
+            }),
+        )
+        .await;
         actual.push((topic_id, opened, acknowledged));
     }
 

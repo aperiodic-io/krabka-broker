@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use super::{
     super::checks::{FreezeEnv, check_approval, consumed_proposal_id, record_of},
-    ALICE, ALICE_NAME, PROPOSAL, config_with_alice, context, freeze_request, image, peer,
-    principal,
+    ALICE, PROPOSAL, alice_key_configuration, config_with_alice, freeze_request, image,
+    with_freeze_env,
 };
 use crate::{
     codes,
@@ -24,8 +24,7 @@ use crate::{
 
 #[test]
 fn a_thaw_with_no_proposal_needs_a_break_glass_approval() {
-    let dir = TempDir::new().expect("tempdir");
-    let (config, _) = config_with_alice(&dir);
+    let (_dir, config, _) = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)] ; env, config);
     let thaw = TopicFreezeRecord {
         frozen: false,
@@ -44,8 +43,7 @@ fn a_thaw_with_no_proposal_needs_a_break_glass_approval() {
 
 #[test]
 fn a_freeze_needs_no_proposal() {
-    let dir = TempDir::new().expect("tempdir");
-    let (config, _) = config_with_alice(&dir);
+    let (_dir, config, _) = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
     let record = record_of(
         &freeze_request("orders", PATTERN_TYPE_LITERAL),
@@ -79,25 +77,19 @@ fn a_thaw_that_names_another_proposal_is_refused() {
 fn with_approved_thaw(proposal_id: Uuid, check: impl FnOnce(&FreezeEnv<'_>, &TopicFreezeRecord)) {
     let dir = TempDir::new().expect("tempdir");
     let (config, image) = approved_context(&dir, &[("orders", PatternType::Literal)]);
-    let principal = principal(ALICE_NAME);
-    let peer = peer();
-    let ctx = context(&principal, &peer);
-    let env = FreezeEnv {
-        config: &config,
-        image: &image,
-        ctx: &ctx,
-    };
-    let thaw = TopicFreezeRecord {
-        frozen: false,
-        proposal_id,
-        ..record_of(
-            &freeze_request("orders", PATTERN_TYPE_LITERAL),
-            PatternType::Literal,
-            ALICE,
-        )
-    };
+    with_freeze_env(&config, &image, |env| {
+        let thaw = TopicFreezeRecord {
+            frozen: false,
+            proposal_id,
+            ..record_of(
+                &freeze_request("orders", PATTERN_TYPE_LITERAL),
+                PatternType::Literal,
+                ALICE,
+            )
+        };
 
-    check(&env, &thaw);
+        check(env, &thaw);
+    });
 }
 
 #[test]
@@ -110,38 +102,31 @@ fn a_proposal_for_one_scope_does_not_thaw_another() {
             ("orders", PatternType::Prefixed),
         ],
     );
-    let principal = principal(ALICE_NAME);
-    let peer = peer();
-    let ctx = context(&principal, &peer);
-    let env = FreezeEnv {
-        config: &config,
-        image: &image,
-        ctx: &ctx,
-    };
-
-    for (label, pattern_type, expected) in [
-        ("the scope the proposal names", PatternType::Literal, None),
-        (
-            "the same name under the other pattern type",
-            PatternType::Prefixed,
-            Some(codes::BREAK_GLASS_APPROVAL_REQUIRED),
-        ),
-    ] {
-        let thaw = TopicFreezeRecord {
-            frozen: false,
-            proposal_id: PROPOSAL,
-            pattern_type,
-            ..record_of(
-                &freeze_request("orders", PATTERN_TYPE_LITERAL),
+    with_freeze_env(&config, &image, |env| {
+        for (label, pattern_type, expected) in [
+            ("the scope the proposal names", PatternType::Literal, None),
+            (
+                "the same name under the other pattern type",
+                PatternType::Prefixed,
+                Some(codes::BREAK_GLASS_APPROVAL_REQUIRED),
+            ),
+        ] {
+            let thaw = TopicFreezeRecord {
+                frozen: false,
+                proposal_id: PROPOSAL,
                 pattern_type,
-                ALICE,
-            )
-        };
-        check!(
-            check_approval(&env, &thaw).err().map(|r| r.code) == expected,
-            "{label}"
-        );
-    }
+                ..record_of(
+                    &freeze_request("orders", PATTERN_TYPE_LITERAL),
+                    pattern_type,
+                    ALICE,
+                )
+            };
+            check!(
+                check_approval(env, &thaw).err().map(|r| r.code) == expected,
+                "{label}"
+            );
+        }
+    });
 }
 
 // Alice's configured approvers and their literal orders thaw proposal.

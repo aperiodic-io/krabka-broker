@@ -12,6 +12,43 @@ use std::{
 
 use krabka_protocol::primitives::uuid::Uuid;
 
+/// Query expiration consistently across group protocols.
+macro_rules! expired_members_method {
+    () => {
+        /// The members whose session expired at `now`, without removing them.
+        #[must_use]
+        pub fn expired_members(
+            &self,
+            now: std::time::Instant,
+            session_timeout: std::time::Duration,
+        ) -> Vec<String> {
+            $crate::coordinator::unified::expired_member_ids(
+                self.members
+                    .iter()
+                    .map(|(id, member)| (id.as_str(), member.last_seen)),
+                now,
+                session_timeout,
+            )
+        }
+    };
+}
+pub(crate) use expired_members_method;
+
+/// Consumer and streams groups fence through their own deadline and removal transitions.
+macro_rules! fence_rebalance_timeouts_method {
+    ($(#[$doc:meta])*) => {
+        $(#[$doc])*
+        pub fn fence_rebalance_timeouts(&mut self, now: std::time::Instant) -> Vec<String> {
+            let fenced = self.rebalance_timeouts_due(now);
+            for member_id in &fenced {
+                self.remove_member(member_id);
+            }
+            fenced
+        }
+    };
+}
+pub(crate) use fence_rebalance_timeouts_method;
+
 /// Evicts expired members through the group's own removal transition.
 macro_rules! evict_expired {
     ($(#[$doc:meta])*) => {

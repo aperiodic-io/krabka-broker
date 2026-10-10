@@ -9,7 +9,7 @@ use std::time::Duration;
 use krabka_raft::kraft::NodeId;
 use krabka_units::prelude::millis;
 
-use crate::harness::{STAGGERED_TIMEOUTS, await_single_leader, build_engine, start_engines};
+use crate::harness::{await_single_leader, build_engine, start_engines};
 
 /// 1. Three engines elect exactly one leader and agree on the epoch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -18,7 +18,14 @@ async fn three_engines_elect_one_leader() {
     let cid = uuid::Uuid::from_u128(100);
 
     // Staggered election timeouts so one node reliably wins the first round.
-    let _dirs = start_engines(&net, &ids, cid, &STAGGERED_TIMEOUTS);
+    let _dirs = start_engines(
+        &net,
+        crate::harness::SimClusterSetup {
+            ids: &ids,
+            cluster_id: cid,
+            ..Default::default()
+        },
+    );
 
     let (leader, epoch) = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
     assert2::assert!(epoch >= 1);
@@ -58,7 +65,16 @@ async fn bare_majority_two_of_three_elects_with_uniform_timeouts() {
     // majority of the 3-voter set.
     let mut dirs = Vec::new();
     for &id in &[NodeId(1), NodeId(2)] {
-        let (ctrl, dir) = build_engine(id, &ids, cid, millis(200), &net);
+        let (ctrl, dir) = build_engine(
+            &net,
+            crate::harness::SimEngineSetup {
+                me: id,
+                ids: &ids,
+                cluster_id: cid,
+                election_timeout: millis(200),
+                ..Default::default()
+            },
+        );
         net.register(id, ctrl);
         dirs.push(dir);
     }

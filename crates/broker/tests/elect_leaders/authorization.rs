@@ -10,11 +10,11 @@ use std::time::{Duration, Instant};
 
 use assert2::assert;
 use krabka_broker::Broker;
-use krabka_metadata::AclOperation;
 use krabka_security::SaslMechanism;
 
 use crate::{
     sasl::{create_topic_sasl_plain, drive_elect_leaders_sasl_plain},
+    support::acl::TopicAclSetup,
     wait::wait_partition_exists,
 };
 
@@ -49,18 +49,29 @@ async fn non_super_user_without_acl_denied() {
     let addr = handle.listen_addr();
 
     // Create the topic as admin (rf=1 fine for a single-broker cluster).
-    create_topic_sasl_plain(addr, "admin", b"admin-secret", "foo-auth-test", 1, 1).await;
+    create_topic_sasl_plain(
+        addr,
+        crate::kafka_wire::SaslTopicSetup {
+            client_id: crate::wire::CLIENT_ID,
+            topic: crate::support::topics::ConfiguredTopicSetup {
+                name: ("foo-auth-test").into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .await;
     wait_partition_exists(&handle, "foo-auth-test", 0).await;
 
     // Seed a dummy ACL so the compat shim is disabled. The ACL itself
     // is irrelevant — any non-empty `image.acls` flips the shim off and
     // forces the authorizer to evaluate every request.
     handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(
-            "__compat_shim_disable__",
-            "User:admin",
-            AclOperation::Read,
-        ))
+        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+            topic: "__compat_shim_disable__",
+            principal: "User:admin",
+            ..Default::default()
+        }))
         .await
         .expect("seed dummy ACL");
 
@@ -84,11 +95,15 @@ async fn non_super_user_without_acl_denied() {
     let resp = loop {
         let r = drive_elect_leaders_sasl_plain(
             addr,
-            "alice",
-            b"alice-secret",
-            "foo-auth-test",
-            vec![0],
-            0,
+            crate::support::admin::ElectionSetup {
+                topic: ("foo-auth-test").to_string(),
+                ..Default::default()
+            },
+            &crate::kafka_wire::PlainAuthenticationSetup {
+                client_id: crate::wire::CLIENT_ID,
+                password: (b"alice-secret").to_vec(),
+                ..Default::default()
+            },
         )
         .await;
         // If we see 31, the shim is off and we're done.

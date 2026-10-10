@@ -16,6 +16,17 @@ use krabka_log::Log;
 
 use crate::log_dir_status::LogDirRegistry;
 
+/// The log and the owning directory's storage-failure registry.
+pub(super) type LogStorage<'a> = (
+    &'a Arc<Mutex<Log>>,
+    &'a Arc<ArcSwap<PathBuf>>,
+    &'a LogDirRegistry,
+);
+
+/// Completion of a maintenance pass after storage-error classification.
+pub(super) type MaintenanceAck =
+    tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>;
+
 /// Mark a partition's log dir offline when a mutation hit a storage failure.
 ///
 /// This function inspects a `BrokerError` returned by a partition-writer
@@ -88,9 +99,9 @@ pub(super) async fn run_log_mutation<T: Send + 'static>(
 /// Read the writer-owned watermark, then run one clocked maintenance pass
 /// under the log lock and apply the usual panic/storage-error classification.
 pub(super) async fn maintain_log(
-    storage: (&Arc<Mutex<Log>>, &Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
+    storage: LogStorage<'_>,
     replica_state: &tokio::sync::Mutex<crate::replica_state::ReplicaState>,
-    ack: tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>,
+    ack: MaintenanceAck,
     panic_context: &'static str,
     operation: impl FnOnce(
         &mut Log,
@@ -123,11 +134,20 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn flag_storage_failure_marks_io_errors_offline() {
+    fn storage_fixture() -> (
+        tempfile::TempDir,
+        crate::log_dir_status::LogDirRegistry,
+        ArcSwap<std::path::PathBuf>,
+    ) {
         let dir = tempdir().expect("tempdir");
         let status = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
         let log_dir = ArcSwap::from_pointee(dir.path().to_path_buf());
+        (dir, status, log_dir)
+    }
+
+    #[test]
+    fn flag_storage_failure_marks_io_errors_offline() {
+        let (dir, status, log_dir) = storage_fixture();
         let err = storage_failure_error("append failed", "synthetic EIO");
 
         assert!(flag_storage_failure(&err, &log_dir, &status));
@@ -142,9 +162,7 @@ mod tests {
 
     #[test]
     fn flag_storage_failure_ignores_non_storage_errors() {
-        let dir = tempdir().expect("tempdir");
-        let status = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
-        let log_dir = ArcSwap::from_pointee(dir.path().to_path_buf());
+        let (dir, status, log_dir) = storage_fixture();
         let err = crate::error::BrokerError::UnsupportedApi {
             api_key: 123,
             version: 0,

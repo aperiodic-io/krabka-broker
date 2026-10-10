@@ -4,7 +4,7 @@
     "Coma": {
       "vc_branch_Option_u64": { "prover": "alt-ergo", "time": 0.016 },
       "vc_checked_add": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.007 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.011 },
       "vc_from_residual_Option_tup3_u64_u64_u64": {
         "prover": "alt-ergo",

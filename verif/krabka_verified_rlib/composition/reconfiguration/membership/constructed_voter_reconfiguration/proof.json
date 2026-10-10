@@ -21,7 +21,7 @@
               { "prover": "alt-ergo", "time": 0.026 },
               { "prover": "alt-ergo", "time": 0.018 },
               { "prover": "alt-ergo", "time": 0.064 },
-              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.01 },
               { "prover": "alt-ergo", "time": 0.027 },
               { "prover": "alt-ergo", "time": 0.021 },
               { "prover": "alt-ergo", "time": 0.024 },
@@ -68,7 +68,7 @@
           }
         ]
       },
-      "vc_elim_Admit": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_elim_Admit": { "prover": "alt-ergo", "time": 0.01 },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.004 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.017 },
       "vc_first_u64": { "prover": "alt-ergo", "time": 0.011 },

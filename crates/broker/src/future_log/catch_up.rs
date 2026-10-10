@@ -121,29 +121,37 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::future_log::test_support::{append_records, fixture_partition};
+    use crate::future_log::test_support::fixture_partition;
 
-    #[tokio::test]
-    async fn catch_up_resets_after_source_retention_without_dropping_batch_data() {
-        let primary = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let part = fixture_partition(primary.path(), "t", PartitionIndex(0));
-        append_records(&part, 3);
-        part.log
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .set_log_start_offset(Offset(2))
-            .expect("advance source start");
-        let (_future_path, future) =
-            crate::future_log::test_support::open_future_log(target.path());
-
+    fn first_catch_up(
+        part: &Arc<Partition>,
+        target: &std::path::Path,
+    ) -> (Arc<Mutex<Log>>, CatchUpProgress) {
+        let (_future_path, future) = crate::future_log::test_support::open_future_log(target);
         let progress = catch_up(
-            &part,
+            part,
             &future,
             mebibytes(1),
             &crate::throttle::TokenBucket::new(),
         )
         .expect("catch up");
+        (future, progress)
+    }
+
+    #[tokio::test]
+    async fn catch_up_resets_after_source_retention_without_dropping_batch_data() {
+        let fixture = crate::future_log::test_support::source_fixture(
+            crate::future_log::test_support::FutureSourceSetup::default(),
+        );
+        let _primary = fixture.primary;
+        let target = fixture.target;
+        let part = fixture.partition;
+        part.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_log_start_offset(Offset(2))
+            .expect("advance source start");
+        let (future, progress) = first_catch_up(&part, target.path());
         assert!(!progress.caught_up);
         let future = future
             .lock()
@@ -165,16 +173,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .reset_to(Offset(5))
             .expect("reset source");
-        let (_future_path, future) =
-            crate::future_log::test_support::open_future_log(target.path());
-
-        let progress = catch_up(
-            &part,
-            &future,
-            mebibytes(1),
-            &crate::throttle::TokenBucket::new(),
-        )
-        .expect("catch up");
+        let (future, progress) = first_catch_up(&part, target.path());
         assert!(progress.caught_up);
         let future = future
             .lock()
@@ -185,10 +184,15 @@ mod tests {
 
     #[tokio::test]
     async fn catch_up_waits_when_move_throttle_is_exhausted() {
-        let primary = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let part = fixture_partition(primary.path(), "t", PartitionIndex(0));
-        append_records(&part, 1);
+        let fixture = crate::future_log::test_support::source_fixture(
+            crate::future_log::test_support::FutureSourceSetup {
+                count: crate::test_support::RecordCount(1),
+                ..Default::default()
+            },
+        );
+        let _primary = fixture.primary;
+        let target = fixture.target;
+        let part = fixture.partition;
         let (_future_path, future) =
             crate::future_log::test_support::open_future_log(target.path());
         let throttle = crate::throttle::TokenBucket::new();

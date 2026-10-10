@@ -14,7 +14,6 @@ use crate::{
     support::{
         client::connect_client,
         fetch::{fetch_partition, single_partition_fetch},
-        produce::single_partition_produce,
     },
 };
 
@@ -50,12 +49,13 @@ async fn diverging_epoch_returned_on_stale_last_fetched_epoch() {
         let client = &client;
         async move {
             client
-                .send(single_partition_produce(
-                    "diverge",
-                    topic_id,
-                    0,
-                    Some(record(value).into()),
-                    (1, 5_000),
+                .send(crate::support::produce::batch_request(
+                    record(value),
+                    crate::support::produce::SinglePartitionProduceSetup {
+                        topic: ("diverge").into(),
+                        topic_id,
+                        ..Default::default()
+                    },
                 ))
                 .await
                 .expect("produce");
@@ -115,15 +115,20 @@ async fn diverging_epoch_returned_on_stale_last_fetched_epoch() {
                 replica_id: 7,
                 ..Default::default()
             },
-            ..single_partition_fetch(
-                "diverge",
+            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+                topic: "diverge".into(),
                 topic_id,
-                FetchPartition {
+                partition: FetchPartition {
                     last_fetched_epoch: e0,
-                    ..fetch_partition(0, n, 1 << 20)
+                    ..fetch_partition(crate::support::fetch::FetchPartitionSetup {
+                        offset: krabka_ids::Offset(n),
+                        ..Default::default()
+                    })
                 },
-                (100, 1, 1 << 20),
-            )
+                limits: crate::support::fetch::FetchLimits::one_mebibyte(
+                    crate::support::fetch::RequestWaitMillis(100),
+                ),
+            })
         })
         .await
         .expect("fetch");

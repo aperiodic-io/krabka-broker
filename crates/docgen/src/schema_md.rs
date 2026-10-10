@@ -47,11 +47,7 @@ pub fn render_field_table(schema: &Value) -> String {
 /// layout, so the CRD pages and the other pages keep that layout too.
 #[must_use]
 pub fn render_sectioned_field_table(schema: &Value) -> String {
-    let required: Vec<&str> = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
+    let required = required_fields(schema);
     let Some(props) = schema.get("properties").and_then(Value::as_object) else {
         return String::new();
     };
@@ -120,8 +116,8 @@ fn field_table_header() -> String {
 ///
 /// The "General" section uses this function, and it renders scalar and array
 /// top-level props as plain one-row entries. The function mirrors the per-field
-/// formatting in `collect_rows`, so the type, the default, the description, and
-/// the escaping stay identical.
+/// formatting for nested rows, so types, defaults and descriptions use the same
+/// escaping throughout the table.
 fn write_field_row(
     root: &Value,
     name: &str,
@@ -191,11 +187,7 @@ fn effective_schema<'a>(root: &'a Value, field: &'a Value) -> &'a Value {
 const MAX_DEPTH: usize = 12;
 
 fn collect_rows(root: &Value, schema: &Value, prefix: &str, depth: usize, out: &mut String) {
-    let required: Vec<&str> = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
+    let required = required_fields(schema);
     let Some(props) = schema.get("properties").and_then(Value::as_object) else {
         return;
     };
@@ -206,27 +198,14 @@ fn collect_rows(root: &Value, schema: &Value, prefix: &str, depth: usize, out: &
             format!("{prefix}.{name}")
         };
         let resolved = effective_schema(root, field);
-        let ty = type_label(root, resolved);
-        let req = if required.contains(&name.as_str()) {
-            "yes"
-        } else {
-            "no"
-        };
-        // The default lives on the original field, not the resolved target.
-        let default = field
-            .get("default")
-            .or_else(|| resolved.get("default"))
-            .map(render_default)
-            .unwrap_or_default();
-        let desc = field
-            .get("description")
-            .or_else(|| resolved.get("description"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .replace('\n', " ")
-            // Escape pipes so a description can't break the table's columns.
-            .replace('|', "\\|");
-        let _ = writeln!(out, "| `{path}` | {ty} | {req} | {default} | {desc} |");
+        write_field_row(
+            root,
+            &path,
+            field,
+            resolved,
+            required.contains(&name.as_str()),
+            out,
+        );
         // Recurse into nested objects (inlined or resolved via $ref), but stop
         // at MAX_DEPTH so cyclic/self-referential schemas can't overflow.
         if resolved.get("properties").is_some() && depth < MAX_DEPTH {
@@ -272,6 +251,14 @@ fn render_default(v: &Value) -> String {
         Value::String(s) => format!("`{}`", s.replace('|', "\\|")),
         other => format!("`{}`", other.to_string().replace('|', "\\|")),
     }
+}
+
+fn required_fields(schema: &Value) -> Vec<&str> {
+    schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -390,6 +377,18 @@ mod tests {
         assert2::assert!(deepest <= MAX_DEPTH);
     }
 
+    fn check_escaped_mode_row(md: &str) {
+        let row = md.lines().find(|l| l.contains("`mode`")).expect("mode row");
+        // Pipes in the description are escaped...
+        assert2::assert!(row.contains("a \\| b \\| c"));
+        // ...so the row keeps exactly the 5 columns (6 unescaped delimiters).
+        let unescaped_bars = row
+            .match_indices('|')
+            .filter(|(i, _)| *i == 0 || row.as_bytes()[i - 1] != b'\\')
+            .count();
+        assert2::assert!(unescaped_bars == 6);
+    }
+
     #[test]
     fn escapes_pipe_in_description() {
         let schema = json!({
@@ -401,16 +400,7 @@ mod tests {
                 }
             }
         });
-        let md = render_field_table(&schema);
-        let row = md.lines().find(|l| l.contains("`mode`")).expect("mode row");
-        // Pipes in the description are escaped...
-        assert2::assert!(row.contains("a \\| b \\| c"));
-        // ...so the row keeps exactly the 5 columns (6 unescaped delimiters).
-        let unescaped_bars = row
-            .match_indices('|')
-            .filter(|(i, _)| *i == 0 || row.as_bytes()[i - 1] != b'\\')
-            .count();
-        assert2::assert!(unescaped_bars == 6);
+        check_escaped_mode_row(&render_field_table(&schema));
     }
 
     #[test]
@@ -469,13 +459,6 @@ mod tests {
                 "section": { "$ref": "#/$defs/Inner" }
             }
         });
-        let md = render_sectioned_field_table(&schema);
-        let row = md.lines().find(|l| l.contains("`mode`")).expect("mode row");
-        assert2::assert!(row.contains("a \\| b \\| c"));
-        let unescaped_bars = row
-            .match_indices('|')
-            .filter(|(i, _)| *i == 0 || row.as_bytes()[i - 1] != b'\\')
-            .count();
-        assert2::assert!(unescaped_bars == 6);
+        check_escaped_mode_row(&render_sectioned_field_table(&schema));
     }
 }

@@ -74,23 +74,19 @@ impl ReplicatorSupervisor {
         self.hot_tail.remove_partition(topic_id, index);
         self.reported_dirs.remove(&(topic.clone(), index.get()));
         let owning_dir = removed.log_dir.load_full();
-        let remove = if preserve_follower {
-            crate::wal::quorum::remove_leader_shard(
-                self.wal_shards.as_ref(),
-                &owning_dir,
-                topic,
-                topic_id,
-                index,
-            )
+        let scope = if preserve_follower {
+            crate::wal::quorum::ShardRemoval::Leader
         } else {
-            crate::wal::quorum::remove_shard(
-                self.wal_shards.as_ref(),
-                &owning_dir,
-                topic,
-                topic_id,
-                index,
-            )
+            crate::wal::quorum::ShardRemoval::All
         };
+        let remove = crate::wal::quorum::remove_shard(
+            self.wal_shards.as_ref(),
+            &owning_dir,
+            topic,
+            topic_id,
+            index,
+            scope,
+        );
         if let Err(error) = remove {
             warn!(
                 topic = %topic,
@@ -132,32 +128,73 @@ mod tests {
         image_with, partition_record, supervisor_fixture, topic_record,
     };
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum RegistrationStatus {
+        Registered,
+        Absent,
+    }
+    #[derive(Debug, PartialEq, Eq)]
+    enum DirectoryStatus {
+        Present,
+        Absent,
+    }
+    #[derive(Debug, PartialEq, Eq)]
+    enum RuntimeIdentity {
+        Reused,
+        Replaced,
+    }
+    #[derive(Debug, PartialEq, Eq)]
+    struct PartitionState {
+        topic: &'static str,
+        registration: RegistrationStatus,
+        directory: DirectoryStatus,
+        runtime: Option<RuntimeIdentity>,
+    }
+
+    fn image_with_recreated_topic(
+        mut records: Vec<krabka_metadata::MetadataRecord>,
+    ) -> MetadataImage {
+        records.extend(crate::replicator_supervisor::test_support::topic_partition_records(
+            crate::replicator_supervisor::test_support::SupervisorPartitionSetup::single_replica("recreated", NodeId(2)),
+        ));
+        image_with(&records)
+    }
+
     #[tokio::test]
     async fn reconcile_prunes_deleted_topic_partitions_but_keeps_live_topics() {
-        #[derive(Debug, PartialEq, Eq)]
-        struct PartitionState {
-            topic: &'static str,
-            registered: bool,
-            directory_exists: bool,
-            runtime_reused: Option<bool>,
-        }
-
-        let live_topic = topic_record("live", 1);
-        let live_partition = partition_record("live", 0, NodeId(2), vec![NodeId(2)], 0);
-        let active = image_with(&[
-            topic_record("deleted", 1),
-            partition_record("deleted", 0, NodeId(2), vec![NodeId(2)], 0),
+        let live_topic = topic_record(
+            crate::replicator_supervisor::test_support::SupervisorTopicSetup {
+                topic: "live",
+                ..Default::default()
+            },
+        );
+        let live_partition = partition_record(
+            crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                topic: "live",
+                leader: NodeId(2),
+                replicas: vec![NodeId(2)],
+                ..Default::default()
+            },
+        );
+        let active = image_with_recreated_topic(vec![
+            topic_record(
+                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
+                    topic: "deleted",
+                    ..Default::default()
+                },
+            ),
+            partition_record(
+                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                    topic: "deleted",
+                    leader: NodeId(2),
+                    replicas: vec![NodeId(2)],
+                    ..Default::default()
+                },
+            ),
             live_topic.clone(),
             live_partition.clone(),
-            topic_record("recreated", 1),
-            partition_record("recreated", 0, NodeId(2), vec![NodeId(2)], 0),
         ]);
-        let after_delete = image_with(&[
-            live_topic,
-            live_partition,
-            topic_record("recreated", 1),
-            partition_record("recreated", 0, NodeId(2), vec![NodeId(2)], 0),
-        ]);
+        let after_delete = image_with_recreated_topic(vec![live_topic, live_partition]);
         let (supervisor, partitions, _reporter, dir) = supervisor_fixture(active.clone());
         supervisor
             .materialize_local_partition(&active, "startup-only", 0)
@@ -202,37 +239,49 @@ mod tests {
             .into_iter()
             .map(|topic| PartitionState {
                 topic,
-                registered: partitions.contains(topic, PartitionIndex(0)),
-                directory_exists: dir.path().join(format!("{topic}-0")).exists(),
-                runtime_reused: partitions
-                    .get(topic, PartitionIndex(0))
-                    .map(|current| Arc::ptr_eq(&original[topic], &current)),
+                registration: if partitions.contains(topic, PartitionIndex(0)) {
+                    RegistrationStatus::Registered
+                } else {
+                    RegistrationStatus::Absent
+                },
+                directory: if dir.path().join(format!("{topic}-0")).exists() {
+                    DirectoryStatus::Present
+                } else {
+                    DirectoryStatus::Absent
+                },
+                runtime: partitions.get(topic, PartitionIndex(0)).map(|current| {
+                    if Arc::ptr_eq(&original[topic], &current) {
+                        RuntimeIdentity::Reused
+                    } else {
+                        RuntimeIdentity::Replaced
+                    }
+                }),
             })
             .collect::<Vec<_>>();
         let expected = vec![
             PartitionState {
                 topic: "deleted",
-                registered: false,
-                directory_exists: false,
-                runtime_reused: None,
+                registration: RegistrationStatus::Absent,
+                directory: DirectoryStatus::Absent,
+                runtime: None,
             },
             PartitionState {
                 topic: "live",
-                registered: true,
-                directory_exists: true,
-                runtime_reused: Some(true),
+                registration: RegistrationStatus::Registered,
+                directory: DirectoryStatus::Present,
+                runtime: Some(RuntimeIdentity::Reused),
             },
             PartitionState {
                 topic: "recreated",
-                registered: true,
-                directory_exists: true,
-                runtime_reused: Some(false),
+                registration: RegistrationStatus::Registered,
+                directory: DirectoryStatus::Present,
+                runtime: Some(RuntimeIdentity::Replaced),
             },
             PartitionState {
                 topic: "startup-only",
-                registered: true,
-                directory_exists: true,
-                runtime_reused: Some(true),
+                registration: RegistrationStatus::Registered,
+                directory: DirectoryStatus::Present,
+                runtime: Some(RuntimeIdentity::Reused),
             },
         ];
         assert!(actual == expected);
@@ -240,14 +289,33 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_prunes_partition_after_local_replica_is_reassigned() {
-        let topic = topic_record("moved", 1);
+        let topic = topic_record(
+            crate::replicator_supervisor::test_support::SupervisorTopicSetup {
+                topic: "moved",
+                ..Default::default()
+            },
+        );
         let assigned = image_with(&[
             topic.clone(),
-            partition_record("moved", 0, NodeId(2), vec![NodeId(2)], 0),
+            partition_record(
+                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                    topic: "moved",
+                    leader: NodeId(2),
+                    replicas: vec![NodeId(2)],
+                    ..Default::default()
+                },
+            ),
         ]);
         let reassigned = image_with(&[
             topic,
-            partition_record("moved", 0, NodeId(1), vec![NodeId(1)], 1),
+            partition_record(
+                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                    topic: "moved",
+                    replicas: vec![NodeId(1)],
+                    epoch: krabka_metadata::LeaderEpoch(1),
+                    ..Default::default()
+                },
+            ),
         ]);
         let (supervisor, partitions, _reporter, dir) = supervisor_fixture(assigned.clone());
         supervisor.reconcile(&assigned).await;
@@ -281,7 +349,12 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_keeps_partition_until_its_metadata_record_arrives() {
-        let image = image_with(&[topic_record("pending", 1)]);
+        let image = image_with(&[topic_record(
+            crate::replicator_supervisor::test_support::SupervisorTopicSetup {
+                topic: "pending",
+                ..Default::default()
+            },
+        )]);
         let (supervisor, partitions, _reporter, dir) = supervisor_fixture(image.clone());
         supervisor
             .materialize_local_partition(&image, "pending", 0)

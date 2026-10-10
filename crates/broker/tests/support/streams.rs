@@ -55,19 +55,28 @@ pub fn first_join(group: &str, topo: Topology) -> StreamsGroupHeartbeatRequest {
     }
 }
 
-pub fn follow_up(
-    group: &str,
-    member_id: &str,
-    epoch: i32,
-    active: Option<Vec<ReqTaskIds>>,
-) -> StreamsGroupHeartbeatRequest {
+#[derive(Clone, Copy)]
+pub struct StreamsMemberEpoch(pub i32);
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct StreamsFollowUpSetup<'a> {
+    #[default("g")]
+    pub group: &'a str,
+    #[default("m")]
+    pub member_id: &'a str,
+    #[default(StreamsMemberEpoch(1))]
+    pub epoch: StreamsMemberEpoch,
+    pub active: Option<Vec<ReqTaskIds>>,
+}
+
+pub fn follow_up(setup: StreamsFollowUpSetup<'_>) -> StreamsGroupHeartbeatRequest {
     StreamsGroupHeartbeatRequest {
-        group_id: group.into(),
-        member_id: member_id.into(),
-        member_epoch: epoch,
-        standby_tasks: active.as_ref().map(|_| Vec::new()),
-        warmup_tasks: active.as_ref().map(|_| Vec::new()),
-        active_tasks: active,
+        group_id: setup.group.into(),
+        member_id: setup.member_id.into(),
+        member_epoch: setup.epoch.0,
+        standby_tasks: setup.active.as_ref().map(|_| Vec::new()),
+        warmup_tasks: setup.active.as_ref().map(|_| Vec::new()),
+        active_tasks: setup.active,
         ..Default::default()
     }
 }
@@ -114,21 +123,32 @@ pub async fn streams_join_and_converge(
         tokio::time::sleep(Duration::from_millis(200)).await;
         let active = request_active_tasks(&resp);
         resp = client
-            .send(follow_up(group, &member_id, resp.member_epoch, active))
+            .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+                group,
+                member_id: &member_id,
+                epoch: crate::support::streams::StreamsMemberEpoch(resp.member_epoch),
+                active,
+            }))
             .await
             .expect("follow-up streams heartbeat");
         member_id = resp.member_id.clone();
     }
     (member_id, resp)
 }
+#[derive(Clone, Copy)]
+pub enum ElectionReadiness {
+    CoordinatorReady,
+    BrokerElectable,
+}
+
 pub async fn boot(
-    wait_electable: bool,
+    readiness: ElectionReadiness,
 ) -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
     let (dir, broker) = crate::support::standalone_broker().await;
     // A streams or classic group needs `__consumer_offsets`. No broker creates
     // it at startup, so create it as a client's first lookup does.
     broker.wait_until_group_coordinator_ready().await;
-    if wait_electable {
+    if matches!(readiness, ElectionReadiness::BrokerElectable) {
         broker.wait_until_broker_electable(broker.node_id()).await;
     }
     let bootstrap = broker.listen_addr().to_string();

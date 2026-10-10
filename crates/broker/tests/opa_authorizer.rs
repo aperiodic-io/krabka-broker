@@ -31,7 +31,7 @@ use std::{io, net::SocketAddr};
 use assert2::assert;
 use kafka_wire::single_record_produce_request;
 use krabka_broker::{BrokerHandle, authorizer::opa::OpaAuthorizer};
-use krabka_protocol::owned::{produce_request::ProduceRequest, produce_response::ProduceResponse};
+use krabka_protocol::owned::produce_response::ProduceResponse;
 use krabka_security::SaslMechanism;
 use tempfile::TempDir;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
@@ -45,7 +45,6 @@ const ERR_TOPIC_AUTHORIZATION_FAILED: i16 = 29;
 //   * CreateTopics v7 — flexible (FLEXIBLE_MIN=5), topic id round-trips.
 //   * Produce v11 — flexible (FLEXIBLE_MIN=9), still uses topic `name`
 //     rather than topic_id (v >= 13 introduces the latter).
-const PRODUCE_VERSION: i16 = 11;
 
 /// The client id every request header in this suite carries.
 const CLIENT_ID: &str = "krabka-opa-test";
@@ -118,28 +117,23 @@ fn start_broker_with_opa_authorizer(
 // Wire driver helpers.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn drive_produce_as_plain(
-    addr: SocketAddr,
-    user: &str,
-    password: &[u8],
-    req: ProduceRequest,
-) -> Result<ProduceResponse, io::Error> {
-    kafka_wire::request_as_plain(
-        addr,
-        CLIENT_ID,
-        (user, password),
-        &req,
-        (0, PRODUCE_VERSION),
-        "Produce",
-    )
-    .await
-}
+use crate::kafka_wire::drive_produce_as_plain;
 
 /// Drives `CreateTopics(name, 1 partition, rf=1)` over a SASL/PLAIN admin
 /// session. Admin is the super-user in both tests, so the call bypasses the OPA
 /// mock and the topic materialises whatever OPA answers.
 async fn create_topic_as_admin(addr: SocketAddr, name: &str) {
-    crate::kafka_wire::create_topic_as_super_user(addr, CLIENT_ID, name, 1).await;
+    crate::kafka_wire::create_topic_as_super_user(
+        addr,
+        crate::kafka_wire::AutomaticTopicSetup {
+            client_id: CLIENT_ID,
+            topic: crate::support::topics::ConfiguredTopicSetup {
+                name: name.to_string(),
+                ..Default::default()
+            },
+        },
+    )
+    .await;
 }
 
 /// Waits on `handle`, event-driven, until the local writer-actor of `topic`
@@ -173,9 +167,12 @@ async fn produce_when_partition_ready(
     handle.wait_until_local_log_end_offset(topic, 0, 0).await;
     drive_produce_as_plain(
         addr,
-        user,
-        password,
         single_record_produce_request(topic, 0, b"hello"),
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            user,
+            password: (password).to_vec(),
+        },
     )
     .await
 }
@@ -201,9 +198,12 @@ async fn produce_blocked_by_opa_returns_topic_authorization_failed() {
     // alice (non-super-user) tries to Produce → OPA returns deny → 29.
     let resp = drive_produce_as_plain(
         addr,
-        "alice",
-        &alice_password(),
         single_record_produce_request("blocked-topic", 0, b"hello"),
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            password: alice_password(),
+            ..Default::default()
+        },
     )
     .await
     .expect("Produce must round-trip");

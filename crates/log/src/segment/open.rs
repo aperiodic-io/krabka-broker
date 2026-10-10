@@ -308,21 +308,29 @@ mod tests {
     #[test]
     fn append_after_open_active_writes_at_eof() {
         let dir = tempdir().unwrap();
-        drop(seeded_segment(dir.path(), 0, &[(0, 1, 100), (1, 1, 200)]));
+        drop(seeded_segment(
+            dir.path(),
+            crate::segment::test_support::SeededSegmentSetup {
+                batches: &[
+                    crate::segment::test_support::ONE_RECORD_BATCH,
+                    crate::segment::test_support::SECOND_SINGLE_RECORD_BATCH,
+                ],
+                ..Default::default()
+            },
+        ));
 
         let mut seg = Segment::open_active(dir.path(), Offset(0), true).unwrap();
-        let position = seg.append(&sample_batch(2, 1, 300), DENSE_INDEX).unwrap();
+        let position = seg
+            .append(
+                &sample_batch(crate::segment::test_support::THIRD_SINGLE_RECORD_BATCH),
+                DENSE_INDEX,
+            )
+            .unwrap();
 
         let read = seg.read(Offset(0), NO_LIMIT).unwrap();
         assert2::assert!(position > 0);
         assert2::assert!(seg.last_offset() == Offset(2));
-        assert2::assert!(
-            read == crate::segment::test_support::sample_batches(&[
-                (0, 1, 100),
-                (1, 1, 200),
-                (2, 1, 300)
-            ])
-        );
+        assert2::assert!(read == crate::segment::test_support::three_single_record_batches());
     }
 
     /// Tail recovery must physically truncate a partial or garbage tail and
@@ -331,7 +339,13 @@ mod tests {
     fn recover_active_tail_truncates_trailing_garbage() {
         let dir = tempdir().unwrap();
         let valid_size = {
-            let mut seg = seeded_segment(dir.path(), 0, &[(0, 3, 100), (3, 2, 200)]);
+            let mut seg = seeded_segment(
+                dir.path(),
+                crate::segment::test_support::SeededSegmentSetup {
+                    batches: crate::segment::test_support::FIVE_OFFSET_TIMESTAMP_BATCHES,
+                    ..Default::default()
+                },
+            );
             seg.flush().unwrap();
             let valid_size = seg.log_size;
             let stale_position = u32::try_from(valid_size).unwrap();
@@ -385,8 +399,15 @@ mod tests {
         {
             let mut seg = Segment::create(dir.path(), Offset(0)).unwrap();
             for (base, timestamp) in [(0, 100), (1, 300), (2, 200)] {
-                seg.append(&sample_batch(base, 1, timestamp), kibibytes(4))
-                    .unwrap();
+                seg.append(
+                    &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                        offset: crate::Offset(base),
+                        timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+                        ..Default::default()
+                    }),
+                    kibibytes(4),
+                )
+                .unwrap();
             }
         }
 

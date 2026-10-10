@@ -14,7 +14,7 @@
         "prover": "alt-ergo",
         "time": 0.021
       },
-      "vc_len_tup2_i64_i32": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_len_tup2_i64_i32": { "prover": "alt-ergo", "time": 0.008 },
       "vc_restore_batch_step": { "prover": "alt-ergo", "time": 0.02 },
       "vc_scheduled_delivery_visible": {
         "prover": "alt-ergo",

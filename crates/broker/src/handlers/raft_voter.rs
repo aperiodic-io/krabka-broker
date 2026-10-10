@@ -27,6 +27,32 @@ macro_rules! handler {
 
 pub(super) use handler;
 
+/// Add/remove voter RPCs share the Cluster:Alter admission and leader-only refusal.
+macro_rules! leader_handler {
+    (($broker:ident, $version:ident, $bytes:ident, $ctx:ident),
+     ($request:ty, $response:ty, $api:expr, $denied:expr),
+     ($req:ident, $image:ident, $quorum:ident), $body:block) => {
+        crate::handlers::raft_voter::handler!($broker, $version, $bytes, $ctx, {
+            let crate::handlers::raft_voter::Admitted {
+                req: $req,
+                image: $image,
+                quorum: $quorum,
+            } = crate::handlers::raft_voter::admit!(
+                $request,
+                ($broker, $version, $bytes, $ctx),
+                $api,
+                crate::handlers::cluster_alter_denied,
+                crate::handlers::raft_voter::Refusals::<$response>::messages(
+                    Some($denied.into()),
+                    Some(String::new()),
+                )
+            );
+            $body
+        });
+    };
+}
+pub(super) use leader_handler;
+
 /// Keep early encoded answers at the caller's entry point, before its own voter checks.
 macro_rules! admit {
     ($request:ty, ($broker:expr, $version:expr, $bytes:expr, $ctx:expr), $api:expr, $gate:expr, $refusals:expr) => {

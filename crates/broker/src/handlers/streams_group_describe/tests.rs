@@ -41,12 +41,12 @@ async fn grant(
         .broker_arc_for_test()
         .controller
         .submit_change(vec![MetadataRecord::V1AccessControlEntry(
-            crate::test_support::allow_acl(
+            crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
                 resource_type,
                 resource_name,
-                &format!("User:{user}"),
+                principal: &format!("User:{user}"),
                 operation,
-            ),
+            }),
         )])
         .await
         .expect("commit acl");
@@ -360,13 +360,14 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
             ..Default::default()
         }]),
         ..crate::handlers::group_heartbeat_test_support::streams_request_with_topology(
-            "app",
-            "m1",
-            "in",
-            vec![hb::topic_info::TopicInfo {
-                name: "app-store-changelog".into(),
+            crate::handlers::group_heartbeat_test_support::StreamsTopologySetup {
+                group_id: "app",
+                state_changelog_topics: vec![hb::topic_info::TopicInfo {
+                    name: "app-store-changelog".into(),
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
+            },
         )
     };
     let joined = heartbeat(&broker, &join).await;
@@ -490,13 +491,15 @@ async fn empty_group_is_empty_and_another_group_type_is_not_found() {
     finalize_streams_version(&broker).await;
     broker.group_coordinator.mark_share("share");
     let join = crate::handlers::group_heartbeat_test_support::streams_request_with_topology(
-        "left",
-        "m1",
-        "absent",
-        vec![hb::topic_info::TopicInfo {
-            name: "left-changelog".into(),
+        crate::handlers::group_heartbeat_test_support::StreamsTopologySetup {
+            group_id: "left",
+            source_topic: "absent",
+            state_changelog_topics: vec![hb::topic_info::TopicInfo {
+                name: "left-changelog".into(),
+                ..Default::default()
+            }],
             ..Default::default()
-        }],
+        },
     );
     check!(heartbeat(&broker, &join).await.error_code == codes::NONE);
     let leave = StreamsGroupHeartbeatRequest {

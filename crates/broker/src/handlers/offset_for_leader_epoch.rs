@@ -436,8 +436,9 @@ mod tests {
     async fn leader_check_needs_the_installed_role_and_the_image_to_name_this_node() {
         let image = crate::handlers::produce::test_support::image_with_topic("orders", &[1, 2]);
 
-        let dir = tempfile::tempdir().expect("tempdir");
-        let partition = crate::test_support::open_partition(dir.path(), "orders", 0);
+        let (_dir, partition) = crate::test_support::temporary_partition(
+            crate::test_support::StandalonePartitionSetup::default(),
+        );
 
         // (this node, installed leader, refused)
         let cases = [
@@ -473,18 +474,39 @@ mod tests {
     /// appended `partition_leader_epoch` has to agree with the partition's
     /// `current_leader_epoch`, which this also sets via
     /// `test_set_leader_epoch`.
+    use krabka_ids::LeaderEpoch;
+    use krabka_metadata::NodeId;
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct SeededEpochTopicSetup<'a> {
+        #[default("orders")]
+        topic: &'a str,
+        #[default(uuid::Uuid::from_u128(1))]
+        topic_id: uuid::Uuid,
+        #[default(NodeId(1))]
+        leader: NodeId,
+        #[default(LeaderEpoch(0))]
+        leader_epoch: LeaderEpoch,
+    }
+
     async fn seeded_topic(
         broker_handle: &crate::broker::BrokerHandle,
-        topic: &str,
-        topic_id: u128,
-        leader: u64,
-        leader_epoch: i32,
+        setup: SeededEpochTopicSetup<'_>,
     ) -> std::sync::Arc<Partition> {
-        crate::handlers::test_support::seed_replicated_topic(
-            broker_handle,
+        let SeededEpochTopicSetup {
             topic,
             topic_id,
             leader,
+            leader_epoch,
+        } = setup;
+        crate::handlers::test_support::seed_partition_replicas(
+            broker_handle,
+            crate::handlers::test_support::ReplicatedTopicSetup {
+                topic,
+                topic_id,
+                leader,
+                ..Default::default()
+            },
         )
         .await;
 
@@ -492,7 +514,7 @@ mod tests {
         let partition = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
                 if let Some(partition) = shared.partitions.get(topic, krabka_ids::PartitionIndex(0))
-                    && partition.current_leader.load(Ordering::Acquire) == leader
+                    && partition.current_leader.load(Ordering::Acquire) == leader.0
                 {
                     return partition;
                 }
@@ -502,11 +524,11 @@ mod tests {
         .await
         .expect("the broker holds the partition in its role");
 
-        partition.test_set_leader_epoch(leader_epoch);
+        partition.test_set_leader_epoch(leader_epoch.0);
 
         let mut batch = krabka_protocol::records::RecordBatch {
             last_offset_delta: 1,
-            partition_leader_epoch: leader_epoch,
+            partition_leader_epoch: leader_epoch.0,
             records: [&b"first"[..], &b"second"[..]]
                 .iter()
                 .zip(0..)
@@ -518,19 +540,14 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        partition
-            .log
-            .lock()
-            .expect("partition log lock")
-            .append(&mut batch)
-            .expect("append the records");
+        crate::test_support::append_partition_batch(&partition, &mut batch);
         partition
     }
 
     fn ofle_request(
         topic: &str,
-        leader_epoch: i32,
-        current_leader_epoch: i32,
+        leader_epoch: LeaderEpoch,
+        current_leader_epoch: LeaderEpoch,
     ) -> OffsetForLeaderEpochRequest {
         use krabka_protocol::owned::offset_for_leader_epoch_request::{
             OffsetForLeaderPartition, OffsetForLeaderTopic,
@@ -542,8 +559,8 @@ mod tests {
                 topic: topic.to_owned(),
                 partitions: vec![OffsetForLeaderPartition {
                     partition: 0,
-                    current_leader_epoch,
-                    leader_epoch,
+                    current_leader_epoch: current_leader_epoch.0,
+                    leader_epoch: leader_epoch.0,
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -593,9 +610,34 @@ mod tests {
 
         let (broker, _dir) = crate::test_support::start_broker_no_audit().await;
 
-        let leader_topic = seeded_topic(&broker, "ofle-leader", 1, 1, 0).await;
-        seeded_topic(&broker, "ofle-follower", 2, 2, 0).await;
-        seeded_topic(&broker, "ofle-epoch", 3, 1, 3).await;
+        let leader_topic = seeded_topic(
+            &broker,
+            SeededEpochTopicSetup {
+                topic: "ofle-leader",
+                ..Default::default()
+            },
+        )
+        .await;
+        seeded_topic(
+            &broker,
+            SeededEpochTopicSetup {
+                topic: "ofle-follower",
+                topic_id: uuid::Uuid::from_u128(2),
+                leader: NodeId(2),
+                ..Default::default()
+            },
+        )
+        .await;
+        seeded_topic(
+            &broker,
+            SeededEpochTopicSetup {
+                topic: "ofle-epoch",
+                topic_id: uuid::Uuid::from_u128(3),
+                leader_epoch: LeaderEpoch(3),
+                ..Default::default()
+            },
+        )
+        .await;
 
         let refused = |error_code| EpochEndOffset {
             partition: 0,
@@ -683,7 +725,11 @@ mod tests {
             let got = ofle(
                 &broker,
                 VERSION,
-                &ofle_request(topic, leader_epoch, current_leader_epoch),
+                &ofle_request(
+                    topic,
+                    LeaderEpoch(leader_epoch),
+                    LeaderEpoch(current_leader_epoch),
+                ),
             );
             assert!(got == want, "{name}");
         }
@@ -691,7 +737,11 @@ mod tests {
         // Unknown partition: the fence and leader-only gate never run, since
         // the partition lookup answers first. Like every refused row above it
         // carries the schema defaults, -1 for both offsets.
-        let unknown = ofle(&broker, VERSION, &ofle_request("ofle-missing", 5, -1));
+        let unknown = ofle(
+            &broker,
+            VERSION,
+            &ofle_request("ofle-missing", LeaderEpoch(5), LeaderEpoch(-1)),
+        );
         assert!(
             unknown
                 == EpochEndOffset {
@@ -724,7 +774,15 @@ mod tests {
             crate::test_support::start_broker_no_audit()
         );
 
-        let offline = seeded_topic(&broker, "ofle-offline", 1, 1, 3).await;
+        let offline = seeded_topic(
+            &broker,
+            SeededEpochTopicSetup {
+                topic: "ofle-offline",
+                leader_epoch: LeaderEpoch(3),
+                ..Default::default()
+            },
+        )
+        .await;
         shared
             .log_dir_status
             .mark_offline(&offline.log_dir.load(), "test: EIO");
@@ -732,11 +790,13 @@ mod tests {
         // Node 1 is not a replica of this partition, so it never hosts it.
         crate::handlers::test_support::seed_partition_replicas(
             &broker,
-            "ofle-moved",
-            uuid::Uuid::from_u128(9),
-            krabka_audit::NodeId(2),
-            &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-            3,
+            crate::handlers::test_support::ReplicatedTopicSetup {
+                topic: "ofle-moved",
+                topic_id: uuid::Uuid::from_u128(9),
+                leader: krabka_audit::NodeId(2),
+                replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
+                leader_epoch: krabka_ids::LeaderEpoch(3),
+            },
         )
         .await;
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -777,7 +837,11 @@ mod tests {
             ),
         ];
         for (name, topic, error_code) in cases {
-            let got = ofle(&broker, VERSION, &ofle_request(topic, 3, 2));
+            let got = ofle(
+                &broker,
+                VERSION,
+                &ofle_request(topic, LeaderEpoch(3), LeaderEpoch(2)),
+            );
             assert!(got == refused(error_code), "{name}");
         }
 

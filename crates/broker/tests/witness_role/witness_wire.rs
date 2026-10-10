@@ -19,23 +19,24 @@ use krabka_protocol::{
     primitives::uuid::Uuid as WireUuid,
 };
 
-use crate::{
-    TOPIC,
-    support::{fetch::fetch_topic_row, produce::single_partition_produce},
-};
+use crate::{TOPIC, support::fetch::fetch_topic_row};
 
 /// Create `TOPIC` with one partition and rf=3, and return its id.
 pub(crate) async fn create_topic(client: &Client) -> WireUuid {
-    crate::support::client::create_topic_with(client, TOPIC, 1, 3, 10_000).await
+    crate::support::client::create_replicated_topic(client, TOPIC).await
 }
 
 fn produce_request(topic_id: WireUuid, n: i32) -> ProduceRequest {
-    single_partition_produce(
-        TOPIC,
-        topic_id,
-        0,
-        Some(crate::support::client::value_batch(n).into()),
-        (-1, 10_000),
+    crate::support::produce::batch_request(
+        crate::support::client::value_batch(crate::support::client::ValueBatchSetup {
+            records: crate::support::client::ValueRecordCount(n),
+        }),
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: (TOPIC).into(),
+            topic_id,
+            timeout: crate::support::produce::ProduceTimeoutMillis(10_000),
+            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+        },
     )
 }
 

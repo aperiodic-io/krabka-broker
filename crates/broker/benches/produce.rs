@@ -62,34 +62,8 @@ use krabka_protocol::{
 use krabka_records_legacy::Magic;
 use tempfile::TempDir;
 
-/// The record shapes: one large record, a mid-sized batch, and a wide batch of
-/// small records. They bracket what a producer's `batch.size` and
-/// `linger.ms` actually produce.
-const SHAPES: [(&str, i32, usize); 3] = [
-    ("1rec_100KiB", 1, 100 * 1024),
-    ("100rec_1KiB", 100, 1024),
-    ("1000rec_100B", 1000, 100),
-];
-
-/// Bytes a single benchmark's log may take before it starts over.
-///
-/// Criterion runs a fast append hundreds of thousands of times, and every one
-/// of them lands on disk. The reset happens outside the timed region, so it
-/// costs the measurement nothing.
-const LOG_BUDGET: usize = 256 * 1024 * 1024;
-
-/// The leader epoch the verbatim writer stamps into the batch header.
-const LEADER_EPOCH: i32 = 3;
-
-/// Untimed appends run before the measured ones, against the same log.
-///
-/// The first append into a fresh log pays for the temp directory, the segment
-/// file and its first page faults. Criterion amortizes that over a large
-/// `iters`, but [`bench_ratio`]'s short run does not, and it lands entirely on
-/// whichever path a shape measures first — the verbatim one, which is the
-/// denominator of both ratios. A handful of untimed appends move it out of the
-/// measurement.
-const WARMUP: u64 = 8;
+mod support;
+use support::{LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP};
 
 fn settings(metrics: &BrokerMetrics) -> HotPathSettings<'_> {
     HotPathSettings {

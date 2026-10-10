@@ -29,11 +29,30 @@ use crate::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn copy_then_fetch_full_segment() {
     let store = rsm(None);
-    let md = sample_metadata(10);
-    seeded_blocking(store, md, true, move |store, md| {
-        assert!(store.fetch_log_segment(&md, 0, None).unwrap() == b"0123456789");
-    })
+    let md = sample_metadata(uuid::Uuid::from_u128(10));
+    seeded_blocking(
+        store,
+        crate::s3::test_support::SeededCopySetup {
+            metadata: md,
+            ..Default::default()
+        },
+        move |store, md| {
+            assert!(store.fetch_log_segment(&md, 0, None).unwrap() == b"0123456789");
+        },
+    )
     .await;
+}
+
+fn copied_segment(
+    store: &S3RemoteStorage,
+    metadata: &RemoteLogSegmentMetadata,
+    data: &LogSegmentData,
+    expected_len: usize,
+) -> Vec<u8> {
+    store.copy_log_segment_data(metadata, data).unwrap();
+    let fetched = store.fetch_log_segment(metadata, 0, None).unwrap();
+    assert!(fetched.len() == expected_len);
+    fetched
 }
 
 fn write_log_segment(dir: &std::path::Path, len: usize) -> PathBuf {
@@ -61,20 +80,11 @@ async fn put_path_uses_multipart_above_threshold_and_round_trips() {
     let store = S3RemoteStorage::with_store(Arc::new(InMemory::new()), None)
         .with_multipart_tuning(kibibytes(8), kibibytes(4));
     let src = TempDir::new().unwrap();
-    let md = sample_metadata(40);
-    let log_path = write_log_segment(src.path(), seg_len);
-    let data = LogSegmentData {
-        log_segment: log_path,
-        offset_index: write_file(src.path(), "00.index", b"OFFSET-IDX"),
-        time_index: write_file(src.path(), "00.timeindex", b"TIME-IDX"),
-        transaction_index: None,
-        producer_snapshot_index: Some(write_file(src.path(), "00.snapshot", b"SNAP")),
-        leader_epoch_index: Bytes::from_static(b"EPOCH-BYTES"),
-    };
+    let md = sample_metadata(uuid::Uuid::from_u128(40));
+    let mut data = multipart_data(src.path(), seg_len);
+    data.producer_snapshot_index = Some(write_file(src.path(), "00.snapshot", b"SNAP"));
     tokio::task::spawn_blocking(move || {
-        store.copy_log_segment_data(&md, &data).unwrap();
-        let fetched = store.fetch_log_segment(&md, 0, None).unwrap();
-        assert!(fetched.len() == seg_len);
+        let fetched = copied_segment(&store, &md, &data, seg_len);
         for (i, b) in fetched.iter().enumerate() {
             assert!(*b == u8::try_from(i % 251).unwrap(), "byte mismatch at {i}");
         }
@@ -105,12 +115,10 @@ async fn multipart_flushes_partial_tail_chunk() {
     let store = S3RemoteStorage::with_store(Arc::new(InMemory::new()), None)
         .with_multipart_tuning(kibibytes(1), chunk);
     let src = TempDir::new().unwrap();
-    let md = sample_metadata(41);
+    let md = sample_metadata(uuid::Uuid::from_u128(41));
     let data = multipart_data(src.path(), seg_len);
     tokio::task::spawn_blocking(move || {
-        store.copy_log_segment_data(&md, &data).unwrap();
-        let fetched = store.fetch_log_segment(&md, 0, None).unwrap();
-        assert!(fetched.len() == seg_len);
+        let fetched = copied_segment(&store, &md, &data, seg_len);
         assert!(
             fetched.last().copied() == Some(u8::try_from((seg_len - 1) % 251).unwrap()),
             "tail byte was dropped"
@@ -131,7 +139,7 @@ async fn put_path_stays_on_single_put_below_threshold() {
     let store = S3RemoteStorage::with_store(Arc::new(InMemory::new()), None)
         .with_multipart_tuning(mebibytes(1), kibibytes(4));
     let src = TempDir::new().unwrap();
-    let md = sample_metadata(42);
+    let md = sample_metadata(uuid::Uuid::from_u128(42));
     let data = multipart_data(src.path(), 10);
     tokio::task::spawn_blocking(move || {
         store.copy_log_segment_data(&md, &data).unwrap();
@@ -152,7 +160,22 @@ fn read_manifest(store: &S3RemoteStorage, md: &RemoteLogSegmentMetadata) -> Segm
 }
 
 /// The manifest entry a copy must record for an object holding `body`.
-fn expected_entry(suffix: &str, key: &ObjectPath, body: &[u8], e_tag: &str) -> ObjectEntry {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct ExpectedEntrySetup<'a> {
+    #[default(".log")]
+    suffix: &'a str,
+    #[default(b"0123456789")]
+    body: &'a [u8],
+    #[default("\"0\"")]
+    e_tag: &'a str,
+}
+
+fn expected_entry(key: &ObjectPath, setup: ExpectedEntrySetup<'_>) -> ObjectEntry {
+    let ExpectedEntrySetup {
+        suffix,
+        body,
+        e_tag,
+    } = setup;
     ObjectEntry {
         suffix: suffix.to_string(),
         key: key.to_string(),
@@ -188,77 +211,105 @@ fn multipart_manifest_entry_requires_a_version() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_copy_writes_a_manifest_next_to_the_segment() {
-    let keys = TempDir::new().unwrap();
-    let store = worm_rsm(Arc::new(InMemory::new()), &keys, false);
-    let md = stamped_metadata(50, 0, ChainHead::GENESIS);
-    seeded_blocking(store, md, true, move |store, md| {
-        // The manifest is the log's key with the suffix swapped, so a
-        // verifier that can list a partition prefix finds it beside the
-        // data it describes.
-        let manifest_key = store.segment_key(&md, MANIFEST_SUFFIX);
-        check!(
-            manifest_key.as_ref().trim_end_matches(MANIFEST_SUFFIX)
-                == store.log_key(&md).as_ref().trim_end_matches(".log")
-        );
+    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
+    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+        segment_id: uuid::Uuid::from_u128(50),
+        ..Default::default()
+    });
+    seeded_blocking(
+        store,
+        crate::s3::test_support::SeededCopySetup {
+            metadata: md,
+            ..Default::default()
+        },
+        move |store, md| {
+            // The manifest is the log's key with the suffix swapped, so a
+            // verifier that can list a partition prefix finds it beside the
+            // data it describes.
+            let manifest_key = store.segment_key(&md, MANIFEST_SUFFIX);
+            check!(
+                manifest_key.as_ref().trim_end_matches(MANIFEST_SUFFIX)
+                    == store.log_key(&md).as_ref().trim_end_matches(".log")
+            );
 
-        let manifest = read_manifest(&store, &md);
-        check!(manifest.body.segment == SegmentIdentity::from_metadata(&md));
-        check!(manifest.body.format_version == MANIFEST_FORMAT_VERSION);
-        assert!(let Some(signature) = manifest.signature.as_ref());
-        check!(signature.key_id == WORM_KEY_ID);
-        check!(verify_manifest_signature(
-            &manifest,
-            &signature.public_key.0
-        ));
-    })
+            let manifest = read_manifest(&store, &md);
+            check!(manifest.body.segment == SegmentIdentity::from_metadata(&md));
+            check!(manifest.body.format_version == MANIFEST_FORMAT_VERSION);
+            assert!(let Some(signature) = manifest.signature.as_ref());
+            check!(signature.key_id == WORM_KEY_ID);
+            check!(verify_manifest_signature(
+                &manifest,
+                &signature.public_key.0
+            ));
+        },
+    )
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_manifest_lists_every_object_with_its_digest() {
-    let keys = TempDir::new().unwrap();
-    let store = worm_rsm(Arc::new(InMemory::new()), &keys, false);
-    let md = stamped_metadata(51, 0, ChainHead::GENESIS);
-    seeded_blocking(store, md, true, move |store, md| {
-        // `InMemory` hands out etags from a per-store counter, so a fresh
-        // store numbers this copy's six objects 0..=5 in upload order.
-        // The digests are computed here from the fixture bodies, never
-        // from what the store reported.
-        let expected = vec![
-            expected_entry(".log", &store.log_key(&md), b"0123456789", "\"0\""),
-            expected_entry(
-                ".index",
-                &store.index_key(&md, IndexType::Offset),
-                b"OFFSET-IDX",
-                "\"1\"",
-            ),
-            expected_entry(
-                ".timeindex",
-                &store.index_key(&md, IndexType::Timestamp),
-                b"TIME-IDX",
-                "\"2\"",
-            ),
-            expected_entry(
-                ".snapshot",
-                &store.index_key(&md, IndexType::ProducerSnapshot),
-                b"SNAP",
-                "\"3\"",
-            ),
-            expected_entry(
-                ".leader_epoch_checkpoint",
-                &store.index_key(&md, IndexType::LeaderEpoch),
-                b"EPOCH-BYTES",
-                "\"4\"",
-            ),
-            expected_entry(
-                ".txnindex",
-                &store.index_key(&md, IndexType::Transaction),
-                b"TXN-IDX",
-                "\"5\"",
-            ),
-        ];
-        check!(read_manifest(&store, &md).body.objects == expected);
-    })
+    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
+    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+        segment_id: uuid::Uuid::from_u128(51),
+        ..Default::default()
+    });
+    seeded_blocking(
+        store,
+        crate::s3::test_support::SeededCopySetup {
+            metadata: md,
+            ..Default::default()
+        },
+        move |store, md| {
+            // `InMemory` hands out etags from a per-store counter, so a fresh
+            // store numbers this copy's six objects 0..=5 in upload order.
+            // The digests are computed here from the fixture bodies, never
+            // from what the store reported.
+            let expected = vec![
+                expected_entry(&store.log_key(&md), ExpectedEntrySetup::default()),
+                expected_entry(
+                    &store.index_key(&md, IndexType::Offset),
+                    ExpectedEntrySetup {
+                        suffix: ".index",
+                        body: b"OFFSET-IDX",
+                        e_tag: "\"1\"",
+                    },
+                ),
+                expected_entry(
+                    &store.index_key(&md, IndexType::Timestamp),
+                    ExpectedEntrySetup {
+                        suffix: ".timeindex",
+                        body: b"TIME-IDX",
+                        e_tag: "\"2\"",
+                    },
+                ),
+                expected_entry(
+                    &store.index_key(&md, IndexType::ProducerSnapshot),
+                    ExpectedEntrySetup {
+                        suffix: ".snapshot",
+                        body: b"SNAP",
+                        e_tag: "\"3\"",
+                    },
+                ),
+                expected_entry(
+                    &store.index_key(&md, IndexType::LeaderEpoch),
+                    ExpectedEntrySetup {
+                        suffix: ".leader_epoch_checkpoint",
+                        body: b"EPOCH-BYTES",
+                        e_tag: "\"4\"",
+                    },
+                ),
+                expected_entry(
+                    &store.index_key(&md, IndexType::Transaction),
+                    ExpectedEntrySetup {
+                        suffix: ".txnindex",
+                        body: b"TXN-IDX",
+                        e_tag: "\"5\"",
+                    },
+                ),
+            ];
+            check!(read_manifest(&store, &md).body.objects == expected);
+        },
+    )
     .await;
 }
 
@@ -267,9 +318,8 @@ async fn worm_manifest_lists_every_object_with_its_digest() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_manifest_omits_objects_the_copy_did_not_write() {
     let src = TempDir::new().unwrap();
-    let keys = TempDir::new().unwrap();
-    let store = worm_rsm(Arc::new(InMemory::new()), &keys, false);
-    let md = stamped_metadata(52, 0, ChainHead::GENESIS);
+    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
+    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup::default());
     let data = LogSegmentData {
         log_segment: write_file(src.path(), "00.log", b"0123456789"),
         offset_index: write_file(src.path(), "00.index", b"OFFSET-IDX"),
@@ -295,14 +345,17 @@ async fn worm_manifest_omits_objects_the_copy_did_not_write() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_copy_returns_a_receipt_with_the_new_head() {
     let src = TempDir::new().unwrap();
-    let keys = TempDir::new().unwrap();
-    let store = worm_rsm(Arc::new(InMemory::new()), &keys, false);
+    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
     let prev_head = ChainHead([1u8; 32]);
-    let md = stamped_metadata(53, 3, prev_head);
+    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+        segment_id: uuid::Uuid::from_u128(53),
+        sequence: crate::worm::ManifestSeq(3),
+        previous_head: prev_head,
+    });
     tokio::task::spawn_blocking(move || {
         assert!(let
             Ok(Some(custom)) =
-                store.copy_log_segment_data(&md, &sample_data(src.path(), false))
+                store.copy_log_segment_data(&md, &sample_data(src.path(), crate::test_support::TransactionIndex::Omitted))
         );
         assert!(let Ok(receipt) = WormChainRecord::from_custom_metadata(&custom));
 
@@ -326,11 +379,18 @@ async fn worm_copy_returns_a_receipt_with_the_new_head() {
 async fn worm_multipart_copy_refuses_replay() {
     let src = TempDir::new().unwrap();
     let keys = TempDir::new().unwrap();
-    let store = worm_rsm(Arc::new(InMemory::new()), &keys, false)
-        .with_multipart_tuning(krabka_units::bytes(8), krabka_units::bytes(4));
-    let md = stamped_metadata(54, 0, ChainHead::GENESIS);
+    let store = worm_rsm(
+        Arc::new(InMemory::new()),
+        &keys,
+        crate::s3::test_support::WormAccess::ReadWrite,
+    )
+    .with_multipart_tuning(krabka_units::bytes(8), krabka_units::bytes(4));
+    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+        segment_id: uuid::Uuid::from_u128(54),
+        ..Default::default()
+    });
     tokio::task::spawn_blocking(move || {
-        let data = sample_data(src.path(), true);
+        let data = sample_data(src.path(), crate::test_support::TransactionIndex::Present);
         store.copy_log_segment_data(&md, &data).unwrap();
         let first = read_manifest(&store, &md);
         check!(!first.body.objects[0].create_precondition);
@@ -369,9 +429,9 @@ async fn worm_multipart_copy_refuses_replay() {
 async fn non_worm_copy_writes_no_manifest_and_returns_none() {
     let store = rsm(None);
     let src = TempDir::new().unwrap();
-    let md = sample_metadata(57);
+    let md = sample_metadata(uuid::Uuid::from_u128(57));
     tokio::task::spawn_blocking(move || {
-        let data = sample_data(src.path(), true);
+        let data = sample_data(src.path(), crate::test_support::TransactionIndex::Present);
         check!(store.copy_log_segment_data(&md, &data).unwrap().is_none());
         check!(matches!(
             S3RemoteStorage::block_os(store.ops.get(&store.segment_key(&md, MANIFEST_SUFFIX))),
@@ -387,13 +447,12 @@ async fn non_worm_copy_writes_no_manifest_and_returns_none() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_copy_without_a_chain_stamp_is_refused() {
     let src = TempDir::new().unwrap();
-    let keys = TempDir::new().unwrap();
-    let store = worm_rsm(Arc::new(InMemory::new()), &keys, false);
+    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
     // No `with_custom_metadata`: the broker did not stamp this segment.
-    let md = sample_metadata(58);
+    let md = sample_metadata(uuid::Uuid::from_u128(58));
     tokio::task::spawn_blocking(move || {
         assert!(let
-            Err(err) = store.copy_log_segment_data(&md, &sample_data(src.path(), false))
+            Err(err) = store.copy_log_segment_data(&md, &sample_data(src.path(), crate::test_support::TransactionIndex::Omitted))
         );
         check!(matches!(
             err,

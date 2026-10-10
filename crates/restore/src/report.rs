@@ -411,6 +411,7 @@ fn format_thousands(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use assert2::check;
+    use krabka_ids::Offset;
     use uuid::Uuid;
 
     use super::{
@@ -418,30 +419,56 @@ mod tests {
         SkippedSegment, format_thousands, plural,
     };
 
-    fn segment(
-        base: i64,
-        end: i64,
-        kept: u64,
-        dropped: u64,
-        rewritten: u64,
-        emptied: u64,
-    ) -> SegmentOutcome {
+    #[derive(Clone, Copy, Default)]
+    struct RestoredRecordCount(u64);
+
+    #[derive(Clone, Copy, Default)]
+    struct RestoredBatchCount(u64);
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct SegmentOutcomeSetup {
+        #[default(Offset(0))]
+        base: Offset,
+        #[default(Offset(402))]
+        end: Offset,
+        #[default(RestoredRecordCount(402))]
+        kept: RestoredRecordCount,
+        dropped: RestoredRecordCount,
+        rewritten: RestoredBatchCount,
+        emptied: RestoredBatchCount,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum RestoreMode {
+        Perform,
+        DryRun,
+    }
+
+    fn segment(setup: SegmentOutcomeSetup) -> SegmentOutcome {
+        let SegmentOutcomeSetup {
+            base,
+            end,
+            kept,
+            dropped,
+            rewritten,
+            emptied,
+        } = setup;
         SegmentOutcome {
-            segment_id: Uuid::from_u128(u128::from(base.unsigned_abs()) + 1),
-            base_offset: base.into(),
-            end_offset: end.into(),
+            segment_id: Uuid::from_u128(u128::from(base.0.unsigned_abs()) + 1),
+            base_offset: base,
+            end_offset: end,
             batches_kept: 1,
-            batches_rewritten: rewritten,
-            batches_emptied: emptied,
-            records_kept: kept,
-            records_dropped: dropped,
+            batches_rewritten: rewritten.0,
+            batches_emptied: emptied.0,
+            records_kept: kept.0,
+            records_dropped: dropped.0,
             bytes_written: 1024,
         }
     }
 
-    fn sample_report(dry_run: bool) -> RestoreReport {
+    fn sample_report(mode: RestoreMode) -> RestoreReport {
         RestoreReport {
-            dry_run,
+            dry_run: mode == RestoreMode::DryRun,
             log_dir: "/var/lib/krabka/restored".into(),
             cluster_id: Uuid::from_u128(0xC1_A5_7E_00),
             authentication: None,
@@ -461,21 +488,39 @@ mod tests {
                     partition: 0,
                     topic_id: Uuid::from_u128(0x0001),
                     segments: vec![
-                        segment(0, 4999, 4995, 5, 1, 0),
-                        segment(5000, 12489, 7485, 4, 0, 1),
+                        segment(SegmentOutcomeSetup {
+                            end: Offset(4999),
+                            kept: RestoredRecordCount(4995),
+                            dropped: RestoredRecordCount(5),
+                            rewritten: RestoredBatchCount(1),
+                            ..Default::default()
+                        }),
+                        segment(SegmentOutcomeSetup {
+                            base: Offset(5000),
+                            end: Offset(12489),
+                            kept: RestoredRecordCount(7485),
+                            dropped: RestoredRecordCount(4),
+                            emptied: RestoredBatchCount(1),
+                            ..Default::default()
+                        }),
                     ],
                 },
                 PartitionReport {
                     topic: "orders".to_owned(),
                     partition: 1,
                     topic_id: Uuid::from_u128(0x0001),
-                    segments: vec![segment(0, 8021, 8015, 6, 0, 0)],
+                    segments: vec![segment(SegmentOutcomeSetup {
+                        end: Offset(8021),
+                        kept: RestoredRecordCount(8015),
+                        dropped: RestoredRecordCount(6),
+                        ..Default::default()
+                    })],
                 },
                 PartitionReport {
                     topic: "orders-archive".to_owned(),
                     partition: 0,
                     topic_id: Uuid::from_u128(0x0002),
-                    segments: vec![segment(0, 402, 402, 0, 0, 0)],
+                    segments: vec![segment(SegmentOutcomeSetup::default())],
                 },
             ],
             skipped: vec![SkippedSegment {
@@ -516,7 +561,7 @@ mod tests {
 
     #[test]
     fn text_rendering_contains_key_facts() {
-        let report = sample_report(false);
+        let report = sample_report(RestoreMode::Perform);
         let text = report.render(ReportFormat::Text);
 
         check!(text.contains("orders"));
@@ -554,7 +599,7 @@ mod tests {
                 topic: "orders-archive".to_owned(),
                 partition: 0,
                 topic_id: Uuid::nil(),
-                segments: vec![segment(0, 402, 402, 0, 0, 0)],
+                segments: vec![segment(SegmentOutcomeSetup::default())],
             }],
             skipped: vec![],
         };
@@ -571,8 +616,8 @@ mod tests {
 
     #[test]
     fn dry_run_is_visible_in_text() {
-        let dry = sample_report(true).render(ReportFormat::Text);
-        let real = sample_report(false).render(ReportFormat::Text);
+        let dry = sample_report(RestoreMode::DryRun).render(ReportFormat::Text);
+        let real = sample_report(RestoreMode::Perform).render(ReportFormat::Text);
 
         check!(dry.contains("dry run"));
         check!(!real.contains("dry run"));
@@ -580,7 +625,7 @@ mod tests {
 
     #[test]
     fn empty_skipped_list_omits_section() {
-        let mut report = sample_report(false);
+        let mut report = sample_report(RestoreMode::Perform);
         report.skipped.clear();
         let text = report.render(ReportFormat::Text);
 
@@ -589,7 +634,7 @@ mod tests {
 
     #[test]
     fn nonempty_skipped_list_names_every_segment_and_reason() {
-        let mut report = sample_report(false);
+        let mut report = sample_report(RestoreMode::Perform);
         report.skipped.push(SkippedSegment {
             topic: "returns".to_owned(),
             partition: 7,
@@ -641,16 +686,29 @@ mod tests {
 
     #[test]
     fn json_rendering_round_trips_field_values() {
-        let report = sample_report(false);
+        let report = sample_report(RestoreMode::Perform);
         let json = report.render(ReportFormat::Json);
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
 
         check!(value["dry_run"] == serde_json::json!(false));
-        check!(value["cluster_id"] == serde_json::json!(report.cluster_id.to_string()));
-        check!(value["partitions"][0]["topic"] == serde_json::json!("orders"));
-        check!(value["partitions"][0]["partition"] == serde_json::json!(0));
-        check!(value["partitions"][0]["segments"][0]["records_kept"] == serde_json::json!(4995));
-        check!(value["partitions"][0]["segments"][1]["batches_emptied"] == serde_json::json!(1));
+        for (pointer, expected) in [
+            (
+                "/cluster_id",
+                serde_json::json!(report.cluster_id.to_string()),
+            ),
+            ("/partitions/0/topic", serde_json::json!("orders")),
+            ("/partitions/0/partition", serde_json::json!(0)),
+            (
+                "/partitions/0/segments/0/records_kept",
+                serde_json::json!(4995),
+            ),
+            (
+                "/partitions/0/segments/1/batches_emptied",
+                serde_json::json!(1),
+            ),
+        ] {
+            check!(value.pointer(pointer) == Some(&expected), "{pointer}");
+        }
         check!(
             value["skipped"][0]["reason"]
                 == serde_json::json!("checksum mismatch in batch at offset 900")

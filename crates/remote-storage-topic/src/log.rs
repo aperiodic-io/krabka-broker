@@ -58,6 +58,17 @@ pub struct PartitionStart {
     pub start_offset: i64,
 }
 
+impl PartitionStart {
+    /// Consume one partition beginning at the inclusive offset.
+    #[must_use]
+    pub const fn new(partition: i32, start_offset: i64) -> Self {
+        Self {
+            partition,
+            start_offset,
+        }
+    }
+}
+
 /// Runtime control over a live [`MetadataEventLog`] subscription's assigned
 /// partition set. [`MetadataEventLog::subscribe`] returns it together with
 /// the stream.

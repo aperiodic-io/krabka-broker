@@ -75,6 +75,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic};
 
     #[test]
     fn forgotten_topic_name_drops_only_matching_topic_partition() {
@@ -89,12 +90,7 @@ mod tests {
                 topic_id: WireUuid::ZERO,
                 partition: 0,
             } => CachedPartitionState::default()};
-        let forgotten = vec![ForgottenTopic {
-            topic: "t".into(),
-            topic_id: WireUuid::ZERO,
-            partitions: vec![0],
-            ..Default::default()
-        }];
+        let forgotten = vec![forgotten_topic(ForgottenTopicSetup::default())];
 
         apply_incremental(&mut partitions, &forgotten, &[]);
 
@@ -125,12 +121,11 @@ mod tests {
                 topic_id: other_tid,
                 partition: 0,
             } => CachedPartitionState::default()};
-        let forgotten = vec![ForgottenTopic {
+        let forgotten = vec![forgotten_topic(ForgottenTopicSetup {
             topic: String::new(),
             topic_id: tid,
-            partitions: vec![0],
             ..Default::default()
-        }];
+        })];
 
         apply_incremental(&mut partitions, &forgotten, &[]);
 
@@ -157,12 +152,13 @@ mod fuzz {
     use std::collections::HashMap;
 
     use krabka_protocol::{
-        owned::fetch_request::{FetchPartition, FetchTopic, ForgottenTopic},
+        owned::fetch_request::{FetchPartition, FetchTopic},
         primitives::uuid::Uuid as WireUuid,
     };
     use proptest::prelude::*;
 
     use super::{CachedPartitionState, FetchSessionKey, apply_incremental};
+    use crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic};
 
     // name index 0 = empty (id-only wire form), 1 = "A", 2 = "B".
     fn name_of(i: u8) -> String {
@@ -191,12 +187,7 @@ mod fuzz {
                 let forgotten = if fname == 0 && fid == 0 {
                     vec![]
                 } else {
-                    vec![ForgottenTopic {
-                        topic: name_of(fname),
-                        topic_id: id_of(fid),
-                        partitions: vec![fp],
-                        ..Default::default()
-                    }]
+                    vec![forgotten_topic(ForgottenTopicSetup {topic: name_of(fname), topic_id: id_of(fid), partitions: vec![krabka_ids::PartitionIndex(fp)]})]
                 };
                 let subscribe = do_sub && !(sname == 0 && sid == 0);
                 let topics = if subscribe {

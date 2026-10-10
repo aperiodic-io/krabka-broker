@@ -29,17 +29,32 @@ use crate::{
 const VERSION: i16 = 9;
 
 async fn create_topic(broker: &BrokerHandle, name: &str) {
-    crate::handlers::test_support::create_topic(broker, "broker-default-test", name, 1).await;
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "broker-default-test",
+            name,
+            ..Default::default()
+        },
+    )
+    .await;
+}
+
+/// One dynamic config override; default to a cluster-wide two-MiB message cap.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct BrokerConfigSetup<'a> {
+    #[default(DEFAULT_BROKER_CONFIG_NODE_ID)]
+    node: krabka_metadata::NodeId,
+    #[default("message.max.bytes")]
+    name: &'a str,
+    #[default("2097152")]
+    value: &'a str,
 }
 
 /// The stored value of one dynamic broker config, on `node` (the cluster
 /// default for [`DEFAULT_BROKER_CONFIG_NODE_ID`]).
-async fn set_broker_config(
-    broker: &BrokerHandle,
-    node: krabka_metadata::NodeId,
-    name: &str,
-    value: &str,
-) {
+async fn set_broker_config(broker: &BrokerHandle, setup: BrokerConfigSetup<'_>) {
+    let BrokerConfigSetup { node, name, value } = setup;
     broker
         .broker_arc_for_test()
         .controller
@@ -105,17 +120,19 @@ async fn a_dynamic_message_max_bytes_governs_a_topic_that_sets_no_cap() {
     assert!(produce_error_code(&broker, "orders", batch).await == codes::MESSAGE_TOO_LARGE);
 
     // A cluster-wide default of 2 MiB lets it through.
-    set_broker_config(
-        &broker,
-        DEFAULT_BROKER_CONFIG_NODE_ID,
-        "message.max.bytes",
-        "2097152",
-    )
-    .await;
+    set_broker_config(&broker, BrokerConfigSetup::default()).await;
     assert!(produce_error_code(&broker, "orders", batch).await == codes::NONE);
 
     // This node's own value wins over the cluster's.
-    set_broker_config(&broker, node, "message.max.bytes", "1100000").await;
+    set_broker_config(
+        &broker,
+        BrokerConfigSetup {
+            node,
+            value: "1100000",
+            ..Default::default()
+        },
+    )
+    .await;
     assert!(produce_error_code(&broker, "orders", batch).await == codes::MESSAGE_TOO_LARGE);
 
     broker.shutdown().await;
@@ -147,13 +164,29 @@ async fn a_dynamic_max_decompressed_message_bytes_refuses_an_oversized_compresse
 
     // A cluster-wide 512 refuses the compressed record and not the small one,
     // and not the same record sent uncompressed.
-    set_broker_config(&broker, DEFAULT_BROKER_CONFIG_NODE_ID, key, "512").await;
+    set_broker_config(
+        &broker,
+        BrokerConfigSetup {
+            name: key,
+            value: "512",
+            ..Default::default()
+        },
+    )
+    .await;
     assert!(gzip(record).await == codes::INVALID_RECORD);
     assert!(gzip(64).await == codes::NONE);
     assert!(produce_error_code(&broker, "orders", record).await == codes::NONE);
 
     // This node's own value wins over the cluster's.
-    set_broker_config(&broker, node, key, "8192").await;
+    set_broker_config(
+        &broker,
+        BrokerConfigSetup {
+            node,
+            name: key,
+            value: "8192",
+        },
+    )
+    .await;
     assert!(gzip(record).await == codes::NONE);
 
     broker.shutdown().await;
@@ -167,9 +200,11 @@ async fn a_default_broker_ignores_max_decompressed_message_bytes() {
     create_topic(&broker, "orders").await;
     set_broker_config(
         &broker,
-        DEFAULT_BROKER_CONFIG_NODE_ID,
-        "max.decompressed.message.bytes",
-        "512",
+        BrokerConfigSetup {
+            name: "max.decompressed.message.bytes",
+            value: "512",
+            ..Default::default()
+        },
     )
     .await;
 

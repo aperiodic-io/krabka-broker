@@ -301,13 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_marks_expired_broker_dead() {
-        let clock = TestClock::new();
-        let liveness =
-            ControllerLivenessState::with_clock(Duration::from_millis(10), clock.clock());
-        liveness.record_heartbeat(2).await;
-        // Advance past the timeout deterministically (no wall-clock sleep).
-        clock.advance(Duration::from_millis(11));
-        let transitions = liveness.tick().await;
+        let (_clock, liveness, transitions) = crate::test_support::expired_broker_fixture(2).await;
         assert!(transitions == vec![LivenessTransition::AliveToDead(2)]);
         assert!(liveness.state(2).await == Some(BrokerLivenessState::Dead));
     }
@@ -387,43 +381,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn normal_seed_gives_brokers_full_timeout_window() {
-        let clock = TestClock::new();
-        let liveness =
-            ControllerLivenessState::with_clock(Duration::from_millis(50), clock.clock());
-        liveness
-            .seed_brokers([ReplicatedRegistration::unfenced(7)])
-            .await;
-        // Well within the 50ms window — deterministically still alive.
-        clock.advance(Duration::from_millis(1));
-
-        let transitions = liveness.tick().await;
-
-        assert!(transitions.is_empty());
-        assert!(liveness.state(7).await == Some(BrokerLivenessState::Alive));
-    }
-
-    #[tokio::test]
-    async fn normal_seed_refreshes_existing_entries() {
-        let clock = TestClock::new();
-        let liveness =
-            ControllerLivenessState::with_clock(Duration::from_millis(10), clock.clock());
-        liveness.record_heartbeat(7).await;
-        // Let the original heartbeat go stale relative to the 10ms window...
-        clock.advance(Duration::from_millis(20));
-
-        // ...a normal re-seed must REFRESH the existing entry to a full window,
-        liveness
-            .seed_brokers([ReplicatedRegistration::unfenced(7)])
-            .await;
-        // so 1ms later it is nowhere near expiry. Were the refresh missing, the
-        // entry would be ~21ms stale here and `tick` would mark it dead — which
-        // is exactly the regression this test guards.
-        clock.advance(Duration::from_millis(1));
-        let transitions = liveness.tick().await;
-
-        assert!(transitions.is_empty());
-        assert!(liveness.state(7).await == Some(BrokerLivenessState::Alive));
+    async fn normal_seed_gives_new_and_existing_brokers_a_full_timeout_window() {
+        for (timeout_ms, stale_heartbeat_ms) in [(50, None), (10, Some(20))] {
+            let clock = TestClock::new();
+            let liveness = ControllerLivenessState::with_clock(
+                Duration::from_millis(timeout_ms),
+                clock.clock(),
+            );
+            if let Some(age_ms) = stale_heartbeat_ms {
+                liveness.record_heartbeat(7).await;
+                clock.advance(Duration::from_millis(age_ms));
+            }
+            // A re-seed refreshes even a stale entry to a full timeout window.
+            liveness
+                .seed_brokers([ReplicatedRegistration::unfenced(7)])
+                .await;
+            clock.advance(Duration::from_millis(1));
+            let transitions = liveness.tick().await;
+            assert!(transitions.is_empty());
+            assert!(liveness.state(7).await == Some(BrokerLivenessState::Alive));
+        }
     }
 
     /// krabka-io/krabka-broker#822: a broker id is held against a new

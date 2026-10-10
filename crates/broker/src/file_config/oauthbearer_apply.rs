@@ -272,6 +272,21 @@ mod tests {
 
     use crate::file_config::{FileConfig, FileConfigError};
 
+    fn check_unsecured(cfg: &crate::config::BrokerConfig) {
+        assert!(cfg.oauthbearer_jwks_endpoint.is_none());
+        assert!(matches!(
+            cfg.oauthbearer_validator,
+            krabka_security::OAuthBearerValidator::Unsecured(_)
+        ));
+    }
+
+    fn client_secret(value: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("client-secret");
+        std::fs::write(&path, value).unwrap();
+        (dir, path)
+    }
+
     #[test]
     fn apply_to_oauthbearer_jwks_selects_signed_validator() {
         let src = r#"
@@ -356,11 +371,7 @@ principal_claim_name = "sub"
 allowable_clock_skew_ms = 5000
 "#;
         let cfg = crate::file_config::test_support::configured(src, "parse").unwrap();
-        assert!(cfg.oauthbearer_jwks_endpoint.is_none());
-        assert!(matches!(
-            cfg.oauthbearer_validator,
-            krabka_security::OAuthBearerValidator::Unsecured(_)
-        ));
+        check_unsecured(&cfg);
     }
 
     #[test]
@@ -394,11 +405,7 @@ advertised = "host:9092"
 protocol = "Plaintext"
 "#;
         let cfg = crate::file_config::test_support::configured(src, "parse").unwrap();
-        assert!(cfg.oauthbearer_jwks_endpoint.is_none());
-        assert!(matches!(
-            cfg.oauthbearer_validator,
-            krabka_security::OAuthBearerValidator::Unsecured(_)
-        ));
+        check_unsecured(&cfg);
     }
 
     #[test]
@@ -427,9 +434,7 @@ jwks_endpoint_uri = "https://idp.example/certs"
 
     #[test]
     fn apply_to_oauthbearer_selects_introspection_validator_when_endpoint_set() {
-        let dir = tempfile::tempdir().unwrap();
-        let secret_path = dir.path().join("client-secret");
-        std::fs::write(&secret_path, "the-secret").unwrap();
+        let (_dir, secret_path) = client_secret("the-secret");
         let toml = format!(
             r#"
 [oauthbearer]
@@ -449,9 +454,7 @@ introspection_client_secret_path = '{}'
     #[test]
     #[should_panic(expected = "mutually exclusive")]
     fn apply_to_oauthbearer_rejects_both_jwks_and_introspection_set() {
-        let dir = tempfile::tempdir().unwrap();
-        let secret_path = dir.path().join("client-secret");
-        std::fs::write(&secret_path, "x").unwrap();
+        let (_dir, secret_path) = client_secret("x");
         let toml = format!(
             r#"
 [oauthbearer]
@@ -468,9 +471,7 @@ introspection_client_secret_path = '{}'
     #[test]
     #[should_panic(expected = "introspection_client_id")]
     fn apply_to_oauthbearer_introspection_requires_client_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let secret_path = dir.path().join("client-secret");
-        std::fs::write(&secret_path, "x").unwrap();
+        let (_dir, secret_path) = client_secret("x");
         let toml = format!(
             r#"
 [oauthbearer]
@@ -494,45 +495,32 @@ introspection_client_id = "kafka-broker"
     }
 
     #[test]
-    fn apply_to_oauthbearer_introspection_with_userinfo_sets_call_userinfo_true() {
-        let dir = tempfile::tempdir().unwrap();
-        let secret_path = dir.path().join("client-secret");
-        std::fs::write(&secret_path, "x").unwrap();
-        let toml = format!(
-            r#"
+    fn introspection_calls_userinfo_only_when_an_endpoint_is_configured() {
+        for (userinfo, expected) in [
+            (
+                "userinfo_endpoint_uri = \"https://idp.example/userinfo\"\n",
+                true,
+            ),
+            ("", false),
+        ] {
+            let (_dir, secret_path) = client_secret("x");
+            let toml = format!(
+                r#"
 [oauthbearer]
 introspection_endpoint_uri = "https://idp.example/introspect"
-userinfo_endpoint_uri = "https://idp.example/userinfo"
-introspection_client_id = "id"
+{userinfo}introspection_client_id = "id"
 introspection_client_secret_path = '{}'
 "#,
-            secret_path.display()
-        );
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(&toml).unwrap();
-        match cfg.oauthbearer_validator {
-            krabka_security::OAuthBearerValidator::Introspection(v) => assert!(v.call_userinfo),
-            other => panic!("expected Introspection, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn apply_to_oauthbearer_introspection_without_userinfo_sets_call_userinfo_false() {
-        let dir = tempfile::tempdir().unwrap();
-        let secret_path = dir.path().join("client-secret");
-        std::fs::write(&secret_path, "x").unwrap();
-        let toml = format!(
-            r#"
-[oauthbearer]
-introspection_endpoint_uri = "https://idp.example/introspect"
-introspection_client_id = "id"
-introspection_client_secret_path = '{}'
-"#,
-            secret_path.display()
-        );
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(&toml).unwrap();
-        match cfg.oauthbearer_validator {
-            krabka_security::OAuthBearerValidator::Introspection(v) => assert!(!v.call_userinfo),
-            other => panic!("expected Introspection, got {other:?}"),
+                secret_path.display()
+            );
+            let cfg = crate::file_config::test_support::configured_unwrap_parse(&toml).unwrap();
+            match cfg.oauthbearer_validator {
+                krabka_security::OAuthBearerValidator::Introspection(v) => assert!(
+                    v.call_userinfo == expected,
+                    "userinfo endpoint: {userinfo:?}"
+                ),
+                other => panic!("expected Introspection, got {other:?}"),
+            }
         }
     }
 }

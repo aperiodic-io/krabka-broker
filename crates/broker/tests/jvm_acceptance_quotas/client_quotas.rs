@@ -108,10 +108,14 @@ async fn quota_round_trip(case: QuotaCase<'_>) {
         users,
     } = case;
 
-    let (h1, h2, h3, _cfg1, _cfg2, _cfg3, _d1, _d2, _d3) = Box::pin(
-        crate::jvm_acceptance::start_registered_sasl_cluster(ADMIN, ADMIN_PASS, users),
-    )
-    .await;
+    let (h1, h2, h3, _cfg1, _cfg2, _cfg3, _d1, _d2, _d3) =
+        Box::pin(crate::jvm_acceptance::start_registered_sasl_cluster(
+            crate::jvm_acceptance::SaslClusterSetup {
+                extra_users: users,
+                ..Default::default()
+            },
+        ))
+        .await;
 
     let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
     let admin_mount = admin_props.mount_str();

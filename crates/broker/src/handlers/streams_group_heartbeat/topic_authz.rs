@@ -116,12 +116,7 @@ mod tests {
         let topology = Topology {
             epoch: 1,
             subtopologies: vec![
-                Subtopology {
-                    subtopology_id: "0".into(),
-                    source_topics: vec!["orders".into()],
-                    repartition_sink_topics: vec!["rp".into()],
-                    ..Default::default()
-                },
+                crate::test_support::source_to_repartition(),
                 Subtopology {
                     subtopology_id: "1".into(),
                     source_topics: vec!["orders".into()],

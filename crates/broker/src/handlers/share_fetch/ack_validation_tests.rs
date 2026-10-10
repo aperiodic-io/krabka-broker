@@ -30,6 +30,9 @@ use crate::{
     authorizer::AuthorizationResult,
     broker::BrokerHandle,
     codes,
+    handlers::test_support::{
+        AcknowledgementMode, AcknowledgementPartitionSetup, ShareSessionEpoch,
+    },
     share_partition::state::RecordState::{self, Acquired},
     test_support::start_broker_no_audit_with,
 };
@@ -71,51 +74,81 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 }
 
 async fn create_topic(broker: &BrokerHandle) -> WireUuid {
-    crate::handlers::test_support::create_topic(broker, "ack-order-test", TOPIC, 1).await
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "ack-order-test",
+            name: TOPIC,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// Appends one batch of three records to partition 0.
 async fn produce(broker: &BrokerHandle) {
-    crate::handlers::test_support::produce_records(broker, TOPIC, 0, 3).await;
+    crate::handlers::test_support::produce_records(
+        broker,
+        crate::handlers::test_support::ProduceRecordsSetup {
+            topic: TOPIC,
+            ..Default::default()
+        },
+    )
+    .await;
 }
 
 /// Starts `group` at the earliest offset and lets [`READER`] acquire offsets
 /// 0 to 2 at epoch 0.
 async fn acquire_all(broker: &BrokerHandle, group: &str, topic_id: WireUuid) {
     crate::handlers::test_support::initialize_earliest_share(broker, group, topic_id, 0..1).await;
-    let response = share_fetch(broker, READER, group, 0, topic_id, &[(0, &[])], false).await;
+    let response = share_fetch(
+        broker,
+        ValidationFetchSetup {
+            group,
+            epoch: ShareSessionEpoch(0),
+            topic_id,
+            ..Default::default()
+        },
+    )
+    .await;
     let acquired: Vec<_> =
         crate::handlers::test_support::acquired_share_records(&response.responses[0].partitions[0]);
     assert!(acquired == vec![(0, 2)], "{response:?}");
 }
 
 /// A `ShareFetch` that names each `(partition, batches)` row of `rows`.
-async fn share_fetch(
-    broker: &BrokerHandle,
-    user: &str,
-    group: &str,
-    epoch: i32,
+#[derive(krabka_macros::FieldDefaults)]
+struct ValidationFetchSetup<'a> {
+    #[default(READER)]
+    user: &'a str,
+    #[default("ack-order")]
+    group: &'a str,
+    epoch: ShareSessionEpoch,
     topic_id: WireUuid,
-    rows: &[(i32, &[Batch])],
-    is_renew_ack: bool,
-) -> ShareFetchResponse {
+    #[default(vec![AcknowledgementPartitionSetup::default()])]
+    rows: Vec<AcknowledgementPartitionSetup>,
+    mode: AcknowledgementMode,
+}
+
+async fn share_fetch(broker: &BrokerHandle, setup: ValidationFetchSetup<'_>) -> ShareFetchResponse {
     let request = ShareFetchRequest {
-        group_id: Some(group.into()),
+        group_id: Some(setup.group.into()),
         member_id: Some("member".into()),
-        share_session_epoch: epoch,
+        share_session_epoch: setup.epoch.0,
         max_bytes: 1 << 20,
         max_records: 500,
         batch_size: 500,
-        is_renew_ack,
+        is_renew_ack: matches!(setup.mode, AcknowledgementMode::Renew),
         topics: vec![FetchTopic {
-            topic_id,
-            partitions: rows
-                .iter()
-                .map(|&(partition_index, batches)| FetchPartition {
-                    partition_index,
+            topic_id: setup.topic_id,
+            partitions: setup
+                .rows
+                .into_iter()
+                .map(|row| FetchPartition {
+                    partition_index: row.index.0,
                     acknowledgement_batches: acknowledgement_batches!(
                         FetchAcknowledgeBatch,
-                        batches
+                        row.batches
                     ),
                     ..Default::default()
                 })
@@ -124,25 +157,48 @@ async fn share_fetch(
         }],
         ..Default::default()
     };
-    crate::handlers::test_support::share_fetch_wire_as(broker, VERSION, user, &request).await
+    crate::handlers::test_support::share_fetch_wire(
+        broker,
+        &request,
+        crate::handlers::test_support::ShareWireSetup {
+            version: krabka_ids::ApiVersion(VERSION),
+            user: setup.user,
+        },
+    )
+    .await
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+struct ValidationAcknowledgeSetup<'a> {
+    #[default(READER)]
+    user: &'a str,
+    #[default("ack-order")]
+    group: &'a str,
+    topic_id: WireUuid,
+    partition: AcknowledgementPartitionSetup,
 }
 
 async fn share_acknowledge(
     broker: &BrokerHandle,
-    user: &str,
-    group: &str,
-    topic_id: WireUuid,
-    (partition_index, batches): (i32, &[Batch]),
+    setup: ValidationAcknowledgeSetup<'_>,
 ) -> ShareAcknowledgeResponse {
     let request = crate::handlers::test_support::acknowledge_batches_request(
-        group,
-        "member",
-        1,
-        topic_id,
-        (partition_index, batches),
-        false,
+        crate::handlers::test_support::AcknowledgementSetup {
+            group: setup.group,
+            topic_id: setup.topic_id,
+            partition: setup.partition,
+            ..Default::default()
+        },
     );
-    crate::handlers::test_support::share_acknowledge_wire_as(broker, VERSION, user, &request).await
+    crate::handlers::test_support::share_acknowledge_wire(
+        broker,
+        &request,
+        crate::handlers::test_support::ShareWireSetup {
+            version: krabka_ids::ApiVersion(VERSION),
+            user: setup.user,
+        },
+    )
+    .await
 }
 
 async fn record_states(broker: &BrokerHandle, group: &str, topic_id: WireUuid) -> Vec<RecordState> {
@@ -245,12 +301,17 @@ async fn acknowledge_checks_run_in_kafka_order() {
         acquire_all(&broker, &group, topic_id).await;
         let response = share_fetch(
             &broker,
-            case.user,
-            &group,
-            1,
-            topic_id,
-            &[(case.partition, case.batches)],
-            false,
+            ValidationFetchSetup {
+                user: case.user,
+                group: &group,
+                topic_id,
+                rows: [(case.partition, case.batches)]
+                    .iter()
+                    .copied()
+                    .map(AcknowledgementPartitionSetup::from_wire)
+                    .collect(),
+                ..Default::default()
+            },
         )
         .await;
         let row = &response.responses[0].partitions[0];
@@ -275,10 +336,12 @@ async fn acknowledge_checks_run_in_kafka_order() {
         acquire_all(&broker, &group, topic_id).await;
         let response = share_acknowledge(
             &broker,
-            case.user,
-            &group,
-            topic_id,
-            (case.partition, case.batches),
+            ValidationAcknowledgeSetup {
+                user: case.user,
+                group: &group,
+                topic_id,
+                partition: AcknowledgementPartitionSetup::from_wire((case.partition, case.batches)),
+            },
         )
         .await;
         let row = &response.responses[0].partitions[0];
@@ -308,7 +371,16 @@ async fn a_denied_row_without_acknowledgements_has_no_acknowledge_error() {
     produce(&broker).await;
     acquire_all(&broker, "no-acks", topic_id).await;
 
-    let response = share_fetch(&broker, DENIED, "no-acks", 1, topic_id, &[(0, &[])], false).await;
+    let response = share_fetch(
+        &broker,
+        ValidationFetchSetup {
+            user: DENIED,
+            group: "no-acks",
+            topic_id,
+            ..Default::default()
+        },
+    )
+    .await;
     let row = &response.responses[0].partitions[0];
 
     assert!(

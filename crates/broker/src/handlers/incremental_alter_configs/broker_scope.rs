@@ -22,7 +22,7 @@ use crate::{
     config_keys::{
         self,
         broker_dynamic::{
-            BrokerKeyKind, CLUSTER_DEFAULT_ONLY, broker_key_kind, broker_resource_node,
+            BrokerConfigContext, BrokerKeyKind, CLUSTER_DEFAULT_ONLY, broker_key_kind,
             cordoned_log_dirs_disabled_error, cordoned_log_dirs_error, elr_min_isr_error,
             validate_dynamic_broker_configs,
         },
@@ -104,12 +104,9 @@ fn apply_operations(
 /// role.
 fn broker_records(
     resource: &AlterConfigsResource,
-    image: &MetadataImage,
-    serving: NodeId,
-    log_dirs: &[std::path::PathBuf],
-    unstable: UnstableApiVersions,
+    context: BrokerConfigContext<'_>,
 ) -> Result<Vec<MetadataRecord>, (i16, String)> {
-    let node_id = broker_resource_node(&resource.resource_name, serving)?;
+    let node_id = context.resource_node(&resource.resource_name)?;
     if let Some(cfg) = resource.configs.iter().find(|cfg| {
         !matches!(
             cfg.config_operation,
@@ -144,20 +141,21 @@ fn broker_records(
             ));
         }
     }
-    let mut props: BTreeMap<String, String> = image
+    let mut props: BTreeMap<String, String> = context
+        .image
         .broker_config(node_id)
         .into_iter()
         .flatten()
         .filter(|(name, _)| !config_keys::is_controller_managed_broker_config(name))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
-    apply_operations(resource, &mut props, unstable)?;
+    apply_operations(resource, &mut props, context.unstable)?;
     let per_broker = node_id != krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID;
     // The records carry the client's strings, as Kafka's do: validation
     // parses a value and keeps nothing of the parse.
-    validate_dynamic_broker_configs(&props, per_broker, unstable)?;
+    validate_dynamic_broker_configs(&props, per_broker, context.unstable)?;
     if per_broker {
-        cordoned_log_dirs_error(&props, log_dirs)?;
+        cordoned_log_dirs_error(&props, context.log_dirs)?;
     }
 
     // Kafka writes a record for every key the request names, changed or not
@@ -165,10 +163,11 @@ fn broker_records(
     let mut records = Vec::with_capacity(resource.configs.len());
     for cfg in &resource.configs {
         let value = props.get(&cfg.name).cloned();
-        if let Some(error) = elr_min_isr_error(image, node_id, &cfg.name, value.as_deref()) {
+        if let Some(error) = elr_min_isr_error(context.image, node_id, &cfg.name, value.as_deref())
+        {
             return Err(error);
         }
-        if let Some(error) = cordoned_log_dirs_disabled_error(image, &cfg.name) {
+        if let Some(error) = cordoned_log_dirs_disabled_error(context.image, &cfg.name) {
             return Err(error);
         }
         records.push(MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
@@ -188,7 +187,15 @@ pub(super) fn handle_broker_scoped(
     out: &mut AlterConfigsResourceResponse,
     to_submit: &mut Vec<MetadataRecord>,
 ) {
-    match broker_records(resource, image, serving, log_dirs, unstable) {
+    match broker_records(
+        resource,
+        crate::config_keys::broker_dynamic::BrokerConfigContext {
+            image,
+            serving,
+            log_dirs,
+            unstable,
+        },
+    ) {
         Ok(records) => to_submit.extend(records),
         Err((code, message)) => {
             out.error_code = code;
@@ -203,8 +210,11 @@ mod tests {
     use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
 
     use super::*;
-    use crate::handlers::incremental_alter_configs::test_support::{
-        make_del_cfg, make_image_with_broker, make_resource, make_set_cfg,
+    use crate::handlers::{
+        incremental_alter_configs::test_support::{
+            make_del_cfg, make_image_with_broker, make_resource, make_set_cfg,
+        },
+        test_support::{BrokerConfigMutationSetup, broker_config_context},
     };
 
     const SERVING: NodeId = NodeId(1);
@@ -231,7 +241,7 @@ mod tests {
         image.apply(&MetadataRecord::V1BrokerRegistration(
             krabka_metadata::BrokerRegistrationRecord {
                 port: 9093,
-                ..crate::test_support::broker_registration(2)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
             },
         ));
         for (node, key, value) in configs {
@@ -255,6 +265,15 @@ mod tests {
         Vec<AlterableConfig>,
         Result<Vec<MetadataRecord>, (i16, &'a str)>,
     );
+
+    fn check_broker_record_cases(cases: Vec<Case<'_>>, setup: BrokerConfigMutationSetup<'_>) {
+        for (name, image, configs, want) in cases {
+            let resource = make_resource(name, configs.clone());
+            let got = broker_records(&resource, broker_config_context(&image, setup));
+            let want = want.map_err(|(code, message)| (code, message.to_owned()));
+            check!(got == want, "{name:?} {configs:?}");
+        }
+    }
 
     /// Each row is a resource name, the stored state, the operations, and the
     /// whole expected outcome: the staged records, or the error.
@@ -442,18 +461,7 @@ mod tests {
                 Ok(vec![record(cluster, "log.cleanup.policy", Some("compact"))]),
             ),
         ];
-        for (name, image, configs, want) in cases {
-            let resource = make_resource(name, configs.clone());
-            let got = broker_records(
-                &resource,
-                &image,
-                SERVING,
-                &[],
-                UnstableApiVersions::Disabled,
-            );
-            let want = want.map_err(|(code, message)| (code, message.to_owned()));
-            check!(got == want, "{name:?} {configs:?}");
-        }
+        check_broker_record_cases(cases, BrokerConfigMutationSetup::default());
     }
 
     /// Kafka stores the string the client sent
@@ -481,10 +489,10 @@ mod tests {
 
         let records = broker_records(
             &resource,
-            &image_with(&[], false),
-            SERVING,
-            &[],
-            UnstableApiVersions::Disabled,
+            broker_config_context(
+                &image_with(&[], false),
+                BrokerConfigMutationSetup::default(),
+            ),
         );
 
         check!(
@@ -504,10 +512,10 @@ mod tests {
                 check!(
                     broker_records(
                         &resource,
-                        &image_with(&[], false),
-                        SERVING,
-                        &[],
-                        UnstableApiVersions::Disabled,
+                        broker_config_context(
+                            &image_with(&[], false),
+                            BrokerConfigMutationSetup::default()
+                        )
                     ) == Err((
                         codes::INVALID_CONFIG,
                         format!("broker config {key} is controller-managed and read-only"),
@@ -622,17 +630,12 @@ mod tests {
                 Err(disabled),
             ),
         ];
-        for (name, image, configs, want) in cases {
-            let resource = make_resource(name, configs.clone());
-            let got = broker_records(
-                &resource,
-                &image,
-                SERVING,
-                &log_dirs,
-                UnstableApiVersions::Disabled,
-            );
-            let want = want.map_err(|(code, message)| (code, message.to_owned()));
-            check!(got == want, "{name:?} {configs:?}");
-        }
+        check_broker_record_cases(
+            cases,
+            BrokerConfigMutationSetup {
+                log_dirs: &log_dirs,
+                ..Default::default()
+            },
+        );
     }
 }

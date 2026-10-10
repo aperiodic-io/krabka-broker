@@ -24,24 +24,45 @@ use crate::{
 
 const LIMIT: ByteSize = bytes(100);
 
-/// A batch of one keyed record with a `value_len`-byte value, compressed with
-/// `codec`, that a transaction of `producer_id` wrote when it is not `-1`.
-fn keyed_batch(
-    base_offset: i64,
-    value_len: usize,
-    codec: CompressionType,
-    producer_id: i64,
-) -> RecordBatch {
+#[derive(Clone, Copy, Default)]
+enum BatchProducer {
+    #[default]
+    Anonymous,
+    Transactional(ProducerId),
+}
+
+#[derive(Clone, Copy)]
+enum ExpectedLimit {
+    AllowsRecord,
+    RefusesRecord,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct KeyedBatchSetup {
+    offset: Offset,
+    #[default(bytes(1_000))]
+    value_size: ByteSize,
+    #[default(CompressionType::Gzip)]
+    compression: CompressionType,
+    producer: BatchProducer,
+}
+
+/// One oversized keyed record, compressed with gzip and anonymous by default.
+fn keyed_batch(setup: KeyedBatchSetup) -> RecordBatch {
+    let producer_id = match setup.producer {
+        BatchProducer::Anonymous => -1,
+        BatchProducer::Transactional(producer) => producer.0,
+    };
     RecordBatch {
-        base_offset,
+        base_offset: setup.offset.0,
         last_offset_delta: 0,
         producer_id,
         attributes: Attributes::default()
-            .with_compression(codec)
-            .with_transactional(producer_id >= 0),
+            .with_compression(setup.compression)
+            .with_transactional(matches!(setup.producer, BatchProducer::Transactional(_))),
         records: vec![Record {
             key: Some(Bytes::from_static(b"k")),
-            value: Some(Bytes::from(vec![7_u8; value_len])),
+            value: Some(Bytes::from(vec![7_u8; setup.value_size.bytes_usize()])),
             ..Default::default()
         }],
         ..RecordBatch::default()
@@ -71,22 +92,36 @@ fn the_passes_refuse_a_compressed_record_above_the_limit() {
             "compressed, oversized",
             CompressionType::Gzip,
             Some(LIMIT),
-            true,
+            ExpectedLimit::RefusesRecord,
         ),
-        ("compressed, no limit", CompressionType::Gzip, None, false),
+        (
+            "compressed, no limit",
+            CompressionType::Gzip,
+            None,
+            ExpectedLimit::AllowsRecord,
+        ),
         (
             "uncompressed, oversized",
             CompressionType::None,
             Some(LIMIT),
-            false,
+            ExpectedLimit::AllowsRecord,
         ),
     ] {
         let dir = tempfile::tempdir().unwrap();
-        let seg = write_sealed_batches(dir.path(), &[keyed_batch(0, 1_000, codec, -1)]);
+        let seg = write_sealed_batches(
+            dir.path(),
+            &[keyed_batch(KeyedBatchSetup {
+                compression: codec,
+                ..Default::default()
+            })],
+        );
         let segments = [&seg];
 
         let map = build_offset_map(&segments, vec![], limit);
-        assert2::check!(refused(map) == refuses, "{name}: offset map");
+        assert2::check!(
+            refused(map) == matches!(refuses, ExpectedLimit::RefusesRecord),
+            "{name}: offset map"
+        );
 
         let unchecked = build_offset_map(&segments, vec![], None).unwrap();
         let mut txn = CleanedTransactionMetadata::default();
@@ -107,7 +142,10 @@ fn the_passes_refuse_a_compressed_record_above_the_limit() {
                 max_decompressed_record: limit,
             },
         );
-        assert2::check!(refused(rewritten) == refuses, "{name}: rewrite");
+        assert2::check!(
+            refused(rewritten) == matches!(refuses, ExpectedLimit::RefusesRecord),
+            "{name}: rewrite"
+        );
     }
 }
 
@@ -118,14 +156,34 @@ fn the_passes_refuse_a_compressed_record_above_the_limit() {
 fn an_aborted_batch_is_read_only_when_the_pass_keeps_it_empty() {
     let producer = ProducerId(2000);
     let last_data_offset = |offset| ProducerLastRecord {
-        last_data_offset: Some(Offset(offset)),
+        last_data_offset: Some(offset),
         producer_epoch: 0,
     };
     for (name, upper_bound, active_offset, refuses) in [
-        ("deleted outright", 10, None, false),
-        ("the last batch of the round", 1, None, true),
-        ("an active producer's last data batch", 10, Some(0), true),
-        ("another batch of an active producer", 10, Some(5), false),
+        (
+            "deleted outright",
+            Offset(10),
+            None,
+            ExpectedLimit::AllowsRecord,
+        ),
+        (
+            "the last batch of the round",
+            Offset(1),
+            None,
+            ExpectedLimit::RefusesRecord,
+        ),
+        (
+            "an active producer's last data batch",
+            Offset(10),
+            Some(Offset(0)),
+            ExpectedLimit::RefusesRecord,
+        ),
+        (
+            "another batch of an active producer",
+            Offset(10),
+            Some(Offset(5)),
+            ExpectedLimit::AllowsRecord,
+        ),
     ] {
         let dir = tempfile::tempdir().unwrap();
         // An oversized compressed batch of an aborted transaction, then the
@@ -133,7 +191,10 @@ fn an_aborted_batch_is_read_only_when_the_pass_keeps_it_empty() {
         // aborted-transaction list names all the same.
         let seg = write_sealed_batches(
             dir.path(),
-            &[keyed_batch(0, 1_000, CompressionType::Gzip, producer.get())],
+            &[keyed_batch(KeyedBatchSetup {
+                producer: BatchProducer::Transactional(producer),
+                ..Default::default()
+            })],
         );
         let segments = [&seg];
         let aborted = AbortedTxn {
@@ -163,11 +224,14 @@ fn an_aborted_batch_is_read_only_when_the_pass_keeps_it_empty() {
             },
             CleaningRound {
                 active_producers: &active,
-                upper_bound: Offset(upper_bound),
+                upper_bound,
                 max_decompressed_record: Some(LIMIT),
             },
         );
-        assert2::check!(refused(rewritten) == refuses, "{name}");
+        assert2::check!(
+            refused(rewritten) == matches!(refuses, ExpectedLimit::RefusesRecord),
+            "{name}"
+        );
     }
 }
 

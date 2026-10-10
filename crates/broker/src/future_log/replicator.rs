@@ -279,36 +279,35 @@ mod tests {
         let target = tempdir().unwrap();
         let stamp_source: Arc<dyn krabka_log::StampSource> =
             Arc::new(TestStampSource(AtomicU64::new(100)));
-        let partitions = Arc::new(PartitionRegistry::with_stamp_source(Some(Arc::clone(
-            &stamp_source,
-        ))));
-        let future_logs = Arc::new(DashMap::new());
-        let part = fixture_partition(primary.path(), "t", PartitionIndex(0));
-        part.log
-            .lock()
-            .expect("source log")
-            .set_stamp_source(stamp_source)
-            .expect("source stamp index");
-        append_records(&part, 3);
-        partitions.insert("t".into(), PartitionIndex(0), part.clone());
+        let source = crate::future_log::test_support::registered_source_fixture(
+            primary.path(),
+            crate::future_log::test_support::FutureSourceSetup {
+                stamp_source: Some(stamp_source),
+                ..Default::default()
+            },
+        );
 
         resume_and_wait(
-            &part,
-            &partitions,
-            &future_logs,
+            &source.partition,
+            &source.partitions,
+            &source.future_logs,
             target.path(),
             Duration::from_millis(500),
             "future log should catch up and swap",
         )
         .await;
 
-        assert!(part.log_end_offset() == 3);
+        assert!(source.partition.log_end_offset() == 3);
         assert!(
-            canonicalize_or_self(&part.log_dir.load_full()) == canonicalize_or_self(target.path())
+            canonicalize_or_self(&source.partition.log_dir.load_full())
+                == canonicalize_or_self(target.path())
         );
-        assert!(part.stamp_for_offset(Offset(0)) == Some(101));
-        append_records(&part, 1);
-        assert!(part.stamp_for_offset(Offset(3)) == Some(102));
+        assert!(source.partition.stamp_for_offset(Offset(0)) == Some(101));
+        append_records(
+            &source.partition,
+            crate::test_support::PartitionRecordsSetup::default(),
+        );
+        assert!(source.partition.stamp_for_offset(Offset(3)) == Some(102));
     }
 
     #[tokio::test]
@@ -319,7 +318,13 @@ mod tests {
         let future_logs = Arc::new(DashMap::new());
         let part = fixture_partition(primary.path(), "t", PartitionIndex(0));
         for _ in 0..4 {
-            append_value_batch(&part, 400 * 1024);
+            append_value_batch(
+                &part,
+                crate::future_log::test_support::FutureRecordSetup {
+                    value_size: crate::future_log::test_support::RecordValueBytes(400 * 1024),
+                    ..Default::default()
+                },
+            );
         }
         partitions.insert("t".into(), PartitionIndex(0), part.clone());
 
@@ -344,7 +349,13 @@ mod tests {
     ) -> (Arc<Partition>, Arc<Mutex<Log>>, PathBuf) {
         let part = fixture_partition(primary, "t", PartitionIndex(0));
         for _ in 0..5 {
-            append_value_batch(&part, 10);
+            append_value_batch(
+                &part,
+                crate::future_log::test_support::FutureRecordSetup {
+                    value_size: crate::future_log::test_support::RecordValueBytes(10),
+                    ..Default::default()
+                },
+            );
         }
         let (future_path, future_log) = crate::future_log::test_support::open_future_log(target);
         let policy = test_policy();
@@ -354,6 +365,29 @@ mod tests {
         {}
         assert!(future_log.lock().unwrap().log_end_offset() == Offset(5));
         (part, future_log, future_path)
+    }
+
+    struct TruncatedFutureFixture {
+        future_path: PathBuf,
+        future_log: Arc<Mutex<Log>>,
+        part: Arc<Partition>,
+        target: tempfile::TempDir,
+        _primary: tempfile::TempDir,
+    }
+
+    async fn truncated_copied_future() -> TruncatedFutureFixture {
+        let primary = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let (part, future_log, future_path) =
+            partition_with_copied_future_log(primary.path(), target.path());
+        part.truncate_to(Offset(3)).await.unwrap();
+        TruncatedFutureFixture {
+            future_path,
+            future_log,
+            part,
+            target,
+            _primary: primary,
+        }
     }
 
     /// The value size of each record of `log` from offset 0.
@@ -368,6 +402,17 @@ mod tests {
             .collect()
     }
 
+    async fn finish_replaced_move(
+        part: &Arc<Partition>,
+        future_log: Arc<Mutex<Log>>,
+        future_path: PathBuf,
+        target: &std::path::Path,
+    ) {
+        finish_move(part, future_log, future_path, target).await;
+        assert!(canonicalize_or_self(&part.log_dir.load_full()) == canonicalize_or_self(target));
+        assert!(value_sizes(&part.log) == [10, 10, 10, 20, 20]);
+    }
+
     /// KIP-113 with a leader change: a follower truncates its current log to 3
     /// and takes five records again, two of them from the new leader. The
     /// future log still holds the old records 3 and 4 and ends where the
@@ -375,23 +420,24 @@ mod tests {
     /// in.
     #[tokio::test]
     async fn a_truncation_of_the_current_log_cuts_the_future_log_before_the_swap() {
-        let primary = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let (part, future_log, future_path) =
-            partition_with_copied_future_log(primary.path(), target.path());
-        part.truncate_to(Offset(3)).await.unwrap();
+        let fixture = truncated_copied_future().await;
+        let part = fixture.part;
         for _ in 0..2 {
-            append_value_batch(&part, 20);
+            append_value_batch(
+                &part,
+                crate::future_log::test_support::FutureRecordSetup::default(),
+            );
         }
         assert!(part.log_end_offset() == Offset(5));
         assert!(value_sizes(&part.log) == [10, 10, 10, 20, 20]);
 
-        finish_move(&part, future_log, future_path, target.path()).await;
-
-        assert!(
-            canonicalize_or_self(&part.log_dir.load_full()) == canonicalize_or_self(target.path())
-        );
-        assert!(value_sizes(&part.log) == [10, 10, 10, 20, 20]);
+        finish_replaced_move(
+            &part,
+            fixture.future_log,
+            fixture.future_path,
+            fixture.target.path(),
+        )
+        .await;
     }
 
     /// The truncation mark is in memory, so a move that resumes after a restart
@@ -402,24 +448,28 @@ mod tests {
     /// records from 3 on and grew back to the same log end (#1219).
     #[tokio::test]
     async fn a_resumed_move_cuts_a_future_log_that_kept_what_the_current_log_dropped() {
-        let primary = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let (part, future_log, future_path) =
-            partition_with_copied_future_log(primary.path(), target.path());
-        part.truncate_to(Offset(3)).await.unwrap();
+        let fixture = truncated_copied_future().await;
+        let part = fixture.part;
         // The restart: nothing remembers the cut.
         assert!(part.take_future_truncation().await.unwrap() == Some(Offset(3)));
         for _ in 0..2 {
-            append_epoch_batch(&part, 20, 2);
+            append_epoch_batch(
+                &part,
+                crate::future_log::test_support::FutureRecordSetup {
+                    leader_epoch: krabka_ids::LeaderEpoch(2),
+                    ..Default::default()
+                },
+            );
         }
-        assert!(part.log_end_offset() == future_log.lock().unwrap().log_end_offset());
+        assert!(part.log_end_offset() == fixture.future_log.lock().unwrap().log_end_offset());
 
-        finish_move(&part, future_log, future_path, target.path()).await;
-
-        assert!(
-            canonicalize_or_self(&part.log_dir.load_full()) == canonicalize_or_self(target.path())
-        );
-        assert!(value_sizes(&part.log) == [10, 10, 10, 20, 20]);
+        finish_replaced_move(
+            &part,
+            fixture.future_log,
+            fixture.future_path,
+            fixture.target.path(),
+        )
+        .await;
     }
 
     /// The writer reports the lowest offset the log was cut to once, and
@@ -434,7 +484,10 @@ mod tests {
         part.truncate_to(Offset(4)).await.unwrap();
         part.truncate_to(Offset(2)).await.unwrap();
         for _ in 0..3 {
-            append_value_batch(&part, 20);
+            append_value_batch(
+                &part,
+                crate::future_log::test_support::FutureRecordSetup::default(),
+            );
         }
         assert!(part.log_end_offset() == Offset(5));
         let (ack, outcome) = oneshot::channel();

@@ -34,12 +34,7 @@ mod tests {
     fn subtopology(id: &str) -> StoredSubtopology {
         StoredSubtopology {
             subtopology_id: id.into(),
-            source_topics: Vec::new(),
-            source_topic_regex: Vec::new(),
-            repartition_sink_topics: Vec::new(),
-            state_changelog_topics: Vec::new(),
-            repartition_source_topics: Vec::new(),
-            copartition_groups: Vec::new(),
+            ..Default::default()
         }
     }
 

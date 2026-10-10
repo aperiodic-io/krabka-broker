@@ -23,7 +23,7 @@ let%span stimestamp'8 = "/workspace/crates/verified/src/timestamp.rs" 26 10 26 6
 let%span stimestamp'9 = "/workspace/crates/verified/src/composition/timestamp.rs" 260 16 260 54
 let%span stimestamp'10 = "/workspace/crates/verified/src/composition/timestamp.rs" 14 8 14 53
 let%span stimestamp'11 = "/workspace/crates/verified/src/timestamp.rs" 15 8 20 9
-let%span stimestamp'12 = "/workspace/crates/verified/src/composition/timestamp.rs" 134 8 135 54
+let%span stimestamp'12 = "/workspace/crates/verified/src/composition/timestamp.rs" 144 8 145 54
 let%span stimestamp'13 = "/workspace/crates/verified/src/composition/timestamp.rs" 232 16 233 85
 let%span ssequence = "/workspace/crates/verified/src/sequence.rs" 14 16 14 72
 let%span ssequence'0 = "/workspace/crates/verified/src/sequence.rs" 21 16 22 44
@@ -205,7 +205,7 @@ predicate time_rows_ordered [#"/workspace/crates/verified/src/composition/timest
     -> Int64.to_int (Seq.get entries left).f0'5 <= Int64.to_int (Seq.get entries right).f0'5
     /\ UInt32.t'int (Seq.get entries left).f1'5 < UInt32.t'int (Seq.get entries right).f1'5
 
-predicate time_archive_valid [#"/workspace/crates/verified/src/composition/timestamp.rs" 132 0 132 78] (entries: Seq.seq tup2_i64_u32) (max_relative: int) =
+predicate time_archive_valid [#"/workspace/crates/verified/src/composition/timestamp.rs" 142 0 142 78] (entries: Seq.seq tup2_i64_u32) (max_relative: int) =
   [%#stimestamp'12] (forall i: int. 0 <= i /\ i < Seq.length entries
       -> UInt32.t'int (Seq.get entries i).f1'5 <= max_relative)
   /\ time_rows_ordered entries (Seq.length entries)

@@ -50,7 +50,7 @@ fn restored_topic(name: &str, topic_id: u128, partitions: i32) -> Vec<MetadataRe
     records.extend((0..partitions).map(|partition| {
         MetadataRecord::V1Partition(PartitionRecord {
             directories: vec![Uuid::nil()],
-            ..single_replica_partition(name, partition, NodeId(1))
+            ..single_replica_partition(name, krabka_ids::PartitionIndex(partition), NodeId(1))
         })
     }));
     records

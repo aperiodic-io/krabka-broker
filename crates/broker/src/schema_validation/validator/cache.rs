@@ -308,6 +308,15 @@ mod tests {
         value_check,
     };
 
+    fn clocked_validator(uri: String) -> (Arc<ManualMonotonicClock>, SchemaValidator) {
+        let timeline = ManualMonotonicClock::new_shared();
+        let clock = timeline.new_wall_clock(SystemTime::now());
+        let validator =
+            SchemaValidator::with_clock(uri, false, 100, minutes(5), secs(5), None, clock)
+                .expect("validator");
+        (timeline, validator)
+    }
+
     #[tokio::test]
     async fn an_unregistered_id_is_rejected_and_the_rejection_is_cached() {
         let server = MockServer::start().await;
@@ -362,6 +371,38 @@ mod tests {
         check!(value_check(&v, ValidationMode::Id, &field).await.is_ok());
     }
 
+    async fn check_id(v: &SchemaValidator, field: &[u8], metrics: &BrokerMetrics) {
+        check!(
+            v.check("orders", Role::Value, ValidationMode::Id, field, metrics)
+                .await
+                .is_ok()
+        );
+    }
+
+    async fn reference_endpoint(
+        server: &MockServer,
+        index: usize,
+        references: Option<serde_json::Value>,
+        expected_calls: u64,
+    ) {
+        let mut body = serde_json::json!({
+            "subject": format!("subject-{index}"),
+            "version": 1,
+            "id": index,
+            "schema": r#"{"type":"record","name":"Leaf","fields":[]}"#,
+        });
+        if let Some(references) = references {
+            body["references"] = references;
+        }
+        response_endpoint(
+            server,
+            &format!("/subjects/subject-{index}/versions/1"),
+            ResponseTemplate::new(200).set_body_json(body),
+            Some(expected_calls),
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn the_cache_counters_move_on_a_miss_then_a_hit() {
         // `registry(1)` allows exactly one call to `/versions`, so the second
@@ -373,19 +414,11 @@ mod tests {
         let field = framed(KNOWN_ID, b"anything");
         let metrics = BrokerMetrics::new();
 
-        check!(
-            v.check("orders", Role::Value, ValidationMode::Id, &field, &metrics)
-                .await
-                .is_ok()
-        );
+        check_id(&v, &field, &metrics).await;
         check!(metrics.schema_validation_cache_misses.get() == 1);
         check!(metrics.schema_validation_cache_hits.get() == 0);
 
-        check!(
-            v.check("orders", Role::Value, ValidationMode::Id, &field, &metrics)
-                .await
-                .is_ok()
-        );
+        check_id(&v, &field, &metrics).await;
         check!(metrics.schema_validation_cache_misses.get() == 1);
         check!(metrics.schema_validation_cache_hits.get() == 1);
     }
@@ -434,11 +467,7 @@ mod tests {
         )
         .await;
 
-        let timeline = ManualMonotonicClock::new_shared();
-        let clock = timeline.new_wall_clock(SystemTime::now());
-        let v =
-            SchemaValidator::with_clock(server.uri(), false, 100, minutes(5), secs(5), None, clock)
-                .expect("validator");
+        let (timeline, v) = clocked_validator(server.uri());
         let field = framed(KNOWN_ID, b"anything");
 
         let got = value_check(&v, ValidationMode::Id, &field).await;
@@ -466,11 +495,7 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let timeline = ManualMonotonicClock::new_shared();
-        let clock = timeline.new_wall_clock(SystemTime::now());
-        let v =
-            SchemaValidator::with_clock(server.uri(), false, 100, minutes(5), secs(5), None, clock)
-                .expect("validator");
+        let (timeline, v) = clocked_validator(server.uri());
         let field = framed(KNOWN_ID, b"anything");
 
         for _ in 0..2 {
@@ -497,19 +522,7 @@ mod tests {
                     "version": 1
                 }])
             };
-            response_endpoint(
-                &server,
-                &format!("/subjects/subject-{index}/versions/1"),
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "subject": format!("subject-{index}"),
-                    "version": 1,
-                    "id": index,
-                    "schema": r#"{"type":"record","name":"Leaf","fields":[]}"#,
-                    "references": references
-                })),
-                Some(1),
-            )
-            .await;
+            reference_endpoint(&server, index, Some(references), 1).await;
         }
 
         let v = validator(server.uri());
@@ -536,16 +549,11 @@ mod tests {
                 subject: format!("subject-{index}"),
                 version: 1,
             });
-            response_endpoint(
+            reference_endpoint(
                 &server,
-                &format!("/subjects/subject-{index}/versions/1"),
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "subject": format!("subject-{index}"),
-                    "version": 1,
-                    "id": index,
-                    "schema": r#"{"type":"record","name":"Leaf","fields":[]}"#
-                })),
-                Some(u64::from(index < MAX_REFERENCE_SCHEMAS)),
+                index,
+                None,
+                u64::from(index < MAX_REFERENCE_SCHEMAS),
             )
             .await;
         }

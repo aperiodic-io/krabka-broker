@@ -29,7 +29,7 @@ macro_rules! broker_fixture {
         $partition.install_replication_target(None, $broker.config.node_id.0, 0).await;
     };
     (($handle:ident, $directory:ident, $broker:ident, $persister:ident), share_persister($authorizer:expr, $enabled:expr)) => {
-        broker_fixture!(($handle, $directory, $broker), crate::test_support::start_share_broker($authorizer, $enabled));
+        broker_fixture!(($handle, $directory, $broker), crate::test_support::start_share_broker($authorizer, crate::test_support::ShareBrokerSetup { support: $enabled }));
         let $persister = $broker.group_coordinator.share_persister().cloned().expect("share persister");
     };
     ($bindings:tt, extra_log_dir($extra:ident)) => {
@@ -88,9 +88,7 @@ macro_rules! broker_fixture {
         ));
     };
     ($bindings:tt, share_allow_all) => {
-        broker_fixture!($bindings, crate::test_support::start_share_broker(
-            std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer), true
-        ));
+        broker_fixture!($bindings, crate::test_support::start_share_broker(std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer), crate::test_support::ShareBrokerSetup::default()));
     };
     ($bindings:tt, allow_all $(, $ready:ident)?) => {
         broker_fixture!(
@@ -135,7 +133,7 @@ macro_rules! share_refusal_cases {
      $handler:ident($request:expr, $version:expr)) => {
         for ($case, $authorizer, $enabled, $($input,)* $expected) in $cases {
             broker_fixture!(($handle, $directory, $broker),
-                crate::test_support::start_share_broker($authorizer, $enabled));
+                crate::test_support::start_share_broker($authorizer, crate::test_support::ShareBrokerSetup { support: $enabled }));
             test_ctx!($ctx, "alice");
             let $response = $handler(&$broker, $request, $version, &$ctx)
                 .await.expect("handle");
@@ -313,15 +311,15 @@ pub(crate) const fn unauthorized_topic_cases(
     ]
 }
 
-/// Both share APIs carry the same acknowledgement ranges in distinct wire types.
+/// Adapt typed acknowledgement ranges to each share API's concrete wire batch.
 macro_rules! acknowledgement_batches {
     ($ty:ident, $batches:expr) => {
         $batches
-            .iter()
-            .map(|&(first_offset, last_offset, types)| $ty {
-                first_offset,
-                last_offset,
-                acknowledge_types: types.to_vec(),
+            .into_iter()
+            .map(|batch| $ty {
+                first_offset: batch.first_offset.0,
+                last_offset: batch.last_offset.0,
+                acknowledge_types: batch.types.into_iter().map(|kind| kind.0).collect(),
                 ..Default::default()
             })
             .collect()
@@ -333,12 +331,26 @@ krabka_macros::single_replica_partition_fixture!(single_replica_partition);
 
 /// A partition with the supplied leader and replicas, initially all in ISR.
 /// Callers keep differing ISR, epoch, directory, and reassignment values explicit.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct ReplicatedPartitionSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    pub partition: krabka_ids::PartitionIndex,
+    #[default(krabka_metadata::NodeId(1))]
+    pub leader: krabka_metadata::NodeId,
+    #[default(&[krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)])]
+    pub replicas: &'a [krabka_metadata::NodeId],
+}
+
 pub(crate) fn replicated_partition(
-    topic: &str,
-    partition: i32,
-    leader: krabka_metadata::NodeId,
-    replicas: &[krabka_metadata::NodeId],
+    setup: ReplicatedPartitionSetup<'_>,
 ) -> krabka_metadata::PartitionRecord {
+    let ReplicatedPartitionSetup {
+        topic,
+        partition,
+        leader,
+        replicas,
+    } = setup;
     krabka_metadata::PartitionRecord {
         replicas: replicas.to_vec(),
         isr: replicas.to_vec(),
@@ -346,12 +358,36 @@ pub(crate) fn replicated_partition(
     }
 }
 
-pub(crate) fn acl(
-    resource_type: krabka_metadata::ResourceType,
-    resource_name: &str,
-    pattern_type: krabka_metadata::PatternType,
-    operation: krabka_metadata::AclOperation,
-) -> krabka_metadata::AclEntry {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct AclSetup<'a> {
+    #[default(krabka_metadata::ResourceType::Topic)]
+    pub resource_type: krabka_metadata::ResourceType,
+    #[default("orders")]
+    pub resource_name: &'a str,
+    #[default(krabka_metadata::PatternType::Literal)]
+    pub pattern_type: krabka_metadata::PatternType,
+    #[default(krabka_metadata::AclOperation::Read)]
+    pub operation: krabka_metadata::AclOperation,
+}
+
+impl AclSetup<'_> {
+    pub fn cluster(operation: krabka_metadata::AclOperation) -> Self {
+        Self {
+            resource_type: krabka_metadata::ResourceType::Cluster,
+            resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+            operation,
+            ..Default::default()
+        }
+    }
+}
+
+pub(crate) fn acl(setup: AclSetup<'_>) -> krabka_metadata::AclEntry {
+    let AclSetup {
+        resource_type,
+        resource_name,
+        pattern_type,
+        operation,
+    } = setup;
     krabka_metadata::AclEntry {
         resource_type,
         resource_name: resource_name.into(),
@@ -402,27 +438,45 @@ pub(crate) async fn produce_wire(
     crate::test_support::decode_response(&response_bytes, version)
 }
 
-pub(crate) async fn share_acknowledge_wire(
+/// Send a fixture acknowledgement using the current wire version and default principal.
+pub(crate) async fn send_acknowledgements(
     broker: &BrokerHandle,
-    version: i16,
-    request: &krabka_protocol::owned::share_acknowledge_request::ShareAcknowledgeRequest,
+    setup: AcknowledgementSetup<'_>,
 ) -> krabka_protocol::owned::share_acknowledge_response::ShareAcknowledgeResponse {
-    share_acknowledge_wire_as(broker, version, "share-consumer", request).await
+    let request = acknowledge_batches_request(setup);
+    share_acknowledge_wire(
+        broker,
+        &request,
+        crate::handlers::test_support::ShareWireSetup {
+            version: krabka_ids::ApiVersion(
+                krabka_protocol::owned::share_acknowledge_request::MAX_VERSION,
+            ),
+            ..Default::default()
+        },
+    )
+    .await
 }
 
-pub(crate) async fn share_acknowledge_wire_as(
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct ShareWireSetup<'a> {
+    #[default(krabka_ids::ApiVersion(2))]
+    pub version: krabka_ids::ApiVersion,
+    #[default("share-consumer")]
+    pub user: &'a str,
+}
+
+pub(crate) async fn share_acknowledge_wire(
     broker: &BrokerHandle,
-    version: i16,
-    user: &str,
     request: &krabka_protocol::owned::share_acknowledge_request::ShareAcknowledgeRequest,
+    setup: ShareWireSetup<'_>,
 ) -> krabka_protocol::owned::share_acknowledge_response::ShareAcknowledgeResponse {
     context_wire(
         broker,
-        krabka_protocol::owned::share_acknowledge_request::API_KEY,
-        version,
         request,
-        user,
-        ("share-client", "handle share acknowledge"),
+        ContextWireSetup {
+            operation: ShareOperation::Acknowledge,
+            wire: setup,
+        },
     )
     .await
 }
@@ -453,35 +507,32 @@ pub(crate) async fn check_denied_topic_cases<T: std::fmt::Debug + PartialEq>(
     broker.shutdown().await;
 }
 
-/// Publish the two metadata records of a two-replica topic separately, as
-/// the replication and epoch handler fixtures originally seeded them.
-pub(crate) async fn seed_replicated_topic(
-    broker: &BrokerHandle,
-    topic: &str,
-    topic_id: u128,
-    leader: u64,
-) {
-    seed_partition_replicas(
-        broker,
-        topic,
-        uuid::Uuid::from_u128(topic_id),
-        krabka_metadata::NodeId(leader),
-        &[krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-        0,
-    )
-    .await;
+/// Submit the topic before its replicated partition, retaining each fixture's epochs.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct ReplicatedTopicSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    #[default(uuid::Uuid::from_u128(1))]
+    pub topic_id: uuid::Uuid,
+    #[default(krabka_metadata::NodeId(1))]
+    pub leader: krabka_metadata::NodeId,
+    #[default(&[krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)])]
+    pub replicas: &'a [krabka_metadata::NodeId],
+    pub leader_epoch: krabka_ids::LeaderEpoch,
 }
 
-/// Submit the topic before its replicated partition, retaining each fixture's epochs.
 pub(crate) async fn seed_partition_replicas(
     broker: &BrokerHandle,
-    topic: &str,
-    topic_id: uuid::Uuid,
-    leader: krabka_metadata::NodeId,
-    replicas: &[krabka_metadata::NodeId],
-    leader_epoch: i32,
+    setup: ReplicatedTopicSetup<'_>,
 ) {
     use krabka_metadata::{MetadataRecord, PartitionRecord, TopicRecord};
+    let ReplicatedTopicSetup {
+        topic,
+        topic_id,
+        leader,
+        replicas,
+        leader_epoch,
+    } = setup;
     broker
         .submit_metadata_record_for_test(MetadataRecord::V1Topic(TopicRecord {
             name: topic.to_owned(),
@@ -493,65 +544,155 @@ pub(crate) async fn seed_partition_replicas(
         .expect("submit topic record");
     broker
         .submit_metadata_record_for_test(MetadataRecord::V1Partition(PartitionRecord {
-            leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+            leader_epoch,
             directories: vec![uuid::Uuid::nil(); replicas.len()],
-            ..replicated_partition(topic, 0, leader, replicas)
+            ..replicated_partition(crate::handlers::test_support::ReplicatedPartitionSetup {
+                topic,
+                leader,
+                replicas,
+                ..Default::default()
+            })
         }))
         .await
         .expect("submit partition record");
 }
 
-/// Plain records with the protocol's default batch header, whose leader epoch is zero.
-pub(crate) fn default_records_batch(values: &[&'static [u8]]) -> RecordBatch {
-    RecordBatch {
-        partition_leader_epoch: 0,
-        ..crate::test_support::static_records_batch(values, 0)
+pub(crate) use crate::test_support::default_value_records_batch as default_records_batch;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub(crate) struct ShareSessionEpoch(pub i32);
+
+impl Default for ShareSessionEpoch {
+    fn default() -> Self {
+        Self(1)
     }
 }
 
-pub(crate) fn acknowledge_request(
-    group: &str,
-    member: &str,
-    epoch: i32,
-    topic_id: WireUuid,
-    (first_offset, last_offset): (i64, i64),
-    acknowledge_type: i8,
-) -> krabka_protocol::owned::share_acknowledge_request::ShareAcknowledgeRequest {
-    acknowledge_batches_request(
-        group,
-        member,
-        epoch,
-        topic_id,
-        (0, &[(first_offset, last_offset, &[acknowledge_type])]),
-        false,
-    )
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum AcknowledgementMode {
+    #[default]
+    Settle,
+    Renew,
 }
 
 /// A partition index and its ordered acknowledgement ranges, with independent
 /// lifetimes for the range list and its acknowledgement-type slices.
-pub(crate) type PartitionAcknowledgements<'a, 'b> = (i32, &'a [(i64, i64, &'b [i8])]);
+/// Wire acknowledgement codes include malformed values in validation cases.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub(crate) struct AcknowledgementCode(pub i8);
+
+#[derive(Clone, Default)]
+pub(crate) struct AcknowledgementBatchSetup {
+    pub first_offset: krabka_log::Offset,
+    pub last_offset: krabka_log::Offset,
+    pub types: Vec<AcknowledgementCode>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct AcknowledgementPartitionSetup {
+    pub index: krabka_ids::PartitionIndex,
+    pub batches: Vec<AcknowledgementBatchSetup>,
+}
+
+type WirePartitionAcknowledgements<'a, 'b> = (i32, &'a [(i64, i64, &'b [i8])]);
+
+impl AcknowledgementPartitionSetup {
+    /// One acknowledgement code covering an inclusive offset range on partition zero.
+    pub(crate) fn single_batch(
+        offsets: std::ops::RangeInclusive<krabka_log::Offset>,
+        code: AcknowledgementCode,
+    ) -> Self {
+        Self {
+            batches: vec![AcknowledgementBatchSetup {
+                first_offset: *offsets.start(),
+                last_offset: *offsets.end(),
+                types: vec![code],
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// Adapt the literal wire tables used by malformed-request cases.
+    pub(crate) fn from_wire((index, batches): WirePartitionAcknowledgements<'_, '_>) -> Self {
+        Self {
+            index: krabka_ids::PartitionIndex(index),
+            batches: batches
+                .iter()
+                .map(|&(first, last, types)| AcknowledgementBatchSetup {
+                    first_offset: krabka_log::Offset(first),
+                    last_offset: krabka_log::Offset(last),
+                    types: types.iter().copied().map(AcknowledgementCode).collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, krabka_macros::FieldDefaults)]
+pub(crate) struct AcknowledgementSetup<'a> {
+    #[default("g")]
+    pub group: &'a str,
+    #[default("member")]
+    pub member: &'a str,
+    pub epoch: ShareSessionEpoch,
+    pub topic_id: WireUuid,
+    pub partition: AcknowledgementPartitionSetup,
+    pub mode: AcknowledgementMode,
+}
+
+impl<'a> AcknowledgementSetup<'a> {
+    /// The default member and acknowledgement mode for one topic's session.
+    pub(crate) fn for_topic_session(
+        group: &'a str,
+        epoch: ShareSessionEpoch,
+        topic_id: WireUuid,
+    ) -> Self {
+        Self {
+            group,
+            epoch,
+            topic_id,
+            ..Default::default()
+        }
+    }
+}
 
 pub(crate) fn acknowledge_batches_request(
-    group: &str,
-    member: &str,
-    epoch: i32,
-    topic_id: WireUuid,
-    (partition_index, batches): PartitionAcknowledgements<'_, '_>,
-    is_renew_ack: bool,
+    setup: AcknowledgementSetup<'_>,
 ) -> krabka_protocol::owned::share_acknowledge_request::ShareAcknowledgeRequest {
     use krabka_protocol::owned::share_acknowledge_request::{
         AcknowledgePartition, AcknowledgeTopic, AcknowledgementBatch, ShareAcknowledgeRequest,
     };
+    let AcknowledgementSetup {
+        group,
+        member,
+        epoch,
+        topic_id,
+        partition,
+        mode,
+    } = setup;
     ShareAcknowledgeRequest {
         group_id: Some(group.into()),
         member_id: Some(member.into()),
-        share_session_epoch: epoch,
-        is_renew_ack,
+        share_session_epoch: epoch.0,
+        is_renew_ack: mode == AcknowledgementMode::Renew,
         topics: vec![AcknowledgeTopic {
             topic_id,
             partitions: vec![AcknowledgePartition {
-                partition_index,
-                acknowledgement_batches: acknowledgement_batches!(AcknowledgementBatch, batches),
+                partition_index: partition.index.0,
+                acknowledgement_batches: acknowledgement_batches!(
+                    AcknowledgementBatch,
+                    partition.batches
+                ),
                 ..Default::default()
             }],
             ..Default::default()
@@ -560,56 +701,80 @@ pub(crate) fn acknowledge_batches_request(
     }
 }
 
-pub(crate) async fn share_fetch_wire(
+/// Return the incremental rows for the first topic, or no rows when it is omitted.
+pub(crate) async fn share_fetch_partition_rows(
     broker: &BrokerHandle,
-    version: i16,
     request: &krabka_protocol::owned::share_fetch_request::ShareFetchRequest,
-) -> krabka_protocol::owned::share_fetch_response::ShareFetchResponse {
-    share_fetch_wire_as(broker, version, "share-consumer", request).await
+    setup: ShareWireSetup<'_>,
+) -> Vec<krabka_protocol::owned::share_fetch_response::PartitionData> {
+    share_fetch_wire(broker, request, setup)
+        .await
+        .responses
+        .into_iter()
+        .next()
+        .map(|topic| topic.partitions)
+        .unwrap_or_default()
 }
 
-pub(crate) async fn share_fetch_wire_as(
+pub(crate) async fn share_fetch_wire(
     broker: &BrokerHandle,
-    version: i16,
-    user: &str,
     request: &krabka_protocol::owned::share_fetch_request::ShareFetchRequest,
+    setup: ShareWireSetup<'_>,
 ) -> krabka_protocol::owned::share_fetch_response::ShareFetchResponse {
     context_wire(
         broker,
-        krabka_protocol::owned::share_fetch_request::API_KEY,
-        version,
         request,
-        user,
-        ("share-client", "handle share fetch"),
+        ContextWireSetup {
+            operation: ShareOperation::Fetch,
+            wire: setup,
+        },
     )
     .await
 }
 
-/// Encodes and decodes one contextual dispatch using the fixture's identity.
-/// Specialized dispatch kinds, including `Produce` and `Fetch`, use their own helpers.
+#[derive(Clone, Copy)]
+enum ShareOperation {
+    Fetch,
+    Acknowledge,
+}
+
+#[derive(Clone, Copy)]
+struct ContextWireSetup<'a> {
+    operation: ShareOperation,
+    wire: ShareWireSetup<'a>,
+}
+
+/// Encodes and decodes one contextual share dispatch using the fixture's identity.
 async fn context_wire<R: Decode<'static>>(
     broker: &BrokerHandle,
-    api_key: i16,
-    version: i16,
     request: &impl Encode,
-    user: &str,
-    (client_id, expectation): (&str, &str),
+    setup: ContextWireSetup<'_>,
 ) -> R {
+    let (api_key, expectation) = match setup.operation {
+        ShareOperation::Fetch => (
+            krabka_protocol::owned::share_fetch_request::API_KEY,
+            "handle share fetch",
+        ),
+        ShareOperation::Acknowledge => (
+            krabka_protocol::owned::share_acknowledge_request::API_KEY,
+            "handle share acknowledge",
+        ),
+    };
     let shared = broker.broker_arc_for_test();
-    let user = crate::test_support::principal(user);
+    let user = crate::test_support::principal(setup.wire.user);
     let peer = crate::test_support::peer();
-    let context = crate::test_support::request_context(&user, &peer, client_id);
-    let request_bytes = crate::test_support::encode_request(request, version);
+    let context = crate::test_support::request_context(&user, &peer, "share-client");
+    let request_bytes = crate::test_support::encode_request(request, setup.wire.version.0);
     let response = crate::test_support::try_dispatch_context(
         &shared,
         api_key,
-        version,
+        setup.wire.version.0,
         &request_bytes,
         &context,
     )
     .await
     .expect(expectation);
-    crate::test_support::decode_response(&response, version)
+    crate::test_support::decode_response(&response, setup.wire.version.0)
 }
 
 /// Reads the ordered record states of partition zero without changing its locks.
@@ -649,19 +814,33 @@ macro_rules! created_topic_fixture {
     };
 }
 
-pub(crate) async fn create_topic(
-    broker: &BrokerHandle,
-    client_id: &str,
-    name: &str,
-    partitions: i32,
-) -> WireUuid {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct ClientTopicSetup<'a> {
+    #[default("admin-client")]
+    pub client_id: &'a str,
+    #[default("orders")]
+    pub name: &'a str,
+    #[default(TopicPartitionCount(1))]
+    pub partitions: TopicPartitionCount,
+}
+
+pub(crate) async fn create_topic(broker: &BrokerHandle, setup: ClientTopicSetup<'_>) -> WireUuid {
+    let ClientTopicSetup {
+        client_id,
+        name,
+        partitions,
+    } = setup;
     created_topic_fixture!(
         (client, response),
         broker,
         client_id,
-        crate::handlers::test_support::configured_topic_request(name, &[], partitions, 1, 5_000,)
+        crate::handlers::test_support::configured_topic_request(CreateTopicSetup {
+            topic: name,
+            num_partitions: partitions,
+            ..Default::default()
+        })
     );
-    for partition in 0..partitions {
+    for partition in 0..partitions.0 {
         broker.wait_until_partition_present(name, partition).await;
     }
     WireUuid(
@@ -674,21 +853,43 @@ pub(crate) async fn create_topic(
     )
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub(crate) struct RecordCount(pub i32);
+
 /// Appends one v2 batch of `count` records through the v12 Produce handler.
-pub(crate) async fn produce_records(
-    broker: &BrokerHandle,
-    topic: &str,
-    partition_index: i32,
-    count: i32,
-) {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct ProduceRecordsSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    pub partition_index: krabka_ids::PartitionIndex,
+    #[default(RecordCount(3))]
+    pub count: RecordCount,
+}
+
+pub(crate) async fn produce_records(broker: &BrokerHandle, setup: ProduceRecordsSetup<'_>) {
+    let ProduceRecordsSetup {
+        topic,
+        partition_index,
+        count,
+    } = setup;
     let request = ProduceRequest {
         acks: -1,
         timeout_ms: 5_000,
         topic_data: vec![TopicProduceData {
             name: topic.to_string(),
             partition_data: vec![PartitionProduceData {
-                index: partition_index,
-                records: Some(RecordsPayload::V2(vec![record_batch(count)])),
+                index: partition_index.0,
+                records: Some(RecordsPayload::V2(vec![record_batch(count.0)])),
                 ..Default::default()
             }],
             ..Default::default()
@@ -721,49 +922,73 @@ pub(crate) fn local_partition(
     root: &Path,
     topic: &str,
 ) -> Arc<crate::partition::Partition> {
-    partition(broker, root, topic, false)
+    partition(
+        broker,
+        root,
+        crate::test_support::StandalonePartitionSetup {
+            topic,
+            ..Default::default()
+        },
+    )
 }
 
 pub(crate) fn partition(
     broker: &crate::broker::Broker,
     root: &Path,
-    topic: &str,
-    diskless: bool,
+    setup: crate::test_support::StandalonePartitionSetup<'_>,
 ) -> Arc<crate::partition::Partition> {
+    let crate::test_support::StandalonePartitionSetup {
+        topic,
+        partition: index,
+        storage,
+    } = setup;
     spawn_partition(
         root,
-        topic,
-        0,
-        (
-            broker.log_dir_status.clone(),
-            Arc::clone(&broker.producer_state),
-        ),
-        diskless,
-        krabka_log::LogConfig::default(),
+        crate::handlers::test_support::PartitionSpawnSetup {
+            topic,
+            index,
+            log_dir_status: broker.log_dir_status.clone(),
+            producer_state: Arc::clone(&broker.producer_state),
+            storage,
+            ..Default::default()
+        },
     )
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct PartitionSpawnSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    pub index: krabka_ids::PartitionIndex,
+    pub log_dir_status: crate::log_dir_status::LogDirRegistry,
+    #[default(Arc::new(crate::producer_state::ProducerState::new()))]
+    pub producer_state: Arc<crate::producer_state::ProducerState>,
+    pub storage: crate::test_support::StorageMode,
+    pub log_config: krabka_log::LogConfig,
 }
 
 pub(crate) fn spawn_partition(
     root: &Path,
-    topic: &str,
-    index: i32,
-    (log_dir_status, producer_state): (
-        crate::log_dir_status::LogDirRegistry,
-        Arc<crate::producer_state::ProducerState>,
-    ),
-    diskless: bool,
-    log_config: krabka_log::LogConfig,
+    setup: PartitionSpawnSetup<'_>,
 ) -> Arc<crate::partition::Partition> {
-    let partition_dir = crate::log_dir::partition_dir(root, topic, index);
+    let PartitionSpawnSetup {
+        topic,
+        index,
+        log_dir_status,
+        producer_state,
+        storage,
+        log_config,
+    } = setup;
+    let partition_dir = crate::log_dir::partition_dir(root, topic, index.0);
     std::fs::create_dir_all(&partition_dir).expect("partition directory");
     crate::broker::spawn_partition(
         topic.to_string(),
-        krabka_ids::PartitionIndex(index),
+        index,
         root.to_path_buf(),
         krabka_log::Log::open(&partition_dir, log_config).expect("open partition log"),
         log_dir_status,
         producer_state,
-        diskless,
+        storage == crate::test_support::StorageMode::Diskless,
     )
 }
 
@@ -1043,4 +1268,26 @@ pub(crate) fn share_fetch_topics(
             .collect(),
         ..Default::default()
     }]
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct BrokerConfigMutationSetup<'a> {
+    #[default(krabka_metadata::NodeId(1))]
+    pub serving: krabka_metadata::NodeId,
+    #[default(&[])]
+    pub log_dirs: &'a [std::path::PathBuf],
+    #[default(crate::api_catalog::UnstableApiVersions::Disabled)]
+    pub unstable: crate::api_catalog::UnstableApiVersions,
+}
+
+pub(crate) fn broker_config_context<'a>(
+    image: &'a krabka_metadata::MetadataImage,
+    setup: BrokerConfigMutationSetup<'a>,
+) -> crate::config_keys::broker_dynamic::BrokerConfigContext<'a> {
+    crate::config_keys::broker_dynamic::BrokerConfigContext {
+        image,
+        serving: setup.serving,
+        log_dirs: setup.log_dirs,
+        unstable: setup.unstable,
+    }
 }

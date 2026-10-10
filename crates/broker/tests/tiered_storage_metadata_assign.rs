@@ -71,16 +71,8 @@ async fn subscribe_subset_from_nonzero_offset_yields_exact_records() {
     log.publish(2, Bytes::from_static(b"z")).await.unwrap();
 
     // Subscribe to partitions {0 from offset 1, 1 from offset 0}; not 2.
-    let (mut stream, _handle) = log.subscribe(vec![
-        PartitionStart {
-            partition: 0,
-            start_offset: 1,
-        },
-        PartitionStart {
-            partition: 1,
-            start_offset: 0,
-        },
-    ]);
+    let (mut stream, _handle) =
+        log.subscribe(vec![PartitionStart::new(0, 1), PartitionStart::new(1, 0)]);
 
     // Expect exactly: (0,1,b), (0,2,c), (1,0,x), (1,1,y). Collect with a
     // deadline; assert no partition-2 record ever arrives.

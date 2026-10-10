@@ -362,7 +362,7 @@ mod tests {
             image.apply(&MetadataRecord::V1Partition(
                 crate::handlers::test_support::single_replica_partition(
                     "a",
-                    partition,
+                    krabka_ids::PartitionIndex(partition),
                     NodeId(leader),
                 ),
             ));

@@ -22,3 +22,17 @@ pub(super) async fn wait_for_controller_leader(ctrl: &krabka_raft::ControllerHan
     .await
     .expect("controller should elect itself");
 }
+
+/// A fresh bootstrapped single-node controller, already elected.
+pub(super) async fn start_controller() -> (tempfile::TempDir, krabka_raft::ControllerHandle) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg = krabka_raft::ControllerConfig {
+        bootstrap_mode: krabka_raft::BootstrapMode::Bootstrap,
+        ..krabka_raft::ControllerConfig::for_tests(krabka_raft::NodeId(1), dir.path().to_path_buf())
+    };
+    let ctrl = krabka_raft::Controller::start(cfg)
+        .await
+        .expect("controller");
+    wait_for_controller_leader(&ctrl).await;
+    (dir, ctrl)
+}

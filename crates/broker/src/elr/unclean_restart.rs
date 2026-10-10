@@ -128,8 +128,17 @@ pub(crate) fn withdraw_elr_membership(image: &MetadataImage, node: NodeId) -> Ve
 /// Empty when no topic carries the override, which is every cluster that
 /// never turned the feature on.
 pub(crate) fn clear_published_elr(image: &MetadataImage) -> Vec<MetadataRecord> {
+    clear_published_elr_for_topic(image, None)
+}
+
+/// Clear published and legacy ELR for the selected topic, or the whole image.
+pub(crate) fn clear_published_elr_for_topic(
+    image: &MetadataImage,
+    topic: Option<&str>,
+) -> Vec<MetadataRecord> {
     let topics: std::collections::BTreeSet<_> = image
         .all_partitions()
+        .filter(|partition| topic.is_none_or(|name| partition.topic == name))
         .map(|partition| partition.topic.as_str())
         .collect();
     let mut records = Vec::new();

@@ -190,6 +190,7 @@ mod tests {
             consumer_state::GroupState,
             group::GroupKind,
             offsets_log::fake::InMemoryOffsetsLog,
+            test_support::check_two_members_expired,
         },
     };
 
@@ -232,17 +233,17 @@ mod tests {
         let mut state = GroupState::new("g");
         for member_id in ["m1", "m2"] {
             let mut m = subscribed_member(
-                member_id,
-                &["t"],
-                crate::coordinator::unified::ClientIdentity {
-                    id: "client-a",
-                    host: "h",
+                crate::coordinator::unified::actor::test_support::ConsumerMemberSetup {
+                    member_id,
+                    client: crate::coordinator::unified::ClientIdentity {
+                        id: "client-a",
+                        host: "h",
+                    },
+                    now: Instant::now(),
+                    ..Default::default()
                 },
-                Instant::now(),
             );
-            m.last_seen = Instant::now()
-                .checked_sub(Duration::from_millis(50))
-                .expect("50ms is always within Instant range");
+            m.last_seen = crate::coordinator::unified::test_support::expired_session_last_seen();
             state.add_or_update_member(m);
         }
         state.group_epoch = 2;
@@ -264,10 +265,11 @@ mod tests {
             .expect("tick should succeed");
 
         let fence = |member_id: &str, epoch| {
+            use crate::coordinator::unified::test_support::member_tombstones;
             PendingRecords {
-                member_metadata: vec![(member_id.into(), None)],
-                target_per_member: vec![(member_id.into(), None)],
-                current_per_member: vec![(member_id.into(), None)],
+                member_metadata: member_tombstones(member_id),
+                target_per_member: member_tombstones(member_id),
+                current_per_member: member_tombstones(member_id),
                 group_metadata: Some(
                     crate::coordinator::unified::persistence_next_gen::GroupMetadataValue {
                         epoch,
@@ -280,12 +282,7 @@ mod tests {
             .unwrap()
             .records
         };
-        let written: Vec<_> = log
-            .batches()
-            .await
-            .into_iter()
-            .map(|batch| batch.records)
-            .collect();
+        let written: Vec<_> = log.record_batches().await;
         let mut expected = vec![fence("m1", 3), fence("m2", 4)];
         if written.first().is_some_and(|batch| batch != &expected[0]) {
             // The members expire together: either may be fenced first.
@@ -293,7 +290,7 @@ mod tests {
         }
         check!(written == expected);
         let state = group.as_consumer().unwrap();
-        check!((state.members.len(), state.group_epoch, state.target.epoch) == (0, 4, 2));
+        check_two_members_expired((state.members.len(), state.group_epoch, state.target.epoch));
     }
 
     /// KIP-848: Kafka fences a member that does not revoke its partitions
@@ -610,6 +607,11 @@ mod tests {
         assert!(!handle.tx.is_closed());
     }
 
+    fn check_preparing_survivor(state: &ClassicState) {
+        check!(state.state == ClassicGroupState::PreparingRebalance);
+        check!(state.members.keys().collect::<Vec<_>>() == vec!["m2"]);
+    }
+
     /// Kafka's `removeMemberAndUpdateClassicGroup` reaches `prepareRebalance`,
     /// which answers every member waiting in `SyncGroup` with
     /// `REBALANCE_IN_PROGRESS` at once and gives the survivors the whole group
@@ -635,8 +637,7 @@ mod tests {
                     ..Default::default()
                 }
         );
-        check!(state.state == ClassicGroupState::PreparingRebalance);
-        check!(state.members.keys().collect::<Vec<_>>() == vec!["m2"]);
+        check_preparing_survivor(state);
         // The survivor's 60 s rebalance timeout, not the 3 s initial delay.
         check!(
             state
@@ -703,8 +704,7 @@ mod tests {
                 == codes::REBALANCE_IN_PROGRESS
         );
         let state = group.as_classic().unwrap();
-        check!(state.state == ClassicGroupState::PreparingRebalance);
-        check!(state.members.keys().collect::<Vec<_>>() == vec!["m2"]);
+        check_preparing_survivor(state);
         check!(state.sync_deadline.is_none());
     }
 

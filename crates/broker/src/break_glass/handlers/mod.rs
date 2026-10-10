@@ -192,6 +192,23 @@ pub(crate) async fn require_privileged(
         .await
 }
 
+/// Refuse a workflow request with the same policy error when its durable audit intent fails.
+pub(crate) async fn admit_privileged_request(
+    audit_log: &AuditLog,
+    ctx: &RequestContext<'_>,
+    approver_set_fingerprint: String,
+    event: &PrivilegedAudit<'_>,
+) -> Result<(), Refusal> {
+    require_privileged(audit_log, ctx, approver_set_fingerprint, event)
+        .await
+        .map_err(|error| {
+            Refusal::new(
+                crate::codes::POLICY_VIOLATION,
+                format!("privileged action refused: {error}"),
+            )
+        })
+}
+
 /// The `signed_at_ms` of a break-glass event.
 ///
 /// A break-glass approval signs the proposal's `created_at_ms` and

@@ -93,6 +93,7 @@ impl ReplicatorSupervisor {
                         &target.topic,
                         shard.topic_id,
                         shard.partition,
+                        crate::wal::quorum::ShardRemoval::All,
                     ) {
                         warn!(
                             topic = %target.topic,
@@ -203,7 +204,14 @@ mod tests {
             MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
                 "diskless", topic_id,
             )),
-            partition_record("diskless", 0, NodeId(1), vec![NodeId(1)], 7),
+            partition_record(
+                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                    topic: "diskless",
+                    replicas: vec![NodeId(1)],
+                    epoch: krabka_metadata::LeaderEpoch(7),
+                    ..Default::default()
+                },
+            ),
             MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                 topic: "diskless".into(),
                 overrides,
@@ -240,7 +248,14 @@ mod tests {
                 MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
                     "diskless", topic_id,
                 )),
-                partition_record("diskless", 0, NodeId(1), vec![NodeId(1)], leader_epoch),
+                partition_record(
+                    crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                        topic: "diskless",
+                        replicas: vec![NodeId(1)],
+                        epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+                        ..Default::default()
+                    },
+                ),
                 MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                     topic: "diskless".into(),
                     overrides,

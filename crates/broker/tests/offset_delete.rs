@@ -250,11 +250,15 @@ async fn delete_offsets_for_subscribed_topic_returns_group_subscribed() {
     let r1 = p
         .client
         .send(classic_join_request(
-            "g5",
-            String::new(),
-            (30_000, 1_500),
-            "consumer",
-            vec![join_protocol("range", sub_bytes.clone())],
+            crate::support::classic::ClassicJoinSetup {
+                group_id: ("g5").into(),
+                timeouts: crate::support::classic::ClassicTimeouts {
+                    rebalance: krabka_units::millis(1_500),
+                    ..Default::default()
+                },
+                protocols: vec![join_protocol("range", sub_bytes.clone())],
+                ..Default::default()
+            },
         ))
         .await
         .expect("JoinGroup1");
@@ -267,11 +271,16 @@ async fn delete_offsets_for_subscribed_topic_returns_group_subscribed() {
     let r2 = p
         .client
         .send(classic_join_request(
-            "g5",
-            mid,
-            (30_000, 1_500),
-            "consumer",
-            vec![join_protocol("range", sub_bytes)],
+            crate::support::classic::ClassicJoinSetup {
+                group_id: ("g5").into(),
+                member_id: mid,
+                timeouts: crate::support::classic::ClassicTimeouts {
+                    rebalance: krabka_units::millis(1_500),
+                    ..Default::default()
+                },
+                protocols: vec![join_protocol("range", sub_bytes)],
+                ..Default::default()
+            },
         ))
         .await
         .expect("JoinGroup2");

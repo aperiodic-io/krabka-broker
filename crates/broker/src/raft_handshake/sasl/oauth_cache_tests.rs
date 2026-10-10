@@ -17,7 +17,10 @@ use tokio::{
 };
 
 use super::*;
-use crate::raft_handshake::test_support::{read_response_frame, request_frame, sasl_test_config};
+use crate::raft_handshake::test_support::{
+    HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
+    RequestFrameSetup, read_response_frame, request_frame, sasl_test_config,
+};
 
 struct NoApiVersions;
 
@@ -140,14 +143,11 @@ async fn controller_signed_oauth_requires_a_fresh_published_cache() {
         .encode(&mut body, 1)
         .unwrap();
         client
-            .write_all(&request_frame(
-                API_KEY_SASL_HANDSHAKE,
-                1,
-                1,
-                None,
-                false,
-                &body,
-            ))
+            .write_all(&request_frame(RequestFrameSetup {
+                client_id: None,
+                body: &body,
+                ..Default::default()
+            }))
             .await
             .unwrap();
         let handshake = read_response_frame(&mut client).await;
@@ -193,14 +193,14 @@ async fn authenticate_round_trip(
     body: &[u8],
 ) -> SaslAuthenticateResponse {
     client
-        .write_all(&request_frame(
-            API_KEY_SASL_AUTHENTICATE,
-            2,
-            correlation_id,
-            None,
-            true,
+        .write_all(&request_frame(RequestFrameSetup {
+            api_key: HandshakeApiKey(API_KEY_SASL_AUTHENTICATE),
+            api_version: HandshakeApiVersion(2),
+            correlation: HandshakeCorrelationId(correlation_id),
+            client_id: None,
+            header: HandshakeHeader::Flexible,
             body,
-        ))
+        }))
         .await
         .unwrap();
     let frame = read_response_frame(client).await;

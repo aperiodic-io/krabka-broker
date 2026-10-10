@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/composition/delivery.rs" 71 0 77 28 *)
+(* #"/workspace/crates/verified/src/composition/delivery.rs" 79 0 85 28 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
@@ -18,45 +18,46 @@ let%span sops = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creu
 let%span sops'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/ops.rs" 702 25 702 33
 let%span sops'1 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/ops.rs" 701 18 701 32
 let%span sbroker = "/workspace/crates/verified/src/broker.rs" 33 8 35 83
-let%span sdelivery = "/workspace/crates/verified/src/composition/delivery.rs" 78 18 78 80
-let%span sdelivery'0 = "/workspace/crates/verified/src/composition/delivery.rs" 81 16 81 22
-let%span sdelivery'1 = "/workspace/crates/verified/src/composition/delivery.rs" 96 14 96 33
-let%span sdelivery'2 = "/workspace/crates/verified/src/composition/delivery.rs" 97 14 97 27
-let%span sdelivery'3 = "/workspace/crates/verified/src/composition/delivery.rs" 93 16 95 74
-let%span sdelivery'4 = "/workspace/crates/verified/src/composition/delivery.rs" 90 16 92 40
-let%span sdelivery'5 = "/workspace/crates/verified/src/composition/delivery.rs" 89 16 89 70
-let%span sdelivery'6 = "/workspace/crates/verified/src/composition/delivery.rs" 86 16 88 84
-let%span sdelivery'7 = "/workspace/crates/verified/src/composition/delivery.rs" 84 16 85 62
-let%span sdelivery'8 = "/workspace/crates/verified/src/composition/delivery.rs" 83 16 83 64
-let%span sdelivery'9 = "/workspace/crates/verified/src/composition/delivery.rs" 82 16 82 36
-let%span sdelivery'10 = "/workspace/crates/verified/src/composition/delivery.rs" 98 28 98 38
-let%span sdelivery'11 = "/workspace/crates/verified/src/composition/delivery.rs" 98 13 98 17
-let%span sdelivery'12 = "/workspace/crates/verified/src/composition/delivery.rs" 98 19 98 24
-let%span sdelivery'13 = "/workspace/crates/verified/src/composition/delivery.rs" 99 19 99 58
-let%span sdelivery'14 = "/workspace/crates/verified/src/composition/delivery.rs" 99 19 99 59
-let%span sdelivery'15 = "/workspace/crates/verified/src/composition/delivery.rs" 104 62 104 76
-let%span sdelivery'16 = "/workspace/crates/verified/src/composition/delivery.rs" 104 43 104 47
-let%span sdelivery'17 = "/workspace/crates/verified/src/composition/delivery.rs" 104 16 104 82
-let%span sdelivery'18 = "/workspace/crates/verified/src/composition/delivery.rs" 110 13 110 14
-let%span sdelivery'19 = "/workspace/crates/verified/src/composition/delivery.rs" 110 8 110 14
-let%span sdelivery'20 = "/workspace/crates/verified/src/composition/delivery.rs" 115 22 115 96
-let%span sdelivery'21 = "/workspace/crates/verified/src/composition/delivery.rs" 117 36 117 41
-let%span sdelivery'22 = "/workspace/crates/verified/src/composition/delivery.rs" 117 43 117 47
-let%span sdelivery'23 = "/workspace/crates/verified/src/composition/delivery.rs" 117 19 117 70
-let%span sdelivery'24 = "/workspace/crates/verified/src/composition/delivery.rs" 118 36 118 40
-let%span sdelivery'25 = "/workspace/crates/verified/src/composition/delivery.rs" 118 42 118 46
-let%span sdelivery'26 = "/workspace/crates/verified/src/composition/delivery.rs" 118 19 118 69
-let%span sdelivery'27 = "/workspace/crates/verified/src/composition/delivery.rs" 53 11 53 86
-let%span sdelivery'28 = "/workspace/crates/verified/src/composition/delivery.rs" 54 10 70 1
-let%span sdelivery'29 = "/workspace/crates/verified/src/composition/delivery.rs" 33 10 35 51
+let%span sdelivery = "/workspace/crates/verified/src/composition/delivery.rs" 86 18 86 80
+let%span sdelivery'0 = "/workspace/crates/verified/src/composition/delivery.rs" 89 16 89 22
+let%span sdelivery'1 = "/workspace/crates/verified/src/composition/delivery.rs" 104 14 104 33
+let%span sdelivery'2 = "/workspace/crates/verified/src/composition/delivery.rs" 105 14 105 27
+let%span sdelivery'3 = "/workspace/crates/verified/src/composition/delivery.rs" 101 16 103 74
+let%span sdelivery'4 = "/workspace/crates/verified/src/composition/delivery.rs" 98 16 100 40
+let%span sdelivery'5 = "/workspace/crates/verified/src/composition/delivery.rs" 97 16 97 70
+let%span sdelivery'6 = "/workspace/crates/verified/src/composition/delivery.rs" 94 16 96 84
+let%span sdelivery'7 = "/workspace/crates/verified/src/composition/delivery.rs" 92 16 93 62
+let%span sdelivery'8 = "/workspace/crates/verified/src/composition/delivery.rs" 91 16 91 64
+let%span sdelivery'9 = "/workspace/crates/verified/src/composition/delivery.rs" 90 16 90 36
+let%span sdelivery'10 = "/workspace/crates/verified/src/composition/delivery.rs" 106 28 106 38
+let%span sdelivery'11 = "/workspace/crates/verified/src/composition/delivery.rs" 106 13 106 17
+let%span sdelivery'12 = "/workspace/crates/verified/src/composition/delivery.rs" 106 19 106 24
+let%span sdelivery'13 = "/workspace/crates/verified/src/composition/delivery.rs" 107 19 107 58
+let%span sdelivery'14 = "/workspace/crates/verified/src/composition/delivery.rs" 107 19 107 59
+let%span sdelivery'15 = "/workspace/crates/verified/src/composition/delivery.rs" 112 62 112 76
+let%span sdelivery'16 = "/workspace/crates/verified/src/composition/delivery.rs" 112 43 112 47
+let%span sdelivery'17 = "/workspace/crates/verified/src/composition/delivery.rs" 112 16 112 82
+let%span sdelivery'18 = "/workspace/crates/verified/src/composition/delivery.rs" 118 13 118 14
+let%span sdelivery'19 = "/workspace/crates/verified/src/composition/delivery.rs" 118 8 118 14
+let%span sdelivery'20 = "/workspace/crates/verified/src/composition/delivery.rs" 123 22 123 96
+let%span sdelivery'21 = "/workspace/crates/verified/src/composition/delivery.rs" 125 36 125 41
+let%span sdelivery'22 = "/workspace/crates/verified/src/composition/delivery.rs" 125 43 125 47
+let%span sdelivery'23 = "/workspace/crates/verified/src/composition/delivery.rs" 125 19 125 70
+let%span sdelivery'24 = "/workspace/crates/verified/src/composition/delivery.rs" 126 36 126 40
+let%span sdelivery'25 = "/workspace/crates/verified/src/composition/delivery.rs" 126 42 126 46
+let%span sdelivery'26 = "/workspace/crates/verified/src/composition/delivery.rs" 126 19 126 69
+let%span sdelivery'27 = "/workspace/crates/verified/src/composition/delivery.rs" 63 11 63 86
+let%span sdelivery'28 = "/workspace/crates/verified/src/composition/delivery.rs" 64 10 78 1
+let%span sdelivery'29 = "/workspace/crates/verified/src/composition/delivery.rs" 43 10 45 51
 let%span sdelivery'30 = "/workspace/crates/verified/src/composition/delivery.rs" 13 16 14 38
 let%span sdelivery'31 = "/workspace/crates/verified/src/delivery.rs" 12 10 14 52
 let%span sdelivery'32 = "/workspace/crates/verified/src/delivery.rs" 49 11 49 33
 let%span sdelivery'33 = "/workspace/crates/verified/src/delivery.rs" 50 10 50 91
 let%span sdelivery'34 = "/workspace/crates/verified/src/delivery.rs" 51 10 51 54
 let%span sdelivery'35 = "/workspace/crates/verified/src/delivery.rs" 52 10 53 29
-let%span sdelivery'36 = "/workspace/crates/verified/src/composition/delivery.rs" 130 16 130 91
+let%span sdelivery'36 = "/workspace/crates/verified/src/composition/delivery.rs" 138 16 138 91
 let%span sdelivery'37 = "/workspace/crates/verified/src/composition/delivery.rs" 21 8 25 93
+let%span sdelivery'38 = "/workspace/crates/verified/src/composition/delivery.rs" 34 16 36 37
 let%span srecord_coordinates = "/workspace/crates/verified/src/restore/record_coordinates.rs" 124 10 133 1
 let%span scomposition = "/workspace/crates/verified/src/composition.rs" 309 16 309 42
 
@@ -102,7 +103,7 @@ let len_tup2_i64_i32 (self_: Slice64.slice tup2_i64_i32) (return (x: UInt64.t)) 
     = UInt64.t'int result}
     (! return {result}) ]
 
-predicate scheduled_activation_due [#"/workspace/crates/verified/src/composition/delivery.rs" 12 0 12 91] (activation: int) (uncertainty: int) (now: int) =
+predicate scheduled_activation_due [#"/workspace/crates/verified/src/composition/delivery.rs" 12 0 12 84] (activation: int) (uncertainty: int) (now: int) =
   [%#sdelivery'30] ge_log_Int uncertainty 0
   /\ activation + uncertainty <= Int64.to_int const_MAX /\ activation + uncertainty <= now
 
@@ -268,7 +269,7 @@ let fetch_visibility (is_follower: bool) (read_committed: bool) (w: t_FetchWater
 predicate offset_range_valid [#"/workspace/crates/verified/src/composition.rs" 308 0 308 55] (start: int) (end': int) =
   [%#scomposition] 0 <= start /\ start <= end'
 
-predicate scheduled_inputs_coherent [#"/workspace/crates/verified/src/composition/delivery.rs" 124 0 129 9] (batches: Seq.seq tup2_i64_i32) (activations: Seq.seq Int64.t) (start: int) (end': int) =
+predicate scheduled_inputs_coherent [#"/workspace/crates/verified/src/composition/delivery.rs" 132 0 137 9] (batches: Seq.seq tup2_i64_i32) (activations: Seq.seq Int64.t) (start: int) (end': int) =
   [%#sdelivery'36] Seq.length batches = Seq.length activations /\ offset_range_valid start end'
 
 predicate scheduled_batches_valid [#"/workspace/crates/verified/src/composition/delivery.rs" 19 0 19 93] (batches: Seq.seq tup2_i64_i32) (start: int) (end': int) =
@@ -288,6 +289,14 @@ predicate scheduled_batches_valid [#"/workspace/crates/verified/src/composition/
     = end'
   )
 
+type tup2_Int_Int = { f0'1: int; f1'1: int }
+
+predicate scheduled_prefix_covers_pending [#"/workspace/crates/verified/src/composition/delivery.rs" 31 0 33 9] (batches: Seq.seq tup2_i64_i32) (activations: Seq.seq Int64.t) (clock: tup2_Int_Int) (frontier: int) =
+  [%#sdelivery'38] forall i: int. 0 <= i
+      /\ i < Seq.length batches
+      /\ not scheduled_activation_due (Int64.to_int (Seq.get activations i)) clock.f0'1 clock.f1'1
+    -> frontier <= Int64.to_int (Seq.get batches i).f0
+
 predicate committed_fetch_response [#"/workspace/crates/verified/src/broker.rs" 25 0 31 9] (view: t_FetchVisibility) (hw'0: Int64.t) (lso'0: Int64.t) (deliverable'0: Int64.t) (floor: int) =
   [%#sbroker] view.response_hw = hw'0
   /\ Int64.to_int view.response_lso = MinMax.min (Int64.to_int hw'0) (Int64.to_int lso'0)
@@ -300,7 +309,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let scheduled_prefix_bounds_fetch [#"/workspace/crates/verified/src/composition/delivery.rs" 71 0 77 28]
+let scheduled_prefix_bounds_fetch [#"/workspace/crates/verified/src/composition/delivery.rs" 79 0 85 28]
   (batches: Slice64.slice tup2_i64_i32) (activations: Slice64.slice Int64.t) (uncertainty: Int64.t) (now: Int64.t)
   (w: t_FetchWatermarks) (return (x: t_Option_tup3_i64_FetchVisibility_FetchVisibility)) =
 {[@stop_split] [@expl:scheduled_prefix_bounds_fetch requires] [%#sdelivery'27] scheduled_inputs_coherent (Slice64.view batches) (Slice64.view activations) (Int64.to_int w.log_start) (Int64.to_int w.log_end)}
@@ -457,10 +466,8 @@ let scheduled_prefix_bounds_fetch [#"/workspace/crates/verified/src/composition/
       | Some'1 {f0'0 = frontier; f1'0 = consumer; f2'0 = follower} -> scheduled_batches_valid (Slice64.view batches) (Int64.to_int w.log_start) (Int64.to_int w.log_end)
       /\ Int64.to_int w.log_start <= Int64.to_int frontier
       /\ Int64.to_int frontier <= Int64.to_int w.log_end
-      /\ (forall i: int. 0 <= i
-            /\ i < Seq.length (Slice64.view batches)
-            /\ not scheduled_activation_due (Int64.to_int (Seq.get (Slice64.view activations) i)) (Int64.to_int uncertainty) (Int64.to_int now)
-          -> Int64.to_int frontier <= Int64.to_int (Seq.get (Slice64.view batches) i).f0)
+      /\ scheduled_prefix_covers_pending (Slice64.view batches) (Slice64.view activations) { f0'1 = Int64.to_int uncertainty;
+                                                                                             f1'1 = Int64.to_int now } (Int64.to_int frontier)
       /\ (Int64.to_int frontier = Int64.to_int w.log_end
         \/ (exists i: int. 0 <= i
           /\ i < Seq.length (Slice64.view batches)

@@ -34,25 +34,90 @@ pub async fn shutdown_cluster(cluster: Vec<(BrokerHandle, BrokerConfig, TempDir)
 /// such as `elect_leaders` that drive `add_learner` and `change_membership`
 /// manually and need extra config overrides per broker. `start_n_node`'s
 /// auto-join path cannot support that flow.
-pub fn broker_config(
-    i: usize,
-    client_addrs: &[SocketAddr],
-    controller_addrs: &[SocketAddr],
-    voters: &[(u64, SocketAddr)],
-    log_dir: &std::path::Path,
-    mode: BootstrapMode,
-) -> BrokerConfig {
-    let listen = client_addrs[i];
-    let mut cfg = crate::support::node_config(i, log_dir);
-    cfg.listen_addr = listen;
-    cfg.advertised_listener = listen.to_string();
-    cfg.controller_listen_addr = controller_addrs[i];
-    // `controller_quorum_voters` carries `<host>:<port>` strings (the dialer
-    // re-resolves per connect); test voter sets are built from `SocketAddr`s,
-    // so stringify here.
-    cfg.controller_quorum_voters = crate::support::controller_voters(voters);
-    cfg.bootstrap_mode = mode;
-    cfg
+const DEFAULT_ENDPOINTS: [SocketAddr; 1] = [SocketAddr::V4(std::net::SocketAddrV4::new(
+    std::net::Ipv4Addr::LOCALHOST,
+    0,
+))];
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct ClusterNodeSetup<'a> {
+    pub index: crate::support::NodeIndex,
+    #[default(&DEFAULT_ENDPOINTS)]
+    pub client_addrs: &'a [SocketAddr],
+    #[default(&DEFAULT_ENDPOINTS)]
+    pub controller_addrs: &'a [SocketAddr],
+    pub voters: Vec<(NodeId, String)>,
+    #[default(BootstrapMode::Bootstrap)]
+    pub mode: BootstrapMode,
+}
+
+pub fn broker_config(log_dir: &std::path::Path, setup: ClusterNodeSetup<'_>) -> BrokerConfig {
+    let mut config = addressed_node_config(
+        log_dir,
+        AddressedNodeSetup {
+            node: NodeId(u64::try_from(setup.index.0 + 1).expect("one-based node id")),
+            client: setup.client_addrs[setup.index.0],
+            controller: setup.controller_addrs[setup.index.0],
+        },
+    );
+    config.controller_quorum_voters = setup.voters;
+    config.bootstrap_mode = setup.mode;
+    config
+}
+
+/// Listener addresses and node identity common to formatted bootstrap nodes.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct AddressedNodeSetup {
+    #[default(NodeId(1))]
+    pub node: NodeId,
+    #[default(DEFAULT_ENDPOINTS[0])]
+    pub client: SocketAddr,
+    #[default(DEFAULT_ENDPOINTS[0])]
+    pub controller: SocketAddr,
+}
+
+pub fn addressed_node_config(log_dir: &std::path::Path, setup: AddressedNodeSetup) -> BrokerConfig {
+    let mut config = BrokerConfig::for_tests(log_dir.to_path_buf());
+    config.broker_id = i32::try_from(setup.node.0).expect("node id");
+    config.node_id = setup.node;
+    config.listen_addr = setup.client;
+    config.advertised_listener = setup.client.to_string();
+    config.controller_listen_addr = setup.controller;
+    config
+}
+
+/// Address and voter configuration kept alive independently of the adopted listeners.
+pub struct RoleEndpoints {
+    clients: Vec<SocketAddr>,
+    controllers: Vec<SocketAddr>,
+    voters: Vec<(u64, SocketAddr)>,
+}
+
+impl RoleEndpoints {
+    pub fn topology(&self) -> RoleTopology<'_> {
+        RoleTopology::new(&self.clients, &self.controllers, &self.voters)
+    }
+}
+
+pub async fn single_controller_endpoints(
+    nodes: usize,
+) -> (
+    RoleEndpoints,
+    std::vec::IntoIter<tokio::net::TcpListener>,
+    std::vec::IntoIter<tokio::net::TcpListener>,
+) {
+    let (clients, controllers, client_listeners, controller_listeners) =
+        super::bind_and_hold_ports(nodes).await;
+    let voters = vec![(1, controllers[0])];
+    (
+        RoleEndpoints {
+            clients,
+            controllers,
+            voters,
+        },
+        client_listeners.into_iter(),
+        controller_listeners.into_iter(),
+    )
 }
 
 /// The held endpoints and voter map shared by the nodes of a role-separated cluster.
@@ -60,6 +125,22 @@ pub struct RoleTopology<'a> {
     clients: &'a [SocketAddr],
     controllers: &'a [SocketAddr],
     voters: &'a [(u64, SocketAddr)],
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct RoleNodeSetup {
+    pub index: crate::support::NodeIndex,
+    #[default(BootstrapMode::Bootstrap)]
+    pub mode: BootstrapMode,
+    #[default(krabka_broker::config::NodeRole::Broker)]
+    pub role: krabka_broker::config::NodeRole,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct ClusterBootstrapSetup {
+    pub index: crate::support::NodeIndex,
+    #[default(BootstrapMode::Bootstrap)]
+    pub mode: BootstrapMode,
 }
 
 impl<'a> RoleTopology<'a> {
@@ -75,26 +156,30 @@ impl<'a> RoleTopology<'a> {
         }
     }
 
+    /// Resolve one node's held addresses and voter endpoints from this topology.
+    pub fn node_setup(&self, setup: ClusterBootstrapSetup) -> ClusterNodeSetup<'a> {
+        ClusterNodeSetup {
+            index: setup.index,
+            client_addrs: self.clients,
+            controller_addrs: self.controllers,
+            voters: crate::support::controller_voters(self.voters),
+            mode: setup.mode,
+        }
+    }
+
     /// Apply exactly one role after the ordinary static-voter configuration.
     ///
     /// # Panics
     /// Panics if the node index or checked broker id is out of range.
-    pub fn config(
-        &self,
-        index: usize,
-        log_dir: &std::path::Path,
-        mode: BootstrapMode,
-        role: krabka_broker::config::NodeRole,
-    ) -> BrokerConfig {
+    pub fn config(&self, log_dir: &std::path::Path, setup: RoleNodeSetup) -> BrokerConfig {
         let mut config = broker_config(
-            index,
-            self.clients,
-            self.controllers,
-            self.voters,
             log_dir,
-            mode,
+            self.node_setup(ClusterBootstrapSetup {
+                index: setup.index,
+                mode: setup.mode,
+            }),
         );
-        config.roles = vec![role];
+        config.roles = vec![setup.role];
         config
     }
 }
@@ -142,18 +227,27 @@ pub async fn start_n_node(
 /// split-vote on slow runners. A fresh tempdir and port set on retry
 /// clears the openraft state and usually succeeds within 2 attempts.
 pub async fn start_n_node_with_retry(n: u64) -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
+    start_n_node_customized_with_retry(n, |_, _| {}, "cluster").await
+}
+
+/// Retry startup with the same per-node customization on each fresh cluster.
+pub async fn start_n_node_customized_with_retry(
+    n: u64,
+    mut customize: impl FnMut(usize, &mut BrokerConfig),
+    label: &str,
+) -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
     let mut last_err = None;
     for attempt in 1..=3 {
-        match start_n_node(n).await {
+        match start_n_node_with(n, &mut customize).await {
             Ok(cluster) => return cluster,
-            Err(e) => {
-                tracing::warn!(attempt, error = %e, "cluster start failed; retrying");
-                last_err = Some(e);
+            Err(error) => {
+                tracing::warn!(attempt, %error, "{label} start failed; retrying");
+                last_err = Some(error);
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
     }
-    panic!("cluster start failed after 3 attempts; last error: {last_err:?}");
+    panic!("{label} start failed after 3 attempts; last error: {last_err:?}");
 }
 
 /// Boot a static-voter cluster and await its registration on every broker.
@@ -258,4 +352,17 @@ pub async fn start_first_held(
     Broker::start_with_listeners(config, Some(controller_listener), Some(data_listener))
         .await
         .expect(context)
+}
+
+/// Wait for this survivor's leader watch to replace the departed node.
+pub async fn await_controller_replacement(handle: &BrokerHandle, departed: NodeId, context: &str) {
+    let mut leaders = handle.watch_leader_for_test();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        leaders
+            .wait_for(|leader| matches!(leader, Some(id) if *id != NodeId(0) && *id != departed)),
+    )
+    .await
+    .expect(context)
+    .expect("leader channel closed");
 }

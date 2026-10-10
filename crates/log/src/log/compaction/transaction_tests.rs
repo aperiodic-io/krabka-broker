@@ -18,12 +18,25 @@ use crate::{
     txn_index::AbortedTxn,
 };
 
-/// A transactional batch of one keyed record; `Log::append` assigns the offset.
-fn transactional_keyed(pid: i64, sequence: i32, key: &[u8], value: &[u8]) -> RecordBatch {
+#[derive(Clone, Copy, Default)]
+struct ProducerSequence(i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct KeyedTransactionSetup<'a> {
+    #[default(ProducerId(1000))]
+    producer: ProducerId,
+    sequence: ProducerSequence,
+    #[default((b"k", b"v"))]
+    payload: (&'a [u8], &'a [u8]),
+}
+
+/// One keyed transactional record; `Log::append` assigns its offset.
+fn transactional_keyed(setup: KeyedTransactionSetup<'_>) -> RecordBatch {
+    let (key, value) = setup.payload;
     let mut batch = keyed_batch(0, &[(0, key, value)]);
-    batch.producer_id = pid;
+    batch.producer_id = setup.producer.0;
     batch.producer_epoch = 0;
-    batch.base_sequence = sequence;
+    batch.base_sequence = setup.sequence.0;
     batch.attributes = Attributes::default().with_transactional(true);
     batch
 }
@@ -80,17 +93,31 @@ fn index_of_the_fixture(log: &Log) -> Vec<AbortedTxn> {
     index
 }
 
+fn committed_and_aborted_batches(tail: [RecordBatch; 2]) -> Vec<RecordBatch> {
+    let mut batches = vec![
+        transactional_keyed(KeyedTransactionSetup {
+            payload: (b"k", b"committed"),
+            ..Default::default()
+        }), // 0
+        commit_marker(1000, 0), // 1
+        transactional_keyed(KeyedTransactionSetup {
+            producer: ProducerId(2000),
+            payload: (b"k", b"aborted"),
+            ..Default::default()
+        }), // 2
+    ];
+    batches.extend(tail);
+    batches
+}
+
 /// A committed value followed by a newer aborted write under the same key.
 fn committed_then_aborted(dir: &std::path::Path) -> Log {
     log_with_a_batch_per_segment(
         dir,
-        vec![
-            transactional_keyed(1000, 0, b"k", b"committed"), // 0
-            commit_marker(1000, 0),                           // 1
-            transactional_keyed(2000, 0, b"k", b"aborted"),   // 2
-            abort_marker(2000, 0),                            // 3
-            keyed_batch(0, &[(0, b"after", b"a")]),           // 4
-        ],
+        committed_and_aborted_batches([
+            abort_marker(2000, 0),                  // 3
+            keyed_batch(0, &[(0, b"after", b"a")]), // 4
+        ]),
     )
 }
 
@@ -180,13 +207,10 @@ fn an_aborted_batch_is_dropped_when_its_marker_lies_beyond_the_consumed_range() 
     let dir = tempdir().unwrap();
     let mut log = log_with_a_batch_per_segment(
         dir.path(),
-        vec![
-            transactional_keyed(1000, 0, b"k", b"committed"), // 0
-            commit_marker(1000, 0),                           // 1
-            transactional_keyed(2000, 0, b"k", b"aborted"),   // 2
-            keyed_batch(0, &[(0, b"other", b"o")]),           // 3
-            abort_marker(2000, 0),                            // 4
-        ],
+        committed_and_aborted_batches([
+            keyed_batch(0, &[(0, b"other", b"o")]), // 3
+            abort_marker(2000, 0),                  // 4
+        ]),
     );
     // The pass consumes the sealed segments below offset 4 only.
     let ctx = CompactionContext {

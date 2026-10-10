@@ -20,33 +20,55 @@ use crate::partition::Partition;
 fn batch(count: i32) -> RecordBatch {
     RecordBatch {
         partition_leader_epoch: 0,
-        ..crate::test_support::repeated_records_batch(count, crate::time_util::now_ms())
+        ..crate::test_support::repeated_records_batch(crate::test_support::RepeatedRecordsSetup {
+            count: crate::test_support::RecordCount(count),
+            timestamp: crate::test_support::UnixMillis(crate::time_util::now_ms()),
+        })
     }
 }
 
 pub(super) fn orders_partition(root: &Path) -> Arc<Partition> {
-    test_partition(root, "orders", 0, true, NodeId(1))
+    test_partition(root, FlusherPartitionSetup::default())
 }
 
-pub(super) fn test_partition(
-    root: &Path,
-    topic: &str,
-    partition: i32,
-    diskless: bool,
-    leader: NodeId,
-) -> Arc<Partition> {
+#[derive(Clone, Copy)]
+pub(super) struct FlusherPartitionSetup<'a> {
+    pub topic: &'a str,
+    pub partition: krabka_ids::PartitionIndex,
+    pub storage: crate::test_support::StorageMode,
+    pub leader: NodeId,
+}
+
+impl Default for FlusherPartitionSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "orders",
+            partition: krabka_ids::PartitionIndex(0),
+            storage: crate::test_support::StorageMode::Diskless,
+            leader: NodeId(1),
+        }
+    }
+}
+
+pub(super) fn test_partition(root: &Path, setup: FlusherPartitionSetup<'_>) -> Arc<Partition> {
+    let FlusherPartitionSetup {
+        topic,
+        partition,
+        storage,
+        leader,
+    } = setup;
     let partition_dir = root.join(format!("{topic}-{partition}"));
     std::fs::create_dir_all(&partition_dir).unwrap();
     let mut log = Log::open(&partition_dir, LogConfig::default()).unwrap();
     log.append(&mut batch(3)).unwrap();
     let handle = crate::broker::spawn_partition(
         topic.to_owned(),
-        krabka_ids::PartitionIndex(partition),
+        partition,
         root.to_path_buf(),
         log,
         crate::log_dir_status::LogDirRegistry::default(),
         Arc::new(crate::producer_state::ProducerState::new()),
-        diskless,
+        storage == crate::test_support::StorageMode::Diskless,
     );
     handle.current_leader.store(leader.0, Ordering::Relaxed);
     handle
@@ -61,25 +83,4 @@ pub(super) async fn test_index_log() -> crate::diskless::index_log::DisklessInde
     .unwrap()
 }
 
-/// One keyed range, with each scenario supplying its timestamps and byte size.
-pub(super) fn flush_record(
-    topic_id: uuid::Uuid,
-    object_key: &str,
-    (first_offset, last_offset, max_timestamp_ms): (i64, i64, i64),
-    byte_len: u32,
-) -> crate::diskless::wal_index::WalFlushRecord {
-    use crate::diskless::wal_index::{WalFlushRecord, WalIndexEntry};
-    WalFlushRecord {
-        object_key: object_key.into(),
-        format_version: WalFlushRecord::FORMAT_VERSION,
-        entries: vec![WalIndexEntry {
-            topic_id,
-            partition: 0,
-            first_offset,
-            last_offset,
-            byte_start: 0,
-            byte_len,
-            max_timestamp_ms,
-        }],
-    }
-}
+pub(super) use crate::diskless::index_log::test_support::flush_record;

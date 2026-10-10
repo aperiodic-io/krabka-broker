@@ -24,7 +24,7 @@ use crate::{
 };
 
 pub(crate) async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    crate::support::streams::boot(true).await
+    crate::support::streams::boot(crate::support::streams::ElectionReadiness::BrokerElectable).await
 }
 
 pub(crate) async fn connect(bootstrap: &str) -> Arc<Client> {

@@ -302,11 +302,7 @@ mod tests {
     fn install_assignments_to_stable() {
         let mut g = ClassicGroup::new("g");
         g.add_member(sample_member("m1"));
-        g.complete_rebalance("range");
-        let mut a = HashMap::new();
-        a.insert("m1".into(), Bytes::from_static(b"assignment-bytes"));
-        g.install_assignments(a);
-        assert!(g.state == GroupState::Stable);
+        super::super::test_support::stabilize_m1(&mut g);
         assert!(g.members["m1"].assignment.is_some());
     }
 

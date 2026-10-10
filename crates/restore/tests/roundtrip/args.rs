@@ -21,17 +21,16 @@ use tokio::net::TcpListener;
 pub(crate) fn restore_args(
     archive_root: &Path,
     log_dir: &Path,
-    controller_listener: &str,
-    extra: &[&str],
+    options: RestoreOptions<'_>,
 ) -> RestoreArgs {
-    let argv = restore_argv(archive_root, log_dir, controller_listener, extra);
+    let argv = restore_argv(archive_root, log_dir, options);
     Cli::try_parse_from(argv).expect("valid command line").args
 }
 
 #[path = "../support/args.rs"]
 mod cli_args;
 
-pub(crate) use cli_args::restore_argv;
+pub(crate) use cli_args::{RestoreOptions, restore_argv};
 
 /// The controller listener of a restored node, bound before the restore
 /// formats its log directory.
@@ -67,7 +66,14 @@ impl ControllerListener {
         log_dir: &Path,
         extra: &[&str],
     ) -> RestoreArgs {
-        restore_args(archive_root, log_dir, &self.addr.to_string(), extra)
+        restore_args(
+            archive_root,
+            log_dir,
+            RestoreOptions {
+                controller_listener: &self.addr.to_string(),
+                extra,
+            },
+        )
     }
 
     /// Start node 1 under `config` with its controller listening here. The

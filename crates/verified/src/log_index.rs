@@ -7,8 +7,45 @@
 
 use creusot_std::prelude::*;
 
+// A sorted first coordinate determines both sparse-index and logical-range cursors.
+macro_rules! sorted_first_cursor {
+    ($name:ident, $key:ty, $value:ty, $before:tt) => {
+        #[requires(forall<i: Int, j: Int> 0 <= i && i < j && j < entries@.len()
+            ==> entries@[i].0@ <= entries@[j].0@)]
+        #[ensures(result@ <= entries@.len())]
+        #[ensures(forall<i: Int> 0 <= i && i < result@ ==> entries@[i].0@ $before target@)]
+        #[ensures(forall<i: Int> result@ <= i && i < entries@.len()
+            ==> !(entries@[i].0@ $before target@))]
+        #[must_use]
+        #[inline]
+        pub(crate) fn $name(entries: &[($key, $value)], target: $key) -> usize {
+            let mut lo = 0usize;
+            let mut hi = entries.len();
+            #[invariant(lo@ <= hi@ && hi@ <= entries@.len())]
+            #[invariant(forall<i: Int> 0 <= i && i < lo@ ==> entries@[i].0@ $before target@)]
+            #[invariant(forall<i: Int> hi@ <= i && i < entries@.len()
+                ==> !(entries@[i].0@ $before target@))]
+            #[variant(hi - lo)]
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if entries[mid].0 $before target {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            lo
+        }
+    };
+}
+
+sorted_first_cursor!(upper_offset_cursor, u32, u32, <=);
+sorted_first_cursor!(upper_time_cursor, i64, u32, <=);
+sorted_first_cursor!(upper_range_cursor, i64, i64, <=);
+sorted_first_cursor!(lower_offset_cursor, u32, u32, <);
+
 macro_rules! floor_lookup {
-    ($(#[$doc:meta])* $name:ident, $key:ty, $order:tt) => {
+    ($(#[$doc:meta])* $name:ident, $key:ty, $order:tt, $cursor:ident) => {
                 $(#[$doc])*
         #[requires(forall<i: Int, j: Int> 0 <= i && i < j && j < entries@.len()
             ==> entries@[i].0@ $order entries@[j].0@)]
@@ -19,16 +56,7 @@ macro_rules! floor_lookup {
         #[ensures((forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].0@ > target@) ==> result@ == 0)]
         #[must_use]
         pub fn $name(entries: &[($key, u32)], target: $key) -> u32 {
-            let mut lo = 0usize;
-            let mut hi = entries.len();
-            #[invariant(lo@ <= hi@ && hi@ <= entries@.len())]
-            #[invariant(forall<i: Int> 0 <= i && i < lo@ ==> entries@[i].0@ <= target@)]
-            #[invariant(forall<i: Int> hi@ <= i && i < entries@.len() ==> entries@[i].0@ > target@)]
-            #[variant(hi - lo)]
-            while lo < hi {
-                let mid = lo + (hi - lo) / 2;
-                if entries[mid].0 <= target { lo = mid + 1; } else { hi = mid; }
-            }
+            let lo = $cursor(entries, target);
             if lo == 0 { 0 } else { entries[lo - 1].1 }
         }
     };
@@ -41,7 +69,7 @@ floor_lookup! {
 #[doc = "`relative_offset <= target`, or 0 if no such entry exists. `entries` must be"]
 #[doc = "strictly sorted by relative offset, which the construction of `OffsetIndex`"]
 #[doc = "guarantees."]
-offset_index_lookup, u32, <
+offset_index_lookup, u32, <, upper_offset_cursor
 }
 
 floor_lookup! {
@@ -50,7 +78,7 @@ floor_lookup! {
 #[doc = "This is the offset field of the last entry with"]
 #[doc = "`timestamp <= target_timestamp`, or 0 if no such entry exists. `entries`"]
 #[doc = "must be sorted by timestamp; equal timestamps are allowed."]
-time_index_lookup, i64, <=
+time_index_lookup, i64, <=, upper_time_cursor
 }
 
 /// A safe sparse starting offset for a forward scan seeking `timestamp >= target`.
@@ -89,20 +117,7 @@ pub fn time_index_scan_start(entries: &[(i64, u32)], target_timestamp: i64) -> u
     ==> result == None)]
 #[must_use]
 pub fn offset_index_position_at_or_after(entries: &[(u32, u32)], target: u32) -> Option<u32> {
-    let mut lo = 0usize; // entries[..lo] all have rel < target
-    let mut hi = entries.len(); // entries[hi..] all have rel >= target
-    #[invariant(lo@ <= hi@ && hi@ <= entries@.len())]
-    #[invariant(forall<i: Int> 0 <= i && i < lo@ ==> entries@[i].0@ < target@)]
-    #[invariant(forall<i: Int> hi@ <= i && i < entries@.len() ==> target@ <= entries@[i].0@)]
-    #[variant(hi - lo)]
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        if entries[mid].0 < target {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
+    let lo = lower_offset_cursor(entries, target);
     if lo == entries.len() {
         None
     } else {

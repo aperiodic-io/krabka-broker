@@ -16,9 +16,8 @@ use tokio::{
 };
 
 use crate::support::{
-    produce::single_partition_produce,
     records::{batch_from_records, value_record},
-    topics::{creatable_topic, create_topic_request},
+    topics::CreateTopicSetup,
 };
 pub async fn connect(bootstrap: &str, client_id: &str) -> Arc<Client> {
     Arc::new(connect_client(bootstrap, Some(client_id)).await)
@@ -65,20 +64,24 @@ pub async fn connect_owned(bootstrap: impl AsRef<str>, client_id: &str, context:
     connect_with_context(bootstrap, Some(client_id), context).await
 }
 pub async fn create_topic(client: &Client, topic: &str, partitions: i32) {
-    create_topic_with(client, topic, partitions, 1, 5_000).await;
+    create_topic_with(
+        client,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            num_partitions: crate::support::topics::TopicPartitionCount(partitions),
+            ..Default::default()
+        },
+    )
+    .await;
 }
 
 /// Create a topic and verify that its first partition becomes local.
 ///
 /// # Panics
 /// Panics if creation fails or the partition never becomes local.
-pub async fn create_led_topic(
-    broker: &BrokerHandle,
-    client: &Client,
-    topic: &str,
-    partitions: i32,
-) {
-    create_topic(client, topic, partitions).await;
+pub async fn create_led_topic(broker: &BrokerHandle, client: &Client, setup: CreateTopicSetup<'_>) {
+    let topic = setup.topic;
+    create_topic_with(client, setup).await;
     broker.wait_until_partition_present(topic, 0).await;
     assert!(broker.has_partition(topic, 0), "partition never led");
 }
@@ -103,17 +106,41 @@ pub async fn http_get(addr: SocketAddr, path: &str, flush: bool) -> String {
     String::from_utf8(buf).unwrap()
 }
 
-pub async fn create_topic_with(
+pub async fn create_topic_with(client: &Client, setup: CreateTopicSetup<'_>) -> WireUuid {
+    let mut request = crate::support::topics::configured_topic_request(setup);
+    create_topic_spec(
+        client,
+        request.topics.remove(0),
+        crate::support::topics::CreateTopicRequestSetup {
+            timeout: crate::support::topics::CreateTopicsTimeoutMillis(request.timeout_ms),
+        },
+    )
+    .await
+}
+
+/// The three-replica topic used by witness and stretched-quorum scenarios.
+pub async fn create_replicated_topic(client: &Client, topic: &str) -> WireUuid {
+    create_topic_with(
+        client,
+        CreateTopicSetup {
+            topic,
+            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            timeout: krabka_units::millis(10_000),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// Create the caller's complete topic specification and return its wire identity.
+pub async fn create_topic_spec(
     client: &Client,
-    topic: &str,
-    partitions: i32,
-    replication_factor: i16,
-    timeout_ms: i32,
+    topic: krabka_protocol::owned::create_topics_request::CreatableTopic,
+    setup: crate::support::topics::CreateTopicRequestSetup,
 ) -> WireUuid {
     let resp = client
-        .send(create_topic_request(
-            creatable_topic(topic, partitions, replication_factor),
-            timeout_ms,
+        .send(crate::support::topics::create_topic_request_with_setup(
+            topic, setup,
         ))
         .await
         .expect("CreateTopics");
@@ -124,8 +151,19 @@ pub async fn create_topic_with(
     resp.topics[0].topic_id
 }
 
+/// Number of sequential vN records in a fixture batch.
+#[derive(Clone, Copy)]
+pub struct ValueRecordCount(pub i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct ValueBatchSetup {
+    #[default(ValueRecordCount(1))]
+    pub records: ValueRecordCount,
+}
+
 /// One vN record per offset, starting at zero within the batch.
-pub fn value_batch(n: i32) -> RecordBatch {
+pub fn value_batch(setup: ValueBatchSetup) -> RecordBatch {
+    let n = setup.records.0;
     RecordBatch {
         base_offset: 0,
         last_offset_delta: (n - 1).max(0),
@@ -137,25 +175,34 @@ pub fn value_batch(n: i32) -> RecordBatch {
     }
 }
 
+/// Options shared by single-partition batch producers.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct BatchProduceSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    pub topic_id: WireUuid,
+    pub acknowledgements: crate::support::produce::ProduceAcknowledgements,
+    pub timeout: crate::support::produce::ProduceTimeoutMillis,
+}
+
 /// Produce one batch, preserving the caller's acknowledgement and deadline.
 pub async fn produce_batch(
     client: &Client,
-    topic: &str,
-    topic_id: WireUuid,
     batch: RecordBatch,
-    acks: i16,
-    timeout_ms: i32,
+    setup: BatchProduceSetup<'_>,
 ) -> PartitionProduceResponse {
-    let response = client
-        .send(single_partition_produce(
-            topic.to_owned(),
-            topic_id,
-            0,
-            Some(batch.into()),
-            (acks, timeout_ms),
-        ))
-        .await
-        .expect("Produce");
+    let response = crate::support::produce::send_batch(
+        &client,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: setup.topic.to_owned(),
+            topic_id: setup.topic_id,
+            acknowledgements: setup.acknowledgements,
+            timeout: setup.timeout,
+            ..Default::default()
+        },
+    )
+    .await;
     response.responses[0].partition_responses[0].clone()
 }
 
@@ -228,22 +275,10 @@ pub async fn metadata_fetch(
 ///
 /// # Panics
 /// Panics if the request fails, its topic row is missing, or creation is rejected.
-pub async fn create_configured_topic(
-    client: &Client,
-    topic: &str,
-    configs: &[(&str, &str)],
-    partitions: i32,
-    replication_factor: i16,
-    timeout_ms: i32,
-) {
+pub async fn create_configured_topic(client: &Client, setup: CreateTopicSetup<'_>) {
+    let topic = setup.topic;
     let response = client
-        .send(crate::support::topics::configured_topic_request(
-            topic,
-            configs,
-            partitions,
-            replication_factor,
-            timeout_ms,
-        ))
+        .send(crate::support::topics::configured_topic_request(setup))
         .await
         .expect("CreateTopics");
     let created = response.topics.first().expect("one topic result");
@@ -262,6 +297,17 @@ pub async fn connect_c1(bootstrap: &str) -> Arc<Client> {
     connect(bootstrap, "c1").await
 }
 
+/// Client identity and diagnostics for a configured broker fixture.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct BrokerClientSetup<'a> {
+    #[default("krabka-broker-test")]
+    pub client_id: &'a str,
+    #[default("broker start")]
+    pub broker_context: &'a str,
+    #[default("client build")]
+    pub client_context: &'a str,
+}
+
 /// Start a configured broker and connect the fixture's explicitly named client.
 /// The caller retains its original directory guard and readiness policy.
 ///
@@ -269,12 +315,15 @@ pub async fn connect_c1(bootstrap: &str) -> Arc<Client> {
 /// Panics if startup or client construction fails, with each caller's diagnostic.
 pub async fn start_broker_client(
     config: BrokerConfig,
-    client_id: &str,
-    broker_context: &str,
-    client_context: &str,
+    setup: BrokerClientSetup<'_>,
 ) -> (BrokerHandle, Client) {
-    let broker = configured_broker(config, Some(broker_context)).await;
-    let client = connect_owned(broker.listen_addr().to_string(), client_id, client_context).await;
+    let broker = configured_broker(config, Some(setup.broker_context)).await;
+    let client = connect_owned(
+        broker.listen_addr().to_string(),
+        setup.client_id,
+        setup.client_context,
+    )
+    .await;
     (broker, client)
 }
 
@@ -300,4 +349,40 @@ async fn configured_broker(config: BrokerConfig, context: Option<&str>) -> Broke
         Some(context) => result.expect(context),
         None => result.unwrap(),
     }
+}
+
+/// A standalone broker with its default admin client and a created topic.
+pub async fn standalone_topic(topic: &str) -> (tempfile::TempDir, BrokerHandle, String, Client) {
+    let (dir, broker) = super::standalone_broker().await;
+    let bootstrap = broker.listen_addr().to_string();
+    let admin = connect_client(&bootstrap, None).await;
+    create_topic(&admin, topic, 1).await;
+    (dir, broker, bootstrap, admin)
+}
+
+/// Named-topic creation with the original producer and topic-description success diagnostic.
+pub async fn create_topic_named(client: &Client, setup: CreateTopicSetup<'_>) {
+    let name = setup.topic;
+    let response = send_topic_creation(client, setup).await;
+    assert!(
+        response.topics[0].error_code == 0,
+        "{name} create: {response:?}"
+    );
+}
+
+/// Connect through the fixture broker and create a topic with scenario-specific placement.
+pub async fn create_topic_for_broker(broker: &BrokerHandle, setup: CreateTopicSetup<'_>) {
+    let client = connect_with_context(broker.listen_addr().to_string(), None, "client").await;
+    let response = send_topic_creation(&client, setup).await;
+    assert!(response.topics[0].error_code == 0, "{response:?}");
+}
+
+async fn send_topic_creation(
+    client: &Client,
+    setup: CreateTopicSetup<'_>,
+) -> krabka_protocol::owned::create_topics_response::CreateTopicsResponse {
+    client
+        .send(crate::support::topics::configured_topic_request(setup))
+        .await
+        .expect("CreateTopics")
 }

@@ -27,14 +27,11 @@ use krabka_metadata::{
     BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
     metadata_version::ELR_VERSION_FEATURE,
 };
-use krabka_protocol::{
-    owned::{
-        describe_configs_request::DescribeConfigsRequest,
-        describe_configs_response::{
-            DescribeConfigsResourceResult, DescribeConfigsResult, DescribeConfigsSynonym,
-        },
+use krabka_protocol::owned::{
+    describe_configs_request::DescribeConfigsRequest,
+    describe_configs_response::{
+        DescribeConfigsResourceResult, DescribeConfigsResult, DescribeConfigsSynonym,
     },
-    records::RecordBatch,
 };
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -74,7 +71,7 @@ enum Quorum {
 }
 
 /// One node of a case: its node id and its roles.
-type NodeSpec = (u64, &'static [NodeRole]);
+type NodeSpec = (NodeId, &'static [NodeRole]);
 
 const CONTROLLER: &[NodeRole] = &[NodeRole::Controller];
 const BROKER: &[NodeRole] = &[NodeRole::Broker];
@@ -82,7 +79,7 @@ const COMBINED: &[NodeRole] = &[NodeRole::Broker, NodeRole::Controller];
 
 /// A node that is formatted and not yet started.
 struct Node {
-    id: u64,
+    id: NodeId,
     roles: &'static [NodeRole],
     client: TcpListener,
     controller: TcpListener,
@@ -94,7 +91,7 @@ struct Node {
 
 /// Formats `log_dir` for node `id` with `krabka-format` and the quorum and
 /// feature flags in `flags`, in process.
-async fn format(log_dir: &std::path::Path, id: u64, flags: &[String]) {
+async fn format(log_dir: &std::path::Path, id: NodeId, flags: &[String]) {
     let node_id = id.to_string();
     let mut argv = vec![
         "krabka-format".to_owned(),
@@ -113,42 +110,53 @@ async fn format(log_dir: &std::path::Path, id: u64, flags: &[String]) {
 /// The config the broker binary builds for `node` from its formatted
 /// directory: the ids of its `meta.properties`, `Bootstrap` mode for a fresh
 /// directory, and the static `min.insync.replicas` of the case.
-fn config(
-    node: &Node,
+#[derive(Clone, Copy, derive_more::Display)]
+struct MinimumInsyncReplicas(i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct ActivationSetup<'a> {
+    #[default(Quorum::Dynamic)]
     quorum: Quorum,
-    controllers: &[(u64, SocketAddr)],
-    min_insync_replicas: i32,
-) -> BrokerConfig {
+    controllers: &'a [(NodeId, SocketAddr)],
+    #[default(MinimumInsyncReplicas(1))]
+    min_insync_replicas: MinimumInsyncReplicas,
+}
+
+fn config(node: &Node, setup: ActivationSetup<'_>) -> BrokerConfig {
     let meta = krabka_broker::bootstrap::initialize_log_dirs(
         &node.log_dir,
         std::slice::from_ref(&node.log_dir),
-        NodeId(node.id),
+        node.id,
         None,
     )
     .expect("krabka-format wrote meta.properties");
-    let mut config = BrokerConfig::for_tests(node.log_dir.clone());
-    config.broker_id = i32::try_from(node.id).expect("node id");
-    config.node_id = NodeId(node.id);
-    config.listen_addr = node.client_addr;
-    config.advertised_listener = node.client_addr.to_string();
-    config.controller_listen_addr = node.controller_addr;
+    let mut config = crate::support::addressed_node_config(
+        &node.log_dir,
+        crate::support::AddressedNodeSetup {
+            node: node.id,
+            client: node.client_addr,
+            controller: node.controller_addr,
+        },
+    );
     config.roles = node.roles.to_vec();
     config.bootstrap_mode = BootstrapMode::Bootstrap;
     config.cluster_id = Some(meta.cluster_id);
     config.directory_id = meta.directory_id;
-    config.default_min_insync_replicas = min_insync_replicas;
-    match quorum {
+    config.default_min_insync_replicas = setup.min_insync_replicas.0;
+    match setup.quorum {
         Quorum::Dynamic => {
             config.controller_quorum_voters = vec![];
-            config.bootstrap_servers = controllers
+            config.bootstrap_servers = setup
+                .controllers
                 .iter()
                 .map(|(_, addr)| addr.to_string())
                 .collect();
         }
         Quorum::Static => {
-            config.controller_quorum_voters = controllers
+            config.controller_quorum_voters = setup
+                .controllers
                 .iter()
-                .map(|(id, addr)| (NodeId(*id), addr.to_string()))
+                .map(|(id, addr)| (*id, addr.to_string()))
                 .collect();
         }
     }
@@ -159,12 +167,10 @@ fn config(
 /// does not finish starting.
 async fn start_all(
     nodes: Vec<Node>,
-    quorum: Quorum,
-    controllers: &[(u64, SocketAddr)],
-    min_insync_replicas: i32,
-) -> Vec<(u64, BrokerHandle, TempDir)> {
+    setup: ActivationSetup<'_>,
+) -> Vec<(NodeId, BrokerHandle, TempDir)> {
     join_all(nodes.into_iter().map(|node| async move {
-        let config = config(&node, quorum, controllers, min_insync_replicas);
+        let config = config(&node, setup);
         let id = node.id;
         let handle = tokio::time::timeout(
             DEADLINE,
@@ -195,10 +201,8 @@ async fn committed_batches(controller: SocketAddr) -> Vec<Batch> {
         crate::support::client::metadata_fetch(controller, "bootstrap-activation-test", 0).await;
 
     let mut image = MetadataImage::new(uuid::Uuid::nil());
-    let mut bytes: &[u8] = &response.records;
     let mut batches = Vec::new();
-    while !bytes.is_empty() {
-        let batch = RecordBatch::decode(&mut bytes).expect("decode a metadata batch");
+    for batch in crate::support::records::metadata_batches(&response.records) {
         if batch.attributes.is_control_batch() {
             batches.push(Batch::Control);
             continue;
@@ -279,7 +283,9 @@ async fn describe_cluster_min_insync_replicas(broker: SocketAddr) -> DescribeCon
 /// `min.insync.replicas` at `value`: a `DYNAMIC_DEFAULT_BROKER_CONFIG` entry,
 /// writable, of type `INT`, whose only synonym is the cluster default itself.
 /// Without a value there is no entry.
-fn kafkas_cluster_min_insync_replicas(value: Option<i32>) -> DescribeConfigsResult {
+fn kafkas_cluster_min_insync_replicas(
+    value: Option<MinimumInsyncReplicas>,
+) -> DescribeConfigsResult {
     DescribeConfigsResult {
         error_code: 0,
         error_message: None,
@@ -310,13 +316,19 @@ fn kafkas_cluster_min_insync_replicas(value: Option<i32>) -> DescribeConfigsResu
 
 /// One case: its topology, whether its format enables ELR, and the static
 /// `min.insync.replicas` of every node.
+#[derive(Clone, Copy)]
+enum EligibleLeaderReplicas {
+    Enabled,
+    Disabled,
+}
+
 struct Case {
     what: &'static str,
     quorum: Quorum,
     controllers: &'static [NodeSpec],
     brokers: &'static [NodeSpec],
-    elr: bool,
-    min_insync_replicas: i32,
+    eligible_leader_replicas: EligibleLeaderReplicas,
+    min_insync_replicas: MinimumInsyncReplicas,
 }
 
 /// The active controller writes the bootstrap records once, as the first
@@ -334,34 +346,38 @@ async fn the_active_controller_writes_the_bootstrap_records_once() {
         Case {
             what: "a dynamic quorum of a standalone controller and two brokers",
             quorum: Quorum::Dynamic,
-            controllers: &[(3001, CONTROLLER)],
-            brokers: &[(1, BROKER), (2, BROKER)],
-            elr: true,
-            min_insync_replicas: 2,
+            controllers: &[(NodeId(3001), CONTROLLER)],
+            brokers: &[(NodeId(1), BROKER), (NodeId(2), BROKER)],
+            eligible_leader_replicas: EligibleLeaderReplicas::Enabled,
+            min_insync_replicas: MinimumInsyncReplicas(2),
         },
         Case {
             what: "a static quorum of three isolated controllers and two brokers",
             quorum: Quorum::Static,
-            controllers: &[(3001, CONTROLLER), (3002, CONTROLLER), (3003, CONTROLLER)],
-            brokers: &[(1, BROKER), (2, BROKER)],
-            elr: true,
-            min_insync_replicas: 1,
+            controllers: &[
+                (NodeId(3001), CONTROLLER),
+                (NodeId(3002), CONTROLLER),
+                (NodeId(3003), CONTROLLER),
+            ],
+            brokers: &[(NodeId(1), BROKER), (NodeId(2), BROKER)],
+            eligible_leader_replicas: EligibleLeaderReplicas::Enabled,
+            min_insync_replicas: MinimumInsyncReplicas(1),
         },
         Case {
             what: "one combined node",
             quorum: Quorum::Static,
-            controllers: &[(1, COMBINED)],
+            controllers: &[(NodeId(1), COMBINED)],
             brokers: &[],
-            elr: true,
-            min_insync_replicas: 2,
+            eligible_leader_replicas: EligibleLeaderReplicas::Enabled,
+            min_insync_replicas: MinimumInsyncReplicas(2),
         },
         Case {
             what: "one combined node formatted without ELR",
             quorum: Quorum::Static,
-            controllers: &[(1, COMBINED)],
+            controllers: &[(NodeId(1), COMBINED)],
             brokers: &[],
-            elr: false,
-            min_insync_replicas: 2,
+            eligible_leader_replicas: EligibleLeaderReplicas::Disabled,
+            min_insync_replicas: MinimumInsyncReplicas(2),
         },
     ];
     for case in cases {
@@ -375,22 +391,24 @@ async fn run_case(case: Case) {
         quorum,
         controllers: controller_specs,
         brokers: broker_specs,
-        elr,
+        eligible_leader_replicas,
         min_insync_replicas,
     } = case;
     // A default format finalizes every feature at the default level of the
     // latest production release, `metadata.version` first. That enables ELR.
     // `--feature eligible.leader.replicas.version=0` leaves it out.
-    let disabled: std::collections::BTreeMap<String, i16> = if elr {
-        std::collections::BTreeMap::new()
-    } else {
-        [(ELR_VERSION_FEATURE.to_owned(), 0)].into()
-    };
+    let disabled: std::collections::BTreeMap<String, i16> =
+        if matches!(eligible_leader_replicas, EligibleLeaderReplicas::Enabled) {
+            std::collections::BTreeMap::new()
+        } else {
+            [(ELR_VERSION_FEATURE.to_owned(), 0)].into()
+        };
     let bootstrap = krabka_metadata::bootstrap_feature_records_with_overrides(
         krabka_format::LATEST_PRODUCTION_METADATA_VERSION,
         &disabled,
     );
-    let cluster_min_isr = elr.then_some(min_insync_replicas);
+    let cluster_min_isr = matches!(eligible_leader_replicas, EligibleLeaderReplicas::Enabled)
+        .then_some(min_insync_replicas);
     let mut activation = bootstrap.clone();
     activation.extend(cluster_min_isr.map(|value| {
         MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
@@ -432,7 +450,7 @@ async fn run_case(case: Case) {
             },
         )
         .collect();
-    let controllers: Vec<(u64, SocketAddr)> = nodes[..controller_specs.len()]
+    let controllers: Vec<(NodeId, SocketAddr)> = nodes[..controller_specs.len()]
         .iter()
         .map(|node| (node.id, node.controller_addr))
         .collect();
@@ -445,22 +463,38 @@ async fn run_case(case: Case) {
             ],
             Quorum::Dynamic | Quorum::Static => vec![],
         };
-        if !elr {
+        if matches!(eligible_leader_replicas, EligibleLeaderReplicas::Disabled) {
             flags.extend(["--feature".to_owned(), format!("{ELR_VERSION_FEATURE}=0")]);
         }
         format(&node.log_dir, node.id, &flags).await;
     }
 
     let brokers = nodes.split_off(controller_specs.len());
-    let started_controllers = start_all(nodes, quorum, &controllers, min_insync_replicas).await;
+    let started_controllers = start_all(
+        nodes,
+        ActivationSetup {
+            quorum,
+            controllers: &controllers,
+            min_insync_replicas,
+        },
+    )
+    .await;
     let leader_id = started_controllers[0]
         .1
         .wait_until_controller_leader()
         .await;
-    let started_brokers = start_all(brokers, quorum, &controllers, min_insync_replicas).await;
+    let started_brokers = start_all(
+        brokers,
+        ActivationSetup {
+            quorum,
+            controllers: &controllers,
+            min_insync_replicas,
+        },
+    )
+    .await;
     let leader = started_controllers
         .iter()
-        .find(|(id, ..)| NodeId(*id) == leader_id)
+        .find(|(id, ..)| *id == leader_id)
         .map(|(_, handle, _)| handle)
         .expect("the leader is one of the controllers");
     let broker_role_count = controller_specs

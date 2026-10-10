@@ -656,7 +656,7 @@ async fn serve_from_cold_tier(
 mod tests {
     use assert2::assert;
     use bytes::{Bytes, BytesMut};
-    use krabka_ids::PartitionIndex;
+    use krabka_ids::Offset;
     use krabka_log::{Log, LogConfig};
     use krabka_protocol::{
         primitives::uuid::Uuid as WireUuid,
@@ -785,25 +785,54 @@ mod tests {
         }
     }
 
+    fn open_fixture_log(dir: &std::path::Path, topic: &str) -> Log {
+        let part_dir = dir.join(format!("{topic}-0"));
+        std::fs::create_dir_all(&part_dir).expect("partition dir");
+        Log::open(&part_dir, LogConfig::default()).expect("open partition log")
+    }
+
+    fn spawn_fixture_partition(
+        broker: &Broker,
+        dir: &std::path::Path,
+        log: Log,
+        setup: crate::test_support::StandalonePartitionSetup<'_>,
+    ) -> std::sync::Arc<crate::partition::Partition> {
+        crate::broker::spawn_partition(
+            setup.topic.to_owned(),
+            setup.partition,
+            dir.to_path_buf(),
+            log,
+            broker.log_dir_status.clone(),
+            broker.producer_state.clone(),
+            setup.storage == crate::test_support::StorageMode::Diskless,
+        )
+    }
+
     /// A local partition read planned against `Broker`'s "leader with no
     /// replication target installed" default, for a topic that already holds
     /// one appended batch at offset 0.
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct NonemptyPartitionSetup<'a> {
+        #[default("orders")]
+        topic: &'a str,
+        #[default(b"v")]
+        payload: &'static [u8],
+    }
+
     async fn nonempty_local_partition(
         broker: &Broker,
         dir: &std::path::Path,
-        topic: &str,
-        payload: &'static [u8],
+        setup: NonemptyPartitionSetup<'_>,
     ) -> std::sync::Arc<crate::partition::Partition> {
-        let part_dir = dir.join(format!("{topic}-0"));
-        std::fs::create_dir_all(&part_dir).expect("partition dir");
-        let part = crate::broker::spawn_partition(
-            topic.to_string(),
-            PartitionIndex(0),
-            dir.to_path_buf(),
-            Log::open(&part_dir, LogConfig::default()).expect("open partition log"),
-            broker.log_dir_status.clone(),
-            broker.producer_state.clone(),
-            false,
+        let NonemptyPartitionSetup { topic, payload } = setup;
+        let part = spawn_fixture_partition(
+            broker,
+            dir,
+            open_fixture_log(dir, topic),
+            crate::test_support::StandalonePartitionSetup {
+                topic,
+                ..Default::default()
+            },
         );
         part.install_replication_target(None, broker.config.node_id.0, 0)
             .await;
@@ -834,8 +863,24 @@ mod tests {
             crate::handlers::test_support::start_broker()
         );
 
-        let part_a = nonempty_local_partition(&broker, dir.path(), TOPIC_A, PAYLOAD).await;
-        let part_b = nonempty_local_partition(&broker, dir.path(), TOPIC_B, PAYLOAD).await;
+        let part_a = nonempty_local_partition(
+            &broker,
+            dir.path(),
+            NonemptyPartitionSetup {
+                topic: TOPIC_A,
+                payload: PAYLOAD,
+            },
+        )
+        .await;
+        let part_b = nonempty_local_partition(
+            &broker,
+            dir.path(),
+            NonemptyPartitionSetup {
+                topic: TOPIC_B,
+                payload: PAYLOAD,
+            },
+        )
+        .await;
 
         let request = super::EffectivePartition {
             partition: 0,
@@ -1025,9 +1070,7 @@ mod tests {
         dir: &std::path::Path,
         topic: &str,
     ) -> std::sync::Arc<crate::partition::Partition> {
-        let part_dir = dir.join(format!("{topic}-0"));
-        std::fs::create_dir_all(&part_dir).expect("partition dir");
-        let mut log = Log::open(&part_dir, LogConfig::default()).expect("open partition log");
+        let mut log = open_fixture_log(dir, topic);
         log.append(&mut RecordBatch {
             records: vec![Record {
                 value: Some(Bytes::from_static(b"evicted")),
@@ -1039,22 +1082,23 @@ mod tests {
         let limit = log.log_end_offset();
         log.trim_to_offset(limit)
             .expect("trim the whole log away from under the fetch");
-        crate::broker::spawn_partition(
-            topic.to_string(),
-            PartitionIndex(0),
-            dir.to_path_buf(),
+        spawn_fixture_partition(
+            broker,
+            dir,
             log,
-            broker.log_dir_status.clone(),
-            broker.producer_state.clone(),
-            true,
+            crate::test_support::StandalonePartitionSetup {
+                topic,
+                storage: crate::test_support::StorageMode::Diskless,
+                ..Default::default()
+            },
         )
     }
 
     /// One encoded batch of a single record.
-    fn encoded_batch(base_offset: i64, payload: Vec<u8>) -> Bytes {
+    fn encoded_batch(base_offset: Offset, payload: Vec<u8>) -> Bytes {
         let mut buf = BytesMut::new();
         RecordBatch {
-            base_offset,
+            base_offset: base_offset.0,
             records: vec![Record {
                 value: Some(Bytes::from(payload)),
                 ..Default::default()
@@ -1091,7 +1135,7 @@ mod tests {
 
         // Partition A: one cold batch big enough to spend the whole response
         // budget by itself.
-        let batch_a = encoded_batch(0, vec![b'a'; 300]);
+        let batch_a = encoded_batch(Offset(0), vec![b'a'; 300]);
         let read_handle = broker.diskless_read.as_ref().expect("diskless read handle");
         read_handle
             .object_store()
@@ -1123,8 +1167,8 @@ mod tests {
         // the full, uncapped per-partition request would extend across both;
         // a read capped to the near-zero budget left after A must stop after
         // the first.
-        let first = encoded_batch(0, b"first".to_vec());
-        let second = encoded_batch(1, vec![b'b'; 300]);
+        let first = encoded_batch(Offset(0), b"first".to_vec());
+        let second = encoded_batch(Offset(1), vec![b'b'; 300]);
         let mut combined = BytesMut::new();
         combined.extend_from_slice(&first);
         combined.extend_from_slice(&second);
@@ -1281,7 +1325,15 @@ mod tests {
                 }],
             });
 
-        let part = crate::handlers::test_support::partition(&broker, dir.path(), "cold", true);
+        let part = crate::handlers::test_support::partition(
+            &broker,
+            dir.path(),
+            crate::test_support::StandalonePartitionSetup {
+                topic: "cold",
+                storage: crate::test_support::StorageMode::Diskless,
+                ..Default::default()
+            },
+        );
         let mut pending = super::PendingRead {
             topic_name: "cold".into(),
             topic_id: WireUuid(topic_id.into_bytes()),
@@ -1349,7 +1401,7 @@ mod tests {
         .expect("append new-epoch record");
 
         let phases = crate::metrics::RequestPhases::default();
-        let mut state = state_for(&pending, 0, 0);
+        let mut state = state_for(&pending, PollStateSetup::default());
         super::long_poll_then_reread(&broker, &mut pending, Vec::new(), &mut state, &phases).await;
 
         assert!(pending[0].out.error_code == crate::codes::FENCED_LEADER_EPOCH);
@@ -1387,14 +1439,16 @@ mod tests {
         // Nothing will ever append, and the floor is unreachable: only the
         // error can end this wait before its 30-second deadline.
         let waits = super::arm_waits(&pending);
-        let phases = RequestPhases::default();
-        let mut state = state_for(&pending, 4096, 30_000);
-        tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            super::long_poll_then_reread(&broker, &mut pending, waits, &mut state, &phases),
+        check_blocked_poll_completes(
+            &broker,
+            &mut pending,
+            waits,
+            BlockedPollSetup {
+                failure: "the error completes the long poll",
+                ..Default::default()
+            },
         )
-        .await
-        .expect("the error completes the long poll");
+        .await;
 
         assert!(pending[0].out.error_code == crate::codes::OFFSET_OUT_OF_RANGE);
         broker_handle.shutdown().await;
@@ -1425,8 +1479,6 @@ mod tests {
         // waiters before it, the leadership waiters after it.
         let mut waits = super::arm_waits(&pending);
         waits.extend(super::arm_leadership_waits(&pending));
-        let phases = RequestPhases::default();
-        let mut state = state_for(&pending, 4096, 30_000);
         let demoted = std::sync::Arc::clone(&part);
         let demote = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1434,12 +1486,16 @@ mod tests {
                 .install_replication_target(None, node_id + 1, 0)
                 .await;
         });
-        tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            super::long_poll_then_reread(&broker, &mut pending, waits, &mut state, &phases),
+        check_blocked_poll_completes(
+            &broker,
+            &mut pending,
+            waits,
+            BlockedPollSetup {
+                failure: "the leader change completes the long poll",
+                ..Default::default()
+            },
         )
-        .await
-        .expect("the leader change completes the long poll");
+        .await;
         demote.await.expect("demote task");
 
         assert!(
@@ -1467,7 +1523,7 @@ mod tests {
             let (part, _part_dir) = consumer_partition(Vec::new()).await;
             let mut pending = [consumer_read("reread", &part, read_committed)];
             let phases = RequestPhases::default();
-            let mut state = state_for(&pending, 0, 0);
+            let mut state = state_for(&pending, PollStateSetup::default());
             super::reread_woken(&broker, &mut pending, 0, &mut state, &phases).await;
 
             assert!(
@@ -1540,16 +1596,54 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
+    #[derive(Clone, Copy, Default)]
+    struct FetchMinimumBytes(usize);
+    #[derive(Clone, Copy, Default)]
+    struct FetchWaitMillis(i32);
+    #[derive(Clone, Copy, Default)]
+    struct PollStateSetup {
+        minimum: FetchMinimumBytes,
+        wait: FetchWaitMillis,
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct BlockedPollSetup<'a> {
+        #[default(FetchMinimumBytes(4096))]
+        minimum: FetchMinimumBytes,
+        #[default(FetchWaitMillis(30_000))]
+        wait: FetchWaitMillis,
+        #[default("the long poll completes promptly")]
+        failure: &'a str,
+    }
+
+    async fn check_blocked_poll_completes(
+        broker: &Broker,
+        pending: &mut [super::PendingRead],
+        waits: Vec<super::WaitFut>,
+        setup: BlockedPollSetup<'_>,
+    ) {
+        let phases = RequestPhases::default();
+        let mut state = state_for(
+            pending,
+            PollStateSetup {
+                minimum: setup.minimum,
+                wait: setup.wait,
+            },
+        );
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            super::long_poll_then_reread(broker, pending, waits, &mut state, &phases),
+        )
+        .await
+        .expect(setup.failure);
+    }
+
     /// The accumulator a fetch carries into the long poll, for a pending set
     /// that has just been read and produced `bytes` bytes in total.
-    fn state_for(
-        pending: &[super::PendingRead],
-        min_bytes: usize,
-        max_wait_ms: i32,
-    ) -> super::LongPollState {
+    fn state_for(pending: &[super::PendingRead], setup: PollStateSetup) -> super::LongPollState {
         super::LongPollState {
-            min_bytes,
-            max_wait_ms,
+            min_bytes: setup.minimum.0,
+            max_wait_ms: setup.wait.0,
             sendfile_capable: false,
             bytes: vec![0; pending.len()],
             cold_served: vec![false; pending.len()],
@@ -1665,7 +1759,13 @@ mod tests {
         // What `execute_pending_reads` does in this order: arm the waiters,
         // read (the log is empty, so the read finds nothing), then park.
         let waits = super::arm_waits(&pending);
-        let mut state = state_for(&pending, 1, 60_000);
+        let mut state = state_for(
+            &pending,
+            PollStateSetup {
+                minimum: FetchMinimumBytes(1),
+                wait: FetchWaitMillis(60_000),
+            },
+        );
 
         // The race the arming closes: the append lands between the read and
         // the park.

@@ -15,17 +15,10 @@ use krabka_metadata::{
     AclEntry, AclOperation, MetadataImage, MetadataRecord, NodeId, PatternType, PermissionType,
     ResourceType, TopicConfigRecord, TopicRecord,
 };
-use krabka_protocol::owned::{
-    describe_acls_request::DescribeAclsRequest,
-    describe_configs_request::{DescribeConfigsRequest, DescribeConfigsResource},
-};
-use krabka_restore::restore;
+use krabka_protocol::owned::describe_acls_request::DescribeAclsRequest;
 use uuid::Uuid;
 
-use crate::{
-    args::{ControllerListener, restore_args},
-    fixture::{Fixture, build_fixture},
-};
+use crate::fixture::{Fixture, build_fixture};
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
 
@@ -36,20 +29,10 @@ krabka_macros::single_replica_partition_fixture!(single_replica_partition);
 #[tokio::test]
 async fn restored_bootstrap_metadata_carries_the_archived_topic_ids_and_partition_counts() {
     let fixture = build_fixture();
-    let target = tempfile::tempdir().expect("target parent");
-    let log_dir = target.path().join("restored");
-    let cluster_id = Uuid::new_v4();
-    let args = restore_args(
-        fixture.archive_root.path(),
-        &log_dir,
-        "127.0.0.1:9093",
-        &["--cluster-id", &cluster_id.to_string()],
-    );
+    let restored = crate::restored::fresh_restore(fixture.archive_root.path()).await;
+    check!(restored.report.cluster_id == restored.cluster_id);
 
-    let report = restore(&args).await.expect("restore");
-    check!(report.cluster_id == cluster_id);
-
-    let meta = krabka_format::MetaProperties::read(&log_dir)
+    let meta = krabka_format::MetaProperties::read(&restored.log_dir)
         .expect("meta.properties reads")
         .expect("the restore formats the target");
     check!(meta.directory_id.is_some());
@@ -58,7 +41,7 @@ async fn restored_bootstrap_metadata_carries_the_archived_topic_ids_and_partitio
             directory_id: None,
             ..meta
         } == krabka_format::MetaProperties {
-            cluster_id: krabka_format::ClusterId(cluster_id),
+            cluster_id: krabka_format::ClusterId(restored.cluster_id),
             node_id: 1,
             directory_id: None,
         }
@@ -106,9 +89,10 @@ async fn restored_bootstrap_metadata_carries_the_archived_topic_ids_and_partitio
     };
     let extra_records =
         u64::try_from(Fixture::topic_count() + fixture.partitions().len()).expect("small count");
-    check!(record_count(&log_dir) == record_count(&baseline_dir) + extra_records);
+    check!(record_count(&restored.log_dir) == record_count(&baseline_dir) + extra_records);
 
-    let bin = std::fs::read(log_dir.join("bootstrap.records.bin")).expect("bootstrap.records.bin");
+    let bin = std::fs::read(restored.log_dir.join("bootstrap.records.bin"))
+        .expect("bootstrap.records.bin");
     for topic_id in [fixture.orders_id, fixture.payments_id] {
         let topic_id_bytes: [u8; 16] = topic_id.into_bytes();
         check!(
@@ -141,7 +125,7 @@ async fn restored_snapshot_reaches_describe_configs_and_describe_acls() {
     for partition in 0..2 {
         image.apply(&MetadataRecord::V1Partition(single_replica_partition(
             ORDERS,
-            partition,
+            krabka_ids::PartitionIndex(partition),
             NodeId(1),
         )));
     }
@@ -170,15 +154,11 @@ async fn restored_snapshot_reaches_describe_configs_and_describe_acls() {
     )
     .expect("write metadata snapshot");
 
-    let target = tempfile::tempdir().expect("target parent");
-    let log_dir = target.path().join("restored");
-    let mut controller = ControllerListener::bind().await;
-    let args = controller.restore_args(
+    let (_target, log_dir, mut controller, report) = crate::restored::restore_for_controller(
         fixture.archive_root.path(),
-        &log_dir,
         &["--metadata-snapshot", &snapshot_path.display().to_string()],
-    );
-    let report = restore(&args).await.expect("restore");
+    )
+    .await;
     check!(report.metadata.topic_configs == 1);
     check!(report.metadata.access_control_entries == 1);
 
@@ -199,25 +179,13 @@ async fn restored_snapshot_reaches_describe_configs_and_describe_acls() {
         .await
         .expect("client");
 
-    let configs = client
-        .send(DescribeConfigsRequest {
-            resources: vec![DescribeConfigsResource {
-                resource_type: 2,
-                resource_name: ORDERS.to_owned(),
-                configuration_keys: None,
-                ..Default::default()
-            }],
-            include_synonyms: false,
-            include_documentation: false,
-            ..Default::default()
-        })
-        .await
-        .expect("DescribeConfigs");
-    let result = configs.results.first().expect("one config result");
-    assert!(result.error_code == 0, "DescribeConfigs failed: {result:?}");
-    check!(result.configs.iter().any(|config| {
-        config.name == "cleanup.policy" && config.value.as_deref() == Some("compact")
-    }));
+    crate::topic_configuration::check_topic_configuration(
+        &client,
+        ORDERS,
+        "cleanup.policy",
+        "compact",
+    )
+    .await;
 
     let acls = client
         .send(DescribeAclsRequest {

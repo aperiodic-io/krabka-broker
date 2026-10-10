@@ -61,26 +61,7 @@ pub(crate) fn clear_elr_records(
     if !crate::features::feature_enabled(image, crate::features::ELR_VERSION, 1) {
         return Vec::new();
     }
-    let topics: std::collections::BTreeSet<_> = image
-        .all_partitions()
-        .filter(|partition| topic.is_none_or(|name| partition.topic == name))
-        .map(|partition| partition.topic.as_str())
-        .collect();
-    let mut records = Vec::new();
-    for topic in topics {
-        for record in crate::elr::TopicElr::of_topic(image, topic).records(topic) {
-            let krabka_metadata::MetadataRecord::V1PartitionElr(mut record) = record else {
-                unreachable!()
-            };
-            record.eligible_leader_replicas.clear();
-            record.last_known_elr.clear();
-            records.push(krabka_metadata::MetadataRecord::V1PartitionElr(record));
-        }
-        if let Some(record) = crate::elr::state::without_legacy_elr(image, topic, None) {
-            records.push(record);
-        }
-    }
-    records
+    crate::elr::unclean_restart::clear_published_elr_for_topic(image, topic)
 }
 
 /// Apache Kafka's `min.insync.replicas` default, used when neither the topic
@@ -144,19 +125,17 @@ mod tests {
     use assert2::check;
     use krabka_metadata::{
         BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord, NodeId,
-        PartitionElrRecord, PartitionRecord, TopicConfigRecord, TopicRecord,
+        PartitionElrRecord, PartitionRecord, TopicConfigRecord,
     };
 
     use super::*;
+    use crate::test_support::TopicSetup;
 
     fn image(topic_override: Option<&str>, cluster_default: Option<&str>) -> MetadataImage {
-        let mut image = MetadataImage::new(uuid::Uuid::nil());
-        image.apply(&MetadataRecord::V1Topic(TopicRecord {
-            name: "t".into(),
-            topic_id: uuid::Uuid::from_u128(1),
-            partitions: 1,
-            replication_factor: 3,
-        }));
+        let mut image = crate::test_support::topic_image(TopicSetup {
+            topic: "t",
+            ..Default::default()
+        });
         if let Some(value) = topic_override {
             image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
                 topic: "t".into(),

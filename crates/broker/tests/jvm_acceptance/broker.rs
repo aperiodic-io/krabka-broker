@@ -17,12 +17,14 @@ pub(crate) fn host_broker_config(dir: &Path, client_context: &str) -> BrokerConf
     let listen = broker0_listen().parse().expect(client_context);
     let controller = controller_addr_0().parse().expect("allocated addr");
     crate::support::jvm_broker_config(
-        1,
-        listen,
-        controller,
-        broker0_advertised(),
         dir.to_path_buf(),
-        &[(1, controller)],
+        crate::support::JvmBrokerSetup {
+            listen,
+            controller,
+            advertised: (broker0_advertised()).to_owned(),
+            voters: crate::support::controller_voters(&[(1, controller)]),
+            ..Default::default()
+        },
     )
 }
 

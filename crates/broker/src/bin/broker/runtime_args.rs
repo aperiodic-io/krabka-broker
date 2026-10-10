@@ -156,12 +156,6 @@ pub struct RuntimeArgs {
     pub transaction_max_timeout: Option<Time>,
     pub transaction_partition_verification_enable: Option<bool>,
 
-    pub share_group_session_timeout: Option<Time>,
-    pub share_group_heartbeat_interval: Option<Time>,
-    pub share_group_min_session_timeout: Option<Time>,
-    pub share_group_max_session_timeout: Option<Time>,
-    pub share_group_min_heartbeat_interval: Option<Time>,
-    pub share_group_max_heartbeat_interval: Option<Time>,
     #[overlay(refined)]
     pub share_group_max_size: Option<PositiveCount>,
     #[overlay(refined)]

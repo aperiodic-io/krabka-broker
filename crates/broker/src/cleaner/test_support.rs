@@ -2,7 +2,7 @@
 //! whose log holds compactable duplicates, and the record count that shows
 //! whether a sweep compacted one.
 
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use krabka_ids::PartitionIndex;
@@ -25,51 +25,6 @@ fn keyed_batch(base: i64, key: &[u8], value: &[u8]) -> RecordBatch {
     }
 }
 
-pub(super) async fn compactable_partition(
-    root: &TempDir,
-    topic: &str,
-    partition_id: i32,
-    leader: NodeId,
-    cleanup_policy: krabka_log::CleanupPolicy,
-) -> Arc<Partition> {
-    compactable_partition_with_config(
-        root,
-        topic,
-        partition_id,
-        leader,
-        krabka_log::LogConfig {
-            cleanup_policy,
-            segment_size: krabka_units::bytes(256),
-            ..Default::default()
-        },
-    )
-    .await
-}
-
-/// The same fixture against a caller-supplied log-dir registry, for the tests
-/// that watch a compaction failure reach it. The default registry every other
-/// fixture builds has nowhere to report a flip to.
-pub(super) async fn compactable_partition_in_registry(
-    root: &TempDir,
-    topic: &str,
-    leader: NodeId,
-    log_dir_status: crate::log_dir_status::LogDirRegistry,
-) -> Arc<Partition> {
-    open_compactable_partition(
-        root,
-        topic,
-        0,
-        leader,
-        krabka_log::LogConfig {
-            cleanup_policy: krabka_log::CleanupPolicy::Compact,
-            segment_size: krabka_units::bytes(256),
-            ..Default::default()
-        },
-        log_dir_status,
-    )
-    .await
-}
-
 /// Make every compaction pass on `partition`'s log fail with a real
 /// `io::Error`, by putting a directory where the rewrite has to create its
 /// `.cleaned` file. Opening a directory for writing fails with `EISDIR` for
@@ -88,35 +43,43 @@ pub(super) fn block_compaction_swap(root: &TempDir, topic: &str) -> Vec<std::pat
     )
 }
 
-/// The same fixture over a caller-chosen `LogConfig`, for the cleaner's
-/// dirty-ratio and compaction-lag tests.
-pub(super) async fn compactable_partition_with_config(
+pub(super) struct CompactionSetup<'a> {
+    pub topic: &'a str,
+    pub partition_id: PartitionIndex,
+    pub leader: NodeId,
+    pub cfg: krabka_log::LogConfig,
+    pub log_dir_status: crate::log_dir_status::LogDirRegistry,
+}
+
+impl Default for CompactionSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "orders",
+            partition_id: PartitionIndex(0),
+            leader: NodeId(7),
+            cfg: krabka_log::LogConfig {
+                cleanup_policy: krabka_log::CleanupPolicy::Compact,
+                segment_size: krabka_units::bytes(256),
+                ..Default::default()
+            },
+            log_dir_status: crate::log_dir_status::LogDirRegistry::default(),
+        }
+    }
+}
+
+/// Seed duplicate keys over the selected log policy and registry.
+pub(super) async fn compactable_partition(
     root: &TempDir,
-    topic: &str,
-    partition_id: i32,
-    leader: NodeId,
-    cfg: krabka_log::LogConfig,
+    setup: CompactionSetup<'_>,
 ) -> Arc<Partition> {
-    open_compactable_partition(
-        root,
+    let CompactionSetup {
         topic,
         partition_id,
         leader,
         cfg,
-        crate::log_dir_status::LogDirRegistry::default(),
-    )
-    .await
-}
-
-async fn open_compactable_partition(
-    root: &TempDir,
-    topic: &str,
-    partition_id: i32,
-    leader: NodeId,
-    cfg: krabka_log::LogConfig,
-    log_dir_status: crate::log_dir_status::LogDirRegistry,
-) -> Arc<Partition> {
-    let part_dir = crate::log_dir::partition_dir(root.path(), topic, partition_id);
+        log_dir_status,
+    } = setup;
+    let part_dir = crate::log_dir::partition_dir(root.path(), topic, partition_id.0);
     std::fs::create_dir_all(&part_dir).expect("create partition dir");
     let mut log = krabka_log::Log::open(&part_dir, cfg).expect("open compactable log");
     for idx in 0..12 {
@@ -126,22 +89,17 @@ async fn open_compactable_partition(
     let mut active = keyed_batch(12, b"active-key", b"active");
     log.append(&mut active).expect("append active batch");
 
-    let part = crate::broker::spawn_partition(
-        topic.to_string(),
-        PartitionIndex(partition_id),
-        root.path().to_path_buf(),
+    crate::test_support::committed_partition(
+        root.path(),
         log,
-        log_dir_status,
-        Arc::new(crate::producer_state::ProducerState::new()),
-        false,
-    );
-    part.current_leader.store(leader.0, Ordering::Relaxed);
-    // A replica that has caught up: compaction is bounded at the high
-    // watermark, and `set_follower_hw` clamps to the local log end, so this
-    // leaves the whole log committed. It is also how a real follower learns
-    // the watermark — from the leader's Fetch response.
-    part.set_follower_hw(krabka_log::Offset(i64::MAX)).await;
-    part
+        crate::test_support::CommittedPartitionSetup {
+            topic,
+            partition: partition_id,
+            leader,
+            registry: log_dir_status,
+        },
+    )
+    .await
 }
 
 pub(super) fn record_count(partition: &Partition) -> usize {
@@ -152,4 +110,23 @@ pub(super) fn record_count(partition: &Partition) -> usize {
         .read(krabka_log::Offset(0), krabka_units::mebibytes(1))
         .expect("read partition log");
     read.batches.iter().map(|batch| batch.records.len()).sum()
+}
+
+/// Register a compactable partition and capture its original record count.
+pub(super) async fn register_compactable(
+    root: &TempDir,
+    registry: &crate::partition_registry::PartitionRegistry,
+    topic: &str,
+) -> (Arc<Partition>, usize) {
+    let partition = compactable_partition(
+        root,
+        crate::cleaner::test_support::CompactionSetup {
+            topic,
+            ..Default::default()
+        },
+    )
+    .await;
+    let before = record_count(&partition);
+    registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
+    (partition, before)
 }

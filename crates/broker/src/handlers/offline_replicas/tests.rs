@@ -17,46 +17,40 @@ fn dir(n: u128) -> Uuid {
     Uuid::from_u128(n)
 }
 
-fn registration(node_id: u64, log_dirs: Vec<Uuid>) -> MetadataRecord {
+fn registration(node_id: NodeId, log_dirs: Vec<Uuid>) -> MetadataRecord {
     registration_on(node_id, log_dirs, LISTENER)
 }
 
 /// A registration whose only endpoint is on `listener`.
-fn registration_on(node_id: u64, log_dirs: Vec<Uuid>, listener: &str) -> MetadataRecord {
+fn registration_on(node_id: NodeId, log_dirs: Vec<Uuid>, listener: &str) -> MetadataRecord {
     MetadataRecord::V1BrokerRegistration(BrokerRegistrationRecord {
-        incarnation_id: Uuid::from_u128(u128::from(node_id)),
-        host: format!("broker-{node_id}"),
+        incarnation_id: Uuid::from_u128(u128::from(node_id.0)),
+        host: format!("broker-{}", node_id.0),
         endpoints: vec![BrokerEndpoint {
             name: listener.to_owned(),
-            host: format!("broker-{node_id}"),
+            host: format!("broker-{}", node_id.0),
             port: 9092,
             protocol: krabka_security::ListenerProtocol::Plaintext,
         }],
         log_dirs,
-        ..crate::test_support::broker_registration(node_id)
+        ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id.0))
     })
 }
 
-fn partition(replicas: &[u64], directories: &[Uuid]) -> PartitionRecord {
-    PartitionRecord {
-        topic: "t".into(),
-        partition: 0,
-        leader: NodeId(replicas[0]),
-        replicas: replicas.iter().copied().map(NodeId).collect(),
-        isr: replicas.iter().copied().map(NodeId).collect(),
-        leader_epoch: LeaderEpoch(3),
-        adding_replicas: vec![],
-        removing_replicas: vec![],
+fn partition(replicas: &[NodeId], directories: &[Uuid]) -> PartitionRecord {
+    crate::test_support::in_sync_partition(crate::test_support::InSyncPartitionSetup {
+        replicas: replicas.to_vec(),
         directories: directories.to_vec(),
-        partition_epoch: 0,
-    }
+        leader_epoch: LeaderEpoch(3),
+        ..Default::default()
+    })
 }
 
 /// Image with `t-0` on `replicas`/`directories` and a registration for every
 /// `(node_id, online_dirs)` pair in `registrations`.
 fn image(
-    registrations: &[(u64, Vec<Uuid>)],
-    replicas: &[u64],
+    registrations: &[(NodeId, Vec<Uuid>)],
+    replicas: &[NodeId],
     directories: &[Uuid],
 ) -> MetadataImage {
     let mut img = MetadataImage::new(Uuid::nil());
@@ -76,39 +70,38 @@ fn image(
     img
 }
 
-struct Case<E> {
+#[derive(krabka_macros::FieldDefaults)]
+struct ReplicaCaseSetup {
+    #[default("healthy replicas")]
     name: &'static str,
-    registrations: Vec<(u64, Vec<Uuid>)>,
-    replicas: Vec<u64>,
+    #[default(vec![(NodeId(1), vec![dir(0x600d)]), (NodeId(2), vec![dir(0x600d)])])]
+    registrations: Vec<(NodeId, Vec<Uuid>)>,
+    #[default(vec![NodeId(1), NodeId(2)])]
+    replicas: Vec<NodeId>,
+    #[default(vec![dir(0x600d), dir(0x600d)])]
     directories: Vec<Uuid>,
-    unavailable: Vec<u64>,
+    unavailable: Vec<NodeId>,
+}
+
+struct Case<E> {
+    setup: ReplicaCaseSetup,
     expected: E,
 }
 
-fn replica_case<E>(
-    name: &'static str,
-    registrations: Vec<(u64, Vec<Uuid>)>,
-    (replicas, directories): (Vec<u64>, Vec<Uuid>),
-    unavailable: Vec<u64>,
-    expected: E,
-) -> Case<E> {
-    Case {
-        name,
-        registrations,
-        replicas,
-        directories,
-        unavailable,
-        expected,
-    }
+fn replica_case<E>(expected: E, setup: ReplicaCaseSetup) -> Case<E> {
+    Case { setup, expected }
 }
 
 impl<E> Case<E> {
     fn image(&self) -> MetadataImage {
-        image(&self.registrations, &self.replicas, &self.directories)
+        image(
+            &self.setup.registrations,
+            &self.setup.replicas,
+            &self.setup.directories,
+        )
     }
-
     fn unavailable(&self) -> HashSet<u64> {
-        self.unavailable.iter().copied().collect()
+        self.setup.unavailable.iter().map(|id| id.0).collect()
     }
 }
 
@@ -122,7 +115,7 @@ fn check_replica_cases<E: std::fmt::Debug + PartialEq>(
         let record = img.partition("t", 0).expect("partition in image");
         let unavailable: HashSet<u64> = case.unavailable();
         let actual = project(&img, record, &unavailable, LISTENER);
-        assert!(actual == case.expected, "case {}", case.name);
+        assert!(actual == case.expected, "case {}", case.setup.name);
     }
 }
 
@@ -131,67 +124,80 @@ fn offline_replicas_matches_kafka_replica_state_rules() {
     let (good, bad) = (dir(0x600d), dir(0xbad));
     let cases = vec![
         replica_case(
-            "every replica registered, online dir, unfenced",
-            vec![(1, vec![good, bad]), (2, vec![good])],
-            (vec![1, 2], vec![good, good]),
             vec![],
-            vec![],
+            ReplicaCaseSetup {
+                name: "every replica registered, online dir, unfenced",
+                registrations: vec![(NodeId(1), vec![good, bad]), (NodeId(2), vec![good])],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "replica on a dir the registration no longer lists",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![1, 2], vec![bad, good]),
-            vec![],
             vec![1],
+            ReplicaCaseSetup {
+                name: "replica on a dir the registration no longer lists",
+                directories: vec![bad, good],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "fenced broker",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![1, 2], vec![good, good]),
             vec![2],
+            ReplicaCaseSetup {
+                name: "fenced broker",
+                unavailable: vec![NodeId(2)],
+                ..Default::default()
+            },
+        ),
+        replica_case(
             vec![2],
+            ReplicaCaseSetup {
+                name: "unregistered broker",
+                registrations: vec![(NodeId(1), vec![good])],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "unregistered broker",
-            vec![(1, vec![good])],
-            (vec![1, 2], vec![good, good]),
             vec![],
-            vec![2],
+            ReplicaCaseSetup {
+                name: "unassigned directory id is online",
+                directories: vec![Uuid::nil(), Uuid::nil()],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "unassigned directory id is online",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![1, 2], vec![Uuid::nil(), Uuid::nil()]),
-            vec![],
-            vec![],
-        ),
-        replica_case(
-            "registration whose last online dir was retired offlines its replicas",
-            vec![(1, vec![]), (2, vec![good])],
-            (vec![1, 2], vec![bad, good]),
-            vec![],
             vec![1],
+            ReplicaCaseSetup {
+                name: "registration whose last online dir was retired offlines its replicas",
+                registrations: vec![(NodeId(1), vec![]), (NodeId(2), vec![good])],
+                directories: vec![bad, good],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "registration with no online dir keeps an unassigned replica online",
-            vec![(1, vec![]), (2, vec![good])],
-            (vec![1, 2], vec![Uuid::nil(), good]),
             vec![],
-            vec![],
+            ReplicaCaseSetup {
+                name: "registration with no online dir keeps an unassigned replica online",
+                registrations: vec![(NodeId(1), vec![]), (NodeId(2), vec![good])],
+                directories: vec![Uuid::nil(), good],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "missing directory slot is online",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![1, 2], vec![]),
             vec![],
-            vec![],
+            ReplicaCaseSetup {
+                name: "missing directory slot is online",
+                directories: vec![],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "offline dir and fenced peer are both reported, in replica order",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![2, 1], vec![good, bad]),
-            vec![2],
             vec![2, 1],
+            ReplicaCaseSetup {
+                name: "offline dir and fenced peer are both reported, in replica order",
+                replicas: vec![NodeId(2), NodeId(1)],
+                directories: vec![good, bad],
+                unavailable: vec![NodeId(2)],
+                ..Default::default()
+            },
         ),
     ];
 
@@ -216,46 +222,55 @@ fn a_replica_on_a_dead_log_dir_neither_leads_nor_stays_in_the_isr() {
     let (good, bad) = (dir(0x600d), dir(0xbad));
     let cases = vec![
         replica_case(
-            "sole replica on a failed log dir",
-            vec![(1, vec![good])],
-            (vec![1], vec![bad]),
-            vec![],
             availability(NO_LEADER_ID, vec![], vec![1]),
+            ReplicaCaseSetup {
+                name: "sole replica on a failed log dir",
+                registrations: vec![(NodeId(1), vec![good])],
+                replicas: vec![NodeId(1)],
+                directories: vec![bad],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "leader on a failed log dir, follower healthy",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![1, 2], vec![bad, good]),
-            vec![],
             availability(NO_LEADER_ID, vec![2], vec![1]),
+            ReplicaCaseSetup {
+                name: "leader on a failed log dir, follower healthy",
+                directories: vec![bad, good],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "sole replica on a directory nobody has assigned yet",
-            vec![(1, vec![good])],
-            (vec![1], vec![Uuid::nil()]),
-            vec![],
             availability(1, vec![1], vec![]),
+            ReplicaCaseSetup {
+                name: "sole replica on a directory nobody has assigned yet",
+                registrations: vec![(NodeId(1), vec![good])],
+                replicas: vec![NodeId(1)],
+                directories: vec![Uuid::nil()],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "fenced follower keeps its ISR seat",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![1, 2], vec![good, good]),
-            vec![2],
             availability(1, vec![1, 2], vec![2]),
+            ReplicaCaseSetup {
+                name: "fenced follower keeps its ISR seat",
+                unavailable: vec![NodeId(2)],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "unregistered follower keeps its ISR seat",
-            vec![(1, vec![good])],
-            (vec![1, 2], vec![good, good]),
-            vec![],
             availability(1, vec![1, 2], vec![2]),
+            ReplicaCaseSetup {
+                name: "unregistered follower keeps its ISR seat",
+                registrations: vec![(NodeId(1), vec![good])],
+                ..Default::default()
+            },
         ),
         replica_case(
-            "healthy partition is untouched",
-            vec![(1, vec![good]), (2, vec![good])],
-            (vec![1, 2], vec![good, good]),
-            vec![],
             availability(1, vec![1, 2], vec![]),
+            ReplicaCaseSetup {
+                name: "healthy partition is untouched",
+                ..Default::default()
+            },
         ),
     ];
 
@@ -272,8 +287,12 @@ fn a_broker_without_the_request_listener_is_offline_and_cannot_be_the_leader() {
     let good = dir(0x600d);
     // Node 1 lists `PLAINTEXT`, node 2 lists only `EXTERNAL`, and node 3 has
     // no registration.
-    let mut img = image(&[(1, vec![good]), (2, vec![good])], &[1, 2], &[good, good]);
-    img.apply(&registration_on(2, vec![good], "EXTERNAL"));
+    let mut img = image(
+        &[(NodeId(1), vec![good]), (NodeId(2), vec![good])],
+        &[NodeId(1), NodeId(2)],
+        &[good, good],
+    );
+    img.apply(&registration_on(NodeId(2), vec![good], "EXTERNAL"));
     let cases = [
         (
             "the leader lists the listener and the follower does not",
@@ -295,7 +314,7 @@ fn a_broker_without_the_request_listener_is_offline_and_cannot_be_the_leader() {
     for (name, replicas, expected) in cases {
         let mut img = img.clone();
         img.apply(&MetadataRecord::V1Partition(partition(
-            &replicas,
+            &replicas.iter().copied().map(NodeId).collect::<Vec<_>>(),
             &[good, good],
         )));
         let record = img.partition("t", 0).expect("partition in image");
@@ -322,8 +341,12 @@ fn a_broker_without_the_request_listener_is_offline_and_cannot_be_the_leader() {
 fn electable_is_the_registered_brokers_the_unavailable_set_does_not_name() {
     let good = dir(0x600d);
     let img = image(
-        &[(1, vec![good]), (2, vec![good]), (3, vec![good])],
-        &[1, 2],
+        &[
+            (NodeId(1), vec![good]),
+            (NodeId(2), vec![good]),
+            (NodeId(3), vec![good]),
+        ],
+        &[NodeId(1), NodeId(2)],
         &[good, good],
     );
 
@@ -350,7 +373,11 @@ fn electable_is_the_registered_brokers_the_unavailable_set_does_not_name() {
 #[test]
 fn an_unregistered_broker_is_never_electable() {
     let good = dir(0x600d);
-    let img = image(&[(1, vec![good])], &[1, 2], &[good, good]);
+    let img = image(
+        &[(NodeId(1), vec![good])],
+        &[NodeId(1), NodeId(2)],
+        &[good, good],
+    );
 
     assert!(electable(&img, &HashSet::new()) == HashSet::from([1]));
 }
@@ -398,8 +425,8 @@ fn a_leaderless_partition_projects_no_leader_and_an_isr_without_its_last_leader(
     ];
     for (name, replicas, last_known, expected) in cases {
         let mut img = image(
-            &[(1, vec![good]), (2, vec![good])],
-            &replicas,
+            &[(NodeId(1), vec![good]), (NodeId(2), vec![good])],
+            &replicas.iter().copied().map(NodeId).collect::<Vec<_>>(),
             &vec![good; replicas.len()],
         );
         img.apply(&MetadataRecord::V1PartitionElr(

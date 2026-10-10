@@ -20,7 +20,9 @@ async fn writer_handles_replicate_with_caller_offset() {
 
     // First replicate batch must start at offset 0 to match the
     // empty local log's `log_end_offset()`.
-    let mut batch = sample_batch(3);
+    let mut batch = sample_batch(crate::test_support::EmptyPayloadBatchSetup {
+        count: crate::test_support::RecordCount(3),
+    });
     batch.base_offset = 0;
     let (ack, ack_rx) = oneshot::channel();
     tx.send(WriterMessage::Replicate { batch, ack })
@@ -47,7 +49,7 @@ async fn writer_replicate_offset_mismatch_surfaces_error() {
     // offset and refuses one below it. Offset 7 leaves a hole, the way a
     // compacted leader's log does, and is taken.
     for (base_offset, expect_ok, expected_end) in [(7, true, 8), (5, false, 8)] {
-        let mut batch = sample_batch(1);
+        let mut batch = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
         batch.base_offset = base_offset;
         let (ack, ack_rx) = oneshot::channel();
         tx.send(WriterMessage::Replicate { batch, ack })
@@ -79,7 +81,13 @@ async fn writer_truncate_drops_records() {
 
     // Produce two batches so the log has some data.
     for _ in 0..2 {
-        let ack_rx = queue_batch(&tx, sample_batch(2)).await;
+        let ack_rx = queue_batch(
+            &tx,
+            sample_batch(crate::test_support::EmptyPayloadBatchSetup {
+                count: crate::test_support::RecordCount(2),
+            }),
+        )
+        .await;
         ack_rx.await.expect("ack").expect("ok");
     }
     assert!(log.lock().unwrap().log_end_offset() == 4);

@@ -10,7 +10,7 @@
 
 use assert2::{assert, check};
 
-use crate::support::configs::{incremental_config, incremental_request, incremental_resource};
+use crate::support::configs::client_metrics_subscription;
 mod support;
 
 use krabka_protocol::owned::{
@@ -23,9 +23,6 @@ use krabka_protocol::owned::{
 
 /// Kafka resource type id for `CLIENT_METRICS` (KIP-714).
 const RESOURCE_TYPE_CLIENT_METRICS: i8 = 16;
-
-/// `config_operation` SET = 0 in the `IncrementalAlterConfigs` wire protocol.
-const CONFIG_OP_SET: i8 = 0;
 
 /// `config_source` `CLIENT_METRICS_CONFIG` = 7.
 const CONFIG_SOURCE_CLIENT_METRICS: i8 = 7;
@@ -97,25 +94,11 @@ async fn client_metrics_config_alter_describe_list_round_trip() {
         crate::support::start_n_node_client(1, "client-metrics-config-test").await;
 
     // ── Step 1: IncrementalAlterConfigs ──────────────────────────────────────
-    let alter_req = incremental_request(
-        vec![incremental_resource(
-            RESOURCE_TYPE_CLIENT_METRICS,
-            "sub-a".to_string(),
-            vec![
-                incremental_config(
-                    "metrics".to_string(),
-                    Some("org.apache.kafka.consumer.".to_string()),
-                    CONFIG_OP_SET,
-                ),
-                incremental_config(
-                    "interval.ms".to_string(),
-                    Some("60000".to_string()),
-                    CONFIG_OP_SET,
-                ),
-            ],
-        )],
-        false,
-    );
+    let alter_req =
+        client_metrics_subscription(crate::support::configs::ClientMetricsSubscriptionSetup {
+            metrics: "org.apache.kafka.consumer.",
+            ..Default::default()
+        });
 
     let alter_resp: IncrementalAlterConfigsResponse = client
         .send(alter_req)

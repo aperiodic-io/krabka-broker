@@ -40,9 +40,10 @@ async fn await_transaction_coordinator(client: &Client) -> (i64, i16) {
     loop {
         let response = client
             .send(init_producer_request(
-                Some(VERIFY_TID.into()),
-                60_000,
-                (-1, -1),
+                crate::support::transactions::InitProducerSetup {
+                    transactional_id: Some(VERIFY_TID.into()),
+                    ..Default::default()
+                },
             ))
             .await
             .expect("InitProducerId");
@@ -80,7 +81,7 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
     let (broker, bootstrap, _dir) = boot_single().await;
     let client = admin_client(&bootstrap).await;
     // Two partitions so (t,1) is a real partition that simply isn't in the txn.
-    create_topic(&client, "t", 2).await;
+    create_topic(&client, "t", crate::support::topics::TopicPartitionCount(2)).await;
 
     // Locate (and trigger loading of) the transaction coordinator for TID.
     // On a single-broker cluster the coordinator is this same node, but the
@@ -98,10 +99,12 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
     };
     let add = client
         .send(crate::support::transaction_wire::partitions_request(
-            VERIFY_TID,
-            (pid, epoch),
-            false,
-            vec![added_topic],
+            crate::support::transaction_wire::TransactionPartitionsSetup {
+                transactional_id: VERIFY_TID,
+                producer: crate::support::transactions::ProducerIdentity::from_wire((pid, epoch)),
+                topics: vec![added_topic],
+                ..Default::default()
+            },
         ))
         .await
         .expect("AddPartitionsToTxn add");
@@ -120,10 +123,12 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
     };
     let verify = client
         .send(crate::support::transaction_wire::partitions_request(
-            VERIFY_TID,
-            (pid, epoch),
-            true,
-            vec![verify_topic],
+            crate::support::transaction_wire::TransactionPartitionsSetup {
+                transactional_id: VERIFY_TID,
+                producer: crate::support::transactions::ProducerIdentity::from_wire((pid, epoch)),
+                registration: crate::support::transactions::PartitionRegistration::VerifyOnly,
+                topics: vec![verify_topic],
+            },
         ))
         .await
         .expect("AddPartitionsToTxn verify-only");

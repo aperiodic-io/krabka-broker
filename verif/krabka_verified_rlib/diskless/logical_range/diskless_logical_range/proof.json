@@ -2,8 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_diskless_logical_range": { "prover": "z3", "time": 0.033 },
-      "vc_len_tup2_i64_i64": { "prover": "alt-ergo", "time": 0.017 }
+      "vc_diskless_logical_range": { "prover": "z3", "time": 0.011 },
+      "vc_len_tup2_i64_i64": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_upper_range_cursor": { "prover": "alt-ergo", "time": 0.016 }
     }
   }
 }

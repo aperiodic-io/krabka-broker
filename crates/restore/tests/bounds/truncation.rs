@@ -66,51 +66,28 @@ async fn to_offset_filters_records_past_a_bound_inside_one_batch() {
 // ---------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_bound_on_a_partition_the_archive_does_not_hold_is_rejected() {
-    let mut fixture = vec![plain_batch(vec![value_record(0, "v0")])];
-    let archive = build_archive("orders", 0, &mut fixture);
-
-    let target = tempfile::tempdir().expect("target tempdir");
-    let target_dir = target.path().join("restored");
-    let args = restore_args(
-        archive.path(),
-        &target_dir,
-        &["--to-offset", "orders:3=100"],
-    );
-
-    let error = restore(&args).await.expect_err("unknown partition");
-    assert!(let RestoreError::UnknownPartition { topic, partition } = error);
-    check!(topic == "orders");
-    check!(partition == 3);
+async fn bounds_on_absent_partitions_are_rejected() {
+    for (extra, expected_topic, expected_partition) in [
+        (&["--to-offset", "orders:3=100"][..], "orders", 3),
+        // Restricting the scan to absent payments must report UnknownPartition
+        // before EmptyArchive, so the error still names the mistaken bound.
+        (
+            &["--topic", "payments", "--to-offset", "payments:0=10"][..],
+            "payments",
+            0,
+        ),
+    ] {
+        let mut fixture = vec![plain_batch(vec![value_record(0, "v0")])];
+        let archive = build_archive("orders", 0, &mut fixture);
+        let target = tempfile::tempdir().expect("target tempdir");
+        let target_dir = target.path().join("restored");
+        let args = restore_args(archive.path(), &target_dir, extra);
+        let error = restore(&args).await.expect_err("unknown partition");
+        assert!(let RestoreError::UnknownPartition { topic, partition } = error);
+        check!(topic == expected_topic);
+        check!(partition == expected_partition);
+    }
 }
-
-#[tokio::test]
-async fn a_bound_on_a_topic_absent_from_the_archive_is_unknown_partition_not_empty_archive() {
-    // `--topic` selects only `payments`, which the archive holds nothing
-    // for, so the scan finds no partition at all under that restriction.
-    // `UnknownPartition` must still win over the more general
-    // `EmptyArchive`, because it names the actual mistake: the bound, not
-    // the archive prefix.
-    let mut fixture = vec![plain_batch(vec![value_record(0, "v0")])];
-    let archive = build_archive("orders", 0, &mut fixture);
-
-    let target = tempfile::tempdir().expect("target tempdir");
-    let target_dir = target.path().join("restored");
-    let args = restore_args(
-        archive.path(),
-        &target_dir,
-        &["--topic", "payments", "--to-offset", "payments:0=10"],
-    );
-
-    let error = restore(&args).await.expect_err("unknown partition");
-    assert!(let RestoreError::UnknownPartition { topic, partition } = error);
-    check!(topic == "payments");
-    check!(partition == 0);
-}
-
-// ---------------------------------------------------------------------
-// Scenario 2: --to-timestamp keeps only records strictly before the bound.
-// ---------------------------------------------------------------------
 
 #[tokio::test]
 async fn to_timestamp_keeps_only_records_strictly_before_the_bound() {

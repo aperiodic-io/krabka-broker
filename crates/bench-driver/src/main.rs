@@ -343,6 +343,29 @@ mod tests {
         ]
     }
 
+    // Each environment case executes in a separate process, preserving parallel test isolation.
+    fn run_environment_child(marker: &str, test: &str, env: &[(&str, &str)]) -> bool {
+        if std::env::var_os(marker).is_some() {
+            return false;
+        }
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args(["--exact", test])
+            .env(marker, "1")
+            .envs(env.iter().copied())
+            .status()
+            .expect("child test");
+        assert!(status.success());
+        true
+    }
+
+    fn check_invalid_cli_values(option: &'static str, values: &[&'static str]) {
+        for &invalid in values {
+            let mut args = required_args("krabka");
+            args.extend([option, invalid]);
+            check!(Cli::try_parse_from(args).is_err(), "{option}={invalid}");
+        }
+    }
+
     #[test]
     fn client_request_timeout_defaults_follow_active_stack() {
         let krabka = Cli::try_parse_from(required_args("krabka")).expect("Krabka timeout defaults");
@@ -388,21 +411,14 @@ mod tests {
 
     #[test]
     fn client_resource_policy_reads_environment_and_prefers_cli() {
-        const CHILD: &str = "BENCH_CLIENT_RESOURCE_POLICY_CHILD";
-
-        if std::env::var_os(CHILD).is_none() {
-            let status =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::client_resource_policy_reads_environment_and_prefers_cli",
-                    ])
-                    .env(CHILD, "1")
-                    .env("BENCH_CLIENT_DISPATCH_QUEUE_CAPACITY", "7")
-                    .env("BENCH_CLIENT_FRAME_MAX", "32KiB")
-                    .status()
-                    .expect("child test");
-            assert!(status.success());
+        if run_environment_child(
+            "BENCH_CLIENT_RESOURCE_POLICY_CHILD",
+            "tests::client_resource_policy_reads_environment_and_prefers_cli",
+            &[
+                ("BENCH_CLIENT_DISPATCH_QUEUE_CAPACITY", "7"),
+                ("BENCH_CLIENT_FRAME_MAX", "32KiB"),
+            ],
+        ) {
             return;
         }
 
@@ -425,11 +441,7 @@ mod tests {
     #[test]
     fn client_request_timeout_rejects_invalid_cli_values() {
         for option in ["--producer-request-timeout", "--consumer-request-timeout"] {
-            for invalid in ["0s", "not-a-number", "-1s", "2147483648ms", "1"] {
-                let mut args = required_args("krabka");
-                args.extend([option, invalid]);
-                check!(Cli::try_parse_from(args).is_err(), "{option}={invalid}");
-            }
+            check_invalid_cli_values(option, &["0s", "not-a-number", "-1s", "2147483648ms", "1"]);
         }
     }
 
@@ -438,9 +450,13 @@ mod tests {
         let cli = Cli::try_parse_from(required_args("krabka")).expect("retry defaults");
         let policy = resolve_consumer_build_retry_policy(&cli).expect("valid defaults");
 
-        check!(policy.attempts() == 6);
-        check!(policy.initial_backoff() == millis(100));
-        check!(policy.max_backoff() == secs(2));
+        check!(
+            (
+                policy.attempts(),
+                policy.initial_backoff(),
+                policy.max_backoff()
+            ) == (6, millis(100), secs(2))
+        );
     }
 
     #[test]
@@ -476,22 +492,15 @@ mod tests {
 
     #[test]
     fn consumer_build_retry_reads_environment_and_prefers_cli() {
-        const CHILD: &str = "KRABKA_BENCH_CONSUMER_BUILD_RETRY_CHILD";
-
-        if std::env::var_os(CHILD).is_none() {
-            let status =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::consumer_build_retry_reads_environment_and_prefers_cli",
-                    ])
-                    .env(CHILD, "1")
-                    .env("BENCH_CONSUMER_BUILD_ATTEMPTS", "2")
-                    .env("BENCH_CONSUMER_BUILD_INITIAL_BACKOFF", "11ms")
-                    .env("BENCH_CONSUMER_BUILD_MAX_BACKOFF", "12ms")
-                    .status()
-                    .expect("child test");
-            assert!(status.success());
+        if run_environment_child(
+            "KRABKA_BENCH_CONSUMER_BUILD_RETRY_CHILD",
+            "tests::consumer_build_retry_reads_environment_and_prefers_cli",
+            &[
+                ("BENCH_CONSUMER_BUILD_ATTEMPTS", "2"),
+                ("BENCH_CONSUMER_BUILD_INITIAL_BACKOFF", "11ms"),
+                ("BENCH_CONSUMER_BUILD_MAX_BACKOFF", "12ms"),
+            ],
+        ) {
             return;
         }
 
@@ -529,31 +538,20 @@ mod tests {
     #[test]
     fn consumer_poll_timing_rejects_invalid_cli_values() {
         for option in ["--consumer-poll-timeout", "--consumer-poll-error-backoff"] {
-            for invalid in ["0ms", "not-a-number", "-1ms", "1"] {
-                let mut args = required_args("krabka");
-                args.extend([option, invalid]);
-                check!(Cli::try_parse_from(args).is_err(), "{option}={invalid}");
-            }
+            check_invalid_cli_values(option, &["0ms", "not-a-number", "-1ms", "1"]);
         }
     }
 
     #[test]
     fn consumer_poll_timing_reads_environment_and_prefers_cli() {
-        const CHILD: &str = "KRABKA_BENCH_CONSUMER_POLL_TIMING_CHILD";
-
-        if std::env::var_os(CHILD).is_none() {
-            let status =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::consumer_poll_timing_reads_environment_and_prefers_cli",
-                    ])
-                    .env(CHILD, "1")
-                    .env("BENCH_CONSUMER_POLL_TIMEOUT", "11ms")
-                    .env("BENCH_CONSUMER_POLL_ERROR_BACKOFF", "12ms")
-                    .status()
-                    .expect("child test");
-            assert!(status.success());
+        if run_environment_child(
+            "KRABKA_BENCH_CONSUMER_POLL_TIMING_CHILD",
+            "tests::consumer_poll_timing_reads_environment_and_prefers_cli",
+            &[
+                ("BENCH_CONSUMER_POLL_TIMEOUT", "11ms"),
+                ("BENCH_CONSUMER_POLL_ERROR_BACKOFF", "12ms"),
+            ],
+        ) {
             return;
         }
 
@@ -591,20 +589,11 @@ mod tests {
 
     #[test]
     fn producer_final_drain_timeout_reads_environment_and_prefers_cli() {
-        const CHILD: &str = "KRABKA_BENCH_PRODUCER_FINAL_DRAIN_TIMEOUT_CHILD";
-
-        if std::env::var_os(CHILD).is_none() {
-            let status =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::producer_final_drain_timeout_reads_environment_and_prefers_cli",
-                    ])
-                    .env(CHILD, "1")
-                    .env("BENCH_PRODUCER_FINAL_DRAIN_TIMEOUT", "11s")
-                    .status()
-                    .expect("child test");
-            assert!(status.success());
+        if run_environment_child(
+            "KRABKA_BENCH_PRODUCER_FINAL_DRAIN_TIMEOUT_CHILD",
+            "tests::producer_final_drain_timeout_reads_environment_and_prefers_cli",
+            &[("BENCH_PRODUCER_FINAL_DRAIN_TIMEOUT", "11s")],
+        ) {
             return;
         }
 
@@ -635,20 +624,11 @@ mod tests {
 
     #[test]
     fn sample_interval_reads_environment_and_prefers_cli() {
-        const CHILD: &str = "KRABKA_BENCH_SAMPLE_INTERVAL_CHILD";
-
-        if std::env::var_os(CHILD).is_none() {
-            let status =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::sample_interval_reads_environment_and_prefers_cli",
-                    ])
-                    .env(CHILD, "1")
-                    .env("BENCH_SAMPLE_INTERVAL", "11ms")
-                    .status()
-                    .expect("child test");
-            assert!(status.success());
+        if run_environment_child(
+            "KRABKA_BENCH_SAMPLE_INTERVAL_CHILD",
+            "tests::sample_interval_reads_environment_and_prefers_cli",
+            &[("BENCH_SAMPLE_INTERVAL", "11ms")],
+        ) {
             return;
         }
 
@@ -663,21 +643,14 @@ mod tests {
 
     #[test]
     fn client_request_timeouts_read_environment_and_prefer_cli() {
-        const CHILD: &str = "KRABKA_BENCH_CLIENT_TIMEOUTS_CHILD";
-
-        if std::env::var_os(CHILD).is_none() {
-            let status =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::client_request_timeouts_read_environment_and_prefer_cli",
-                    ])
-                    .env(CHILD, "1")
-                    .env("BENCH_PRODUCER_REQUEST_TIMEOUT", "11s")
-                    .env("BENCH_CONSUMER_REQUEST_TIMEOUT", "12s")
-                    .status()
-                    .expect("child test");
-            assert!(status.success());
+        if run_environment_child(
+            "KRABKA_BENCH_CLIENT_TIMEOUTS_CHILD",
+            "tests::client_request_timeouts_read_environment_and_prefer_cli",
+            &[
+                ("BENCH_PRODUCER_REQUEST_TIMEOUT", "11s"),
+                ("BENCH_CONSUMER_REQUEST_TIMEOUT", "12s"),
+            ],
+        ) {
             return;
         }
 
@@ -705,20 +678,11 @@ mod tests {
 
     #[test]
     fn prometheus_request_timeout_environment_and_cli_precedence() {
-        const CHILD: &str = "KRABKA_BENCH_PROMETHEUS_TIMEOUT_CHILD";
-
-        if std::env::var_os(CHILD).is_none() {
-            let status =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::prometheus_request_timeout_environment_and_cli_precedence",
-                    ])
-                    .env(CHILD, "1")
-                    .env("BENCH_PROMETHEUS_REQUEST_TIMEOUT", "32s")
-                    .status()
-                    .expect("child test");
-            assert!(status.success());
+        if run_environment_child(
+            "KRABKA_BENCH_PROMETHEUS_TIMEOUT_CHILD",
+            "tests::prometheus_request_timeout_environment_and_cli_precedence",
+            &[("BENCH_PROMETHEUS_REQUEST_TIMEOUT", "32s")],
+        ) {
             return;
         }
 

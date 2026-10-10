@@ -66,13 +66,13 @@ pub(super) fn decode_task_map(buf: &mut &[u8]) -> Result<BTreeMap<String, Vec<i3
 }
 
 /// A role's tasks, or their assignment epochs, by subtopology id.
-type TaskLists = BTreeMap<String, Vec<i32>>;
+use crate::coordinator::unified::streams::state::TaskMap;
 
 /// Reads what [`encode_task_map_with_epochs`] writes: the task map, and the
 /// `AssignmentEpochs` of each subtopology that carries a non-null one.
 pub(super) fn decode_task_map_with_epochs(
     buf: &mut &[u8],
-) -> Result<(TaskLists, TaskLists), BrokerError> {
+) -> Result<(TaskMap, TaskMap), BrokerError> {
     let n = get_compact_array_len(buf)?;
     let mut map = BTreeMap::new();
     let mut epochs = BTreeMap::new();

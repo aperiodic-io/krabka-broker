@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use krabka_metadata::{PatternType, TopicFreezeRecord};
 use krabka_units::minutes;
-use ring::signature::{Ed25519KeyPair, KeyPair as _};
+use ring::signature::Ed25519KeyPair;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -40,12 +40,13 @@ struct Trust {
 }
 
 fn fresh_key(dir: &TempDir, name: &str) -> (Ed25519KeyPair, PathBuf) {
-    let rng = ring::rand::SystemRandom::new();
-    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).expect("generate pkcs8");
-    let pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("parse pkcs8");
-    let path = dir.path().join(name);
-    std::fs::write(&path, pair.public_key().as_ref()).expect("write public key");
-    (pair, path)
+    crate::test_support::ed25519_public_key_file(
+        dir.path(),
+        crate::test_support::OperatorKeyFileSetup {
+            name,
+            ..Default::default()
+        },
+    )
 }
 
 fn trust() -> Trust {

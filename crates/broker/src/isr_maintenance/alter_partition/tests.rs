@@ -12,7 +12,7 @@ use bytes::{BufMut as _, BytesMut};
 use krabka_client_core::{MockBroker, MockReply};
 use krabka_metadata::{MetadataImage, MetadataRecord};
 use krabka_protocol::{
-    Decode as _, Encode, UnknownTaggedFields,
+    Decode as _, UnknownTaggedFields,
     owned::{
         alter_partition_request::{self, BrokerState, PartitionData, TopicData},
         api_versions_request,
@@ -135,17 +135,7 @@ fn expected_request(
     }
 }
 
-/// A response body after the correlation id: the tagged-fields byte of a v1
-/// response header when `flexible`, then `body` at `version`.
-fn encode_body(body: &impl Encode, version: i16, flexible: bool) -> Vec<u8> {
-    let mut out = BytesMut::new();
-    if flexible {
-        out.put_u8(0);
-    }
-    body.encode(&mut out, version)
-        .expect("encode the scripted answer");
-    out.to_vec()
-}
+use crate::test_support::scripted_response_body as encode_body;
 
 /// What a scripted listener received.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

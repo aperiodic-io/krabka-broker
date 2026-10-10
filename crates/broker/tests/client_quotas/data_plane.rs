@@ -6,6 +6,7 @@
 use std::net::SocketAddr;
 
 use bytes::BytesMut;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -16,7 +17,11 @@ use krabka_protocol::{
 };
 use tokio::net::TcpStream;
 
-use crate::{CLIENT_ID, kafka_wire};
+use crate::{
+    CLIENT_ID, kafka_wire,
+    kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+    support::wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+};
 
 /// The `AddOffsetsToTxn` version the driver below speaks: the newest the
 /// broker advertises, and flexible (v3+), so the response header carries the
@@ -52,11 +57,14 @@ pub async fn drive_add_offsets_to_txn(
         .expect("encode AddOffsetsToTxn");
     let resp_bytes = kafka_wire::round_trip(
         stream,
-        25,
-        ADD_OFFSETS_TO_TXN_VERSION,
-        corr_id,
-        CLIENT_ID,
-        true,
+        WireExchangeSetup {
+            api_key: WireApiKey(25),
+            version: WireApiVersion(ADD_OFFSETS_TO_TXN_VERSION),
+            correlation: WireCorrelationId(corr_id),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
         &body,
     )
     .await
@@ -71,17 +79,16 @@ pub async fn drive_add_offsets_to_txn(
 /// Returns the full `ProduceResponse`.
 pub async fn drive_produce_sasl(
     addr: SocketAddr,
-    user: &str,
-    pass: &[u8],
-    topic: &str,
-    record_bytes: usize,
-    count: usize,
+    records: kafka_wire::ZeroFilledRecordsSetup,
+    authentication: &PlainAuthenticationSetup<'_>,
 ) -> ProduceResponse {
     kafka_wire::produce_sasl_with_ids(
         addr,
-        (CLIENT_ID, CLIENT_ID),
-        (user, pass),
-        (topic, record_bytes, count),
+        kafka_wire::SaslProduceSetup {
+            authentication: authentication.clone(),
+            produce_client_id: CLIENT_ID,
+            records,
+        },
     )
     .await
 }
@@ -99,14 +106,31 @@ pub async fn drive_fetch_sasl(
 
     let req = crate::support::topics::consumer_fetch_request(topic);
 
-    let mut stream = kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, user, pass)
-        .await
-        .expect("SASL authenticate for Fetch");
+    let mut stream = kafka_wire::sasl_plain_authenticate(
+        addr,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            user,
+            password: (pass).to_vec(),
+        },
+    )
+    .await
+    .expect("SASL authenticate for Fetch");
     let mut body = BytesMut::new();
     req.encode(&mut body, version).expect("encode Fetch");
-    let resp_bytes = kafka_wire::round_trip(&mut stream, 1, version, 1, CLIENT_ID, true, &body)
-        .await
-        .expect("Fetch round-trip");
+    let resp_bytes = kafka_wire::round_trip(
+        &mut stream,
+        WireExchangeSetup {
+            api_key: WireApiKey(1),
+            version: WireApiVersion(version),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+        &body,
+    )
+    .await
+    .expect("Fetch round-trip");
     let mut cur: &[u8] = &resp_bytes;
     FetchResponse::decode(&mut cur, version).expect("decode FetchResponse")
 }

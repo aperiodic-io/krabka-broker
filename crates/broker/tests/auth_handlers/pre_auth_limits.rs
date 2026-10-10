@@ -20,15 +20,13 @@ use std::{io, net::SocketAddr, time::Duration};
 use assert2::{assert, check};
 use bytes::{BufMut, BytesMut};
 use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
-        api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
-        metadata_request::MetadataRequest, metadata_response::MetadataResponse,
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_authenticate_response::SaslAuthenticateResponse,
-        sasl_handshake_request::SaslHandshakeRequest,
-        sasl_handshake_response::SaslHandshakeResponse,
+        api_versions_request, api_versions_response, metadata_request, metadata_response,
+        sasl_authenticate_request, sasl_authenticate_response, sasl_handshake_request,
+        sasl_handshake_response,
     },
 };
 use krabka_security::SaslMechanism;
@@ -42,6 +40,10 @@ use crate::{
     support::{
         discovery::{api_versions_request_for, topic_metadata_request},
         topics::metadata_topic,
+        wire::{
+            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+            SocketExchangeSetup,
+        },
     },
 };
 
@@ -66,31 +68,36 @@ fn encode<M: Encode>(message: &M, version: i16) -> Vec<u8> {
     body.to_vec()
 }
 
-/// A request frame with its size prefix. `flexible` selects the v2 header.
-fn request_frame(
-    api_key: i16,
-    version: i16,
-    correlation_id: i32,
-    flexible: bool,
-    body: &[u8],
-) -> Vec<u8> {
-    let mut frame = BytesMut::new();
-    frame.put_i16(api_key);
-    frame.put_i16(version);
-    frame.put_i32(correlation_id);
-    frame.put_i16(1);
-    frame.put_u8(b'c');
-    if flexible {
-        frame.put_u8(0);
-    }
-    frame.put_slice(body);
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct RequestFrameSetup<'a> {
+    #[default(krabka_ids::ApiKey(18))]
+    api_key: krabka_ids::ApiKey,
+    #[default(krabka_ids::ApiVersion(3))]
+    version: krabka_ids::ApiVersion,
+    #[default(crate::support::wire::CorrelationId(2))]
+    correlation: crate::support::wire::CorrelationId,
+    #[default(crate::support::wire::HeaderEncoding::Flexible)]
+    header: crate::support::wire::HeaderEncoding,
+    body: &'a [u8],
+}
+
+/// A sized request frame with the pre-authentication client's header.
+fn request_frame(setup: RequestFrameSetup<'_>) -> Vec<u8> {
+    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+        api_key: setup.api_key,
+        version: setup.version,
+        correlation: setup.correlation,
+        header: setup.header,
+        client_id: "c",
+        body: setup.body,
+        ..Default::default()
+    });
     let mut out = BytesMut::new();
-    out.put_u32(u32::try_from(frame.len()).expect("frame length"));
+    out.put_i32(i32::try_from(frame.len()).expect("frame length fits i32"));
     out.put_slice(&frame);
     out.to_vec()
 }
 
-/// Reads one response frame, or the error that ended the connection first.
 async fn read_frame(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     let length = stream.read_u32().await?;
     let mut frame = vec![0u8; length as usize];
@@ -112,46 +119,69 @@ async fn assert_closed_without_a_frame(stream: &mut TcpStream, what: &str) {
 async fn api_versions(
     stream: &mut TcpStream,
     version: i16,
-    request: &ApiVersionsRequest,
-) -> ApiVersionsResponse {
+    request: &api_versions_request::ApiVersionsRequest,
+) -> api_versions_response::ApiVersionsResponse {
     let body = round_trip(
         stream,
-        18,
-        version,
-        1,
-        version >= 3,
+        SocketExchangeSetup {
+            version: WireApiVersion(version),
+            header: RequestHeaderEncoding::from_wire(version >= 3),
+            ..Default::default()
+        },
         &encode(request, version),
     )
     .await
     .expect("ApiVersions answer");
-    ApiVersionsResponse::decode(&mut &body[..], version).expect("decode ApiVersions")
+    api_versions_response::ApiVersionsResponse::decode(&mut &body[..], version)
+        .expect("decode ApiVersions")
 }
 
-fn named_client(name: &str) -> ApiVersionsRequest {
+fn named_client(name: &str) -> api_versions_request::ApiVersionsRequest {
     api_versions_request_for(name, "1.0")
 }
 
 /// PLAIN login as `admin` on `stream`, after whichever requests already ran.
 async fn plain_login(stream: &mut TcpStream, password: &str) -> Result<(), io::Error> {
     let handshake = encode(
-        &SaslHandshakeRequest {
+        &sasl_handshake_request::SaslHandshakeRequest {
             mechanism: "PLAIN".to_string(),
             ..Default::default()
         },
         1,
     );
-    let answer = round_trip(stream, 17, 1, 2, false, &handshake).await?;
-    let answer = SaslHandshakeResponse::decode(&mut &answer[..], 1).expect("decode handshake");
+    let answer = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            correlation: WireCorrelationId(2),
+            ..Default::default()
+        },
+        &handshake,
+    )
+    .await?;
+    let answer = sasl_handshake_response::SaslHandshakeResponse::decode(&mut &answer[..], 1)
+        .expect("decode handshake");
     if answer.error_code != 0 {
         return Err(io::Error::other(format!("handshake {}", answer.error_code)));
     }
-    let token = SaslAuthenticateRequest {
+    let token = sasl_authenticate_request::SaslAuthenticateRequest {
         auth_bytes: bytes::Bytes::from(format!("\0admin\0{password}").into_bytes()),
         ..Default::default()
     };
-    let answer = round_trip(stream, 36, 2, 3, true, &encode(&token, 2)).await?;
-    let answer =
-        SaslAuthenticateResponse::decode(&mut &answer[..], 2).expect("decode authenticate");
+    let answer = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(36),
+            version: WireApiVersion(2),
+            correlation: WireCorrelationId(3),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &encode(&token, 2),
+    )
+    .await?;
+    let answer = sasl_authenticate_response::SaslAuthenticateResponse::decode(&mut &answer[..], 2)
+        .expect("decode authenticate");
     if answer.error_code != 0 {
         return Err(io::Error::other(format!(
             "authenticate {}",
@@ -213,7 +243,7 @@ async fn the_larger_request_limit_returns_once_the_peer_authenticated() {
         })
         .collect::<Vec<_>>();
     let metadata = encode(
-        &MetadataRequest {
+        &metadata_request::MetadataRequest {
             allow_auto_topic_creation: false,
             ..topic_metadata_request(Some(topics))
         },
@@ -229,17 +259,30 @@ async fn the_larger_request_limit_returns_once_the_peer_authenticated() {
     // mechanism, and the next frame is read under the 1 KiB limit.
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let handshake = encode(
-        &SaslHandshakeRequest {
+        &sasl_handshake_request::SaslHandshakeRequest {
             mechanism: "PLAIN".to_string(),
             ..Default::default()
         },
         1,
     );
-    round_trip(&mut stream, 17, 1, 1, false, &handshake)
-        .await
-        .expect("handshake");
+    round_trip(
+        &mut stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            ..Default::default()
+        },
+        &handshake,
+    )
+    .await
+    .expect("handshake");
     stream
-        .write_all(&request_frame(36, 2, 2, true, &vec![0u8; 2048]))
+        .write_all(&request_frame(RequestFrameSetup {
+            api_key: krabka_ids::ApiKey(36),
+            version: krabka_ids::ApiVersion(2),
+            body: &vec![0u8; 2048],
+            ..Default::default()
+        }))
         .await
         .unwrap();
     assert_closed_without_a_frame(&mut stream, "an oversize frame mid-exchange").await;
@@ -249,10 +292,20 @@ async fn the_larger_request_limit_returns_once_the_peer_authenticated() {
     plain_login(&mut stream, &admin_plain_password())
         .await
         .expect("login");
-    let body = round_trip(&mut stream, 3, 12, 4, true, &metadata)
-        .await
-        .expect("Metadata after authentication");
-    let response = MetadataResponse::decode(&mut &body[..], 12).expect("decode Metadata");
+    let body = round_trip(
+        &mut stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(3),
+            version: WireApiVersion(12),
+            correlation: WireCorrelationId(4),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &metadata,
+    )
+    .await
+    .expect("Metadata after authentication");
+    let response =
+        metadata_response::MetadataResponse::decode(&mut &body[..], 12).expect("decode Metadata");
     check!(response.topics.len() == 64);
     handle.shutdown().await;
 }
@@ -302,11 +355,19 @@ async fn a_second_api_versions_before_the_handshake_closes_the_connection() {
     // A refused ApiVersions leaves the state alone, whichever way it is
     // refused, and the retries, a valid one, and a handshake all follow.
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let unsupported = round_trip(&mut stream, 18, i16::MAX, 1, true, &[0xff])
-        .await
-        .expect("UNSUPPORTED_VERSION answer");
+    let unsupported = round_trip(
+        &mut stream,
+        SocketExchangeSetup {
+            version: WireApiVersion(i16::MAX),
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+        &[0xff],
+    )
+    .await
+    .expect("UNSUPPORTED_VERSION answer");
     check!(
-        ApiVersionsResponse::decode(&mut &unsupported[..], 0)
+        api_versions_response::ApiVersionsResponse::decode(&mut &unsupported[..], 0)
             .expect("decode")
             .error_code
             == 35
@@ -324,13 +385,10 @@ async fn a_second_api_versions_before_the_handshake_closes_the_connection() {
     let first = api_versions(&mut stream, 3, &named_client("krabka-test")).await;
     check!(first.error_code == 0);
     stream
-        .write_all(&request_frame(
-            18,
-            3,
-            2,
-            true,
-            &encode(&named_client("krabka-test"), 3),
-        ))
+        .write_all(&request_frame(RequestFrameSetup {
+            body: &encode(&named_client("krabka-test"), 3),
+            ..Default::default()
+        }))
         .await
         .unwrap();
     assert_closed_without_a_frame(&mut stream, "a second ApiVersions").await;
@@ -348,7 +406,7 @@ async fn a_pre_auth_api_versions_carries_no_rebootstrap_check() {
             krabka_broker::api_catalog::UnstableApiVersions::Enabled;
     })
     .await;
-    let stale = ApiVersionsRequest {
+    let stale = api_versions_request::ApiVersionsRequest {
         cluster_id: Some("some-other-cluster".into()),
         node_id: 41,
         ..api_versions_request_for("krabka-test", "1.0")

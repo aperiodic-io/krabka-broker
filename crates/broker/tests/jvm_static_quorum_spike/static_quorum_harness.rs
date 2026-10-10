@@ -26,24 +26,7 @@ pub(crate) fn kafka_cluster_id_string(id: Uuid) -> String {
 /// Builds a Krabka controller `BrokerConfig` for voter `i` in the shared static
 /// 3-voter set, with the shared cluster id. `i` is 0-indexed, and the id is
 /// `i+1`.
-pub(crate) fn krabka_controller_config(
-    i: usize,
-    own_client_addr: SocketAddr,
-    own_controller_addr: SocketAddr,
-    voters: &[(u64, SocketAddr)],
-    cluster_id: Uuid,
-    log_dir: &std::path::Path,
-) -> BrokerConfig {
-    crate::support::jvm_static_voter_config(
-        i,
-        own_client_addr,
-        own_client_addr.to_string(),
-        own_controller_addr,
-        voters,
-        cluster_id,
-        log_dir,
-    )
-}
+pub(crate) use crate::support::jvm_static_voter_config as krabka_controller_config;
 
 /// Formats a Krabka voter's log directory at Kafka 4.0's `metadata.version`.
 ///
@@ -142,12 +125,19 @@ impl MixedQuorum {
         let configs: [BrokerConfig; 2] = std::array::from_fn(|index| {
             let bind = SocketAddr::from(([0, 0, 0, 0], self.ports[index]));
             let mut config = krabka_controller_config(
-                index,
-                self.clients[index],
-                bind,
-                &voters,
-                cluster_id,
                 dirs[index].path(),
+                crate::support::JvmStaticVoterSetup {
+                    broker: crate::support::JvmBrokerSetup {
+                        node: krabka_broker::NodeId(
+                            u64::try_from((index) + 1).expect("one-based node id"),
+                        ),
+                        listen: self.clients[index],
+                        advertised: (self.clients[index]).to_string(),
+                        controller: bind,
+                        voters: crate::support::controller_voters(&voters),
+                    },
+                    cluster_id,
+                },
             );
             if let Some(timeout) = election_timeout {
                 config.controller_election_timeout = timeout;

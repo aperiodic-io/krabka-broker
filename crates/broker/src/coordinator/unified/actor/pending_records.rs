@@ -611,13 +611,14 @@ mod tests {
         state.target.epoch = 6;
 
         let mut m = subscribed_member(
-            "m1",
-            &["t"],
-            crate::coordinator::unified::ClientIdentity {
-                id: "client-a",
-                host: "h",
+            crate::coordinator::unified::actor::test_support::ConsumerMemberSetup {
+                client: crate::coordinator::unified::ClientIdentity {
+                    id: "client-a",
+                    host: "h",
+                },
+                now: Instant::now(),
+                ..Default::default()
             },
-            Instant::now(),
         );
         m.member_epoch = 7;
         m.previous_member_epoch = 6;

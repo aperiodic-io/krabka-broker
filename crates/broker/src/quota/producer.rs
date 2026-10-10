@@ -40,15 +40,12 @@ pub fn consume_producer_quota(
 #[cfg(test)]
 mod tests {
     use assert2::{assert, check};
-    use krabka_metadata::MetadataImage;
     use krabka_units::{Time, convert::TimeExt, millis, secs};
 
     use super::consume_producer_quota;
-    use crate::quota::{QuotaBuckets, test_support::image_with_quota as quota_image};
+    use crate::quota::QuotaBuckets;
 
-    fn img_with_quota(entity: Vec<(&str, Option<&str>)>, rate: f64) -> MetadataImage {
-        quota_image(entity, "producer_byte_rate", rate)
-    }
+    crate::quota::test_support::image_builder!(img_with_quota, "producer_byte_rate");
 
     /// One bucket per quota entity (#748): two charges share it, so the
     /// second one, which fits the rate on its own, is throttled by the first.
@@ -141,16 +138,11 @@ mod tests {
         // `(producer_byte_rate, request bytes, expected throttle)`. The
         // one-second window gives the bucket a burst of exactly its rate, and
         // the throttle is the shortfall over the rate.
-        let cases = crate::quota::test_support::fractional_bandwidth_cases();
-        let mut actual = Vec::new();
-        let mut expected = Vec::new();
-        for (rate, bytes, delay) in cases {
-            let img = img_with_quota(vec![("user", Some("alice"))], rate);
-            let buckets = QuotaBuckets::with_window(secs(1));
-            let throttle = consume_producer_quota(&img, &buckets, "alice", Some("app"), bytes);
-            actual.push((rate.to_string(), bytes, throttle.delay));
-            expected.push((rate.to_string(), bytes, delay));
-        }
-        assert!(actual == expected);
+        crate::quota::test_support::check_fractional_bandwidth(
+            "producer_byte_rate",
+            |image, buckets, bytes| {
+                consume_producer_quota(image, buckets, "alice", Some("app"), bytes).delay
+            },
+        );
     }
 }

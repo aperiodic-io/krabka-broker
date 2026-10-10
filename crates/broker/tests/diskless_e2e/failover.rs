@@ -167,17 +167,7 @@ async fn diskless_acks_all_append_survives_the_acking_broker() {
     // The surviving two of three are still a majority, so the controller can
     // commit a new partition-leader record.
     let survivor = *followers.first().expect("a surviving voter");
-    cluster
-        .handle_for_node(survivor)
-        .expect("the survivor is up")
-        .wait_until_partition_leader_changed(TOPIC, 0, leader)
-        .await;
-    let promoted = cluster
-        .handle_for_node(survivor)
-        .expect("the survivor is up")
-        .partition_leader_for_test(TOPIC, 0)
-        .map(krabka_broker::NodeId)
-        .expect("a promoted leader");
+    let promoted = cluster.promoted_leader(survivor, leader).await;
     assert!(promoted != leader);
 
     // (3) The promoted broker serves the same offsets, byte for byte.

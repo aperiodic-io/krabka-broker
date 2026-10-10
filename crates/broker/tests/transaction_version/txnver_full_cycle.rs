@@ -83,7 +83,12 @@ async fn versioned_full_cycles_commit_and_read() {
     for case in cases {
         let (broker, bootstrap, _dir) = boot_single().await;
         let admin = admin_client(&bootstrap).await;
-        create_topic(&admin, case.topic, 1).await;
+        create_topic(
+            &admin,
+            case.topic,
+            crate::support::topics::TopicPartitionCount(1),
+        )
+        .await;
         downgrade_transaction_version(&admin, case.level).await;
         // The first lookup asks for `__transaction_state` and answers
         // COORDINATOR_NOT_AVAILABLE. A Kafka producer retries it; the krabka

@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn nondefault_partition_count_changes_coordinator_routing() {
-        let coordinator = test_coordinator_with_partitions(7);
+        let coordinator = test_coordinator_with_partitions(crate::test_support::PartitionCount(7));
         check!(
             coordinator.partition_for("my-tid") == PartitionIndex(partition_for_tid("my-tid", 7))
         );

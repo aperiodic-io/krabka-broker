@@ -171,12 +171,7 @@ fn topology(epoch: i32) -> StreamsGroupTopologyValue {
         epoch,
         subtopologies: vec![StoredSubtopology {
             subtopology_id: SUBTOPOLOGY.to_string(),
-            source_topics: Vec::new(),
-            source_topic_regex: Vec::new(),
-            repartition_sink_topics: Vec::new(),
-            state_changelog_topics: Vec::new(),
-            repartition_source_topics: Vec::new(),
-            copartition_groups: Vec::new(),
+            ..Default::default()
         }],
     }
 }

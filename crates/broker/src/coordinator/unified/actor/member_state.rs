@@ -617,6 +617,23 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct RegexJoinSetup<'a> {
+        #[default("^orders-.*")]
+        pattern: &'a str,
+    }
+
+    fn regex_join_request(setup: RegexJoinSetup<'_>) -> ConsumerGroupHeartbeatRequest {
+        ConsumerGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: "m1".into(),
+            member_epoch: 0,
+            subscribed_topic_regex: Some(setup.pattern.into()),
+            rebalance_timeout_ms: 60_000,
+            ..Default::default()
+        }
+    }
+
     /// Kafka's `throwIfRegularExpressionIsInvalid` fails the heartbeat that
     /// carries a bad pattern, before any member record is written, so the
     /// joining member is never admitted.
@@ -630,14 +647,7 @@ mod tests {
                 &mut state,
                 &config,
                 &metadata,
-                &ConsumerGroupHeartbeatRequest {
-                    group_id: "g".into(),
-                    member_id: "m1".into(),
-                    member_epoch: 0,
-                    subscribed_topic_regex: Some(pattern.into()),
-                    rebalance_timeout_ms: 60_000,
-                    ..Default::default()
-                },
+                &regex_join_request(RegexJoinSetup { pattern }),
                 ClientIdentity {
                     id: "client",
                     host: "host",
@@ -721,14 +731,7 @@ mod tests {
             &mut state,
             &config,
             &metadata,
-            &ConsumerGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: "m1".into(),
-                member_epoch: 0,
-                subscribed_topic_regex: Some("^orders-.*".into()),
-                rebalance_timeout_ms: 60_000,
-                ..Default::default()
-            },
+            &regex_join_request(RegexJoinSetup::default()),
             ClientIdentity {
                 id: "client",
                 host: "host",

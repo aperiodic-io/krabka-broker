@@ -6,6 +6,8 @@
 use krabka_broker::{BrokerConfig, BrokerHandle, authorizer::SimpleAclAuthorizer};
 use krabka_security::SaslMechanism;
 
+use crate::support::acl::TopicAclSetup;
+
 /// Build a `BrokerConfig` with a single `SASL_PLAINTEXT` listener, PLAIN
 /// enabled, and the given super-user. The non-super-user case still
 /// declares a super-user so the cluster-Alter gate applies. It also
@@ -71,6 +73,24 @@ pub async fn start_admin_alice() -> (BrokerHandle, tempfile::TempDir, std::net::
     crate::support::sasl::start_broker(cfg, dir).await
 }
 
+/// A single foo partition with Alice's exact topic operation grant.
+pub async fn start_alice_topic_grant(
+    operation: krabka_metadata::AclOperation,
+) -> (BrokerHandle, tempfile::TempDir, std::net::SocketAddr) {
+    let (handle, dir, _) = start_admin_alice().await;
+    let addr = handle.listen_addr();
+    crate::acl_admin::create_topic_as_admin(addr, "foo", 1).await;
+    handle
+        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+            topic: "foo",
+            operation,
+            ..Default::default()
+        }))
+        .await
+        .expect("seed Alice's topic operation ACL");
+    (handle, dir, addr)
+}
+
 /// Provisioning fixture with the caller's exact credential set and the admin super-user.
 pub async fn start_admin_with(
     creds: &[(&str, &str)],
@@ -82,4 +102,12 @@ pub async fn start_admin_with(
         .expect("broker must start");
     let addr = handle.listen_addr();
     (dir, handle, addr)
+}
+
+/// A real foo partition with only an irrelevant ACL: Alice's topic operations remain denied.
+pub async fn start_denied_foo() -> (BrokerHandle, tempfile::TempDir, std::net::SocketAddr) {
+    let (handle, directory, address) = start_admin_alice().await;
+    crate::acl_admin::create_topic_as_admin(address, "foo", 1).await;
+    crate::support::acl::seed_dummy_acl(&handle).await;
+    (handle, directory, address)
 }

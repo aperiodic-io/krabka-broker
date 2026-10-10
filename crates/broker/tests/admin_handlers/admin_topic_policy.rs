@@ -27,11 +27,14 @@ use crate::{
 /// `POLICY_VIOLATION` in the Kafka error table.
 const POLICY_VIOLATION: i16 = 44;
 
-/// `config_operation` SET = 0 in the `IncrementalAlterConfigs` wire protocol.
-const CONFIG_OP_SET: i8 = 0;
-
 fn create_request(name: &str, replication_factor: i16) -> CreateTopicsRequest {
-    create_topic_request(creatable_topic(name, 1, replication_factor), 5_000)
+    create_topic_request(creatable_topic(
+        crate::support::topics::ConfiguredTopicSetup {
+            name: (name).into(),
+            replicas: crate::support::topics::TopicReplicationFactor(replication_factor),
+            ..Default::default()
+        },
+    ))
 }
 
 /// A replication factor under the policy floor is refused with 44 and a
@@ -185,16 +188,16 @@ async fn altering_a_topic_to_a_forbidden_config_is_a_policy_violation() {
 }
 
 fn alter_request(topic: &str, value: &str) -> IncrementalAlterConfigsRequest {
-    incremental_request(
-        vec![incremental_resource(
+    incremental_request(crate::support::configs::IncrementalConfigsSetup {
+        resources: vec![incremental_resource(
             RESOURCE_TYPE_TOPIC,
             topic,
             vec![incremental_config(
                 "unclean.leader.election.enable",
                 Some(value.into()),
-                CONFIG_OP_SET,
+                crate::support::configs::ConfigOperation::Set,
             )],
         )],
-        false,
-    )
+        ..Default::default()
+    })
 }

@@ -27,3 +27,19 @@ crate::share_consumption_fixture!(
     join,
     |broker, client, member, epoch, tid| wait_for_share_init(broker, client, &member, epoch, tid)
 );
+
+pub use crate::support::share::ConsumptionFixture;
+
+pub async fn consumption_fixture(
+    setup: crate::support::share::ShareRecordSeedSetup,
+) -> ConsumptionFixture {
+    crate::support::share::consumption_fixture(setup, initialize_consumption).await
+}
+
+/// A fresh g1/t session whose initial batch contains exactly one record.
+pub async fn single_record_consumption_fixture() -> ConsumptionFixture {
+    consumption_fixture(crate::support::share::ShareRecordSeedSetup {
+        count: crate::support::share::ShareRecordCount(1),
+    })
+    .await
+}

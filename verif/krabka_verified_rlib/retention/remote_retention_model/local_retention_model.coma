@@ -67,8 +67,3 @@ goal vc_local_retention_model: if ge_log_Int i limit then
             - i) ([%#sremote_retention_model] limit - (i + 1))
           else
             true
-
-
-
-
-

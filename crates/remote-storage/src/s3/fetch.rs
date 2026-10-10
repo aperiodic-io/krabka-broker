@@ -95,13 +95,12 @@ mod tests {
             counting_rsm, rsm, sample_metadata, seeded_blocking, stamped_metadata, worm_rsm,
         },
         storage_manager::RemoteStorageManager,
-        worm::ChainHead,
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn missing_object_is_one_request() {
         let (store, counter) = counting_rsm();
-        let md = sample_metadata(11);
+        let md = sample_metadata(uuid::Uuid::from_u128(11));
         tokio::task::spawn_blocking(move || {
             let before = counter.attempts(StoreOp::Get);
             check!(matches!(
@@ -125,42 +124,55 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fetch_partial_byte_ranges() {
         let store = rsm(None);
-        let md = sample_metadata(10);
-        seeded_blocking(store, md, false, move |store, md| {
-            // Inclusive [2, 5] -> "2345".
-            assert!(store.fetch_log_segment(&md, 2, Some(5)).unwrap() == b"2345");
-            // Open-ended from 7 -> "789".
-            assert!(store.fetch_log_segment(&md, 7, None).unwrap() == b"789");
-        })
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup::without_transaction_index(),
+            move |store, md| {
+                // Inclusive [2, 5] -> "2345".
+                assert!(store.fetch_log_segment(&md, 2, Some(5)).unwrap() == b"2345");
+                // Open-ended from 7 -> "789".
+                assert!(store.fetch_log_segment(&md, 7, None).unwrap() == b"789");
+            },
+        )
         .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fetch_single_byte_range_start_equals_end() {
         let store = rsm(None);
-        let md = sample_metadata(10);
-        seeded_blocking(store, md, false, move |store, md| {
-            // Inclusive [3, 3] is a valid single-byte range -> "3" (the guard
-            // is `end < start_position`, not `<=`/`==`).
-            assert!(store.fetch_log_segment(&md, 3, Some(3)).unwrap() == b"3");
-        })
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup::without_transaction_index(),
+            move |store, md| {
+                // Inclusive [3, 3] is a valid single-byte range -> "3" (the guard
+                // is `end < start_position`, not `<=`/`==`).
+                assert!(store.fetch_log_segment(&md, 3, Some(3)).unwrap() == b"3");
+            },
+        )
         .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fetch_each_index_type() {
         let store = rsm(None);
-        let md = sample_metadata(11);
-        seeded_blocking(store, md, true, move |store, md| {
-            crate::test_support::check_sample_indexes(&store, &md);
-        })
+        let md = sample_metadata(uuid::Uuid::from_u128(11));
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup {
+                metadata: md,
+                ..Default::default()
+            },
+            move |store, md| {
+                crate::test_support::check_sample_indexes(&store, &md);
+            },
+        )
         .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fetch_before_copy_is_not_found() {
         let store = rsm(None);
-        let md = sample_metadata(404);
+        let md = sample_metadata(uuid::Uuid::from_u128(404));
         let err = tokio::task::spawn_blocking(move || store.fetch_log_segment(&md, 0, None))
             .await
             .unwrap()
@@ -171,11 +183,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn missing_optional_txn_index_is_not_found() {
         let store = rsm(None);
-        let md = sample_metadata(12);
-        seeded_blocking(store, md, false, move |store, md| {
-            let err = store.fetch_index(&md, IndexType::Transaction).unwrap_err();
-            assert!(matches!(err, RemoteStorageError::SegmentNotFound(_)));
-        })
+        let md = sample_metadata(uuid::Uuid::from_u128(12));
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup {
+                metadata: md,
+                transaction_index: crate::test_support::TransactionIndex::Omitted,
+            },
+            move |store, md| {
+                let err = store.fetch_index(&md, IndexType::Transaction).unwrap_err();
+                assert!(matches!(err, RemoteStorageError::SegmentNotFound(_)));
+            },
+        )
         .await;
     }
 
@@ -193,15 +212,28 @@ mod tests {
         let backing: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         let readable_keys = TempDir::new().unwrap();
         let sealed_keys = TempDir::new().unwrap();
-        let readable = worm_rsm(Arc::clone(&backing), &readable_keys, false);
-        let write_only = worm_rsm(backing, &sealed_keys, true);
-        let md = stamped_metadata(56, 0, ChainHead::GENESIS);
+        let readable = worm_rsm(
+            Arc::clone(&backing),
+            &readable_keys,
+            crate::s3::test_support::WormAccess::ReadWrite,
+        );
+        let write_only = worm_rsm(
+            backing,
+            &sealed_keys,
+            crate::s3::test_support::WormAccess::WriteOnly,
+        );
+        let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+            segment_id: uuid::Uuid::from_u128(56),
+            ..Default::default()
+        });
 
         let readable_md = md.clone();
         seeded_blocking(
             readable,
-            readable_md,
-            false,
+            crate::s3::test_support::SeededCopySetup {
+                metadata: readable_md,
+                transaction_index: crate::test_support::TransactionIndex::Omitted,
+            },
             move |readable, readable_md| {
                 check!(readable.fetch_log_segment(&readable_md, 0, None).unwrap() == b"0123456789");
                 check!(

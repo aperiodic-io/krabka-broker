@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn release_redelivers_with_incremented_count() {
-        let mut s = acquired_state(3);
+        let mut s = acquired_state(krabka_log::Offset(3));
         s.acknowledge("m1", Offset(0), Offset(2), AckType::Release, 5)
             .unwrap();
         let acq2 = s.acquire("m1", 10, krabka_log::Offset(i64::MAX), t0(), LOCK, 5);
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn reject_archives_and_advances_spso() {
-        let mut s = acquired_state(3);
+        let mut s = acquired_state(krabka_log::Offset(3));
         s.acknowledge("m1", Offset(0), Offset(2), AckType::Reject, 5)
             .unwrap();
         assert!(s.start_offset == 3); // archived prefix dropped
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn gap_archives() {
-        let mut s = acquired_state(2);
+        let mut s = acquired_state(krabka_log::Offset(2));
         s.acknowledge("m1", Offset(0), Offset(1), AckType::Gap, 5)
             .unwrap();
         assert!(s.start_offset == 2);
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn acknowledge_wrong_member_is_invalid_record_state() {
-        let mut s = acquired_state(3);
+        let mut s = acquired_state(krabka_log::Offset(3));
         let err = s.acknowledge("m2", Offset(0), Offset(2), AckType::Accept, 5);
         assert!(err == Err(crate::codes::INVALID_RECORD_STATE));
     }

@@ -192,21 +192,7 @@ pub const fn diskless_object_reclaimable(referenced: bool, grace_elapsed: bool) 
 })]
 #[must_use]
 pub fn diskless_logical_range(entries: &[(i64, i64)], requested: i64) -> Option<usize> {
-    let mut lo = 0usize;
-    let mut hi = entries.len();
-    #[invariant(lo@ <= hi@ && hi@ <= entries@.len())]
-    #[invariant(forall<i: Int> 0 <= i && i < lo@ ==> entries@[i].0@ <= requested@)]
-    #[invariant(forall<i: Int> hi@ <= i && i < entries@.len()
-        ==> requested@ < entries@[i].0@)]
-    #[variant(hi@ - lo@)]
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        if entries[mid].0 <= requested {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
+    let lo = crate::log_index::upper_range_cursor(entries, requested);
     if lo == 0 {
         return None;
     }

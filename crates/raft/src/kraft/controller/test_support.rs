@@ -42,74 +42,58 @@ pub fn voter_set(ids: &[NodeId]) -> krabka_metadata::voters::VoterSet {
     }))
 }
 
-pub fn build(me: NodeId, ids: &[NodeId]) -> (KraftController, tempfile::TempDir) {
-    build_with_timeout(me, ids, TEST_ELECTION_TIMEOUT)
+/// Number of metadata records between count-triggered snapshots; zero disables the trigger.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub struct SnapshotRecordCount(pub u64);
+
+#[derive(Clone, Copy)]
+pub struct ControllerSetup<'a> {
+    pub me: NodeId,
+    pub ids: &'a [NodeId],
+    pub election_timeout: Time,
+    pub snapshot_interval_records: SnapshotRecordCount,
+    pub heartbeat_interval: Option<Time>,
+    pub controller_fetch_miss_limit: ControllerFetchMissLimit,
+    pub metadata_raft_command_queue_capacity: MetadataRaftCommandQueueCapacity,
+    pub metadata_raft_fetch_max: MetadataRaftFetchMax,
+    pub max_bytes_between_snapshots: krabka_units::ByteSize,
 }
 
-pub fn build_with_timeout(
-    me: NodeId,
-    ids: &[NodeId],
-    election_timeout: Time,
-) -> (KraftController, tempfile::TempDir) {
-    build_full(me, ids, election_timeout, 0)
+impl Default for ControllerSetup<'_> {
+    fn default() -> Self {
+        Self {
+            me: NodeId(1),
+            ids: &[NodeId(1), NodeId(2), NodeId(3)],
+            election_timeout: TEST_ELECTION_TIMEOUT,
+            snapshot_interval_records: SnapshotRecordCount(0),
+            heartbeat_interval: None,
+            controller_fetch_miss_limit: ControllerFetchMissLimit::default(),
+            metadata_raft_command_queue_capacity: MetadataRaftCommandQueueCapacity::default(),
+            metadata_raft_fetch_max: MetadataRaftFetchMax::default(),
+            max_bytes_between_snapshots: krabka_units::bytes(0),
+        }
+    }
 }
 
-pub fn build_with_snapshot_interval(
-    me: NodeId,
-    ids: &[NodeId],
-    snapshot_interval_records: u64,
-) -> (KraftController, tempfile::TempDir) {
-    build_full(me, ids, TEST_ELECTION_TIMEOUT, snapshot_interval_records)
-}
-
-/// Like [`build_with_snapshot_interval`], but with a caller-chosen
-/// `max_bytes_between_snapshots` instead of a record-count interval.
-pub fn build_with_max_bytes_between_snapshots(
-    me: NodeId,
-    ids: &[NodeId],
-    max_bytes_between_snapshots: krabka_units::prelude::ByteSize,
-) -> (KraftController, tempfile::TempDir) {
-    spawn_test_controller(me, ids, |config| {
-        config.max_bytes_between_snapshots = max_bytes_between_snapshots;
-    })
-}
-
-pub fn build_full(
-    me: NodeId,
-    ids: &[NodeId],
-    election_timeout: Time,
-    snapshot_interval_records: u64,
-) -> (KraftController, tempfile::TempDir) {
-    build_full_with_policy(
-        me,
-        ids,
-        election_timeout,
-        snapshot_interval_records,
-        None,
-        ControllerFetchMissLimit::default(),
-        MetadataRaftCommandQueueCapacity::default(),
-        MetadataRaftFetchMax::default(),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn build_full_with_policy(
-    me: NodeId,
-    ids: &[NodeId],
-    election_timeout: Time,
-    snapshot_interval_records: u64,
-    heartbeat_interval: Option<Time>,
-    controller_fetch_miss_limit: ControllerFetchMissLimit,
-    metadata_raft_command_queue_capacity: MetadataRaftCommandQueueCapacity,
-    metadata_raft_fetch_max: MetadataRaftFetchMax,
-) -> (KraftController, tempfile::TempDir) {
-    spawn_test_controller(me, ids, |config| {
-        config.election_timeout = election_timeout;
-        config.snapshot_interval_records = snapshot_interval_records;
-        config.heartbeat_interval = heartbeat_interval;
-        config.controller_fetch_miss_limit = controller_fetch_miss_limit;
-        config.metadata_raft_command_queue_capacity = metadata_raft_command_queue_capacity;
-        config.metadata_raft_fetch_max = metadata_raft_fetch_max;
+pub fn build(setup: ControllerSetup<'_>) -> (KraftController, tempfile::TempDir) {
+    spawn_test_controller(setup.me, setup.ids, |config| {
+        config.election_timeout = setup.election_timeout;
+        config.snapshot_interval_records = setup.snapshot_interval_records.0;
+        config.heartbeat_interval = setup.heartbeat_interval;
+        config.controller_fetch_miss_limit = setup.controller_fetch_miss_limit;
+        config.metadata_raft_command_queue_capacity = setup.metadata_raft_command_queue_capacity;
+        config.metadata_raft_fetch_max = setup.metadata_raft_fetch_max;
+        config.max_bytes_between_snapshots = setup.max_bytes_between_snapshots;
     })
 }
 
@@ -139,13 +123,43 @@ pub fn open_test_controller(
     cluster_id: uuid::Uuid,
     voters: VoterSet,
 ) -> Result<KraftController, RaftError> {
+    open_test_controller_with(
+        data_dir,
+        ControllerOpenSetup {
+            cluster_id,
+            voters,
+            ..Default::default()
+        },
+    )
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct ControllerOpenSetup {
+    pub cluster_id: uuid::Uuid,
+    #[default(voter_set(&[NodeId(1)]))]
+    pub voters: VoterSet,
+    #[default(TEST_ELECTION_TIMEOUT)]
+    pub election_timeout: krabka_units::Time,
+    pub activation: crate::kraft::Activation,
+}
+
+pub fn open_test_controller_with(
+    data_dir: std::path::PathBuf,
+    setup: ControllerOpenSetup,
+) -> Result<KraftController, RaftError> {
+    let ControllerOpenSetup {
+        cluster_id,
+        voters,
+        election_timeout,
+        activation,
+    } = setup;
     KraftController::open(
         data_dir,
         NodeId(1),
         cluster_id,
         uuid::Uuid::nil(),
         voters,
-        TEST_ELECTION_TIMEOUT,
+        election_timeout,
         None,
         ControllerFetchMissLimit::default(),
         MetadataRaftCommandQueueCapacity::default(),
@@ -156,7 +170,7 @@ pub fn open_test_controller(
         krabka_units::prelude::millis(0),
         MetadataSnapshotFetchMax::default(),
         test_metadata_log(),
-        crate::kraft::Activation::default(),
+        activation,
     )
 }
 
@@ -174,39 +188,35 @@ fn spawn_test_controller(
     (ctrl, dir)
 }
 
-pub fn build_engine_only(me: NodeId, ids: &[NodeId]) -> (Engine, tempfile::TempDir) {
-    build_engine_only_with_policy(
-        me,
-        ids,
-        ControllerFetchMissLimit::default(),
-        MetadataRaftFetchMax::default(),
-    )
+#[derive(Clone, Copy)]
+pub struct EngineSetup<'a> {
+    pub me: NodeId,
+    pub ids: &'a [NodeId],
+    pub controller_fetch_miss_limit: ControllerFetchMissLimit,
+    pub metadata_raft_fetch_max: MetadataRaftFetchMax,
+    pub metadata_log: MetadataLogConfig,
 }
 
-pub fn build_engine_only_with_policy(
-    me: NodeId,
-    ids: &[NodeId],
-    controller_fetch_miss_limit: ControllerFetchMissLimit,
-    metadata_raft_fetch_max: MetadataRaftFetchMax,
-) -> (Engine, tempfile::TempDir) {
-    build_engine_only_with_metadata_log(
+impl Default for EngineSetup<'_> {
+    fn default() -> Self {
+        Self {
+            me: NodeId(1),
+            ids: &[NodeId(1), NodeId(2), NodeId(3)],
+            controller_fetch_miss_limit: ControllerFetchMissLimit::default(),
+            metadata_raft_fetch_max: MetadataRaftFetchMax::default(),
+            metadata_log: test_metadata_log(),
+        }
+    }
+}
+
+pub fn build_engine_only(setup: EngineSetup<'_>) -> (Engine, tempfile::TempDir) {
+    let EngineSetup {
         me,
         ids,
         controller_fetch_miss_limit,
         metadata_raft_fetch_max,
-        test_metadata_log(),
-    )
-}
-
-/// Like [`build_engine_only_with_policy`], with the metadata log rolled,
-/// cleaned and kept alive as `metadata_log` says.
-pub fn build_engine_only_with_metadata_log(
-    me: NodeId,
-    ids: &[NodeId],
-    controller_fetch_miss_limit: ControllerFetchMissLimit,
-    metadata_raft_fetch_max: MetadataRaftFetchMax,
-    metadata_log: MetadataLogConfig,
-) -> (Engine, tempfile::TempDir) {
+        metadata_log,
+    } = setup;
     let dir = tempfile::tempdir().expect("tempdir");
     let log = KraftLog::open(dir.path(), &metadata_log).expect("open log");
     let core = QuorumStateMachine::new(
@@ -386,7 +396,11 @@ pub fn topic_record_named(name: &str, id: u128) -> Vec<krabka_metadata::Metadata
             uuid::Uuid::from_u128(id),
         )),
         krabka_metadata::MetadataRecord::V1Partition(
-            crate::test_support::single_replica_partition(name, 0, NodeId(1)),
+            crate::test_support::single_replica_partition(
+                name,
+                krabka_ids::PartitionIndex(0),
+                NodeId(1),
+            ),
         ),
     ]
 }
@@ -443,7 +457,7 @@ pub async fn submit_change_with_timeout(
 }
 
 /// Commit the current tail by delivering a follower fetch at its end offset.
-pub async fn commit_pending(ctrl: &KraftController, follower: NodeId) {
+pub async fn commit_pending(ctrl: &KraftController, follower: NodeId) -> QuorumStateSnapshot {
     let quorum = ctrl.quorum_state().await.unwrap();
     ctrl.inject_event(Event::ReceiveFetch {
         from: follower,
@@ -452,23 +466,34 @@ pub async fn commit_pending(ctrl: &KraftController, follower: NodeId) {
     })
     .await
     .unwrap();
+    quorum
 }
 
 pub fn single_voter_leader_engine() -> (Engine, tempfile::TempDir) {
-    let (mut engine, dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut engine);
     (engine, dir)
 }
 
-pub async fn single_voter_leader() -> (KraftController, tempfile::TempDir) {
-    let (ctrl, dir) = build(NodeId(1), &[NodeId(1)]);
+pub async fn elect_single_voter_controller(ctrl: &KraftController) {
     ctrl.inject_event(Event::ElectionTimeout).await.unwrap();
-    await_leader(&ctrl, Some(NodeId(1))).await;
+    await_leader(ctrl, Some(NodeId(1))).await;
+}
+
+pub async fn single_voter_leader() -> (KraftController, tempfile::TempDir) {
+    let (ctrl, dir) = build(ControllerSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
+    elect_single_voter_controller(&ctrl).await;
     (ctrl, dir)
 }
 
 pub async fn three_voter_leader() -> (KraftController, tempfile::TempDir) {
-    let (ctrl, dir) = build(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
+    let (ctrl, dir) = build(ControllerSetup::default());
     elect_leader_with_helper(&ctrl, NodeId(1), NodeId(2)).await;
     (ctrl, dir)
 }
@@ -488,4 +513,14 @@ pub fn spawn_submit(
 ) -> tokio::task::JoinHandle<Result<SubmitChangeResult, RaftError>> {
     let ctrl = ctrl.clone();
     tokio::spawn(async move { ctrl.submit_change(records).await })
+}
+
+/// Spawn a change and retain the existing 20ms wait for its uncommitted append.
+pub async fn pending_submission(
+    ctrl: &KraftController,
+    records: Vec<krabka_metadata::MetadataRecord>,
+) -> tokio::task::JoinHandle<Result<SubmitChangeResult, RaftError>> {
+    let submission = spawn_submit(ctrl, records);
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    submission
 }

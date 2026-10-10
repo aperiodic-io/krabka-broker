@@ -15,14 +15,11 @@ use krabka_units::prelude::secs;
 use super::*;
 use crate::{
     config::{DEFAULT_METADATA_RAFT_FETCH_MAX, LATEST_PRODUCTION_METADATA_VERSION},
-    kraft::{
-        controller::{
-            activation::{Activation, activation_records, check_bootstrap_records},
-            checkpoint::write_checkpoint,
-            records::metadata_record_batch,
-            test_support::{await_leader, build_engine_only, test_metadata_log, voter_set},
-        },
-        transport::NullPeerSender,
+    kraft::controller::{
+        activation::{Activation, activation_records, check_bootstrap_records},
+        checkpoint::write_checkpoint,
+        records::metadata_record_batch,
+        test_support::{EngineSetup, await_leader, build_engine_only, voter_set},
     },
 };
 
@@ -244,7 +241,10 @@ async fn a_new_leader_writes_the_bootstrap_records_only_to_a_log_without_a_metad
         ),
     ];
     for (what, voters, bootstrap, before, elected, log, committed) in cases {
-        let (mut engine, _dir) = build_engine_only(NodeId(1), voters);
+        let (mut engine, _dir) = build_engine_only(EngineSetup {
+            ids: voters,
+            ..Default::default()
+        });
         engine.activation = Activation {
             bootstrap_records: bootstrap,
             default_min_insync_replicas: 2,
@@ -328,26 +328,19 @@ async fn the_records_of_the_bootstrap_checkpoint_reach_the_image_through_the_log
     write_checkpoint(dir.path(), 0, 0, &bytes).expect("write the bootstrap checkpoint");
 
     // The election timeout is long, so only the injected timeout elects.
-    let ctrl = KraftController::open(
+    let ctrl = crate::kraft::controller::test_support::open_test_controller_with(
         dir.path().to_path_buf(),
-        NodeId(1),
-        uuid::Uuid::nil(),
-        uuid::Uuid::nil(),
-        voters.clone(),
-        secs(60),
-        None,
-        ControllerFetchMissLimit::default(),
-        MetadataRaftCommandQueueCapacity::default(),
-        MetadataRaftFetchMax::default(),
-        Arc::new(NullPeerSender),
-        0,
-        krabka_units::prelude::bytes(0),
-        krabka_units::prelude::millis(0),
-        MetadataSnapshotFetchMax::default(),
-        test_metadata_log(),
-        Activation {
-            bootstrap_records: vec![feature(METADATA_VERSION_FEATURE, EARLIER_METADATA_VERSION)],
-            ..Activation::default()
+        crate::kraft::controller::test_support::ControllerOpenSetup {
+            voters: voters.clone(),
+            election_timeout: secs(60),
+            activation: Activation {
+                bootstrap_records: vec![feature(
+                    METADATA_VERSION_FEATURE,
+                    EARLIER_METADATA_VERSION,
+                )],
+                ..Activation::default()
+            },
+            ..Default::default()
         },
     )
     .expect("open");
@@ -435,13 +428,16 @@ fn the_activation_sets_the_cluster_min_insync_replicas_when_the_bootstrap_enable
 /// not create is one the leader refuses.
 #[test]
 fn a_refused_activation_is_a_fatal_fault() {
-    let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     engine.activation = Activation {
         bootstrap_records: vec![
             feature(METADATA_VERSION_FEATURE, LATEST_PRODUCTION_METADATA_VERSION),
             MetadataRecord::V1Partition(crate::test_support::single_replica_partition(
                 "missing",
-                0,
+                krabka_ids::PartitionIndex(0),
                 NodeId(1),
             )),
         ],

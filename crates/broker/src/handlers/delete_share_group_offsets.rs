@@ -304,12 +304,19 @@ mod tests {
 
     crate::test_support::context_helper!(client_id = "admin-client");
 
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct ShareTopicsSetup<'a> {
+        #[default(&["t"])]
+        names: &'a [&'a str],
+    }
+
     async fn create_topics(
         broker_handle: &crate::broker::BrokerHandle,
-        broker: &crate::broker::Broker,
-        topic_names: &[&str],
         ctx: &crate::handlers::RequestContext<'_>,
+        setup: ShareTopicsSetup<'_>,
     ) {
+        let broker = broker_handle.broker_arc_for_test();
+        let topic_names = setup.names;
         let version = create_topics_response::MAX_VERSION;
         let request = CreateTopicsRequest {
             topics: topic_names
@@ -324,7 +331,7 @@ mod tests {
             timeout_ms: 5_000,
             ..Default::default()
         };
-        let response = crate::handlers::create_topics::handle(broker, request, version, ctx)
+        let response = crate::handlers::create_topics::handle(&broker, request, version, ctx)
             .await
             .expect("create topics");
         assert!(
@@ -353,12 +360,28 @@ mod tests {
         assert!(resp == expected);
     }
 
+    async fn create_share_topics(
+        handle: &crate::broker::BrokerHandle,
+        ctx: &crate::handlers::RequestContext<'_>,
+        setup: ShareTopicsSetup<'_>,
+    ) -> Arc<crate::share_coordinator::persister_client::SharePersister> {
+        let broker = handle.broker_arc_for_test();
+        create_topics(handle, ctx, setup).await;
+        crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
+            .await;
+        broker
+            .group_coordinator
+            .share_persister()
+            .cloned()
+            .expect("share persister")
+    }
+
     #[tokio::test]
     async fn handle_error_scenarios_preserve_expected_rows() {
         type Case<'a> = (
             &'a str,
             Arc<dyn Authorizer>,
-            bool,
+            crate::test_support::ShareApiSupport,
             Vec<&'a str>,
             DeleteShareGroupOffsetsResponse,
         );
@@ -367,7 +390,7 @@ mod tests {
             (
                 "disabled feature returns top-level unsupported version",
                 Arc::new(crate::authorizer::AllowAllAuthorizer),
-                false,
+                crate::test_support::ShareApiSupport::Disabled,
                 vec!["missing"],
                 unthrottled_wire!(DeleteShareGroupOffsetsResponse {
                     error_code: codes::UNSUPPORTED_VERSION,
@@ -378,7 +401,7 @@ mod tests {
             (
                 "denied group returns top-level authorization failure",
                 Arc::new(crate::test_support::ControllerPeerAllowed(DenyAll)),
-                true,
+                crate::test_support::ShareApiSupport::Enabled,
                 vec!["missing"],
                 unthrottled_wire!(DeleteShareGroupOffsetsResponse {
                     error_code: codes::GROUP_AUTHORIZATION_FAILED,
@@ -407,7 +430,14 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topics(&broker_handle, &broker, &["t", "elsewhere"], &ctx).await;
+        create_topics(
+            &broker_handle,
+            &ctx,
+            ShareTopicsSetup {
+                names: &["t", "elsewhere"],
+            },
+        )
+        .await;
         // `share-held` holds state for a topic the image has. The actor's
         // session tick drops the state of every topic the image lacks, as
         // Kafka's `maybeCleanupShareGroupState` does, and that tick can run
@@ -514,20 +544,14 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topics(
+        let persister = create_share_topics(
             &broker_handle,
-            &broker,
-            &["delete-topic", "kept-topic"],
             &ctx,
+            ShareTopicsSetup {
+                names: &["delete-topic", "kept-topic"],
+            },
         )
         .await;
-        crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
-            .await;
-        let persister = broker
-            .group_coordinator
-            .share_persister()
-            .cloned()
-            .expect("share persister");
         let image = broker.controller.current_image();
         let deleted_id = image
             .topic("delete-topic")
@@ -642,26 +666,19 @@ mod tests {
             let denied: HashSet<&'static str> = denied_names.iter().copied().collect();
             let (broker_handle, _dir) = crate::test_support::start_share_broker(
                 Arc::new(DenyReadOnTopics(denied.clone())),
-                true,
+                crate::test_support::ShareBrokerSetup::default(),
             )
             .await;
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
-            create_topics(
+            let persister = create_share_topics(
                 &broker_handle,
-                &broker,
-                &["allow-topic", "deny-topic"],
                 &ctx,
+                ShareTopicsSetup {
+                    names: &["allow-topic", "deny-topic"],
+                },
             )
             .await;
-            crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
-                .await;
-
-            let persister = broker
-                .group_coordinator
-                .share_persister()
-                .cloned()
-                .expect("share persister");
             let image = broker.controller.current_image();
             let allow_id = image.topic("allow-topic").expect("allow topic").topic_id;
             let deny_id = image.topic("deny-topic").expect("deny topic").topic_id;

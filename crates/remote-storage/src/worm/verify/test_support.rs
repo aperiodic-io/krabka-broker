@@ -7,17 +7,13 @@ use std::{collections::HashMap, sync::Arc};
 
 use bytes::Bytes;
 use krabka_audit::signing::FileEd25519Signer;
-use krabka_ids::LeaderEpoch;
 use krabka_object_store::{ObjectOps, ObjectStoreClient, PutRequest};
 use object_store::{GetOptions, ObjectStore, ObjectStoreExt as _, memory::InMemory, path::Path};
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 use uuid::Uuid;
 
 use crate::{
-    metadata::{
-        RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
-        RemoteLogSegmentState, TopicIdPartition,
-    },
+    metadata::RemoteLogSegmentMetadata,
     storage_manager::{partition_dir_name, segment_file_name},
     worm::{
         archiver::WormArchiver,
@@ -47,26 +43,7 @@ fn signer(key_id: &str) -> (Arc<FileEd25519Signer>, Vec<u8>) {
     (Arc::new(signer), public_key)
 }
 
-fn metadata(index: usize) -> RemoteLogSegmentMetadata {
-    let start = i64::try_from(index).unwrap() * SEGMENT_SPAN;
-    RemoteLogSegmentMetadata::new(
-        RemoteLogSegmentId::new(
-            TopicIdPartition::new(Uuid::from_u128(1), TOPIC, PARTITION),
-            Uuid::from_u128(0x1000 + u128::try_from(index).unwrap()),
-        ),
-        start,
-        start + SEGMENT_SPAN - 1,
-        1_713_000_000_000,
-        1,
-        1_713_000_001_000,
-        RemoteLogSegmentDetails::new(
-            4096,
-            RemoteLogSegmentState::CopySegmentStarted,
-            maplit::btreemap! {LeaderEpoch(0) => start},
-        ),
-    )
-    .unwrap()
-}
+krabka_macros::worm_segment_fixture!(metadata, crate, 0x1000, TOPIC, PARTITION, SEGMENT_SPAN);
 
 /// One archived segment, and what the fixture needs to tamper with it.
 pub(super) struct Segment {

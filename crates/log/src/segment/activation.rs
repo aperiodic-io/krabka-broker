@@ -160,7 +160,16 @@ mod tests {
     #[test]
     fn a_segment_with_an_unknown_maximum_is_never_skipped_as_active() {
         let dir = tempdir().unwrap();
-        drop(seeded_segment(dir.path(), 0, &[(0, 1, 9_000)]));
+        drop(seeded_segment(
+            dir.path(),
+            crate::segment::test_support::SeededSegmentSetup {
+                batches: &[crate::segment::test_support::SampleBatchSetup {
+                    timestamp: crate::segment::test_support::RecordTimestamp(9_000),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ));
 
         // The no-scan load: real bytes on disk, maximum still unknown.
         let seg = Segment::open(dir.path(), Offset(0)).unwrap();

@@ -30,9 +30,8 @@ use crate::{
     support,
     support::{
         offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-        produce::single_partition_produce,
         records::{batch_from_records, value_record},
-        sasl::scram_upsertion,
+        sasl::{ScramAlgorithm, ScramUpsertionSetup, scram_upsertion},
         topics::{creatable_topic, create_topic_request},
     },
 };
@@ -41,8 +40,6 @@ use crate::{
 const RESOURCE_TYPE_TOPIC: i8 = 2;
 /// The `IncrementalAlterConfigs` `config_operation` for SET.
 const OP_SET: i8 = 0;
-/// The KIP-554 mechanism discriminant for `SCRAM-SHA-256`.
-const SCRAM_SHA_256: i8 = 1;
 
 /// Append one record to partition 0, so that a later `DeleteRecords` has
 /// something below the high watermark to delete.
@@ -58,17 +55,16 @@ async fn produce_one(
             Some(bytes::Bytes::from_static(b"audited-record")),
         )])
     };
-    let resp = p
-        .client
-        .send(single_partition_produce(
-            topic,
+    let resp = crate::support::produce::send_batch(
+        &p.client,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: (topic).into(),
             topic_id,
-            0,
-            Some(batch.into()),
-            (1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+            ..Default::default()
+        },
+    )
+    .await;
     assert2::check!(resp.responses[0].partition_responses[0].error_code == 0);
 }
 
@@ -190,7 +186,12 @@ async fn every_admin_mutation_is_audited() {
 
     let created = p
         .client
-        .send(create_topic_request(creatable_topic(topic, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (topic).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics");
     assert2::check!(created.topics[0].error_code == 0);
@@ -304,15 +305,13 @@ async fn every_admin_mutation_is_audited() {
     let scram = p
         .client
         .send(AlterUserScramCredentialsRequest {
-            upsertions: vec![scram_upsertion(
-                user,
-                SCRAM_SHA_256,
-                4_096,
-                (
-                    bytes::Bytes::from_static(b"audited-salt"),
-                    bytes::Bytes::from_static(b"audited-salted-password-32-byte"),
-                ),
-            )],
+            upsertions: vec![scram_upsertion(ScramUpsertionSetup {
+                name: (user).into(),
+                mechanism: ScramAlgorithm::Sha256,
+                salt: bytes::Bytes::from_static(b"audited-salt"),
+                salted_password: bytes::Bytes::from_static(b"audited-salted-password-32-byte"),
+                ..Default::default()
+            })],
             ..Default::default()
         })
         .await
@@ -409,9 +408,13 @@ async fn sasl_plain_logins_are_audited_either_way() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
         &dir.path().join("data"),
-        &[],
-        &[],
-        &[("alice", "alice-secret")],
+        crate::support::OperatorSaslSetup {
+            trust: crate::support::OperatorKeysSetup {
+                keys: &[],
+                approvers: &[],
+            },
+            users: &[("alice", "alice-secret")],
+        },
     )
     .await;
     broker.wait_until_partition_present(AUDIT_TOPIC, 0).await;

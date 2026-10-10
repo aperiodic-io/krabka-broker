@@ -118,15 +118,23 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::segment::test_support::{DENSE_INDEX, sample_batch, seeded_segment};
+    use crate::segment::test_support::{DENSE_INDEX, sample_batch};
 
     #[test]
     fn position_for_and_walk_batch_headers_semantics() {
-        let dir = tempdir().unwrap();
-        let mut seg = seeded_segment(dir.path(), 10, &[(10, 5, 1_000)]);
+        let (_dir, mut seg) = crate::segment::test_support::seeded_fixture(
+            crate::segment::test_support::SeededSegmentSetup {
+                offset: crate::Offset(10),
+                batches: &[crate::segment::test_support::FIRST_HEADER_WALK_BATCH],
+                ..Default::default()
+            },
+        );
         let pos2 = seg.log_size;
-        seg.append(&sample_batch(15, 5, 2_000), DENSE_INDEX)
-            .unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SECOND_HEADER_WALK_BATCH),
+            DENSE_INDEX,
+        )
+        .unwrap();
 
         // position_for uses the sparse offset index, whose entries hold each
         // indexed batch's last offset. The first batch takes none (Kafka's
@@ -185,11 +193,26 @@ mod tests {
     /// it, so a small byte budget is not spent stepping over the indexed one.
     #[test]
     fn a_read_past_an_indexed_batch_starts_at_the_batch_after_it() {
-        let dir = tempdir().unwrap();
-        let mut seg = seeded_segment(dir.path(), 10, &[(10, 5, 1_000), (15, 5, 2_000)]);
+        let (_dir, mut seg) = crate::segment::test_support::seeded_fixture(
+            crate::segment::test_support::SeededSegmentSetup {
+                offset: crate::Offset(10),
+                batches: &[
+                    crate::segment::test_support::FIRST_HEADER_WALK_BATCH,
+                    crate::segment::test_support::SECOND_HEADER_WALK_BATCH,
+                ],
+                ..Default::default()
+            },
+        );
         let third = seg.log_size;
-        seg.append(&sample_batch(20, 5, 3_000), DENSE_INDEX)
-            .unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                offset: crate::Offset(20),
+                records: crate::segment::test_support::RecordCount(5),
+                timestamp: crate::segment::test_support::RecordTimestamp(3_000),
+            }),
+            DENSE_INDEX,
+        )
+        .unwrap();
 
         // The second batch (ending at relative offset 9) is indexed, and the
         // read for relative offset 12 is inside the third.
@@ -201,7 +224,12 @@ mod tests {
         use krabka_units::prelude::bytes;
 
         let window = DEFAULT_TIMESTAMP_SCAN_WINDOW.bytes_usize();
-        let batch_size = sample_batch(10, 3, 1_000).encoded_len();
+        let batch_size = sample_batch(crate::segment::test_support::SampleBatchSetup {
+            offset: crate::Offset(10),
+            records: crate::segment::test_support::RecordCount(3),
+            timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+        })
+        .encoded_len();
         let count = 3 * window / batch_size + 2;
         let mut actual = Vec::new();
         let mut expected = Vec::new();
@@ -215,7 +243,15 @@ mod tests {
             for batch in 0..count {
                 positions.push(seg.log_size);
                 let base = 10 + 3 * i64::try_from(batch).unwrap();
-                seg.append(&sample_batch(base, 3, 1_000), interval).unwrap();
+                seg.append(
+                    &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                        offset: crate::Offset(base),
+                        records: crate::segment::test_support::RecordCount(3),
+                        timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+                    }),
+                    interval,
+                )
+                .unwrap();
             }
             for batch in [
                 0,
@@ -247,7 +283,11 @@ mod tests {
         let mut seg = Segment::create(dir.path(), Offset(10)).unwrap();
         let window = DEFAULT_TIMESTAMP_SCAN_WINDOW.bytes_usize();
         let interval = bytes(u32::try_from(4 * window).unwrap());
-        let mut first = sample_batch(10, 1, 1_000);
+        let mut first = sample_batch(crate::segment::test_support::SampleBatchSetup {
+            offset: crate::Offset(10),
+            timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+            ..Default::default()
+        });
         first.records[0].value = Some(Bytes::from(vec![b'x'; window]));
         let overhead = first.encoded_len() - window;
         let first_size = window - HEADER_LEN / 2;
@@ -255,13 +295,33 @@ mod tests {
         assert2::assert!(first.encoded_len() == first_size);
         seg.append(&first, interval).unwrap();
         let split_header = seg.log_size;
-        seg.append(&sample_batch(11, 1, 1_000), interval).unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                offset: crate::Offset(11),
+                timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+                ..Default::default()
+            }),
+            interval,
+        )
+        .unwrap();
         let large_position = seg.log_size;
-        let mut large = sample_batch(12, 1, 1_000);
+        let mut large = sample_batch(crate::segment::test_support::SampleBatchSetup {
+            offset: crate::Offset(12),
+            timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+            ..Default::default()
+        });
         large.records[0].value = Some(Bytes::from(vec![b'x'; 2 * window]));
         seg.append(&large, interval).unwrap();
         let tail = seg.log_size;
-        seg.append(&sample_batch(13, 1, 1_000), interval).unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                offset: crate::Offset(13),
+                timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+                ..Default::default()
+            }),
+            interval,
+        )
+        .unwrap();
 
         let actual: Vec<_> = (0..=4)
             .map(|relative| seg.read_start_position(relative).unwrap())

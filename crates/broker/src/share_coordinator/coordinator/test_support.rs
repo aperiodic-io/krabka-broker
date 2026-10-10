@@ -32,17 +32,64 @@ use crate::{
 /// starts.
 pub(crate) const NOW_MS: i64 = 1_700_000_000_000;
 
-pub(super) fn batch(first: i64, last: i64) -> StateBatch {
-    state_batch(first, last, 0, 1)
+use std::ops::RangeInclusive;
+
+#[derive(Clone, Copy, Default)]
+pub(crate) enum FixtureDeliveryState {
+    #[default]
+    Available,
+    Acknowledged,
+    Archiving,
+    Archived,
+}
+pub(crate) use crate::share_partition::state::test_support::DeliveryCount as DeliveryAttemptCount;
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct StateBatchSetup {
+    #[default(Offset(0)..=Offset(9))]
+    pub bounds: RangeInclusive<Offset>,
+    pub delivery: FixtureDeliveryState,
+    #[default(DeliveryAttemptCount(1))]
+    pub attempts: DeliveryAttemptCount,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StateSeedEpoch(pub i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct StateSeedSetup {
+    #[default(uuid::Uuid::from_bytes([5; 16]))]
+    pub topic: uuid::Uuid,
+    #[default(StateSeedEpoch(1))]
+    pub epoch: StateSeedEpoch,
+    pub offset: Offset,
+}
+
+pub(super) fn batch(bounds: RangeInclusive<Offset>) -> StateBatch {
+    state_batch(StateBatchSetup {
+        bounds,
+        ..Default::default()
+    })
 }
 
 /// A literal batch fixture shared by wire-layout and state-combination tests.
-pub(crate) fn state_batch(first: i64, last: i64, state: i8, count: i16) -> StateBatch {
+pub(crate) fn state_batch(setup: StateBatchSetup) -> StateBatch {
+    let StateBatchSetup {
+        bounds,
+        delivery,
+        attempts,
+    } = setup;
+    let (first_offset, last_offset) = bounds.into_inner();
     StateBatch {
-        first_offset: Offset(first),
-        last_offset: Offset(last),
-        delivery_state: state,
-        delivery_count: count,
+        first_offset,
+        last_offset,
+        delivery_state: match delivery {
+            FixtureDeliveryState::Available => 0,
+            FixtureDeliveryState::Acknowledged => 2,
+            FixtureDeliveryState::Archiving => 3,
+            FixtureDeliveryState::Archived => 4,
+        },
+        delivery_count: attempts.0,
     }
 }
 
@@ -76,14 +123,12 @@ pub(crate) fn open_state_partition(reg: &PartitionRegistry, log_dir: &Path, p: i
 /// Lead the open state logs, then initialize partition zero of group `g`.
 pub(super) async fn initialize_led_group(
     coordinator: &ShareCoordinator,
-    topic_id: uuid::Uuid,
-    state_epoch: i32,
-    start_offset: Offset,
+    setup: StateSeedSetup,
 ) -> krabka_metadata::MetadataImage {
     lead_all(coordinator).await;
-    let image = image_with_topic(topic_id, 1);
+    let image = image_with_topic(setup.topic, 1);
     coordinator
-        .initialize(&image, "g", topic_id, 0, state_epoch, start_offset)
+        .initialize(&image, "g", setup.topic, 0, setup.epoch.0, setup.offset)
         .await
         .unwrap();
     image
@@ -234,7 +279,7 @@ pub(crate) fn image_with_topics(topics: &[(uuid::Uuid, i32)]) -> krabka_metadata
             records.push(krabka_metadata::MetadataRecord::V1Partition(
                 crate::coordinator::test_support::single_replica_partition(
                     &name,
-                    partition,
+                    krabka_ids::PartitionIndex(partition),
                     krabka_metadata::NodeId(1),
                 ),
             ));

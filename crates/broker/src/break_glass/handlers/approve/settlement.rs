@@ -15,7 +15,7 @@ use crate::{
         action_name,
         config::BreakGlassPolicy,
         handlers::{
-            PrivilegedAudit, Refusal, from_wire_uuid, principal_name, require_privileged,
+            PrivilegedAudit, Refusal, admit_privileged_request, from_wire_uuid, principal_name,
             submit_error,
         },
     },
@@ -58,7 +58,7 @@ pub(super) async fn settle(
         .iter()
         .map(|approval| approval.principal.clone())
         .collect();
-    require_privileged(
+    admit_privileged_request(
         broker.audit_log.as_ref(),
         ctx,
         policy.fingerprint(),
@@ -79,13 +79,7 @@ pub(super) async fn settle(
             reason: &updated.reason,
         },
     )
-    .await
-    .map_err(|error| {
-        Refusal::new(
-            codes::POLICY_VIOLATION,
-            format!("privileged action refused: {error}"),
-        )
-    })?;
+    .await?;
     broker
         .controller
         .submit_change(vec![MetadataRecord::V1BreakGlassProposal(updated.clone())])

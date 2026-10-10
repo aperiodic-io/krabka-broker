@@ -38,4 +38,3 @@ goal vc_round_robin_load: if rf <= 0 then
   else
     [@expl:variant decreases] well_founded_relation_Int ([%#smin_insync_is_site_loss_safe] rf) ([%#smin_insync_is_site_loss_safe] rf
     - 1)
-

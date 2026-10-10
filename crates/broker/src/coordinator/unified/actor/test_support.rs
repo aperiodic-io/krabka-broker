@@ -10,6 +10,8 @@ use krabka_protocol::{
     owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest, primitives::uuid::Uuid,
 };
 
+use crate::coordinator::unified::test_support::MemberEpoch;
+
 pub(crate) mod rpc;
 
 use super::{GroupActorHandle, MetadataProvider};
@@ -90,25 +92,42 @@ pub(super) fn subscribed_consumer_group(
     let mut state = GroupState::new(group_id);
     for member_id in member_ids {
         state.add_or_update_member(subscribed_member(
-            member_id,
-            topics,
-            crate::coordinator::unified::ClientIdentity {
-                id: "client",
-                host: "host",
+            crate::coordinator::unified::actor::test_support::ConsumerMemberSetup {
+                member_id,
+                topics,
+                client: crate::coordinator::unified::ClientIdentity {
+                    id: "client",
+                    host: "host",
+                },
+                ..Default::default()
             },
-            std::time::Instant::now(),
         ));
     }
     state
 }
 
 /// A subscribing consumer with the actor fixtures' ordinary rebalance timeout.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct ConsumerMemberSetup<'a> {
+    #[default("m1")]
+    pub member_id: &'a str,
+    #[default(&["t"])]
+    pub topics: &'a [&'a str],
+    #[default(crate::coordinator::unified::ClientIdentity { id: "client", host: "host" })]
+    pub client: crate::coordinator::unified::ClientIdentity<'a>,
+    #[default(std::time::Instant::now())]
+    pub now: std::time::Instant,
+}
+
 pub(super) fn subscribed_member(
-    member_id: &str,
-    topics: &[&str],
-    client: crate::coordinator::unified::ClientIdentity<'_>,
-    now: std::time::Instant,
+    setup: ConsumerMemberSetup<'_>,
 ) -> crate::coordinator::unified::consumer_state::MemberState {
+    let ConsumerMemberSetup {
+        member_id,
+        topics,
+        client,
+        now,
+    } = setup;
     super::member_state::build_member(
         member_id,
         &ConsumerGroupHeartbeatRequest {
@@ -330,7 +349,13 @@ pub(super) async fn seed_and_upgrade(
     coord: &Arc<GroupCoordinator>,
     topic: &str,
 ) -> Arc<GroupActorHandle> {
-    let handle = seed_classic_member(coord, "m-classic", topic, None);
+    let handle = seed_classic_member(
+        coord,
+        crate::coordinator::unified::actor::test_support::ClassicMemberSetup {
+            topic,
+            ..Default::default()
+        },
+    );
 
     upgrade_with_transient_native(&handle, topic).await;
     handle
@@ -387,18 +412,11 @@ pub(super) async fn log_has_classic_group_metadata_write(
     log: &InMemoryOffsetsLog,
     group_id: &str,
 ) -> bool {
-    use crate::coordinator::unified::persistence::{Key, parse_key};
-    log.batches().await.iter().any(|batch| {
-        batch.records.iter().any(|rec| {
-            rec.value.is_some()
-                && rec.key.as_ref().is_some_and(|k| {
-                    matches!(
-                        parse_key(k),
-                        Ok(Key::GroupMetadata { group_id: ref gid }) if gid == group_id
-                    )
-                })
-        })
-    })
+    log.has_classic_group_metadata_record(
+        group_id,
+        crate::coordinator::unified::offsets_log::fake::ClassicMetadataRecord::Write,
+    )
+    .await
 }
 
 /// Seeds a classic consumer group "g" with a single classic member
@@ -407,16 +425,38 @@ pub(super) async fn log_has_classic_group_metadata_write(
 /// downgrade tests use, but it takes parameters, so a static-identity test
 /// can attach an instance id. The fixed `m-classic` in `seed_and_upgrade`
 /// cannot do that.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct ClassicMemberSetup<'a> {
+    #[default("m-classic")]
+    pub member_id: &'a str,
+    #[default("t")]
+    pub topic: &'a str,
+    pub instance_id: Option<&'a str>,
+}
+
+impl<'a> ClassicMemberSetup<'a> {
+    /// A dynamic member with the default topic subscription and generation.
+    pub(super) fn dynamic(member_id: &'a str) -> Self {
+        Self {
+            member_id,
+            ..Default::default()
+        }
+    }
+}
+
 pub(super) fn seed_classic_member(
     coord: &Arc<GroupCoordinator>,
-    member_id: &str,
-    topic: &str,
-    instance_id: Option<&str>,
+    setup: ClassicMemberSetup<'_>,
 ) -> Arc<GroupActorHandle> {
     use super::super::{
         classic_state::{ClassicGroup as ClassicState, Member},
         group::{CoordinatorGroup, GroupKind},
     };
+    let ClassicMemberSetup {
+        member_id,
+        topic,
+        instance_id,
+    } = setup;
 
     let mut cs = ClassicState::new("g");
     cs.protocol_type = Some("consumer".into());
@@ -472,13 +512,78 @@ pub(super) async fn spawn_and_downgrade(
     (handle, view)
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct BidirectionalClassicSetup<'a> {
+    #[default("m1")]
+    pub member_id: &'a str,
+    pub instance_id: Option<&'a str>,
+}
+
+/// A bidirectional coordinator whose first actor was spawned from a classic seed.
+pub(super) fn seeded_bidirectional_coordinator(
+    setup: BidirectionalClassicSetup<'_>,
+) -> (
+    Arc<GroupCoordinator>,
+    Arc<InMemoryOffsetsLog>,
+    Arc<GroupActorHandle>,
+) {
+    let (coordinator, log) = bidirectional_coordinator();
+    let handle = seed_classic_member(
+        &coordinator,
+        ClassicMemberSetup {
+            member_id: setup.member_id,
+            instance_id: setup.instance_id,
+            ..Default::default()
+        },
+    );
+    (coordinator, log, handle)
+}
+
+pub(super) struct JoinedNativeConsumer {
+    pub member_id: String,
+    pub epoch: MemberEpoch,
+}
+
+/// Join a group's first native consumer and retain its assigned identity and epoch.
+pub(super) async fn join_native_consumer(handle: &Arc<GroupActorHandle>) -> JoinedNativeConsumer {
+    let response = rpc::consumer_heartbeat(handle, "", 0, Some("t")).await;
+    assert!(response.error_code == codes::NONE);
+    JoinedNativeConsumer {
+        member_id: response.member_id.expect("native member id"),
+        epoch: MemberEpoch(response.member_epoch),
+    }
+}
+
 /// Seed a convertible classic member and join its first native consumer.
 pub(super) async fn seed_classic_with_native(
     coordinator: &Arc<GroupCoordinator>,
 ) -> (Arc<GroupActorHandle>, String) {
-    let handle = seed_classic_member(coordinator, "m-classic", "t", None);
-    let response = rpc::consumer_heartbeat(&handle, "", 0, Some("t")).await;
-    assert!(response.error_code == codes::NONE);
-    let native = response.member_id.expect("native member id");
-    (handle, native)
+    let handle = seed_classic_member(
+        coordinator,
+        crate::coordinator::unified::actor::test_support::ClassicMemberSetup::default(),
+    );
+    let native = join_native_consumer(&handle).await;
+    (handle, native.member_id)
+}
+
+/// A marked classic handle, in the same get-before-mark order as coordinator dispatch.
+pub(super) fn marked_classic_handle(
+    coord: &Arc<GroupCoordinator>,
+    group_id: &str,
+) -> Arc<GroupActorHandle> {
+    let handle = coord.get_or_create_classic(group_id);
+    coord.mark_classic(group_id);
+    handle
+}
+
+/// The bidirectional migration fixture with both a hosted classic and a native consumer.
+pub(super) async fn bidirectional_with_members() -> (
+    Arc<GroupCoordinator>,
+    Arc<InMemoryOffsetsLog>,
+    Arc<GroupActorHandle>,
+    String,
+) {
+    let (coord, log) = bidirectional_coordinator();
+    let (handle, native) = seed_classic_with_native(&coord).await;
+    (coord, log, handle, native)
 }

@@ -35,21 +35,16 @@ fn key(topic: &str, partition: i32) -> (String, i32) {
     (topic.to_string(), partition)
 }
 
-fn tombstone(topic: &str, partition: i32) -> (Key, Option<Bytes>) {
-    (
-        Key::OffsetCommit {
-            group_id: "g".into(),
-            topic: topic.into(),
-            partition,
-        },
-        None,
-    )
+#[derive(Clone, Copy)]
+enum AppendResult {
+    Success,
+    Failure,
 }
 
 struct Row {
     name: &'static str,
     deleted: Vec<&'static str>,
-    fail_append: bool,
+    append_result: AppendResult,
     expected_reply: Vec<(String, i32)>,
     expected_records: Vec<(Key, Option<Bytes>)>,
     expected_committed: HashSet<(String, i32)>,
@@ -68,20 +63,25 @@ async fn deleting_a_topic_tombstones_its_offsets_in_the_group() {
         Row {
             name: "one of two topics, and the offset of the new topic stays",
             deleted: vec!["orders"],
-            fail_append: false,
+            append_result: AppendResult::Success,
             expected_reply: vec![key("orders", 0), key("orders", 1), key("orders", 2)],
-            expected_records: vec![
-                tombstone("orders", 0),
-                tombstone("orders", 1),
-                tombstone("orders", 2),
-            ],
+            expected_records: crate::coordinator::test_support::topic_deletion_tombstones(
+                crate::coordinator::test_support::TopicDeletionTombstonesSetup {
+                    partitions: &[
+                        krabka_ids::PartitionIndex(0),
+                        krabka_ids::PartitionIndex(1),
+                        krabka_ids::PartitionIndex(2),
+                    ],
+                    ..Default::default()
+                },
+            ),
             expected_committed: HashSet::from([key("orders", 3), key("payments", 0)]),
             expected_pending: HashSet::from([key("payments", 1)]),
         },
         Row {
             name: "a topic the group never committed",
             deleted: vec!["unknown"],
-            fail_append: false,
+            append_result: AppendResult::Success,
             expected_reply: vec![],
             expected_records: vec![],
             expected_committed: all_committed.clone(),
@@ -90,7 +90,7 @@ async fn deleting_a_topic_tombstones_its_offsets_in_the_group() {
         Row {
             name: "the append fails",
             deleted: vec!["orders", "payments"],
-            fail_append: true,
+            append_result: AppendResult::Failure,
             expected_reply: vec![],
             expected_records: vec![],
             expected_committed: all_committed.clone(),
@@ -116,8 +116,10 @@ async fn deleting_a_topic_tombstones_its_offsets_in_the_group() {
         group.add_pending_txn_offsets(8, 101, [key("payments", 1)]);
         coordinator.seed_classic("g", Box::new(group));
         let handle = coordinator.find("g").unwrap();
-        log.fail_next
-            .store(row.fail_append, std::sync::atomic::Ordering::SeqCst);
+        log.fail_next.store(
+            matches!(row.append_result, AppendResult::Failure),
+            std::sync::atomic::Ordering::SeqCst,
+        );
 
         let (reply, deleted) = oneshot::channel();
         handle

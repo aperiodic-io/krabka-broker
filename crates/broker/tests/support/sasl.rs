@@ -6,18 +6,57 @@ use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
 use krabka_security::{ListenerProtocol, SaslMechanism};
 use tempfile::TempDir;
 
+#[derive(Clone, Copy)]
+pub struct ScramMechanismCode(pub i8);
+
+#[derive(Clone, Copy, Default)]
+pub enum ScramAlgorithm {
+    Sha256,
+    #[default]
+    Sha512,
+    Unrecognized(ScramMechanismCode),
+}
+
+impl ScramAlgorithm {
+    fn wire_code(self) -> i8 {
+        match self {
+            Self::Sha256 => 1,
+            Self::Sha512 => 2,
+            Self::Unrecognized(code) => code.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ScramIterations(pub i32);
+
+impl Default for ScramIterations {
+    fn default() -> Self {
+        Self(4096)
+    }
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct ScramUpsertionSetup {
+    #[default("alice".into())]
+    pub name: String,
+    pub mechanism: ScramAlgorithm,
+    pub iterations: ScramIterations,
+    #[default(bytes::Bytes::from(vec![0u8; 16]))]
+    pub salt: bytes::Bytes,
+    #[default(bytes::Bytes::from(vec![0u8; 64]))]
+    pub salted_password: bytes::Bytes,
+}
+
 pub fn scram_upsertion(
-    name: impl Into<String>,
-    mechanism: i8,
-    iterations: i32,
-    (salt, salted_password): (bytes::Bytes, bytes::Bytes),
+    setup: ScramUpsertionSetup,
 ) -> krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialUpsertion {
     krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialUpsertion {
-        name: name.into(),
-        mechanism,
-        iterations,
-        salt,
-        salted_password,
+        name: setup.name,
+        mechanism: setup.mechanism.wire_code(),
+        iterations: setup.iterations.0,
+        salt: setup.salt,
+        salted_password: setup.salted_password,
         ..Default::default()
     }
 }
@@ -111,19 +150,38 @@ pub fn start_sasl_plaintext_with_acl_users(
 }
 
 /// Hash and persist a SCRAM fixture through the controller, outside the wire admin API.
-pub async fn provision_scram(
-    broker: &BrokerHandle,
-    user: &str,
-    password: &[u8],
-    mechanism: SaslMechanism,
-    iterations: u32,
-) {
-    let credential = krabka_security::hash_scram_password(password, mechanism, iterations);
+#[derive(Clone, Copy)]
+pub struct HashIterations(pub u32);
+
+impl Default for HashIterations {
+    fn default() -> Self {
+        Self(4096)
+    }
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct ScramCredentialSetup {
+    #[default("alice".into())]
+    pub user: String,
+    #[default(alice_password().into_bytes())]
+    pub password: Vec<u8>,
+    #[default(SaslMechanism::ScramSha512)]
+    pub mechanism: SaslMechanism,
+    pub iterations: HashIterations,
+}
+
+/// Seed the metadata image with the configured SCRAM credential.
+///
+/// # Panics
+/// Panics if hashing rejects the mechanism or metadata submission fails.
+pub async fn provision_scram(broker: &BrokerHandle, setup: ScramCredentialSetup) {
+    let credential =
+        krabka_security::hash_scram_password(&setup.password, setup.mechanism, setup.iterations.0);
     broker
         .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1ScramCredential(
             krabka_metadata::ScramCredentialRecord {
-                user: user.into(),
-                mechanism,
+                user: setup.user,
+                mechanism: setup.mechanism,
                 salt: credential.salt,
                 stored_key: credential.stored_key,
                 server_key: credential.server_key,
@@ -162,4 +220,35 @@ fn start_configured_users(
     let mut config = sasl_plaintext_with_users(dir.path().to_path_buf(), super_user, users);
     configure(&mut config);
     start_broker(config, dir)
+}
+
+/// Encode PLAIN's authentication request at version 2 without choosing handshake order.
+///
+/// # Panics
+/// Panics if the protocol encoder rejects the request.
+pub fn plain_authentication_body(user: &str, password: &[u8]) -> bytes::BytesMut {
+    use krabka_protocol::Encode as _;
+    let request = krabka_protocol::owned::sasl_authenticate_request::SaslAuthenticateRequest {
+        auth_bytes: plain_payload(user, password),
+        ..Default::default()
+    };
+    let mut body = bytes::BytesMut::new();
+    request.encode(&mut body, 2).unwrap();
+    body
+}
+
+pub fn plain_payload(user: &str, password: &[u8]) -> bytes::Bytes {
+    let mut payload = Vec::with_capacity(2 + user.len() + password.len());
+    payload.push(0);
+    payload.extend_from_slice(user.as_bytes());
+    payload.push(0);
+    payload.extend_from_slice(password);
+    bytes::Bytes::from(payload)
+}
+
+/// The authentication fixtures' runtime-constructed Alice password.
+pub fn alice_password() -> String {
+    ['w', 'o', 'n', 'd', 'e', 'r', 'l', 'a', 'n', 'd']
+        .iter()
+        .collect()
 }

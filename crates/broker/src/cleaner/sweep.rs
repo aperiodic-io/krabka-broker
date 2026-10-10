@@ -38,7 +38,7 @@ use tracing::warn;
 use crate::{
     error::BrokerError,
     freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
-    metrics::{BrokerMetrics, CleanerFailureReason},
+    metrics::BrokerMetrics,
     partition::Partition,
     partition_registry::PartitionRegistry,
 };
@@ -114,19 +114,7 @@ impl UncleanablePartitions {
     }
 }
 
-/// How the sweep classifies one failed [`Partition::compact_log`] call.
-///
-/// The three reasons are what an operator acts on differently: a storage
-/// failure is a disk, and the writer arm has already asked the log-dir
-/// registry to take that disk offline; a dead writer is a partition whose
-/// actor is gone; anything else is the log layer refusing the rewrite.
-fn failure_reason(error: &BrokerError) -> CleanerFailureReason {
-    match error {
-        BrokerError::Log(krabka_log::LogError::Io(_)) => CleanerFailureReason::Io,
-        BrokerError::Replication(_) => CleanerFailureReason::Writer,
-        _ => CleanerFailureReason::Other,
-    }
-}
+use crate::metrics::cleaner_failure_reason as failure_reason;
 
 #[cfg(test)]
 mod tests;

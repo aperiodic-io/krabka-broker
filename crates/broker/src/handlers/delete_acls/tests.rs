@@ -15,7 +15,7 @@ use krabka_protocol::{
     ProtocolError,
     owned::{
         delete_acls_request::DeleteAclsFilter,
-        delete_acls_response::{DeleteAclsFilterResult, DeleteAclsMatchingAcl, DeleteAclsResponse},
+        delete_acls_response::{DeleteAclsFilterResult, DeleteAclsResponse},
     },
 };
 
@@ -27,10 +27,9 @@ use crate::{
     handlers::{
         acl_test_support::{all_acls, seed_acls},
         delete_acls::test_support::{
-            OPERATION_ANY, OPERATION_READ, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL,
-            PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ALLOW, PERMISSION_ANY,
-            RESOURCE_TYPE_TOPIC, VERSION, acl, configured_authorizer, filter, named_filters,
-            request, test_context,
+            OPERATION_ANY, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_MATCH,
+            PATTERN_TYPE_PREFIXED, PERMISSION_ANY, RESOURCE_TYPE_TOPIC, VERSION, acl,
+            configured_authorizer, filter, named_filters, request, test_context,
         },
     },
     test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx},
@@ -41,7 +40,7 @@ async fn handle_denies_cluster_alter_for_each_filter() {
     seeded_acl_fixture!(
         (broker_handle, _dir, broker, ctx),
         start_broker(Arc::new(DenyAll)),
-        vec![acl("orders", "User:alice", AclOperation::Read)],
+        vec![crate::handlers::acl_test_support::alice_orders_acl()],
         "alice"
     );
     let req = named_filters(&[("orders", "User:alice"), ("payments", "User:bob")]);
@@ -66,10 +65,7 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
     seeded_acl_fixture!(
         (broker_handle, _dir, broker, ctx),
         start_broker(configured_authorizer()),
-        vec![
-            acl("orders", "User:alice", AclOperation::Read),
-            acl("payments", "User:bob", AclOperation::Write),
-        ],
+        crate::handlers::acl_test_support::orders_payments_acls(),
         "admin"
     );
     let req = request(vec![filter(Some("orders"), Some("User:alice"))]);
@@ -80,23 +76,21 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
         filter_results: vec![tagged_wire!(DeleteAclsFilterResult {
             error_code: codes::NONE,
             error_message: None,
-            matching_acls: vec![tagged_wire!(DeleteAclsMatchingAcl {
-                error_code: codes::NONE,
-                error_message: None,
-                resource_type: RESOURCE_TYPE_TOPIC,
-                resource_name: "orders".into(),
-                pattern_type: PATTERN_TYPE_LITERAL,
-                principal: "User:alice".into(),
-                host: "*".into(),
-                operation: OPERATION_READ,
-                permission_type: PERMISSION_ALLOW,
-            })],
+            matching_acls: vec![crate::handlers::acl_test_support::expected_deleted_orders_acl()],
         })],
     });
     assert!(resp == expected);
 
     let remaining = all_acls(&broker_handle);
-    assert!(remaining == vec![acl("payments", "User:bob", AclOperation::Write)]);
+    assert!(
+        remaining
+            == vec![acl(crate::test_support::AllowAclSetup {
+                resource_name: "payments",
+                principal: "User:bob",
+                operation: AclOperation::Write,
+                ..Default::default()
+            })]
+    );
     broker_handle.shutdown().await;
 }
 
@@ -106,12 +100,7 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
 /// seeded binding must survive the refusal.
 #[tokio::test]
 async fn handle_answers_security_disabled_for_each_filter_when_no_authorizer_is_configured() {
-    seeded_acl_fixture!(
-        (broker_handle, _dir, broker, ctx),
-        start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)),
-        vec![acl("orders", "User:alice", AclOperation::Read)],
-        "admin"
-    );
+    security_disabled_acl_fixture!((broker_handle, _dir, broker, ctx));
     let req = named_filters(&[("orders", "User:alice"), ("payments", "User:bob")]);
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
@@ -125,22 +114,41 @@ async fn handle_answers_security_disabled_for_each_filter_when_no_authorizer_is_
         filter_results: vec![disabled.clone(), disabled],
     });
     assert!(resp == expected);
-    assert!(all_acls(&broker_handle) == vec![acl("orders", "User:alice", AclOperation::Read)]);
+    assert!(
+        all_acls(&broker_handle) == vec![crate::handlers::acl_test_support::alice_orders_acl()]
+    );
     broker_handle.shutdown().await;
 }
 
 /// An ACL on topic `name` with `pattern_type`, `principal` and
 /// `permission_type`.
-fn topic_acl(
-    name: &str,
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct TopicAclSetup<'a> {
+    #[default("orders")]
+    name: &'a str,
+    #[default(PatternType::Literal)]
     pattern_type: PatternType,
-    principal: &str,
+    #[default("User:alice")]
+    principal: &'a str,
+    #[default(PermissionType::Allow)]
     permission_type: PermissionType,
-) -> AclEntry {
+}
+
+fn topic_acl(setup: TopicAclSetup<'_>) -> AclEntry {
+    let TopicAclSetup {
+        name,
+        pattern_type,
+        principal,
+        permission_type,
+    } = setup;
     AclEntry {
         pattern_type,
         permission_type,
-        ..acl(name, principal, AclOperation::Read)
+        ..acl(crate::test_support::AllowAclSetup {
+            resource_name: name,
+            principal,
+            ..Default::default()
+        })
     }
 }
 
@@ -181,31 +189,32 @@ async fn handle_deletes_exactly_what_kafka_matches() {
     );
     test_ctx!(ctx, "admin");
 
-    let literal_foo = topic_acl(
-        "foo",
-        PatternType::Literal,
-        "User:alice",
-        PermissionType::Allow,
-    );
-    let wildcard_deny = topic_acl("*", PatternType::Literal, "User:bob", PermissionType::Deny);
-    let prefixed_fo = topic_acl(
-        "fo",
-        PatternType::Prefixed,
-        "User:alice",
-        PermissionType::Deny,
-    );
-    let prefixed_bar = topic_acl(
-        "bar",
-        PatternType::Prefixed,
-        "User:bob",
-        PermissionType::Allow,
-    );
-    let literal_food = topic_acl(
-        "food",
-        PatternType::Literal,
-        "User:alice",
-        PermissionType::Allow,
-    );
+    let literal_foo = topic_acl(TopicAclSetup {
+        name: "foo",
+        ..Default::default()
+    });
+    let wildcard_deny = topic_acl(TopicAclSetup {
+        name: "*",
+        principal: "User:bob",
+        permission_type: PermissionType::Deny,
+        ..Default::default()
+    });
+    let prefixed_fo = topic_acl(TopicAclSetup {
+        name: "fo",
+        pattern_type: PatternType::Prefixed,
+        permission_type: PermissionType::Deny,
+        ..Default::default()
+    });
+    let prefixed_bar = topic_acl(TopicAclSetup {
+        name: "bar",
+        pattern_type: PatternType::Prefixed,
+        principal: "User:bob",
+        ..Default::default()
+    });
+    let literal_food = topic_acl(TopicAclSetup {
+        name: "food",
+        ..Default::default()
+    });
     let seeded = vec![
         literal_foo.clone(),
         wildcard_deny.clone(),
@@ -310,8 +319,12 @@ async fn handle_deletes_exactly_what_kafka_matches() {
 #[tokio::test]
 async fn handle_lists_an_acl_under_every_filter_that_matches_it() {
     let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-    let shared = acl("orders", "User:alice", AclOperation::Read);
-    let other = acl("payments", "User:bob", AclOperation::Read);
+    let shared = acl(crate::test_support::AllowAclSetup::default());
+    let other = acl(crate::test_support::AllowAclSetup {
+        resource_name: "payments",
+        principal: "User:bob",
+        ..Default::default()
+    });
     seed_acls(&broker_handle, vec![shared.clone(), other.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
     test_ctx!(ctx, "admin");
@@ -344,7 +357,7 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
     type Edit = fn(&mut DeleteAclsFilter);
 
     let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-    let doomed = acl("orders", "User:alice", AclOperation::Read);
+    let doomed = acl(crate::test_support::AllowAclSetup::default());
     seed_acls(&broker_handle, vec![doomed.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
     test_ctx!(ctx, "admin");
@@ -411,7 +424,7 @@ async fn handle_closes_the_connection_on_an_unknown_element() {
     seeded_acl_fixture!(
         (broker_handle, _dir, broker, ctx),
         start_broker(configured_authorizer()),
-        vec![acl("orders", "User:alice", AclOperation::Read)],
+        vec![crate::handlers::acl_test_support::alice_orders_acl()],
         "admin"
     );
     let mut unknown = filter(Some("payments"), None);
@@ -425,7 +438,9 @@ async fn handle_closes_the_connection_on_an_unknown_element() {
             "Filters contain UNKNOWN elements"
         ))) = result
     );
-    assert!(all_acls(&broker_handle) == vec![acl("orders", "User:alice", AclOperation::Read)]);
+    assert!(
+        all_acls(&broker_handle) == vec![crate::handlers::acl_test_support::alice_orders_acl()]
+    );
     broker_handle.shutdown().await;
 }
 
@@ -435,7 +450,12 @@ async fn seed_many_acls(handle: &BrokerHandle, count: usize) {
     seed_acls(
         handle,
         (0..count)
-            .map(|n| acl(&format!("topic-{n}"), "User:alice", AclOperation::Read))
+            .map(|n| {
+                acl(crate::test_support::AllowAclSetup {
+                    resource_name: &format!("topic-{n}"),
+                    ..Default::default()
+                })
+            })
             .collect(),
     )
     .await;
@@ -493,7 +513,12 @@ async fn handle_bounds_a_request_to_ten_thousand_removals() {
 #[test]
 fn match_filter_bounds_the_removals_of_a_request() {
     let image_acls: Vec<AclEntry> = (0..5)
-        .map(|n| acl(&format!("topic-{n}"), "User:alice", AclOperation::Read))
+        .map(|n| {
+            acl(crate::test_support::AllowAclSetup {
+                resource_name: &format!("topic-{n}"),
+                ..Default::default()
+            })
+        })
         .collect();
     let build = |name: Option<&str>| build_filter(&filter(name, None)).expect("filter");
     let every_acl = build(None);

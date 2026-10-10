@@ -212,9 +212,16 @@ fn rewrite_both_commit_markers_survive_when_data_survives() {
     let dir = tempfile::tempdir().unwrap();
     // pid 1000: data batch at offset 0 (key k1), commit marker at offset 1.
     // pid 2000: data batch at offset 2 (key k2), commit marker at offset 3.
-    let data1 = transactional_record(0, 1000, b"k1", b"v1");
+    let data1 = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+        payload: (b"k1", b"v1"),
+        ..Default::default()
+    });
     let marker1 = control_batch(1, 1000, 1 /* COMMIT */);
-    let data2 = transactional_record(2, 2000, b"k2", b"v2");
+    let data2 = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+        offset: crate::Offset(2),
+        producer: crate::ProducerId(2000),
+        payload: (b"k2", b"v2"),
+    });
     let marker2 = control_batch(3, 2000, 1 /* COMMIT */);
     let expected = vec![
         data1.clone(),

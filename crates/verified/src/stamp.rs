@@ -27,8 +27,7 @@ pub fn stamp_ranges_valid(bases: &[i64], lasts: &[i64]) -> bool {
         return false;
     }
     let mut index = 0usize;
-    #[invariant(index@ <= bases@.len())]
-    #[invariant(stamp_range_arrays_parallel(bases@, lasts@))]
+    #[invariant(stamp_cursor_in_bounds(bases@, lasts@, index@))]
     #[invariant(forall<i: Int> 0 <= i && i < index@ ==> bases@[i]@ <= lasts@[i]@)]
     #[invariant(forall<i: Int> 1 <= i && i < index@ ==> lasts@[i - 1]@ < bases@[i]@)]
     #[variant(bases@.len() - index@)]
@@ -63,8 +62,7 @@ pub fn stamp_range_insertion_index(
         return None;
     }
     let mut index = 0usize;
-    #[invariant(index@ <= bases@.len())]
-    #[invariant(stamp_range_arrays_parallel(bases@, lasts@))]
+    #[invariant(stamp_cursor_in_bounds(bases@, lasts@, index@))]
     #[invariant(forall<i: Int> 0 <= i && i < index@ ==> lasts@[i]@ < new_base@)]
     #[variant(bases@.len() - index@)]
     while index < bases.len() {
@@ -96,8 +94,7 @@ pub fn exact_stamp_range_index(
     target_last: i64,
 ) -> Option<usize> {
     let mut index = 0usize;
-    #[invariant(index@ <= bases@.len())]
-    #[invariant(stamp_range_arrays_parallel(bases@, lasts@))]
+    #[invariant(stamp_cursor_in_bounds(bases@, lasts@, index@))]
     #[invariant(no_exact_stamp_range(bases@, lasts@, index@, target_base@, target_last@))]
     #[variant(bases@.len() - index@)]
     while index < bases.len() {
@@ -120,8 +117,7 @@ pub fn exact_stamp_range_index(
 #[must_use]
 pub fn covering_stamp_range_index(bases: &[i64], lasts: &[i64], offset: i64) -> Option<usize> {
     let mut index = 0usize;
-    #[invariant(index@ <= bases@.len())]
-    #[invariant(stamp_range_arrays_parallel(bases@, lasts@))]
+    #[invariant(stamp_cursor_in_bounds(bases@, lasts@, index@))]
     #[invariant(no_covering_stamp_range(bases@, lasts@, index@, offset@))]
     #[variant(bases@.len() - index@)]
     while index < bases.len() {
@@ -134,8 +130,15 @@ pub fn covering_stamp_range_index(bases: &[i64], lasts: &[i64], offset: i64) -> 
 }
 
 open_logic! {
+/// Both parallel arrays contain every index before this scan cursor.
+fn stamp_cursor_in_bounds(bases: Seq<i64>, lasts: Seq<i64>, index: Int) -> bool {
+    pearlite! { index <= bases.len() && stamp_range_arrays_parallel(bases, lasts) }
+}
+}
+
+open_logic! {
 /// Every listed stamp range has one inclusive end.
-fn stamp_range_arrays_parallel(bases: Seq<i64>, lasts: Seq<i64>) -> bool {
+pub fn stamp_range_arrays_parallel(bases: Seq<i64>, lasts: Seq<i64>) -> bool {
     pearlite! { bases.len() == lasts.len() }
 }
 }

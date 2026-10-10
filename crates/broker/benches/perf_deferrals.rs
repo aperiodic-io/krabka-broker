@@ -47,10 +47,7 @@ use krabka_broker::{
     replicate_hot_path::ReplicaSeam,
     response_framing::{self, KafkaCodec},
 };
-use krabka_protocol::{
-    api_key::ApiKey,
-    records::{Record, RecordBatch},
-};
+use krabka_protocol::{api_key::ApiKey, records::RecordBatch};
 use tokio::{io::AsyncWrite, runtime::Runtime};
 use tokio_util::codec::{Encoder as _, Framed};
 
@@ -75,32 +72,8 @@ const CORRELATION_ID: i32 = 0x0102_0304;
 const BODY_SIZES: [(&str, usize); 3] =
     [("1KiB", 1024), ("64KiB", 64 * 1024), ("1MiB", 1024 * 1024)];
 
-/// The batch shapes the replicator sees, which are the shapes producers write:
-/// one large record, a mid-sized batch, and a wide batch of small records.
-/// They are the shapes `benches/produce.rs` measures the leader side on.
-const SHAPES: [(&str, i32, usize); 3] = [
-    ("1rec_100KiB", 1, 100 * 1024),
-    ("100rec_1KiB", 100, 1024),
-    ("1000rec_100B", 1000, 100),
-];
-
-/// Bytes a single benchmark's follower log may take before it starts over.
-///
-/// Criterion runs a fast append hundreds of thousands of times, and every one
-/// of them lands on disk. The reset happens outside the timed region, so it
-/// costs the measurement nothing.
-const LOG_BUDGET: usize = 256 * 1024 * 1024;
-
-/// The leader epoch a replicated batch carries.
-const LEADER_EPOCH: i32 = 3;
-
-/// Untimed iterations run before the measured ones, against the same fixture.
-///
-/// The first send grows the codec's write buffer to the body size and the
-/// first append pays for the segment file and its page faults. Criterion
-/// amortizes that over a large `iters`, but [`bench_ratio`]'s short run does
-/// not, and it would land entirely on whichever case a shape measures first.
-const WARMUP: u64 = 8;
+mod support;
+use support::{LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP};
 
 // ---------------------------------------------------------------------------
 // Deferral 1: response framing.
@@ -181,14 +154,17 @@ krabka_macros::frame_prefix_fixture!(wire_frame_prefix);
 /// is the handler's body, handed to the socket as its own segment.
 fn frame_prefix(body_len: usize) -> Bytes {
     let header_len = response_framing::response_header_len(API_KEY, BODY_FLEXIBLE);
-    wire_frame_prefix(
-        header_len,
-        CORRELATION_ID,
-        response_framing::response_header_v1(API_KEY, BODY_FLEXIBLE),
-        body_len,
-        4 + header_len,
-        "a bench body fits in a frame",
-    )
+    wire_frame_prefix(ResponsePrefixSetup {
+        header_len: ResponseByteCount(header_len),
+        correlation_id: ResponseCorrelationId(CORRELATION_ID),
+        header: ResponseHeaderEncoding::from_wire(response_framing::response_header_v1(
+            API_KEY,
+            BODY_FLEXIBLE,
+        )),
+        body_len: ResponseByteCount(body_len),
+        capacity: ResponseByteCount(4 + header_len),
+        context: "a bench body fits in a frame",
+    })
     .freeze()
 }
 
@@ -288,23 +264,8 @@ fn timed_sends(payload: &Bytes, framing: Framing, iters: u64) -> Duration {
 // Deferral 2: the replicator's `encoded_len` walk.
 // ---------------------------------------------------------------------------
 
-/// A batch of `records` records, each carrying a `payload`-byte value.
-fn make_batch(records: i32, payload: usize) -> RecordBatch {
-    let mut batch = RecordBatch {
-        partition_leader_epoch: LEADER_EPOCH,
-        last_offset_delta: records - 1,
-        ..RecordBatch::default()
-    };
-    for i in 0..records {
-        batch.records.push(Record {
-            offset_delta: i,
-            key: Some(Bytes::from(format!("k{i:08}"))),
-            value: Some(body(payload)),
-            ..Record::default()
-        });
-    }
-    batch
-}
+// Explicit epochs retain the original unclamped last-offset delta.
+krabka_macros::record_batch_fixture!(make_batch, LEADER_EPOCH);
 
 /// A follower partition that starts over once its log has taken
 /// [`LOG_BUDGET`] bytes.
@@ -402,7 +363,7 @@ fn bench_response_framing(c: &mut Criterion) {
     let mut group = c.benchmark_group("broker/response_framing");
 
     for (label, size) in BODY_SIZES {
-        let payload = body(size);
+        let payload = body(PatternedPayloadLength(size));
         group.throughput(Throughput::Bytes(size as u64));
         for (case, framing) in [("copy", Framing::Copy), ("chained", Framing::Chained)] {
             group.bench_function(format!("{label}/{case}"), |b| {
@@ -467,7 +428,7 @@ fn bench_ratio(_c: &mut Criterion) {
         "body", "copy", "chained", "saved", "saved %"
     );
     for (label, size) in BODY_SIZES {
-        let payload = body(size);
+        let payload = body(PatternedPayloadLength(size));
         let copy = fastest(|iters| timed_sends(&payload, Framing::Copy, iters));
         let chained = fastest(|iters| timed_sends(&payload, Framing::Chained, iters));
         println!(

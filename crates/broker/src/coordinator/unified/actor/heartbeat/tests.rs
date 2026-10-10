@@ -3,6 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use assert2::{assert, check};
+use krabka_ids::PartitionIndex;
 use krabka_protocol::primitives::uuid::Uuid;
 
 use super::*;
@@ -17,6 +18,7 @@ use crate::coordinator::unified::{
     offsets_log::fake::InMemoryOffsetsLog,
     persistence_next_gen::GroupMetadataValue,
     reconciler::ReconcileInput,
+    test_support::MemberEpoch,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -159,14 +161,13 @@ fn handoff_heartbeat(
 fn handoff_join(state: &mut GroupState, member_id: &str) -> HeartbeatStep {
     handoff_heartbeat(
         state,
-        ConsumerGroupHeartbeatRequest {
-            member_id: member_id.into(),
-            member_epoch: 0,
-            subscribed_topic_names: Some(vec!["t".into()]),
-            rebalance_timeout_ms: 60_000,
-            topic_partitions: Some(vec![]),
-            ..Default::default()
-        },
+        crate::coordinator::unified::test_support::consumer_join_request(
+            crate::coordinator::unified::test_support::ConsumerJoinSetup {
+                group_id: "",
+                member_id,
+                ..Default::default()
+            },
+        ),
     )
 }
 
@@ -227,7 +228,14 @@ fn a_joiner_gets_a_partition_only_after_the_incumbent_reports_it_revoked() {
 
     let mut state = GroupState::new("g");
     let incumbent = handoff_join(&mut state, "a");
-    check!(incumbent.response == identity_ok("a", 2, Some(vec![0, 1])));
+    check!(
+        incumbent.response
+            == identity_ok(IdentityExpectationSetup {
+                member_id: "a",
+                epoch: MemberEpoch(2),
+                partitions: Some(vec![PartitionIndex(0), PartitionIndex(1)])
+            })
+    );
 
     // `b` joins: the group moves to epoch 3 and `a` keeps both partitions
     // until its own heartbeat.
@@ -243,7 +251,14 @@ fn a_joiner_gets_a_partition_only_after_the_incumbent_reports_it_revoked() {
     let told = handoff_keepalive(&mut state, "a", 2, None);
     let kept = assigned_partitions(&told.response).expect("a is told its assignment shrank");
     check!(kept.len() == 1);
-    check!(told.response == identity_ok("a", 2, Some(kept.clone())));
+    check!(
+        told.response
+            == identity_ok(IdentityExpectationSetup {
+                member_id: "a",
+                epoch: MemberEpoch(2),
+                partitions: Some(kept.iter().copied().map(PartitionIndex).collect())
+            })
+    );
     let revoked = 1 - kept[0];
     check!(state.members["a"].assignment_state == UnrevokedPartitions);
     check!(
@@ -254,57 +269,76 @@ fn a_joiner_gets_a_partition_only_after_the_incumbent_reports_it_revoked() {
     // Neither `a`'s next null heartbeat nor `b`'s moves anything: `a` still
     // owns the partition, so `b` does not get it.
     let again = handoff_keepalive(&mut state, "a", 2, None);
-    check!(again.response == identity_ok("a", 2, None));
+    check!(
+        again.response
+            == identity_ok(IdentityExpectationSetup {
+                member_id: "a",
+                epoch: MemberEpoch(2),
+                ..Default::default()
+            })
+    );
     let waiting = handoff_keepalive(&mut state, "b", 3, None);
-    check!(waiting.response == identity_ok("b", 3, None));
+    check!(
+        waiting.response
+            == identity_ok(IdentityExpectationSetup {
+                member_id: "b",
+                epoch: MemberEpoch(3),
+                ..Default::default()
+            })
+    );
     check!(state.members["b"].assigned_partitions.is_empty());
     check!(state.members["a"].assignment_state == UnrevokedPartitions);
 
     // `a` reports what it owns now, without the revoked partition. It moves to
     // the target epoch, and `b` is granted the partition at its next heartbeat.
     let acknowledged = handoff_keepalive(&mut state, "a", 2, Some(kept.clone()));
-    check!(acknowledged.response == identity_ok("a", 3, None));
+    check!(
+        acknowledged.response
+            == identity_ok(IdentityExpectationSetup {
+                member_id: "a",
+                epoch: MemberEpoch(3),
+                ..Default::default()
+            })
+    );
     check!(state.members["a"].assignment_state == Stable);
     let granted = handoff_keepalive(&mut state, "b", 3, None);
-    check!(granted.response == identity_ok("b", 3, Some(vec![revoked])));
+    check!(
+        granted.response
+            == identity_ok(IdentityExpectationSetup {
+                member_id: "b",
+                epoch: MemberEpoch(3),
+                partitions: Some(vec![PartitionIndex(revoked)])
+            })
+    );
     check!(state.members["b"].assignment_state == Stable);
 }
 
-/// One row of [`heartbeat_identity_rules_follow_kafka`].
-struct IdentityRow {
-    name: &'static str,
-    /// Send a -2 leave for `s1` before the row's request.
-    release_s1_first: bool,
-    member_id: &'static str,
-    instance_id: Option<&'static str>,
-    member_epoch: i32,
-    owned: Option<Vec<i32>>,
-    expected: ConsumerGroupHeartbeatResponse,
-    /// `(member id, member epoch)` of every member after, sorted.
-    members_after: Vec<(&'static str, i32)>,
-    /// The member that owns instance `i1` after.
-    i1_after: Option<&'static str>,
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum StaticMemberPresence {
+    #[default]
+    Present,
+    Released,
 }
 
-impl IdentityRow {
-    fn new(
-        name: &'static str,
-        (member_id, instance_id, member_epoch): (&'static str, Option<&'static str>, i32),
-        owned: Option<Vec<i32>>,
-        expected: ConsumerGroupHeartbeatResponse,
-    ) -> Self {
-        Self {
-            name,
-            release_s1_first: false,
-            member_id,
-            instance_id,
-            member_epoch,
-            owned,
-            expected,
-            members_after: vec![("m1", 5), ("s1", 5)],
-            i1_after: Some("s1"),
-        }
-    }
+/// One row of [`heartbeat_identity_rules_follow_kafka`].
+#[derive(krabka_macros::FieldDefaults)]
+struct IdentityRow {
+    #[default("identity row")]
+    name: &'static str,
+    /// Whether to send a static leave for `s1` before the row's request.
+    static_member: StaticMemberPresence,
+    #[default("m1")]
+    member_id: &'static str,
+    instance_id: Option<&'static str>,
+    #[default(MemberEpoch(5))]
+    member_epoch: MemberEpoch,
+    owned: Option<Vec<PartitionIndex>>,
+    expected: ConsumerGroupHeartbeatResponse,
+    /// The sorted member identities and epochs after the request.
+    #[default(vec![("m1", MemberEpoch(5)), ("s1", MemberEpoch(5))])]
+    members_after: Vec<(&'static str, MemberEpoch)>,
+    #[default(Some("s1"))]
+    i1_after: Option<&'static str>,
 }
 
 fn heartbeat_interval_ms() -> i32 {
@@ -316,18 +350,28 @@ fn heartbeat_interval_ms() -> i32 {
     .unwrap()
 }
 
-fn identity_ok(
-    member_id: &str,
-    member_epoch: i32,
-    partitions: Option<Vec<i32>>,
-) -> ConsumerGroupHeartbeatResponse {
+#[derive(krabka_macros::FieldDefaults)]
+struct IdentityExpectationSetup<'a> {
+    #[default("m1")]
+    member_id: &'a str,
+    #[default(MemberEpoch(5))]
+    epoch: MemberEpoch,
+    partitions: Option<Vec<PartitionIndex>>,
+}
+
+fn identity_ok(setup: IdentityExpectationSetup<'_>) -> ConsumerGroupHeartbeatResponse {
     use krabka_protocol::owned::common::consumer_group_heartbeat_response::topic_partitions::TopicPartitions;
 
+    let IdentityExpectationSetup {
+        member_id,
+        epoch,
+        partitions,
+    } = setup;
     ConsumerGroupHeartbeatResponse {
         member_id: Some(member_id.into()),
-        member_epoch,
+        member_epoch: epoch.0,
         // Kafka's leave responses carry only the member id and epoch.
-        heartbeat_interval_ms: if member_epoch < 0 {
+        heartbeat_interval_ms: if epoch.0 < 0 {
             0
         } else {
             heartbeat_interval_ms()
@@ -335,7 +379,7 @@ fn identity_ok(
         assignment: partitions.map(|partitions| RespAssignment {
             topic_partitions: vec![TopicPartitions {
                 topic_id: IDENTITY_TOPIC,
-                partitions,
+                partitions: partitions.into_iter().map(|index| index.0).collect(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -344,17 +388,21 @@ fn identity_ok(
     }
 }
 
-fn identity_error(error_code: i16, message: &str) -> ConsumerGroupHeartbeatResponse {
+fn identity_error(
+    error_code: crate::test_support::KafkaErrorCode,
+    message: &str,
+) -> ConsumerGroupHeartbeatResponse {
     ConsumerGroupHeartbeatResponse {
-        error_code,
+        error_code: error_code.0,
         error_message: Some(message.into()),
         ..Default::default()
     }
 }
 
-fn fenced_epoch(direction: &str, received: i32) -> ConsumerGroupHeartbeatResponse {
+fn fenced_epoch(direction: &str, received: MemberEpoch) -> ConsumerGroupHeartbeatResponse {
+    let received = received.0;
     identity_error(
-        codes::FENCED_MEMBER_EPOCH,
+        crate::test_support::KafkaErrorCode(codes::FENCED_MEMBER_EPOCH),
         &format!(
             "The consumer group member has a {direction} member epoch ({received}) than the one \
              known by the group coordinator (5). The member must abandon all its partitions and \
@@ -366,129 +414,180 @@ fn fenced_epoch(direction: &str, received: i32) -> ConsumerGroupHeartbeatRespons
 fn identity_rows() -> Vec<IdentityRow> {
     let fenced_instance = || {
         identity_error(
-            codes::FENCED_INSTANCE_ID,
+            crate::test_support::KafkaErrorCode(codes::FENCED_INSTANCE_ID),
             "Static member m9 with instance id i1 was fenced by member s1.",
         )
     };
     vec![
         IdentityRow {
-            members_after: vec![("m1", 5), ("s1", -2)],
-            ..IdentityRow::new(
-                "static member leaves with epoch -2",
-                ("s1", Some("i1"), -2),
-                None,
-                identity_ok("s1", -2, None),
-            )
+            members_after: vec![("m1", MemberEpoch(5)), ("s1", MemberEpoch(-2))],
+            name: "static member leaves with epoch -2",
+            member_id: "s1",
+            instance_id: Some("i1"),
+            member_epoch: MemberEpoch(-2),
+            expected: identity_ok(IdentityExpectationSetup {
+                member_id: "s1",
+                epoch: MemberEpoch(-2),
+                ..Default::default()
+            }),
+            ..Default::default()
         },
         IdentityRow {
-            release_s1_first: true,
-            members_after: vec![("m1", 5), ("s2", 5)],
+            static_member: StaticMemberPresence::Released,
+            members_after: vec![("m1", MemberEpoch(5)), ("s2", MemberEpoch(5))],
             i1_after: Some("s2"),
-            ..IdentityRow::new(
-                "new member takes a released instance id",
-                ("s2", Some("i1"), 0),
-                Some(vec![]),
-                identity_ok("s2", 5, Some(vec![2, 3])),
-            )
+            name: "new member takes a released instance id",
+            member_id: "s2",
+            instance_id: Some("i1"),
+            member_epoch: MemberEpoch(0),
+            owned: Some(vec![]),
+            expected: identity_ok(IdentityExpectationSetup {
+                member_id: "s2",
+                partitions: Some(vec![PartitionIndex(2), PartitionIndex(3)]),
+                ..Default::default()
+            }),
         },
-        IdentityRow::new(
-            "new member with an unreleased instance id",
-            ("s2", Some("i1"), 0),
-            Some(vec![]),
-            identity_error(
-                codes::UNRELEASED_INSTANCE_ID,
+        IdentityRow {
+            name: "new member with an unreleased instance id",
+            member_id: "s2",
+            instance_id: Some("i1"),
+            member_epoch: MemberEpoch(0),
+            owned: Some(vec![]),
+            expected: identity_error(
+                crate::test_support::KafkaErrorCode(codes::UNRELEASED_INSTANCE_ID),
                 "Static member s2 with instance id i1 cannot join the group because the instance \
                  id is owned by s1 member.",
             ),
-        ),
-        IdentityRow::new(
-            "known member rejoins with epoch 0",
-            ("m1", None, 0),
-            Some(vec![]),
-            identity_ok("m1", 5, Some(vec![0, 1])),
-        ),
-        IdentityRow::new(
-            "previous epoch with a subset of the assignment",
-            ("m1", None, 4),
-            Some(vec![0]),
-            identity_ok("m1", 5, Some(vec![0, 1])),
-        ),
-        IdentityRow::new(
-            "previous epoch with a superset of the assignment",
-            ("m1", None, 4),
-            Some(vec![0, 1, 2]),
-            fenced_epoch("smaller", 4),
-        ),
-        IdentityRow::new(
-            "epoch older than the previous epoch",
-            ("m1", None, 3),
-            Some(vec![0]),
-            fenced_epoch("smaller", 3),
-        ),
-        IdentityRow::new(
-            "greater epoch",
-            ("m1", None, 6),
-            Some(vec![0, 1]),
-            fenced_epoch("greater", 6),
-        ),
-        IdentityRow::new(
-            "leave of an unknown member",
-            ("ghost", None, -1),
-            None,
-            identity_error(
-                codes::UNKNOWN_MEMBER_ID,
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "known member rejoins with epoch 0",
+            member_epoch: MemberEpoch(0),
+            owned: Some(vec![]),
+            expected: identity_ok_two_partitions(),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "previous epoch with a subset of the assignment",
+            member_epoch: MemberEpoch(4),
+            owned: Some(vec![krabka_ids::PartitionIndex(0)]),
+            expected: identity_ok_two_partitions(),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "previous epoch with a superset of the assignment",
+            member_epoch: MemberEpoch(4),
+            owned: Some(vec![
+                krabka_ids::PartitionIndex(0),
+                krabka_ids::PartitionIndex(1),
+                krabka_ids::PartitionIndex(2),
+            ]),
+            expected: fenced_epoch("smaller", MemberEpoch(4)),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "epoch older than the previous epoch",
+            member_epoch: MemberEpoch(3),
+            owned: Some(vec![krabka_ids::PartitionIndex(0)]),
+            expected: fenced_epoch("smaller", MemberEpoch(3)),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "greater epoch",
+            member_epoch: MemberEpoch(6),
+            owned: Some(vec![
+                krabka_ids::PartitionIndex(0),
+                krabka_ids::PartitionIndex(1),
+            ]),
+            expected: fenced_epoch("greater", MemberEpoch(6)),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "leave of an unknown member",
+            member_id: "ghost",
+            member_epoch: MemberEpoch(-1),
+            expected: identity_error(
+                crate::test_support::KafkaErrorCode(codes::UNKNOWN_MEMBER_ID),
                 "Member ghost is not a member of group g.",
             ),
-        ),
-        IdentityRow {
-            members_after: vec![("s1", 5)],
-            ..IdentityRow::new(
-                "dynamic member leaves with epoch -1",
-                ("m1", None, -1),
-                None,
-                identity_ok("m1", -1, None),
-            )
+            ..Default::default()
         },
-        IdentityRow::new(
-            "static heartbeat from another member id",
-            ("m9", Some("i1"), 5),
-            Some(vec![2, 3]),
-            fenced_instance(),
-        ),
-        IdentityRow::new(
-            "static leave from another member id",
-            ("m9", Some("i1"), -2),
-            None,
-            fenced_instance(),
-        ),
-        IdentityRow::new(
-            "static heartbeat with an unknown instance id",
-            ("s1", Some("i9"), 5),
-            Some(vec![2, 3]),
-            identity_error(codes::UNKNOWN_MEMBER_ID, "Instance id i9 is unknown."),
-        ),
+        IdentityRow {
+            members_after: vec![("s1", MemberEpoch(5))],
+            name: "dynamic member leaves with epoch -1",
+            member_epoch: MemberEpoch(-1),
+            expected: identity_ok(IdentityExpectationSetup {
+                epoch: MemberEpoch(-1),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "static heartbeat from another member id",
+            member_id: "m9",
+            instance_id: Some("i1"),
+            owned: Some(vec![
+                krabka_ids::PartitionIndex(2),
+                krabka_ids::PartitionIndex(3),
+            ]),
+            expected: fenced_instance(),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "static leave from another member id",
+            member_id: "m9",
+            instance_id: Some("i1"),
+            member_epoch: MemberEpoch(-2),
+            expected: fenced_instance(),
+            ..Default::default()
+        },
+        IdentityRow {
+            name: "static heartbeat with an unknown instance id",
+            member_id: "s1",
+            instance_id: Some("i9"),
+            owned: Some(vec![
+                krabka_ids::PartitionIndex(2),
+                krabka_ids::PartitionIndex(3),
+            ]),
+            expected: identity_error(
+                crate::test_support::KafkaErrorCode(codes::UNKNOWN_MEMBER_ID),
+                "Instance id i9 is unknown.",
+            ),
+            ..Default::default()
+        },
     ]
 }
 
-fn identity_request(
-    member_id: &str,
-    instance_id: Option<&str>,
-    member_epoch: i32,
-    owned: Option<Vec<i32>>,
-) -> ConsumerGroupHeartbeatRequest {
+#[derive(krabka_macros::FieldDefaults)]
+struct IdentityRequestSetup<'a> {
+    #[default("m1")]
+    member_id: &'a str,
+    instance_id: Option<&'a str>,
+    #[default(MemberEpoch(5))]
+    member_epoch: MemberEpoch,
+    owned: Option<Vec<PartitionIndex>>,
+}
+
+fn identity_request(setup: IdentityRequestSetup<'_>) -> ConsumerGroupHeartbeatRequest {
     use krabka_protocol::owned::consumer_group_heartbeat_request::TopicPartitions;
 
+    let IdentityRequestSetup {
+        member_id,
+        instance_id,
+        member_epoch,
+        owned,
+    } = setup;
     ConsumerGroupHeartbeatRequest {
         group_id: "g".into(),
         member_id: member_id.into(),
         instance_id: instance_id.map(str::to_string),
-        member_epoch,
+        member_epoch: member_epoch.0,
         subscribed_topic_names: Some(vec!["t".into()]),
         rebalance_timeout_ms: 60_000,
         topic_partitions: owned.map(|partitions| {
             vec![TopicPartitions {
                 topic_id: IDENTITY_TOPIC,
-                partitions,
+                partitions: partitions.into_iter().map(|index| index.0).collect(),
                 ..Default::default()
             }]
         }),
@@ -507,7 +606,12 @@ fn identity_group() -> GroupState {
     {
         let mut member = build_member(
             member_id,
-            &identity_request(member_id, instance_id, 0, None),
+            &identity_request(IdentityRequestSetup {
+                member_id,
+                instance_id,
+                member_epoch: MemberEpoch(0),
+                ..Default::default()
+            }),
             crate::coordinator::unified::ClientIdentity { id: "c", host: "h" },
             Instant::now(),
         );
@@ -549,12 +653,17 @@ fn heartbeat_identity_rules_follow_kafka() {
             &state,
             &metadata.input,
         ));
-        if row.release_s1_first {
+        if row.static_member == StaticMemberPresence::Released {
             let released = step_heartbeat(
                 &mut state,
                 &config,
                 &metadata,
-                &identity_request("s1", Some("i1"), -2, None),
+                &identity_request(IdentityRequestSetup {
+                    member_id: "s1",
+                    instance_id: Some("i1"),
+                    member_epoch: MemberEpoch(-2),
+                    ..Default::default()
+                }),
                 client,
                 Instant::now(),
                 &RegexResolution::none(),
@@ -566,16 +675,21 @@ fn heartbeat_identity_rules_follow_kafka() {
             &mut state,
             &config,
             &metadata,
-            &identity_request(row.member_id, row.instance_id, row.member_epoch, row.owned),
+            &identity_request(IdentityRequestSetup {
+                member_id: row.member_id,
+                instance_id: row.instance_id,
+                member_epoch: row.member_epoch,
+                owned: row.owned,
+            }),
             client,
             Instant::now(),
             &RegexResolution::none(),
         );
 
-        let mut members: Vec<(&str, i32)> = state
+        let mut members: Vec<(&str, MemberEpoch)> = state
             .members
             .values()
-            .map(|member| (member.member_id.as_str(), member.member_epoch))
+            .map(|member| (member.member_id.as_str(), MemberEpoch(member.member_epoch)))
             .collect();
         members.sort_unstable();
         check!(step.response == row.expected, "{}", row.name);
@@ -588,12 +702,26 @@ fn heartbeat_identity_rules_follow_kafka() {
     }
 }
 
-/// The member ids a record list writes, each with `true` for a value and
-/// `false` for a tombstone, sorted.
-fn written<T>(records: &[(String, Option<T>)]) -> Vec<(String, bool)> {
-    let mut out: Vec<(String, bool)> = records
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum MemberRecordKind {
+    Tombstone,
+    Value,
+}
+
+/// The member identities and record kinds, sorted.
+fn written<T>(records: &[(String, Option<T>)]) -> Vec<(String, MemberRecordKind)> {
+    let mut out: Vec<_> = records
         .iter()
-        .map(|(id, value)| (id.clone(), value.is_some()))
+        .map(|(id, value)| {
+            (
+                id.clone(),
+                if value.is_some() {
+                    MemberRecordKind::Value
+                } else {
+                    MemberRecordKind::Tombstone
+                },
+            )
+        })
         .collect();
     out.sort_unstable();
     out
@@ -609,7 +737,12 @@ fn static_replacement_writes_new_records_and_tombstones_the_released_member() {
     let metadata = empty_metadata();
     let client = crate::coordinator::unified::ClientIdentity { id: "c", host: "h" };
     let join = |member_id: &str, member_epoch: i32| {
-        identity_request(member_id, Some("i1"), member_epoch, Some(vec![]))
+        identity_request(IdentityRequestSetup {
+            member_id,
+            instance_id: Some("i1"),
+            member_epoch: MemberEpoch(member_epoch),
+            owned: Some(vec![]),
+        })
     };
     let mut state = GroupState::new("g");
     let joined = step_heartbeat(
@@ -659,7 +792,10 @@ fn static_replacement_writes_new_records_and_tombstones_the_released_member() {
     check!(replaced.response.member_epoch == joined.response.member_epoch);
     // Kafka's `replaceMember` records come first: the released member's
     // tombstones and the copy under the new id.
-    let expected = vec![("s1".to_string(), false), ("s2".to_string(), true)];
+    let expected = vec![
+        ("s1".to_string(), MemberRecordKind::Tombstone),
+        ("s2".to_string(), MemberRecordKind::Value),
+    ];
     check!(written(&replaced.pending.member_metadata) == expected);
     check!(written(&replaced.pending.target_per_member) == expected);
     check!(written(&replaced.pending.current_per_member) == expected);
@@ -670,8 +806,8 @@ fn static_replacement_writes_new_records_and_tombstones_the_released_member() {
         .then
         .as_deref()
         .expect("the heartbeat's records");
-    check!(written(&own.member_metadata) == vec![("s2".to_string(), true)]);
-    check!(written(&own.current_per_member) == vec![("s2".to_string(), true)]);
+    check!(written(&own.member_metadata) == vec![("s2".to_string(), MemberRecordKind::Value)]);
+    check!(written(&own.current_per_member) == vec![("s2".to_string(), MemberRecordKind::Value)]);
     let metadata_of_s2 = own
         .member_metadata
         .iter()
@@ -737,14 +873,13 @@ fn a_leave_bumps_the_epoch_and_the_next_heartbeat_assigns() {
         id: "client",
         host: "host",
     };
-    let join = |member_id: &str| ConsumerGroupHeartbeatRequest {
-        group_id: "g".into(),
-        member_id: member_id.into(),
-        member_epoch: 0,
-        subscribed_topic_names: Some(vec!["t".into()]),
-        rebalance_timeout_ms: 60_000,
-        topic_partitions: Some(vec![]),
-        ..Default::default()
+    let join = |member_id: &str| {
+        crate::coordinator::unified::test_support::consumer_join_request(
+            crate::coordinator::unified::test_support::ConsumerJoinSetup {
+                member_id,
+                ..Default::default()
+            },
+        )
     };
     let mut state = GroupState::new("g");
     let step = |state: &mut GroupState, req: &ConsumerGroupHeartbeatRequest| {
@@ -830,7 +965,10 @@ async fn consumer_heartbeat_upgrades_a_classic_group() {
     // "t". Seeding (vs a JoinGroup round-trip) keeps the test deterministic
     // and timing-free; `classic_is_convertible` only inspects protocol_type
     // and each member's protocol_metadata, both set here.
-    let handle = seed_classic_member(&coord, "m-classic", "t", None);
+    let handle = seed_classic_member(
+        &coord,
+        crate::coordinator::unified::actor::test_support::ClassicMemberSetup::default(),
+    );
 
     // A native consumer-protocol heartbeat for the same group → upgrade.
     let resp = rpc::consumer_heartbeat(&handle, "", 0, Some("t")).await;
@@ -851,7 +989,10 @@ async fn consumer_heartbeat_upgrades_a_classic_group() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn failed_upgrade_append_keeps_the_atomic_batch_unpublished() {
     let (coord, log) = make_coordinator_with_topic("t", 1);
-    let handle = seed_classic_member(&coord, "m-classic", "t", None);
+    let handle = seed_classic_member(
+        &coord,
+        crate::coordinator::unified::actor::test_support::ClassicMemberSetup::default(),
+    );
     log.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
 
@@ -1028,4 +1169,12 @@ async fn a_heartbeat_replaces_or_upgrades_a_classic_group_as_kafka_does() {
         );
         check!(got == want, "{label}");
     }
+}
+
+/// Independent success expectation for both partitions of the fixture topic.
+fn identity_ok_two_partitions() -> ConsumerGroupHeartbeatResponse {
+    identity_ok(IdentityExpectationSetup {
+        partitions: Some(vec![PartitionIndex(0), PartitionIndex(1)]),
+        ..Default::default()
+    })
 }

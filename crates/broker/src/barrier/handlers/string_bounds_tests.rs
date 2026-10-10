@@ -29,29 +29,58 @@ use crate::{
 /// The only version of both requests.
 const VERSION: i16 = 0;
 
-fn entry(group: &str, topic: &str, delete: bool) -> AlterableBarrierGroup {
+#[derive(Clone, Copy, Default)]
+enum GroupMutation {
+    #[default]
+    Upsert,
+    Delete,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct AlterGroupSetup<'a> {
+    #[default("short")]
+    group: &'a str,
+    #[default("orders")]
+    topic: &'a str,
+    mutation: GroupMutation,
+}
+
+fn entry(setup: AlterGroupSetup<'_>) -> AlterableBarrierGroup {
+    let AlterGroupSetup {
+        group,
+        topic,
+        mutation,
+    } = setup;
     AlterableBarrierGroup {
         group: group.to_owned(),
         topics: vec![topic.to_owned()],
         interval_ms: -1,
         retained_cuts: 4,
-        delete,
+        delete: matches!(mutation, GroupMutation::Delete),
         ..AlterableBarrierGroup::default()
     }
 }
 
 #[tokio::test]
 async fn alter_barrier_groups_refuses_a_name_of_32768_bytes_and_creates_nothing() {
-    let (handle, _dir) =
-        start_broker_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
-    let broker = handle.broker_arc_for_test();
+    let (handle, _dir, broker) = anonymous_broker().await;
     let (principal, peer) = (principal("ANONYMOUS"), peer());
     let long = "n".repeat(MAX_STRING_BYTES + 1);
     let request = AlterBarrierGroupsRequest {
         groups: vec![
-            entry(&long, "orders", false),
-            entry("short", &long, false),
-            entry(&long, "orders", true),
+            entry(AlterGroupSetup {
+                group: &long,
+                ..Default::default()
+            }),
+            entry(AlterGroupSetup {
+                topic: &long,
+                ..Default::default()
+            }),
+            entry(AlterGroupSetup {
+                group: &long,
+                mutation: GroupMutation::Delete,
+                ..Default::default()
+            }),
         ],
         ..AlterBarrierGroupsRequest::default()
     };
@@ -91,9 +120,7 @@ async fn alter_barrier_groups_refuses_a_name_of_32768_bytes_and_creates_nothing(
 
 #[tokio::test]
 async fn write_barrier_markers_refuses_a_group_of_32768_bytes_on_every_partition() {
-    let (handle, _dir) =
-        start_broker_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
-    let broker = handle.broker_arc_for_test();
+    let (handle, _dir, broker) = anonymous_broker().await;
     let (principal, peer) = (principal("ANONYMOUS"), peer());
     // The broker leads no `orders` partition, so a request that passes the
     // name check answers NOT_LEADER_OR_FOLLOWER for it.
@@ -137,4 +164,15 @@ async fn write_barrier_markers_refuses_a_group_of_32768_bytes_on_every_partition
         check!(codes_by_partition == vec![expected], "{length} bytes");
     }
     handle.shutdown().await;
+}
+
+async fn anonymous_broker() -> (
+    crate::broker::BrokerHandle,
+    tempfile::TempDir,
+    Arc<crate::broker::Broker>,
+) {
+    let (handle, dir) =
+        start_broker_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
+    let broker = handle.broker_arc_for_test();
+    (handle, dir, broker)
 }

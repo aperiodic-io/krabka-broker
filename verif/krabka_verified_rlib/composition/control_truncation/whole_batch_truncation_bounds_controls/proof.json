@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_control_history_frontier": { "prover": "alt-ergo", "time": 0.008 },
-      "vc_frontier_reaches": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_frontier_reaches": { "prover": "alt-ergo", "time": 0.009 },
       "vc_len_i64": { "prover": "alt-ergo", "time": 0.018 },
       "vc_truncation_batch_retained": { "prover": "alt-ergo", "time": 0.013 },
       "vc_truncation_frontier": { "prover": "alt-ergo", "time": 0.015 },

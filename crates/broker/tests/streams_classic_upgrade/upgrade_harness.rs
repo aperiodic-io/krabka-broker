@@ -21,7 +21,7 @@ pub const ERR_GROUP_ID_NOT_FOUND: i16 = 69;
 // ── boot / connect helpers ────────────────────────────────────────────────────
 
 pub async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    crate::support::streams::boot(true).await
+    crate::support::streams::boot(crate::support::streams::ElectionReadiness::BrokerElectable).await
 }
 
 pub async fn connect(bootstrap: &str) -> Arc<Client> {

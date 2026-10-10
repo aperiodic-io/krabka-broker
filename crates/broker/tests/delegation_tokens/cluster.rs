@@ -132,3 +132,8 @@ pub(crate) async fn wait_for_token_gone(handle: &BrokerHandle, token_id: &str) {
         .wait_for_image(|img| img.delegation_token_by_id(token_id).is_none())
         .await;
 }
+
+/// The act-as cluster: an admin super user and an ordinary token owner.
+pub(crate) async fn start_admin_alice() -> (BrokerHandle, TempDir, SocketAddr) {
+    start_broker_with_super_users(&[("admin", "admin-pw"), ("alice", "alice-pw")], &["admin"]).await
+}

@@ -48,6 +48,14 @@ use stateright::{Checker, Model, Property};
 use super::{OpenMode, WalReplica, WalShardEngine, split_batches};
 use crate::model_check::run_bfs;
 
+fn record_committed_watermark(state: &mut WalState, hwm: usize) {
+    assert2::assert!(hwm >= state.committed.len());
+    assert2::assert!(state.logs[state.leader][..state.committed.len()] == state.committed[..]);
+    state.hwm = hwm;
+    state.committed = state.logs[state.leader][..hwm].to_vec();
+    state.last_ack_failed = false;
+}
+
 const VOTERS: usize = 3;
 const MAX_RECORDS: usize = 2;
 const MAX_EPOCH: u8 = 2;
@@ -153,14 +161,7 @@ impl Model for WalModel {
                     state.logs = logs;
                     match result {
                         Ok(hwm) => {
-                            assert2::assert!(hwm >= state.committed.len());
-                            assert2::assert!(
-                                state.logs[state.leader][..state.committed.len()]
-                                    == state.committed[..]
-                            );
-                            state.hwm = hwm;
-                            state.committed = state.logs[state.leader][..hwm].to_vec();
-                            state.last_ack_failed = false;
+                            record_committed_watermark(&mut state, hwm);
                         }
                         Err(()) => {
                             state.last_ack_failed = true;
@@ -181,13 +182,7 @@ impl Model for WalModel {
                 Action::CrashRecover => {
                     let (logs, hwm) = drive_recovery(&state);
                     state.logs = logs;
-                    assert2::assert!(hwm >= state.committed.len());
-                    assert2::assert!(
-                        state.logs[state.leader][..state.committed.len()] == state.committed[..]
-                    );
-                    state.hwm = hwm;
-                    state.committed = state.logs[state.leader][..hwm].to_vec();
-                    state.last_ack_failed = false;
+                    record_committed_watermark(&mut state, hwm);
                     state.recovered = true;
                 }
             }

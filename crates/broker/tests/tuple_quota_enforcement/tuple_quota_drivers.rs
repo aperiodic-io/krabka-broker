@@ -31,9 +31,19 @@ pub(crate) async fn await_authorized_produce(
     loop {
         let response = kafka_wire::produce_sasl_with_ids(
             addr,
-            (CLIENT_ID, client_id),
-            ("alice", password),
-            ("tuple-quota-topic", 1024, 4),
+            crate::kafka_wire::SaslProduceSetup {
+                authentication: crate::kafka_wire::PlainAuthenticationSetup {
+                    client_id: CLIENT_ID,
+                    password: (password).to_vec(),
+                    ..Default::default()
+                },
+                produce_client_id: client_id,
+                records: crate::kafka_wire::ZeroFilledRecordsSetup {
+                    topic: ("tuple-quota-topic").to_string(),
+                    count: crate::kafka_wire::ProduceRecordCount(4),
+                    ..Default::default()
+                },
+            },
         )
         .await;
         let error_code = response

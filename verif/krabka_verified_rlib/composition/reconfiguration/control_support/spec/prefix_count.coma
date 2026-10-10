@@ -1,9 +1,9 @@
-(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 26 0 34 8 *)
+(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 28 0 36 8 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
-let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 25 10 25 15
+let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 27 10 27 15
 let%span sspec'0 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 63 16 67 5
 let%span sspec'1 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 33 16 33 70
 
@@ -57,7 +57,7 @@ constant new : bool
 
 constant count : int
 
-function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 26 0 34 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
+function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 28 0 36 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
 
 goal vc_prefix_count: if count <= 0 then
     true

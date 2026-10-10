@@ -97,21 +97,25 @@ mod tests {
         assert!(a["m2"][&t] == vec![3, 4, 5]);
     }
 
+    fn three_member_assignment(topic: Uuid, partitions: i32) -> Assignment {
+        let topics = TopicMetadata {
+            partitions_per_topic: [(topic, partitions)].into(),
+            ..Default::default()
+        };
+        RangeAssignor.assign(
+            &group(vec![
+                member("m1", &[topic]),
+                member("m2", &[topic]),
+                member("m3", &[topic]),
+            ]),
+            &topics,
+        )
+    }
+
     #[test]
     fn non_divisible_extra_goes_to_first_members() {
         let t = tid(1);
-        let topics = TopicMetadata {
-            partitions_per_topic: [(t, 7)].into(),
-            ..Default::default()
-        };
-        let a = RangeAssignor.assign(
-            &group(vec![
-                member("m1", &[t]),
-                member("m2", &[t]),
-                member("m3", &[t]),
-            ]),
-            &topics,
-        );
+        let a = three_member_assignment(t, 7);
         for (m, want) in [
             ("m1", vec![0, 1, 2]),
             ("m2", vec![3, 4]),
@@ -146,18 +150,7 @@ mod tests {
     #[test]
     fn fewer_partitions_than_members() {
         let t = tid(1);
-        let topics = TopicMetadata {
-            partitions_per_topic: [(t, 2)].into(),
-            ..Default::default()
-        };
-        let a = RangeAssignor.assign(
-            &group(vec![
-                member("m1", &[t]),
-                member("m2", &[t]),
-                member("m3", &[t]),
-            ]),
-            &topics,
-        );
+        let a = three_member_assignment(t, 2);
         for (m, want) in [("m1", vec![0]), ("m2", vec![1])] {
             assert!(a[m][&t] == want);
         }

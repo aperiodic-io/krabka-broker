@@ -8,8 +8,7 @@
 use std::{collections::HashSet, net::SocketAddr};
 
 use krabka_metadata::{
-    AclEntry, AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, PatternType,
-    PermissionType, ResourceType,
+    AclEntry, AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
     metadata_version::{CIDR_ACL_MIN_LEVEL, METADATA_VERSION_FEATURE},
 };
 use krabka_security::Principal;
@@ -42,8 +41,18 @@ impl AliceAuthorizer {
         name: &str,
         operation: AclOperation,
     ) -> AuthorizationResult {
-        self.authorizer
-            .authorize(image, &req(&self.principal, &self.host, name, operation))
+        self.authorizer.authorize(
+            image,
+            &req(
+                &self.principal,
+                &self.host,
+                QuerySetup {
+                    name,
+                    op: operation,
+                    ..Default::default()
+                },
+            ),
+        )
     }
 
     pub fn authorize_by_resource_type(
@@ -92,7 +101,15 @@ impl AliceAuthorizer {
     ) -> AuthorizationResult {
         self.authorizer.authorize(
             image,
-            &req_on(&self.principal, &self.host, resource_type, name, operation),
+            &req(
+                &self.principal,
+                &self.host,
+                QuerySetup {
+                    rt: resource_type,
+                    name,
+                    op: operation,
+                },
+            ),
         )
     }
 }
@@ -167,64 +184,31 @@ pub(super) fn cidr_img() -> MetadataImage {
     image
 }
 
-pub(super) fn topic_acl(
-    permission: PermissionType,
-    op: AclOperation,
-    principal: &str,
-    host: &str,
-    pattern: PatternType,
-    name: &str,
-) -> AclEntry {
-    AclEntry {
-        resource_type: ResourceType::Topic,
-        resource_name: name.into(),
-        pattern_type: pattern,
-        principal: principal.into(),
-        host: host.into(),
-        operation: op,
-        permission_type: permission,
+pub(super) use crate::test_support::{AclSetup, acl as topic_acl};
+
+#[derive(Clone, Copy)]
+pub(super) struct QuerySetup<'a> {
+    pub rt: ResourceType,
+    pub name: &'a str,
+    pub op: AclOperation,
+}
+
+impl Default for QuerySetup<'_> {
+    fn default() -> Self {
+        Self {
+            rt: ResourceType::Topic,
+            name: "foo",
+            op: AclOperation::Read,
+        }
     }
 }
 
 pub(super) fn req<'a>(
     p: &'a Principal,
     host: &'a SocketAddr,
-    name: &'a str,
-    op: AclOperation,
+    setup: QuerySetup<'a>,
 ) -> AuthorizationRequest<'a> {
-    req_on(p, host, ResourceType::Topic, name, op)
-}
-
-pub(super) fn topic_acl_op(permission: PermissionType, op: AclOperation, name: &str) -> AclEntry {
-    topic_acl(
-        permission,
-        op,
-        "User:alice",
-        "*",
-        PatternType::Literal,
-        name,
-    )
-}
-
-pub(super) fn acl_op_on(
-    rt: ResourceType,
-    permission: PermissionType,
-    op: AclOperation,
-    name: &str,
-) -> AclEntry {
-    AclEntry {
-        resource_type: rt,
-        ..topic_acl_op(permission, op, name)
-    }
-}
-
-pub(super) fn req_on<'a>(
-    p: &'a Principal,
-    host: &'a SocketAddr,
-    rt: ResourceType,
-    name: &'a str,
-    op: AclOperation,
-) -> AuthorizationRequest<'a> {
+    let QuerySetup { rt, name, op } = setup;
     AuthorizationRequest {
         principal: p,
         host,

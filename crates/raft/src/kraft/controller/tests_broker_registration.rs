@@ -5,7 +5,9 @@
 use assert2::{assert, check};
 
 use super::*;
-use crate::kraft::controller::test_support::{build, submit_change_with_timeout, topic_record};
+use crate::kraft::controller::test_support::{
+    ControllerSetup, build, submit_change_with_timeout, topic_record,
+};
 
 #[test]
 fn broker_registration_epoch_is_assigned_from_appended_offset() {
@@ -174,18 +176,11 @@ fn a_registration_change_applies_only_at_the_epoch_it_names() {
 async fn a_registration_change_waits_for_an_uncommitted_registration() {
     use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord};
 
-    let (ctrl, _dir) = build(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
+    let (ctrl, _dir) = build(ControllerSetup::default());
     crate::kraft::controller::test_support::elect_leader_with_helper(&ctrl, NodeId(1), NodeId(2))
         .await;
     let commit = || async {
-        let qs = ctrl.quorum_state().await.unwrap();
-        ctrl.inject_event(Event::ReceiveFetch {
-            from: NodeId(2),
-            fetch_epoch: qs.leader_epoch,
-            fetch_offset: qs.log_end_offset,
-        })
-        .await
-        .unwrap();
+        super::test_support::commit_pending(&ctrl, NodeId(2)).await;
     };
     let register = || {
         let ctrl = ctrl.clone();

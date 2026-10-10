@@ -26,8 +26,6 @@
 //! Every role has its own revocation list, as in Kafka's
 //! `CurrentAssignmentBuilder`.
 
-use std::collections::BTreeMap;
-
 use bytes::BufMut;
 use krabka_protocol::ProtocolError;
 
@@ -40,7 +38,7 @@ use crate::{
             flex::{get_i8, value_codec},
             get_i32,
         },
-        streams::state::StreamsMemberAssignmentState,
+        streams::state::{StreamsMemberAssignmentState, TaskMap},
     },
     error::BrokerError,
 };
@@ -97,9 +95,9 @@ impl StreamsMemberWireState {
 /// subtopology id to the partitions of that subtopology that the member holds.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StreamsGroupTargetAssignmentMemberValue {
-    pub active: BTreeMap<String, Vec<i32>>,
-    pub standby: BTreeMap<String, Vec<i32>>,
-    pub warmup: BTreeMap<String, Vec<i32>>,
+    pub active: TaskMap,
+    pub standby: TaskMap,
+    pub warmup: TaskMap,
 }
 
 value_codec! {
@@ -130,19 +128,19 @@ pub struct StreamsGroupCurrentMemberAssignmentValue {
     pub previous_member_epoch: i32,
     #[default(StreamsMemberWireState::Stable)]
     pub state: StreamsMemberWireState,
-    pub active: BTreeMap<String, Vec<i32>>,
-    pub standby: BTreeMap<String, Vec<i32>>,
-    pub warmup: BTreeMap<String, Vec<i32>>,
-    pub active_pending_revocation: BTreeMap<String, Vec<i32>>,
-    pub standby_pending_revocation: BTreeMap<String, Vec<i32>>,
-    pub warmup_pending_revocation: BTreeMap<String, Vec<i32>>,
+    pub active: TaskMap,
+    pub standby: TaskMap,
+    pub warmup: TaskMap,
+    pub active_pending_revocation: TaskMap,
+    pub standby_pending_revocation: TaskMap,
+    pub warmup_pending_revocation: TaskMap,
     /// The `AssignmentEpochs` of the `ActiveTasks` entries that carry one, by
     /// subtopology id, in the order of their partitions. Kafka 4.3.1 writes
     /// one for every active task entry.
-    pub active_epochs: BTreeMap<String, Vec<i32>>,
+    pub active_epochs: TaskMap,
     /// The `AssignmentEpochs` of the `ActiveTasksPendingRevocation` entries
     /// that carry one.
-    pub active_pending_revocation_epochs: BTreeMap<String, Vec<i32>>,
+    pub active_pending_revocation_epochs: TaskMap,
 }
 
 value_codec! {
@@ -191,6 +189,8 @@ value_codec! {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use assert2::assert;
 
     use super::*;

@@ -55,13 +55,7 @@ impl Sim {
     }
 
     fn replicate_from_leader(&mut self, follower: NodeId, leader: NodeId) {
-        if follower == leader {
-            return;
-        }
-        if self.partitioned.contains(&follower) || self.partitioned.contains(&leader) {
-            return;
-        }
-        if !self.nodes[&leader].machine.role().is_leader() {
+        if !self.can_replicate(follower, leader) {
             return;
         }
         let leader_hwm = match self.nodes[&leader].machine.role() {
@@ -74,16 +68,7 @@ impl Sim {
         self.nodes.insert(follower, follower_node);
     }
 
-    fn send(&mut self, src: NodeId, dst: NodeId, event: Event) {
-        if self.partitioned.contains(&src) || self.partitioned.contains(&dst) {
-            return;
-        }
-        self.queue.push_back(Message { src, dst, event });
-    }
-
-    fn all_node_ids(&self) -> Vec<NodeId> {
-        self.nodes.keys().copied().collect()
-    }
+    krabka_macros::simulation_transport!(crate);
 
     /// Drain and deliver the queued messages back-to-front, a deliberately
     /// non-FIFO but deterministic order.

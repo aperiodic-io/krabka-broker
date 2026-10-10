@@ -14,11 +14,9 @@ use std::{
 use assert2::check;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use krabka_audit::signing::FileEd25519Signer;
-use krabka_ids::LeaderEpoch;
 use krabka_remote_storage::{
-    ChainHead, ChainStamp, EpochId, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry,
-    RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentState,
-    Sha256Digest, TopicIdPartition, WormArchiver, WormChainRecord, manifest_head,
+    ChainHead, ChainStamp, EpochId, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry, Sha256Digest,
+    WormArchiver, WormChainRecord, manifest_head,
 };
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 use tempfile::TempDir;
@@ -36,25 +34,33 @@ fn uuid_b64(uuid: Uuid) -> String {
     URL_SAFE_NO_PAD.encode(uuid.as_bytes())
 }
 
-fn metadata(index: usize) -> RemoteLogSegmentMetadata {
-    let start = i64::try_from(index).unwrap() * SEGMENT_SPAN;
-    RemoteLogSegmentMetadata::new(
-        RemoteLogSegmentId::new(
-            TopicIdPartition::new(Uuid::from_u128(1), TOPIC, PARTITION),
-            Uuid::from_u128(0x2000 + u128::try_from(index).unwrap()),
-        ),
-        start,
-        start + SEGMENT_SPAN - 1,
-        1_713_000_000_000,
-        1,
-        1_713_000_001_000,
-        RemoteLogSegmentDetails::new(
-            4096,
-            RemoteLogSegmentState::CopySegmentStarted,
-            maplit::btreemap! {LeaderEpoch(0) => start},
-        ),
-    )
-    .unwrap()
+krabka_macros::worm_segment_fixture!(
+    metadata,
+    krabka_remote_storage,
+    0x2000,
+    TOPIC,
+    PARTITION,
+    SEGMENT_SPAN
+);
+
+#[derive(Clone, Copy, Default)]
+enum ManifestSigning {
+    #[default]
+    Signed,
+    Unsigned,
+}
+
+#[derive(Clone, Copy, Default)]
+enum SigningKey {
+    #[default]
+    Original,
+    RotatedAfterFirstSegment,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ArchiveSetup {
+    signing: ManifestSigning,
+    key: SigningKey,
 }
 
 /// An archive on disk, plus the paths a test needs to damage it.
@@ -80,20 +86,16 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// Writes a two-segment archive. `sign` chooses whether the manifests
-    /// carry a signature at all.
-    fn build(sign: bool) -> Self {
-        Self::build_with(sign, false)
-    }
-
-    /// A signed two-segment archive whose second manifest is signed under a
-    /// second key id, which is what a key rotation part-way through an
-    /// archive leaves behind.
+    /// A signed archive whose second manifest uses the rotated key.
     fn rotated() -> Self {
-        Self::build_with(true, true)
+        Self::build(ArchiveSetup {
+            key: SigningKey::RotatedAfterFirstSegment,
+            ..Default::default()
+        })
     }
 
-    fn build_with(sign: bool, rotate: bool) -> Self {
+    /// Write a two-segment archive, signed with the original key by default.
+    fn build(setup: ArchiveSetup) -> Self {
         let root = TempDir::new().unwrap();
         let keys = TempDir::new().unwrap();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
@@ -101,7 +103,7 @@ impl Fixture {
             .expect("ring mints a valid PKCS#8 Ed25519 key");
         let public_key = keys.path().join("worm.pub");
         std::fs::write(&public_key, signer.public_key()).unwrap();
-        let archiver = if sign {
+        let archiver = if matches!(setup.signing, ManifestSigning::Signed) {
             WormArchiver::new(Some(Arc::new(signer)))
         } else {
             WormArchiver::new(None)
@@ -147,7 +149,7 @@ impl Fixture {
             // The rotation lands part-way through: the chain is unbroken, so
             // only the trusted-key set separates a clean run from an
             // untrusted one.
-            let sealed = if rotate && index > 0 {
+            let sealed = if matches!(setup.key, SigningKey::RotatedAfterFirstSegment) && index > 0 {
                 rotated_archiver.seal(&stamped, entries).unwrap()
             } else {
                 archiver.seal(&stamped, entries).unwrap()
@@ -172,6 +174,12 @@ impl Fixture {
             log_keys,
             entries: all_entries,
         }
+    }
+
+    fn add_orphan(&self) -> String {
+        let stray = format!("{}/stray.bin", self.partition_dir);
+        std::fs::write(self.root().join(&stray), b"nothing names me").unwrap();
+        stray
     }
 
     /// Rewrites the newest manifest as the first manifest of a fresh chain run.
@@ -259,7 +267,7 @@ fn run(args: &[String]) -> Run {
 
 #[test]
 fn a_clean_archive_verifies_and_prints_its_tip() {
-    let fixture = Fixture::build(true);
+    let fixture = Fixture::build(ArchiveSetup::default());
 
     let result = run(&fixture.base_args());
 
@@ -284,7 +292,7 @@ fn a_clean_archive_verifies_and_prints_its_tip() {
 
 #[test]
 fn the_printed_tip_satisfies_expect_head_on_the_next_run() {
-    let fixture = Fixture::build(true);
+    let fixture = Fixture::build(ArchiveSetup::default());
     let mut args = fixture.base_args();
     args.push("--expect-head".to_string());
     args.push(fixture.tip.to_string());
@@ -296,7 +304,7 @@ fn the_printed_tip_satisfies_expect_head_on_the_next_run() {
 
 #[test]
 fn a_truncated_object_is_reported_as_tampering() {
-    let fixture = Fixture::build(true);
+    let fixture = Fixture::build(ArchiveSetup::default());
     let victim = fixture.root().join(&fixture.log_keys[1]);
     let body = std::fs::read(&victim).unwrap();
     std::fs::write(&victim, &body[..body.len() - 1]).unwrap();
@@ -311,7 +319,7 @@ fn a_truncated_object_is_reported_as_tampering() {
 
 #[test]
 fn a_same_length_body_edit_needs_deep_to_be_seen() {
-    let fixture = Fixture::build(true);
+    let fixture = Fixture::build(ArchiveSetup::default());
     let victim = fixture.root().join(&fixture.log_keys[1]);
     let mut body = std::fs::read(&victim).unwrap();
     body[0] ^= 0xff;
@@ -331,7 +339,10 @@ fn a_same_length_body_edit_needs_deep_to_be_seen() {
 
 #[test]
 fn an_unsigned_archive_is_an_incomplete_attestation() {
-    let fixture = Fixture::build(false);
+    let fixture = Fixture::build(ArchiveSetup {
+        signing: ManifestSigning::Unsigned,
+        ..Default::default()
+    });
 
     let result = run(&fixture.base_args());
 
@@ -342,7 +353,7 @@ fn an_unsigned_archive_is_an_incomplete_attestation() {
 
 #[test]
 fn a_tip_that_differs_from_expect_head_is_a_head_mismatch() {
-    let fixture = Fixture::build(true);
+    let fixture = Fixture::build(ArchiveSetup::default());
     let mut args = fixture.base_args();
     let expected = ChainHead([0x5a; 32]);
     args.push("--expect-head".to_string());
@@ -365,9 +376,8 @@ fn a_tip_that_differs_from_expect_head_is_a_head_mismatch() {
 /// can act on is one they stop reading.
 #[test]
 fn an_object_no_manifest_names_is_reported_but_does_not_fail_the_run() {
-    let fixture = Fixture::build(true);
-    let stray = format!("{}/stray.bin", fixture.partition_dir);
-    std::fs::write(fixture.root().join(&stray), b"nothing names me").unwrap();
+    let fixture = Fixture::build(ArchiveSetup::default());
+    let stray = fixture.add_orphan();
 
     let result = run(&fixture.base_args());
 
@@ -392,9 +402,8 @@ fn an_object_no_manifest_names_is_reported_but_does_not_fail_the_run() {
 /// bucket to hold nothing but the archive.
 #[test]
 fn strict_orphans_grades_an_orphan_as_a_failure() {
-    let fixture = Fixture::build(true);
-    let stray = format!("{}/stray.bin", fixture.partition_dir);
-    std::fs::write(fixture.root().join(&stray), b"nothing names me").unwrap();
+    let fixture = Fixture::build(ArchiveSetup::default());
+    fixture.add_orphan();
 
     let mut args = fixture.base_args();
     args.push("--strict-orphans".to_string());
@@ -433,7 +442,7 @@ fn naming_neither_a_bucket_nor_a_directory_is_a_usage_error() {
 
 #[test]
 fn a_chain_restart_is_an_incomplete_attestation_that_names_its_fix() {
-    let fixture = Fixture::build(true);
+    let fixture = Fixture::build(ArchiveSetup::default());
     fixture.restart_chain();
 
     let result = run(&fixture.base_args());
@@ -452,7 +461,7 @@ fn a_chain_restart_is_an_incomplete_attestation_that_names_its_fix() {
 
 #[test]
 fn allow_epoch_restarts_accepts_a_restarted_chain() {
-    let fixture = Fixture::build(true);
+    let fixture = Fixture::build(ArchiveSetup::default());
     fixture.restart_chain();
     let mut args = fixture.base_args();
     args.push("--allow-epoch-restarts".to_string());

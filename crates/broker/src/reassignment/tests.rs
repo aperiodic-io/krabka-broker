@@ -21,7 +21,10 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-use crate::reassignment::test_support::{first_partition, img, liveness};
+use crate::{
+    reassignment::test_support::{first_partition, img, liveness},
+    test_support::ReassignmentSetup,
+};
 
 struct MockReassignmentController {
     is_leader: AtomicBool,
@@ -109,14 +112,22 @@ async fn start_watching_reassignment(
     CancellationToken,
     tokio::task::JoinHandle<()>,
 ) {
-    let initial = img(&[1], &[1], &[], &[], 1);
+    let initial = img(ReassignmentSetup {
+        replicas: vec![krabka_ids::NodeId(1)],
+        isr: vec![krabka_ids::NodeId(1)],
+        ..Default::default()
+    });
     let controller = Arc::new(MockReassignmentController::new(is_leader, initial));
     let l = Arc::new(liveness(&[1, 2, 3]).await);
     let shutdown = CancellationToken::new();
     let task_controller: Arc<dyn ReassignmentController> = controller.clone();
     let task = tokio::spawn(run(task_controller, l, shutdown.clone()));
     tokio::task::yield_now().await;
-    controller.publish(img(&[1, 2, 3], &[1, 2, 3], &[3], &[2], 1));
+    controller.publish(img(ReassignmentSetup {
+        adding: vec![krabka_ids::NodeId(3)],
+        removing: vec![krabka_ids::NodeId(2)],
+        ..Default::default()
+    }));
     (controller, shutdown, task)
 }
 

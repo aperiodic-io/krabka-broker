@@ -3,16 +3,15 @@
 
 use assert2::check;
 use bytes::Bytes;
-use krabka_protocol::records::{Record, RecordsError, TimestampType};
+use krabka_protocol::records::{Record, TimestampType};
 
 use super::{
     test_support::{
-        BASE_TIMESTAMP, batch, check_decision, decide, header, keyed_records, partition,
-        predicates, record, timestamped_records, try_decide,
+        BASE_TIMESTAMP, batch, check_decision, check_record_parse_error, decide, header,
+        keyed_records, partition, predicates, record, timestamped_records,
     },
     *,
 };
-use crate::error::RestoreError;
 
 #[test]
 fn no_predicates_keep_everything() {
@@ -86,34 +85,30 @@ fn exclude_key_filters_only_matching_records() {
     );
 }
 
-#[test]
-fn exclude_key_matching_every_record_empties_the_batch() {
-    let predicates = predicates(&["--exclude-key", "^k"]);
-    let orders_0 = partition("orders", 0);
+fn check_two_key_records(
+    pattern: &str,
+    expected_batch: BatchDecision,
+    expected_record: RecordDecision,
+) {
+    let predicates = predicates(&["--exclude-key", pattern]);
     let owned = batch(1, keyed_records(&[Some(b"k1"), Some(b"k2")]));
-
     check_decision(
         &predicates,
-        &orders_0,
+        &partition("orders", 0),
         &owned,
-        BatchDecision::Empty,
-        &[RecordDecision::Drop, RecordDecision::Drop],
+        expected_batch,
+        &[expected_record; 2],
     );
 }
 
 #[test]
-fn exclude_key_matching_nothing_keeps_the_batch() {
-    let predicates = predicates(&["--exclude-key", "^zzz"]);
-    let orders_0 = partition("orders", 0);
-    let owned = batch(1, keyed_records(&[Some(b"k1"), Some(b"k2")]));
+fn exclude_key_matching_every_record_empties_the_batch() {
+    check_two_key_records("^k", BatchDecision::Empty, RecordDecision::Drop);
+}
 
-    check_decision(
-        &predicates,
-        &orders_0,
-        &owned,
-        BatchDecision::Keep,
-        &[RecordDecision::Keep, RecordDecision::Keep],
-    );
+#[test]
+fn exclude_key_matching_nothing_keeps_the_batch() {
+    check_two_key_records("^zzz", BatchDecision::Keep, RecordDecision::Keep);
 }
 
 #[test]
@@ -217,17 +212,27 @@ fn exclude_offset_only_applies_to_its_named_partition() {
     check!(records == [RecordDecision::Keep]);
 }
 
-#[test]
-fn to_timestamp_entirely_before_the_bound_keeps_the_batch() {
+fn check_timestamp_records(
+    timestamps: &[i64],
+    expected_batch: BatchDecision,
+    expected_records: &[RecordDecision],
+) {
     let bound = BASE_TIMESTAMP + 100;
     let predicates = predicates(&["--to-timestamp", &bound.to_string()]);
-    let orders_0 = partition("orders", 0);
-    let owned = batch(1, timestamped_records(&[0, 50]));
-
+    let owned = batch(1, timestamped_records(timestamps));
     check_decision(
         &predicates,
-        &orders_0,
+        &partition("orders", 0),
         &owned,
+        expected_batch,
+        expected_records,
+    );
+}
+
+#[test]
+fn to_timestamp_entirely_before_the_bound_keeps_the_batch() {
+    check_timestamp_records(
+        &[0, 50],
         BatchDecision::Keep,
         &[RecordDecision::Keep, RecordDecision::Keep],
     );
@@ -235,15 +240,8 @@ fn to_timestamp_entirely_before_the_bound_keeps_the_batch() {
 
 #[test]
 fn to_timestamp_entirely_at_or_after_the_bound_empties_the_batch() {
-    let bound = BASE_TIMESTAMP + 100;
-    let predicates = predicates(&["--to-timestamp", &bound.to_string()]);
-    let orders_0 = partition("orders", 0);
-    let owned = batch(1, timestamped_records(&[100, 200]));
-
-    check_decision(
-        &predicates,
-        &orders_0,
-        &owned,
+    check_timestamp_records(
+        &[100, 200],
         BatchDecision::Empty,
         &[RecordDecision::Drop, RecordDecision::Drop],
     );
@@ -251,15 +249,8 @@ fn to_timestamp_entirely_at_or_after_the_bound_empties_the_batch() {
 
 #[test]
 fn to_timestamp_straddling_the_bound_filters_the_right_split() {
-    let bound = BASE_TIMESTAMP + 100;
-    let predicates = predicates(&["--to-timestamp", &bound.to_string()]);
-    let orders_0 = partition("orders", 0);
-    let owned = batch(1, timestamped_records(&[0, 100, 150]));
-
-    check_decision(
-        &predicates,
-        &orders_0,
-        &owned,
+    check_timestamp_records(
+        &[0, 100, 150],
         BatchDecision::Filter,
         &[
             RecordDecision::Keep,
@@ -269,11 +260,6 @@ fn to_timestamp_straddling_the_bound_filters_the_right_split() {
     );
 }
 
-/// Under `LogAppendTime` Kafka reports every record at the batch
-/// `max_timestamp` (the broker's append clock) and never reads the producer's
-/// `base_timestamp + timestamp_delta`. Here the producer clock ran 10 s ahead
-/// of the broker, so `CreateTime` arithmetic would put every record past the
-/// bound while Kafka puts every record before it.
 #[test]
 fn to_timestamp_judges_log_append_time_records_by_the_batch_max_timestamp() {
     let orders_0 = partition("orders", 0);
@@ -349,12 +335,7 @@ fn record_offset_outside_the_declared_batch_is_an_integrity_error() {
     let mut owned = batch(1, vec![record(1)]);
     owned.last_offset_delta = 0;
 
-    let error = try_decide(&predicates, &orders_0, &owned).unwrap_err();
-
-    check!(matches!(
-        error,
-        RestoreError::Records(RecordsError::RecordParse(_))
-    ));
+    check_record_parse_error(&predicates, &orders_0, &owned);
 }
 
 #[test]
@@ -364,12 +345,7 @@ fn record_offset_overflow_is_an_integrity_error() {
     let mut owned = batch(1, vec![record(1)]);
     owned.base_offset = i64::MAX;
 
-    let error = try_decide(&predicates, &orders_0, &owned).unwrap_err();
-
-    check!(matches!(
-        error,
-        RestoreError::Records(RecordsError::RecordParse(_))
-    ));
+    check_record_parse_error(&predicates, &orders_0, &owned);
 }
 
 #[test]
@@ -380,10 +356,5 @@ fn record_timestamp_overflow_is_an_integrity_error() {
     owned.base_timestamp = i64::MAX;
     owned.max_timestamp = i64::MAX;
 
-    let error = try_decide(&predicates, &orders_0, &owned).unwrap_err();
-
-    check!(matches!(
-        error,
-        RestoreError::Records(RecordsError::RecordParse(_))
-    ));
+    check_record_parse_error(&predicates, &orders_0, &owned);
 }

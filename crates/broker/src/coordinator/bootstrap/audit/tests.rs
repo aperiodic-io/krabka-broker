@@ -25,7 +25,7 @@ fn registration(node_id: u64) -> MetadataRecord {
     MetadataRecord::V1BrokerRegistration(BrokerRegistrationRecord {
         fenced: true,
         incarnation_id: uuid::Uuid::from_u128(u128::from(node_id)),
-        ..crate::test_support::broker_registration(node_id)
+        ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
     })
 }
 
@@ -43,7 +43,7 @@ fn audit_batch(topic_id: uuid::Uuid, replicas: &[u64]) -> Vec<MetadataRecord> {
     for (partition, &replica) in (0_i32..).zip(replicas) {
         batch.push(MetadataRecord::V1Partition(partition_record(
             AUDIT_TOPIC,
-            partition,
+            krabka_ids::PartitionIndex(partition),
             NodeId(replica),
         )));
     }

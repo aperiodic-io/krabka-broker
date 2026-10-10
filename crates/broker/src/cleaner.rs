@@ -20,8 +20,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use krabka_units::{Time, convert::TimeExt as _};
-use qubit_clock::Timer;
+use krabka_units::convert::TimeExt as _;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
@@ -35,35 +34,8 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-/// Tunables for [`run`].
-#[derive(Clone)]
-pub(crate) struct CleanerConfig {
-    pub interval: Time,
-    /// Relative timer that drives the compaction-sweep cadence. Production
-    /// uses `time_util::system_timer`, which is real time. Tests inject a
-    /// timer from a [`qubit_clock::ManualMonotonicClock`], so the sweep
-    /// interval fires on a controlled manual timeline instead of wall-clock
-    /// time.
-    pub timer: Arc<dyn Timer>,
-    /// The metadata authority the sweep reads the KFC-9 write-freeze registry
-    /// from, re-read once per sweep so a freeze and a thaw both take effect on
-    /// the next tick.
-    ///
-    /// `None` is a sweep with no metadata authority to ask. It resolves no
-    /// freeze and leaves every partition eligible, which is the answer an
-    /// empty registry gives anyway.
-    pub metadata: Option<Arc<dyn crate::metadata_source::MetadataSource>>,
-}
-
-impl CleanerConfig {
-    pub(crate) fn system(interval: Time) -> Self {
-        Self {
-            interval,
-            timer: crate::time_util::system_timer(),
-            metadata: None,
-        }
-    }
-}
+/// Tunables for [`run`], shared with the other local log-maintenance sweep.
+pub(crate) type CleanerConfig = time_util::MetadataSweepConfig;
 
 /// Spawned task entry point.
 pub(crate) async fn run(
@@ -85,34 +57,20 @@ pub(crate) async fn run(
     // nothing.
     const TASK: &str = "log cleaner";
     let timer = Arc::clone(&cfg.timer);
-    let Some(mut tick) = time_util::arm(&*timer, Duration::ZERO, TASK) else {
-        return;
-    };
-    // The partitions a sweep failed outlive that sweep: Kafka's cleaner keeps
-    // the same set, because a partition stays uncleanable until a pass
-    // succeeds on it, and a count rebuilt per sweep would report zero on the
-    // next sweep that finds the partition ineligible.
+    // Failed partitions persist across sweeps until compaction succeeds.
     let mut uncleanable = UncleanablePartitions::default();
-    loop {
-        tokio::select! {
-            outcome = &mut tick => {
-                if !time_util::fired(outcome, TASK) {
-                    return;
-                }
-                // One image read per sweep. The registry the sweep gates on is
-                // whatever the metadata authority holds when the tick starts,
-                // so a freeze applied mid-sweep takes effect on the next one.
-                let image = cfg.metadata.as_ref().map(|source| source.current_image());
-                tick_all(&partitions, image.as_deref(), &metrics, &mut uncleanable).await;
-                let Some(next) = time_util::arm(&*timer, cfg.interval.to_std(), TASK) else {
-                    return;
-                };
-                tick = next;
-            }
-            () = shutdown.cancelled() => {
-                debug!("cleaner task shutting down");
-                return;
-            }
-        }
-    }
+    time_util::run_sweeps!(
+        &*timer,
+        (Duration::ZERO, cfg.interval.to_std()),
+        &shutdown,
+        TASK,
+        {
+            // Read one image at the start of a sweep, including its current freezes.
+            let image = cfg.current_image();
+            tick_all(&partitions, image.as_deref(), &metrics, &mut uncleanable).await;
+        },
+        {
+            debug!("cleaner task shutting down");
+        },
+    );
 }

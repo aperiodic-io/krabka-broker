@@ -6,17 +6,15 @@ use assert2::assert;
 use krabka_ids::Offset;
 use krabka_units::{ByteSize, convert::ByteSizeExt as _};
 
-use super::test_support::{append_source, partition_store, source_log};
+use super::test_support::append_source;
 use crate::wal::WalStore;
 
 #[tokio::test]
 async fn wal_fetch_serves_the_uncommitted_tail_with_separate_frontiers() {
     let dir = tempfile::tempdir().unwrap();
-    let source = source_log(dir.path());
-    let store = partition_store(dir.path(), source, 3);
+    let store = super::test_support::fresh_partition_store(dir.path());
 
-    let (_results, first) = append_source(&store, 1).await;
-    let (_results, second) = append_source(&store, 1).await;
+    let (first, second) = super::test_support::append_two(&store).await;
     store.sync_durable(first).await.unwrap();
 
     let fetch = store
@@ -34,8 +32,7 @@ async fn wal_fetch_serves_the_uncommitted_tail_with_separate_frontiers() {
 #[tokio::test]
 async fn wal_fetch_accepts_the_log_end_and_a_zero_byte_limit() {
     let dir = tempfile::tempdir().unwrap();
-    let source = source_log(dir.path());
-    let store = partition_store(dir.path(), source, 3);
+    let store = super::test_support::fresh_partition_store(dir.path());
     let (_results, log_end) = append_source(&store, 1).await;
 
     let at_end = store

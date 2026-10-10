@@ -23,10 +23,28 @@ use crate::{
     },
 };
 
+fn join_setup() -> crate::support::classic::ClassicJoinSetup {
+    crate::support::classic::ClassicJoinSetup {
+        group_id: "g".into(),
+        timeouts: crate::support::classic::ClassicTimeouts {
+            rebalance: krabka_units::millis(1_500),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn join_group_with_empty_member_returns_member_id_required() {
     let p = start().await;
-    let req = crate::support::classic::empty_range_join("g", String::new(), (30_000, 2_000));
+    let req =
+        crate::support::classic::classic_join_request(crate::support::classic::ClassicJoinSetup {
+            timeouts: crate::support::classic::ClassicTimeouts {
+                rebalance: krabka_units::millis(2_000),
+                ..Default::default()
+            },
+            ..join_setup()
+        });
     let r = p.client.send(req).await.expect("JoinGroup");
     assert!(r.error_code == 79); // MEMBER_ID_REQUIRED
     assert!(!r.member_id.is_empty());
@@ -39,21 +57,18 @@ async fn join_group_single_member_completes_after_deadline() {
     // First call to obtain a server-assigned member_id.
     let r1 = p
         .client
-        .send(crate::support::classic::empty_range_join(
-            "g",
-            String::new(),
-            (30_000, 1_500),
-        ))
+        .send(crate::support::classic::classic_join_request(join_setup()))
         .await
         .expect("JoinGroup1");
     // Retry with the assigned member_id. The handler will block ~1.5s
     // waiting for the rebalance deadline.
     let r2 = p
         .client
-        .send(crate::support::classic::empty_range_join(
-            "g",
-            r1.member_id.clone(),
-            (30_000, 1_500),
+        .send(crate::support::classic::classic_join_request(
+            crate::support::classic::ClassicJoinSetup {
+                member_id: r1.member_id.clone(),
+                ..join_setup()
+            },
         ))
         .await
         .expect("JoinGroup2");
@@ -76,11 +91,7 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
     // Step 1: empty member_id → broker returns one.
     let r1 = p
         .client
-        .send(crate::support::classic::empty_range_join(
-            "g",
-            String::new(),
-            (30_000, 1_500),
-        ))
+        .send(crate::support::classic::classic_join_request(join_setup()))
         .await
         .unwrap();
     assert!(r1.error_code == 79);
@@ -90,10 +101,11 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
     // Step 2: re-join with assigned member_id → wait for rebalance, become leader.
     let r2 = p
         .client
-        .send(crate::support::classic::empty_range_join(
-            "g",
-            mid.clone(),
-            (30_000, 1_500),
+        .send(crate::support::classic::classic_join_request(
+            crate::support::classic::ClassicJoinSetup {
+                member_id: mid.clone(),
+                ..join_setup()
+            },
         ))
         .await
         .unwrap();
@@ -105,15 +117,16 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
     let r3 = p
         .client
         .send(classic_sync_request(
-            "g",
-            generation,
-            mid.clone(),
-            Some("consumer".into()),
-            Some("range".into()),
-            vec![sync_assignment(
-                mid.clone(),
-                bytes::Bytes::from_static(b"asgn"),
-            )],
+            crate::support::classic::ClassicSyncSetup {
+                group_id: ("g").into(),
+                generation_id: crate::support::classic::GenerationId(generation),
+                member_id: mid.clone(),
+                assignments: vec![sync_assignment(
+                    mid.clone(),
+                    bytes::Bytes::from_static(b"asgn"),
+                )],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap();

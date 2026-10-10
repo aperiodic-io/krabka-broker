@@ -4,9 +4,9 @@
     "Coma": {
       "vc_deref_Vec_LocalRetentionSegment_Global": {
         "prover": "alt-ergo",
-        "time": 0.008
+        "time": 0.02
       },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.01 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.02 },
       "vc_len_tup4_i64_i64_u64_bool": { "prover": "alt-ergo", "time": 0.017 },
       "vc_local_retention_prefix": { "prover": "alt-ergo", "time": 0.019 },
       "vc_new_LocalRetentionSegment": { "prover": "alt-ergo", "time": 0.009 },

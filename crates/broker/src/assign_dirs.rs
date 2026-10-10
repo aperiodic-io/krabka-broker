@@ -256,65 +256,33 @@ mod tests {
     }
 
     #[test]
-    fn build_request_encodes_the_given_broker_epoch() {
-        let req = build_request(3, 9, &[]);
-        let mut bytes = bytes::BytesMut::new();
-
-        req.encode(&mut bytes, 0).expect("encode request");
-        let decoded =
-            AssignReplicasToDirsRequest::decode(&mut bytes.freeze(), 0).expect("decode request");
-
-        assert!(decoded.broker_id == 3);
-        assert!(decoded.broker_epoch == 9);
-    }
-
-    #[test]
-    fn build_request_encodes_unknown_broker_epoch_as_the_kafka_sentinel() {
-        let req = build_request(3, UNKNOWN_BROKER_EPOCH, &[]);
-        let mut bytes = bytes::BytesMut::new();
-
-        req.encode(&mut bytes, 0).expect("encode request");
-        let decoded =
-            AssignReplicasToDirsRequest::decode(&mut bytes.freeze(), 0).expect("decode request");
-
-        assert!(decoded.broker_id == 3);
-        assert!(decoded.broker_epoch == -1);
-    }
-
-    /// A dialer for a plaintext controller listener that knows `voters` as its
-    /// statically configured quorum.
-    fn plaintext_dialer(
-        voters: Vec<(NodeId, String)>,
-    ) -> crate::controller_endpoint::ControllerDialer {
-        crate::controller_endpoint::ControllerDialer {
-            outbound_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
-            listener_protocol: krabka_security::ListenerProtocol::Plaintext,
-            server_name: "localhost".to_owned(),
-            quorum_voters: voters,
+    fn build_request_round_trips_known_and_unknown_broker_epochs() {
+        for epoch in [9, UNKNOWN_BROKER_EPOCH] {
+            let req = build_request(3, epoch, &[]);
+            let mut bytes = bytes::BytesMut::new();
+            req.encode(&mut bytes, 0).expect("encode request");
+            let decoded = AssignReplicasToDirsRequest::decode(&mut bytes.freeze(), 0)
+                .expect("decode request");
+            assert!(decoded.broker_id == 3);
+            assert!(decoded.broker_epoch == epoch, "{epoch}");
         }
     }
+
+    use crate::test_support::plaintext_controller_dialer_with_voters as plaintext_dialer;
 
     /// What a broker-only node sees of a controller-only leader: a voter with a
     /// CONTROLLER endpoint, and no broker registration anywhere in the image.
     /// `register_broker` skips a node whose `process.roles` exclude `broker`,
     /// so `image.broker(leader)` stays empty however long the cluster runs.
     fn voter_only_image(leader: NodeId, controller_addr: SocketAddr) -> MetadataImage {
-        let mut image = MetadataImage::new(uuid::Uuid::nil());
-        image.apply(&krabka_metadata::MetadataRecord::V1Voters(
-            krabka_metadata::VotersRecord {
-                voters: krabka_metadata::VoterSet::from_voters([krabka_metadata::Voter {
-                    id: leader,
-                    directory_id: uuid::Uuid::nil(),
-                    endpoints: vec![krabka_metadata::VoterEndpoint {
-                        name: "CONTROLLER".to_owned(),
-                        host: controller_addr.ip().to_string(),
-                        port: controller_addr.port(),
-                    }],
-                    kraft_version: krabka_metadata::KRaftVersionRange::default(),
-                }]),
-            },
-        ));
-        image
+        crate::test_support::voter_image(crate::test_support::VoterImageSetup {
+            node: leader,
+            endpoints: vec![krabka_metadata::VoterEndpoint {
+                name: "CONTROLLER".to_owned(),
+                host: controller_addr.ip().to_string(),
+                port: controller_addr.port(),
+            }],
+        })
     }
 
     /// Boot a single-node broker that leads the metadata quorum, and hand back
@@ -356,6 +324,17 @@ mod tests {
         }
     }
 
+    fn voter_only_source(
+        controller_addr: std::net::SocketAddr,
+    ) -> Arc<dyn crate::metadata_source::MetadataSource> {
+        Arc::new(
+            FakeMetadataSource::builder()
+                .image(voter_only_image(NodeId(1), controller_addr))
+                .leader(Some(NodeId(1)))
+                .build(),
+        )
+    }
+
     /// KIP-919 carries `AssignReplicasToDirs` on the controller listener, and a
     /// controller-only node publishes no broker registration at all. Resolving
     /// the leader through `image.broker()` would therefore strand every
@@ -367,12 +346,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_assignments_reaches_a_leader_registered_only_as_a_controller() {
         let (broker, controller_addr, _dir) = start_controller().await;
-        let source: Arc<dyn crate::metadata_source::MetadataSource> = Arc::new(
-            FakeMetadataSource::builder()
-                .image(voter_only_image(NodeId(1), controller_addr))
-                .leader(Some(NodeId(1)))
-                .build(),
-        );
+        let source = voter_only_source(controller_addr);
 
         let sent = send_assignments(
             &source,
@@ -397,12 +371,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_assignments_dials_with_the_controller_listener_security() {
         let (broker, controller_addr, _dir) = start_controller().await;
-        let source: Arc<dyn crate::metadata_source::MetadataSource> = Arc::new(
-            FakeMetadataSource::builder()
-                .image(voter_only_image(NodeId(1), controller_addr))
-                .leader(Some(NodeId(1)))
-                .build(),
-        );
+        let source = voter_only_source(controller_addr);
         let mut dialer = plaintext_dialer(Vec::new());
         dialer.listener_protocol = krabka_security::ListenerProtocol::Ssl;
 

@@ -27,18 +27,13 @@ use crate::{
 async fn trimmed_diskless_offsets_are_served_from_the_object_store() {
     // Flush often, and keep no safety lag behind the committed index frontier,
     // so the trim reaches every offset the flush covered.
-    let cluster = crate::cluster::start_flushing_cluster(krabka_units::millis(100)).await;
-    cluster.await_ready().await;
-
-    let (admin, topic_id, leader, _values, producer) = crate::topic::seed_workload(&cluster).await;
+    let (cluster, admin, topic_id, leader, _values, producer) =
+        crate::topic::flushing_workload(krabka_units::millis(100)).await;
 
     // Wait for the flusher to publish an index record covering the whole
     // committed prefix and for the trim behind it to move the log start off
     // zero.
-    let leader_broker = cluster
-        .handle_for_node(leader)
-        .expect("the diskless leader is up");
-    let committed = i64::try_from(RECORDS).expect("small count");
+    let (leader_broker, committed) = crate::topic::seeded_leader(&cluster, leader);
     let (log_start, high_watermark, frontier) = await_trimmed_flush(leader_broker, committed).await;
     assert!(frontier == Some(committed));
     assert!(high_watermark == committed);
@@ -109,16 +104,11 @@ async fn await_trimmed_flush(
 /// and the ones above the floor are not.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deleted_diskless_records_leave_the_object_store_unreadable() {
-    let cluster = crate::cluster::start_flushing_cluster(krabka_units::millis(100)).await;
-    cluster.await_ready().await;
-
-    let (admin, topic_id, leader, _values, producer) = crate::topic::seed_workload(&cluster).await;
+    let (cluster, admin, topic_id, leader, _values, producer) =
+        crate::topic::flushing_workload(krabka_units::millis(100)).await;
     let bootstrap = cluster.bootstrap_for_node(leader);
 
-    let leader_broker = cluster
-        .handle_for_node(leader)
-        .expect("the diskless leader is up");
-    let committed = i64::try_from(RECORDS).expect("small count");
+    let (leader_broker, committed) = crate::topic::seeded_leader(&cluster, leader);
     let (log_start, _, _) = await_trimmed_flush(leader_broker, committed).await;
     // Everything the case deletes is already below the local log start, so the
     // delete can only be answered by the index.

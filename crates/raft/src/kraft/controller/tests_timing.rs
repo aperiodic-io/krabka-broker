@@ -7,7 +7,7 @@ use krabka_units::prelude::{TimeExt as _, millis, secs};
 
 use super::*;
 use crate::kraft::controller::{
-    test_support::voter_set,
+    test_support::{EngineSetup, voter_set},
     timing::{
         election_timeout_ms, election_timer_starts_election, following_leader_for_role,
         heartbeat_period, initial_election_at, instant_from_clock_base,
@@ -178,13 +178,24 @@ fn deadline_instant_offsets_from_engine_clock_base() {
 async fn discovery_peer_distinguishes_voter_and_observer() {
     use crate::kraft::controller::test_support::build_engine_only;
 
-    let (voter, _dir) = build_engine_only(NodeId(1), &[NodeId(1), NodeId(2)]);
+    let (voter, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    });
     check!(voter.discovery_peer().is_none());
 
-    let (observer, _dir) = build_engine_only(NodeId(3), &[NodeId(1), NodeId(2)]);
+    let (observer, _dir) = build_engine_only(EngineSetup {
+        me: NodeId(3),
+        ids: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    });
     check!(observer.discovery_peer() == Some(NodeId(1)));
 
-    let (mut attached_observer, _dir) = build_engine_only(NodeId(3), &[NodeId(1), NodeId(2)]);
+    let (mut attached_observer, _dir) = build_engine_only(EngineSetup {
+        me: NodeId(3),
+        ids: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    });
     attached_observer.on_event(Event::ReceiveBeginQuorumEpoch {
         leader_id: NodeId(1),
         leader_epoch: 1,
@@ -199,7 +210,11 @@ async fn discovery_peer_distinguishes_voter_and_observer() {
 async fn discovery_takes_the_peers_in_turn() {
     use crate::kraft::controller::test_support::build_engine_only;
 
-    let (mut observer, _dir) = build_engine_only(NodeId(3), &[NodeId(1), NodeId(2)]);
+    let (mut observer, _dir) = build_engine_only(EngineSetup {
+        me: NodeId(3),
+        ids: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    });
     let picked: Vec<Option<NodeId>> = (0..3)
         .map(|attempt| {
             observer.discovery_attempts = attempt;
@@ -213,7 +228,11 @@ async fn discovery_takes_the_peers_in_turn() {
 async fn fetch_misses_increment_and_trigger_timeout_at_limit() {
     use crate::kraft::{controller::test_support::build_engine_only, transport::TimerTick};
 
-    let (mut follower, _dir) = build_engine_only(NodeId(2), &[NodeId(1), NodeId(2)]);
+    let (mut follower, _dir) = build_engine_only(EngineSetup {
+        me: NodeId(2),
+        ids: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    });
     follower.on_event(Event::ReceiveBeginQuorumEpoch {
         leader_id: NodeId(1),
         leader_epoch: 1,

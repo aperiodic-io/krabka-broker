@@ -68,7 +68,12 @@ mod tests {
             producer_id: 42,
             producer_epoch: 3,
             base_sequence,
-            ..crate::test_support::repeated_records_batch(count, 0)
+            ..crate::test_support::repeated_records_batch(
+                crate::test_support::RepeatedRecordsSetup {
+                    count: crate::test_support::RecordCount(count),
+                    ..Default::default()
+                },
+            )
         }
     }
 

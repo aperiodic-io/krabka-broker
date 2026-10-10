@@ -59,11 +59,8 @@ pub(crate) fn spawn(
         loop {
             tokio::select! {
                 () = shutdown.cancelled() => break,
-                changed = images.changed() => {
-                    if changed.is_err() {
-                        break;
-                    }
-                    let image = images.borrow_and_update().clone();
+                image = crate::metadata_source::next_published_image(&mut images) => {
+                    let Some(image) = image else { break; };
                     let next = led_partitions(&image, node_id);
                     let lost: Vec<PartitionIndex> =
                         led.keys().filter(|p| !next.contains_key(p)).copied().collect();

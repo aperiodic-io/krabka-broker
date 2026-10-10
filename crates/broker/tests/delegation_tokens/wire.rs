@@ -11,6 +11,7 @@
 use std::{io, net::SocketAddr};
 
 use base64::Engine;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::owned::{
     api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
     sasl_handshake_request::SaslHandshakeRequest, sasl_handshake_response::SaslHandshakeResponse,
@@ -18,7 +19,13 @@ use krabka_protocol::owned::{
 use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
-use crate::kafka_wire;
+use crate::{
+    kafka_wire,
+    kafka_wire::{
+        ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, SaslAuthenticateSetup,
+    },
+    support::wire::CorrelationId as WireCorrelationId,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire framing (length-prefixed request/response), bound to this suite's
@@ -44,7 +51,15 @@ pub(crate) async fn sasl_plain_authenticate(
     user: &str,
     password: &[u8],
 ) -> io::Result<TcpStream> {
-    kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, user, password).await
+    kafka_wire::sasl_plain_authenticate(
+        addr,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            user,
+            password: (password).to_vec(),
+        },
+    )
+    .await
 }
 
 /// SCRAM-SHA-256 delegation-token driver. It has the same wire shape as
@@ -62,11 +77,10 @@ pub(crate) async fn sasl_scram_sha256_authenticate(
     let _av_resp: ApiVersionsResponse = crate::kafka_wire::exchange(
         &mut stream,
         &ApiVersionsRequest::default(),
-        18,
-        0,
-        1,
-        CLIENT_ID,
-        false,
+        WireExchangeSetup {
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
     )
     .await?;
 
@@ -76,11 +90,13 @@ pub(crate) async fn sasl_scram_sha256_authenticate(
             mechanism: "SCRAM-SHA-256".to_string(),
             ..Default::default()
         },
-        17,
-        1,
-        2,
-        CLIENT_ID,
-        false,
+        WireExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            correlation: WireCorrelationId(2),
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
     )
     .await?;
     if sh_resp.error_code != 0 {
@@ -95,9 +111,11 @@ pub(crate) async fn sasl_scram_sha256_authenticate(
 
     let r1_resp = kafka_wire::sasl_authenticate_on(
         &mut stream,
-        CLIENT_ID,
-        3,
         bytes::Bytes::from(client_first),
+        SaslAuthenticateSetup {
+            client_id: CLIENT_ID,
+            ..Default::default()
+        },
     )
     .await?;
     if r1_resp.error_code != 0 {
@@ -110,9 +128,11 @@ pub(crate) async fn sasl_scram_sha256_authenticate(
     let client_final = client.client_final(&r1_resp.auth_bytes)?;
     let r2_resp = kafka_wire::sasl_authenticate_on(
         &mut stream,
-        CLIENT_ID,
-        4,
         bytes::Bytes::from(client_final),
+        SaslAuthenticateSetup {
+            client_id: CLIENT_ID,
+            correlation: crate::support::wire::CorrelationId(4),
+        },
     )
     .await?;
     if r2_resp.error_code != 0 {
@@ -216,3 +236,10 @@ pub(crate) async fn token_session(
 }
 
 krabka_macros::scram_client_proof_fixture!(scram_client_proof);
+
+/// Open the suite's super-user PLAIN session with its shared authentication diagnostic.
+pub async fn admin_plain(addr: SocketAddr) -> Result<TcpStream, String> {
+    sasl_plain_authenticate(addr, "admin", b"admin-pw")
+        .await
+        .map_err(|error| format!("admin PLAIN auth: {error}"))
+}

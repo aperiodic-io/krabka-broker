@@ -8,7 +8,6 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use dashmap::DashMap;
 use krabka_ids::PartitionIndex;
 use krabka_log::ProducerId;
 use tokio::sync::Mutex;
@@ -64,15 +63,7 @@ impl ProducerState {
         partition: PartitionIndex,
         snapshot: Vec<krabka_log::RecoveredProducer>,
     ) {
-        let parts = if let Some(existing) = self.by_topic.get(topic) {
-            existing.value().clone()
-        } else {
-            self.by_topic
-                .entry(topic.to_string())
-                .or_insert_with(|| Arc::new(DashMap::new()))
-                .value()
-                .clone()
-        };
+        let parts = self.topic_partitions(topic);
         parts.insert(
             partition,
             Arc::new(Mutex::new(PartitionProducerState {

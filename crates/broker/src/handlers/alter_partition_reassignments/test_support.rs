@@ -13,20 +13,62 @@ use krabka_protocol::owned::alter_partition_reassignments_request::{
     AlterPartitionReassignmentsRequest, ReassignablePartition, ReassignableTopic,
 };
 
-pub(super) fn request(
-    allow_replication_factor_change: bool,
-    topic: &str,
-    partition_index: i32,
-    replicas: Option<Vec<i32>>,
-) -> AlterPartitionReassignmentsRequest {
+use crate::test_support::ReassignmentSetup;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum ReplicationFactorPolicy {
+    #[default]
+    Maintain,
+    PermitChange,
+}
+
+/// Signed wire broker ids also permit the malformed ids used in refusal fixtures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub(super) struct ReplicaBrokerId(pub i32);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ReassignmentTarget {
+    Replicas(Vec<ReplicaBrokerId>),
+    Cancel,
+}
+
+impl Default for ReassignmentTarget {
+    fn default() -> Self {
+        Self::Replicas(vec![ReplicaBrokerId(1), ReplicaBrokerId(2)])
+    }
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(super) struct ReassignmentRequestSetup<'a> {
+    pub replication_factor_policy: ReplicationFactorPolicy,
+    #[default("orders")]
+    pub topic: &'a str,
+    #[default(krabka_ids::PartitionIndex(7))]
+    pub partition_index: krabka_ids::PartitionIndex,
+    pub target: ReassignmentTarget,
+}
+
+pub(super) fn request(setup: ReassignmentRequestSetup<'_>) -> AlterPartitionReassignmentsRequest {
+    let ReassignmentRequestSetup {
+        replication_factor_policy,
+        topic,
+        partition_index,
+        target,
+    } = setup;
     AlterPartitionReassignmentsRequest {
         timeout_ms: 30_000,
-        allow_replication_factor_change,
+        allow_replication_factor_change: replication_factor_policy
+            == ReplicationFactorPolicy::PermitChange,
         topics: vec![ReassignableTopic {
             name: topic.into(),
             partitions: vec![ReassignablePartition {
-                partition_index,
-                replicas,
+                partition_index: partition_index.0,
+                replicas: match target {
+                    ReassignmentTarget::Replicas(ids) => {
+                        Some(ids.into_iter().map(|id| id.0).collect())
+                    }
+                    ReassignmentTarget::Cancel => None,
+                },
                 ..Default::default()
             }],
             ..Default::default()
@@ -37,35 +79,38 @@ pub(super) fn request(
 
 crate::test_support::context_helper!(pub(super) client_id = "admin-client");
 
-/// An image holding topic `foo` with one partition in the given reassignment
-/// state, at partition epoch 0.
-pub(super) fn img_with(
-    replicas: &[u64],
-    isr: &[u64],
-    adding: &[u64],
-    removing: &[u64],
-    leader: u64,
-) -> MetadataImage {
-    img_with_epoch(replicas, isr, adding, removing, leader, 0)
+/// A registered six-broker image with one partition in the supplied reassignment state.
+#[derive(Clone, krabka_macros::FieldDefaults)]
+pub(super) struct ReassignmentImageSetup<'a> {
+    pub assignment: ReassignmentSetup<'a>,
+    pub partition_epoch: crate::test_support::PartitionEpoch,
 }
 
-/// [`img_with`], with the partition epoch pinned, for the tests that check the
-/// epoch a planned record bumps to.
-pub(super) fn img_with_epoch(
-    replicas: &[u64],
-    isr: &[u64],
-    adding: &[u64],
-    removing: &[u64],
-    leader: u64,
-    partition_epoch: i32,
-) -> MetadataImage {
+/// The in-progress replacement of broker two by broker three.
+pub(super) fn pending_reassignment_image() -> MetadataImage {
+    img_with(ReassignmentImageSetup {
+        assignment: ReassignmentSetup {
+            adding: vec![krabka_ids::NodeId(3)],
+            removing: vec![krabka_ids::NodeId(2)],
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+}
+
+pub(super) fn img_with(setup: ReassignmentImageSetup<'_>) -> MetadataImage {
+    let ReassignmentImageSetup {
+        assignment,
+        partition_epoch,
+    } = setup;
+    let replica_count = assignment.replicas.len();
     let mut img = MetadataImage::new(uuid::Uuid::nil());
     // Register brokers 1..=6 so validate_target accepts target lists.
     for n in 1u64..=6 {
         img.apply(&MetadataRecord::V1BrokerRegistration(
             BrokerRegistrationRecord {
                 host: "localhost".into(),
-                ..crate::test_support::broker_registration(n)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(n))
             },
         ));
     }
@@ -73,11 +118,11 @@ pub(super) fn img_with_epoch(
         name: "foo".into(),
         topic_id: uuid::Uuid::nil(),
         partitions: 1,
-        replication_factor: i16::try_from(replicas.len()).expect("replication factor fits i16"),
+        replication_factor: i16::try_from(replica_count).expect("replication factor fits i16"),
     }));
     img.apply(&MetadataRecord::V1Partition(PartitionRecord {
-        partition_epoch,
-        ..crate::test_support::reassignment_partition(replicas, isr, (adding, removing), leader)
+        partition_epoch: partition_epoch.0,
+        ..crate::test_support::reassignment_partition(assignment)
     }));
     img
 }

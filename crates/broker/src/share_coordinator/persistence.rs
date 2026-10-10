@@ -288,7 +288,9 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::share_coordinator::coordinator::test_support::state_batch;
+    use crate::share_coordinator::coordinator::test_support::{
+        DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+    };
 
     fn peek_type(buf: &[u8]) -> i16 {
         let mut r = buf;
@@ -386,7 +388,17 @@ mod tests {
                     delivery_complete_count: 5,
                     create_timestamp: 1000,
                     write_timestamp: 2000,
-                    state_batches: vec![state_batch(10, 19, 0, 1), state_batch(20, 29, 2, 3)],
+                    state_batches: vec![
+                        state_batch(StateBatchSetup {
+                            bounds: Offset(10)..=Offset(19),
+                            ..Default::default()
+                        }),
+                        state_batch(StateBatchSetup {
+                            bounds: Offset(20)..=Offset(29),
+                            delivery: FixtureDeliveryState::Acknowledged,
+                            attempts: DeliveryAttemptCount(3),
+                        }),
+                    ],
                 },
                 "0000 00000003 00000002 00000004 000000000000000a \
                  00000000000003e8 00000000000007d0 03 \
@@ -411,7 +423,10 @@ mod tests {
                     leader_epoch: 4,
                     start_offset: Offset(12),
                     delivery_complete_count: -1,
-                    state_batches: vec![state_batch(12, 15, 0, 1)],
+                    state_batches: vec![state_batch(StateBatchSetup {
+                        bounds: Offset(12)..=Offset(15),
+                        ..Default::default()
+                    })],
                 },
                 "0000 00000003 00000004 000000000000000c 02 \
                  000000000000000c 000000000000000f 00 0001 00 00",

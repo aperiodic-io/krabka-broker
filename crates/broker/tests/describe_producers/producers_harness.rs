@@ -6,28 +6,10 @@
 //! idempotent one with the transactional attribute bit set.
 
 use assert2::assert;
-use krabka_client_core::Client;
 use krabka_protocol::records::{Attributes, RecordBatch};
 
-pub(crate) use crate::support::topic_id_for;
-use crate::{
-    support,
-    support::{
-        discovery::coordinator_lookup_request,
-        topics::{creatable_topic, create_topic_request},
-    },
-};
-
-pub(crate) async fn create_topic(client: &Client, name: &str, partitions: i32) {
-    let resp = client
-        .send(create_topic_request(
-            creatable_topic(name, partitions, 1),
-            5_000,
-        ))
-        .await
-        .expect("CreateTopics");
-    assert!(resp.topics[0].error_code == 0, "{name} create: {resp:?}");
-}
+pub(crate) use crate::support::{client::create_topic_named as create_topic, topic_id_for};
+use crate::{support, support::discovery::coordinator_lookup_request};
 
 pub(crate) async fn init_producer(p: &support::InProcess) -> (i64, i16) {
     // A null transactional id is an idempotent producer; an empty one is invalid.
@@ -61,8 +43,10 @@ pub(crate) async fn init_transactional_producer(
         let init = p
             .client
             .send(crate::support::transactions::new_producer_request(
-                Some(transactional_id.into()),
-                60_000,
+                crate::support::transactions::InitProducerSetup {
+                    transactional_id: Some(transactional_id.into()),
+                    ..Default::default()
+                },
             ))
             .await
             .expect("transactional InitProducerId");
@@ -80,13 +64,10 @@ pub(crate) async fn init_transactional_producer(
 pub(crate) use crate::support::records::producer_values_batch as batch;
 
 pub(crate) fn transactional_batch(
-    pid: i64,
-    epoch: i16,
-    base_seq: i32,
-    values: &[&str],
+    setup: crate::support::records::ProducerValuesSetup<'_>,
 ) -> RecordBatch {
     RecordBatch {
         attributes: Attributes::default().with_transactional(true),
-        ..batch(pid, epoch, base_seq, values)
+        ..batch(setup)
     }
 }

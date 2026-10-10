@@ -36,9 +36,8 @@ use krabka_verified::FreezeMutationKind;
 use tracing::warn;
 
 use crate::{
-    error::BrokerError,
     freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
-    metrics::{BrokerMetrics, CleanerFailureReason},
+    metrics::BrokerMetrics,
     partition::Partition,
     partition_registry::PartitionRegistry,
 };
@@ -46,20 +45,7 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// How the sweep classifies one failed [`Partition::retain_log`] call.
-///
-/// The same three reasons the cleaner uses, because an operator acts on them
-/// the same way: a storage failure is a disk, and the writer arm has already
-/// asked the log-dir registry to take that disk offline; a dead writer is a
-/// partition whose actor is gone; anything else is the log layer refusing the
-/// eviction.
-fn failure_reason(error: &BrokerError) -> CleanerFailureReason {
-    match error {
-        BrokerError::Log(krabka_log::LogError::Io(_)) => CleanerFailureReason::Io,
-        BrokerError::Replication(_) => CleanerFailureReason::Writer,
-        _ => CleanerFailureReason::Other,
-    }
-}
+use crate::metrics::cleaner_failure_reason as failure_reason;
 
 /// Whether a KFC-9 write freeze stops this sweep from trimming `topic`.
 ///

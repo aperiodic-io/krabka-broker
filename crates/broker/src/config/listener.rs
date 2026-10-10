@@ -405,9 +405,9 @@ mod tests {
 
     #[test]
     fn outbound_oauthbearer_credentials_validate_for_data_and_controller_listeners() {
-        let dir = tempfile::tempdir().unwrap();
-        let token_path = dir.path().join("token");
-        std::fs::write(&token_path, "header.payload.\n").unwrap();
+        let (_dir, token_path) = crate::test_support::oauth_token_file(
+            crate::test_support::OAuthTokenContents::Nonempty,
+        );
         let credentials = Some(InterBrokerCredentials::OAuthBearer { token_path });
         let data_listener = ListenerSpec {
             name: "OAUTH".into(),
@@ -490,9 +490,8 @@ mod tests {
 
     #[test]
     fn rejects_empty_outbound_oauthbearer_token() {
-        let dir = tempfile::tempdir().unwrap();
-        let token_path = dir.path().join("token");
-        std::fs::write(&token_path, "\n").unwrap();
+        let (_dir, token_path) =
+            crate::test_support::oauth_token_file(crate::test_support::OAuthTokenContents::Empty);
         let c = BrokerConfig {
             inter_broker_credentials: Some(InterBrokerCredentials::OAuthBearer { token_path }),
             ..BrokerConfig::default()
@@ -712,10 +711,7 @@ mod connections_max_idle_tests {
     fn config(idle: Time, overrides: &[(&str, Time)]) -> BrokerConfig {
         BrokerConfig {
             connections_max_idle: Some(idle),
-            connections_max_idle_overrides: overrides
-                .iter()
-                .map(|(name, value)| ((*name).to_string(), *value))
-                .collect(),
+            connections_max_idle_overrides: crate::test_support::listener_time_overrides(overrides),
             ..BrokerConfig::default()
         }
     }
@@ -785,10 +781,9 @@ mod connections_max_reauth_tests {
     fn config(broker_wide: Option<Time>, overrides: &[(&str, Time)]) -> BrokerConfig {
         BrokerConfig {
             connections_max_reauth: broker_wide,
-            connections_max_reauth_overrides: overrides
-                .iter()
-                .map(|(name, value)| ((*name).to_string(), *value))
-                .collect(),
+            connections_max_reauth_overrides: crate::test_support::listener_time_overrides(
+                overrides,
+            ),
             ..BrokerConfig::default()
         }
     }

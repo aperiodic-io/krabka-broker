@@ -574,14 +574,10 @@ mod tests {
     use assert2::check;
 
     use super::*;
-    use crate::api_catalog::UnstableApiVersions::{self, Disabled, Enabled};
-
-    fn overrides(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-            .collect()
-    }
+    use crate::{
+        api_catalog::UnstableApiVersions::{self, Disabled, Enabled},
+        test_support::config_map as overrides,
+    };
 
     /// One row of a table: a key and value, and the refusal text or `Ok`.
     type Row = ((&'static str, &'static str), Result<(), &'static str>);

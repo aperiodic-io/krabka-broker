@@ -10,7 +10,7 @@
       "vc_set_UNDEFINED_EPOCH": { "prover": "alt-ergo", "time": 0.01 },
       "vc_set_UNDEFINED_EPOCH_OFFSET": {
         "prover": "alt-ergo",
-        "time": 0.009
+        "time": 0.021
       }
     }
   }

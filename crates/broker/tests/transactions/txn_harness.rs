@@ -79,7 +79,16 @@ async fn create_topic_with_configs(
     configs: Vec<CreatableTopicConfig>,
 ) {
     let client = connect_client(bootstrap, None).await;
-    crate::support::transaction_wire::create_topic(&client, name, 1, configs, "create_topic").await;
+    crate::support::transaction_wire::create_topic(
+        &client,
+        crate::support::transaction_wire::TransactionTopicSetup {
+            name,
+            configs,
+            context: "create_topic",
+            ..Default::default()
+        },
+    )
+    .await;
 }
 
 pub async fn init_transaction(
@@ -91,7 +100,12 @@ pub async fn init_transaction(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let response = client
-            .send(new_producer_request(Some(transactional_id.into()), 60_000))
+            .send(new_producer_request(
+                crate::support::transactions::InitProducerSetup {
+                    transactional_id: Some(transactional_id.into()),
+                    ..Default::default()
+                },
+            ))
             .await
             .unwrap();
         if response.error_code == 0 {
@@ -158,10 +172,11 @@ pub async fn create_topic_sasl(bootstrap: &str, name: &str, security: ClientSecu
         .unwrap();
     crate::support::transaction_wire::create_topic(
         &client,
-        name,
-        1,
-        Vec::new(),
-        "create_topic_sasl",
+        crate::support::transaction_wire::TransactionTopicSetup {
+            name,
+            context: "create_topic_sasl",
+            ..Default::default()
+        },
     )
     .await;
 }

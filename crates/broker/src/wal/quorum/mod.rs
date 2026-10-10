@@ -35,7 +35,7 @@ use uuid::Uuid;
 
 use self::engine::WalShardEngine;
 pub(crate) use self::shard_dirs::{
-    prune_orphaned_shard_dirs, remove_leader_shard, remove_shard, shard_dir,
+    ShardRemoval, prune_orphaned_shard_dirs, remove_shard, shard_dir,
 };
 #[cfg(test)]
 use self::{

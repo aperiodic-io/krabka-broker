@@ -37,45 +37,37 @@ impl ControllerAdapter {
     }
 }
 
-#[async_trait::async_trait]
-impl crate::leader_rebalance::ControllerLike for ControllerAdapter {
-    fn is_leader(&self) -> bool {
-        self.holds_leadership()
-    }
-
-    fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> {
-        self.handle.current_image()
-    }
-
-    async fn submit_change(
-        &self,
-        records: Vec<krabka_metadata::MetadataRecord>,
-    ) -> Result<(), String> {
-        self.submit(records).await
-    }
+/// Metadata task traits share the same authority and submit error conversion.
+macro_rules! controller_adapter {
+    ($trait:path, $($extra:item),* $(,)?) => {
+        #[async_trait::async_trait]
+        impl $trait for ControllerAdapter {
+            fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> {
+                self.handle.current_image()
+            }
+            async fn submit_change(&self, records: Vec<krabka_metadata::MetadataRecord>) -> Result<(), String> {
+                self.submit(records).await
+            }
+            $($extra)*
+        }
+    };
 }
 
-#[async_trait::async_trait]
-impl crate::reassignment::ReassignmentController for ControllerAdapter {
+controller_adapter!(
+    crate::leader_rebalance::ControllerLike,
     fn is_leader(&self) -> bool {
         self.holds_leadership()
     }
-
-    fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> {
-        self.handle.current_image()
-    }
-
+);
+controller_adapter!(
+    crate::reassignment::ReassignmentController,
+    fn is_leader(&self) -> bool {
+        self.holds_leadership()
+    },
     fn watch_image(&self) -> tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>> {
         self.handle.watch_image()
     }
-
-    async fn submit_change(
-        &self,
-        records: Vec<krabka_metadata::MetadataRecord>,
-    ) -> Result<(), String> {
-        self.submit(records).await
-    }
-}
+);
 
 #[async_trait::async_trait]
 impl crate::delegation_token_cleanup::DelegationTokenController for ControllerAdapter {
@@ -95,19 +87,7 @@ impl crate::delegation_token_cleanup::DelegationTokenController for ControllerAd
     }
 }
 
-#[async_trait::async_trait]
-impl crate::break_glass::sweep::BreakGlassController for ControllerAdapter {
-    fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> {
-        self.handle.current_image()
-    }
-
-    async fn submit_change(
-        &self,
-        records: Vec<krabka_metadata::MetadataRecord>,
-    ) -> Result<(), String> {
-        self.submit(records).await
-    }
-}
+controller_adapter!(crate::break_glass::sweep::BreakGlassController,);
 
 #[cfg(test)]
 mod tests {
@@ -182,7 +162,8 @@ mod tests {
                 .on_submit(|_| Err(krabka_raft::RaftError::Unsupported("adapter test")))
                 .build(),
         );
-        let record = metadata_topic_record("adapter-submit-mutant-topic", 0xADAD);
+        let record =
+            metadata_topic_record("adapter-submit-mutant-topic", uuid::Uuid::from_u128(0xADAD));
         let adapter = adapter(&source, 1);
 
         let results = [

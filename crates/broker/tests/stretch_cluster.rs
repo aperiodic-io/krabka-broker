@@ -121,7 +121,5 @@ const N_RECORDS: i32 = 4;
 const STEP_TIMEOUT: Duration = Duration::from_secs(45);
 
 async fn within<F: Future>(what: &str, future: F) -> F::Output {
-    tokio::time::timeout(STEP_TIMEOUT, future)
-        .await
-        .unwrap_or_else(|_| panic!("{what} did not finish within {STEP_TIMEOUT:?}"))
+    support::poll::within(what, STEP_TIMEOUT, future).await
 }

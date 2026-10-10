@@ -3,9 +3,8 @@
 //! that opens a real partition with a live writer. Both the fan-out tests and
 //! the coordinator tests need them.
 
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
-use krabka_ids::PartitionIndex;
 use krabka_log::{Log, LogConfig};
 use krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord};
 use uuid::Uuid;
@@ -39,20 +38,18 @@ pub(crate) fn topic_records(topic: &str, partitions: i32, leader: NodeId) -> Vec
 }
 
 /// Open a real partition with a live writer, and register it.
-pub(crate) fn open_partition(registry: &PartitionRegistry, dir: &Path, topic: &str, index: i32) {
-    let partition_dir = crate::log_dir::partition_dir(dir, topic, index);
+pub(crate) fn open_partition(
+    registry: &PartitionRegistry,
+    dir: &Path,
+    setup: crate::test_support::StandalonePartitionSetup<'_>,
+) {
+    let topic = setup.topic;
+    let index = setup.partition;
+    let partition_dir = crate::log_dir::partition_dir(dir, topic, index.0);
     std::fs::create_dir_all(&partition_dir).expect("create the partition directory");
     let log = Log::open(&partition_dir, LogConfig::default()).expect("open the log");
-    let partition = crate::broker::spawn_partition(
-        topic.to_owned(),
-        PartitionIndex(index),
-        dir.to_path_buf(),
-        log,
-        crate::log_dir_status::LogDirRegistry::default(),
-        Arc::new(crate::producer_state::ProducerState::new()),
-        false,
-    );
-    registry.insert(topic.into(), PartitionIndex(index), partition);
+    let partition = crate::test_support::spawn_standalone_partition(dir, log, setup);
+    registry.insert(topic.into(), index, partition);
 }
 
 /// A metadata source over `records` that fails the test if the code under test
@@ -70,6 +67,20 @@ pub(crate) fn metadata_source(records: &[MetadataRecord]) -> FakeMetadataSource 
         .records(records)
         .on_submit(|batch| panic!("the barrier tests submit no metadata change, got {batch:?}"))
         .build()
+}
+
+/// Check the control flag and decoded marker against the expected value.
+pub(crate) fn check_control_marker(
+    batch: &krabka_protocol::records::RecordBatch,
+    expected: &crate::barrier::marker::BarrierMarker,
+) {
+    assert2::check!(batch.attributes.is_control_batch());
+    assert2::check!(
+        crate::barrier::marker::parse_barrier_marker(&batch.records[0])
+            .ok()
+            .as_ref()
+            == Some(expected)
+    );
 }
 
 #[cfg(test)]

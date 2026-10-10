@@ -22,13 +22,19 @@ pub async fn admin_client(bootstrap: &str) -> Client {
     connect_client(bootstrap, Some("krabka-txnv-test")).await
 }
 
-pub async fn create_topic(client: &Client, name: &str, partitions: i32) {
+pub async fn create_topic(
+    client: &Client,
+    name: &str,
+    partitions: crate::support::topics::TopicPartitionCount,
+) {
     crate::support::transaction_wire::create_topic(
         client,
-        name,
-        partitions,
-        Vec::new(),
-        "create_topic",
+        crate::support::transaction_wire::TransactionTopicSetup {
+            name,
+            partitions,
+            context: "create_topic",
+            ..Default::default()
+        },
     )
     .await;
 }

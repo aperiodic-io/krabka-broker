@@ -24,7 +24,7 @@ let%span squota = "/workspace/crates/verified/src/quota.rs" 41 10 43 12
 let%span squota'0 = "/workspace/crates/verified/src/quota.rs" 44 10 45 89
 let%span squota'1 = "/workspace/crates/verified/src/quota.rs" 46 10 46 55
 let%span squota'2 = "/workspace/crates/verified/src/quota.rs" 47 10 47 80
-let%span squota'3 = "/workspace/crates/verified/src/quota.rs" 222 16 222 67
+let%span squota'3 = "/workspace/crates/verified/src/quota.rs" 225 16 225 67
 let%span srefill = "/workspace/crates/verified/src/composition/refill.rs" 7 11 7 77
 let%span srefill'0 = "/workspace/crates/verified/src/composition/refill.rs" 8 11 8 37
 let%span srefill'1 = "/workspace/crates/verified/src/composition/refill.rs" 9 11 9 47
@@ -86,7 +86,7 @@ let quota_charge (available: UInt64.t) (debt: UInt64.t) (requested: UInt64.t) (b
 
 type tup4_u64_u64_u64_u64 = { f0'2: UInt64.t; f1'2: UInt64.t; f2'2: UInt64.t; f3'2: UInt64.t }
 
-predicate balance_within_burst [#"/workspace/crates/verified/src/quota.rs" 221 0 221 81] (available: int) (debt: int) (burst: int) =
+predicate balance_within_burst [#"/workspace/crates/verified/src/quota.rs" 224 0 224 81] (available: int) (debt: int) (burst: int) =
   [%#squota'3] available <= burst /\ (available = 0 \/ debt = 0)
 
 predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other <= self

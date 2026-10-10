@@ -31,7 +31,7 @@
             "children": [
               { "prover": "alt-ergo", "time": 0.035 },
               { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "z3", "time": 0.021 },
+              { "prover": "z3", "time": 0.008 },
               { "prover": "z3", "time": 0.023 },
               { "prover": "z3", "time": 0.013 },
               { "prover": "alt-ergo", "time": 0.043 },
@@ -67,9 +67,16 @@
               { "prover": "z3", "time": 0.033 },
               { "prover": "z3", "time": 0.02 },
               { "prover": "z3", "time": 0.021 },
-              { "prover": "z3", "time": 0.195 },
+              { "prover": "z3", "time": 0.582 },
               { "prover": "z3", "time": 0.022 },
-              { "prover": "z3", "time": 0.215 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "z3", "time": 0.048 },
+                  { "prover": "z3", "time": 0.029 },
+                  { "prover": "z3", "time": 0.17 }
+                ]
+              },
               { "prover": "alt-ergo", "time": 0.069 },
               { "prover": "alt-ergo", "time": 0.049 },
               { "prover": "alt-ergo", "time": 0.048 },
@@ -95,7 +102,7 @@
         "prover": "alt-ergo",
         "time": 0.013
       },
-      "vc_push_Option_usize": { "prover": "alt-ergo", "time": 0.01 },
+      "vc_push_Option_usize": { "prover": "alt-ergo", "time": 0.022 },
       "vc_push_ProducerSnapshotEntryFacts": {
         "prover": "alt-ergo",
         "time": 0.015

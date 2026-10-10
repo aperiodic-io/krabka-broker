@@ -347,6 +347,15 @@ async fn real_peer_sender_sends_expected_api_version_client_id_and_body() {
     server.await.unwrap();
 }
 
+async fn fetch_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        answer_fetch_connection(&listener, b"fetch-response").await;
+    });
+    (addr, server)
+}
+
 /// A controller that leaves the voter set must stay reachable. A leader that
 /// appends its own removal keeps its leadership until the removal commits, and
 /// the followers commit it only by fetching from that leader. Kafka's
@@ -360,11 +369,7 @@ async fn a_peer_stays_reachable_after_it_leaves_the_voter_set() {
         ("a voter that the new set removes", false),
     ];
     for (what, stays) in cases {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            answer_fetch_connection(&listener, b"fetch-response").await;
-        });
+        let (addr, server) = fetch_server().await;
 
         let host = addr.ip().to_string();
         let leader = voter_with_controller(NodeId(1), &host, addr.port());
@@ -417,11 +422,7 @@ async fn a_peer_stays_reachable_after_it_leaves_the_voter_set() {
     assert2::assert!(let Err(RaftError::NotLeader { current_leader: None }) = response);
 
     // Updating voters from an empty set makes the new voter reachable.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        answer_fetch_connection(&listener, b"fetch-response").await;
-    });
+    let (addr, server) = fetch_server().await;
     let host = addr.ip().to_string();
     let new_voter = voter_with_controller(NodeId(5), &host, addr.port());
     let sender = RealPeerSender::new(

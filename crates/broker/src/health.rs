@@ -284,13 +284,8 @@ pub async fn serve(
     let bound = listener.local_addr()?;
     tracing::info!(%bound, "health server listening");
     let app = router(state);
-    tokio::spawn(async move {
-        let server = axum::serve(listener, app).with_graceful_shutdown(async move {
-            shutdown.cancelled().await;
-        });
-        if let Err(e) = server.await {
-            tracing::warn!(error = %e, "health server error");
-        }
+    crate::http_server::spawn(listener, app, shutdown, |error| {
+        tracing::warn!(error = %error, "health server error");
     });
     Ok(bound)
 }

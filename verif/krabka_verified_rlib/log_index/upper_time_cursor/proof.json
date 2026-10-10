@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_len_tup2_i64_u32": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_upper_time_cursor": { "prover": "z3", "time": 0.016 }
+    }
+  }
+}

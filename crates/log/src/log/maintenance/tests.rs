@@ -72,9 +72,7 @@ fn changing_flush_config_activates_the_timer_for_existing_dirty_data() {
         flush_interval: Some(Time::ZERO),
         ..LogConfig::default()
     });
-    check!(log.maintenance_delay(SystemTime::now()) == Some(Duration::ZERO));
-    log.maintain(SystemTime::now()).unwrap();
-    check!(log.unflushed_messages == 0);
+    check_immediate_flush(&mut log);
 }
 
 #[test]
@@ -191,12 +189,9 @@ fn owned_gzip_batches_use_the_live_level_and_verbatim_keeps_producer_bytes() {
             batch.records[0].value = Some(bytes::Bytes::from(vec![b'a'; 10_000]));
             batch.attributes = batch.attributes.with_compression(CompressionType::Gzip);
             let (base, _) = log.append(&mut batch).unwrap();
-            let mut expected = bytes::BytesMut::new();
-            batch
-                .encode_with_compression_level(&mut expected, Some(level))
-                .unwrap();
+            let expected = encoded_at_level(&batch, CompressionLevel(level));
             let stored = log.read_raw(base, log.log_end_offset(), NO_LIMIT).unwrap();
-            check!(stored.bytes == expected.freeze());
+            check!(stored.bytes == expected);
         }
         let mut batch = sample_batch(1);
         batch.attributes = batch.attributes.with_compression(CompressionType::Gzip);
@@ -273,16 +268,20 @@ fn lowering_a_live_message_threshold_flushes_existing_dirty_data() {
             flush_messages: Some(2),
             ..LogConfig::default()
         });
-        check!(log.maintenance_delay(SystemTime::now()) == Some(Duration::ZERO));
-        log.maintain(SystemTime::now()).unwrap();
-        check!(log.unflushed_messages == 0);
+        check_immediate_flush(&mut log);
         check!(log.maintenance_delay(SystemTime::now()) == None);
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RetirementFault {
+    IndexRename,
+    DirectorySync,
+}
+
 #[derive(Debug)]
 struct RejectRetirement {
-    sync: bool,
+    fault: RetirementFault,
 }
 
 impl crate::io::LogIo for RejectRetirement {
@@ -292,7 +291,7 @@ impl crate::io::LogIo for RejectRetirement {
         from: &std::path::Path,
         to: &std::path::Path,
     ) -> std::io::Result<()> {
-        if !self.sync
+        if matches!(self.fault, RetirementFault::IndexRename)
             && target == crate::io::IoTarget::SegmentDeletion
             && from
                 .extension()
@@ -304,7 +303,7 @@ impl crate::io::LogIo for RejectRetirement {
     }
 
     fn sync_dir(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        if self.sync {
+        if matches!(self.fault, RetirementFault::DirectorySync) {
             Err(std::io::ErrorKind::StorageFull.into())
         } else {
             crate::io::FileIo.sync_dir(dir)
@@ -314,15 +313,14 @@ impl crate::io::LogIo for RejectRetirement {
 
 #[test]
 fn failed_active_retirement_preserves_a_writable_recoverable_log() {
-    for reset in [false, true] {
-        for sync in [false, true] {
+    for operation in [RetirementOperation::Truncate, RetirementOperation::Reset] {
+        for fault in [RetirementFault::IndexRename, RetirementFault::DirectorySync] {
             let (dir, mut log) = test_log();
             log.append(&mut sample_batch(1)).unwrap();
-            log.test_set_io(Arc::new(RejectRetirement { sync }));
-            let result = if reset {
-                log.reset_to(Offset(0))
-            } else {
-                log.truncate_to(Offset(0))
+            log.test_set_io(Arc::new(RejectRetirement { fault }));
+            let result = match operation {
+                RetirementOperation::Reset => log.reset_to(Offset(0)),
+                RetirementOperation::Truncate => log.truncate_to(Offset(0)),
             };
             check!(result.is_err());
             check!(log.active.is_some());
@@ -343,4 +341,19 @@ fn failed_active_retirement_preserves_a_writable_recoverable_log() {
             check!(reopened.log_end_offset() == Offset(2));
         }
     }
+}
+
+/// A live flush threshold schedules immediate maintenance and clears dirty messages.
+fn check_immediate_flush(log: &mut Log) {
+    check!(log.maintenance_delay(SystemTime::now()) == Some(Duration::ZERO));
+    log.maintain(SystemTime::now()).unwrap();
+    check!(log.unflushed_messages == 0);
+}
+
+krabka_macros::compression_bytes_fixture!(encoded_at_level, CompressionLevel);
+
+#[derive(Clone, Copy)]
+enum RetirementOperation {
+    Truncate,
+    Reset,
 }

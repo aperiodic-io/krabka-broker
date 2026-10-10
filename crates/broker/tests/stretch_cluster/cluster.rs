@@ -5,14 +5,12 @@
 //! The relayed variant that leaves every broker running and cuts the network
 //! instead is `LinkedCluster`, in the `linked` module.
 
-use std::time::Duration;
-
 use krabka_broker::{BrokerConfig, BrokerHandle};
 use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 use tempfile::TempDir;
 
 use crate::{
-    NODE_A, NODE_B, NODE_C,
+    NODE_A,
     profile::{apply_stretch_config, wait_for_stretch_metadata},
     support, within,
 };
@@ -29,42 +27,28 @@ impl Cluster {
     /// Boot the three-site cluster: two data sites, one witness site,
     /// `min.insync.replicas=2` (the only value a stretch profile accepts at
     /// rf=3 over three sites), and the witness role on the `site-c` node.
-    ///
-    /// Retries like `support::start_n_node_with_retry`, which cannot be reused
-    /// here because it takes no per-broker customizer.
     pub async fn start() -> Self {
-        let mut last_err = None;
-        for attempt in 1..=3 {
-            let started = support::start_n_node_with(3, apply_stretch_config).await;
-            match started {
-                Ok(cluster) => {
-                    support::wait_for_all_brokers_registered(&cluster, 3).await;
-                    for (handle, _, _) in &cluster {
-                        wait_for_stretch_metadata(handle).await;
-                    }
-                    let (handles, configs, dirs) = cluster.into_iter().fold(
-                        (Vec::new(), Vec::new(), Vec::new()),
-                        |(mut handles, mut configs, mut dirs), (handle, config, dir)| {
-                            handles.push(Some(handle));
-                            configs.push(config);
-                            dirs.push(dir);
-                            (handles, configs, dirs)
-                        },
-                    );
-                    return Self {
-                        handles,
-                        configs,
-                        _dirs: dirs,
-                    };
-                }
-                Err(error) => {
-                    tracing::warn!(attempt, %error, "stretch cluster start failed; retrying");
-                    last_err = Some(error);
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
+        let cluster =
+            support::start_n_node_customized_with_retry(3, apply_stretch_config, "stretch cluster")
+                .await;
+        support::wait_for_all_brokers_registered(&cluster, 3).await;
+        for (handle, _, _) in &cluster {
+            wait_for_stretch_metadata(handle).await;
         }
-        panic!("stretch cluster start failed after 3 attempts; last error: {last_err:?}");
+        let (handles, configs, dirs) = cluster.into_iter().fold(
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut handles, mut configs, mut dirs), (handle, config, dir)| {
+                handles.push(Some(handle));
+                configs.push(config);
+                dirs.push(dir);
+                (handles, configs, dirs)
+            },
+        );
+        Self {
+            handles,
+            configs,
+            _dirs: dirs,
+        }
     }
 
     pub fn handle(&self, index: usize) -> &BrokerHandle {
@@ -95,14 +79,7 @@ impl Cluster {
 /// Bring the cluster up with a topic and every replica in the ISR.
 pub async fn cluster_with_topic() -> (Cluster, WireUuid) {
     let cluster = Cluster::start().await;
-    let topic_id = crate::produce::initialize_topic(
-        &cluster.addr(NODE_A),
-        [
-            cluster.handle(NODE_A),
-            cluster.handle(NODE_B),
-            cluster.handle(NODE_C),
-        ],
-    )
-    .await;
+    let topic_id =
+        crate::produce::initialize_sites(cluster.addr(NODE_A), |node| cluster.handle(node)).await;
     (cluster, topic_id)
 }

@@ -11,6 +11,31 @@ pub(super) fn acl_authorizer() -> crate::authorizer::SimpleAclAuthorizer {
     crate::authorizer::SimpleAclAuthorizer::new(HashSet::new())
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct GroupAclSetup<'a> {
+    #[default("consumer-client")]
+    pub client_id: &'a str,
+    #[default("ANONYMOUS")]
+    pub principal: &'a str,
+    #[default("g")]
+    pub group: &'a str,
+}
+
+/// An anonymous group-read probe is denied against an empty authorizer and image.
+pub(super) fn check_group_read_denied(setup: GroupAclSetup<'_>) {
+    let authorizer = acl_authorizer();
+    let image = MetadataImage::new(uuid::Uuid::nil());
+    let principal = crate::test_support::principal(setup.principal);
+    let peer = crate::test_support::peer();
+    let ctx = crate::test_support::request_context(&principal, &peer, setup.client_id);
+    assert!(super::group_read_denied(
+        &authorizer,
+        &image,
+        &ctx,
+        setup.group
+    ));
+}
+
 /// An operation on a named resource, allowed to `User:alice` from any host.
 pub(super) fn acl(
     resource_type: ResourceType,
@@ -18,10 +43,12 @@ pub(super) fn acl(
     operation: AclOperation,
 ) -> MetadataRecord {
     MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-        resource_type,
-        name,
-        "User:alice",
-        operation,
+        crate::test_support::AllowAclSetup {
+            resource_type,
+            resource_name: name,
+            operation,
+            ..Default::default()
+        },
     ))
 }
 
@@ -35,21 +62,33 @@ pub(super) fn group_read_acl(name: &str) -> MetadataRecord {
     acl(ResourceType::Group, name, AclOperation::Read)
 }
 
-fn group_version(level: i16) -> MetadataRecord {
+/// The finalized metadata feature level, including the disabled zero sentinel.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct GroupFeatureLevel(pub i16);
+
+pub(super) async fn grant_group_read(broker: &crate::broker::Broker, group: &str) {
+    broker
+        .controller
+        .submit_change(vec![group_read_acl(group)])
+        .await
+        .expect("grant group Read");
+}
+
+fn group_version(level: GroupFeatureLevel) -> MetadataRecord {
     MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
         name: krabka_metadata::group_version::GROUP_VERSION_FEATURE.into(),
-        level,
+        level: level.0,
     })
 }
 
-pub(super) fn image_with_group_version(level: i16) -> MetadataImage {
+pub(super) fn image_with_group_version(level: GroupFeatureLevel) -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());
     image.apply(&group_version(level));
     image
 }
 
 /// Override the broker's release-default finalized consumer-group feature.
-pub(super) async fn set_group_version(broker: &crate::broker::Broker, level: i16) {
+pub(super) async fn set_group_version(broker: &crate::broker::Broker, level: GroupFeatureLevel) {
     broker
         .controller
         .submit_change(vec![group_version(level)])
@@ -57,14 +96,44 @@ pub(super) async fn set_group_version(broker: &crate::broker::Broker, level: i16
         .expect("set group.version");
 }
 
+/// Start the coordinator fixture with an explicit finalized group version.
+pub(super) async fn versioned_group_broker(
+    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
+    level: GroupFeatureLevel,
+) -> (
+    crate::BrokerHandle,
+    tempfile::TempDir,
+    std::sync::Arc<crate::broker::Broker>,
+) {
+    let (handle, dir) = crate::test_support::start_group_broker(authorizer).await;
+    let broker = handle.broker_arc_for_test();
+    set_group_version(&broker, level).await;
+    (handle, dir, broker)
+}
+
 /// A bare `V1Topic` record of `partitions` partitions.
-fn topic_record(name: &str, topic_id: uuid::Uuid, partitions: i32) -> MetadataRecord {
+fn topic_record(name: &str, topic_id: uuid::Uuid, partitions: PartitionCount) -> MetadataRecord {
     MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
         name: name.into(),
         topic_id,
-        partitions,
+        partitions: partitions.0,
         replication_factor: 1,
     })
+}
+
+use krabka_raft::NodeId;
+
+use crate::test_support::PartitionCount;
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct GroupTopicSetup<'a> {
+    #[default("orders")]
+    pub name: &'a str,
+    pub topic_id: uuid::Uuid,
+    #[default(PartitionCount(2))]
+    pub partitions: PartitionCount,
+    #[default(NodeId(1))]
+    pub node: NodeId,
 }
 
 /// A `V1Topic` record plus one `V1Partition` per index, assigned to
@@ -73,16 +142,19 @@ fn topic_record(name: &str, topic_id: uuid::Uuid, partitions: i32) -> MetadataRe
 /// real count comes from the `V1Partition` records that follow it -- so a
 /// topic meant to be assignable needs both, unlike [`topic_record`] alone
 /// (used only where a test never reaches the assignor).
-pub(super) fn topic_with_partitions(
-    name: &str,
-    topic_id: uuid::Uuid,
-    partitions: i32,
-    node: krabka_raft::NodeId,
-) -> Vec<MetadataRecord> {
+pub(super) fn topic_with_partitions(setup: GroupTopicSetup<'_>) -> Vec<MetadataRecord> {
+    let GroupTopicSetup {
+        name,
+        topic_id,
+        partitions,
+        node,
+    } = setup;
     let mut records = vec![topic_record(name, topic_id, partitions)];
-    records.extend((0..partitions).map(|partition| {
+    records.extend((0..partitions.0).map(|partition| {
         MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
-            name, partition, node,
+            name,
+            krabka_ids::PartitionIndex(partition),
+            node,
         ))
     }));
     records
@@ -141,7 +213,7 @@ pub(super) fn subscribed_names_describe_denied_table() {
                 .collect::<Vec<_>>()
         });
         assert!(
-            crate::handlers::subscribed_names_describe_denied(
+            crate::handlers::acl_gates::subscribed_names_describe_denied(
                 &authorizer,
                 &image,
                 &ctx,
@@ -155,29 +227,38 @@ pub(super) fn streams_request(
     group_id: &str,
     member_id: &str,
 ) -> krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
-    streams_request_with_topology(group_id, member_id, "in", Vec::new())
+    streams_request_with_topology(StreamsTopologySetup {
+        group_id,
+        member_id,
+        ..Default::default()
+    })
+}
+
+use krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo;
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(super) struct StreamsTopologySetup<'a> {
+    #[default("g")]
+    pub group_id: &'a str,
+    #[default("m1")]
+    pub member_id: &'a str,
+    #[default("in")]
+    pub source_topic: &'a str,
+    pub state_changelog_topics: Vec<TopicInfo>,
 }
 
 pub(super) fn streams_request_with_topology(
-    group_id: &str,
-    member_id: &str,
-    source_topic: &str,
-    state_changelog_topics: Vec<
-        krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo,
-    >,
+    setup: StreamsTopologySetup<'_>,
 ) -> krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
-    use krabka_protocol::owned::streams_group_heartbeat_request::{
-        StreamsGroupHeartbeatRequest, Subtopology, Topology,
-    };
-    StreamsGroupHeartbeatRequest {
-        group_id: group_id.into(),
-        member_id: member_id.into(),
-        member_epoch: 0,
-        rebalance_timeout_ms: 1_000,
-        active_tasks: Some(vec![]),
-        standby_tasks: Some(vec![]),
-        warmup_tasks: Some(vec![]),
-        topology: Some(Topology {
+    use krabka_protocol::owned::streams_group_heartbeat_request::{Subtopology, Topology};
+    let StreamsTopologySetup {
+        group_id,
+        member_id,
+        source_topic,
+        state_changelog_topics,
+    } = setup;
+    crate::test_support::streams_join_request(
+        Topology {
             epoch: 1,
             subtopologies: vec![Subtopology {
                 subtopology_id: "0".into(),
@@ -186,7 +267,10 @@ pub(super) fn streams_request_with_topology(
                 ..Default::default()
             }],
             ..Default::default()
-        }),
-        ..Default::default()
-    }
+        },
+        crate::test_support::StreamsJoinSetup {
+            group_id,
+            member_id,
+        },
+    )
 }

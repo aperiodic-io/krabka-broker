@@ -23,7 +23,12 @@ mod quorum_forwarder;
 #[cfg(test)]
 mod test_support;
 
-pub(crate) use self::{fatal_fault::or_fatal_fault, image_watch::watch_image_loop};
+pub(crate) use self::{
+    fatal_fault::or_fatal_fault,
+    image_watch::{
+        next_image_until_shutdown, next_published_image, wait_for_image_change, watch_image_loop,
+    },
+};
 pub use self::{observer_source::ObserverSource, quorum_forwarder::QuorumForwarder};
 
 #[async_trait::async_trait]
@@ -100,9 +105,7 @@ pub trait MetadataSource: Send + Sync {
         &self,
         _mutations: Vec<DelegationTokenMutation>,
     ) -> Result<SubmitChangeResult, RaftError> {
-        Err(RaftError::ChangeRejected(
-            "metadata source does not support generation-bound token mutations".to_string(),
-        ))
+        Err(unsupported_token_mutations("source"))
     }
     async fn change_membership(&self, new_voters: BTreeSet<NodeId>) -> Result<(), RaftError>;
     async fn add_learner(&self, node_id: NodeId, node: Node) -> Result<(), RaftError>;
@@ -165,6 +168,12 @@ pub trait MetadataSource: Send + Sync {
     async fn cancel(&self);
 }
 
+fn unsupported_token_mutations(component: &str) -> RaftError {
+    RaftError::ChangeRejected(format!(
+        "metadata {component} does not support generation-bound token mutations"
+    ))
+}
+
 /// Write side for broker-only nodes: forward a batch to the controller
 /// quorum leader.
 #[async_trait::async_trait]
@@ -177,9 +186,7 @@ pub trait MetadataWriter: Send + Sync {
         &self,
         _mutations: Vec<DelegationTokenMutation>,
     ) -> Result<SubmitChangeResult, RaftError> {
-        Err(RaftError::ChangeRejected(
-            "metadata writer does not support generation-bound token mutations".to_string(),
-        ))
+        Err(unsupported_token_mutations("writer"))
     }
     /// Forward a raw request to the controller quorum.
     async fn forward_raw(

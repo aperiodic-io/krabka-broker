@@ -72,7 +72,6 @@ const DELETE_ACLS_VERSION: i16 = 3;
 //   * Fetch v12 — flexible (FLEXIBLE_MIN=12) and still uses topic
 //     `name` rather than topic_id, and predates KIP-903's tagged
 //     `replica_state` (v ≥ 15) so the request stays a simple shape.
-const PRODUCE_VERSION: i16 = 11;
 const FETCH_VERSION: i16 = 12;
 
 // T24 versions:

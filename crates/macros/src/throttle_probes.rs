@@ -20,24 +20,20 @@ pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
             }
             let module = &entry.names.response_module;
             let response = &entry.names.response_type;
-            probes.push(moxy::template! {
-                (krabka_protocol::owned::{{ module }}::API_KEY, {
-                    fn probe(version: ApiVersion) -> ThrottlePosition {
-                        use krabka_protocol::owned::{{ module }} as schema;
-
-                        @if sets_sentinel {
-                            let response = schema::{{ response }} {
-                                throttle_time_ms: SENTINEL,
-                                ..Default::default()
-                            };
-                        } @else {
-                            let response = schema::{{ response }}::default();
-                        }
-                        position(&response, version, &schema::default_json(version))
-                    }
-                    probe as Probe
-                })
-            });
+            probes.push(probe_entry(
+                module,
+                &moxy::template! {
+                                @if sets_sentinel {
+                                    let response = schema::{{ response }} {
+                                        throttle_time_ms: SENTINEL,
+                                        ..Default::default()
+                                    };
+                                } @else {
+                                    let response = schema::{{ response }}::default();
+                                }
+                                position(&response, version, &schema::default_json(version))
+                },
+            ));
         }
     }
     for entry in section(&sections, "legacy_split") {
@@ -49,30 +45,25 @@ pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
         };
         let module = &entry.names.response_module;
         let response = &entry.names.response_type;
-        probes.push(moxy::template! {
-            (krabka_protocol::owned::{{ module }}::API_KEY, {
-                fn probe(version: ApiVersion) -> ThrottlePosition {
-                    use krabka_protocol::{
-                        kafka_3_6_2::owned::{{ module }} as legacy, owned::{{ module }} as schema,
-                    };
-
-                    if version < {{ canonical_from }} {
-                        let response = legacy::{{ response }} {
-                            throttle_time_ms: SENTINEL,
-                            ..Default::default()
-                        };
-                        position(&response, version, &legacy::default_json(version))
-                    } else {
-                        let response = schema::{{ response }} {
-                            throttle_time_ms: SENTINEL,
-                            ..Default::default()
-                        };
-                        position(&response, version, &schema::default_json(version))
-                    }
-                }
-                probe as Probe
-            })
-        });
+        probes.push(probe_entry(
+            module,
+            &moxy::template! {
+                        use krabka_protocol::kafka_3_6_2::owned::{{ module }} as legacy;
+                        if version < {{ canonical_from }} {
+                            let response = legacy::{{ response }} {
+                                throttle_time_ms: SENTINEL,
+                                ..Default::default()
+                            };
+                            position(&response, version, &legacy::default_json(version))
+                        } else {
+                            let response = schema::{{ response }} {
+                                throttle_time_ms: SENTINEL,
+                                ..Default::default()
+                            };
+                            position(&response, version, &schema::default_json(version))
+                        }
+            },
+        ));
     }
 
     Ok(moxy::template! {
@@ -82,4 +73,17 @@ pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
             }
         ]
     })
+}
+
+/// Both canonical and legacy probes share the registry entry and schema alias.
+fn probe_entry(module: &moxy::token::Ident, body: &TokenStream) -> TokenStream {
+    moxy::template! {
+        (krabka_protocol::owned::{{ module }}::API_KEY, {
+            fn probe(version: ApiVersion) -> ThrottlePosition {
+                use krabka_protocol::owned::{{ module }} as schema;
+                {{ body }}
+            }
+            probe as Probe
+        })
+    }
 }

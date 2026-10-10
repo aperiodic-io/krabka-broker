@@ -3,25 +3,52 @@
 //! own data dir five times running never leaves the quorum leaderless, and that
 //! a leader the network isolates gives its epoch up instead of holding it.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use krabka_raft::{
-    ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax,
-    kraft::{KraftController, NodeId, snapshot_fetch::MetadataSnapshotFetchMax},
+use crate::{
+    harness as fixture,
+    harness::{
+        STAGGERED_TIMEOUTS, await_single_leader, await_until, metadata_log, start_engines,
+        topic_record, voter_set,
+    },
 };
 
-use crate::harness::{
-    STAGGERED_TIMEOUTS, await_single_leader, await_until, build_engine, metadata_log,
-    start_engines, topic_record, voter_set,
-};
+/// Start the failover fixture and retain its directories through the scenario.
+async fn elected_cluster(
+    net: &crate::sim_net::SimNet,
+    setup: crate::harness::SimClusterSetup<'_>,
+) -> (Vec<tempfile::TempDir>, fixture::NodeId, u32) {
+    let ids = setup.ids;
+    let dirs = start_engines(net, setup);
+    let (leader, epoch) = await_single_leader(net, ids, fixture::Duration::from_secs(10)).await;
+    (dirs, leader, epoch)
+}
 
 /// Polls `ctrl`'s quorum-state snapshot until `f` accepts it, or panics.
 ///
 /// This is the view `DescribeQuorum`, Metadata and `BrokerHeartbeat` all serve
 /// from, so it is the right place to observe whether a node still answers as
 /// the controller leader.
-async fn await_quorum_state<F>(ctrl: &KraftController, timeout: Duration, mut f: F)
-where
+async fn await_surviving_leader(
+    net: &crate::sim_net::SimNet,
+    ids: &[fixture::NodeId],
+    former: fixture::NodeId,
+    former_epoch: u32,
+) -> (Vec<fixture::NodeId>, fixture::NodeId, u32) {
+    let survivors = ids
+        .iter()
+        .copied()
+        .filter(|id| *id != former)
+        .collect::<Vec<_>>();
+    let (leader, epoch) =
+        await_single_leader(net, &survivors, fixture::Duration::from_secs(15)).await;
+    assert2::assert!((leader != former, epoch > former_epoch) == (true, true));
+    (survivors, leader, epoch)
+}
+
+async fn await_quorum_state<F>(
+    ctrl: &fixture::KraftController,
+    timeout: fixture::Duration,
+    mut f: F,
+) where
     F: FnMut(&krabka_raft::kraft::QuorumStateSnapshot) -> bool,
 {
     let deadline = tokio::time::Instant::now() + timeout;
@@ -46,9 +73,15 @@ async fn leader_failure_reelects() {
     let (net, ids) = crate::harness::three_voter_network();
     let cid = uuid::Uuid::from_u128(300);
 
-    let _dirs = start_engines(&net, &ids, cid, &STAGGERED_TIMEOUTS);
-
-    let (leader, epoch1) = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
+    let (_dirs, leader, epoch1) = elected_cluster(
+        &net,
+        crate::harness::SimClusterSetup {
+            ids: &ids,
+            cluster_id: cid,
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Kill the leader: shut it down and remove it from the registry so peers see
     // it as unreachable.
@@ -56,14 +89,11 @@ async fn leader_failure_reelects() {
     net.remove(leader);
 
     // The two survivors must elect a NEW single leader at a higher epoch.
-    let survivors: Vec<NodeId> = ids.iter().copied().filter(|&id| id != leader).collect();
-    let (new_leader, epoch2) = await_single_leader(&net, &survivors, Duration::from_secs(15)).await;
-    assert2::assert!(new_leader != leader);
-    assert2::assert!(epoch2 > epoch1);
+    let (survivors, new_leader, _epoch2) = await_surviving_leader(&net, &ids, leader, epoch1).await;
 
     // A submit to the new leader commits across the two survivors.
     tokio::time::timeout(
-        Duration::from_secs(10),
+        fixture::Duration::from_secs(10),
         net.get(new_leader)
             .unwrap()
             .submit_change(vec![topic_record("post-failover", 7)]),
@@ -74,7 +104,7 @@ async fn leader_failure_reelects() {
 
     for &id in &survivors {
         let ctrl = net.get(id).unwrap();
-        await_until(Duration::from_secs(10), || {
+        await_until(fixture::Duration::from_secs(10), || {
             ctrl.current_image().topic("post-failover").map(|_| ())
         })
         .await;
@@ -103,19 +133,25 @@ async fn leader_failure_reelects() {
 async fn repeated_leader_restart_reelects() {
     let (net, ids) = crate::harness::three_voter_network();
     let cid = uuid::Uuid::from_u128(301);
-    let mut dirs: HashMap<NodeId, tempfile::TempDir> = HashMap::new();
-    for (i, &id) in ids.iter().enumerate() {
-        let (ctrl, dir) = build_engine(id, &ids, cid, STAGGERED_TIMEOUTS[i], &net);
-        net.register(id, ctrl);
-        dirs.insert(id, dir);
-    }
+    let dirs: fixture::HashMap<_, _> = ids
+        .iter()
+        .copied()
+        .zip(start_engines(
+            &net,
+            crate::harness::SimClusterSetup {
+                ids: &ids,
+                cluster_id: cid,
+                ..Default::default()
+            },
+        ))
+        .collect();
 
     for _ in 0..5 {
-        let (leader, _) = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
+        let (leader, _) = await_single_leader(&net, &ids, fixture::Duration::from_secs(10)).await;
         net.get(leader).unwrap().shutdown().await;
         net.remove(leader);
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let reopened = KraftController::open(
+        tokio::time::sleep(fixture::Duration::from_millis(50)).await;
+        let reopened = fixture::KraftController::open(
             dirs[&leader].path().to_path_buf(),
             leader,
             cid,
@@ -123,14 +159,14 @@ async fn repeated_leader_restart_reelects() {
             voter_set(&ids),
             STAGGERED_TIMEOUTS[usize::try_from(leader.0 - 1).unwrap()],
             None,
-            ControllerFetchMissLimit::default(),
-            MetadataRaftCommandQueueCapacity::default(),
-            MetadataRaftFetchMax::default(),
-            Arc::new(net.as_peer(leader)),
+            fixture::ControllerFetchMissLimit::default(),
+            fixture::MetadataRaftCommandQueueCapacity::default(),
+            fixture::MetadataRaftFetchMax::default(),
+            fixture::Arc::new(net.as_peer(leader)),
             0,
             krabka_units::prelude::bytes(0),
             krabka_units::prelude::millis(0),
-            MetadataSnapshotFetchMax::default(),
+            fixture::MetadataSnapshotFetchMax::default(),
             metadata_log(),
             krabka_raft::kraft::Activation::default(),
         )
@@ -138,7 +174,7 @@ async fn repeated_leader_restart_reelects() {
         net.register(leader, reopened);
     }
 
-    let _ = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
+    let _ = await_single_leader(&net, &ids, fixture::Duration::from_secs(10)).await;
     for &id in &ids {
         net.get(id).unwrap().shutdown().await;
     }
@@ -163,31 +199,30 @@ async fn repeated_leader_restart_reelects() {
 async fn isolated_leader_resigns_and_rejoins_after_heal() {
     let (net, ids) = crate::harness::three_voter_network();
     let cid = uuid::Uuid::from_u128(302);
-    let mut dirs = Vec::new();
-    for (i, &id) in ids.iter().enumerate() {
-        let (ctrl, dir) = build_engine(id, &ids, cid, STAGGERED_TIMEOUTS[i], &net);
-        net.register(id, ctrl);
-        dirs.push(dir);
-    }
-
-    let (leader, epoch1) = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
+    let (_dirs, leader, epoch1) = elected_cluster(
+        &net,
+        crate::harness::SimClusterSetup {
+            ids: &ids,
+            cluster_id: cid,
+            ..Default::default()
+        },
+    )
+    .await;
     let isolated = net.get(leader).expect("leader is registered");
     net.partition(leader);
 
     // Check-quorum is 1.5x the fetch timeout, and the longest configured
     // timeout here is 450ms, so a resignation is due well inside this budget.
     // Until it resigns the node still names itself leader of `epoch1`.
-    await_quorum_state(&isolated, Duration::from_secs(10), |qs| {
+    await_quorum_state(&isolated, fixture::Duration::from_secs(10), |qs| {
         qs.leader_id.is_none()
     })
     .await;
 
     // The majority side elects its own leader at a higher epoch and commits.
-    let survivors: Vec<NodeId> = ids.iter().copied().filter(|&id| id != leader).collect();
-    let (new_leader, epoch2) = await_single_leader(&net, &survivors, Duration::from_secs(15)).await;
-    assert2::assert!((new_leader != leader, epoch2 > epoch1) == (true, true));
+    let (_survivors, new_leader, epoch2) = await_surviving_leader(&net, &ids, leader, epoch1).await;
     tokio::time::timeout(
-        Duration::from_secs(10),
+        fixture::Duration::from_secs(10),
         net.get(new_leader)
             .expect("new leader is registered")
             .submit_change(vec![topic_record("post-partition", 8)]),
@@ -199,11 +234,11 @@ async fn isolated_leader_resigns_and_rejoins_after_heal() {
     // Heal: the rejoining node attaches to the new leader's epoch as a
     // follower, and replicates what it missed.
     net.heal(leader);
-    await_quorum_state(&isolated, Duration::from_secs(15), |qs| {
+    await_quorum_state(&isolated, fixture::Duration::from_secs(15), |qs| {
         qs.leader_id == Some(new_leader) && qs.leader_epoch >= epoch2
     })
     .await;
-    await_until(Duration::from_secs(15), || {
+    await_until(fixture::Duration::from_secs(15), || {
         isolated.current_image().topic("post-partition").map(|_| ())
     })
     .await;

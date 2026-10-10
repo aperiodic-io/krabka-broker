@@ -227,10 +227,7 @@ fn recover(s: &mut DpState, witnesses: &HashSet<krabka_audit::NodeId>) -> bool {
     // This model does carry an ISR, so give `select_leader` the real one rather
     // than an empty slice: its first rung elects an in-sync survivor cleanly,
     // and feeding it nothing would hide that rung from the model entirely.
-    let in_sync: Vec<krabka_audit::NodeId> = (0..NB_U8)
-        .filter(|&b| has(s.isr, b))
-        .map(|b| krabka_audit::NodeId(node(b)))
-        .collect();
+    let in_sync = s.in_sync_nodes();
     let Some(election) = select_leader(&infos, &in_sync, &ids(s.elr), witnesses) else {
         return false;
     };

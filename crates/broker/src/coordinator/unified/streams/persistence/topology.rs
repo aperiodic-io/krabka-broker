@@ -105,7 +105,7 @@ impl StoredCopartitionGroup {
 /// exact and regex, the repartition sinks it produces and the repartition
 /// sources it consumes, its changelog topics, and any copartition
 /// constraints.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StoredSubtopology {
     pub subtopology_id: String,
     pub source_topics: Vec<String>,

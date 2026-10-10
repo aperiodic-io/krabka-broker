@@ -55,34 +55,40 @@ async fn auto_rebalance_restores_preferred_leader() {
     let dir2 = tempfile::TempDir::new().unwrap();
 
     let mut cfg0 = support::broker_config(
-        0,
-        &client_addrs,
-        &controller_addrs,
-        &voters,
         dir0.path(),
-        krabka_broker::BootstrapMode::Bootstrap,
+        crate::support::ClusterNodeSetup {
+            client_addrs: &client_addrs,
+            controller_addrs: &controller_addrs,
+            voters: crate::support::controller_voters(&voters),
+            mode: krabka_broker::BootstrapMode::Bootstrap,
+            ..Default::default()
+        },
     );
     cfg0.features.auto_leader_rebalance_enable = true;
     cfg0.leader_imbalance_check_interval = krabka_units::secs(1);
 
     let mut cfg1 = support::broker_config(
-        1,
-        &client_addrs,
-        &controller_addrs,
-        &voters,
         dir1.path(),
-        krabka_broker::BootstrapMode::Bootstrap,
+        crate::support::ClusterNodeSetup {
+            index: crate::support::NodeIndex(1),
+            client_addrs: &client_addrs,
+            controller_addrs: &controller_addrs,
+            voters: crate::support::controller_voters(&voters),
+            mode: krabka_broker::BootstrapMode::Bootstrap,
+        },
     );
     cfg1.features.auto_leader_rebalance_enable = true;
     cfg1.leader_imbalance_check_interval = krabka_units::secs(1);
 
     let mut cfg2 = support::broker_config(
-        2,
-        &client_addrs,
-        &controller_addrs,
-        &voters,
         dir2.path(),
-        krabka_broker::BootstrapMode::Bootstrap,
+        crate::support::ClusterNodeSetup {
+            index: crate::support::NodeIndex(2),
+            client_addrs: &client_addrs,
+            controller_addrs: &controller_addrs,
+            voters: crate::support::controller_voters(&voters),
+            mode: krabka_broker::BootstrapMode::Bootstrap,
+        },
     );
     cfg2.features.auto_leader_rebalance_enable = true;
     cfg2.leader_imbalance_check_interval = krabka_units::secs(1);
@@ -118,7 +124,14 @@ async fn auto_rebalance_restores_preferred_leader() {
     // ── Phase 2: create rf=2 topic via PLAINTEXT wire. ────────────────────
     // With 3 registered brokers sorted [1, 2, 3] and rf=2, the round-robin
     // assignment for partition 0 is replicas=[1, 2]. Broker 1 is preferred.
-    create_topic_plaintext(addr, crate::wire::CLIENT_ID, topic, &[1, 2]).await;
+    create_topic_plaintext(
+        addr,
+        crate::support::topics::AssignedTopicSetup {
+            name: (topic).into(),
+            replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
+        },
+    )
+    .await;
 
     wait_partition_exists(&h0, topic, 0).await;
     wait_partition_exists(&h1, topic, 0).await;

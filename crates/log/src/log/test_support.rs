@@ -266,21 +266,7 @@ pub fn transactional_batch(pid: i64, epoch: i16, values: &[&str]) -> RecordBatch
     }
 }
 
-/// Build a 4-byte control-marker key: (version=0: i16, `marker_type`: i16) BE.
-pub fn control_key(marker_type: i16) -> Bytes {
-    let mut buf = [0u8; 4];
-    buf[0..2].copy_from_slice(&0i16.to_be_bytes()); // version = 0
-    buf[2..4].copy_from_slice(&marker_type.to_be_bytes());
-    Bytes::from(buf.to_vec())
-}
-
-/// Build an end-marker value: (version=0: i16, coordinator epoch: i32) BE.
-pub fn control_value(coordinator_epoch: i32) -> Bytes {
-    let mut buf = [0u8; 6];
-    buf[0..2].copy_from_slice(&0i16.to_be_bytes());
-    buf[2..6].copy_from_slice(&coordinator_epoch.to_be_bytes());
-    Bytes::from(buf.to_vec())
-}
+krabka_macros::control_marker_fixture!(control_marker);
 
 /// A commit control batch (`marker_type=1`) for the given pid and epoch.
 /// `Log::append` rewrites the offsets.
@@ -313,15 +299,38 @@ fn transaction_marker(pid: i64, epoch: i16, marker_type: i16) -> RecordBatch {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct BarrierEpoch(pub i64);
+
+#[derive(Clone, Copy)]
+pub struct ProducerEpoch(pub i16);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct BarrierMarkerSetup<'a> {
+    #[default("nightly")]
+    pub group: &'a str,
+    #[default(BarrierEpoch(1))]
+    pub epoch: BarrierEpoch,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct HostileBarrierSetup<'a> {
+    pub marker: BarrierMarkerSetup<'a>,
+    #[default(ProducerId(1000))]
+    pub producer: ProducerId,
+    #[default(ProducerEpoch(2))]
+    pub producer_epoch: ProducerEpoch,
+}
+
 /// Build a barrier-marker value: `(version=0: i16, group: string,
 /// epoch: i64, triggered_at: i64)` big-endian, where a string is an `i16`
 /// byte length and then UTF-8 bytes.
-pub fn barrier_value(group: &str, epoch: i64) -> Bytes {
+pub fn barrier_value(group: &str, epoch: BarrierEpoch) -> Bytes {
     let mut buf = Vec::new();
     buf.extend_from_slice(&0i16.to_be_bytes());
     buf.extend_from_slice(&i16::try_from(group.len()).unwrap().to_be_bytes());
     buf.extend_from_slice(group.as_bytes());
-    buf.extend_from_slice(&epoch.to_be_bytes());
+    buf.extend_from_slice(&epoch.0.to_be_bytes());
     buf.extend_from_slice(&1_700_000_000_000i64.to_be_bytes());
     Bytes::from(buf)
 }
@@ -332,7 +341,7 @@ pub fn barrier_value(group: &str, epoch: i64) -> Bytes {
 /// `producer_id` of -1, a `producer_epoch` of -1, and a `base_sequence`
 /// of -1. The attributes set the control bit and leave the transactional
 /// bit clear. `Log::append` rewrites the offsets.
-pub fn barrier_marker(group: &str, epoch: i64) -> RecordBatch {
+pub fn barrier_marker(setup: BarrierMarkerSetup<'_>) -> RecordBatch {
     RecordBatch {
         base_offset: 0,
         last_offset_delta: 0,
@@ -340,7 +349,7 @@ pub fn barrier_marker(group: &str, epoch: i64) -> RecordBatch {
         records: vec![Record {
             offset_delta: 0,
             key: Some(control_key(BARRIER_CONTROL_TYPE)),
-            value: Some(barrier_value(group, epoch)),
+            value: Some(barrier_value(setup.group, setup.epoch)),
             ..Default::default()
         }],
         ..RecordBatch::default()
@@ -351,16 +360,11 @@ pub fn barrier_marker(group: &str, epoch: i64) -> RecordBatch {
 /// `producer_epoch`. The wire format sets both to -1, so this shape is
 /// hostile input. It exists to state that the log decides by
 /// control-record type alone.
-pub fn barrier_marker_from_producer(
-    group: &str,
-    epoch: i64,
-    producer_id: i64,
-    producer_epoch: i16,
-) -> RecordBatch {
+pub fn barrier_marker_from_producer(setup: HostileBarrierSetup<'_>) -> RecordBatch {
     RecordBatch {
-        producer_id,
-        producer_epoch,
-        ..barrier_marker(group, epoch)
+        producer_id: setup.producer.0,
+        producer_epoch: setup.producer_epoch.0,
+        ..barrier_marker(setup.marker)
     }
 }
 
@@ -510,4 +514,15 @@ pub fn check_contiguous_exports(exports: &[super::SegmentExport]) {
         // Each sealed segment ends exactly one offset before its successor.
         assert2::assert!(pair[0].last_offset + 1 == pair[1].base_offset);
     }
+}
+
+/// Several sealed segments and an active segment, with identical batch timestamps.
+pub(crate) fn rolled_sample_log(dir: &std::path::Path) -> Log {
+    let mut log = crate::test_support::segmented_log(dir, krabka_units::kibibytes(1));
+    append_samples(&mut log, 40, 4);
+    assert2::check!(
+        !log.segments.is_empty(),
+        "the appends should have rolled a segment"
+    );
+    log
 }

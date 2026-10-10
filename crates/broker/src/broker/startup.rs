@@ -13,7 +13,7 @@ use crate::{
         Broker, BrokerHandle, DisklessRuntime,
         coordinators::{CoordinatorInputs, CoordinatorStartup, start_coordinators},
         finish::{BrokerStorageStartup, finish_broker_startup},
-        metadata_phase::start_metadata_phase,
+        metadata_phase::{MetadataControlPlane, MetadataPhase, start_metadata_phase},
         runtime::start_broker_runtime,
         storage::{StorageStartup, recover_storage_and_groups},
         transport::{StartupTransport, prepare_startup_transport},
@@ -196,7 +196,14 @@ impl Broker {
         // broker-only node too, reads them from that log. No node submits
         // them. A `Join` node has no seed voter set and relies on
         // `bootstrap_servers` + auto-join instead.
-        let (controller, controller_admin_router, raft_handshake_audit) = start_metadata_phase(
+        let MetadataPhase {
+            control_plane:
+                MetadataControlPlane {
+                    source: controller,
+                    admin_router: controller_admin_router,
+                },
+            audit: raft_handshake_audit,
+        } = start_metadata_phase(
             &mut config,
             controller_listener,
             transport.tls_dynamic.as_ref(),

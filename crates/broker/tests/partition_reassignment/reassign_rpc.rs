@@ -7,9 +7,13 @@
 
 use std::net::SocketAddr;
 
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use tokio::net::TcpStream;
 
-use crate::{kafka_wire, plaintext_wire::CLIENT_ID};
+use crate::{
+    kafka_wire, kafka_wire::ExchangeSetup as WireExchangeSetup, plaintext_wire::CLIENT_ID,
+    support::wire::HeaderEncoding as RequestHeaderEncoding,
+};
 
 /// Drives `AlterPartitionReassignments` over a fresh PLAINTEXT connection. It
 /// returns `(topic_name, [(partition_index, error_code)])` rows.
@@ -53,10 +57,18 @@ pub async fn drive_list_reassignments(
         ..Default::default()
     };
     let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let resp: ListPartitionReassignmentsResponse =
-        kafka_wire::exchange(&mut stream, &req, 46, 0, 1, CLIENT_ID, true)
-            .await
-            .expect("ListPartitionReassignments round-trip");
+    let resp: ListPartitionReassignmentsResponse = kafka_wire::exchange(
+        &mut stream,
+        &req,
+        WireExchangeSetup {
+            api_key: WireApiKey(46),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("ListPartitionReassignments round-trip");
 
     resp.topics
         .into_iter()
@@ -117,10 +129,19 @@ pub async fn alter_reassignments_on(
         topics,
         ..Default::default()
     };
-    let resp: AlterPartitionReassignmentsResponse =
-        kafka_wire::exchange(stream, &req, 45, 1, 1, CLIENT_ID, true)
-            .await
-            .expect("AlterPartitionReassignments round-trip");
+    let resp: AlterPartitionReassignmentsResponse = kafka_wire::exchange(
+        stream,
+        &req,
+        WireExchangeSetup {
+            api_key: WireApiKey(45),
+            version: WireApiVersion(1),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("AlterPartitionReassignments round-trip");
 
     resp.responses
         .into_iter()

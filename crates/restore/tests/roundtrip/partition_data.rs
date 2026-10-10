@@ -22,7 +22,11 @@ async fn restored_partitions_read_back_the_original_batches_at_their_original_of
     let fixture = build_fixture();
     let target = tempfile::tempdir().expect("target parent");
     let log_dir = target.path().join("restored");
-    let args = restore_args(fixture.archive_root.path(), &log_dir, "127.0.0.1:9093", &[]);
+    let args = restore_args(
+        fixture.archive_root.path(),
+        &log_dir,
+        crate::args::RestoreOptions::default(),
+    );
 
     restore(&args).await.expect("restore");
 

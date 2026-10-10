@@ -22,7 +22,7 @@ use crate::{
         },
     },
     handlers::push_telemetry::test_support::{gauge_metric, metrics_data},
-    test_support::peer,
+    test_support::{KafkaErrorCode, peer},
 };
 
 crate::test_support::codec_helpers!(
@@ -33,6 +33,39 @@ crate::test_support::codec_helpers!(
 
 const GZIP: i8 = 1;
 const NONE: i8 = 0;
+
+#[derive(Clone, Copy, Default)]
+struct SubscriptionId(i32);
+
+#[derive(Clone, Copy)]
+struct TelemetryCompressionCode(i8);
+
+#[derive(Clone, Copy, Default)]
+enum TelemetryCompression {
+    #[default]
+    Gzip,
+    Uncompressed,
+    Malformed(TelemetryCompressionCode),
+}
+
+impl TelemetryCompression {
+    fn wire_code(self) -> i8 {
+        match self {
+            Self::Gzip => GZIP,
+            Self::Uncompressed => NONE,
+            Self::Malformed(code) => code.0,
+        }
+    }
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+struct PushSetup {
+    #[default(Uuid::from_u128(0x1234))]
+    instance: Uuid,
+    subscription: SubscriptionId,
+    compression: TelemetryCompression,
+    metrics: Bytes,
+}
 
 fn otlp() -> Vec<u8> {
     metrics_data(vec![gauge_metric(
@@ -46,9 +79,9 @@ fn gzip(raw: &[u8]) -> Bytes {
     krabka_compression::compress(CompressionType::Gzip, raw).expect("compress telemetry payload")
 }
 
-fn response(error_code: i16) -> PushTelemetryResponse {
+fn response(error_code: KafkaErrorCode) -> PushTelemetryResponse {
     PushTelemetryResponse {
-        error_code,
+        error_code: error_code.0,
         ..Default::default()
     }
 }
@@ -71,7 +104,7 @@ impl Client<'_> {
         }
     }
 
-    fn get(&self, instance: Uuid) -> i32 {
+    fn get(&self, instance: Uuid) -> SubscriptionId {
         let image = self.broker.controller.current_image();
         let SubscriptionDecision::Assign(assignment) = self
             .broker
@@ -81,31 +114,31 @@ impl Client<'_> {
         else {
             panic!("fresh client must receive a subscription");
         };
-        assignment.subscription_id
+        SubscriptionId(assignment.subscription_id)
     }
 
     /// The subscription id that the current subscriptions give `instance`,
     /// on any broker.
-    fn current_subscription_id(&self, instance: Uuid) -> i32 {
+    fn current_subscription_id(&self, instance: Uuid) -> SubscriptionId {
         let image = self.broker.controller.current_image();
-        compute_subscription_id(
+        SubscriptionId(compute_subscription_id(
             &compute_subscription(&image, &self.attrs(instance), INTERVAL_MS_DEFAULT),
             instance,
-        )
+        ))
     }
 
-    fn push(
-        &self,
-        instance: Uuid,
-        subscription_id: i32,
-        compression_type: i8,
-        metrics: Bytes,
-    ) -> PushTelemetryResponse {
+    fn push(&self, setup: PushSetup) -> PushTelemetryResponse {
+        let PushSetup {
+            instance,
+            subscription,
+            compression,
+            metrics,
+        } = setup;
         let req = PushTelemetryRequest {
             client_instance_id: ProtoUuid(*instance.as_bytes()),
-            subscription_id,
+            subscription_id: subscription.0,
             terminating: false,
-            compression_type,
+            compression_type: compression.wire_code(),
             metrics,
             ..Default::default()
         };
@@ -160,57 +193,77 @@ async fn push_after_get_checks(unstable: UnstableApiVersions) {
         UnstableApiVersions::Enabled => codes::TELEMETRY_TOO_LARGE,
     };
     let rows = [
-        ("gzip OTLP", GZIP, gzip(&otlp()), codes::NONE),
-        ("uncompressed OTLP", NONE, Bytes::from(otlp()), codes::NONE),
-        ("empty payload", GZIP, Bytes::new(), codes::NONE),
+        (
+            "gzip OTLP",
+            TelemetryCompression::Gzip,
+            gzip(&otlp()),
+            KafkaErrorCode(codes::NONE),
+        ),
+        (
+            "uncompressed OTLP",
+            TelemetryCompression::Uncompressed,
+            Bytes::from(otlp()),
+            KafkaErrorCode(codes::NONE),
+        ),
+        (
+            "empty payload",
+            TelemetryCompression::Gzip,
+            Bytes::new(),
+            KafkaErrorCode(codes::NONE),
+        ),
         (
             "id 9 masks to gzip",
-            9,
+            TelemetryCompression::Malformed(TelemetryCompressionCode(9)),
             gzip(&otlp()),
-            codes::UNSUPPORTED_COMPRESSION_TYPE,
+            KafkaErrorCode(codes::UNSUPPORTED_COMPRESSION_TYPE),
         ),
         (
             "id 12 masks to zstd",
-            12,
+            TelemetryCompression::Malformed(TelemetryCompressionCode(12)),
             gzip(&otlp()),
-            codes::UNSUPPORTED_COMPRESSION_TYPE,
+            KafkaErrorCode(codes::UNSUPPORTED_COMPRESSION_TYPE),
         ),
         (
             "negative id",
-            -1,
+            TelemetryCompression::Malformed(TelemetryCompressionCode(-1)),
             gzip(&otlp()),
-            codes::UNSUPPORTED_COMPRESSION_TYPE,
+            KafkaErrorCode(codes::UNSUPPORTED_COMPRESSION_TYPE),
         ),
         (
             "compressed payload over telemetry.max.bytes",
-            NONE,
+            TelemetryCompression::Uncompressed,
             Bytes::from(vec![0; 1025]),
-            codes::TELEMETRY_TOO_LARGE,
+            KafkaErrorCode(codes::TELEMETRY_TOO_LARGE),
         ),
         (
             "decompressed payload over telemetry.max.bytes",
-            GZIP,
+            TelemetryCompression::Gzip,
             bomb,
-            decompressed_too_large,
+            KafkaErrorCode(decompressed_too_large),
         ),
         (
             "payload that is not OTLP",
-            GZIP,
+            TelemetryCompression::Gzip,
             gzip(b"not-otlp"),
-            codes::INVALID_RECORD,
+            KafkaErrorCode(codes::INVALID_RECORD),
         ),
         (
             "payload that is not gzip",
-            GZIP,
+            TelemetryCompression::Gzip,
             Bytes::from_static(b"not-gzip"),
-            codes::INVALID_RECORD,
+            KafkaErrorCode(codes::INVALID_RECORD),
         ),
     ];
     for (row, (name, compression, payload, expected)) in (100u128..).zip(rows) {
         let instance = Uuid::from_u128(row);
         let subscription_id = client.get(instance);
         assert!(
-            client.push(instance, subscription_id, compression, payload) == response(expected),
+            client.push(PushSetup {
+                instance,
+                subscription: subscription_id,
+                compression,
+                metrics: payload
+            }) == response(expected),
             "row {name} with {unstable:?}"
         );
     }
@@ -244,25 +297,35 @@ async fn push_without_a_get_builds_the_instance() {
             "the current subscription id",
             known,
             client.current_subscription_id(known),
-            codes::NONE,
+            KafkaErrorCode(codes::NONE),
         ),
         (
             "another subscription id",
             other,
-            client.current_subscription_id(other) ^ 1,
-            codes::UNKNOWN_SUBSCRIPTION_ID,
+            SubscriptionId(client.current_subscription_id(other).0 ^ 1),
+            KafkaErrorCode(codes::UNKNOWN_SUBSCRIPTION_ID),
         ),
-        ("the zero id", Uuid::nil(), 0, codes::INVALID_REQUEST),
+        (
+            "the zero id",
+            Uuid::nil(),
+            SubscriptionId(0),
+            KafkaErrorCode(codes::INVALID_REQUEST),
+        ),
         (
             "Uuid.ONE_UUID",
             Uuid::from_u128(1),
-            0,
-            codes::INVALID_REQUEST,
+            SubscriptionId(0),
+            KafkaErrorCode(codes::INVALID_REQUEST),
         ),
     ];
     for (name, instance, subscription_id, expected) in rows {
         assert!(
-            client.push(instance, subscription_id, GZIP, gzip(&otlp())) == response(expected),
+            client.push(PushSetup {
+                instance,
+                subscription: subscription_id,
+                metrics: gzip(&otlp()),
+                ..Default::default()
+            }) == response(expected),
             "row {name}"
         );
     }

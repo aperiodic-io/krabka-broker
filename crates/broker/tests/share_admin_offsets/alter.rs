@@ -14,10 +14,7 @@ use krabka_protocol::owned::alter_share_group_offsets_request::{
 
 use crate::{
     describe::describe_until,
-    harness::{
-        NON_EMPTY_GROUP, NONE, bootstrap_share_state, fetch_until_acquired, join, produce_n,
-        wait_for_share_init,
-    },
+    harness::{NON_EMPTY_GROUP, NONE, fetch_until_acquired, join, wait_for_share_init},
 };
 
 /// Alter resets the SPSO of an empty group.
@@ -36,12 +33,11 @@ use crate::{
 /// reset and invalidated leader cache.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_resets_empty_group() {
-    let (_permit, broker, client, _dir, tid) =
-        crate::support::share::permitted_topic_fixture("t", 1, |_| {}).await;
-    // Make the share coordinator write-ready WITHOUT joining (no members).
-    bootstrap_share_state(&broker, &client, "g1").await;
-    // Produce 6 records so offset 5 exists.
-    produce_n(&client, "t", tid, 0, 6).await;
+    let (_permit, _broker, client, _dir, tid) =
+        crate::harness::seeded_empty_group(crate::support::share::ShareRecordSeedSetup {
+            count: crate::support::share::ShareRecordCount(6),
+        })
+        .await;
 
     // Alter: reset SPSO to 5 on the empty (never-joined) group. This
     // initializes-from-absent at the group epoch 1, and invalidates the
@@ -89,7 +85,11 @@ async fn alter_resets_empty_group() {
     // again, so the acquire reads the reset SPSO 5 via the invalidated leader
     // cache.
     let (member, _epoch) = join(&client, "g1", "t").await;
-    let row = fetch_until_acquired(&client, "g1", &member, tid, 0, 0).await;
+    let row = fetch_until_acquired(
+        &client,
+        crate::support::share::ShareSessionSetup::opening(&member, tid),
+    )
+    .await;
     assert!(
         row.acquired_records[0].first_offset == 5,
         "fetch after Alter must acquire from offset 5, got {:?}",
@@ -103,9 +103,8 @@ async fn alter_resets_empty_group() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_non_empty_group_fenced() {
     let (_permit, broker, client, _dir, tid) =
-        crate::support::share::permitted_topic_fixture("t", 1, |_| {}).await;
-    bootstrap_share_state(&broker, &client, "g1").await;
-    produce_n(&client, "t", tid, 0, 3).await;
+        crate::harness::seeded_empty_group(crate::support::share::ShareRecordSeedSetup::default())
+            .await;
 
     // Live member present (steady-state heartbeat), never leaves.
     let (_member, _epoch) = join(&client, "g1", "t").await;

@@ -179,17 +179,15 @@ mod tests {
         assert!(feature_enabled(&image, "group.version", 1)); // present at 1 → enabled
     }
 
-    /// Kafka's `isShareGroupProtocolEnabled`: share groups are on from a
-    /// finalized `share.version` of 1, and an image without the feature has
-    /// them off.
+    /// Kafka enables share groups at share.version 1 and the DLQ at 2.
     #[test]
-    fn share_groups_follow_the_finalized_share_version() {
+    fn share_group_and_dlq_gates_follow_the_finalized_share_version() {
         use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-        for (finalized, want) in [
-            (None, false),
-            (Some(0), false),
-            (Some(1), true),
-            (Some(2), true),
+        for (finalized, groups, dlq) in [
+            (None, false, false),
+            (Some(0), false, false),
+            (Some(1), true, false),
+            (Some(2), true, true),
         ] {
             let mut image = MetadataImage::new(uuid::Uuid::nil());
             if let Some(level) = finalized {
@@ -198,29 +196,8 @@ mod tests {
                     level,
                 }));
             }
-            assert!(share_groups_enabled(&image) == want, "{finalized:?}");
-        }
-    }
-
-    /// Kafka's `supportsShareGroupDLQ`: the dead-letter queue is on from a
-    /// finalized `share.version` of 2, and off below it or with no level.
-    #[test]
-    fn the_share_dlq_follows_the_finalized_share_version() {
-        use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-        for (finalized, want) in [
-            (None, false),
-            (Some(0), false),
-            (Some(1), false),
-            (Some(2), true),
-        ] {
-            let mut image = MetadataImage::new(uuid::Uuid::nil());
-            if let Some(level) = finalized {
-                image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-                    name: SHARE_VERSION.into(),
-                    level,
-                }));
-            }
-            assert!(share_dlq_supported(&image) == want, "{finalized:?}");
+            assert!(share_groups_enabled(&image) == groups, "{finalized:?}");
+            assert!(share_dlq_supported(&image) == dlq, "{finalized:?}");
         }
     }
 

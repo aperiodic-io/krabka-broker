@@ -242,14 +242,14 @@ mod tests {
         let part_dir = crate::log_dir::partition_dir(log_dir, topic, partition.get());
         std::fs::create_dir_all(&part_dir).unwrap();
         let log = Log::open(&part_dir, LogConfig::default()).unwrap();
-        crate::broker::spawn_partition(
-            topic.to_string(),
-            partition,
-            log_dir.to_path_buf(),
+        crate::test_support::spawn_standalone_partition(
+            log_dir,
             log,
-            crate::log_dir_status::LogDirRegistry::default(),
-            Arc::new(crate::producer_state::ProducerState::new()),
-            false,
+            crate::test_support::StandalonePartitionSetup {
+                topic,
+                partition,
+                ..Default::default()
+            },
         )
     }
 

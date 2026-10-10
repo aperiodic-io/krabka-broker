@@ -5,10 +5,8 @@
 //! exhaustive: a search that hit either cap proves nothing, and the two must
 //! be tuned together.
 
-use stateright::Checker;
-
 use super::{failover_state::FailoverModel, recovery_state::RecoveryModel};
-use crate::model_check::run_bfs;
+use crate::model_check::check_model;
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 80;
@@ -49,21 +47,19 @@ pub(super) const PINNED_UNIQUE_STATES_ELR_RECOVER: usize = 1_246;
 pub(super) const PINNED_UNIQUE_STATES_WITNESS_ELR_UNCLEAN: usize = 532;
 
 pub(super) fn run_failover(model: FailoverModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, MAX_STATES);
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    check_model(
+        model,
         label,
+        (MAX_DEPTH, MAX_STATES, MAX_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }
 
 pub(super) fn run_recovery(model: RecoveryModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, MAX_STATES);
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    check_model(
+        model,
         label,
+        (MAX_DEPTH, MAX_STATES, MAX_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }

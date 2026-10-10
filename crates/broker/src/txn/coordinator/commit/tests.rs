@@ -40,20 +40,16 @@ fn append_errors_map_as_kafka_append_transaction_to_log() {
             codes::UNKNOWN_TOPIC_OR_PARTITION,
             codes::COORDINATOR_NOT_AVAILABLE,
         ),
-        (codes::NOT_ENOUGH_REPLICAS, codes::COORDINATOR_NOT_AVAILABLE),
         (
             codes::NOT_ENOUGH_REPLICAS_AFTER_APPEND,
             codes::COORDINATOR_NOT_AVAILABLE,
         ),
-        (codes::REQUEST_TIMED_OUT, codes::COORDINATOR_NOT_AVAILABLE),
-        (codes::NOT_LEADER_OR_FOLLOWER, codes::NOT_COORDINATOR),
-        (codes::KAFKA_STORAGE_ERROR, codes::NOT_COORDINATOR),
-        (codes::MESSAGE_TOO_LARGE, codes::UNKNOWN_SERVER_ERROR),
-        (codes::RECORD_LIST_TOO_LARGE, codes::UNKNOWN_SERVER_ERROR),
         (codes::CORRUPT_MESSAGE, codes::CORRUPT_MESSAGE),
-        (codes::UNKNOWN_SERVER_ERROR, codes::UNKNOWN_SERVER_ERROR),
     ];
-    for (append, expected) in cases {
+    for (append, expected) in cases
+        .into_iter()
+        .chain(crate::test_support::COORDINATOR_WRITE_ERROR_CASES)
+    {
         assert!(coordinator_append_error(append) == expected, "{append}");
     }
 }

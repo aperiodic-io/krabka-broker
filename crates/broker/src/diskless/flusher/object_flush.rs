@@ -254,7 +254,6 @@ mod tests {
 
     use assert2::assert;
     use bytes::{Bytes, BytesMut};
-    use krabka_metadata::NodeId;
     use krabka_protocol::records::{Record, RecordBatch};
     use object_store::memory::InMemory;
     use tempfile::tempdir;
@@ -488,7 +487,13 @@ mod tests {
     async fn combined_object_stops_after_size_budget() {
         let dir = tempdir().unwrap();
         let first = orders_partition(dir.path());
-        let second = test_partition(dir.path(), "orders", 1, true, NodeId(1));
+        let second = test_partition(
+            dir.path(),
+            crate::diskless::flusher::test_support::FlusherPartitionSetup {
+                partition: krabka_ids::PartitionIndex(1),
+                ..Default::default()
+            },
+        );
         let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         let index = test_index_log().await;
         let cache = index.cache();

@@ -83,7 +83,6 @@ use support::topic_id_for;
 
 use crate::support::{
     client::connect_client,
-    produce::single_partition_produce,
     records::value_record,
     topics::{creatable_topic, create_topic_request},
 };
@@ -107,12 +106,13 @@ async fn produce(client: &Client, topic: &str, values: &[&str]) {
         let mut produced = false;
         for attempt in 1..=5 {
             let resp = client
-                .send(single_partition_produce(
-                    topic,
-                    topic_id,
-                    0,
-                    Some(batch.clone().into()),
-                    (1, 5_000),
+                .send(crate::support::produce::batch_request(
+                    batch.clone(),
+                    crate::support::produce::SinglePartitionProduceSetup {
+                        topic: (topic).into(),
+                        topic_id,
+                        ..Default::default()
+                    },
                 ))
                 .await
                 .expect("produce");
@@ -138,7 +138,12 @@ async fn produce(client: &Client, topic: &str, values: &[&str]) {
 
 async fn create_topic(client: &Client, name: &str) {
     let cr = client
-        .send(create_topic_request(creatable_topic(name, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (name).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics");
     assert!(cr.topics[0].error_code == 0, "create_topic failed: {cr:?}");

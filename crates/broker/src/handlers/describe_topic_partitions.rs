@@ -409,13 +409,17 @@ mod tests {
     use std::sync::Arc;
 
     use assert2::assert;
+    use krabka_ids::{LeaderEpoch, PartitionIndex};
     use krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord};
     use krabka_protocol::owned::describe_topic_partitions_request::{
         Cursor as RequestCursor, TopicRequest,
     };
 
     use super::*;
-    use crate::broker::BrokerHandle;
+    use crate::{
+        broker::BrokerHandle,
+        test_support::{PartitionCount, TopicSetup},
+    };
 
     const VERSION: i16 = krabka_protocol::owned::describe_topic_partitions_response::MAX_VERSION;
 
@@ -423,7 +427,7 @@ mod tests {
 
     use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
 
-    async fn seed_topic_with_epoch(handle: &BrokerHandle, leader_epoch: i32) {
+    async fn seed_topic_with_epoch(handle: &BrokerHandle, leader_epoch: LeaderEpoch) {
         handle
             .broker_arc_for_test()
             .controller
@@ -435,14 +439,15 @@ mod tests {
                     replication_factor: 1,
                 }),
                 MetadataRecord::V1Partition(PartitionRecord {
-                    leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+                    leader_epoch,
                     directories: vec![uuid::Uuid::nil()],
                     partition_epoch: 3,
                     ..crate::handlers::test_support::replicated_partition(
-                        "orders",
-                        0,
-                        NodeId(1),
-                        &[NodeId(1)],
+                        crate::handlers::test_support::ReplicatedPartitionSetup {
+                            leader: NodeId(1),
+                            replicas: &[NodeId(1)],
+                            ..Default::default()
+                        },
                     )
                 }),
             ])
@@ -453,17 +458,27 @@ mod tests {
     /// Seed a topic with `partitions` single-replica partitions, leader node
     /// 1, no ELR. `id_seed` gives each seeded topic a distinct `topic_id` so
     /// row comparisons can pin it.
-    async fn seed_topic(handle: &BrokerHandle, name: &str, id_seed: u128, partitions: i32) {
+    async fn seed_topic(handle: &BrokerHandle, setup: TopicSetup<'_>) {
+        let TopicSetup {
+            topic: name,
+            topic_id,
+            partitions,
+            replication_factor,
+        } = setup;
         let mut records = vec![MetadataRecord::V1Topic(TopicRecord {
             name: name.to_string(),
-            topic_id: uuid::Uuid::from_u128(id_seed),
-            partitions,
-            replication_factor: 1,
+            topic_id,
+            partitions: partitions.0,
+            replication_factor: replication_factor.0,
         })];
-        for index in 0..partitions {
+        for index in 0..partitions.0 {
             records.push(MetadataRecord::V1Partition(PartitionRecord {
                 directories: vec![uuid::Uuid::nil()],
-                ..crate::handlers::test_support::single_replica_partition(name, index, NodeId(1))
+                ..crate::handlers::test_support::single_replica_partition(
+                    name,
+                    krabka_ids::PartitionIndex(index),
+                    NodeId(1),
+                )
             }));
         }
         handle
@@ -490,29 +505,53 @@ mod tests {
         }
     });
 
-    fn request(
-        topics: Vec<&str>,
-        response_partition_limit: i32,
+    #[derive(Clone, Copy)]
+    struct ResponsePartitionLimit(i32);
+
+    #[derive(krabka_macros::FieldDefaults)]
+    struct DescribeTopicsSetup {
+        #[default(vec!["a".to_owned()])]
+        topics: Vec<String>,
+        #[default(ResponsePartitionLimit(2000))]
+        response_partition_limit: ResponsePartitionLimit,
         cursor: Option<RequestCursor>,
-    ) -> DescribeTopicPartitionsRequest {
+    }
+
+    impl DescribeTopicsSetup {
+        /// A one-partition pagination budget over the caller's ordered topic names.
+        fn one_partition(topics: &[&str]) -> Self {
+            Self {
+                topics: topics.iter().map(|name| (*name).to_owned()).collect(),
+                response_partition_limit: ResponsePartitionLimit(1),
+                ..Default::default()
+            }
+        }
+    }
+
+    fn request(setup: DescribeTopicsSetup) -> DescribeTopicPartitionsRequest {
+        let DescribeTopicsSetup {
+            topics,
+            response_partition_limit,
+            cursor,
+        } = setup;
         DescribeTopicPartitionsRequest {
             topics: topics
                 .into_iter()
                 .map(|name| TopicRequest {
-                    name: name.to_string(),
+                    name,
                     ..Default::default()
                 })
                 .collect(),
-            response_partition_limit,
+            response_partition_limit: response_partition_limit.0,
             cursor,
             ..Default::default()
         }
     }
 
-    fn partition_row(index: i32) -> DescribeTopicPartitionsResponsePartition {
+    fn partition_row(index: PartitionIndex) -> DescribeTopicPartitionsResponsePartition {
         DescribeTopicPartitionsResponsePartition {
             error_code: codes::NONE,
-            partition_index: index,
+            partition_index: index.0,
             leader_id: 1,
             leader_epoch: 0,
             replica_nodes: vec![1],
@@ -545,11 +584,27 @@ mod tests {
             .collect()
     }
 
+    fn ordered_a_b_topics() -> [TopicSetup<'static>; 2] {
+        [
+            TopicSetup {
+                topic: "a",
+                ..TopicSetup::single_replica()
+            },
+            TopicSetup {
+                topic: "b",
+                topic_id: uuid::Uuid::from_u128(2),
+                ..TopicSetup::single_replica()
+            },
+        ]
+    }
+
     macro_rules! seeded_topics_fixture {
         (($handle:ident, $dir:ident, $broker:ident, $ctx:ident), $authorizer:expr,
-            [$(($topic:expr, $partitions:expr, $id:expr)),* $(,)?]) => {
+            $topics:expr) => {
             let ($handle, $dir) = start_broker($authorizer).await;
-            $(seed_topic(&$handle, $topic, $partitions, $id).await;)*
+            for setup in $topics {
+                seed_topic(&$handle, setup).await;
+            }
             let $broker = $handle.broker_arc_for_test();
             test_ctx!($ctx, "admin");
         };
@@ -560,12 +615,12 @@ mod tests {
         seeded_topics_fixture!(
             (broker_handle, _dir, broker, ctx),
             Arc::new(DenyTopics(&["c"])),
-            [("a", 1, 1), ("b", 2, 1)]
+            ordered_a_b_topics()
         );
         // Budget of 1: "a" fills it, "b" is truncated with no row (the
         // partition-budget-at-topic-boundary rule), "c" is denied. Without
         // the fix, "c" would vanish instead of appearing after "b".
-        let req = request(vec!["a", "b", "c"], 1, None);
+        let req = request(DescribeTopicsSetup::one_partition(&["a", "b", "c"]));
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -578,7 +633,7 @@ mod tests {
                         name: Some("a".into()),
                         topic_id: WireUuid(uuid::Uuid::from_u128(1).into_bytes()),
                         is_internal: false,
-                        partitions: vec![partition_row(0)],
+                        partitions: vec![partition_row(PartitionIndex(0))],
                         topic_authorized_operations: authorized_operations_bits(
                             broker.config.authorizer.as_ref(),
                             &broker.controller.current_image(),
@@ -610,8 +665,24 @@ mod tests {
     #[tokio::test]
     async fn cursor_offset_on_a_denied_topic_does_not_leak_onto_the_next_topic() {
         let (broker_handle, _dir) = start_broker(Arc::new(DenyTopics(&["a"]))).await;
-        seed_topic(&broker_handle, "a", 1, 1).await;
-        seed_topic(&broker_handle, "b", 2, 3).await;
+        seed_topic(
+            &broker_handle,
+            TopicSetup {
+                topic: "a",
+                ..TopicSetup::single_replica()
+            },
+        )
+        .await;
+        seed_topic(
+            &broker_handle,
+            TopicSetup {
+                topic: "b",
+                topic_id: uuid::Uuid::from_u128(2),
+                partitions: PartitionCount(3),
+                ..TopicSetup::single_replica()
+            },
+        )
+        .await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "admin");
         let cursor = Some(RequestCursor {
@@ -619,7 +690,11 @@ mod tests {
             partition_index: 2,
             ..Default::default()
         });
-        let req = request(vec!["a", "b"], 2000, cursor);
+        let req = request(DescribeTopicsSetup {
+            topics: vec!["a", "b"].into_iter().map(str::to_owned).collect(),
+            cursor,
+            ..Default::default()
+        });
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -632,7 +707,11 @@ mod tests {
                         name: Some("b".into()),
                         topic_id: WireUuid(uuid::Uuid::from_u128(2).into_bytes()),
                         is_internal: false,
-                        partitions: vec![partition_row(0), partition_row(1), partition_row(2),],
+                        partitions: vec![
+                            partition_row(PartitionIndex(0)),
+                            partition_row(PartitionIndex(1)),
+                            partition_row(PartitionIndex(2)),
+                        ],
                         topic_authorized_operations: authorized_operations_bits(
                             broker.config.authorizer.as_ref(),
                             &broker.controller.current_image(),
@@ -660,9 +739,15 @@ mod tests {
         seeded_topics_fixture!(
             (broker_handle, _dir, broker, ctx),
             Arc::new(crate::authorizer::AllowAllAuthorizer),
-            [("a", 1, 1), ("b", 2, 1)]
+            ordered_a_b_topics()
         );
-        let req = request(vec!["b", "a", "b", "a"], 2000, None);
+        let req = request(DescribeTopicsSetup {
+            topics: vec!["b", "a", "b", "a"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            ..Default::default()
+        });
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -701,9 +786,15 @@ mod tests {
             seeded_topics_fixture!(
                 (broker_handle, _dir, broker, ctx),
                 Arc::new(crate::authorizer::AllowAllAuthorizer),
-                [("a", 1, 1)]
+                [TopicSetup {
+                    topic: "a",
+                    ..TopicSetup::single_replica()
+                }]
             );
-            let req = request(vec!["a"], 2000, cursor);
+            let req = request(DescribeTopicsSetup {
+                cursor,
+                ..Default::default()
+            });
 
             let resp = describe(&broker, req, &ctx).await;
 
@@ -729,9 +820,16 @@ mod tests {
         seeded_topics_fixture!(
             (broker_handle, _dir, broker, ctx),
             Arc::new(crate::authorizer::AllowAllAuthorizer),
-            [("a", 1, 2)]
+            [TopicSetup {
+                topic: "a",
+                partitions: PartitionCount(2),
+                ..TopicSetup::single_replica()
+            }]
         );
-        let req = request(vec!["a"], 0, None);
+        let req = request(DescribeTopicsSetup {
+            response_partition_limit: ResponsePartitionLimit(0),
+            ..Default::default()
+        });
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -740,7 +838,7 @@ mod tests {
             .iter()
             .find(|t| t.name.as_deref() == Some("a"))
             .expect("topic a row");
-        assert!(topic.partitions == vec![partition_row(0)]);
+        assert!(topic.partitions == vec![partition_row(PartitionIndex(0))]);
         assert!(
             resp.next_cursor
                 == Some(ResponseCursor {
@@ -765,13 +863,28 @@ mod tests {
         for next_topic_exists in [true, false] {
             let (broker_handle, _dir) =
                 start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
-            seed_topic(&broker_handle, "a", 1, 1).await;
+            seed_topic(
+                &broker_handle,
+                TopicSetup {
+                    topic: "a",
+                    ..TopicSetup::single_replica()
+                },
+            )
+            .await;
             if next_topic_exists {
-                seed_topic(&broker_handle, "b", 2, 1).await;
+                seed_topic(
+                    &broker_handle,
+                    TopicSetup {
+                        topic: "b",
+                        topic_id: uuid::Uuid::from_u128(2),
+                        ..TopicSetup::single_replica()
+                    },
+                )
+                .await;
             }
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "admin");
-            let req = request(vec!["a", "b"], 1, None);
+            let req = request(DescribeTopicsSetup::one_partition(&["a", "b"]));
 
             let resp = describe(&broker, req, &ctx).await;
 
@@ -823,7 +936,10 @@ mod tests {
         );
 
         for (name, error_code, is_internal) in cases {
-            let req = request(vec![name], 2000, None);
+            let req = request(DescribeTopicsSetup {
+                topics: vec![name].into_iter().map(str::to_owned).collect(),
+                ..Default::default()
+            });
             let resp = describe(&broker, req, &ctx).await;
 
             let expected_ops = authorized_operations_bits(
@@ -870,10 +986,12 @@ mod tests {
                 directories: vec![uuid::Uuid::nil(); 3],
                 partition_epoch: 4,
                 ..crate::handlers::test_support::replicated_partition(
-                    "orders",
-                    index,
-                    NodeId(1),
-                    &[NodeId(1), NodeId(2), NodeId(3)],
+                    crate::handlers::test_support::ReplicatedPartitionSetup {
+                        partition: krabka_ids::PartitionIndex(index),
+                        leader: NodeId(1),
+                        replicas: &[NodeId(1), NodeId(2), NodeId(3)],
+                        ..Default::default()
+                    },
                 )
             })
         };
@@ -911,19 +1029,27 @@ mod tests {
         seed_topic_with_elr(&broker_handle, "0:2:3").await;
         let broker = broker_handle.broker_arc_for_test();
         let topic = orders_topic(&broker).await;
-        let row = |index: i32| DescribeTopicPartitionsResponsePartition {
+        let row = |index: PartitionIndex| DescribeTopicPartitionsResponsePartition {
             error_code: codes::NONE,
-            partition_index: index,
+            partition_index: index.0,
             leader_id: 1,
             leader_epoch: 7,
             replica_nodes: vec![1, 2, 3],
             isr_nodes: vec![1],
-            eligible_leader_replicas: Some(if index == 0 { vec![2] } else { vec![] }),
-            last_known_elr: Some(if index == 0 { vec![3] } else { vec![] }),
+            eligible_leader_replicas: Some(if index == PartitionIndex(0) {
+                vec![2]
+            } else {
+                vec![]
+            }),
+            last_known_elr: Some(if index == PartitionIndex(0) {
+                vec![3]
+            } else {
+                vec![]
+            }),
             offline_replicas: vec![2, 3],
             ..Default::default()
         };
-        assert!(topic.partitions == vec![row(0), row(1)]);
+        assert!(topic.partitions == vec![row(PartitionIndex(0)), row(PartitionIndex(1))]);
 
         broker_handle.shutdown().await;
     }
@@ -935,7 +1061,7 @@ mod tests {
     async fn response_partition_carries_leader_epoch() {
         let (broker_handle, _dir) =
             start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
-        seed_topic_with_epoch(&broker_handle, 9).await;
+        seed_topic_with_epoch(&broker_handle, LeaderEpoch(9)).await;
         let broker = broker_handle.broker_arc_for_test();
         let topic = orders_topic(&broker).await;
         let part = topic

@@ -40,10 +40,9 @@ use std::time::{Duration, Instant};
 use assert2::{assert, check};
 use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId, config::NodeRole};
 
-/// Kafka 4.3.1 is the compatibility oracle: its `kafka-features.sh` exposes
-/// the explicit `upgrade` / `downgrade` verbs, and its `AdminClient` routes
-/// admin writes to whichever node `Metadata` names as controller.
-const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.3.1";
+// Kafka 4.3.1 is the compatibility oracle: its `kafka-features.sh` exposes
+// the explicit `upgrade` / `downgrade` verbs, and its `AdminClient` routes
+// admin writes to whichever node `Metadata` names as controller.
 
 /// One controller-only node and two broker-only nodes, each with a client and
 /// a controller port. Allocated once per process so two container suites can
@@ -190,7 +189,12 @@ fn command_config() -> &'static std::path::Path {
 /// with forwarding.
 async fn kafka_tool(tool: &str, bootstrap: &str, args: &[&str]) -> std::process::Output {
     let mount = format!("{}:/krabka-config", command_config().display());
-    let mut full = support::jvm_admin_args(KAFKA_IMAGE, &mount, tool, bootstrap);
+    let mut full = support::jvm_admin_args(support::JvmAdminSetup {
+        mount: &mount,
+        tool,
+        bootstrap,
+        ..Default::default()
+    });
     full.extend(args.iter().map(|arg| (*arg).to_owned()));
     let tool = tool.to_owned();
     let out = support::docker_run_blocking(full, "spawn docker run").await;

@@ -9,7 +9,7 @@ use krabka_protocol::owned::{
 };
 use krabka_raft::RaftError;
 
-use crate::{broker::Broker, codes, handlers::forward_to_controller::is_active_controller};
+use crate::{broker::Broker, codes};
 
 context_handler! {
     BrokerRegistrationRequest => BrokerRegistrationResponse,
@@ -17,13 +17,9 @@ context_handler! {
     {
         let image = broker.controller.current_image();
 
-        // Every listener runs the `ClusterAction` gate, the controller listener
-        // included, as Kafka's `ControllerApis.handleBrokerRegistration` does.
-        if crate::handlers::cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            return Ok(response(codes::CLUSTER_AUTHORIZATION_FAILED, -1));
-        }
-        if !is_active_controller(broker) {
-            return Ok(response(codes::NOT_CONTROLLER, -1));
+        // ClusterAction is checked before the active-controller requirement.
+        if let Some(code) = super::registration_listeners::registration_refusal(broker, &image, ctx) {
+            return Ok(response(code, -1));
         }
         // Kafka's controller decides one registration at a time on its event
         // thread. Hold the registration turn from the session check to the
@@ -485,7 +481,7 @@ mod tests {
                     incarnation_id: uuid::Uuid::from_u128(u128::from(node)),
                     host: "broker".into(),
                     log_dirs: vec![uuid::Uuid::from_u128(directory)],
-                    ..crate::test_support::broker_registration(node)
+                    ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
                 },
             ));
         }
@@ -523,16 +519,15 @@ mod wire_tests {
 
     use assert2::assert;
     use krabka_metadata::{
-        BrokerEndpoint, BrokerRegistrationRecord, LeaderEpoch, NodeId, PartitionRecord,
-        TopicConfigRecord, TopicRecord,
+        BrokerRegistrationRecord, LeaderEpoch, NodeId, PartitionRecord, TopicConfigRecord,
+        TopicRecord,
     };
-    use krabka_protocol::owned::broker_registration_request::Feature;
-    use krabka_security::ListenerProtocol;
 
     use super::*;
     use crate::{
         config_keys::MIN_INSYNC_REPLICAS,
         elr::{TopicElr, state::PartitionElr},
+        handlers::forward_to_controller::is_active_controller,
         test_support::{peer, start_broker_with_authorizer},
     };
 
@@ -580,15 +575,12 @@ mod wire_tests {
                 broker_epoch: -1,
                 incarnation_id: uuid::Uuid::from_u128(0xdead),
                 host: "broker-2".into(),
-                endpoints: vec![BrokerEndpoint {
-                    name: "PLAINTEXT".into(),
-                    host: "broker-2".into(),
-                    port: 9092,
-                    protocol: ListenerProtocol::Plaintext,
-                }],
+                endpoints: vec![crate::test_support::plaintext_broker_endpoint(
+                    "broker-2", 9092,
+                )],
                 log_dirs: vec![uuid::Uuid::from_u128(1011)],
                 features: krabka_metadata::supported_feature_ranges(),
-                ..crate::test_support::broker_registration(REGISTERED.0)
+                ..crate::test_support::broker_registration(REGISTERED)
             }),
             MetadataRecord::V1Topic(TopicRecord {
                 name: TOPIC.into(),
@@ -680,16 +672,7 @@ mod wire_tests {
                 security_protocol: 0,
                 ..Default::default()
             }],
-            features: image
-                .finalized_features()
-                .iter()
-                .map(|(name, level)| Feature {
-                    name: name.clone(),
-                    min_supported_version: 0,
-                    max_supported_version: *level,
-                    ..Default::default()
-                })
-                .collect(),
+            features: crate::test_support::finalized_broker_features(&image),
             log_dirs: vec![krabka_protocol::primitives::uuid::Uuid(
                 uuid::Uuid::from_u128(1011).into_bytes(),
             )],

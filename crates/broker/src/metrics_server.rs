@@ -56,13 +56,8 @@ pub(crate) async fn run(
     let bound = listener.local_addr()?;
     tracing::info!(%bound, "metrics server listening");
     let app = router(registry, profiling)?;
-    tokio::spawn(async move {
-        let server = axum::serve(listener, app).with_graceful_shutdown(async move {
-            shutdown.cancelled().await;
-        });
-        if let Err(e) = server.await {
-            tracing::warn!(error = %e, "metrics server error");
-        }
+    crate::http_server::spawn(listener, app, shutdown, |error| {
+        tracing::warn!(error = %error, "metrics server error");
     });
     Ok(bound)
 }

@@ -78,14 +78,3 @@ pub(super) enum Step {
     /// A gated transition tries to spend whatever covers one request.
     Consume(usize),
 }
-
-/// How many different principals appear in `approvals`.
-pub(super) fn distinct(approvals: &[&'static str]) -> usize {
-    let mut seen: Vec<&str> = Vec::with_capacity(approvals.len());
-    for principal in approvals {
-        if !seen.contains(principal) {
-            seen.push(principal);
-        }
-    }
-    seen.len()
-}

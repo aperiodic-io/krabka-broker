@@ -5,6 +5,30 @@ use moxy::{
     token::{Ident, Span, TokenStream, TokenTree},
 };
 
+/// Top-level comma splitting that retains the input's diagnostic span.
+pub(crate) struct CommaArguments {
+    pub(crate) span: Span,
+    parts: Vec<Vec<TokenTree>>,
+}
+
+impl CommaArguments {
+    pub(crate) fn new(input: TokenStream) -> Self {
+        let span = input.span();
+        let tokens = Vec::from(input);
+        Self {
+            span,
+            parts: tokens
+                .split(TokenTree::is_punct_comma)
+                .map(<[TokenTree]>::to_vec)
+                .collect(),
+        }
+    }
+
+    pub(crate) fn parts(&self) -> Vec<&[TokenTree]> {
+        self.parts.iter().map(Vec::as_slice).collect()
+    }
+}
+
 pub(crate) fn name(tokens: TokenStream) -> Result<Ident, ParseError> {
     let tokens: Vec<_> = tokens.into_iter().collect();
     match tokens.as_slice() {
@@ -14,6 +38,48 @@ pub(crate) fn name(tokens: TokenStream) -> Result<Ident, ParseError> {
             "fixture generator needs one item name",
         )),
     }
+}
+
+/// Build named fixture items after validating the generator's item name.
+pub(crate) fn named_items(
+    input: TokenStream,
+    build: impl FnOnce(Ident) -> TokenStream,
+) -> Result<TokenStream, ParseError> {
+    Ok(build(name(input)?))
+}
+
+/// Parse an item name followed by a fixed number of generator arguments.
+pub(crate) fn named_arguments(
+    input: TokenStream,
+    count: usize,
+) -> Result<(Ident, std::vec::IntoIter<TokenStream>), ParseError> {
+    let mut arguments = crate::meta::arguments(input, count)?.into_iter();
+    let name = self::name(arguments.next().expect("item name argument"))?;
+    Ok((name, arguments))
+}
+
+/// Parse the common item-name and crate-path pair of fixture generators.
+pub(crate) fn named_root(input: TokenStream) -> Result<(Ident, TokenStream), ParseError> {
+    let [name, root]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
+        .try_into()
+        .expect("two arguments");
+    Ok((self::name(name)?, root))
+}
+
+/// Assemble a fixture function while leaving its signature and body explicit.
+pub(crate) fn function(
+    input: TokenStream,
+    visibility: &TokenStream,
+    parameters: &TokenStream,
+    returns: &TokenStream,
+    body: &TokenStream,
+) -> Result<TokenStream, ParseError> {
+    let name = self::name(input)?;
+    Ok(moxy::template! {
+        {{ visibility }} fn {{ name }}({{ parameters }}) -> {{ returns }} {
+            {{ body }}
+        }
+    })
 }
 
 pub(crate) fn capture_layer(tokens: TokenStream) -> Result<TokenStream, ParseError> {
@@ -236,11 +302,23 @@ pub(crate) fn share_dlq_meters(tokens: TokenStream) -> Result<TokenStream, Parse
 }
 
 pub(crate) fn record_batch(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = name(tokens)?;
+    let mut args = crate::meta::arguments(tokens.clone(), 1)
+        .or_else(|_| crate::meta::arguments(tokens, 2))?
+        .into_iter();
+    let name = name(args.next().expect("fixture name"))?;
+    let (epoch_field, last_offset) = if let Some(epoch) = args.next() {
+        (
+            moxy::template! { partition_leader_epoch: {{ epoch }}, },
+            moxy::template! { n - 1 },
+        )
+    } else {
+        (TokenStream::new(), moxy::template! { (n - 1).max(0) })
+    };
     Ok(moxy::template! {
         fn {{ name }}(n: i32, payload_size: usize) -> ::krabka_protocol::records::RecordBatch {
             ::krabka_protocol::records::RecordBatch {
-                last_offset_delta: (n - 1).max(0),
+                {{ epoch_field }}
+                last_offset_delta: {{ last_offset }},
                 records: (0..n).map(|offset_delta| ::krabka_protocol::records::Record {
                     offset_delta,
                     key: Some(::bytes::Bytes::from(format!("k{offset_delta:08}"))),
@@ -434,6 +512,114 @@ pub(crate) fn snapshot_topic(tokens: TokenStream) -> Result<TokenStream, ParseEr
                 image.apply(&MetadataRecord::V1Partition(PartitionRecord {
                     topic: "orders".into(), partition, leader: NodeId(1), replicas: vec![NodeId(1)], isr: vec![NodeId(1)], leader_epoch: LeaderEpoch(0), adding_replicas: vec![], removing_replicas: vec![], directories: vec![], partition_epoch: 0,
                 }));
+            }
+        }
+    })
+}
+
+pub(crate) fn s3_archive_config(tokens: TokenStream) -> Result<TokenStream, ParseError> {
+    let [name_tokens, config_type]: [TokenStream; 2] = crate::meta::arguments(tokens, 2)?
+        .try_into()
+        .expect("two arguments");
+    let name = name(name_tokens)?;
+    Ok(moxy::template! {
+        fn {{ name }}() -> {{ config_type }} {
+            {{ config_type }} {
+                bucket: "backups".into(), region: "eu-west-1".into(),
+                endpoint: Some("http://minio:9000".into()),
+                access_key_id: Some("key".into()), secret_access_key: Some("secret".into()),
+                allow_http: true, ..Default::default()
+            }
+        }
+    })
+}
+
+pub(crate) fn benchmark_latency(tokens: TokenStream) -> Result<TokenStream, ParseError> {
+    let name = name(tokens)?;
+    Ok(moxy::template! {
+        fn {{ name }}() -> LatencyPercentiles {
+            use krabka_units::{micros, millis};
+            LatencyPercentiles {
+                p50: micros(1500), p95: micros(3200), p99: micros(4250),
+                p999: millis(9), max: millis(42), mean: micros(1800), count: 600_000,
+            }
+        }
+    })
+}
+
+pub(crate) fn benchmark_scenario(tokens: TokenStream) -> Result<TokenStream, ParseError> {
+    let name = name(tokens)?;
+    Ok(moxy::template! {
+        fn {{ name }}(name: &str, msg_size: krabka_units::ByteSize) -> Scenario {
+            use krabka_units::prelude::*;
+            Scenario {
+                name: name.into(), mode_tag: ModeTag::Ci, msg_size,
+                key_size: ByteSize::ZERO, partitions: 6, replication_factor: 1,
+                producers: 1, consumers: 1, mode: LoadMode::Saturate,
+                acks: Acks::Leader, compression: Compression::None,
+                linger: millis(5), batch_size: kibibytes(16),
+                duration: secs(60), warmup: secs(10), failover: None,
+            }
+        }
+    })
+}
+
+pub(crate) fn simulation_transport(root: TokenStream) -> Result<TokenStream, ParseError> {
+    let root =
+        crate::meta::required_tokens(root, "simulation_transport needs the consensus crate path")?;
+    Ok(moxy::template! {
+        fn can_replicate(&self, follower: NodeId, leader: NodeId) -> bool {
+            follower != leader
+                && !self.partitioned.contains(&follower)
+                && !self.partitioned.contains(&leader)
+                && self.nodes[&leader].machine.role().is_leader()
+        }
+        pub(super) fn send(&mut self, src: NodeId, dst: NodeId, event: {{ root }}::event::Event) {
+            if !self.partitioned.contains(&src) && !self.partitioned.contains(&dst) {
+                self.queue.push_back(Message { src, dst, event });
+            }
+        }
+        pub(super) fn reachable_leader(&self, id: NodeId) -> Option<NodeId> {
+            {{ root }}::simulation_support::reachable_leader(
+                self.nodes[&id].machine.role(), id, &self.partitioned,
+                |leader| self.nodes.get(&leader).is_some_and(|node| node.machine.role().is_leader()),
+            )
+        }
+        fn all_node_ids(&self) -> Vec<NodeId> {
+            self.nodes.keys().copied().collect()
+        }
+    })
+}
+
+pub(crate) fn simulation_heartbeat(input: TokenStream) -> Result<TokenStream, ParseError> {
+    let [root, interval]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
+        .try_into()
+        .expect("two arguments");
+    Ok(moxy::template! {
+        /// Re-broadcast the leader epoch and re-arm its heartbeat timer.
+        fn fire_leader_heartbeat(&mut self, id: {{ root }}::types::NodeId) {
+            if !self.nodes[&id].machine.role().is_leader() { return; }
+            let epoch = self.nodes[&id].machine.quorum_state().leader_epoch;
+            self.apply_action(id, {{ root }}::action::Action::SendBeginQuorumEpoch { epoch });
+            let deadline = self.now.saturating_add_ms({{ interval }});
+            self.nodes.get_mut(&id).unwrap().heartbeat_deadline = Some(deadline);
+        }
+    })
+}
+
+pub(crate) fn delete_topic_request(tokens: TokenStream) -> Result<TokenStream, ParseError> {
+    let name = name(tokens)?;
+    Ok(moxy::template! {
+        /// Delete one named topic using both legacy and flexible request fields.
+        fn {{ name }}(topic: &str) -> ::krabka_protocol::owned::delete_topics_request::DeleteTopicsRequest {
+            ::krabka_protocol::owned::delete_topics_request::DeleteTopicsRequest {
+                topics: ::std::vec![::krabka_protocol::owned::delete_topics_request::DeleteTopicState {
+                    name: Some(topic.into()),
+                    ..Default::default()
+                }],
+                topic_names: ::std::vec![topic.into()],
+                timeout_ms: 5_000,
+                ..Default::default()
             }
         }
     })

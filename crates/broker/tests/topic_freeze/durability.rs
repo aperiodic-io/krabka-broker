@@ -9,7 +9,7 @@ use assert2::check;
 use krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL;
 
 use crate::{
-    control_plane::{freeze_scope, wait_for_registry_len},
+    control_plane::wait_for_registry_len,
     support,
     wire::{CONTROL, accepted, refused},
 };
@@ -27,12 +27,8 @@ async fn a_freeze_survives_a_controller_restart() {
     let dir = tempfile::tempdir().expect("tempdir");
     {
         let (broker, client) = support::start_with_dir(dir.path()).await;
-        let (frozen, _control) =
-            crate::wire::create_controlled_topic(&broker, &client, "orders").await;
-        crate::wire::check_produce!(&broker, &client, "orders", frozen => accepted(1));
-
-        freeze_scope(&client, PATTERN_TYPE_LITERAL, "orders", "cutover").await;
-        crate::wire::check_produce!(&broker, &client, "orders", frozen => refused("literal", "orders", "cutover", 1));
+        let (_frozen, _control) =
+            crate::wire::frozen_topic_with_record(&broker, &client, "orders", "cutover").await;
         broker.shutdown().await;
     }
 

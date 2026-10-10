@@ -314,18 +314,17 @@ impl Segment {
 #[cfg(test)]
 mod tests {
     use krabka_units::prelude::kibibytes;
-    use tempfile::tempdir;
 
     use super::*;
     use crate::segment::test_support::{
-        DENSE_INDEX, NO_LIMIT, sample_batch, seeded_segment, test_batch_at, test_segment,
+        DENSE_INDEX, NO_LIMIT, sample_batch, test_batch_at, test_segment,
     };
 
     #[test]
     fn append_then_read_back() {
         let (_dir, mut seg) = crate::segment::test_support::test_segment();
-        let b1 = sample_batch(0, 3, 1_000_000);
-        let b2 = sample_batch(3, 2, 2_000_000);
+        let b1 = sample_batch(crate::segment::test_support::FIRST_LARGE_TIMESTAMP_BATCH);
+        let b2 = sample_batch(crate::segment::test_support::SECOND_LARGE_TIMESTAMP_BATCH);
         seg.append(&b1, kibibytes(4)).unwrap();
         seg.append(&b2, kibibytes(4)).unwrap();
         let read = seg.read(Offset(0), NO_LIMIT).unwrap();
@@ -335,8 +334,12 @@ mod tests {
 
     #[test]
     fn append_rejects_offset_successor_overflow_before_writing() {
-        let (dir, mut seg) = crate::segment::test_support::segment_at(i64::MAX);
-        let batch = sample_batch(i64::MAX, 1, 100);
+        let (dir, mut seg) = crate::segment::test_support::segment_at(crate::Offset(i64::MAX));
+        let batch = sample_batch(crate::segment::test_support::SampleBatchSetup {
+            offset: crate::Offset(i64::MAX),
+            timestamp: crate::segment::test_support::RecordTimestamp(100),
+            ..Default::default()
+        });
 
         let error = seg.append(&batch, DENSE_INDEX).unwrap_err();
 
@@ -352,18 +355,44 @@ mod tests {
 
     #[test]
     fn append_after_truncate_writes_at_new_eof() {
-        let dir = tempdir().unwrap();
-        let mut seg = seeded_segment(dir.path(), 0, &[(0, 1, 100)]);
+        let (_dir, mut seg) = crate::segment::test_support::seeded_fixture(
+            crate::segment::test_support::SeededSegmentSetup {
+                batches: &[crate::segment::test_support::ONE_RECORD_BATCH],
+                ..Default::default()
+            },
+        );
         let expected_position = seg.size().bytes_u64();
-        seg.append(&sample_batch(1, 1, 200), DENSE_INDEX).unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SECOND_SINGLE_RECORD_BATCH),
+            DENSE_INDEX,
+        )
+        .unwrap();
 
         seg.truncate_to_relative(1).unwrap();
-        let position = seg.append(&sample_batch(1, 1, 300), DENSE_INDEX).unwrap();
+        let position = seg
+            .append(
+                &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                    offset: crate::Offset(1),
+                    timestamp: crate::segment::test_support::RecordTimestamp(300),
+                    ..Default::default()
+                }),
+                DENSE_INDEX,
+            )
+            .unwrap();
 
         let read = seg.read(Offset(0), NO_LIMIT).unwrap();
         assert2::assert!(position == expected_position);
         assert2::assert!(seg.last_offset() == Offset(1));
-        assert2::assert!(read == vec![sample_batch(0, 1, 100), sample_batch(1, 1, 300)]);
+        assert2::assert!(
+            read == vec![
+                sample_batch(crate::segment::test_support::ONE_RECORD_BATCH),
+                sample_batch(crate::segment::test_support::SampleBatchSetup {
+                    offset: crate::Offset(1),
+                    timestamp: crate::segment::test_support::RecordTimestamp(300),
+                    ..Default::default()
+                })
+            ]
+        );
     }
 
     #[test]
@@ -372,7 +401,10 @@ mod tests {
         seg.seal().unwrap();
         assert2::assert!(seg.is_sealed());
         let err = seg
-            .append(&sample_batch(0, 1, 0), kibibytes(4))
+            .append(
+                &sample_batch(crate::segment::test_support::SampleBatchSetup::default()),
+                kibibytes(4),
+            )
             .unwrap_err();
         assert2::assert!(matches!(err, LogError::Io(_)));
     }
@@ -382,7 +414,7 @@ mod tests {
         let (dir, mut seg) = test_segment();
         // Build a batch as a "producer" would, with its own base_offset and
         // leader epoch, then encode to verbatim wire bytes.
-        let mut producer = test_batch_at(0);
+        let mut producer = test_batch_at(crate::Offset(0));
         producer.base_offset = 999; // producer-supplied (to be overwritten)
         producer.partition_leader_epoch = -1; // producer-supplied
         producer.last_offset_delta = 0;
@@ -424,7 +456,7 @@ mod tests {
     #[test]
     fn append_verbatim_updates_index_and_last_offset() {
         let (dir, mut seg) = test_segment();
-        let mut producer = test_batch_at(0);
+        let mut producer = test_batch_at(crate::Offset(0));
         producer.last_offset_delta = 2; // spans 3 offsets
         producer.max_timestamp = 5_000;
         let mut wire = bytes::BytesMut::new();
@@ -446,7 +478,7 @@ mod tests {
         let (dir, mut seg) = test_segment();
         seg.seal().unwrap();
         let mut wire = bytes::BytesMut::new();
-        test_batch_at(0).encode(&mut wire).unwrap();
+        test_batch_at(crate::Offset(0)).encode(&mut wire).unwrap();
         let err = seg
             .append_verbatim(&wire.freeze(), Offset(0), 0, 0, LeaderEpoch(0), DENSE_INDEX)
             .unwrap_err();

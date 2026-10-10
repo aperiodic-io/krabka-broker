@@ -34,3 +34,13 @@ pub(super) fn member_with_protocols(id: &str, protocols: Vec<(&str, &[u8])>) -> 
 pub(super) fn static_member(member_id: &str, instance_id: &str) -> Member {
     sample_member(member_id).with_instance_id(Some(instance_id.to_string()))
 }
+
+/// Complete a range rebalance and install the test's assignment for member m1.
+pub(super) fn stabilize_m1(group: &mut super::group::ClassicGroup) {
+    group.complete_rebalance("range");
+    group.install_assignments(std::collections::HashMap::from([(
+        "m1".into(),
+        Bytes::from_static(b"assignment-bytes"),
+    )]));
+    assert2::assert!(group.state == super::group::GroupState::Stable);
+}

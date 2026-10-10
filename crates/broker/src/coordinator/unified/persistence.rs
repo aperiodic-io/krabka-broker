@@ -650,6 +650,24 @@ macro_rules! assert_member_record_count {
 }
 pub(crate) use assert_member_record_count;
 
+/// The topics in id order and the partitions ascending, so that two equal
+/// assignments give equal records.
+pub(super) fn sorted_partitions(
+    partitions: &std::collections::HashMap<krabka_protocol::primitives::uuid::Uuid, Vec<i32>>,
+) -> Vec<(krabka_protocol::primitives::uuid::Uuid, Vec<i32>)> {
+    let mut topics: Vec<(krabka_protocol::primitives::uuid::Uuid, Vec<i32>)> = partitions
+        .iter()
+        .filter(|(_, partitions)| !partitions.is_empty())
+        .map(|(topic_id, partitions)| {
+            let mut partitions = partitions.clone();
+            partitions.sort_unstable();
+            (*topic_id, partitions)
+        })
+        .collect();
+    topics.sort_by_key(|(topic_id, _)| topic_id.0);
+    topics
+}
+
 #[cfg(test)]
 mod tests {
     use assert2::assert;

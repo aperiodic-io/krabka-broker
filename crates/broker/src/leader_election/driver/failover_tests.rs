@@ -10,14 +10,47 @@ use super::*;
 use crate::{
     heartbeat::controller_state::{LivenessTransition, TestClock},
     leader_election::test_support::{
-        fake_source, img_with_partition, liveness_with_alive, liveness_with_dead,
-        one_partition_change, recovery_handle_for_tests, register_brokers, stalled_fake_source,
+        ElectionSetup, ExpectedPartitionSetup, fake_source, img_with_partition,
+        liveness_with_alive, liveness_with_dead, one_partition_change, recovery_handle_for_tests,
+        register_brokers, stalled_fake_source,
     },
 };
 
+struct SweepFixture {
+    liveness: Arc<ControllerLivenessState>,
+    metrics: crate::metrics::BrokerMetrics,
+    recovery: crate::unclean_recovery::UncleanRecoveryHandle,
+    state: LivenessTickState,
+}
+
+impl SweepFixture {
+    async fn new(dead: &[u64], alive: &[u64]) -> Self {
+        Self {
+            liveness: liveness_with_dead(dead, alive).await,
+            metrics: crate::metrics::BrokerMetrics::new(),
+            recovery: recovery_handle_for_tests(),
+            state: LivenessTickState::default(),
+        }
+    }
+
+    async fn sweep(&mut self, controller: &Arc<dyn crate::metadata_source::MetadataSource>) {
+        sweep_dead_leaders(
+            controller,
+            NodeId(7),
+            &self.liveness,
+            &self.metrics,
+            &self.recovery,
+            &mut self.state,
+        )
+        .await;
+    }
+}
+
 #[tokio::test]
 async fn on_broker_dead_submits_failover_when_this_controller_is_leader() {
-    let img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+    let img = img_with_partition(ElectionSetup {
+        ..Default::default()
+    });
     let source = fake_source(img, Some(NodeId(7)));
     let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
     let liveness = liveness_with_alive(&[2, 3]).await;
@@ -43,7 +76,9 @@ async fn on_broker_dead_submits_failover_when_this_controller_is_leader() {
 
 #[tokio::test(start_paused = true)]
 async fn on_broker_dead_bounds_a_stalled_commit() {
-    let img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+    let img = img_with_partition(ElectionSetup {
+        ..Default::default()
+    });
     let source = stalled_fake_source(img, Some(NodeId(7)));
     let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
     let liveness = liveness_with_alive(&[2, 3]).await;
@@ -69,7 +104,10 @@ async fn on_broker_dead_bounds_a_stalled_commit() {
 #[tokio::test]
 async fn sweep_resolves_death_edge_that_found_no_alive_isr_member() {
     // Partition t-0: leader 1, ISR {1, 2}. Replica 3 is out of the ISR.
-    let img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2]);
+    let img = img_with_partition(ElectionSetup {
+        isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
+        ..Default::default()
+    });
     let source = fake_source(img, Some(NodeId(7)));
     let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
     let clock = TestClock::new();
@@ -131,13 +169,11 @@ async fn sweep_resolves_death_edge_that_found_no_alive_isr_member() {
     .await;
     let batches = source.submitted();
     assert!(batches.len() == 1);
-    let expected = crate::leader_election::test_support::expected_partition(
-        "t",
-        2,
-        &[2],
-        LeaderEpoch(6),
-        vec![],
-    );
+    let expected =
+        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
+            isr: &[krabka_raft::NodeId(2)],
+            ..Default::default()
+        });
     assert!(*one_partition_change(&batches[0]) == expected);
 }
 
@@ -148,25 +184,28 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
     struct Case {
         name: &'static str,
         controller_leader: Option<NodeId>,
-        leader: u64,
-        isr: &'static [u64],
+        leader: NodeId,
+        isr: &'static [NodeId],
         dead: &'static [u64],
         alive: &'static [u64],
         expected: Option<PartitionRecord>,
     }
-    let base = crate::leader_election::test_support::expected_partition(
-        "t",
-        1,
-        &[],
-        LeaderEpoch(5),
-        vec![],
-    );
+    let base = crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
+        leader: krabka_raft::NodeId(1),
+        isr: &[],
+        leader_epoch: LeaderEpoch(5),
+        ..Default::default()
+    });
     let cases = [
         Case {
             name: "dead leader still leads: elect an alive ISR member",
             controller_leader: Some(NodeId(7)),
-            leader: 1,
-            isr: &[1, 2, 3],
+            leader: NodeId(1),
+            isr: &[
+                krabka_raft::NodeId(1),
+                krabka_raft::NodeId(2),
+                krabka_raft::NodeId(3),
+            ],
             dead: &[1],
             alive: &[2, 3],
             expected: Some(PartitionRecord {
@@ -179,8 +218,12 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
         Case {
             name: "dead ISR member: shrink the ISR without an epoch bump",
             controller_leader: Some(NodeId(7)),
-            leader: 1,
-            isr: &[1, 2, 3],
+            leader: NodeId(1),
+            isr: &[
+                krabka_raft::NodeId(1),
+                krabka_raft::NodeId(2),
+                krabka_raft::NodeId(3),
+            ],
             dead: &[2],
             alive: &[1, 3],
             expected: Some(PartitionRecord {
@@ -191,8 +234,8 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
         Case {
             name: "failover already done: dead broker is a plain replica",
             controller_leader: Some(NodeId(7)),
-            leader: 2,
-            isr: &[2, 3],
+            leader: NodeId(2),
+            isr: &[krabka_raft::NodeId(2), krabka_raft::NodeId(3)],
             dead: &[1],
             alive: &[2, 3],
             expected: None,
@@ -200,31 +243,27 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
         Case {
             name: "not the controller leader: no re-drive",
             controller_leader: Some(NodeId(8)),
-            leader: 1,
-            isr: &[1, 2, 3],
+            leader: NodeId(1),
+            isr: &[
+                krabka_raft::NodeId(1),
+                krabka_raft::NodeId(2),
+                krabka_raft::NodeId(3),
+            ],
             dead: &[1],
             alive: &[2, 3],
             expected: None,
         },
     ];
     for case in cases {
-        let img = img_with_partition("t", 0, case.leader, &[1, 2, 3], case.isr);
+        let img = img_with_partition(ElectionSetup {
+            leader: case.leader,
+            isr: case.isr,
+            ..Default::default()
+        });
         let source = fake_source(img, case.controller_leader);
         let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
-        let liveness = liveness_with_dead(case.dead, case.alive).await;
-        let metrics = crate::metrics::BrokerMetrics::new();
-        let recovery = recovery_handle_for_tests();
-        let mut state = LivenessTickState::default();
-
-        sweep_dead_leaders(
-            &controller,
-            NodeId(7),
-            &liveness,
-            &metrics,
-            &recovery,
-            &mut state,
-        )
-        .await;
+        let mut fixture = SweepFixture::new(case.dead, case.alive).await;
+        fixture.sweep(&controller).await;
 
         let batches = source.submitted();
         let submitted = batches
@@ -243,25 +282,18 @@ async fn sweep_walks_the_image_once_per_change_while_a_dead_broker_stays_resolve
     // Broker 1 is dead and no longer leads or sits in an ISR. The sweep
     // walks the image once, records that nothing is stuck, and skips the
     // walk on later ticks until the image or the dead set changes.
-    let mut img = img_with_partition("t", 0, /*leader*/ 2, &[1, 2, 3], &[2, 3]);
+    let mut img = img_with_partition(ElectionSetup {
+        leader: krabka_raft::NodeId(2),
+        isr: &[krabka_raft::NodeId(2), krabka_raft::NodeId(3)],
+        ..Default::default()
+    });
     register_brokers(&mut img, &[1, 2, 3]);
     let source = fake_source(img, Some(NodeId(7)));
     let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
-    let liveness = liveness_with_dead(&[1], &[2, 3]).await;
-    let metrics = crate::metrics::BrokerMetrics::new();
-    let recovery = recovery_handle_for_tests();
-    let mut state = LivenessTickState::default();
-
-    sweep_dead_leaders(
-        &controller,
-        NodeId(7),
-        &liveness,
-        &metrics,
-        &recovery,
-        &mut state,
-    )
-    .await;
-    let memo = state
+    let mut fixture = SweepFixture::new(&[1], &[2, 3]).await;
+    fixture.sweep(&controller).await;
+    let memo = fixture
+        .state
         .clean_sweep
         .as_ref()
         .expect("a clean sweep is remembered");
@@ -270,15 +302,7 @@ async fn sweep_walks_the_image_once_per_change_while_a_dead_broker_stays_resolve
     assert!(source.submitted().is_empty());
 
     // Broker 1 comes back: the dead set changes and the memo is dropped.
-    liveness.record_heartbeat(1).await;
-    sweep_dead_leaders(
-        &controller,
-        NodeId(7),
-        &liveness,
-        &metrics,
-        &recovery,
-        &mut state,
-    )
-    .await;
-    assert!(state.clean_sweep.is_none());
+    fixture.liveness.record_heartbeat(1).await;
+    fixture.sweep(&controller).await;
+    assert!(fixture.state.clean_sweep.is_none());
 }

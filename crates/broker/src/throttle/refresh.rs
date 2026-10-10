@@ -82,19 +82,24 @@ mod tests {
         }));
     }
 
-    #[test]
-    fn apply_image_sets_rates() {
+    fn image_with_leader_and_directory_rates() -> MetadataImage {
         let mut img = MetadataImage::new(Uuid::nil());
         set_broker_rate(&mut img, "leader.replication.throttled.rate", Some("2048"));
         set_broker_rate(
             &mut img,
-            "follower.replication.throttled.rate",
-            Some("1024"),
-        );
-        set_broker_rate(
-            &mut img,
             "replica.alter.log.dirs.io.max.bytes.per.second",
             Some("512"),
+        );
+        img
+    }
+
+    #[test]
+    fn apply_image_sets_rates() {
+        let mut img = image_with_leader_and_directory_rates();
+        set_broker_rate(
+            &mut img,
+            "follower.replication.throttled.rate",
+            Some("1024"),
         );
         let throttle = ThrottleState::new();
         apply_image(&img, NodeId(1), &throttle);
@@ -105,13 +110,7 @@ mod tests {
 
     #[test]
     fn apply_image_resets_to_zero_when_config_deleted() {
-        let mut img = MetadataImage::new(Uuid::nil());
-        set_broker_rate(&mut img, "leader.replication.throttled.rate", Some("2048"));
-        set_broker_rate(
-            &mut img,
-            "replica.alter.log.dirs.io.max.bytes.per.second",
-            Some("512"),
-        );
+        let mut img = image_with_leader_and_directory_rates();
         let throttle = ThrottleState::new();
         apply_image(&img, NodeId(1), &throttle);
         assert!(throttle.leader_out.byte_rate() == bytes_per_sec(2048));

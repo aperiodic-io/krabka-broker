@@ -62,7 +62,14 @@ fn image_with_remote_leader(topic: &str) -> MetadataImage {
 /// A partition backed by a real log under `dir`, registered as led by
 /// `LEADER` with `FOLLOWER` as its one in-sync follower.
 fn led_partition(dir: &Path, topic: &str, partition: i32) -> Arc<Partition> {
-    let part = crate::test_support::open_partition(dir, topic, partition);
+    let part = crate::test_support::open_partition(
+        dir,
+        crate::test_support::StandalonePartitionSetup {
+            topic,
+            partition: krabka_ids::PartitionIndex(partition),
+            ..Default::default()
+        },
+    );
     part.current_leader.store(LEADER.0, Ordering::Release);
     part
 }
@@ -83,7 +90,10 @@ async fn install_isr(partition: &Partition) {
 fn append_records(partition: &Partition, count: i32) {
     let mut batch = RecordBatch {
         partition_leader_epoch: -1,
-        ..crate::test_support::repeated_records_batch(count, 1_700_000_000)
+        ..crate::test_support::repeated_records_batch(crate::test_support::RepeatedRecordsSetup {
+            count: crate::test_support::RecordCount(count),
+            timestamp: crate::test_support::UnixMillis(1_700_000_000),
+        })
     };
     partition
         .log
@@ -136,13 +146,26 @@ async fn sample_replica_lag(partitions: &PartitionRegistry, metrics: &BrokerMetr
     metrics.publish_replica_lag(&replica_lag_samples(partitions, LEADER, &replica_image()).await);
 }
 
-async fn classic_group_poller(
-    dir: &Path,
-    high_watermark: i64,
+fn replica_fixture() -> (tempfile::TempDir, PartitionRegistry, Arc<Partition>) {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let partitions = PartitionRegistry::new();
+    let partition = led_partition(directory.path(), TOPIC, 0);
+    (directory, partitions, partition)
+}
+
+async fn sampled_two_followers() -> (tempfile::TempDir, PartitionRegistry, BrokerMetrics) {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let partitions = two_follower_lags(directory.path()).await;
+    let metrics = BrokerMetrics::new();
+    sample_replica_lag(&partitions, &metrics).await;
+    (directory, partitions, metrics)
+}
+
+async fn committed_classic_poller(
+    metadata: Arc<dyn MetadataSource>,
+    partitions: Arc<PartitionRegistry>,
     committed: i64,
 ) -> (LagPoller, BrokerMetrics) {
-    let metadata: Arc<dyn MetadataSource> = lag_metadata(coordinator_image());
-    let partitions = partition_at_high_watermark(dir, high_watermark).await;
     let coordinator = coordinator(Arc::clone(&metadata));
     let handle = coordinator.get_or_create_classic("billing");
     commit_offset(&handle, committed).await;
@@ -151,6 +174,16 @@ async fn classic_group_poller(
         poller(coordinator, metadata, partitions, metrics.clone()),
         metrics,
     )
+}
+
+async fn classic_group_poller(
+    dir: &Path,
+    high_watermark: i64,
+    committed: i64,
+) -> (LagPoller, BrokerMetrics) {
+    let metadata: Arc<dyn MetadataSource> = lag_metadata(coordinator_image());
+    let partitions = partition_at_high_watermark(dir, high_watermark).await;
+    committed_classic_poller(metadata, partitions, committed).await
 }
 
 /// The published lag of `FOLLOWER` on `TOPIC`-`partition`, or `None` when the
@@ -171,9 +204,7 @@ fn published_replica_lag(metrics: &BrokerMetrics, partition: i32) -> Option<i64>
 /// the records it added.
 #[tokio::test]
 async fn a_paused_follower_fetch_makes_the_replica_lag_gauge_climb() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let partitions = PartitionRegistry::new();
-    let partition = led_partition(dir.path(), TOPIC, 0);
+    let (_dir, partitions, partition) = replica_fixture();
     install_isr(&partition).await;
     partitions.insert(TOPIC.into(), PartitionIndex(0), Arc::clone(&partition));
     let metrics = BrokerMetrics::new();
@@ -216,27 +247,25 @@ async fn two_follower_lags(dir: &Path) -> PartitionRegistry {
 /// sampled.
 #[tokio::test]
 async fn the_max_rollup_reports_the_worst_follower_on_the_broker() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let partitions = two_follower_lags(dir.path()).await;
-    let metrics = BrokerMetrics::new();
-
-    sample_replica_lag(&partitions, &metrics).await;
+    let (_dir, _partitions, metrics) = sampled_two_followers().await;
 
     check!(published_replica_lag(&metrics, 0) == Some(3));
     check!(published_replica_lag(&metrics, 1) == Some(40));
     check!(metrics.replica_lag_max.get() == 40);
 }
 
+fn append_and_register(partitions: &PartitionRegistry, partition: &Arc<Partition>, records: i32) {
+    append_records(partition, records);
+    partitions.insert(TOPIC.into(), PartitionIndex(0), Arc::clone(partition));
+}
+
 /// Leadership is what justifies a replica-lag series, so the pass that first
 /// sees another broker leading the partition takes the series away.
 #[tokio::test]
 async fn losing_leadership_releases_the_partitions_replica_lag_series() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let partitions = PartitionRegistry::new();
-    let partition = led_partition(dir.path(), TOPIC, 0);
+    let (_dir, partitions, partition) = replica_fixture();
     install_isr(&partition).await;
-    append_records(&partition, 12);
-    partitions.insert(TOPIC.into(), PartitionIndex(0), Arc::clone(&partition));
+    append_and_register(&partitions, &partition, 12);
     let metrics = BrokerMetrics::new();
     sample_replica_lag(&partitions, &metrics).await;
     assert!(published_replica_lag(&metrics, 0) == Some(12));
@@ -256,9 +285,7 @@ async fn losing_leadership_releases_the_partitions_replica_lag_series() {
 /// reports the whole log rather than no series at all.
 #[tokio::test]
 async fn an_assigned_follower_that_has_never_fetched_reports_the_whole_log() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let partitions = PartitionRegistry::new();
-    let partition = led_partition(dir.path(), TOPIC, 0);
+    let (_dir, partitions, partition) = replica_fixture();
     // The ISR holds the leader alone, which is what a replica added by a
     // reassignment looks like until its first fetch lands.
     partition.replica_state.lock().await.install_isr(
@@ -267,8 +294,7 @@ async fn an_assigned_follower_that_has_never_fetched_reports_the_whole_log() {
         LEADER,
         Instant::now(),
     );
-    append_records(&partition, 12);
-    partitions.insert(TOPIC.into(), PartitionIndex(0), Arc::clone(&partition));
+    append_and_register(&partitions, &partition, 12);
     let metrics = BrokerMetrics::new();
 
     sample_replica_lag(&partitions, &metrics).await;
@@ -288,10 +314,7 @@ async fn an_assigned_follower_that_has_never_fetched_reports_the_whole_log() {
 /// and a scrape in between would report a maximum no series carries.
 #[tokio::test]
 async fn evicting_the_worst_follower_lowers_the_max_rollup() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let partitions = two_follower_lags(dir.path()).await;
-    let metrics = BrokerMetrics::new();
-    sample_replica_lag(&partitions, &metrics).await;
+    let (_dir, _partitions, metrics) = sampled_two_followers().await;
     assert!(metrics.replica_lag_max.get() == 40);
 
     metrics.evict_partition_series(&crate::metrics::PartitionLabel {
@@ -486,11 +509,7 @@ async fn a_group_this_broker_does_not_coordinate_gets_no_series() {
     let image = image_with_remote_leader(OFFSETS_TOPIC);
     let metadata: Arc<dyn MetadataSource> = lag_metadata(image);
     let partitions = partition_at_high_watermark(dir.path(), 40).await;
-    let coordinator = coordinator(Arc::clone(&metadata));
-    let handle = coordinator.get_or_create_classic("billing");
-    commit_offset(&handle, 7).await;
-    let metrics = BrokerMetrics::new();
-    let poller = poller(coordinator, metadata, partitions, metrics.clone());
+    let (poller, metrics) = committed_classic_poller(metadata, partitions, 7).await;
 
     poller.sample().await;
 
@@ -601,16 +620,8 @@ async fn a_watermark_this_broker_cannot_read_yields_no_series() {
     // so the probe cannot even be addressed.
     let image = image_with_remote_leader(TOPIC);
     let metadata: Arc<dyn MetadataSource> = lag_metadata(image);
-    let coordinator = coordinator(Arc::clone(&metadata));
-    let handle = coordinator.get_or_create_classic("billing");
-    commit_offset(&handle, 7).await;
-    let metrics = BrokerMetrics::new();
-    let poller = poller(
-        coordinator,
-        metadata,
-        Arc::new(PartitionRegistry::new()),
-        metrics.clone(),
-    );
+    let (poller, metrics) =
+        committed_classic_poller(metadata, Arc::new(PartitionRegistry::new()), 7).await;
 
     poller.sample().await;
 

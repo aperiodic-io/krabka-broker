@@ -15,3 +15,21 @@ pub(crate) fn assert_pinned_count(actual: usize, expected: usize, label: &str) {
         "[{label}] unique-state count moved: the reachable set of this model changed"
     );
 }
+
+/// Run an exhaustive model with its independent unique-state bound and pin.
+pub(crate) fn check_model<M>(model: M, label: &str, limits: (usize, usize, usize), pinned: usize)
+where
+    M: stateright::Model + Send + Sync + 'static,
+    M::State: std::fmt::Debug + std::hash::Hash + Send + Sync + Clone + PartialEq + 'static,
+    M::Action: std::fmt::Debug + Clone + PartialEq,
+{
+    use stateright::Checker as _;
+    let (depth, states, unique) = limits;
+    let checker = run_bfs(model, label, depth, states);
+    assert2::assert!(
+        checker.unique_state_count() < unique,
+        "[{label}] unique-state bound exceeded"
+    );
+    assert_pinned_count(checker.unique_state_count(), pinned, label);
+    checker.assert_properties();
+}

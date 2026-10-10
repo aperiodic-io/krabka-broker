@@ -3,9 +3,12 @@
 use moxy::{ast::ParseError, token::TokenStream};
 
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
-    Ok(moxy::template! {
-        fn {{ name }}(base_offset: i64, timestamps: &[i64], value_byte: u8) -> ::krabka_protocol::records::RecordBatch {
+    crate::fixtures::function(
+        input,
+        &moxy::template! {},
+        &moxy::template! { base_offset: i64, timestamps: &[i64], value_byte: u8 },
+        &moxy::template! { ::krabka_protocol::records::RecordBatch },
+        &moxy::template! {
             let base_timestamp = timestamps.first().copied().unwrap_or_default();
             ::krabka_protocol::records::RecordBatch {
                 base_offset,
@@ -20,6 +23,6 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
                 }).collect(),
                 ..Default::default()
             }
-        }
-    })
+        },
+    )
 }

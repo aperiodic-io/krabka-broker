@@ -72,24 +72,11 @@ impl AclSource for AclCache {
 #[cfg(test)]
 mod tests {
 
-    use krabka_metadata::{
-        AclOperation, MetadataImage, MetadataRecord, PermissionType, ResourceType,
-    };
+    use krabka_metadata::{AclOperation, MetadataImage, MetadataRecord, ResourceType};
     use uuid::Uuid;
 
     use super::*;
-
-    fn entry(rt: ResourceType, pattern: PatternType, name: &str, op: AclOperation) -> AclEntry {
-        AclEntry {
-            resource_type: rt,
-            resource_name: name.into(),
-            pattern_type: pattern,
-            principal: "User:alice".into(),
-            host: "*".into(),
-            operation: op,
-            permission_type: PermissionType::Allow,
-        }
-    }
+    use crate::test_support::{AclSetup, acl as entry};
 
     /// A stable, comparable identity for an `AclEntry`.
     ///
@@ -121,42 +108,32 @@ mod tests {
         // A representative ACL set: literal exact, the literal "*" wildcard,
         // a prefixed entry, an unrelated topic, and a different resource type.
         let entries = vec![
-            entry(
-                ResourceType::Topic,
-                PatternType::Literal,
-                "foo",
-                AclOperation::Read,
-            ),
-            entry(
-                ResourceType::Topic,
-                PatternType::Literal,
-                "*",
-                AclOperation::Write,
-            ),
-            entry(
-                ResourceType::Topic,
-                PatternType::Prefixed,
-                "team-",
-                AclOperation::Read,
-            ),
-            entry(
-                ResourceType::Topic,
-                PatternType::Literal,
-                "bar",
-                AclOperation::Read,
-            ),
-            entry(
-                ResourceType::Group,
-                PatternType::Literal,
-                "cg-1",
-                AclOperation::Read,
-            ),
-            entry(
-                ResourceType::Group,
-                PatternType::Prefixed,
-                "app-",
-                AclOperation::Read,
-            ),
+            entry(AclSetup::default()),
+            entry(AclSetup {
+                op: AclOperation::Write,
+                name: "*",
+                ..Default::default()
+            }),
+            entry(AclSetup {
+                pattern: PatternType::Prefixed,
+                name: "team-",
+                ..Default::default()
+            }),
+            entry(AclSetup {
+                name: "bar",
+                ..Default::default()
+            }),
+            entry(AclSetup {
+                rt: ResourceType::Group,
+                name: "cg-1",
+                ..Default::default()
+            }),
+            entry(AclSetup {
+                rt: ResourceType::Group,
+                pattern: PatternType::Prefixed,
+                name: "app-",
+                ..Default::default()
+            }),
         ];
 
         // Build the same set into a MetadataImage (broker side) ...
@@ -206,12 +183,7 @@ mod tests {
 
         let range_allow = AclEntry {
             host: "10.0.0.0/8".into(),
-            ..entry(
-                ResourceType::Topic,
-                PatternType::Literal,
-                "foo",
-                AclOperation::Read,
-            )
+            ..entry(AclSetup::default())
         };
         let alice = Principal {
             name: "alice".into(),
@@ -280,12 +252,7 @@ mod tests {
         assert2::assert!(empty.is_empty());
         assert2::assert!(empty.len() == 0);
 
-        let cache = AclCache::new(vec![entry(
-            ResourceType::Topic,
-            PatternType::Literal,
-            "foo",
-            AclOperation::Read,
-        )]);
+        let cache = AclCache::new(vec![entry(AclSetup::default())]);
         assert2::assert!(!cache.is_empty());
         assert2::assert!(cache.len() == 1);
     }

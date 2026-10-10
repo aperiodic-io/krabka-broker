@@ -22,7 +22,14 @@ use tempfile::TempDir;
 /// binary and the crate's own tests use. `extra` carries the bound flags
 /// under test.
 pub(crate) fn restore_args(archive_dir: &Path, target_dir: &Path, extra: &[&str]) -> RestoreArgs {
-    let argv = cli_args::restore_argv(archive_dir, target_dir, "127.0.0.1:9093", extra);
+    let argv = cli_args::restore_argv(
+        archive_dir,
+        target_dir,
+        cli_args::RestoreOptions {
+            extra,
+            ..Default::default()
+        },
+    );
     Cli::try_parse_from(argv).expect("valid command line").args
 }
 
@@ -56,4 +63,26 @@ pub(crate) fn check_batches(
         .read(krabka_ids::Offset(0), LogConfig::default().segment_size)
         .expect("read back");
     assert2::check!(read.batches == expected);
+}
+
+/// A filtered first batch still claims its offsets; the following batch is unchanged.
+pub(crate) fn empty_first_batch(
+    fixture: &[krabka_protocol::records::RecordBatch],
+) -> Vec<krabka_protocol::records::RecordBatch> {
+    vec![
+        krabka_protocol::records::RecordBatch {
+            records: Vec::new(),
+            ..fixture[0].clone()
+        },
+        fixture[1].clone(),
+    ]
+}
+
+/// Keep both archive and restore directories alive while checking key-filtered bytes.
+pub(crate) async fn restore_excluding_keys(
+    fixture: &mut [krabka_protocol::records::RecordBatch],
+) -> (TempDir, TempDir, PathBuf) {
+    let archive = crate::archive::build_archive("orders", 0, fixture);
+    let (target, dir) = run_restore(archive.path(), &["--exclude-key", "^drop"]).await;
+    (archive, target, dir)
 }

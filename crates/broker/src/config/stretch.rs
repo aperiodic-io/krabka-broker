@@ -191,11 +191,16 @@ mod tests {
             .expect("a witness-site node of a valid profile");
     }
 
+    fn stretch_data_node_with_sites(sites: &[&str]) -> BrokerConfig {
+        let mut config = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
+        config.stretch.as_mut().expect("profile").sites =
+            sites.iter().map(|site| (*site).to_owned()).collect();
+        config
+    }
+
     #[test]
     fn stretch_profile_needs_exactly_three_sites() {
-        let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
-        let profile = c.stretch.as_mut().expect("profile");
-        profile.sites = vec!["dc-a".to_string(), "dc-w".to_string()];
+        let c = stretch_data_node_with_sites(&["dc-a", "dc-w"]);
         assert!(matches!(
             c.validate(),
             Err(BrokerError::StretchProfileNeedsThreeSites { count: 2 })
@@ -204,9 +209,7 @@ mod tests {
 
     #[test]
     fn stretch_profile_rejects_a_repeated_site() {
-        let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
-        let profile = c.stretch.as_mut().expect("profile");
-        profile.sites = vec!["dc-a".to_string(), "dc-a".to_string(), "dc-w".to_string()];
+        let c = stretch_data_node_with_sites(&["dc-a", "dc-a", "dc-w"]);
         assert!(matches!(
             c.validate(),
             Err(BrokerError::StretchProfileDuplicateSite { site }) if site == "dc-a"

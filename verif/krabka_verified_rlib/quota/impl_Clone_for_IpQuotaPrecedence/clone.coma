@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/quota.rs" 195 19 195 36 *)
+(* #"/workspace/crates/verified/src/quota.rs" 198 19 198 36 *)
 
 (* <quota::IpQuotaPrecedence as std::clone::Clone> *)
 
@@ -10,7 +10,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_IpQuotaPrecedence [#"/workspace/crates/verified/src/quota.rs" 195 19 195 36] (self: t_IpQuotaPrecedence)
+let clone_IpQuotaPrecedence [#"/workspace/crates/verified/src/quota.rs" 198 19 198 36] (self: t_IpQuotaPrecedence)
   (return (x: t_IpQuotaPrecedence)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_IpQuotaPrecedence = Any.any_l () | & self: t_IpQuotaPrecedence = self ])

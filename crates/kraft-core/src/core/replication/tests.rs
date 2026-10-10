@@ -6,6 +6,24 @@ use crate::{
     event::Event,
 };
 
+fn three_voter_leader(log: &dyn LogView) -> QuorumStateMachine {
+    let mut machine = three_voter_machine();
+    win_election(&mut machine, log, &[NodeId(2), NodeId(3)], SimInstant(2000));
+    machine
+}
+
+fn expected_quorum_loss(transition: &'static str, timer: Action) -> Vec<Action> {
+    vec![
+        Action::SendEndQuorumEpoch {
+            epoch: 1,
+            preferred_successors: vec![NodeId(2), NodeId(3)],
+        },
+        Action::PersistQuorumState,
+        Action::TransitionedTo(transition),
+        timer,
+    ]
+}
+
 /// Capture the promotion log end before replication tests grow the log.
 /// The election and the two grants retain their separate event times.
 fn promote_with_second_voter(m: &mut QuorumStateMachine, log: &dyn LogView) {
@@ -217,8 +235,7 @@ fn a_fetch_is_valid_only_at_an_epoch_the_leader_holds_to_that_offset() {
     ];
     let log = RunsLog::new(&[(4, 120), (6, 80)]);
     for case in cases {
-        let mut m = three_voter_machine();
-        win_election(&mut m, &log, &[NodeId(2), NodeId(3)], SimInstant(2000));
+        let mut m = three_voter_leader(&log);
         let actions = m.on_event(
             Event::ReceiveFetch {
                 from: NodeId(2),
@@ -380,6 +397,18 @@ fn armed_check_quorum(actions: &[Action]) -> Option<SimInstant> {
     })
 }
 
+fn elect_empty_log(voter_ids: &[NodeId]) -> (QuorumStateMachine, FakeLog, Vec<Action>) {
+    let mut m = machine(NodeId(1), voter_ids);
+    let log = FakeLog::new(0, 0);
+    let peers: Vec<NodeId> = voter_ids
+        .iter()
+        .copied()
+        .filter(|&id| id != NodeId(1))
+        .collect();
+    let actions = win_election(&mut m, &log, &peers, SimInstant(2000));
+    (m, log, actions)
+}
+
 /// A new leader arms the check-quorum window at 1.5x the fetch timeout, which
 /// is Kafka's `CHECK_QUORUM_TIMEOUT_FACTOR` over the same configured extent the
 /// follower fetch deadline uses. A lone voter has nobody to hear from, so it
@@ -401,14 +430,7 @@ fn promotion_arms_the_check_quorum_window_unless_the_leader_is_alone() {
         ),
         ("sole voter", &[NodeId(1)][..], None),
     ] {
-        let mut m = machine(NodeId(1), voter_ids);
-        let log = FakeLog::new(0, 0);
-        let peers: Vec<NodeId> = voter_ids
-            .iter()
-            .copied()
-            .filter(|&id| id != NodeId(1))
-            .collect();
-        let actions = win_election(&mut m, &log, &peers, SimInstant(2000));
+        let (m, _log, actions) = elect_empty_log(voter_ids);
         assert2::assert!(m.role().is_leader(), "case {name}");
         assert2::check!(armed_check_quorum(&actions) == want, "case {name}");
     }
@@ -452,14 +474,7 @@ fn only_a_majority_of_followers_re_arms_the_check_quorum_window() {
             vec![None],
         ),
     ] {
-        let mut m = machine(NodeId(1), voter_ids);
-        let log = FakeLog::new(0, 0);
-        let peers: Vec<NodeId> = voter_ids
-            .iter()
-            .copied()
-            .filter(|&id| id != NodeId(1))
-            .collect();
-        win_election(&mut m, &log, &peers, SimInstant(2000));
+        let (mut m, log, _actions) = elect_empty_log(voter_ids);
         let got: Vec<Option<SimInstant>> = fetchers
             .iter()
             .map(|&from| {
@@ -484,9 +499,8 @@ fn only_a_majority_of_followers_re_arms_the_check_quorum_window() {
 /// mid-snapshot resigns under a perfectly healthy quorum.
 #[test]
 fn a_snapshot_fetch_is_check_quorum_contact() {
-    let mut m = three_voter_machine();
     let log = FakeLog::new(0, 0);
-    win_election(&mut m, &log, &[NodeId(2), NodeId(3)], SimInstant(2000));
+    let mut m = three_voter_leader(&log);
     let actions = m.on_event(
         Event::ReceiveFetchSnapshot { from: NodeId(2) },
         &log,
@@ -506,9 +520,8 @@ fn a_snapshot_fetch_is_check_quorum_contact() {
 /// quorum over a truncation round would cost a whole election for nothing.
 #[test]
 fn a_diverging_fetch_still_counts_as_contact() {
-    let mut m = three_voter_machine();
     let log = RunsLog::new(&[(1, 5)]);
-    win_election(&mut m, &log, &[NodeId(2), NodeId(3)], SimInstant(2000));
+    let mut m = three_voter_leader(&log);
     // Follower 2 claims epoch 1 out to offset 9; our epoch 1 ends at 5.
     let actions = m.on_event(
         Event::ReceiveFetch {
@@ -544,28 +557,22 @@ fn a_diverging_fetch_still_counts_as_contact() {
 /// cluster has already replaced.
 #[test]
 fn check_quorum_expiry_resigns_the_leader() {
-    let mut m = three_voter_machine();
     let log = FakeLog::new(0, 0);
-    win_election(&mut m, &log, &[NodeId(2), NodeId(3)], SimInstant(2000));
+    let mut m = three_voter_leader(&log);
     assert2::assert!(m.quorum_state().leader_id == Some(NodeId(1)));
 
     let actions = m.on_event(Event::CheckQuorumTimeout, &log, SimInstant(3500));
     assert2::assert!(
         actions
-            == vec![
-                Action::SendEndQuorumEpoch {
-                    epoch: 1,
-                    preferred_successors: vec![NodeId(2), NodeId(3)],
-                },
-                Action::PersistQuorumState,
-                Action::TransitionedTo("Resigned"),
+            == expected_quorum_loss(
+                "Resigned",
                 Action::ResetTimer {
                     kind: TimerKind::Election,
                     deadline: SimInstant(
                         3500 + 1000 + crate::core::election_jitter_ms(NodeId(1), 1, 1000)
                     ),
-                },
-            ]
+                }
+            )
     );
     assert2::assert!(
         (
@@ -581,9 +588,8 @@ fn check_quorum_expiry_resigns_the_leader() {
 /// partition can hand it the leadership back.
 #[test]
 fn a_resigned_replica_elects_on_its_election_timer() {
-    let mut m = three_voter_machine();
     let log = FakeLog::new(0, 0);
-    win_election(&mut m, &log, &[NodeId(2), NodeId(3)], SimInstant(2000));
+    let mut m = three_voter_leader(&log);
     m.on_event(Event::CheckQuorumTimeout, &log, SimInstant(3500));
     let actions = m.on_event(Event::ElectionTimeout, &log, SimInstant(5000));
     assert2::assert!(matches!(m.role(), Role::Prospective { .. }));
@@ -736,9 +742,8 @@ fn a_membership_change_starts_the_contact_tally_over() {
 /// reach it again.
 #[test]
 fn a_removed_leader_resigns_into_observer_discovery() {
-    let mut m = three_voter_machine();
     let log = FakeLog::new(0, 0);
-    win_election(&mut m, &log, &[NodeId(2), NodeId(3)], SimInstant(2000));
+    let mut m = three_voter_leader(&log);
     m.apply_voter_set(
         crate::core::test_support::voters(&[NodeId(2), NodeId(3)]),
         SimInstant(3000),
@@ -746,18 +751,13 @@ fn a_removed_leader_resigns_into_observer_discovery() {
     let actions = m.on_event(Event::CheckQuorumTimeout, &log, SimInstant(5000));
     assert2::assert!(
         actions
-            == vec![
-                Action::SendEndQuorumEpoch {
-                    epoch: 1,
-                    preferred_successors: vec![NodeId(2), NodeId(3)],
-                },
-                Action::PersistQuorumState,
-                Action::TransitionedTo("Observer"),
+            == expected_quorum_loss(
+                "Observer",
                 Action::ResetTimer {
                     kind: TimerKind::Fetch,
                     deadline: SimInstant(6000),
-                },
-            ]
+                }
+            )
     );
     assert2::assert!(
         (m.role().clone(), m.quorum_state().leader_id)

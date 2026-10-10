@@ -13,9 +13,7 @@
 use assert2::assert;
 
 use crate::support::{
-    fetch::{fetch_partition, single_partition_fetch},
-    produce::single_partition_produce,
-    topics::{creatable_topic, create_topic_request},
+    client::create_topic, fetch::single_partition_fetch, produce::single_partition_produce,
 };
 mod support;
 
@@ -25,15 +23,6 @@ use krabka_protocol::{
     owned::fetch_request::FetchRequest, primitives::uuid::Uuid, records::RecordsPayload,
 };
 use krabka_records_legacy::{Magic, ParsedRecord, encode_flat_message_set};
-
-async fn create_topic(p: &support::InProcess, name: &str) {
-    let resp = p
-        .client
-        .send(create_topic_request(creatable_topic(name, 1, 1), 5_000))
-        .await
-        .expect("CreateTopics");
-    assert!(resp.topics[0].error_code == 0);
-}
 
 async fn topic_id_for(p: &support::InProcess, name: &str) -> Uuid {
     let resp = p
@@ -69,18 +58,17 @@ fn build_v1_message_set(values: &[&[u8]]) -> Bytes {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn produce_v1_message_set_is_upconverted_and_round_trips() {
     let p = support::start().await;
-    create_topic(&p, "legacy").await;
+    create_topic(&p.client, "legacy", 1).await;
     let topic_id = topic_id_for(&p, "legacy").await;
 
     let legacy_bytes = build_v1_message_set(&[b"alpha", b"beta", b"gamma"]);
 
-    let req = single_partition_produce(
-        "legacy",
+    let req = single_partition_produce(crate::support::produce::SinglePartitionProduceSetup {
+        topic: ("legacy").into(),
         topic_id,
-        0,
-        Some(RecordsPayload::Legacy(legacy_bytes)),
-        (1, 5_000),
-    );
+        records: Some(RecordsPayload::Legacy(legacy_bytes)),
+        ..Default::default()
+    });
     let resp = p.client.send(req).await.expect("Produce");
     let pr = &resp.responses[0].partition_responses[0];
     assert!(
@@ -97,12 +85,11 @@ async fn produce_v1_message_set_is_upconverted_and_round_trips() {
             .client
             .send(FetchRequest {
                 replica_id: -1,
-                ..single_partition_fetch(
-                    "legacy",
+                ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+                    topic: "legacy".into(),
                     topic_id,
-                    fetch_partition(0, 0, 1 << 20),
-                    (500, 1, 1 << 20),
-                )
+                    ..Default::default()
+                })
             })
             .await
             .expect("Fetch");
@@ -136,7 +123,7 @@ async fn produce_v1_message_set_is_upconverted_and_round_trips() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn produce_malformed_legacy_bytes_returns_invalid_record() {
     let p = support::start().await;
-    create_topic(&p, "bad").await;
+    create_topic(&p.client, "bad", 1).await;
     let topic_id = topic_id_for(&p, "bad").await;
 
     // 100 bytes of garbage that look superficially like a legacy
@@ -147,13 +134,12 @@ async fn produce_malformed_legacy_bytes_returns_invalid_record() {
     let mut garbage = vec![0u8; 100];
     garbage[8..12].copy_from_slice(&88_i32.to_be_bytes());
     garbage[16] = 0; // explicit: not v2
-    let req = single_partition_produce(
-        "bad",
+    let req = single_partition_produce(crate::support::produce::SinglePartitionProduceSetup {
+        topic: ("bad").into(),
         topic_id,
-        0,
-        Some(RecordsPayload::Legacy(Bytes::from(garbage))),
-        (1, 5_000),
-    );
+        records: Some(RecordsPayload::Legacy(Bytes::from(garbage))),
+        ..Default::default()
+    });
     let resp = p.client.send(req).await.expect("Produce");
     let pr = &resp.responses[0].partition_responses[0];
     assert!(

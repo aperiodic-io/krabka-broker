@@ -49,11 +49,13 @@ async fn kip320_krabka_follower_truncates_from_jvm_leader() {
 
     c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
         crate::mixed_cluster::single_leader_record(
-            TOPIC,
             &partition,
-            krabka_broker::NodeId(99),
-            parked_epoch,
-            1,
+            crate::mixed_cluster::SingleLeaderSetup {
+                topic: TOPIC,
+                leader: krabka_broker::NodeId(99),
+                epoch: parked_epoch,
+                ..Default::default()
+            },
         ),
     ))
     .await
@@ -78,11 +80,13 @@ async fn kip320_krabka_follower_truncates_from_jvm_leader() {
     let jvm_epoch = LeaderEpoch(parked_epoch.0 + 1);
     c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
         crate::mixed_cluster::single_leader_record(
-            TOPIC,
             &partition,
-            krabka_broker::NodeId(3),
-            jvm_epoch,
-            2,
+            crate::mixed_cluster::SingleLeaderSetup {
+                topic: TOPIC,
+                leader: krabka_broker::NodeId(3),
+                epoch: jvm_epoch,
+                partition_epoch_delta: crate::mixed_cluster::PartitionEpochDelta(2),
+            },
         ),
     ))
     .await

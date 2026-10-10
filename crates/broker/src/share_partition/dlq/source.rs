@@ -237,14 +237,24 @@ mod tests {
         open_data_partition(
             &registry,
             dir.path(),
-            "t",
-            0,
-            &[
-                (1_000, &[b"a", b"b"]),
-                (2_000, &[b"c", b"d"]),
-                (3_000, &[b"e"]),
-            ],
-            Offset(5),
+            crate::share_partition::manager::test_support::DataPartitionSetup {
+                batches: vec![
+                    crate::share_partition::manager::test_support::TimedValues {
+                        timestamp: crate::test_support::UnixMillis(1_000),
+                        values: &[b"a", b"b"],
+                    },
+                    crate::share_partition::manager::test_support::TimedValues {
+                        timestamp: crate::test_support::UnixMillis(2_000),
+                        values: &[b"c", b"d"],
+                    },
+                    crate::share_partition::manager::test_support::TimedValues {
+                        timestamp: crate::test_support::UnixMillis(3_000),
+                        values: &[b"e"],
+                    },
+                ],
+                high_watermark: Offset(5),
+                ..Default::default()
+            },
         )
         .await;
         let part = registry

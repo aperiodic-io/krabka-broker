@@ -24,8 +24,7 @@ use krabka_protocol::{
 };
 
 use crate::support::{
-    fetch::{fetch_partition, single_partition_fetch},
-    produce::single_partition_produce,
+    fetch::single_partition_fetch,
     records::{batch_from_records, value_record},
 };
 
@@ -69,24 +68,28 @@ async fn produce_and_fetch(client: &krabka_client_core::Client) -> usize {
     assert!(created.topics[0].error_code == 0);
     let topic_id = support::topic_id_for(client, TOPIC).await;
 
-    let produced = client
-        .send(single_partition_produce(
-            TOPIC,
+    let produced = crate::support::produce::send_batch(
+        &client,
+        batch_of(&["a", "b", "c"]),
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: (TOPIC).into(),
             topic_id,
-            0,
-            Some(batch_of(&["a", "b", "c"]).into()),
-            (-1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+        },
+    )
+    .await;
     assert!(produced.responses[0].partition_responses[0].error_code == 0);
 
     let fetched = client
         .send(single_partition_fetch(
-            TOPIC,
-            topic_id,
-            fetch_partition(0, 0, 1 << 20),
-            (100, 1, 1 << 20),
+            crate::support::fetch::SinglePartitionFetchSetup {
+                topic: TOPIC.into(),
+                topic_id,
+                limits: crate::support::fetch::FetchLimits::one_mebibyte(
+                    crate::support::fetch::RequestWaitMillis(100),
+                ),
+                ..Default::default()
+            },
         ))
         .await
         .expect("Fetch");

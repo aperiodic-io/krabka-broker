@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use assert2::assert;
+use krabka_metadata::AclOperation;
 use krabka_protocol::owned::alter_client_quotas_response::{
     EntityData as RespEntity, EntryData as RespEntry,
 };

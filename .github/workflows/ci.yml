@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   cpd:
-    name: CPD · no new repeats at 100 tokens
+    name: jscpd · zero repeats at 60 tokens
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -41,12 +41,8 @@ jobs:
           bazelisk-cache: true
           disk-cache: false
           repository-cache: true
-      - name: compare native PMD Rust CPD with the target revision
-        env:
-          CPD_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
-        run: |
-          export PATH="${JAVA_HOME_17_X64}/bin:${PATH}"
-          aspect check-cpd --base "${CPD_BASE:-HEAD^}" --output "${RUNNER_TEMP}/cpd-reports"
+      - name: reject Rust duplicates with jscpd
+        run: aspect check-cpd --output "${RUNNER_TEMP}/cpd-reports"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

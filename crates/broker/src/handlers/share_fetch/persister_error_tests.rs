@@ -39,12 +39,28 @@ enum Api {
 use crate::handlers::test_support::start_allow_all_no_audit as start;
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(broker, "share-persister-error-test", name, 1).await
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "share-persister-error-test",
+            name,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// Appends one batch of two records to partition 0 of `topic`.
 async fn produce_two_records(broker: &BrokerHandle, topic: &str) {
-    crate::handlers::test_support::produce_records(broker, topic, 0, 2).await;
+    crate::handlers::test_support::produce_records(
+        broker,
+        crate::handlers::test_support::ProduceRecordsSetup {
+            topic,
+            count: crate::handlers::test_support::RecordCount(2),
+            ..Default::default()
+        },
+    )
+    .await;
 }
 
 /// Sends a `ShareFetch` for partition 0 of `topic_id`. With `accept`, the row
@@ -56,7 +72,6 @@ async fn share_fetch(
     topic_id: WireUuid,
     accept: Option<(i64, i64)>,
 ) -> PartitionData {
-    let version = krabka_protocol::owned::share_fetch_request::MAX_VERSION;
     let request = ShareFetchRequest {
         group_id: Some(group.into()),
         member_id: Some("member".into()),
@@ -84,14 +99,13 @@ async fn share_fetch(
         }],
         ..Default::default()
     };
-    let response = crate::handlers::test_support::share_fetch_wire(broker, version, &request).await;
-    // An incremental response leaves out a partition with nothing new.
-    response
-        .responses
-        .first()
-        .and_then(|topic| topic.partitions.first())
-        .cloned()
-        .unwrap_or_default()
+    let rows = crate::handlers::test_support::share_fetch_partition_rows(
+        broker,
+        &request,
+        crate::handlers::test_support::ShareWireSetup::default(),
+    )
+    .await;
+    rows.into_iter().next().unwrap_or_default()
 }
 
 /// Sends a `ShareAcknowledge` that accepts `[first, last]` on partition 0 of
@@ -103,17 +117,22 @@ async fn share_acknowledge(
     topic_id: WireUuid,
     (first_offset, last_offset): (i64, i64),
 ) -> i16 {
-    let version = krabka_protocol::owned::share_acknowledge_request::MAX_VERSION;
-    let request = crate::handlers::test_support::acknowledge_request(
-        group,
-        "member",
-        epoch,
-        topic_id,
-        (first_offset, last_offset),
-        ACCEPT,
-    );
-    let response =
-        crate::handlers::test_support::share_acknowledge_wire(broker, version, &request).await;
+    let response = crate::handlers::test_support::send_acknowledgements(
+        broker,
+        crate::handlers::test_support::AcknowledgementSetup {
+            partition: crate::handlers::test_support::AcknowledgementPartitionSetup::single_batch(
+                krabka_log::Offset(first_offset)..=krabka_log::Offset(last_offset),
+                crate::handlers::test_support::AcknowledgementCode(ACCEPT),
+            ),
+            ..crate::handlers::test_support::AcknowledgementSetup::for_topic_session(
+                group,
+                crate::handlers::test_support::ShareSessionEpoch(epoch),
+                topic_id,
+            )
+        },
+    )
+    .await;
+
     response.responses[0].partitions[0].error_code
 }
 
@@ -251,7 +270,7 @@ async fn state_topic_led_by_an_unknown_broker(broker: &BrokerHandle) {
     records.extend((0..partitions).map(|partition| {
         MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
             crate::share_coordinator::bootstrap::TOPIC,
-            partition,
+            krabka_ids::PartitionIndex(partition),
             NodeId(99),
         ))
     }));

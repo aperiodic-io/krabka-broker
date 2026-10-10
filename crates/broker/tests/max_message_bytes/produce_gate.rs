@@ -16,6 +16,23 @@ use crate::{
 /// against `apache/kafka:4.1.0`.
 const CAP: usize = 2048;
 
+async fn check_exact_limit(
+    process: &support::InProcess,
+    topic: krabka_protocol::primitives::uuid::Uuid,
+    limit: usize,
+    refusal: krabka_protocol::owned::produce_response::PartitionProduceResponse,
+) {
+    check!(
+        produce_batch_of_wire_len(&process.client, "orders", topic, limit).await == accepted(0, 0)
+    );
+    check!(produce_batch_of_wire_len(&process.client, "orders", topic, limit + 1).await == refusal);
+    check!(process.broker.local_log_end_offset("orders", 0) == Some(1));
+    check!(
+        produce_batch_of_wire_len(&process.client, "orders", topic, limit).await == accepted(1, 0)
+    );
+    check!(process.broker.local_log_end_offset("orders", 0) == Some(2));
+}
+
 /// The cap is exact, and a refusal costs the log nothing.
 ///
 /// This is the feature in one case. The batch at the cap goes first, so the
@@ -26,20 +43,9 @@ const CAP: usize = 2048;
 /// 100-MiB batch the cap exists to keep out of the partition.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_batch_at_the_cap_appends_and_one_byte_over_it_is_refused() {
-    let p = support::start().await;
-    let topic = create_topic(
-        &p.broker,
-        &p.client,
-        "orders",
-        &[(MAX_MESSAGE_BYTES, &CAP.to_string())],
-    )
-    .await;
+    let (p, topic) = crate::wire::orders_fixture(&[(MAX_MESSAGE_BYTES, &CAP.to_string())]).await;
 
-    check!(produce_batch_of_wire_len(&p.client, "orders", topic, CAP).await == accepted(0, 0));
-    check!(produce_batch_of_wire_len(&p.client, "orders", topic, CAP + 1).await == too_large());
-    check!(p.broker.local_log_end_offset("orders", 0) == Some(1));
-    check!(produce_batch_of_wire_len(&p.client, "orders", topic, CAP).await == accepted(1, 0));
-    check!(p.broker.local_log_end_offset("orders", 0) == Some(2));
+    check_exact_limit(&p, topic, CAP, too_large()).await;
 
     p.broker.shutdown().await;
 }
@@ -74,14 +80,7 @@ async fn a_batch_larger_than_segment_bytes_is_refused_even_when_the_message_cap_
     )
     .await;
 
-    check!(produce_batch_of_wire_len(&p.client, "orders", topic, SEGMENT).await == accepted(0, 0));
-    check!(
-        produce_batch_of_wire_len(&p.client, "orders", topic, SEGMENT + 1).await
-            == record_list_too_large()
-    );
-    check!(p.broker.local_log_end_offset("orders", 0) == Some(1));
-    check!(produce_batch_of_wire_len(&p.client, "orders", topic, SEGMENT).await == accepted(1, 0));
-    check!(p.broker.local_log_end_offset("orders", 0) == Some(2));
+    check_exact_limit(&p, topic, SEGMENT, record_list_too_large()).await;
 
     p.broker.shutdown().await;
 }

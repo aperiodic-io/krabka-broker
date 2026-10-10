@@ -27,22 +27,12 @@ impl ClientServerFailoverModel {
         vec![
             Property::always("acked_all_durable", |_, s: &FailoverState| {
                 s.acked_offset.is_none_or(|offset| {
-                    offset >= i64::from(s.hwm)
-                        || s.logs[s.leader].iter().flatten().any(|batch| {
-                            batch.producer_id == PRODUCER_ID
-                                && batch.offset == offset
-                                && batch.base_sequence == BASE_SEQUENCE
-                        })
+                    offset >= i64::from(s.hwm) || leader_has_batch_at(s, krabka_ids::Offset(offset))
                 })
             }),
             Property::always("ack_requires_hwm", |_, s: &FailoverState| {
                 s.acked_offset.is_none_or(|offset| {
-                    s.hwm == 1
-                        && s.logs[s.leader].iter().flatten().any(|batch| {
-                            batch.producer_id == PRODUCER_ID
-                                && batch.offset == offset
-                                && batch.base_sequence == BASE_SEQUENCE
-                        })
+                    s.hwm == 1 && leader_has_batch_at(s, krabka_ids::Offset(offset))
                 })
             }),
             Property::always("no_duplicate_append", |_, s: &FailoverState| {
@@ -148,4 +138,12 @@ impl ClientServerFailoverModel {
             }),
         ]
     }
+}
+
+fn leader_has_batch_at(state: &FailoverState, offset: krabka_ids::Offset) -> bool {
+    state.logs[state.leader].iter().flatten().any(|batch| {
+        batch.producer_id == PRODUCER_ID
+            && batch.offset == offset.0
+            && batch.base_sequence == BASE_SEQUENCE
+    })
 }

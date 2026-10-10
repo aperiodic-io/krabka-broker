@@ -286,6 +286,13 @@ pub mod fake {
 
     use super::{BrokerError, OFFSETS_TOPIC, OffsetsLog, async_trait};
 
+    /// Which classic metadata operation a test expects in the append log.
+    #[derive(Clone, Copy)]
+    pub enum ClassicMetadataRecord {
+        Write,
+        Tombstone,
+    }
+
     #[derive(Debug, Default)]
     pub struct InMemoryOffsetsLog {
         pub appended: Mutex<Vec<RecordBatch>>,
@@ -320,8 +327,31 @@ pub mod fake {
     }
 
     impl InMemoryOffsetsLog {
+        /// Refuse the next append with the selected error, or the default failure.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the failure mutex is poisoned.
+        pub fn fail_next_append(&self, failure: Option<BrokerError>) {
+            match failure {
+                Some(error) => *self.fail_next_with.lock().expect("not poisoned") = Some(error),
+                None => self
+                    .fail_next
+                    .store(true, std::sync::atomic::Ordering::SeqCst),
+            }
+        }
+
         pub async fn batches(&self) -> Vec<RecordBatch> {
             self.appended.lock().await.clone()
+        }
+
+        /// Snapshot the records grouped by their original append batch.
+        pub async fn record_batches(&self) -> Vec<Vec<krabka_protocol::records::Record>> {
+            self.batches()
+                .await
+                .into_iter()
+                .map(|batch| batch.records)
+                .collect()
         }
 
         /// Returns `true` if and only if an appended record tombstones the
@@ -330,16 +360,26 @@ pub mod fake {
         /// `GroupMetadata`, and a null value. Tests read it to assert that the
         /// upgrade flip removed the classic group record atomically.
         pub async fn has_classic_group_metadata_tombstone(&self, group_id: &str) -> bool {
+            self.has_classic_group_metadata_record(group_id, ClassicMetadataRecord::Tombstone)
+                .await
+        }
+
+        /// Match a classic metadata key and its expected value presence.
+        pub async fn has_classic_group_metadata_record(
+            &self,
+            group_id: &str,
+            operation: ClassicMetadataRecord,
+        ) -> bool {
             use crate::coordinator::unified::persistence::{Key, parse_key};
             self.appended.lock().await.iter().any(|batch| {
-                batch.records.iter().any(|rec| {
-                    rec.value.is_none()
-                        && rec.key.as_ref().is_some_and(|k| {
-                            matches!(
-                                parse_key(k),
-                                Ok(Key::GroupMetadata { group_id: ref gid }) if gid == group_id
-                            )
-                        })
+                batch.records.iter().any(|record| {
+                    let value_matches = match operation {
+                        ClassicMetadataRecord::Write => record.value.is_some(),
+                        ClassicMetadataRecord::Tombstone => record.value.is_none(),
+                    };
+                    value_matches && record.key.as_ref().is_some_and(|key| {
+                        matches!(parse_key(key), Ok(Key::GroupMetadata { group_id: ref id }) if id == group_id)
+                    })
                 })
             })
         }

@@ -81,7 +81,15 @@ async fn connect() -> Client {
 /// Creates `topic` with 1 partition and waits until this broker leads
 /// partition 0.
 async fn create_topic(broker: &BrokerHandle, client: &Client, topic: &str) -> uuid::Uuid {
-    support::client::create_led_topic(broker, client, topic, 1).await;
+    support::client::create_led_topic(
+        broker,
+        client,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            ..Default::default()
+        },
+    )
+    .await;
     support::share::topic_id(broker, topic)
 }
 
@@ -138,14 +146,16 @@ async fn produce_at(
         .collect();
     support::share::produce_batch(
         client,
-        topic,
-        tid,
-        0,
         RecordBatch {
             last_offset_delta: i32::try_from(values.len() - 1).unwrap(),
             base_timestamp: timestamp_ms,
             max_timestamp: timestamp_ms,
             records,
+            ..Default::default()
+        },
+        crate::support::share::ShareProduceSetup {
+            topic,
+            topic_id: tid,
             ..Default::default()
         },
     )

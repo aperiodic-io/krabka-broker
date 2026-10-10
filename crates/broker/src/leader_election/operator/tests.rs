@@ -9,13 +9,17 @@ use uuid::Uuid;
 
 use super::*;
 use crate::leader_election::test_support::{
-    alive_set, img_with_dirs, img_with_partition, no_witnesses, register_broker_with_dirs,
-    witnesses,
+    ElectionSetup, ExpectedPartitionSetup, alive_set, img_with_partition, no_witnesses,
+    register_broker_with_dirs, witnesses,
 };
 
 #[tokio::test]
 async fn preferred_happy_path() {
-    let img = img_with_partition("foo", 0, /*leader*/ 2, &[1, 2, 3], &[1, 2, 3]);
+    let img = img_with_partition(ElectionSetup {
+        topic: "foo",
+        leader: krabka_raft::NodeId(2),
+        ..Default::default()
+    });
     let l = alive_set(&[1, 2, 3]);
     let new_pr = select_new_leader_for_partition(
         &img,
@@ -26,20 +30,28 @@ async fn preferred_happy_path() {
         ElectionType::Preferred,
     )
     .expect("should elect");
-    let expected = crate::leader_election::test_support::expected_partition(
-        "foo",
-        1,
-        &[1, 2, 3],
-        LeaderEpoch(6),
-        vec![],
-    );
+    let expected =
+        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
+            topic: "foo",
+            leader: krabka_raft::NodeId(1),
+            isr: &[
+                krabka_raft::NodeId(1),
+                krabka_raft::NodeId(2),
+                krabka_raft::NodeId(3),
+            ],
+            ..Default::default()
+        });
     assert!(new_pr == expected);
 }
 
 #[tokio::test]
 async fn preferred_election_rejects_exhausted_metadata_epochs() {
     for (partition_epoch, leader_epoch) in [(i32::MAX, 5), (0, i32::MAX)] {
-        let mut img = img_with_partition("foo", 0, 2, &[1, 2, 3], &[1, 2, 3]);
+        let mut img = img_with_partition(ElectionSetup {
+            topic: "foo",
+            leader: krabka_raft::NodeId(2),
+            ..Default::default()
+        });
         let mut record = img.partition("foo", 0).expect("seeded partition").clone();
         record.partition_epoch = partition_epoch;
         record.leader_epoch = LeaderEpoch(leader_epoch);
@@ -78,7 +90,12 @@ async fn preferred_election_error_cases() {
         (2, &[1, 2, 3], &[2, 3], ElectError::PreferredNotAlive),
     ];
     for (leader, isr, alive, expected) in cases {
-        let img = img_with_partition("foo", 0, leader, &[1, 2, 3], isr);
+        let img = img_with_partition(ElectionSetup {
+            topic: "foo",
+            leader: krabka_raft::NodeId(leader),
+            isr: &crate::test_support::replica_nodes(isr),
+            ..Default::default()
+        });
         let l = alive_set(alive);
         let err = select_new_leader_for_partition(
             &img,
@@ -99,24 +116,31 @@ async fn preferred_election_error_cases() {
 #[tokio::test]
 async fn unclean_happy_path() {
     // ISR is just {1}, broker 1 is dead, brokers 2/3 are alive.
-    let img = img_with_partition("foo", 0, 1, &[1, 2, 3], &[1]);
+    let img = img_with_partition(ElectionSetup {
+        topic: "foo",
+        isr: &[krabka_raft::NodeId(1)],
+        ..Default::default()
+    });
     let l = alive_set(&[2, 3]);
     let new_pr =
         select_new_leader_for_partition(&img, &l, &no_witnesses(), "foo", 0, ElectionType::Unclean)
             .expect("unclean should elect");
-    let expected = crate::leader_election::test_support::expected_partition(
-        "foo",
-        2,
-        &[2],
-        LeaderEpoch(6),
-        vec![],
-    );
+    let expected =
+        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
+            topic: "foo",
+            isr: &[krabka_raft::NodeId(2)],
+            ..Default::default()
+        });
     assert!(new_pr == expected);
 }
 
 #[tokio::test]
 async fn unclean_no_alive_replicas() {
-    let img = img_with_partition("foo", 0, 1, &[1, 2, 3], &[1]);
+    let img = img_with_partition(ElectionSetup {
+        topic: "foo",
+        isr: &[krabka_raft::NodeId(1)],
+        ..Default::default()
+    });
     let l = alive_set(&[]); // everyone dead
     let err =
         select_new_leader_for_partition(&img, &l, &no_witnesses(), "foo", 0, ElectionType::Unclean)
@@ -126,7 +150,11 @@ async fn unclean_no_alive_replicas() {
 
 #[tokio::test]
 async fn unclean_isr_member_alive_returns_election_not_needed() {
-    let img = img_with_partition("foo", 0, 1, &[1, 2, 3], &[1, 2]);
+    let img = img_with_partition(ElectionSetup {
+        topic: "foo",
+        isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
+        ..Default::default()
+    });
     let l = alive_set(&[1, 2]); // ISR has live member
     let err =
         select_new_leader_for_partition(&img, &l, &no_witnesses(), "foo", 0, ElectionType::Unclean)
@@ -154,7 +182,11 @@ async fn unknown_topic_returns_error() {
 async fn preferred_election_refuses_a_witness_preferred_replica() {
     // Site-aware placement put the witness first in `replicas`, so the
     // preferred replica can never lead.
-    let img = img_with_partition("foo", 0, /*leader*/ 2, &[1, 2, 3], &[1, 2, 3]);
+    let img = img_with_partition(ElectionSetup {
+        topic: "foo",
+        leader: krabka_raft::NodeId(2),
+        ..Default::default()
+    });
     let l = alive_set(&[1, 2, 3]);
     let err = select_new_leader_for_partition(
         &img,
@@ -173,7 +205,11 @@ async fn operator_unclean_election_skips_a_witness_replica() {
     // Every data replica in the ISR is dead and the operator forces an
     // unclean election. The alive witness 2 must not take leadership, and
     // it must not report the election as unneeded either.
-    let img = img_with_partition("foo", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2]);
+    let img = img_with_partition(ElectionSetup {
+        topic: "foo",
+        isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
+        ..Default::default()
+    });
     let l = alive_set(&[2, 3]);
     let new_pr = select_new_leader_for_partition(
         &img,
@@ -184,13 +220,13 @@ async fn operator_unclean_election_skips_a_witness_replica() {
         ElectionType::Unclean,
     )
     .expect("unclean should elect the data replica");
-    let expected = crate::leader_election::test_support::expected_partition(
-        "foo",
-        3,
-        &[3],
-        LeaderEpoch(6),
-        vec![],
-    );
+    let expected =
+        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
+            topic: "foo",
+            leader: krabka_raft::NodeId(3),
+            isr: &[krabka_raft::NodeId(3)],
+            ..Default::default()
+        });
     assert!(new_pr == expected);
 }
 
@@ -285,7 +321,13 @@ async fn elections_skip_a_replica_on_a_dead_log_dir() {
     } in cases
     {
         let dirs: Vec<Uuid> = (1..=3).map(Uuid::from_u128).collect();
-        let mut img = img_with_dirs("foo", leader, &[1, 2, 3], isr, &dirs);
+        let mut img = img_with_partition(ElectionSetup {
+            topic: "foo",
+            leader: krabka_raft::NodeId(leader),
+            isr: &crate::test_support::replica_nodes(isr),
+            dirs: &dirs,
+            ..Default::default()
+        });
         for (id, dir) in (1..=3).zip(&dirs) {
             let online = if dead_dirs.contains(&id) {
                 Uuid::from_u128(99)

@@ -83,7 +83,19 @@ async fn tuple_quota_throttles_only_matching_client_id() {
     // Seed ACL entries so the authorizer engages (compat shim disabled) and
     // alice can Write to the topic.
     seed_compat_shim_disable_acl(&handle).await;
-    create_topic_as_admin(addr, admin_password.as_bytes(), "tuple-quota-topic", 1, 1).await;
+    create_topic_as_admin(
+        addr,
+        kafka_wire::SaslTopicSetup {
+            client_id: CLIENT_ID,
+            password: admin_password.as_bytes(),
+            topic: support::topics::ConfiguredTopicSetup {
+                name: "tuple-quota-topic".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .await;
     wait_partition_exists(&handle, "tuple-quota-topic", 0).await;
     seed_alice_write_acl(&handle, "tuple-quota-topic").await;
 
@@ -93,9 +105,6 @@ async fn tuple_quota_throttles_only_matching_client_id() {
     // No (user=alice)-only quota is set, so (alice, other) has no quota at all.
     let alter_resp = drive_alter_client_quotas_sasl(
         addr,
-        crate::CLIENT_ID,
-        "admin",
-        &admin_password,
         vec![(
             vec![
                 ("user".into(), Some("alice".into())),
@@ -103,7 +112,14 @@ async fn tuple_quota_throttles_only_matching_client_id() {
             ],
             vec![("producer_byte_rate".into(), 1024.0, false)],
         )],
-        false,
+        &crate::kafka_wire::quotas::QuotaAlterSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup {
+                client_id: crate::CLIENT_ID,
+                user: "admin",
+                password: admin_password.as_bytes().to_vec(),
+            },
+            ..Default::default()
+        },
     )
     .await;
     assert!(

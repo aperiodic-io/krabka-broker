@@ -43,15 +43,17 @@ async fn start_host_broker_on(client_port: u16, controller_port: u16) -> (Broker
         heartbeat_timeout: krabka_units::secs(120),
         bootstrap_mode: BootstrapMode::Bootstrap,
         ..crate::support::jvm_broker_config(
-            1,
-            format!("0.0.0.0:{client_port}").parse().expect("addr"),
-            format!("0.0.0.0:{controller_port}").parse().expect("addr"),
-            &format!("host.docker.internal:{client_port}"),
             dir.path().to_path_buf(),
-            &[(
-                1,
-                format!("0.0.0.0:{controller_port}").parse().expect("addr"),
-            )],
+            crate::support::JvmBrokerSetup {
+                listen: format!("0.0.0.0:{client_port}").parse().expect("addr"),
+                controller: format!("0.0.0.0:{controller_port}").parse().expect("addr"),
+                advertised: format!("host.docker.internal:{client_port}"),
+                voters: crate::support::controller_voters(&[(
+                    1,
+                    format!("0.0.0.0:{controller_port}").parse().expect("addr"),
+                )]),
+                ..Default::default()
+            },
         )
     };
     let handle = Broker::start(config).await.expect("start broker");

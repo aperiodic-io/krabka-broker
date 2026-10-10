@@ -239,18 +239,23 @@ mod tests {
             .collect()
     }
 
-    /// A preopened listener cannot report its address, so the supplied
-    /// listeners serve the specs in order and take the spec's address. The
-    /// specs name an address that no local interface has, so a bind of
-    /// either would fail: the adoption binds nothing.
-    #[tokio::test]
-    async fn preopened_listeners_serve_the_specs_in_order_without_a_bind() {
+    async fn two_listeners() -> (TcpListener, TcpListener, (SocketAddr, SocketAddr)) {
         let first = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let second = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let locals = (
             first.local_addr().expect("local address"),
             second.local_addr().expect("local address"),
         );
+        (first, second, locals)
+    }
+
+    /// A preopened listener cannot report its address, so the supplied
+    /// listeners serve the specs in order and take the spec's address. The
+    /// specs name an address that no local interface has, so a bind of
+    /// either would fail: the adoption binds nothing.
+    #[tokio::test]
+    async fn preopened_listeners_serve_the_specs_in_order_without_a_bind() {
+        let (first, second, locals) = two_listeners().await;
         let data: SocketAddr = "10.255.0.1:9092".parse().expect("literal");
         let internal: SocketAddr = "10.255.0.1:9094".parse().expect("literal");
 
@@ -275,12 +280,7 @@ mod tests {
     /// whatever the order of the supplied listeners.
     #[tokio::test]
     async fn native_listeners_serve_the_spec_with_their_address() {
-        let first = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let second = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let locals = (
-            first.local_addr().expect("local address"),
-            second.local_addr().expect("local address"),
-        );
+        let (first, second, locals) = two_listeners().await;
 
         let bound = adopt_or_bind_listeners(
             Sockets::Native,

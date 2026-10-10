@@ -8,7 +8,7 @@
         "time": 0.014
       },
       "vc_elim_Admit": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_len_tup2_i64_AclFacts": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_len_tup2_i64_AclFacts": { "prover": "alt-ergo", "time": 0.0 },
       "vc_new_bool": { "prover": "alt-ergo", "time": 0.02 },
       "vc_published_controller_session_bounds_quorum_requests": {
         "prover": "z3",
@@ -16,7 +16,7 @@
       },
       "vc_published_keys_bound_oauth_session": {
         "prover": "alt-ergo",
-        "time": 0.022
+        "time": 0.011
       },
       "vc_push_bool": { "prover": "alt-ergo", "time": 0.019 }
     }

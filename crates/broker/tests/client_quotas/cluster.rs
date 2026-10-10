@@ -25,3 +25,17 @@ pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition
 /// Seeds an ACL that allows alice to Write topic `topic`.
 pub use crate::support::acl::seed_alice_write_acl;
 pub use crate::support::acl::seed_compat_shim_disable_acl;
+
+/// Wait for the exact user quota to reach the committed image.
+pub async fn wait_alice_quota(handle: &BrokerHandle, key: &str, rate: f64) {
+    handle
+        .wait_for_image(|image| {
+            let entity: krabka_metadata::EntityKey = vec![("user".into(), Some("alice".into()))];
+            image
+                .client_quotas()
+                .get(&entity)
+                .and_then(|configs| configs.get(key))
+                == Some(&rate)
+        })
+        .await;
+}

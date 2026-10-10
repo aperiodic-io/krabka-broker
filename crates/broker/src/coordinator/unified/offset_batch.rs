@@ -39,37 +39,36 @@ impl OffsetRecordBatchBuilder {
 #[cfg(test)]
 mod tests {
     use assert2::check;
-    use krabka_log::{Log, LogConfig};
-    use krabka_units::convert::TimeExt;
+    use krabka_log::Log;
 
     use super::*;
 
     #[test]
     fn coordinator_records_roll_only_after_the_segment_age_limit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = LogConfig::default();
-        let roll_ms = config.segment_roll_interval.millis_i64_trunc();
-        let mut log = Log::open(dir.path(), config.clone()).unwrap();
-        let first_ms = 1_700_000_000_000;
-        for elapsed_ms in [0, 1, 2, 3, roll_ms] {
+        let mut fixture = crate::test_support::segment_age_fixture();
+        for elapsed_ms in [0, 1, 2, 3, fixture.roll_ms] {
             let mut builder = OffsetRecordBatchBuilder::default();
             builder.push(
                 Bytes::from_static(b"metadata"),
                 Some(Bytes::from_static(b"value")),
             );
             builder.push(Bytes::from_static(b"offset"), None);
-            log.append(&mut builder.finish(first_ms + elapsed_ms))
+            fixture
+                .log
+                .append(&mut builder.finish(fixture.first_ms + elapsed_ms))
                 .unwrap();
         }
-        check!(log.tierable_segments().is_empty());
+        check!(fixture.log.tierable_segments().is_empty());
 
         // Recovery must retain the original record timestamp used for rolling.
-        log.close();
-        let mut log = Log::open(dir.path(), config).unwrap();
+        fixture.log.close();
+        fixture.log = Log::open(fixture.dir.path(), fixture.config.clone()).unwrap();
         let mut builder = OffsetRecordBatchBuilder::default();
         builder.push(Bytes::from_static(b"offset"), None);
-        log.append(&mut builder.finish(first_ms + roll_ms + 1))
+        fixture
+            .log
+            .append(&mut builder.finish(fixture.first_ms + fixture.roll_ms + 1))
             .unwrap();
-        check!(log.tierable_segments().len() == 1);
+        check!(fixture.log.tierable_segments().len() == 1);
     }
 }

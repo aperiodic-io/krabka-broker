@@ -94,8 +94,12 @@ pub fn check_successful_classic_leave(result: &LeaveResult) {
     assert2::check!(result.members[0].error_code == crate::codes::NONE);
 }
 
-pub async fn classic_join(handle: &GroupActorHandle, member_id: &str, topic: &str) -> JoinResult {
-    ask(&handle.tx, |reply| GroupActorMessage::ClassicJoin {
+pub fn classic_join_message(
+    member_id: &str,
+    topic: &str,
+    reply: tokio::sync::oneshot::Sender<JoinResult>,
+) -> GroupActorMessage {
+    GroupActorMessage::ClassicJoin {
         req: JoinGroupRequest {
             group_id: "g".into(),
             member_id: member_id.into(),
@@ -116,6 +120,12 @@ pub async fn classic_join(handle: &GroupActorHandle, member_id: &str, topic: &st
         client_host: "127.0.0.1".into(),
         regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
         reply,
+    }
+}
+
+pub async fn classic_join(handle: &GroupActorHandle, member_id: &str, topic: &str) -> JoinResult {
+    ask(&handle.tx, |reply| {
+        classic_join_message(member_id, topic, reply)
     })
     .await
     .unwrap()
@@ -278,6 +288,12 @@ pub async fn consumer_heartbeat_owning(
 
 /// Reads the live `ClassicInspect` view. Only a classic-kind group
 /// replies.
+pub fn check_stable_classic_member(view: &ClassicView, member_id: &str) {
+    assert2::check!(view.state == crate::coordinator::unified::classic_state::GroupState::Stable);
+    assert2::check!(view.members.len() == 1);
+    assert2::check!(view.members[0].member_id == member_id);
+}
+
 pub async fn classic_inspect(handle: &GroupActorHandle) -> ClassicView {
     ask(&handle.tx, |reply| GroupActorMessage::ClassicInspect {
         reply,

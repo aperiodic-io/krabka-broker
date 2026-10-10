@@ -52,7 +52,10 @@ use tokio_rustls::rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject as _},
 };
 
-use crate::support::topics::{creatable_topic, create_topic_request};
+use crate::support::{
+    acl::ClusterAclSetup,
+    topics::{creatable_topic, create_topic_request},
+};
 
 const CLUSTER_AUTHORIZATION_FAILED: i16 = 31;
 const MESSAGE: &str = "Cluster authorization failed.";
@@ -94,9 +97,11 @@ async fn start_with(
 
 async fn allow(broker: &BrokerHandle, principal: &str, operation: AclOperation) {
     broker
-        .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(
-            principal, "*", operation,
-        ))
+        .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(ClusterAclSetup {
+            principal,
+            operation,
+            ..Default::default()
+        }))
         .await
         .expect("seed ACL");
 }
@@ -148,6 +153,25 @@ fn decode<T: Decode<'static>>(bytes: &Bytes, version: i16) -> T {
     let decoded = T::decode(&mut cursor, version).expect("decode response");
     check!(cursor.is_empty(), "the response consumed its body");
     decoded
+}
+
+async fn check_quorum_denied<S: AsyncRead + AsyncWrite + Unpin>(stream: &mut S, version: i16) {
+    let refused = exchange(
+        stream,
+        describe_quorum_request::API_KEY,
+        version,
+        true,
+        &describe_quorum(),
+    )
+    .await;
+    check!(
+        decode::<DescribeQuorumResponse>(&refused, version)
+            == DescribeQuorumResponse {
+                error_code: CLUSTER_AUTHORIZATION_FAILED,
+                error_message: Some(MESSAGE.to_owned()),
+                ..Default::default()
+            }
+    );
 }
 
 async fn sasl_plain(stream: &mut TcpStream, user: &str, password: &str) {
@@ -350,10 +374,12 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
         create_version,
         true,
         &encode(
-            &create_topic_request(
-                creatable_topic("created-by-creator".to_owned(), 1, 1),
-                5_000,
-            ),
+            &create_topic_request(creatable_topic(
+                crate::support::topics::ConfiguredTopicSetup {
+                    name: "created-by-creator".to_owned(),
+                    ..Default::default()
+                },
+            )),
             create_version,
         ),
     )
@@ -389,22 +415,7 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
             == 0
     );
     let quorum_version = describe_quorum_request::MAX_VERSION;
-    let refused = exchange(
-        &mut replicator,
-        describe_quorum_request::API_KEY,
-        quorum_version,
-        true,
-        &describe_quorum(),
-    )
-    .await;
-    check!(
-        decode::<DescribeQuorumResponse>(&refused, quorum_version)
-            == DescribeQuorumResponse {
-                error_code: CLUSTER_AUTHORIZATION_FAILED,
-                error_message: Some(MESSAGE.to_owned()),
-                ..Default::default()
-            }
-    );
+    check_quorum_denied(&mut replicator, quorum_version).await;
 
     let mut reader = TcpStream::connect(broker.controller_addr())
         .await
@@ -446,15 +457,9 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
     broker.shutdown().await;
 }
 
-const DEV_CERT: &str = include_str!("fixtures/security/dev_cert.pem");
-const DEV_KEY: &str = include_str!("fixtures/security/dev_key.pem");
-const DEV_CLIENT_CA: &str = include_str!("fixtures/security/dev_client_ca.pem");
-const DEV_CLIENT_CERT: &str = include_str!("fixtures/security/dev_client_cert.pem");
-const DEV_CLIENT_KEY: &str = include_str!("fixtures/security/dev_client_key.pem");
-
-/// The Subject DN of the fixture client certificate, which Kafka's `DEFAULT`
-/// mapping rule keeps as the principal name.
-const CLIENT_PRINCIPAL: &str = r"CN=test-client\,OU\=integration\,O\=krabka";
+use crate::support::tls::{
+    CLIENT_PRINCIPAL, DEV_CERT, DEV_CLIENT_CA, DEV_CLIENT_CERT, DEV_CLIENT_KEY, DEV_KEY,
+};
 
 /// An `SSL` controller listener authorizes each request for the principal of
 /// the client certificate.
@@ -517,22 +522,7 @@ async fn an_ssl_controller_listener_authorizes_each_request_for_the_certificate_
         .expect("mTLS handshake");
 
     let quorum_version = describe_quorum_request::MAX_VERSION;
-    let refused = exchange(
-        &mut stream,
-        describe_quorum_request::API_KEY,
-        quorum_version,
-        true,
-        &describe_quorum(),
-    )
-    .await;
-    check!(
-        decode::<DescribeQuorumResponse>(&refused, quorum_version)
-            == DescribeQuorumResponse {
-                error_code: CLUSTER_AUTHORIZATION_FAILED,
-                error_message: Some(MESSAGE.to_owned()),
-                ..Default::default()
-            }
-    );
+    check_quorum_denied(&mut stream, quorum_version).await;
 
     allow(
         &broker,

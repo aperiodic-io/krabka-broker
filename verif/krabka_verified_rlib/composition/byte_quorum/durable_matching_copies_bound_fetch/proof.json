@@ -60,7 +60,7 @@
       "vc_elim_Continue'0": { "prover": "alt-ergo", "time": 0.014 },
       "vc_from_residual_Option_tup4_i64_i64_Vec_tup2_u64_i64_Global_Vec_i64_Global": {
         "prover": "alt-ergo",
-        "time": 0.013
+        "time": 0.027
       },
       "vc_installed_wal_quorum_bounds_fetch": {
         "prover": "alt-ergo",

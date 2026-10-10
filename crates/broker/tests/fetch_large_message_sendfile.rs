@@ -19,10 +19,9 @@
 use assert2::assert;
 
 use crate::support::{
+    client::create_topic,
     fetch::{fetch_partition, single_partition_fetch},
-    produce::single_partition_produce,
     records::value_record,
-    topics::{creatable_topic, create_topic_request},
 };
 mod support;
 
@@ -33,15 +32,6 @@ use krabka_protocol::{
     records::{Record, RecordBatch},
 };
 use support::topic_id_for;
-
-async fn create_topic(p: &support::InProcess, name: &str) {
-    let resp = p
-        .client
-        .send(create_topic_request(creatable_topic(name, 1, 1), 5_000))
-        .await
-        .expect("CreateTopics");
-    assert!(resp.topics[0].error_code == 0);
-}
 
 /// Build `n` records whose values are distinct, large, and content-addressed
 /// by index. Any misplaced byte is then detectable.
@@ -117,24 +107,23 @@ fn one_drain_on(path: FetchDrainPath) -> [u64; 3] {
 #[tokio::test]
 async fn large_message_fetch_round_trips_byte_exact() {
     let p = support::start().await;
-    create_topic(&p, "big").await;
+    create_topic(&p.client, "big", 1).await;
     let tid = topic_id_for(&p.client, "big").await;
 
     // 64 records × 2 KiB ≈ 128 KiB of records — far over `sendfile_min`, so
     // the Linux plaintext fetch goes zero-copy.
     let (batch, expected) = large_records(64, 2 * 1024);
 
-    let prod = p
-        .client
-        .send(single_partition_produce(
-            "big",
-            tid,
-            0,
-            Some(batch.into()),
-            (1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+    let prod = crate::support::produce::send_batch(
+        &p.client,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: ("big").into(),
+            topic_id: tid,
+            ..Default::default()
+        },
+    )
+    .await;
     assert!(prod.responses[0].partition_responses[0].error_code == 0);
 
     // Fetch with a generous byte budget so the whole run comes back in one go.
@@ -144,12 +133,18 @@ async fn large_message_fetch_round_trips_byte_exact() {
         .send(FetchRequest {
             session_id: 0,
             session_epoch: -1,
-            ..single_partition_fetch(
-                "big",
-                tid,
-                fetch_partition(0, 0, 8 * 1024 * 1024),
-                (200, 1, 8 * 1024 * 1024),
-            )
+            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+                topic: "big".into(),
+                topic_id: tid,
+                partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
+                    maximum: crate::support::fetch::FetchByteLimit(8 * 1024 * 1024),
+                    ..Default::default()
+                }),
+                limits: crate::support::fetch::FetchLimits::wait_for_data_with_maximum(
+                    crate::support::fetch::RequestWaitMillis(200),
+                    crate::support::fetch::FetchByteLimit(8 * 1024 * 1024),
+                ),
+            })
         })
         .await
         .expect("Fetch");

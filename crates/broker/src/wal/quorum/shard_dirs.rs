@@ -43,35 +43,41 @@ pub(crate) fn shard_dir(
         .join(format!("{identity}-{}", partition.0))
 }
 
+fn unregister_shard(
+    registry: &registry::WalShardRegistry,
+    log_dir: &std::path::Path,
+    topic: &str,
+    topic_id: Uuid,
+    partition: PartitionIndex,
+) -> std::path::PathBuf {
+    registry.remove(registry::ShardId {
+        topic_id,
+        partition,
+    });
+    shard_dir(log_dir, topic, Some(topic_id), partition)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ShardRemoval {
+    All,
+    Leader,
+}
+
 pub(crate) fn remove_shard(
     registry: &registry::WalShardRegistry,
     log_dir: &std::path::Path,
     topic: &str,
     topic_id: Uuid,
     partition: PartitionIndex,
+    scope: ShardRemoval,
 ) -> std::io::Result<()> {
-    registry.remove(registry::ShardId {
-        topic_id,
-        partition,
-    });
-    match fs::remove_dir_all(shard_dir(log_dir, topic, Some(topic_id), partition)) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        result => result,
+    let root = unregister_shard(registry, log_dir, topic, topic_id, partition);
+    if matches!(scope, ShardRemoval::All) {
+        return match fs::remove_dir_all(root) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            result => result,
+        };
     }
-}
-
-pub(crate) fn remove_leader_shard(
-    registry: &registry::WalShardRegistry,
-    log_dir: &std::path::Path,
-    topic: &str,
-    topic_id: Uuid,
-    partition: PartitionIndex,
-) -> std::io::Result<()> {
-    registry.remove(registry::ShardId {
-        topic_id,
-        partition,
-    });
-    let root = shard_dir(log_dir, topic, Some(topic_id), partition);
     let entries = match fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -164,17 +170,43 @@ mod tests {
         let topic_id = Uuid::from_u128(3);
         let partition = PartitionIndex(4);
 
-        remove_shard(&registry, root.path(), "orders", topic_id, partition).unwrap();
+        remove_shard(
+            &registry,
+            root.path(),
+            "orders",
+            topic_id,
+            partition,
+            ShardRemoval::All,
+        )
+        .unwrap();
 
         let path = shard_dir(root.path(), "orders", Some(topic_id), partition);
         fs::create_dir_all(path.join("voter-2")).unwrap();
         fs::write(path.join("voter-2/checkpoint"), b"durable").unwrap();
-        remove_shard(&registry, root.path(), "orders", topic_id, partition).unwrap();
+        remove_shard(
+            &registry,
+            root.path(),
+            "orders",
+            topic_id,
+            partition,
+            ShardRemoval::All,
+        )
+        .unwrap();
         assert!(!path.exists());
 
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"not a directory").unwrap();
-        assert!(remove_shard(&registry, root.path(), "orders", topic_id, partition).is_err());
+        assert!(
+            remove_shard(
+                &registry,
+                root.path(),
+                "orders",
+                topic_id,
+                partition,
+                ShardRemoval::All
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -188,7 +220,15 @@ mod tests {
         fs::write(shard.join("voter-2/checkpoint"), b"durable").unwrap();
         fs::write(shard.join("quorum-state.json"), b"leader").unwrap();
 
-        remove_leader_shard(&registry, root.path(), "orders", topic_id, partition).unwrap();
+        remove_shard(
+            &registry,
+            root.path(),
+            "orders",
+            topic_id,
+            partition,
+            ShardRemoval::Leader,
+        )
+        .unwrap();
 
         assert!(shard.join("voter-2/checkpoint").exists());
         assert!(!shard.join("quorum-state.json").exists());

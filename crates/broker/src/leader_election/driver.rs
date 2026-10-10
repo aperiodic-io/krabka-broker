@@ -162,14 +162,24 @@ pub(crate) async fn on_broker_dead(
 ) -> Result<(), BrokerError> {
     fail_over_dead_broker(
         FailoverTrigger::Edge,
-        controller,
         node_id,
         dead,
-        liveness,
-        metrics,
-        recovery,
+        FailoverServices {
+            controller,
+            liveness,
+            metrics,
+            recovery,
+        },
     )
     .await
+}
+
+/// Services shared by death-edge and retry-sweep failover.
+struct FailoverServices<'a> {
+    controller: &'a Arc<dyn crate::metadata_source::MetadataSource>,
+    liveness: &'a Arc<ControllerLivenessState>,
+    metrics: &'a crate::metrics::BrokerMetrics,
+    recovery: &'a crate::unclean_recovery::UncleanRecoveryHandle,
 }
 
 /// The failover behind [`on_broker_dead`] and [`sweep_dead_leaders`].
@@ -184,13 +194,16 @@ pub(crate) async fn on_broker_dead(
 )]
 async fn fail_over_dead_broker(
     trigger: FailoverTrigger,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
     node_id: NodeId,
     dead: NodeId,
-    liveness: &Arc<ControllerLivenessState>,
-    metrics: &crate::metrics::BrokerMetrics,
-    recovery: &crate::unclean_recovery::UncleanRecoveryHandle,
+    services: FailoverServices<'_>,
 ) -> Result<(), BrokerError> {
+    let FailoverServices {
+        controller,
+        liveness,
+        metrics,
+        recovery,
+    } = services;
     if !is_controller_leader(controller, node_id) {
         return Ok(());
     }
@@ -308,12 +321,14 @@ pub(crate) async fn sweep_dead_leaders(
     for broker_id in stuck {
         if let Err(error) = fail_over_dead_broker(
             FailoverTrigger::Sweep,
-            controller,
             node_id,
             NodeId(broker_id),
-            liveness,
-            metrics,
-            recovery,
+            FailoverServices {
+                controller,
+                liveness,
+                metrics,
+                recovery,
+            },
         )
         .await
         {

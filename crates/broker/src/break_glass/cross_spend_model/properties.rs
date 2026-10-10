@@ -11,8 +11,9 @@ use stateright::{Model, Property};
 
 use super::{
     transitions::CrossSpendModel,
-    universe::{EXPIRES_AT, PROPOSALS, ProposalState, Step, Universe, distinct},
+    universe::{EXPIRES_AT, PROPOSALS, ProposalState, Step, Universe},
 };
+use crate::break_glass::state_model::distinct;
 
 impl Model for CrossSpendModel {
     type State = Universe;

@@ -184,18 +184,10 @@ mod tests {
     }
 
     fn image_with_voter(node: u64, host: &str, port: u16) -> krabka_metadata::MetadataImage {
-        let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-        image.apply(&krabka_metadata::MetadataRecord::V1Voters(
-            krabka_metadata::VotersRecord {
-                voters: krabka_metadata::VoterSet::from_voters([krabka_metadata::Voter {
-                    id: krabka_raft::NodeId(node),
-                    directory_id: uuid::Uuid::nil(),
-                    endpoints: endpoints(&[("CONTROLLER", host, port)]),
-                    kraft_version: krabka_metadata::KRaftVersionRange::default(),
-                }]),
-            },
-        ));
-        image
+        crate::test_support::voter_image(crate::test_support::VoterImageSetup {
+            node: krabka_ids::NodeId(node),
+            endpoints: endpoints(&[("CONTROLLER", host, port)]),
+        })
     }
 
     /// The voter set answers first, and the configured quorum answers for a

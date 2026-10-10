@@ -43,6 +43,38 @@ pub(crate) async fn watch_image_loop(
     }
 }
 
+/// The next owned publication on this receiver, or no image when its publisher closes.
+pub(crate) async fn next_published_image(
+    images: &mut watch::Receiver<Arc<MetadataImage>>,
+) -> Option<Arc<MetadataImage>> {
+    if wait_for_image_change(Some(images)).await {
+        Some(images.borrow_and_update().clone())
+    } else {
+        None
+    }
+}
+
+/// Wait for a publication until cancellation or the publisher closing.
+pub(crate) async fn next_image_until_shutdown(
+    images: &mut watch::Receiver<Arc<MetadataImage>>,
+    shutdown: &CancellationToken,
+) -> Option<Arc<MetadataImage>> {
+    tokio::select! {
+        () = shutdown.cancelled() => None,
+        image = next_published_image(images) => image,
+    }
+}
+
+/// Wait for a subscribed image update; no subscription leaves that select arm pending.
+pub(crate) async fn wait_for_image_change(
+    images: Option<&mut watch::Receiver<Arc<MetadataImage>>>,
+) -> bool {
+    match images {
+        Some(images) => images.changed().await.is_ok(),
+        None => std::future::pending().await,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

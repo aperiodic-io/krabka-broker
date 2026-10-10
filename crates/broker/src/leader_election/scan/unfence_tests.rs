@@ -16,23 +16,23 @@ use krabka_metadata::{
 use super::*;
 use crate::{
     config_keys::{ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS},
-    leader_election::test_support::{expected_partition, img_with_partition, set_topic_configs},
+    leader_election::test_support::{
+        ElectionSetup, ExpectedPartitionSetup, expected_partition, img_with_partition,
+    },
 };
 
 /// The image of a partition `t-0` with replicas `[1, 2, 3]`, led by broker 1
 /// alone in its record, and with `published` as its ELR state.
 fn leaderless_image(published: &str) -> MetadataImage {
-    let mut img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1]);
-    crate::test_support::finalize_elr_version(&mut img);
-    set_topic_configs(
-        &mut img,
-        "t",
-        &[
+    img_with_partition(ElectionSetup {
+        isr: &[krabka_raft::NodeId(1)],
+        elr: crate::leader_election::test_support::ElrFinalization::Enabled,
+        configs: &[
             (MIN_INSYNC_REPLICAS, "2"),
             (ELIGIBLE_LEADER_REPLICAS, published),
         ],
-    );
-    img
+        ..Default::default()
+    })
 }
 
 /// The records an unfence election writes: broker `leader` takes the
@@ -46,11 +46,36 @@ fn leaderless_image(published: &str) -> MetadataImage {
 /// bumps the epoch only when the leader changes, so the partition record stays
 /// whole and the ELR and recovery records follow it. Any other election is the
 /// one `V1PartitionUpdate` Kafka's `PartitionChangeRecord` is.
-fn elected(leader: u64, eligible: &[u64], recovering: bool) -> Vec<MetadataRecord> {
-    let partition = expected_partition("t", leader, &[leader], LeaderEpoch(6), vec![]);
-    let eligible: Vec<NodeId> = eligible.iter().copied().map(NodeId).collect();
-    let recovery = recovering.then_some(LeaderRecoveryState::Recovering);
-    if leader != 1 {
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ElectionRecovery {
+    #[default]
+    Complete,
+    Recovering,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct ElectedSetup<'a> {
+    #[default(NodeId(1))]
+    leader: NodeId,
+    eligible: &'a [NodeId],
+    recovery: ElectionRecovery,
+}
+
+fn elected(setup: ElectedSetup<'_>) -> Vec<MetadataRecord> {
+    let ElectedSetup {
+        leader,
+        eligible,
+        recovery,
+    } = setup;
+    let partition = expected_partition(ExpectedPartitionSetup {
+        leader,
+        isr: &[leader],
+        ..Default::default()
+    });
+    let eligible = eligible.to_vec();
+    let recovery =
+        (recovery == ElectionRecovery::Recovering).then_some(LeaderRecoveryState::Recovering);
+    if leader != NodeId(1) {
         return vec![MetadataRecord::V1PartitionUpdate(PartitionUpdateRecord {
             partition,
             eligible_leader_replicas: Some(eligible),
@@ -104,7 +129,10 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
             published: "0::1",
             unfenced: 1,
             alive: &[2, 3],
-            expected: elected(1, &[], true),
+            expected: elected(ElectedSetup {
+                recovery: ElectionRecovery::Recovering,
+                ..Default::default()
+            }),
             unclean_elections: 1,
         },
         Case {
@@ -112,7 +140,10 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
             published: "0:1,2,3:1",
             unfenced: 1,
             alive: &[2, 3],
-            expected: elected(1, &[2, 3], false),
+            expected: elected(ElectedSetup {
+                eligible: &[krabka_raft::NodeId(2), krabka_raft::NodeId(3)],
+                ..Default::default()
+            }),
             unclean_elections: 0,
         },
         Case {
@@ -120,7 +151,11 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
             published: "0:1,2,3:1",
             unfenced: 2,
             alive: &[3],
-            expected: elected(2, &[1, 3], false),
+            expected: elected(ElectedSetup {
+                leader: NodeId(2),
+                eligible: &[krabka_raft::NodeId(1), krabka_raft::NodeId(3)],
+                ..Default::default()
+            }),
             unclean_elections: 0,
         },
     ];

@@ -57,6 +57,29 @@ pub const fn compute_horizon(now_ms: i64, delete_retention_ms: i64) -> i64 {
     now_ms.saturating_add(delete_retention_ms)
 }
 
+open_logic! {
+fn horizon_decision_matches(existing: Option<i64>, now: i64, retention: i64, decision: RetainDecision) -> bool {
+    pearlite! { match existing {
+        None => exists<h: i64> decision == RetainDecision::SetHorizon(h)
+            && h@ == compute_horizon_model(now, retention),
+        Some(h) => decision == if now@ >= h@ { RetainDecision::Delete } else { RetainDecision::Keep },
+    } }
+}
+}
+
+#[ensures(horizon_decision_matches(existing, now_ms, delete_retention_ms, result))]
+const fn horizon_retention(
+    existing: Option<i64>,
+    now_ms: i64,
+    delete_retention_ms: i64,
+) -> RetainDecision {
+    match existing {
+        Some(h) if now_ms >= h => RetainDecision::Delete,
+        Some(_) => RetainDecision::Keep,
+        None => RetainDecision::SetHorizon(compute_horizon(now_ms, delete_retention_ms)),
+    }
+}
+
 /// The single per-record KIP-534 retain decision.
 ///
 /// Control batches, that is transaction commit and abort markers, are retained
@@ -66,23 +89,14 @@ pub const fn compute_horizon(now_ms: i64, delete_retention_ms: i64) -> i64 {
 /// through the delete horizon after it becomes the newest entry for its key.
 #[ensures(batch.is_control && (txn == TxnDataState::DataSurvives || txn == TxnDataState::NotTransactional)
     ==> result == RetainDecision::Keep)]
-#[ensures(batch.is_control && txn == TxnDataState::DataFullyGone && batch.existing_horizon == None
-    ==> exists<h: i64> result == RetainDecision::SetHorizon(h)
-        && h@ == compute_horizon_model(now_ms, delete_retention_ms))]
-#[ensures(forall<h: i64> batch.is_control && txn == TxnDataState::DataFullyGone
-        && batch.existing_horizon == Some(h)
-    ==> result == (if now_ms@ >= h@ { RetainDecision::Delete } else { RetainDecision::Keep }))]
+#[ensures(batch.is_control && txn == TxnDataState::DataFullyGone
+    ==> horizon_decision_matches(batch.existing_horizon, now_ms, delete_retention_ms, result))]
 #[ensures(!batch.is_control && !rec.has_key ==> result == RetainDecision::Delete)]
 #[ensures(!batch.is_control && rec.has_key && !is_newest_for_key ==> result == RetainDecision::Delete)]
 #[ensures(!batch.is_control && rec.has_key && is_newest_for_key && rec.has_value
     ==> result == RetainDecision::Keep)]
 #[ensures(!batch.is_control && rec.has_key && is_newest_for_key && !rec.has_value
-        && batch.existing_horizon == None
-    ==> exists<h: i64> result == RetainDecision::SetHorizon(h)
-        && h@ == compute_horizon_model(now_ms, delete_retention_ms))]
-#[ensures(forall<h: i64> !batch.is_control && rec.has_key && is_newest_for_key && !rec.has_value
-        && batch.existing_horizon == Some(h)
-    ==> result == (if now_ms@ >= h@ { RetainDecision::Delete } else { RetainDecision::Keep }))]
+    ==> horizon_decision_matches(batch.existing_horizon, now_ms, delete_retention_ms, result))]
 #[must_use]
 pub const fn retain_decision(
     rec: RecordMeta,
@@ -95,11 +109,9 @@ pub const fn retain_decision(
     if batch.is_control {
         return match txn {
             TxnDataState::DataSurvives | TxnDataState::NotTransactional => RetainDecision::Keep,
-            TxnDataState::DataFullyGone => match batch.existing_horizon {
-                Some(h) if now_ms >= h => RetainDecision::Delete,
-                Some(_) => RetainDecision::Keep,
-                None => RetainDecision::SetHorizon(compute_horizon(now_ms, delete_retention_ms)),
-            },
+            TxnDataState::DataFullyGone => {
+                horizon_retention(batch.existing_horizon, now_ms, delete_retention_ms)
+            }
         };
     }
     if !rec.has_key {
@@ -112,9 +124,5 @@ pub const fn retain_decision(
         return RetainDecision::Keep;
     }
     // Newest-for-key tombstone: age out via the delete horizon.
-    match batch.existing_horizon {
-        Some(h) if now_ms >= h => RetainDecision::Delete,
-        Some(_) => RetainDecision::Keep,
-        None => RetainDecision::SetHorizon(compute_horizon(now_ms, delete_retention_ms)),
-    }
+    horizon_retention(batch.existing_horizon, now_ms, delete_retention_ms)
 }

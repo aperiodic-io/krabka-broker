@@ -394,7 +394,7 @@ mod tests {
                 .copied()
                 .map(uuid::Uuid::from_u128)
                 .collect(),
-            ..crate::test_support::broker_registration(1)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(1))
         }
     }
 

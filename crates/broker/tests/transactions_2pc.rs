@@ -35,26 +35,73 @@ use crate::support::{
     transactions::init_producer_request,
 };
 
-/// An `InitProducerId` request that keeps the two-phase commit fields.
-///
-/// Kafka marks `InitProducerId` v6 `latestVersionUnstable`, so a client
-/// negotiates v5 at the most and leaves `enable2Pc` and `keepPreparedTxn` off
-/// the wire. These tests drive the v6 semantics, so they pin v6, on a broker
-/// that enables unstable api versions.
+#[derive(Clone, Copy, Default)]
+enum PreparedTransactionRecovery {
+    #[default]
+    Disabled,
+    Keep,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct TwoPhaseInitSetup<'a> {
+    #[default("tid-2pc")]
+    transactional_id: &'a str,
+    recovery: PreparedTransactionRecovery,
+}
+
+/// Pin the unstable v6 wire version and preserve both two-phase commit flags.
 fn two_phase_init(
-    request: InitProducerIdRequest,
+    setup: TwoPhaseInitSetup<'_>,
 ) -> crate::support::wire::At<InitProducerIdRequest, { init_producer_id_request::MAX_VERSION }> {
-    crate::support::wire::At(request)
+    crate::support::wire::At(InitProducerIdRequest {
+        enable2_pc: true,
+        keep_prepared_txn: matches!(setup.recovery, PreparedTransactionRecovery::Keep),
+        ..init_producer_request(crate::support::transactions::InitProducerSetup {
+            transactional_id: Some(setup.transactional_id.into()),
+            timeout: crate::support::transactions::TransactionTimeoutMillis(30_000),
+            ..Default::default()
+        })
+    })
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct InitializedProducerSetup<'a> {
+    #[default("tid-keep")]
+    transactional_id: &'a str,
+}
+
+/// Bootstrap the coordinator before initializing a transactional producer.
+async fn initialized_producer(
+    broker: &BrokerHandle,
+    bootstrap: &str,
+    setup: InitializedProducerSetup<'_>,
+) -> Producer {
+    broker.wait_until_transaction_coordinator_ready().await;
+    let producer = Producer::builder()
+        .bootstrap(bootstrap.to_owned())
+        .transactional_id(setup.transactional_id)
+        .build()
+        .await
+        .unwrap();
+    producer.init_transactions().await.unwrap();
+    producer
 }
 
 // Kafka error codes (see crates/broker/src/codes.rs).
 const NONE: i16 = 0;
 const TRANSACTIONAL_ID_AUTHORIZATION_FAILED: i16 = 53;
 
-async fn boot(two_pc_enabled: bool) -> (BrokerHandle, String, TempDir) {
+#[derive(Clone, Copy)]
+enum TwoPhaseCommitSupport {
+    Enabled,
+    Disabled,
+}
+
+async fn boot(support: TwoPhaseCommitSupport) -> (BrokerHandle, String, TempDir) {
     let dir = TempDir::new().unwrap();
     let mut cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
-    cfg.features.transaction_two_phase_commit_enable = two_pc_enabled;
+    cfg.features.transaction_two_phase_commit_enable =
+        matches!(support, TwoPhaseCommitSupport::Enabled);
     // v6 is `latestVersionUnstable`: a broker accepts it only with Kafka's
     // `unstable.api.versions.enable`, and closes the connection otherwise.
     cfg.features.unstable_api_versions = krabka_broker::api_catalog::UnstableApiVersions::Enabled;
@@ -74,14 +121,12 @@ async fn client(bootstrap: &str) -> krabka_client_core::Client {
 /// `UNSUPPORTED_*` code.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn enable_2pc_rejected_when_cluster_disabled() {
-    let (broker, bootstrap, _dir) = boot(false).await;
+    let (broker, bootstrap, _dir) = boot(TwoPhaseCommitSupport::Disabled).await;
     let client = client(&bootstrap).await;
 
     let resp = client
-        .send(two_phase_init(InitProducerIdRequest {
-            enable2_pc: true,
-            keep_prepared_txn: false,
-            ..init_producer_request(Some("tid-2pc".into()), 30_000, (-1, -1))
+        .send(two_phase_init(TwoPhaseInitSetup {
+            ..Default::default()
         }))
         .await
         .expect("InitProducerId");
@@ -99,24 +144,15 @@ async fn enable_2pc_rejected_when_cluster_disabled() {
 /// no-op without a separate describe round trip.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn keep_prepared_txn_without_ongoing_transaction_is_a_noop() {
-    let (broker, bootstrap, _dir) = boot(true).await;
-    // The producer does not retry COORDINATOR_NOT_AVAILABLE from
-    // FindCoordinator. Bring the transaction coordinator up first.
-    broker.wait_until_transaction_coordinator_ready().await;
-    let producer = Producer::builder()
-        .bootstrap(bootstrap.clone())
-        .transactional_id("tid-keep")
-        .build()
-        .await
-        .unwrap();
-    producer.init_transactions().await.unwrap();
+    let (broker, bootstrap, _dir) = boot(TwoPhaseCommitSupport::Enabled).await;
+    let producer =
+        initialized_producer(&broker, &bootstrap, InitializedProducerSetup::default()).await;
     let client = client(&bootstrap).await;
 
     let resp = client
-        .send(two_phase_init(InitProducerIdRequest {
-            enable2_pc: true,
-            keep_prepared_txn: true,
-            ..init_producer_request(Some("tid-keep".into()), 30_000, (-1, -1))
+        .send(two_phase_init(TwoPhaseInitSetup {
+            transactional_id: "tid-keep",
+            recovery: PreparedTransactionRecovery::Keep,
         }))
         .await
         .expect("InitProducerId");
@@ -142,27 +178,22 @@ async fn keep_prepared_txn_without_ongoing_transaction_is_a_noop() {
 /// timeout back through `DescribeTransactions`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn enable_2pc_persists_no_timeout_sentinel() {
-    let (broker, bootstrap, _dir) = boot(true).await;
-    // The producer does not retry COORDINATOR_NOT_AVAILABLE from
-    // FindCoordinator. Bring the transaction coordinator up first.
-    broker.wait_until_transaction_coordinator_ready().await;
-
-    // Bootstrap the txn coordinator + this tid's entry via a normal producer.
-    let producer = Producer::builder()
-        .bootstrap(bootstrap.clone())
-        .transactional_id("tid-2pc-ok")
-        .build()
-        .await
-        .unwrap();
-    producer.init_transactions().await.unwrap();
+    let (broker, bootstrap, _dir) = boot(TwoPhaseCommitSupport::Enabled).await;
+    let producer = initialized_producer(
+        &broker,
+        &bootstrap,
+        InitializedProducerSetup {
+            transactional_id: "tid-2pc-ok",
+        },
+    )
+    .await;
 
     // Re-init the SAME tid with enable2Pc → flips it to a no-timeout 2PC txn.
     let client = client(&bootstrap).await;
     let resp = client
-        .send(two_phase_init(InitProducerIdRequest {
-            enable2_pc: true,
-            keep_prepared_txn: false,
-            ..init_producer_request(Some("tid-2pc-ok".into()), 30_000, (-1, -1))
+        .send(two_phase_init(TwoPhaseInitSetup {
+            transactional_id: "tid-2pc-ok",
+            ..Default::default()
         }))
         .await
         .expect("InitProducerId(enable2Pc)");
@@ -213,7 +244,7 @@ async fn enable_2pc_persists_no_timeout_sentinel() {
 async fn two_phase_commit_needs_no_transaction_version_3_and_3_is_refused() {
     use krabka_protocol::owned::update_features_response::UpdateFeaturesResponse;
 
-    let (broker, bootstrap, _dir) = boot(true).await;
+    let (broker, bootstrap, _dir) = boot(TwoPhaseCommitSupport::Enabled).await;
     let client = client(&bootstrap).await;
 
     let api_versions = client

@@ -37,6 +37,15 @@ async fn create_topic(client: &Client, name: &str, partitions: i32) {
     );
 }
 
+async fn boot_topic(
+    log_dir: std::path::PathBuf,
+    topic: &str,
+) -> (krabka_broker::BrokerHandle, Arc<Client>) {
+    let (broker, client) = boot(log_dir).await;
+    create_topic(&client, topic, 2).await;
+    (broker, client)
+}
+
 fn rejoin_config(log_dir: std::path::PathBuf) -> BrokerConfig {
     let mut cfg = BrokerConfig::for_tests(log_dir);
     cfg.bootstrap_mode = BootstrapMode::Rejoin;
@@ -51,8 +60,7 @@ async fn replay_preserves_group_epoch_and_members() {
     let member_id;
     let initial_epoch;
     {
-        let (broker, client) = boot(log_dir.clone()).await;
-        create_topic(&client, "tp", 2).await;
+        let (broker, client) = boot_topic(log_dir.clone(), "tp").await;
         let req = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp".into()]),
             ..crate::support::consumer_groups::joining_consumer(
@@ -154,8 +162,7 @@ async fn replay_keeps_the_topics_a_regex_resolved_to_and_finds_new_ones() {
     let member_id;
     let initial_epoch;
     {
-        let (broker, client) = boot(log_dir.clone()).await;
-        create_topic(&client, "orders-eu", 2).await;
+        let (broker, client) = boot_topic(log_dir.clone(), "orders-eu").await;
         let resp = client
             .send(ConsumerGroupHeartbeatRequest {
                 subscribed_topic_regex: Some("orders-.*".into()),

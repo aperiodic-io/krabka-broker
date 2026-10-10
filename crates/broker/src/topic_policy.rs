@@ -141,13 +141,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
-
-    fn configs(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-            .collect()
-    }
+    use crate::test_support::config_map as configs;
 
     fn policy() -> TopicPolicy {
         TopicPolicy {

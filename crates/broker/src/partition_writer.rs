@@ -51,12 +51,27 @@ pub(crate) use self::append::run_produce_append_batch;
 pub(crate) use self::storage::{flag_storage_failure, storage_failure_error};
 use self::{
     compaction::handle_compact,
-    mutations::{handle_replicate, handle_reset, handle_trim, handle_truncate},
+    mutations::{ResetMutation, handle_log_reset, handle_replicate, handle_trim},
     produce::handle_produce,
     retention::handle_retention,
     storage::lock_log,
     swap::swap_future_log,
 };
+
+/// Notifications, replica state, and scheduled-delivery handles used by the writer.
+pub type WriterSignals = (
+    Arc<Notify>,
+    Arc<tokio::sync::Mutex<ReplicaState>>,
+    Arc<Notify>,
+    DeliveryHandles,
+);
+
+/// Storage health, producer state, and optional shared WAL used by the writer.
+pub type WriterServices = (
+    LogDirRegistry,
+    Arc<ProducerState>,
+    Option<crate::wal::SharedWal>,
+);
 
 /// Loop on the receive side of the partition's `WriterMessage` channel.
 ///
@@ -66,17 +81,8 @@ pub async fn run(
     identity: (String, PartitionIndex),
     storage: (Arc<Mutex<Log>>, Arc<ArcSwap<PathBuf>>),
     rx: mpsc::Receiver<WriterMessage>,
-    signals: (
-        Arc<Notify>,
-        Arc<tokio::sync::Mutex<ReplicaState>>,
-        Arc<Notify>,
-        DeliveryHandles,
-    ),
-    services: (
-        LogDirRegistry,
-        Arc<ProducerState>,
-        Option<crate::wal::SharedWal>,
-    ),
+    signals: WriterSignals,
+    services: WriterServices,
 ) {
     run_with_sequencer(
         identity,
@@ -94,17 +100,8 @@ pub async fn run_with_sequencer(
     identity: (String, PartitionIndex),
     storage: (Arc<Mutex<Log>>, Arc<ArcSwap<PathBuf>>),
     mut rx: mpsc::Receiver<WriterMessage>,
-    signals: (
-        Arc<Notify>,
-        Arc<tokio::sync::Mutex<ReplicaState>>,
-        Arc<Notify>,
-        DeliveryHandles,
-    ),
-    services: (
-        LogDirRegistry,
-        Arc<ProducerState>,
-        Option<crate::wal::SharedWal>,
-    ),
+    signals: WriterSignals,
+    services: WriterServices,
     max_produce_group: usize,
     sequencer: Option<Arc<dyn crate::wal::OffsetSequencer>>,
 ) {
@@ -228,12 +225,12 @@ pub async fn run_with_sequencer(
                 .await;
             }
             WriterMessage::Truncate { offset, ack } => {
-                if handle_truncate(
+                if handle_log_reset(
                     &log,
                     (&log_dir, &log_dir_status),
                     &replica_state,
                     wal.as_ref(),
-                    offset,
+                    ResetMutation::Truncate(offset),
                     ack,
                 )
                 .await
@@ -242,12 +239,12 @@ pub async fn run_with_sequencer(
                 }
             }
             WriterMessage::ResetTo { new_base, ack } => {
-                if handle_reset(
+                if handle_log_reset(
                     &log,
                     (&log_dir, &log_dir_status),
                     &replica_state,
                     wal.as_ref(),
-                    new_base,
+                    ResetMutation::Reset(new_base),
                     ack,
                 )
                 .await

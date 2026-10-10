@@ -1328,11 +1328,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn spool_file_is_the_golden_bytes() {
+    fn spooled_golden_record() -> (tempfile::TempDir, Spool) {
         let dir = tempfile::tempdir().unwrap();
         let mut spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         check!(spool.append(&golden_record()).unwrap());
+        (dir, spool)
+    }
+
+    #[test]
+    fn spool_file_is_the_golden_bytes() {
+        let (dir, _spool) = spooled_golden_record();
 
         check!(std::fs::read(dir.path().join(SPOOL_FILE)).unwrap() == GOLDEN_SPOOL);
     }
@@ -1353,9 +1358,7 @@ mod tests {
     /// its replay and lost three records in generation 1 leaves them.
     #[test]
     fn sidecar_files_are_the_golden_bytes() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
-        check!(spool.append(&golden_record()).unwrap());
+        let (dir, spool) = spooled_golden_record();
         spool.pending_losses().add(3);
         spool.pending_losses().persist().unwrap();
         spool.begin_replay(&golden_record()).unwrap();

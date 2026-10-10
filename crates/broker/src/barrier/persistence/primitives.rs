@@ -1,15 +1,20 @@
-//! The three reads that every `__barrier_state` record kind shares.
+//! Wire primitives and checks shared by every `__barrier_state` record kind.
 //!
 //! The leading version check, the trailing-byte check, and the `i32`-counted
 //! array appear in all four decoders, so they live here rather than once per
 //! record kind.
 
-use krabka_protocol::{
+pub(super) use krabka_protocol::{
     ProtocolError,
-    primitives::{array::get_array_len, fixed::get_i16},
+    primitives::{
+        array::{get_array_len, put_array_len},
+        fixed::{get_i8, get_i16, get_i32, get_i64, put_i8, put_i16, put_i32, put_i64},
+        string_bytes::get_string_owned,
+    },
 };
 
-use super::RECORD_VERSION;
+pub(super) use super::RECORD_VERSION;
+pub(super) use crate::{coordinator::unified::persistence::put_string, error::BrokerError};
 
 /// Read and check the leading record version.
 pub(super) fn expect_version(cur: &mut &[u8]) -> Result<(), ProtocolError> {

@@ -349,7 +349,9 @@ mod tests {
         for (level, want_disabled) in cases {
             let image = match level {
                 None => MetadataImage::new(uuid::Uuid::nil()),
-                Some(level) => image_with_group_version(level),
+                Some(level) => image_with_group_version(
+                    crate::handlers::group_heartbeat_test_support::GroupFeatureLevel(level),
+                ),
             };
             assert!(
                 group_version_disabled(&image) == want_disabled,
@@ -380,22 +382,34 @@ mod tests {
         entries.iter().map(|(id, p)| (*id, p.to_vec())).collect()
     }
 
-    fn view_member(member_id: &str) -> DescribeMember {
-        DescribeMember {
-            member_id: member_id.into(),
-            instance_id: None,
-            rack_id: None,
-            member_epoch: 5,
-            client_id: "client".into(),
-            client_host: "/10.0.0.1".into(),
-            subscribed_topic_names: vec!["orders".into(), "payments".into()],
-            subscribed_topic_regex: None,
-            assigned_partitions: HashMap::new(),
-            partitions_pending_revocation: HashMap::new(),
-            target_partitions: HashMap::new(),
-            is_classic: false,
-        }
+    /// The same literal member identity appears in the input view and expected wire member.
+    /// Their assignments remain separate, including the independently expected wire mapping.
+    macro_rules! member_identity_fixture {
+        ($name:ident -> $type:ident, $encoding:ident, {$($extra:tt)*}) => {
+            fn $name(member_id: &str) -> $type {
+                member_identity_fixture!(@$encoding $type {
+                    member_id: member_id.into(),
+                    instance_id: None,
+                    rack_id: None,
+                    member_epoch: 5,
+                    client_id: "client".into(),
+                    client_host: "/10.0.0.1".into(),
+                    subscribed_topic_names: vec!["orders".into(), "payments".into()],
+                    subscribed_topic_regex: None,
+                    $($extra)*
+                })
+            }
+        };
+        (@plain $type:ident $fields:tt) => { $type $fields };
+        (@tagged $type:ident $fields:tt) => { tagged_wire!($type $fields) };
     }
+
+    member_identity_fixture!(view_member -> DescribeMember, plain, {
+        assigned_partitions: HashMap::new(),
+        partitions_pending_revocation: HashMap::new(),
+        target_partitions: HashMap::new(),
+        is_classic: false,
+    });
 
     fn view(group_state: &'static str, members: Vec<DescribeMember>) -> DescribeView {
         DescribeView {
@@ -422,21 +436,11 @@ mod tests {
         })
     }
 
-    fn wire_member(member_id: &str) -> Member {
-        tagged_wire!(Member {
-            member_id: member_id.into(),
-            instance_id: None,
-            rack_id: None,
-            member_epoch: 5,
-            client_id: "client".into(),
-            client_host: "/10.0.0.1".into(),
-            subscribed_topic_names: vec!["orders".into(), "payments".into()],
-            subscribed_topic_regex: None,
-            assignment: assigned(vec![]),
-            target_assignment: assigned(vec![]),
-            member_type: MEMBER_TYPE_CONSUMER,
-        })
-    }
+    member_identity_fixture!(wire_member -> Member, tagged, {
+        assignment: assigned(vec![]),
+        target_assignment: assigned(vec![]),
+        member_type: MEMBER_TYPE_CONSUMER,
+    });
 
     fn wire_group(group_state: &str, assignor_name: &str, members: Vec<Member>) -> DescribedGroup {
         tagged_wire!(DescribedGroup {
@@ -565,12 +569,10 @@ mod tests {
     fn a_group_naming_an_undescribable_topic_is_replaced_by_an_error_row() {
         let mut image = image_with_topics();
         image.apply(&MetadataRecord::V1AccessControlEntry(
-            crate::test_support::allow_acl(
-                krabka_metadata::ResourceType::Topic,
-                "orders",
-                "User:alice",
-                AclOperation::Describe,
-            ),
+            crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+                operation: AclOperation::Describe,
+                ..Default::default()
+            }),
         ));
         let authorizer = acl_authorizer();
         request_identity!(
@@ -742,7 +744,11 @@ mod tests {
             (broker_handle, _dir, broker),
             group_controller_peer(authorizer)
         );
-        set_group_version(&broker, 0).await;
+        set_group_version(
+            &broker,
+            crate::handlers::group_heartbeat_test_support::GroupFeatureLevel(0),
+        )
+        .await;
         request_identity!(
             (principal, peer, ctx),
             crate::test_support::principal("nobody"),
@@ -780,12 +786,12 @@ mod tests {
         broker
             .controller
             .submit_change(vec![MetadataRecord::V1AccessControlEntry(
-                crate::test_support::allow_acl(
-                    krabka_metadata::ResourceType::Group,
-                    "allowed",
-                    "User:alice",
-                    krabka_metadata::AclOperation::Describe,
-                ),
+                crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+                    resource_type: krabka_metadata::ResourceType::Group,
+                    resource_name: "allowed",
+                    operation: krabka_metadata::AclOperation::Describe,
+                    ..Default::default()
+                }),
             )])
             .await
             .expect("grant alice Describe on allowed");

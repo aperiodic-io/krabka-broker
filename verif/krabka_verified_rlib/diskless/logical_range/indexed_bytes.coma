@@ -36,4 +36,3 @@ goal vc_indexed_bytes: if count <= 0 then
     true
   else
     [@expl:variant decreases] well_founded_relation_Int ([%#slogical_range] count) ([%#slogical_range] count - 1)
-

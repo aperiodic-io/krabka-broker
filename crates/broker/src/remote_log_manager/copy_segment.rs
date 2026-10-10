@@ -154,7 +154,9 @@ async fn copy_one_inner(
         return CopyOutcome::Failed;
     }
 
-    let data = export_segment_data(ex, true, || leader_epoch_index_bytes(&epochs));
+    let data = export_segment_data(ex, ProducerSnapshotExport::Include, || {
+        leader_epoch_index_bytes(&epochs)
+    });
 
     // The RSM is a blocking SPI — run the copy on the blocking pool.
     //
@@ -333,8 +335,8 @@ mod tests {
     use crate::remote_log_manager::{
         copy_eligible, test_support as fixtures,
         test_support::{
-            FakeWormArchive, TEST_COPY_TIMEOUT, copy_exports, local_backends, missing_remote_reads,
-            rolled_log, synth_export, tier, tp,
+            FakeWormArchive, copy_exports, local_backends, missing_remote_reads, rolled_log,
+            synth_export, tier, tp,
         },
     };
 
@@ -474,7 +476,7 @@ mod tests {
             let rsm_impl = Arc::new(CapturingRsm::default());
             let rsm: Arc<dyn RemoteStorageManager> = rsm_impl.clone();
             let rlmm = fixtures::in_memory_metadata();
-            let export = synth_export(0, 9, 100, 64);
+            let export = synth_export(fixtures::SegmentExportSetup::default());
 
             let outcome = copy_one(
                 &tier(chain.archive(), &rsm, &rlmm),
@@ -526,7 +528,7 @@ mod tests {
                 &tp(),
                 1,
                 LeaderEpoch(0),
-                &synth_export(0, 9, 100, 64),
+                &synth_export(fixtures::SegmentExportSetup::default()),
                 ChainPosition::At(requested),
             )
             .await;
@@ -595,12 +597,15 @@ mod tests {
         ];
         for (name, rsm, chain, sealed, failed) in cases {
             fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
-            let tier = fixtures::tier_with_resources(
+            let tier = fixtures::configured_tier(
                 &rsm,
                 &rlmm,
-                (&metrics, &index_cache),
-                chain.archive(),
-                TEST_COPY_TIMEOUT,
+                fixtures::TierSetup {
+                    metrics: &metrics,
+                    index_cache: &index_cache,
+                    archive: chain.archive(),
+                    ..Default::default()
+                },
             );
 
             copy_one(
@@ -608,7 +613,7 @@ mod tests {
                 &tp(),
                 1,
                 LeaderEpoch(0),
-                &synth_export(0, 9, 100, 64),
+                &synth_export(fixtures::SegmentExportSetup::default()),
                 chain,
             )
             .await;

@@ -65,30 +65,26 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
-    use crate::quota::test_support::image_with_quota as quota_image;
 
-    fn img_with_quota(entity: Vec<(&str, Option<&str>)>, rate: f64) -> MetadataImage {
-        quota_image(entity, "request_percentage", rate)
+    crate::quota::test_support::image_builder!(img_with_quota, "request_percentage");
+
+    fn check_request_delay(image: &MetadataImage, elapsed: u64, cap: Time, expected: Time) {
+        let buckets = QuotaBuckets::new();
+        assert!(
+            consume_request_quota(image, &buckets, "alice", Some(""), elapsed, cap) == expected
+        );
     }
 
     #[test]
     fn zero_elapsed_returns_zero_delay() {
         let img = img_with_quota(vec![("user", Some("alice"))], 100.0);
-        let buckets = QuotaBuckets::new();
-        assert!(
-            consume_request_quota(&img, &buckets, "alice", Some(""), 0, secs(1))
-                == <Time as TimeExt>::ZERO
-        );
+        check_request_delay(&img, 0, secs(1), <Time as TimeExt>::ZERO);
     }
 
     #[test]
     fn no_quota_returns_zero_delay() {
         let img = MetadataImage::new(uuid::Uuid::nil());
-        let buckets = QuotaBuckets::new();
-        assert!(
-            consume_request_quota(&img, &buckets, "alice", Some(""), 5_000, secs(1))
-                == <Time as TimeExt>::ZERO
-        );
+        check_request_delay(&img, 5000, secs(1), <Time as TimeExt>::ZERO);
     }
 
     #[test]
@@ -96,11 +92,7 @@ mod tests {
         // rate=100% ⇒ 1_000_000 µs/sec budget; 5_000 µs is well under one
         // second of capacity → no overage.
         let img = img_with_quota(vec![("user", Some("alice"))], 100.0);
-        let buckets = QuotaBuckets::new();
-        assert!(
-            consume_request_quota(&img, &buckets, "alice", Some(""), 5_000, secs(1))
-                == <Time as TimeExt>::ZERO
-        );
+        check_request_delay(&img, 5000, secs(1), <Time as TimeExt>::ZERO);
     }
 
     #[test]
@@ -108,19 +100,13 @@ mod tests {
         // rate=0.001% ⇒ 10 µs/sec budget; 1_000_000 µs of work is a colossal
         // overage → multi-day delay → capped at 1s.
         let img = img_with_quota(vec![("user", Some("alice"))], 0.001);
-        let buckets = QuotaBuckets::new();
-        let delay = consume_request_quota(&img, &buckets, "alice", Some(""), 1_000_000, secs(1));
-        assert!(delay == secs(1));
+        check_request_delay(&img, 1_000_000, secs(1), secs(1));
     }
 
     #[test]
     fn overage_uses_configured_maximum_delay() {
         let img = img_with_quota(vec![("user", Some("alice"))], 0.001);
-        let buckets = QuotaBuckets::new();
-
-        let delay = consume_request_quota(&img, &buckets, "alice", Some(""), 1_000_000, millis(25));
-
-        assert!(delay == millis(25));
+        check_request_delay(&img, 1_000_000, millis(25), millis(25));
     }
 
     /// Kafka's quota window forgets what a client recorded more than
@@ -175,7 +161,13 @@ mod tests {
                 vec![("user", Some("alice")), ("client-id", None)],
             ]
             .map(|entity| {
-                crate::quota::test_support::quota_record(entity, "request_percentage", 0.001)
+                crate::quota::test_support::quota_record(
+                    crate::quota::test_support::QuotaRecordSetup {
+                        entity,
+                        key: "request_percentage",
+                        value: crate::quota::test_support::QuotaValue(0.001),
+                    },
+                )
             })
             .to_vec(),
         );

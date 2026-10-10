@@ -20,9 +20,8 @@ use crate::{
     dat_fixtures::{Mode, Visible, now_ms},
     support,
     support::{
-        fetch::{fetch_partition, single_partition_fetch},
+        fetch::single_partition_fetch,
         offsets::{list_offset_partition, single_partition_list_offsets},
-        produce::single_partition_produce,
     },
 };
 
@@ -32,11 +31,11 @@ const VISIBILITY_DEADLINE: Duration = Duration::from_secs(30);
 pub async fn create_topic(client: &Client, topic: &str, mode: Mode) {
     crate::support::client::create_configured_topic(
         client,
-        topic,
-        &[("delivery.mode", mode.value)],
-        1,
-        1,
-        5_000,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            configs: &[("delivery.mode", mode.value)],
+            ..Default::default()
+        },
     )
     .await;
 }
@@ -72,16 +71,16 @@ pub async fn ready_topic(broker: &BrokerHandle, client: &Client, topic: &str, mo
 }
 
 pub async fn produce(client: &Client, topic: &str, topic_id: Uuid, batch: RecordBatch) {
-    let response = client
-        .send(single_partition_produce(
-            topic.to_owned(),
+    let response = crate::support::produce::send_batch(
+        &client,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: topic.to_owned(),
             topic_id,
-            0,
-            Some(batch.into()),
-            (1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+            ..Default::default()
+        },
+    )
+    .await;
     let written = response
         .responses
         .first()
@@ -103,10 +102,14 @@ pub async fn fetch_values(
 ) -> Vec<String> {
     let response = client
         .send(single_partition_fetch(
-            topic.to_owned(),
-            topic_id,
-            fetch_partition(0, 0, 1 << 20),
-            (max_wait_ms, 1, 1 << 20),
+            crate::support::fetch::SinglePartitionFetchSetup {
+                topic: topic.to_owned(),
+                topic_id,
+                limits: crate::support::fetch::FetchLimits::one_mebibyte(
+                    crate::support::fetch::RequestWaitMillis(max_wait_ms),
+                ),
+                ..Default::default()
+            },
         ))
         .await
         .expect("Fetch");

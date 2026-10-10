@@ -39,24 +39,25 @@ async fn wait_for_controller_leader_other_than(
     victim: krabka_broker::NodeId,
 ) {
     for (h, _, _) in cluster {
-        let mut rx = h.watch_leader_for_test();
-        tokio::time::timeout(
-            Duration::from_secs(30),
-            rx.wait_for(
-                |l| matches!(l, Some(id) if *id != krabka_broker::NodeId(0) && *id != victim),
-            ),
+        support::await_controller_replacement(
+            h,
+            victim,
+            "no new controller leader within 30s after kill",
         )
-        .await
-        .expect("no new controller leader within 30s after kill")
-        .expect("leader channel closed");
+        .await;
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn broker_death_elects_new_leader() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, _bootstrap_1) =
-        crate::support::durability::replicated_topic_fixture(3, "elect", 3).await;
+    let (mut cluster, _bootstrap_1) = crate::support::durability::replicated_topic_fixture(
+        crate::support::durability::ReplicatedTopicSetup {
+            topic: "elect",
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Kill broker 1 (the partition leader by round-robin).
     let (dead, dead_cfg, _dead_dir) = cluster.remove(0);
@@ -96,8 +97,13 @@ async fn broker_death_elects_new_leader() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unclean_failover_recovers_after_a_real_broker_restart() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, _bootstrap) =
-        crate::support::durability::replicated_topic_fixture(3, "kip704-restart", 3).await;
+    let (mut cluster, _bootstrap) = crate::support::durability::replicated_topic_fixture(
+        crate::support::durability::ReplicatedTopicSetup {
+            topic: "kip704-restart",
+            ..Default::default()
+        },
+    )
+    .await;
 
     cluster[0]
         .0
@@ -166,8 +172,13 @@ async fn unclean_failover_recovers_after_a_real_broker_restart() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn acks_all_completes_after_isr_shrink() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, bootstrap_1) =
-        crate::support::durability::replicated_topic_fixture(3, "shrink2", 3).await;
+    let (mut cluster, bootstrap_1) = crate::support::durability::replicated_topic_fixture(
+        crate::support::durability::ReplicatedTopicSetup {
+            topic: "shrink2",
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Freeze broker 3 by shutting it down.
     let dead = cluster.pop().expect("3rd broker");
@@ -177,9 +188,18 @@ async fn acks_all_completes_after_isr_shrink() {
     // replica_lag_time_max (2s on CI) + heartbeat_timeout (2s); produce
     // completes after.
     let start = Instant::now();
-    let offset = produce_acks(&bootstrap_1, "shrink2", &["a", "b", "c"], -1, 15_000)
-        .await
-        .expect("acks=-1 after shrink");
+    let offset = produce_acks(
+        &bootstrap_1,
+        &["a", "b", "c"],
+        crate::support::client::BatchProduceSetup {
+            topic: "shrink2",
+            acknowledgements: crate::support::produce::ProduceAcknowledgements::AllReplicas,
+            timeout: crate::support::produce::ProduceTimeoutMillis(15_000),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("acks=-1 after shrink");
     let elapsed = start.elapsed();
     assert!(offset == 0);
     assert!(
@@ -193,8 +213,13 @@ async fn acks_all_completes_after_isr_shrink() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn isr_expand_on_catchup() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, _bootstrap_1) =
-        crate::support::durability::replicated_topic_fixture(3, "expand", 3).await;
+    let (mut cluster, _bootstrap_1) = crate::support::durability::replicated_topic_fixture(
+        crate::support::durability::ReplicatedTopicSetup {
+            topic: "expand",
+            ..Default::default()
+        },
+    )
+    .await;
 
     // 1. Find the controller leader so we can activate dynamic membership.
     let leader_idx = find_controller_leader(&cluster).await;
@@ -274,16 +299,28 @@ async fn isr_expand_on_catchup() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn produce_during_leader_failover() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, bootstrap_1) =
-        crate::support::durability::replicated_topic_fixture(3, "failover", 3).await;
+    let (mut cluster, bootstrap_1) = crate::support::durability::replicated_topic_fixture(
+        crate::support::durability::ReplicatedTopicSetup {
+            topic: "failover",
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Produce 5 records with acks=1, kill broker 1 mid-burst, produce 5
     // more pointed at broker 2's bootstrap (clients will re-fetch
     // metadata on NOT_LEADER_OR_FOLLOWER).
     for v in &["a", "b", "c", "d", "e"] {
-        produce_acks(&bootstrap_1, "failover", &[v], 1, 5_000)
-            .await
-            .expect("pre");
+        produce_acks(
+            &bootstrap_1,
+            &[v],
+            crate::support::client::BatchProduceSetup {
+                topic: "failover",
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("pre");
     }
     let bootstrap_2 = cluster[1].1.listen_addr.to_string();
     let (dead, dead_cfg, _dead_dir) = cluster.remove(0);
@@ -301,7 +338,15 @@ async fn produce_during_leader_failover() {
     // Continue producing. The first attempt may hit NOT_LEADER_OR_FOLLOWER;
     // retry via bootstrap_2.
     for v in &["f", "g", "h", "i", "j"] {
-        let res = produce_acks(&bootstrap_2, "failover", &[v], 1, 5_000).await;
+        let res = produce_acks(
+            &bootstrap_2,
+            &[v],
+            crate::support::client::BatchProduceSetup {
+                topic: "failover",
+                ..Default::default()
+            },
+        )
+        .await;
         // Either success (election done) or NOT_LEADER_OR_FOLLOWER if metadata still stale.
         // For test purposes, accept either; just verify the cluster keeps serving.
         let _ = res;

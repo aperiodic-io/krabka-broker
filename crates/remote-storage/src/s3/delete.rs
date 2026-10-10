@@ -41,21 +41,17 @@ impl S3RemoteStorage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use assert2::{assert, check};
     use krabka_object_store::fault::StoreOp;
-    use object_store::memory::InMemory;
     use tempfile::TempDir;
 
     use super::{ObjectOps, RemoteStorageError, S3RemoteStorage, WormError};
     use crate::{
         s3::test_support::{
             counting_rsm, rsm, sample_data, sample_metadata, seeded_blocking, stamped_metadata,
-            worm_rsm,
         },
         storage_manager::{IndexType, RemoteStorageManager},
-        worm::ChainHead,
     };
 
     /// Every key the backing store currently holds, sorted.
@@ -72,46 +68,60 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn delete_issues_one_request_per_current_key() {
         let (store, counter) = counting_rsm();
-        let md = sample_metadata(14);
-        seeded_blocking(store, md, true, move |store, md| {
-            let expected = {
-                let mut keys = vec![
-                    store.log_key(&md).to_string(),
-                    store.index_key(&md, IndexType::Offset).to_string(),
-                    store.index_key(&md, IndexType::Timestamp).to_string(),
-                    store
-                        .index_key(&md, IndexType::ProducerSnapshot)
-                        .to_string(),
-                    store.index_key(&md, IndexType::LeaderEpoch).to_string(),
-                    store.index_key(&md, IndexType::Transaction).to_string(),
-                ];
-                keys.sort();
-                keys
-            };
-            check!(all_keys(&store) == expected);
+        let md = sample_metadata(uuid::Uuid::from_u128(14));
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup {
+                metadata: md,
+                ..Default::default()
+            },
+            move |store, md| {
+                let expected = {
+                    let mut keys = vec![
+                        store.log_key(&md).to_string(),
+                        store.index_key(&md, IndexType::Offset).to_string(),
+                        store.index_key(&md, IndexType::Timestamp).to_string(),
+                        store
+                            .index_key(&md, IndexType::ProducerSnapshot)
+                            .to_string(),
+                        store.index_key(&md, IndexType::LeaderEpoch).to_string(),
+                        store.index_key(&md, IndexType::Transaction).to_string(),
+                    ];
+                    keys.sort();
+                    keys
+                };
+                check!(all_keys(&store) == expected);
 
-            let before = counter.attempts(StoreOp::Delete);
-            store.delete_log_segment_data(&md).unwrap();
+                let before = counter.attempts(StoreOp::Delete);
+                store.delete_log_segment_data(&md).unwrap();
 
-            // Six requests, one per artifact: no second layout to sweep.
-            check!(counter.attempts(StoreOp::Delete) - before == 6);
-            check!(all_keys(&store) == Vec::<String>::new());
-        })
+                // Six requests, one per artifact: no second layout to sweep.
+                check!(counter.attempts(StoreOp::Delete) - before == 6);
+                check!(all_keys(&store) == Vec::<String>::new());
+            },
+        )
         .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn delete_is_idempotent() {
         let store = rsm(None);
-        let md = sample_metadata(13);
-        seeded_blocking(store, md, true, move |store, md| {
-            store.delete_log_segment_data(&md).unwrap();
-            store.delete_log_segment_data(&md).unwrap();
-            assert!(matches!(
-                store.fetch_log_segment(&md, 0, None).unwrap_err(),
-                RemoteStorageError::SegmentNotFound(_)
-            ));
-        })
+        let md = sample_metadata(uuid::Uuid::from_u128(13));
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup {
+                metadata: md,
+                ..Default::default()
+            },
+            move |store, md| {
+                store.delete_log_segment_data(&md).unwrap();
+                store.delete_log_segment_data(&md).unwrap();
+                assert!(matches!(
+                    store.fetch_log_segment(&md, 0, None).unwrap_err(),
+                    RemoteStorageError::SegmentNotFound(_)
+                ));
+            },
+        )
         .await;
     }
 
@@ -119,36 +129,55 @@ mod tests {
     async fn segments_are_isolated_by_id() {
         let store = rsm(None);
         let src = TempDir::new().unwrap();
-        let a = sample_metadata(20);
-        let b = sample_metadata(21);
-        seeded_blocking(store, a, false, move |store, a| {
-            store
-                .copy_log_segment_data(&b, &sample_data(src.path(), false))
-                .unwrap();
-            store.delete_log_segment_data(&a).unwrap();
-            assert!(store.fetch_log_segment(&b, 0, None).unwrap() == b"0123456789");
-        })
+        let a = sample_metadata(uuid::Uuid::from_u128(20));
+        let b = sample_metadata(uuid::Uuid::from_u128(21));
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup {
+                metadata: a,
+                transaction_index: crate::test_support::TransactionIndex::Omitted,
+            },
+            move |store, a| {
+                store
+                    .copy_log_segment_data(
+                        &b,
+                        &sample_data(src.path(), crate::test_support::TransactionIndex::Omitted),
+                    )
+                    .unwrap();
+                store.delete_log_segment_data(&a).unwrap();
+                assert!(store.fetch_log_segment(&b, 0, None).unwrap() == b"0123456789");
+            },
+        )
         .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worm_delete_is_refused() {
-        let keys = TempDir::new().unwrap();
-        let store = worm_rsm(Arc::new(InMemory::new()), &keys, false);
-        let md = stamped_metadata(55, 0, ChainHead::GENESIS);
-        seeded_blocking(store, md, true, move |store, md| {
-            let before = all_keys(&store);
+        let (_keys, store) = crate::s3::test_support::memory_worm_archive();
+        let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+            segment_id: uuid::Uuid::from_u128(55),
+            ..Default::default()
+        });
+        seeded_blocking(
+            store,
+            crate::s3::test_support::SeededCopySetup {
+                metadata: md,
+                ..Default::default()
+            },
+            move |store, md| {
+                let before = all_keys(&store);
 
-            assert!(let Err(err) = store.delete_log_segment_data(&md));
-            check!(
-                matches!(&err, RemoteStorageError::Worm(WormError::DeleteRefused { key })
+                assert!(let Err(err) = store.delete_log_segment_data(&md));
+                check!(
+                    matches!(&err, RemoteStorageError::Worm(WormError::DeleteRefused { key })
                     if *key == store.log_key(&md).to_string())
-            );
+                );
 
-            // Not one object left the archive.
-            check!(all_keys(&store) == before);
-            check!(before.len() == 7, "six objects plus the manifest");
-        })
+                // Not one object left the archive.
+                check!(all_keys(&store) == before);
+                check!(before.len() == 7, "six objects plus the manifest");
+            },
+        )
         .await;
     }
 }

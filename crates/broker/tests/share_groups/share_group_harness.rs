@@ -43,6 +43,17 @@ pub async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) 
     (broker, bootstrap, dir)
 }
 
+/// Reopen the caller's existing directory without adding startup-readiness waits.
+pub async fn rejoin(
+    log_dir: std::path::PathBuf,
+) -> (krabka_broker::BrokerHandle, std::sync::Arc<Client>) {
+    let mut config = broker_config(log_dir);
+    config.bootstrap_mode = krabka_broker::BootstrapMode::Rejoin;
+    let broker = Box::pin(Broker::start(config)).await.unwrap();
+    let client = connect(&broker.listen_addr().to_string()).await;
+    (broker, client)
+}
+
 pub use crate::support::client::{connect_c1 as connect, create_topic};
 
 pub fn heartbeat(group: &str, member_id: &str, epoch: i32) -> ShareGroupHeartbeatRequest {

@@ -179,19 +179,22 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
         ],
     ));
     let delivery = resolve_delivery_gate(&image, "sched");
-    let fixture = crate::handlers::produce::test_support::PipelineFixture::new(1);
+    let fixture =
+        crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(1));
 
     let part = fixture
         .partition_with_config(
             dir.path(),
-            "sched",
             &image,
-            krabka_log::LogConfig {
-                delivery_policy: krabka_log::DeliveryPolicy::Scheduled,
-                // The log enforces `delivery.schedule.monotonic`, so its
-                // configuration must match the topic's delivery settings.
-                schedule_order: krabka_log::ScheduleOrder::Monotonic,
-                ..krabka_log::LogConfig::default()
+            crate::handlers::produce::test_support::PipelinePartitionSetup {
+                topic: "sched",
+                log_config: krabka_log::LogConfig {
+                    delivery_policy: krabka_log::DeliveryPolicy::Scheduled,
+                    // The log enforces `delivery.schedule.monotonic`, so its
+                    // configuration must match the topic's delivery settings.
+                    schedule_order: krabka_log::ScheduleOrder::Monotonic,
+                    ..krabka_log::LogConfig::default()
+                },
             },
         )
         .await;

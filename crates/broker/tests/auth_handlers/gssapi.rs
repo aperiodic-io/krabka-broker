@@ -9,6 +9,7 @@
 use assert2::assert;
 use bytes::BytesMut;
 use krabka_broker::Broker;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -21,8 +22,12 @@ use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
 use crate::{
-    harness::round_trip, inter_broker::drive_inter_broker_client_then_apiversions,
-    support::manifest_dir,
+    harness::round_trip,
+    inter_broker::drive_inter_broker_client_then_apiversions,
+    support::{
+        manifest_dir,
+        wire::{CorrelationId as WireCorrelationId, SocketExchangeSetup},
+    },
 };
 
 /// A broker with GSSAPI enabled advertises GSSAPI in its `SaslHandshake`
@@ -57,9 +62,16 @@ async fn gssapi_handshake_advertised_when_enabled() {
     let av_req = ApiVersionsRequest::default();
     let mut av_body = BytesMut::new();
     av_req.encode(&mut av_body, 0).unwrap();
-    let av = round_trip(&mut stream, 18, 0, corr, false, &av_body)
-        .await
-        .unwrap();
+    let av = round_trip(
+        &mut stream,
+        SocketExchangeSetup {
+            correlation: WireCorrelationId(corr),
+            ..Default::default()
+        },
+        &av_body,
+    )
+    .await
+    .unwrap();
     corr += 1;
     let mut cur: &[u8] = &av;
     ApiVersionsResponse::decode(&mut cur, 0).unwrap();
@@ -71,9 +83,18 @@ async fn gssapi_handshake_advertised_when_enabled() {
     };
     let mut sh_body = BytesMut::new();
     sh_req.encode(&mut sh_body, 1).unwrap();
-    let sh = round_trip(&mut stream, 17, 1, corr, false, &sh_body)
-        .await
-        .unwrap();
+    let sh = round_trip(
+        &mut stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            correlation: WireCorrelationId(corr),
+            ..Default::default()
+        },
+        &sh_body,
+    )
+    .await
+    .unwrap();
     let mut cur: &[u8] = &sh;
     let sh_resp = SaslHandshakeResponse::decode(&mut cur, 1).unwrap();
 

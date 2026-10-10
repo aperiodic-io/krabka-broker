@@ -31,6 +31,9 @@
 // This binary uses one archive and one partition of it, so most of what they
 // offer is unused here, the same way `crates/broker/tests/support` is unused in
 // part by every binary that includes it.
+#[path = "support/topic_configuration.rs"]
+mod topic_configuration;
+
 #[path = "support/archive_fixture.rs"]
 mod archive_fixture;
 #[path = "roundtrip/args.rs"]
@@ -52,9 +55,6 @@ use krabka_client_core::{
     Client, CoordinatorKeyType, build_find_coordinator, coordinator_endpoint,
 };
 use krabka_metadata::{MetadataImage, MetadataRecord, NodeId, TopicConfigRecord, TopicRecord};
-use krabka_protocol::owned::describe_configs_request::{
-    DescribeConfigsRequest, DescribeConfigsResource,
-};
 use krabka_remote_storage::{PartitionDump, RlmmCacheDump, TopicIdPartition};
 use krabka_remote_storage_topic::Snapshot;
 use krabka_restore::restore;
@@ -83,9 +83,6 @@ const COMMITTED_OFFSET: i64 = 2;
 
 /// A topic config that only the metadata checkpoint can carry back.
 const RETENTION_MS: &str = "604800000";
-
-/// `DescribeConfigsResource.resource_type` for a topic.
-const TOPIC_RESOURCE: i8 = 2;
 
 /// What `OffsetFetch` answers for a partition with no committed offset. It is
 /// the value that makes a consumer fall back to `auto.offset.reset`.
@@ -133,7 +130,7 @@ fn metadata_checkpoint(fixture: &Fixture) -> Vec<u8> {
     for partition in 0..2 {
         image.apply(&MetadataRecord::V1Partition(single_replica_partition(
             TOPIC,
-            partition,
+            krabka_ids::PartitionIndex(partition),
             NodeId(1),
         )));
     }
@@ -328,28 +325,14 @@ async fn a_captured_cluster_restores_with_its_configuration_and_its_group_positi
 
     // 5. The restored cluster has the configuration back and the group's
     //    position gone. Nothing in a KIP-405 archive holds a committed offset.
-    let configs = post_client
-        .send(DescribeConfigsRequest {
-            resources: vec![DescribeConfigsResource {
-                resource_type: TOPIC_RESOURCE,
-                resource_name: TOPIC.to_owned(),
-                configuration_keys: None,
-                ..Default::default()
-            }],
-            include_synonyms: false,
-            include_documentation: false,
-            ..Default::default()
-        })
-        .await
-        .expect("DescribeConfigs");
-    let result = configs.results.first().expect("one config result");
-    assert!(result.error_code == 0, "DescribeConfigs failed: {result:?}");
-    check!(
-        result.configs.iter().any(|config| {
-            config.name == "retention.ms" && config.value.as_deref() == Some(RETENTION_MS)
-        }),
-        "the metadata checkpoint did not bring the topic config back: {result:?}"
-    );
+    crate::topic_configuration::check_topic_configuration(
+        &post_client,
+        TOPIC,
+        "retention.ms",
+        RETENTION_MS,
+    )
+    .await;
+
     check!(committed_offset(&post_bootstrap).await == NO_COMMITTED_OFFSET);
 
     // 6. The offsets go back, and the group is where it was.

@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 34 0 42 21 *)
+(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 33 0 41 21 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
@@ -18,64 +18,65 @@ let%span svec'1 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span svec'2 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/vec.rs" 202 18 202 34
 let%span svec'3 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/vec.rs" 18 14 18 41
 let%span sfuture_log_swap_admission = "/workspace/crates/verified/src/storage/future_log_swap_admission.rs" 9 10 22 1
-let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 75 10 75 15
-let%span sspec'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 69 11 69 77
-let%span sspec'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 70 11 71 80
-let%span sspec'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 72 11 72 59
-let%span sspec'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 73 10 74 62
-let%span sspec'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 115 16 115 83
-let%span sspec'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 101 8 105 9
-let%span sspec'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 8 16 12 5
-let%span sspec'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 58 8 59 113
+let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 77 10 77 15
+let%span sspec'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 71 11 71 77
+let%span sspec'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 72 11 73 80
+let%span sspec'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 74 11 74 59
+let%span sspec'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 75 10 76 62
+let%span sspec'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 117 16 117 83
+let%span sspec'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 145 8 146 86
+let%span sspec'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 10 16 14 5
+let%span sspec'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 60 8 61 113
 let%span sspec'8 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 149 16 149 113
-let%span sspec'9 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 25 10 25 15
-let%span sspec'10 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 35 16 44 5
-let%span sspec'11 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 127 16 129 41
+let%span sspec'9 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 27 10 27 15
+let%span sspec'10 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 37 16 46 5
+let%span sspec'11 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 129 16 131 41
 let%span sspec'12 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 22 8 26 13
 let%span sspec'13 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 136 16 137 61
 let%span sspec'14 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 120 8 122 44
 let%span sspec'15 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 82 10 82 15
 let%span sspec'16 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 91 16 98 5
 let%span sspec'17 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 33 16 33 70
-let%span sspec'18 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 39 16 39 67
-let%span sspec'19 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 50 16 51 85
-let%span sspec'20 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 18 16 19 54
-let%span sspec'21 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 63 16 67 5
+let%span sspec'18 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 103 8 107 9
+let%span sspec'19 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 20 16 21 54
+let%span sspec'20 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 63 16 67 5
+let%span sspec'21 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 39 16 39 67
+let%span sspec'22 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 50 16 51 85
 let%span smetadata_record_offset_deltas = "/workspace/crates/verified/src/raft/metadata_record_offset_deltas.rs" 169 28 175 1
-let%span sprepare = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 44 8 44 87
-let%span sprepare'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 44 8 44 88
-let%span sprepare'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 46 33 46 43
-let%span sprepare'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 48 31 48 41
-let%span sprepare'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 50 8 50 24
-let%span sprepare'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 53 8 53 24
-let%span sprepare'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 55 47 55 60
-let%span sprepare'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 55 17 55 61
-let%span sprepare'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 55 17 55 62
-let%span sprepare'8 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 56 16 56 29
-let%span sprepare'9 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 56 16 56 30
-let%span sprepare'10 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 57 19 57 61
-let%span sprepare'11 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 57 19 57 62
-let%span sprepare'12 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 58 39 58 49
-let%span sprepare'13 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 59 16 59 22
-let%span sprepare'14 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 63 14 63 33
-let%span sprepare'15 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 64 14 64 27
-let%span sprepare'16 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 61 16 62 90
-let%span sprepare'17 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 60 16 60 58
-let%span sprepare'18 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 65 20 65 30
-let%span sprepare'19 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 65 20 65 32
-let%span sprepare'20 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 65 41 65 51
-let%span sprepare'21 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 65 41 65 53
-let%span sprepare'22 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 65 8 65 62
-let%span sprepare'23 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 66 13 66 14
-let%span sprepare'24 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 66 8 66 14
-let%span sprepare'25 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 69 86 69 92
-let%span sprepare'26 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 69 8 69 93
-let%span sprepare'27 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 69 8 69 94
-let%span sprepare'28 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 71 8 71 105
-let%span sprepare'29 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 78 17 78 24
+let%span sprepare = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 43 8 43 87
+let%span sprepare'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 43 8 43 88
+let%span sprepare'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 45 33 45 43
+let%span sprepare'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 47 31 47 41
+let%span sprepare'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 49 8 49 24
+let%span sprepare'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 52 8 52 24
+let%span sprepare'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 54 47 54 60
+let%span sprepare'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 54 17 54 61
+let%span sprepare'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 54 17 54 62
+let%span sprepare'8 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 55 16 55 29
+let%span sprepare'9 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 55 16 55 30
+let%span sprepare'10 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 56 19 56 61
+let%span sprepare'11 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 56 19 56 62
+let%span sprepare'12 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 57 39 57 49
+let%span sprepare'13 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 58 16 58 22
+let%span sprepare'14 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 62 14 62 33
+let%span sprepare'15 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 63 14 63 27
+let%span sprepare'16 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 60 16 61 90
+let%span sprepare'17 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 59 16 59 58
+let%span sprepare'18 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 64 20 64 30
+let%span sprepare'19 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 64 20 64 32
+let%span sprepare'20 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 64 41 64 51
+let%span sprepare'21 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 64 41 64 53
+let%span sprepare'22 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 64 8 64 62
+let%span sprepare'23 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 65 13 65 14
+let%span sprepare'24 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 65 8 65 14
+let%span sprepare'25 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 68 86 68 92
+let%span sprepare'26 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 68 8 68 93
+let%span sprepare'27 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 68 8 68 94
+let%span sprepare'28 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 70 8 70 105
+let%span sprepare'29 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 77 17 77 24
 let%span sprepare'30 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 8 11 8 59
-let%span sprepare'31 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 9 10 13 85
-let%span sprepare'32 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 14 10 33 1
+let%span sprepare'31 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 9 10 12 84
+let%span sprepare'32 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 13 10 32 1
 let%span sadmitted_plan = "/workspace/crates/verified/src/reconfiguration/admitted_plan.rs" 164 8 179 9
 let%span sadmitted_plan'0 = "/workspace/crates/verified/src/reconfiguration/admitted_plan.rs" 89 8 148 9
 let%span sadmitted_plan'1 = "/workspace/crates/verified/src/reconfiguration/admitted_plan.rs" 16 8 19 47
@@ -147,13 +148,13 @@ predicate distinct_u64 [#"/workspace/crates/verified/src/sequence.rs" 6 0 6 42] 
   [%#ssequence] pairwise_u64 values (fun (__0: tup2_u64_u64) -> let {f0'1 = left; f1'1 = right} = __0 in left <> right)
 
 predicate valid_old [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 38 0 38 41] (nodes: Seq.seq UInt64.t) =
-  [%#sspec'18] gt_log_Int (Seq.length nodes) 0 /\ distinct_u64 nodes
+  [%#sspec'21] gt_log_Int (Seq.length nodes) 0 /\ distinct_u64 nodes
 
 predicate has_node [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 32 0 32 63] (nodes: Seq.seq UInt64.t) (count: int) (node: UInt64.t) =
   [%#sspec'17] exists i: int. 0 <= i /\ i < count /\ Seq.get nodes i = node
 
 predicate membership_coherent [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 44 0 49 9] (nodes: Seq.seq UInt64.t) (node: UInt64.t) (membership'0: t_TargetMembership) (kind'0: t_VoterChangeKind) =
-  [%#sspec'19] kind'0 = FinalizeKraftVersion \/ has_node nodes (Seq.length nodes) node = (membership'0 <> Absent)
+  [%#sspec'22] kind'0 = FinalizeKraftVersion \/ has_node nodes (Seq.length nodes) node = (membership'0 <> Absent)
 
 type t_VoterReconfigurationDecision =
   | NotLeader
@@ -289,7 +290,7 @@ axiom view_Vec_u64_Global_spec:
     <= UInt64.t'int const_MAX
 
 predicate expected_member [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 56 0 62 9] (nodes: Seq.seq UInt64.t) (count: int) (kind'0: t_VoterChangeKind) (target: UInt64.t) (node: UInt64.t) =
-  [%#sspec'21] match kind'0 with
+  [%#sspec'20] match kind'0 with
     | Add -> has_node nodes count node \/ node = target
     | Remove -> has_node nodes count node /\ node <> target
     | Update | FinalizeKraftVersion -> has_node nodes count node
@@ -792,7 +793,7 @@ let elim_Continue'3
       end}
     any) ]
 
-function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 26 0 34 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
+function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 28 0 36 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
 
 axiom prefix_count_def:
   forall old': Seq.seq UInt64.t, reports: Seq.seq tup2_i64_i64, kind'0: t_VoterChangeKind, node: UInt64.t, end': int, new: bool, count: int [prefix_count old' reports kind'0 node end' new count]. prefix_count old' reports kind'0 node end' new count
@@ -822,7 +823,7 @@ axiom prefix_count_def:
       )
     )
 
-function prefix_grants_agree [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 76 0 86 1] (old': Seq.seq UInt64.t) (next: Seq.seq UInt64.t) (votes: Seq.seq tup2_bool_bool) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : ()
+function prefix_grants_agree [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 78 0 88 1] (old': Seq.seq UInt64.t) (next: Seq.seq UInt64.t) (votes: Seq.seq tup2_bool_bool) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : ()
 
 axiom prefix_grants_agree_spec:
   forall old': Seq.seq UInt64.t, next: Seq.seq UInt64.t, votes: Seq.seq tup2_bool_bool, reports: Seq.seq tup2_i64_i64, kind'0: t_VoterChangeKind, node: UInt64.t, end': int, new: bool, count: int. ([%#sspec'0] 0
@@ -870,38 +871,44 @@ let elim_Continue'4 (_x: t_ControlFlow_Option_Infallible_u64) (return (f0'8: UIn
       end}
     any) ]
 
-predicate control_inputs_coherent [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 110 0 114 9] (old': Seq.seq UInt64.t) (context: t_CurrentVoterSet) (reports: Seq.seq tup2_i64_i64) =
+predicate control_inputs_coherent [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 112 0 116 9] (old': Seq.seq UInt64.t) (context: t_CurrentVoterSet) (reports: Seq.seq tup2_i64_i64) =
   [%#sspec'4] UInt64.t'int context.voter_count = Seq.length old' /\ Seq.length reports = Seq.length old' + 1
 
-predicate control_request_admitted [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 93 0 99 9] (old': Seq.seq UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest) (node: UInt64.t) (target: t_TargetVoter) =
-  [%#sspec'5] valid_old old'
+type tup2_u64_TargetVoter = { f0'8: UInt64.t; f1'8: t_TargetVoter }
+
+predicate control_request_admitted [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 95 0 101 9] (old': Seq.seq UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest) (node: UInt64.t) (target: t_TargetVoter) =
+  [%#sspec'18] valid_old old'
   /\ membership_coherent old' node target.membership request.kind
   /\ match voter_reconfiguration_rejection state.f0 state.f1 request target with
     | Some'0 _ -> false
     | None'0 -> true
     end
 
-function control_record_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 7 0 7 71] (version: UInt16.t) (kind'0: t_VoterChangeKind) : int
+function control_record_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 9 0 9 71] (version: UInt16.t) (kind'0: t_VoterChangeKind) : int
  = [%#sspec'6] match kind'0 with
     | FinalizeKraftVersion -> 2
     | Update -> if UInt16.t'int version = 0 then 0 else 1
     | Add | Remove -> 1
     end
 
-function next_size [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 17 0 17 58] (count: int) (kind'0: t_VoterChangeKind) : int
- = [%#sspec'20] match kind'0 with
+predicate control_supported_request [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 137 0 143 9] (old': Seq.seq UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest) (candidate: tup2_u64_TargetVoter) (support: bool) =
+  [%#sspec'5] control_request_admitted old' state request candidate.f0'8 candidate.f1'8
+  /\ (control_record_count state.f1.kraft_version request.kind = 0 \/ support)
+
+function next_size [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 19 0 19 58] (count: int) (kind'0: t_VoterChangeKind) : int
+ = [%#sspec'19] match kind'0 with
     | Add -> count + 1
     | Remove -> count - 1
     | _ -> count
     end
 
-predicate control_prefix_majorities [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 50 0 56 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) =
+predicate control_prefix_majorities [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 52 0 58 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) =
   [%#sspec'7] ge_log_Int (prefix_count old' reports kind'0 node end' false (Seq.length reports)) (ComputerDivision.div (Seq.length old') 2
     + 1)
   /\ ge_log_Int (prefix_count old' reports kind'0 node end' true (Seq.length reports)) (ComputerDivision.div (next_size (Seq.length old') kind'0) 2
   + 1)
 
-predicate common_prefix_reported [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 120 0 126 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (next: Seq.seq UInt64.t) (common: UInt64.t) (end': int) =
+predicate common_prefix_reported [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 122 0 128 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (next: Seq.seq UInt64.t) (common: UInt64.t) (end': int) =
   [%#sspec'11] exists i: int. 0 <= i
     /\ i < Seq.length old'
     /\ Seq.get old' i = common
@@ -912,7 +919,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let reconfiguration_control_prefix_support [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 34 0 42 21]
+let reconfiguration_control_prefix_support [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 33 0 41 21]
   (old': Slice64.slice UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest)
   (node: UInt64.t) (target: t_TargetVoter) (base: Int64.t) (reports: Slice64.slice tup2_i64_i64)
   (return (x: t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64)) =
@@ -1205,12 +1212,11 @@ let reconfiguration_control_prefix_support [#"/workspace/crates/verified/src/com
     (result: t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64) ->
   {[@stop_split] [@expl:reconfiguration_control_prefix_support ensures] ([@stop_split] [@expl:reconfiguration_control_prefix_support ensures #0] [%#sprepare'31] (result
         <> None'3)
-      = (control_request_admitted (Slice64.view old') state request node target
-      /\ (control_record_count state.f1.kraft_version request.kind = 0
-      \/ ge_log_Int (Int64.to_int base) 0
+      = control_supported_request (Slice64.view old') state request { f0'8 = node;
+                                                                      f1'8 = target } (ge_log_Int (Int64.to_int base) 0
       /\ Int64.to_int base + control_record_count state.f1.kraft_version request.kind <= Int64.to_int const_MAX'1
       /\ control_prefix_majorities (Slice64.view old') (Slice64.view reports) request.kind node (Int64.to_int base
-      + control_record_count state.f1.kraft_version request.kind))))
+      + control_record_count state.f1.kraft_version request.kind)))
     /\ ([@stop_split] [@expl:reconfiguration_control_prefix_support ensures #1] [%#sprepare'32] match result with
       | None'3 -> true
       | Some'3 {f0'4 = plan; f1'4 = next; f2'4 = deltas; f3'4 = support} -> admitted_plan state.f1 request.kind plan

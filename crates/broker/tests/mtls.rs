@@ -27,6 +27,7 @@ use std::sync::Arc;
 use assert2::assert;
 use bytes::BytesMut;
 use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{Decode, Encode, owned::create_topics_response::CreateTopicsResponse};
 use krabka_security::{ClientAuthMode, TlsConfig};
 use tokio::net::TcpStream;
@@ -38,23 +39,20 @@ use tokio_rustls::{
     },
 };
 
-use crate::support::topics::{creatable_topic, create_topic_request};
+use crate::{
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    support::{
+        topics::{creatable_topic, create_topic_request},
+        wire::HeaderEncoding as RequestHeaderEncoding,
+    },
+};
 
 /// The client id every request header in this suite carries.
 const CLIENT_ID: &str = "krabka-mtls-test";
 
-const DEV_CERT: &str = include_str!("fixtures/security/dev_cert.pem");
-const DEV_KEY: &str = include_str!("fixtures/security/dev_key.pem");
-const DEV_CLIENT_CA: &str = include_str!("fixtures/security/dev_client_ca.pem");
-const DEV_CLIENT_CERT: &str = include_str!("fixtures/security/dev_client_cert.pem");
-const DEV_CLIENT_KEY: &str = include_str!("fixtures/security/dev_client_key.pem");
-
-/// Subject DN of the fixture client cert in RFC 2253 form, as Kafka's
-/// `X500Principal.getName()` gives it. The fixture's Subject is one CN whose
-/// value holds the commas and equals signs, which the JDK escapes (openssl's
-/// RFC 2253 output leaves `=` bare). Operators pin this string in
-/// ACLs and `super_users`.
-const CLIENT_PRINCIPAL: &str = r"CN=test-client\,OU\=integration\,O\=krabka";
+use crate::support::tls::{
+    CLIENT_PRINCIPAL, DEV_CERT, DEV_CLIENT_CA, DEV_CLIENT_CERT, DEV_CLIENT_KEY, DEV_KEY,
+};
 
 fn write_fixture(dir: &std::path::Path, name: &str, contents: &str) -> std::path::PathBuf {
     let p = dir.join(name);
@@ -115,17 +113,22 @@ async fn mtls_principal_is_cert_dn_and_super_user_bypass_works() {
     // ANONYMOUS, which is what a non-mTLS connection would see) would
     // get CLUSTER_AUTHORIZATION_FAILED.
     let body = create_topics_body("mtls-smoke");
-    let resp_bytes = kafka_wire::round_trip(&mut tls, 19, 7, 1, CLIENT_ID, true, &body)
-        .await
-        .unwrap();
-    let mut cur: &[u8] = &resp_bytes;
-    let resp = CreateTopicsResponse::decode(&mut cur, 7).expect("decode CreateTopicsResponse");
-
-    assert!(resp.topics.len() == 1);
-    assert!(
-        resp.topics[0].error_code == 0,
-        "CreateTopics must succeed for the cert-DN super-user — got {:?}",
-        resp.topics[0]
+    let resp_bytes = kafka_wire::round_trip(
+        &mut tls,
+        WireExchangeSetup {
+            api_key: WireApiKey(19),
+            version: WireApiVersion(7),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+        &body,
+    )
+    .await
+    .unwrap();
+    check_create_topics_success(
+        &resp_bytes,
+        "CreateTopics must succeed for the cert-DN super-user",
     );
 
     handle.shutdown().await;
@@ -170,12 +173,8 @@ async fn an_unmappable_certificate_dn_closes_the_connection() {
 
     let body = create_topics_body("unmappable-dn");
 
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        kafka_wire::round_trip(&mut tls, 19, 7, 1, CLIENT_ID, true, &body),
-    )
-    .await
-    .expect("the broker must close rather than hang");
+    let outcome =
+        timed_create_topics(&mut tls, &body, "the broker must close rather than hang").await;
 
     assert!(
         outcome.is_err(),
@@ -223,24 +222,47 @@ async fn a_connection_with_no_certificate_is_served_rather_than_closed() {
     // The broker answers, which is the whole claim: the session was built.
     // The refusal test above sends the same request over the same listener
     // shape and gets no answer at all.
-    let resp_bytes = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        kafka_wire::round_trip(&mut tls, 19, 7, 1, CLIENT_ID, true, &body),
-    )
-    .await
-    .expect("the broker must not hang")
-    .expect("the broker must answer a certificate-less TLS connection");
-    let mut cur: &[u8] = &resp_bytes;
-    let resp = CreateTopicsResponse::decode(&mut cur, 7).expect("decode CreateTopicsResponse");
-
-    assert!(resp.topics.len() == 1);
-    assert!(
-        resp.topics[0].error_code == 0,
-        "the ANONYMOUS session must be served — got {:?}",
-        resp.topics[0]
-    );
+    let resp_bytes = timed_create_topics(&mut tls, &body, "the broker must not hang")
+        .await
+        .expect("the broker must answer a certificate-less TLS connection");
+    check_create_topics_success(&resp_bytes, "the ANONYMOUS session must be served");
 
     handle.shutdown().await;
+}
+
+async fn timed_create_topics<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    body: &[u8],
+    timeout_context: &str,
+) -> std::io::Result<Vec<u8>> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        kafka_wire::round_trip(
+            stream,
+            WireExchangeSetup {
+                api_key: WireApiKey(19),
+                version: WireApiVersion(7),
+                client_id: CLIENT_ID,
+                header: RequestHeaderEncoding::Flexible,
+                ..Default::default()
+            },
+            body,
+        ),
+    )
+    .await
+    .expect(timeout_context)
+}
+
+fn check_create_topics_success(bytes: &[u8], context: &str) {
+    let mut cursor = bytes;
+    let response =
+        CreateTopicsResponse::decode(&mut cursor, 7).expect("decode CreateTopicsResponse");
+    assert!(response.topics.len() == 1);
+    assert!(
+        response.topics[0].error_code == 0,
+        "{context} — got {:?}",
+        response.topics[0]
+    );
 }
 
 fn mtls_fixture(
@@ -274,7 +296,12 @@ fn server_certificate() -> CertificateDer<'static> {
 }
 
 fn create_topics_body(topic: &str) -> BytesMut {
-    let request = create_topic_request(creatable_topic(topic, 1, 1), 5_000);
+    let request = create_topic_request(creatable_topic(
+        crate::support::topics::ConfiguredTopicSetup {
+            name: (topic).into(),
+            ..Default::default()
+        },
+    ));
     let mut body = BytesMut::new();
     request.encode(&mut body, 7).expect("encode CreateTopics");
     body

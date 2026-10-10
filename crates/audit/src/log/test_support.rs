@@ -30,11 +30,20 @@ pub fn product() -> ProductInfo {
     }
 }
 
-pub fn life(n: i64) -> AuditEvent {
+/// Lifecycle fixture for a node, with its identity also used as the timestamp.
+pub fn life(node: crate::NodeId) -> AuditEvent {
+    let n = i64::try_from(node.0).expect("fixture node identity fits the audit record");
     AuditEvent::Lifecycle {
         kind: LifecycleKind::BrokerStarted,
         node_id: n,
         time_ms: n,
+    }
+}
+
+/// Emit a lifecycle sequence in caller-specified node order.
+pub fn emit_lifecycle(log: &AuditLog, nodes: &[crate::NodeId]) {
+    for &node in nodes {
+        log.emit(life(node));
     }
 }
 
@@ -56,6 +65,16 @@ pub fn spawn_writer(
 pub async fn finish_writer(log: Arc<AuditLog>, handle: tokio::task::JoinHandle<()>) {
     drop(log);
     handle.await.unwrap();
+}
+
+/// Emit the supplied lifecycle sequence and drain it through the writer's shutdown.
+pub async fn finish_lifecycle_writer(
+    log: Arc<AuditLog>,
+    handle: tokio::task::JoinHandle<()>,
+    nodes: &[crate::NodeId],
+) {
+    emit_lifecycle(&log, nodes);
+    finish_writer(log, handle).await;
 }
 
 pub fn failed_sink_stats() -> (Arc<FailableSink>, Arc<AuditStats>) {
@@ -188,17 +207,52 @@ pub fn params(sink: Arc<dyn AuditSink>, spool: Spool, stats: Arc<AuditStats>) ->
     }
 }
 
+/// A count of accepted audit events.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub struct AuditEventCount(pub u64);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CheckpointFrequency {
+    #[default]
+    Disabled,
+    Every(AuditEventCount),
+}
+
 /// Keep time-based work dormant while a test controls count-based checkpoints.
+#[derive(krabka_macros::FieldDefaults)]
+pub struct CheckpointSetup {
+    #[default(Arc::new(AuditStats::new()))]
+    pub stats: Arc<AuditStats>,
+    pub signer: Option<Arc<crate::FileEd25519Signer>>,
+    pub frequency: CheckpointFrequency,
+}
+
 pub fn quiet_params(
     sink: Arc<dyn AuditSink>,
     spool: Spool,
-    stats: Arc<AuditStats>,
-    signer: Option<Arc<crate::FileEd25519Signer>>,
-    checkpoint_every_n: u64,
+    setup: CheckpointSetup,
 ) -> AuditWriterParams {
+    let CheckpointSetup {
+        stats,
+        signer,
+        frequency,
+    } = setup;
     let mut params = params(sink, spool, stats);
     params.signer = signer;
-    params.checkpoint_every_n = checkpoint_every_n;
+    params.checkpoint_every_n = match frequency {
+        CheckpointFrequency::Disabled => 0,
+        CheckpointFrequency::Every(count) => count.0,
+    };
     params.replay_every = DORMANT;
     params
 }

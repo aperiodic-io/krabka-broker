@@ -51,18 +51,32 @@ mod tests {
     use krabka_units::millis;
 
     use super::*;
-    use crate::barrier::coordinator::test_support::{Fixture, GROUP, spec};
+    use crate::barrier::coordinator::test_support::{
+        Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec,
+    };
 
-    #[tokio::test]
-    async fn inject_due_injects_due_group() {
-        let fixture = Fixture::new();
+    async fn periodic_group(fixture: &Fixture) -> (BarrierCoordinator, Arc<dyn MetadataSource>) {
         let coordinator = fixture.coordinator().await;
         let controller = Arc::clone(&fixture.source) as Arc<dyn MetadataSource>;
 
         coordinator
-            .create_group(GROUP, spec(&["orders"], Some(millis(1)), 5))
+            .create_group(
+                GROUP,
+                spec(GroupSpecSetup {
+                    interval: Some(millis(1)),
+                    retained_cuts: RetainedCutCount(5),
+                    ..Default::default()
+                }),
+            )
             .await
             .expect("create group");
+        (coordinator, controller)
+    }
+
+    #[tokio::test]
+    async fn inject_due_injects_due_group() {
+        let fixture = Fixture::new();
+        let (coordinator, controller) = periodic_group(&fixture).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
 
@@ -78,13 +92,8 @@ mod tests {
     #[tokio::test]
     async fn run_ticks_and_shuts_down_on_cancellation() {
         let fixture = Fixture::new();
-        let coordinator = Arc::new(fixture.coordinator().await);
-        let controller = Arc::clone(&fixture.source) as Arc<dyn MetadataSource>;
-
-        coordinator
-            .create_group(GROUP, spec(&["orders"], Some(millis(1)), 5))
-            .await
-            .expect("create group");
+        let (coordinator, controller) = periodic_group(&fixture).await;
+        let coordinator = Arc::new(coordinator);
 
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(run(

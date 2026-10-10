@@ -40,6 +40,15 @@ pub(super) struct Node {
     pub(super) check_quorum_deadline: Option<SimInstant>,
 }
 
+impl Node {
+    /// Append under the machine's current epoch, returning the epoch for the trace.
+    pub(super) fn append_in_current_epoch(&mut self, count: usize) -> crate::types::Epoch {
+        let epoch = self.machine.quorum_state().leader_epoch;
+        self.log.append_in_epoch(epoch, count);
+        epoch
+    }
+}
+
 /// How often a simulated leader re-announces its epoch to the cluster.
 pub(super) const HEARTBEAT: Time = millis(300);
 

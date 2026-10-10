@@ -435,15 +435,19 @@ fn reopen_seals_recovered_segments_at_next_base_minus_one() {
     crate::log::test_support::check_contiguous_exports(&exports);
 }
 
+fn trimmed_active_log(root: &std::path::Path) -> Log {
+    let mut log = crate::test_support::open_log(root);
+    log.append(&mut sample_batch(5)).unwrap();
+    // A single segment cannot witness the interior trim in its filename.
+    log.set_log_start_offset(Offset(3)).unwrap();
+    log
+}
+
 #[test]
 fn open_restores_a_log_start_trimmed_inside_the_active_segment() {
     let dir = tempdir().unwrap();
     {
-        let mut log = crate::test_support::open_log(dir.path());
-        log.append(&mut sample_batch(5)).unwrap();
-        // One segment holds every record, so no segment name witnesses the
-        // trim: only the checkpoint can carry it across the reopen.
-        log.set_log_start_offset(Offset(3)).unwrap();
+        let mut log = trimmed_active_log(dir.path());
         log.sync().unwrap();
     }
 
@@ -537,9 +541,7 @@ fn open_resolves_a_checkpoint_against_what_the_log_holds() {
 fn reset_to_drops_the_checkpoint_so_a_reopen_starts_at_the_new_base() {
     let dir = tempdir().unwrap();
     {
-        let mut log = crate::test_support::open_log(dir.path());
-        log.append(&mut sample_batch(5)).unwrap();
-        log.set_log_start_offset(Offset(3)).unwrap();
+        let mut log = trimmed_active_log(dir.path());
         log.reset_to(Offset(100)).unwrap();
         log.sync().unwrap();
         assert!(!name::log_start_offset_checkpoint_path(dir.path()).exists());

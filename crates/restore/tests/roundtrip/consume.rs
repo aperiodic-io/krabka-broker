@@ -54,7 +54,7 @@ use krabka_protocol::{
     },
     records::{Attributes, Record, RecordBatch},
 };
-use krabka_restore::{RestoreReport, restore};
+use krabka_restore::RestoreReport;
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 use uuid::Uuid;
 
@@ -99,11 +99,8 @@ impl RestoredCluster {
     }
 
     async fn start_with(fixture: Fixture, extra: &[&str]) -> Self {
-        let target = tempfile::tempdir().expect("target parent");
-        let log_dir = target.path().join("restored");
-        let mut controller = ControllerListener::bind().await;
-        let args = controller.restore_args(fixture.archive_root.path(), &log_dir, extra);
-        let report = restore(&args).await.expect("restore");
+        let (target, log_dir, mut controller, report) =
+            crate::restored::restore_for_controller(fixture.archive_root.path(), extra).await;
 
         let (broker, client) =
             boot(&mut controller, BrokerConfig::for_tests(log_dir.clone())).await;

@@ -122,7 +122,7 @@ async fn write_persists_and_recovers() {
                 "g",
                 tid,
                 0,
-                share_write((2, 3), (20, 4), vec![batch(20, 29)]),
+                share_write((2, 3), (20, 4), vec![batch(Offset(20)..=Offset(29))]),
             )
             .await
             .unwrap();
@@ -147,7 +147,7 @@ async fn write_persists_and_recovers() {
     check!(st.leader_epoch == 3);
     check!(st.start_offset == 20);
     check!(st.delivery_complete_count == 4);
-    check!(st.state_batches == vec![batch(20, 29)]);
+    check!(st.state_batches == vec![batch(Offset(20)..=Offset(29))]);
 }
 
 /// Kafka's `share.coordinator.state.topic.compression.codec`: each codec is
@@ -257,7 +257,7 @@ async fn replay_uses_per_record_and_inter_batch_offsets() {
                 delivery_complete_count: 8,
                 create_timestamp: 0,
                 write_timestamp: 0,
-                state_batches: vec![batch(50, 59)],
+                state_batches: vec![batch(Offset(50)..=Offset(59))],
             }
             .encode(),
         ),
@@ -273,7 +273,7 @@ async fn replay_uses_per_record_and_inter_batch_offsets() {
     check!(st.leader_epoch == 9);
     check!(st.start_offset == 50);
     check!(st.delivery_complete_count == 8);
-    check!(st.state_batches == vec![batch(50, 59)]);
+    check!(st.state_batches == vec![batch(Offset(50)..=Offset(59))]);
     // Batch B's snapshot sits at base_offset 2 (single record, delta 0).
     check!(st.last_snapshot_offset == 2);
 }
@@ -338,16 +338,16 @@ fn state_partition_image(partition: i32, leader: u64, leader_epoch: i32) -> Meta
                 replication_factor: 2,
             }),
             krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
-                topic: bootstrap::TOPIC.to_string(),
-                partition,
-                leader: node,
-                replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-                isr: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
                 leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
-                adding_replicas: vec![],
-                removing_replicas: vec![],
-                directories: vec![],
                 partition_epoch: leader_epoch,
+                ..crate::handlers::test_support::replicated_partition(
+                    crate::handlers::test_support::ReplicatedPartitionSetup {
+                        topic: bootstrap::TOPIC,
+                        partition: krabka_ids::PartitionIndex(partition),
+                        leader: node,
+                        ..Default::default()
+                    },
+                )
             }),
         ],
     )
@@ -433,7 +433,7 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
         },
         Step::Read {
             on: Broker::A,
-            expected: Ok(Some((20, vec![batch(20, 29)]))),
+            expected: Ok(Some((20, vec![batch(Offset(20)..=Offset(29))]))),
         },
         // Leadership moves to B. B has not run its load yet.
         Step::Refresh {
@@ -470,7 +470,7 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
         Step::AwaitActive { on: Broker::B },
         Step::Read {
             on: Broker::B,
-            expected: Ok(Some((20, vec![batch(20, 29)]))),
+            expected: Ok(Some((20, vec![batch(Offset(20)..=Offset(29))]))),
         },
         Step::Write {
             on: Broker::B,
@@ -493,7 +493,7 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
         },
         Step::Read {
             on: Broker::A,
-            expected: Ok(Some((30, vec![batch(30, 39)]))),
+            expected: Ok(Some((30, vec![batch(Offset(30)..=Offset(39))]))),
         },
         Step::Read {
             on: Broker::B,
@@ -552,7 +552,11 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
                         "g",
                         topic_id,
                         0,
-                        share_write((1, 0), (start, 0), vec![batch(start, start + 9)]),
+                        share_write(
+                            (1, 0),
+                            (start, 0),
+                            vec![batch(Offset(start)..=Offset(start + 9))],
+                        ),
                     )
                     .await
                     .map_err(ShareStateError::code);
@@ -586,6 +590,17 @@ fn coordinator_for_topic(
     (coordinator, state_partition)
 }
 
+async fn check_empty_active_partition(
+    coordinator: &Arc<ShareCoordinator>,
+    image: &MetadataImage,
+    state_partition: PartitionIndex,
+    topic_id: uuid::Uuid,
+) {
+    refresh_and_wait(coordinator, image).await;
+    check!(coordinator.load_status(state_partition).await == Some(super::LoadStatus::Active));
+    check!(coordinator.read_summary("g", topic_id, 0).await == Ok(None));
+}
+
 /// A broker that the image names as leader, but whose state partition log is
 /// not open yet, answers `COORDINATOR_LOAD_IN_PROGRESS`. The refresh after the
 /// log opens loads the partition.
@@ -605,9 +620,7 @@ async fn led_partition_without_a_local_log_loads_once_the_log_opens() {
     );
 
     open_state_partition(&registry, dir.path(), state_partition.get());
-    refresh_and_wait(&coordinator, &image).await;
-    check!(coordinator.load_status(state_partition).await == Some(super::LoadStatus::Active));
-    check!(coordinator.read_summary("g", topic_id, 0).await == Ok(None));
+    check_empty_active_partition(&coordinator, &image, state_partition, topic_id).await;
 }
 
 /// A failed replay installs no partial state: the partition answers
@@ -637,9 +650,7 @@ async fn failed_load_serves_nothing_and_the_next_refresh_loads_again() {
     check!(coordinator.load_status(state_partition).await == Some(super::LoadStatus::Failed));
     check!(coordinator.read_summary("g", topic_id, 0).await == Err(crate::codes::NOT_COORDINATOR));
 
-    refresh_and_wait(&coordinator, &image).await;
-    check!(coordinator.load_status(state_partition).await == Some(super::LoadStatus::Active));
-    check!(coordinator.read_summary("g", topic_id, 0).await == Ok(None));
+    check_empty_active_partition(&coordinator, &image, state_partition, topic_id).await;
 }
 
 fn state_keys(topic_id: uuid::Uuid) -> (bytes::Bytes, bytes::Bytes) {
@@ -688,7 +699,7 @@ fn update_then_snapshot(snap_key: bytes::Bytes, upd_key: bytes::Bytes) -> Record
                 delivery_complete_count: 4,
                 create_timestamp: 0,
                 write_timestamp: 0,
-                state_batches: vec![batch(20, 29)],
+                state_batches: vec![batch(Offset(20)..=Offset(29))],
             }
             .encode(),
         ),
@@ -727,7 +738,7 @@ async fn replay_skips_unknown_record_types_and_fails_on_bad_records() {
         delivery_complete_count: 0,
         create_timestamp: 0,
         write_timestamp: 0,
-        state_batches: vec![batch(start, start + 9)],
+        state_batches: vec![batch(Offset(start)..=Offset(start + 9))],
     };
     let update = ShareUpdateValue {
         snapshot_epoch: 0,

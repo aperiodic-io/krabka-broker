@@ -14,9 +14,7 @@ use krabka_units::bytes;
 
 use crate::{
     support::{
-        client::connect_client,
-        discovery::topic_metadata_request,
-        fetch::{fetch_partition, single_partition_fetch},
+        client::connect_client, discovery::topic_metadata_request, fetch::single_partition_fetch,
         topics::metadata_topic,
     },
     txn_harness::{boot_single, create_topic, create_topic_with_segment_bytes, rec, send_ok},
@@ -99,12 +97,14 @@ async fn abort_then_read_committed_skips_records() {
         .send(FetchRequest {
             replica_id: -1,
             isolation_level: 1,
-            ..single_partition_fetch(
-                "ta",
+            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+                topic: "ta".into(),
                 topic_id,
-                fetch_partition(0, 0, 1 << 20),
-                (1_000, 1, 1 << 20),
-            )
+                limits: crate::support::fetch::FetchLimits::one_mebibyte(
+                    crate::support::fetch::RequestWaitMillis(1_000),
+                ),
+                ..Default::default()
+            })
         })
         .await
         .unwrap();

@@ -41,23 +41,15 @@ impl Sim {
     /// Both the curated scenarios and the playground's "settle" button call
     /// this method.
     pub fn run_until_stable(&mut self, max_ticks: usize) {
-        let mut last_fingerprint = self.fingerprint();
-        let mut stable_rounds = 0u32;
+        let mut stability = crate::simulation_support::StableFingerprint::new(self.fingerprint());
         for _ in 0..max_ticks {
             if let Some(msg) = self.queue.pop_front() {
                 self.deliver(&msg);
                 continue;
             }
             let fired = self.fire_next_timer();
-            let fp = self.fingerprint();
-            if fp == last_fingerprint {
-                stable_rounds += 1;
-                if stable_rounds >= 2 {
-                    return;
-                }
-            } else {
-                stable_rounds = 0;
-                last_fingerprint = fp;
+            if stability.observe(self.fingerprint()) {
+                return;
             }
             if !fired && self.queue.is_empty() {
                 return;
@@ -99,16 +91,7 @@ impl Sim {
                 true
             }
             SimTimer::Fetch => {
-                if let Some(leader_id) = crate::simulation_support::reachable_leader(
-                    self.nodes[&id].machine.role(),
-                    id,
-                    &self.partitioned,
-                    |leader| {
-                        self.nodes
-                            .get(&leader)
-                            .is_some_and(|node| node.machine.role().is_leader())
-                    },
-                ) {
+                if let Some(leader_id) = self.reachable_leader(id) {
                     let deadline = self
                         .now
                         .saturating_add_ms(deadline_millis(election_timeout_of(id)));
@@ -151,15 +134,7 @@ impl Sim {
         }
     }
 
-    fn fire_leader_heartbeat(&mut self, id: NodeId) {
-        if !self.nodes[&id].machine.role().is_leader() {
-            return;
-        }
-        let epoch = self.nodes[&id].machine.quorum_state().leader_epoch;
-        self.apply_action(id, Action::SendBeginQuorumEpoch { epoch });
-        let deadline = self.now.saturating_add_ms(deadline_millis(HEARTBEAT));
-        self.nodes.get_mut(&id).unwrap().heartbeat_deadline = Some(deadline);
-    }
+    krabka_macros::simulation_heartbeat!(crate, deadline_millis(HEARTBEAT));
 
     pub(super) fn reconcile_timers_for_role(&mut self, id: NodeId) {
         let node = self.nodes.get_mut(&id).unwrap();

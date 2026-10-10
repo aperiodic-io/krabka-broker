@@ -9,6 +9,13 @@ use krabka_ids::PartitionIndex;
 
 use crate::broker::{BrokerHandle, TEST_AWAITER_TIMEOUT};
 
+#[cfg(any(test, feature = "test-helpers"))]
+#[derive(Clone, Copy)]
+enum LocalFrontier {
+    LogEnd,
+    HighWatermark,
+}
+
 impl BrokerHandle {
     /// Test-only: await until the local partition runtime has installed the
     /// metadata leader, epoch, and ISR used by the Produce readiness gate.
@@ -87,27 +94,8 @@ impl BrokerHandle {
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
     pub async fn wait_until_local_log_end_offset(&self, topic: &str, partition: i32, min: i64) {
-        let res = tokio::time::timeout(TEST_AWAITER_TIMEOUT, async {
-            loop {
-                if let Some(part) = self.broker.partitions.get(topic, PartitionIndex(partition)) {
-                    let notified = part.append_notify.notified();
-                    if part.log_end_offset() >= krabka_log::Offset(min) {
-                        return;
-                    }
-                    notified.await;
-                } else {
-                    let mut img = self.broker.controller.watch_image();
-                    if img.changed().await.is_err() {
-                        return;
-                    }
-                }
-            }
-        })
-        .await;
-        assert2::assert!(
-            res.is_ok(),
-            "local log_end_offset({topic}-{partition}) did not reach {min} within 30s"
-        );
+        self.wait_for_local_frontier(topic, partition, min, LocalFrontier::LogEnd)
+            .await;
     }
 
     /// Test-only: await until the LOCAL high watermark for `topic-partition`
@@ -116,26 +104,51 @@ impl BrokerHandle {
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
     pub async fn wait_until_high_watermark(&self, topic: &str, partition: i32, min: i64) {
-        let res = tokio::time::timeout(TEST_AWAITER_TIMEOUT, async {
+        self.wait_for_local_frontier(topic, partition, min, LocalFrontier::HighWatermark)
+            .await;
+    }
+
+    /// Register before inspecting the frontier to avoid losing its notification.
+    #[cfg(any(test, feature = "test-helpers"))]
+    async fn wait_for_local_frontier(
+        &self,
+        topic: &str,
+        partition: i32,
+        min: i64,
+        frontier: LocalFrontier,
+    ) {
+        let result = tokio::time::timeout(TEST_AWAITER_TIMEOUT, async {
             loop {
                 if let Some(part) = self.broker.partitions.get(topic, PartitionIndex(partition)) {
-                    let notified = part.hw_advance_notify.notified();
-                    if part.high_watermark().await >= krabka_log::Offset(min) {
+                    let notify = match frontier {
+                        LocalFrontier::LogEnd => &part.append_notify,
+                        LocalFrontier::HighWatermark => &part.hw_advance_notify,
+                    };
+                    let notified = notify.notified();
+                    let offset = match frontier {
+                        LocalFrontier::LogEnd => part.log_end_offset(),
+                        LocalFrontier::HighWatermark => part.high_watermark().await,
+                    };
+                    if offset >= krabka_log::Offset(min) {
                         return;
                     }
                     notified.await;
                 } else {
-                    let mut img = self.broker.controller.watch_image();
-                    if img.changed().await.is_err() {
+                    let mut image = self.broker.controller.watch_image();
+                    if image.changed().await.is_err() {
                         return;
                     }
                 }
             }
         })
         .await;
+        let label = match frontier {
+            LocalFrontier::LogEnd => "local log_end_offset",
+            LocalFrontier::HighWatermark => "high_watermark",
+        };
         assert2::assert!(
-            res.is_ok(),
-            "high_watermark({topic}-{partition}) did not reach {min} within 30s"
+            result.is_ok(),
+            "{label}({topic}-{partition}) did not reach {min} within 30s"
         );
     }
 
@@ -219,21 +232,21 @@ mod tests {
     use krabka_units::{kibibytes, mebibytes, secs};
 
     use super::*;
-    use crate::{
-        broker::{Broker, test_support::local_partition_with_records},
-        config::BrokerConfig,
-    };
+    use crate::broker::test_support::local_partition_with_records;
 
     #[tokio::test]
     async fn single_broker_handle_local_log_helpers_observe_real_state() {
-        let dir = tempfile::tempdir().unwrap();
-        let handle = Broker::start(BrokerConfig::for_tests(dir.path().to_path_buf()))
-            .await
-            .expect("broker start");
+        let (handle, dir) = crate::test_support::start_broker_with(|_| {}).await;
         let broker = handle.broker_arc_for_test();
 
         let helper_topic = "handle-partition-helper-mutant-topic";
-        let helper_part = local_partition_with_records(dir.path(), helper_topic, 0, &[]);
+        let helper_part = local_partition_with_records(
+            dir.path(),
+            crate::broker::test_support::LocalPartitionSetup {
+                topic: helper_topic,
+                ..Default::default()
+            },
+        );
         let helper_config = krabka_log::LogConfig {
             retention: Some(secs(123)),
             segment_size: kibibytes(4),

@@ -73,6 +73,12 @@ pub(super) fn metadata_snapshot_fetch_max(
         .map_err(|error| invalid_runtime_value(name, error))
 }
 
+fn whole_nonnegative_bytes(value: ByteSize) -> bool {
+    value.bytes_f64().is_finite()
+        && value >= ByteSize::from_bytes(0)
+        && ByteSize::from_bytes(value.bytes_u64()) == value
+}
+
 /// A byte count in the domain Kafka gives an `INT` config with `atLeast(0)`.
 ///
 /// `apache/kafka:4.3.1` starts on `message.max.bytes=0`, refuses `-1` with
@@ -86,9 +92,7 @@ pub(super) fn metadata_snapshot_fetch_max(
 /// through `whole_bytes_u64`: that helper rejects zero.
 pub(super) fn kafka_int_bytes(name: &str, value: ByteSize) -> Result<ByteSize, FileConfigError> {
     let bytes = value.bytes_u64();
-    if value.bytes_f64().is_finite()
-        && value >= ByteSize::from_bytes(0)
-        && ByteSize::from_bytes(bytes) == value
+    if whole_nonnegative_bytes(value)
         && bytes <= u64::try_from(i32::MAX).expect("i32::MAX fits u64")
     {
         Ok(value)
@@ -112,11 +116,7 @@ pub(super) fn metadata_log_segment_bytes(
     let bytes = value.bytes_u64();
     let floor = krabka_raft::MIN_METADATA_LOG_SEGMENT_SIZE.bytes_u64();
     let ceiling = u64::try_from(i32::MAX).expect("i32::MAX fits u64");
-    if value.bytes_f64().is_finite()
-        && value >= ByteSize::from_bytes(0)
-        && ByteSize::from_bytes(bytes) == value
-        && (floor..=ceiling).contains(&bytes)
-    {
+    if whole_nonnegative_bytes(value) && (floor..=ceiling).contains(&bytes) {
         Ok(value)
     } else {
         Err(invalid_runtime_value(
@@ -133,12 +133,7 @@ pub(super) fn metadata_log_segment_bytes(
 /// byte size has no negative form, so the operator omits the key instead,
 /// and the built-in limit stays.
 pub(super) fn kafka_long_bytes(name: &str, value: ByteSize) -> Result<ByteSize, FileConfigError> {
-    let bytes = value.bytes_u64();
-    if value.bytes_f64().is_finite()
-        && value >= ByteSize::from_bytes(0)
-        && value.bytes_f64() < 9_223_372_036_854_775_808.0
-        && ByteSize::from_bytes(bytes) == value
-    {
+    if whole_nonnegative_bytes(value) && value.bytes_f64() < 9_223_372_036_854_775_808.0 {
         Ok(value)
     } else {
         Err(invalid_runtime_value(
@@ -305,27 +300,22 @@ mod tests {
 
     #[test]
     fn runtime_file_config_rejects_zero_and_names_field() {
-        let file: FileConfig = toml::from_str("[runtime]\ncleaner_interval = \"0ms\"\n")
-            .expect("parse runtime config");
-        let mut cfg = crate::config::BrokerConfig::default();
-
-        let error = file
-            .apply_to(&mut cfg)
-            .expect_err("zero cleaner interval must fail");
+        let error = crate::file_config::test_support::configured(
+            "[runtime]\ncleaner_interval = \"0ms\"\n",
+            "parse runtime config",
+        )
+        .expect_err("zero cleaner interval must fail");
 
         assert!(error.to_string().contains("cleaner_interval"));
     }
 
     #[test]
     fn runtime_file_config_rejects_voter_timeout_above_wire_limit() {
-        let file: FileConfig =
-            toml::from_str("[runtime]\nauto_join_voter_request_timeout = \"2147483648ms\"\n")
-                .expect("parse runtime config");
-        let mut cfg = crate::config::BrokerConfig::default();
-
-        let error = file
-            .apply_to(&mut cfg)
-            .expect_err("timeout above i32 wire limit must fail");
+        let error = crate::file_config::test_support::configured(
+            "[runtime]\nauto_join_voter_request_timeout = \"2147483648ms\"\n",
+            "parse runtime config",
+        )
+        .expect_err("timeout above i32 wire limit must fail");
 
         assert!(
             error
@@ -346,11 +336,9 @@ mod tests {
                 "[runtime]\nproducer_id_expiration = \"1.5ms\"\n",
             ),
         ] {
-            let file: FileConfig = toml::from_str(source).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let error = file
-                .apply_to(&mut cfg)
-                .expect_err("fractional protocol milliseconds must fail");
+            let error =
+                crate::file_config::test_support::configured(source, "parse runtime config")
+                    .expect_err("fractional protocol milliseconds must fail");
             assert!(error.to_string().contains(field));
         }
     }
@@ -388,15 +376,15 @@ mod tests {
                 None,
             ),
         ] {
-            let file: FileConfig = toml::from_str(source).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let result = file.apply_to(&mut cfg);
+            let result =
+                crate::file_config::test_support::configured(source, "parse runtime config");
 
             if let Some(field) = field {
                 let error = result.expect_err(label);
                 check!(error.to_string().contains(field), "{label}");
             } else {
                 check!(result.is_ok(), "{label}");
+                let cfg = result.unwrap();
                 check!(
                     cfg.txn_id_expiration_cleanup_interval
                         == <krabka_units::Time as krabka_units::convert::TimeExt>::ZERO,
@@ -500,20 +488,15 @@ mod tests {
             "metadata_snapshot_fetch_max",
         ] {
             let source = format!("[runtime]\n{field} = \"0B\"\n");
-            let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let error = file
-                .apply_to(&mut cfg)
-                .expect_err("zero byte size must fail");
+            let error =
+                crate::file_config::test_support::configured(&source, "parse runtime config")
+                    .expect_err("zero byte size must fail");
             assert!(error.to_string().contains(field), "{error}");
         }
 
         let field = "record_decompression_max_ratio";
         let source = format!("[runtime]\n{field} = \"0\"\n");
-        let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
-        let mut cfg = crate::config::BrokerConfig::default();
-        let error = file
-            .apply_to(&mut cfg)
+        let error = crate::file_config::test_support::configured(&source, "parse runtime config")
             .expect_err("invalid ratio must fail");
         assert!(error.to_string().contains(field), "{error}");
     }
@@ -540,11 +523,9 @@ mod tests {
             ("message_max_bytes", "2147483648B"),
         ] {
             let source = format!("[runtime]\n{field} = \"{value}\"\n");
-            let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let error = file
-                .apply_to(&mut cfg)
-                .expect_err("fractional or overflowing byte size must fail");
+            let error =
+                crate::file_config::test_support::configured(&source, "parse runtime config")
+                    .expect_err("fractional or overflowing byte size must fail");
             let expected = if field == "record_decompression_output_ceiling" {
                 "record_decompression"
             } else {
@@ -574,9 +555,8 @@ mod tests {
                 false,
             ),
         ] {
-            let file: FileConfig = toml::from_str(source).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let result = file.apply_to(&mut cfg);
+            let result =
+                crate::file_config::test_support::configured(source, "parse runtime config");
             assert!(result.is_ok() == expect_ok, "{source}: {result:?}");
         }
     }
@@ -767,9 +747,8 @@ mod tests {
         ];
 
         for (source, field) in cases {
-            let file: FileConfig = toml::from_str(source).expect("parse config");
-            let mut cfg = crate::config::BrokerConfig::default();
-            let error = file.apply_to(&mut cfg).expect_err("zero must fail");
+            let error = crate::file_config::test_support::configured(source, "parse config")
+                .expect_err("zero must fail");
             assert!(error.to_string().contains(field));
         }
     }

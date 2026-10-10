@@ -84,12 +84,11 @@ mod tests {
     use super::*;
     use crate::break_glass::ALL_ACTIONS;
 
+    krabka_macros::break_glass_golden_id!(PROPOSAL_ID);
+
     fn proposal() -> BreakGlassProposalRecord {
         BreakGlassProposalRecord {
-            proposal_id: Uuid::from_bytes([
-                0x0B, 0xAD, 0xC0, 0xFF, 0xEE, 0x00, 0x40, 0x00, 0x80, 0x00, 0x01, 0x02, 0x03, 0x04,
-                0x05, 0x06,
-            ]),
+            proposal_id: Uuid::from_bytes(PROPOSAL_ID),
             action: BreakGlassAction::DeleteTopic,
             target: "doomed".to_owned(),
             proposer: "User:alice".to_owned(),

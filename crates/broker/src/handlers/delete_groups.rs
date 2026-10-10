@@ -87,10 +87,9 @@ async fn delete_one(broker: &Broker, group_id: &str) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Arc};
+    use std::sync::Arc;
 
     use assert2::assert;
-    use krabka_security::Principal;
 
     use super::*;
     use crate::{
@@ -112,11 +111,9 @@ mod tests {
     async fn drive(
         broker: &Broker,
         req: &DeleteGroupsRequest,
-        principal: &Principal,
-        peer: &SocketAddr,
+        ctx: &crate::handlers::RequestContext<'_>,
     ) -> DeleteGroupsResponse {
-        let ctx = test_context(principal, peer);
-        handle(broker, req.clone(), VERSION, &ctx)
+        handle(broker, req.clone(), VERSION, ctx)
             .await
             .expect("handle")
     }
@@ -129,7 +126,7 @@ mod tests {
         request_identity!((p, peer), principal("alice"));
         let req = request(&["group-a", "group-b"]);
 
-        let resp = drive(&broker, &req, &p, &peer).await;
+        let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
         let expected = unthrottled_wire!(DeleteGroupsResponse {
             results: vec![
@@ -209,7 +206,10 @@ mod tests {
         let mut actual = Vec::with_capacity(cases.len());
         let mut expected = Vec::with_capacity(cases.len());
         for (groups, response) in cases {
-            actual.push((groups, drive(&broker, &request(groups), &p, &peer).await));
+            actual.push((
+                groups,
+                drive(&broker, &request(groups), &test_context(&p, &peer)).await,
+            ));
             expected.push((groups, response));
         }
         assert!(actual == expected);
@@ -222,7 +222,7 @@ mod tests {
         request_identity!((p, peer), principal("admin"));
         let req = request(&["missing"]);
 
-        let resp = drive(&broker, &req, &p, &peer).await;
+        let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
         let expected = unthrottled_wire!(DeleteGroupsResponse {
             results: vec![tagged_wire!(DeletableGroupResult {

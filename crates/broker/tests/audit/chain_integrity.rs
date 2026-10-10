@@ -34,10 +34,12 @@ async fn signed_checkpoints_appear_on_audit_topic() {
     let audit_before = p.broker.metrics().audit_events.get();
     let _ = p
         .client
-        .send(create_topic_request(
-            creatable_topic("cp-topic", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("cp-topic").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .unwrap();
 
@@ -71,34 +73,26 @@ async fn audit_chain_continues_across_restart() {
 
     // First boot: generate some audit events, then shut down cleanly.
     {
-        let (broker, client) = support::start_with_dir(dir.path()).await;
-        let audit_before = broker.metrics().audit_events.get();
-        let _ = client
-            .send(create_topic_request(creatable_topic("r1", 1, 1), 5_000))
-            .await
-            .unwrap();
-        // Ensure the r1 CreateTopics audit record is durable before shutdown.
-        broker
-            .wait_for_metrics("audit event written", |m| {
-                m.audit_events.get() > audit_before
-            })
-            .await;
+        let (broker, _client) = boot_with_audited_topic(
+            dir.path(),
+            crate::support::topics::CreateTopicSetup {
+                topic: "r1",
+                ..Default::default()
+            },
+        )
+        .await;
         broker.shutdown().await;
     }
 
     // Second boot on the SAME data dir: more events.
-    let (broker, client) = support::start_with_dir(dir.path()).await;
-    let audit_before = broker.metrics().audit_events.get();
-    let _ = client
-        .send(create_topic_request(creatable_topic("r2", 1, 1), 5_000))
-        .await
-        .unwrap();
-    // Ensure the r2 CreateTopics audit record is durable before consuming.
-    broker
-        .wait_for_metrics("audit event written", |m| {
-            m.audit_events.get() > audit_before
-        })
-        .await;
+    let (broker, client) = boot_with_audited_topic(
+        dir.path(),
+        crate::support::topics::CreateTopicSetup {
+            topic: "r2",
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Consume the audit topic and assert seqs are a contiguous, duplicate-free
     // chain (recovery worked — no reset to 0 on the second boot).
@@ -111,4 +105,23 @@ async fn audit_chain_continues_across_restart() {
     assert2::check!(sorted == (0..seqs.len() as u64).collect::<Vec<_>>()); // contiguous from 0
 
     broker.shutdown().await;
+}
+
+/// Await the exact topic-creation audit event on each boot before shutdown or consumption.
+async fn boot_with_audited_topic(
+    directory: &std::path::Path,
+    setup: crate::support::topics::CreateTopicSetup<'_>,
+) -> (krabka_broker::BrokerHandle, krabka_client_core::Client) {
+    let (broker, client) = support::start_with_dir(directory).await;
+    let audit_before = broker.metrics().audit_events.get();
+    let _ = client
+        .send(crate::support::topics::configured_topic_request(setup))
+        .await
+        .unwrap();
+    broker
+        .wait_for_metrics("audit event written", |metrics| {
+            metrics.audit_events.get() > audit_before
+        })
+        .await;
+    (broker, client)
 }

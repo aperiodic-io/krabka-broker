@@ -265,6 +265,14 @@ mod tests {
         l
     }
 
+    async fn tick_all_alive(mock: &MockController) -> bool {
+        let liveness = liveness_all_alive().await;
+        let cfg = AutoRebalanceConfig {
+            check_interval: minutes(5),
+        };
+        rebalance_tick(mock, &liveness, &cfg).await
+    }
+
     #[tokio::test]
     async fn offline_or_out_of_isr_preferred_replica_is_not_submitted() {
         let offline = MockController::new(img_with_n_partitions(1, 0), true);
@@ -296,7 +304,6 @@ mod tests {
         let cfg = AutoRebalanceConfig {
             check_interval: minutes(5),
         };
-
         rebalance_tick(&mock, &liveness, &cfg).await;
         assert!(mock.submitted.lock().unwrap().is_empty());
         rebalance_tick(&mock, &liveness, &cfg).await;
@@ -311,11 +318,7 @@ mod tests {
         // others joined them; the KRaft controller restores them now, which
         // is what a rolling restart needs (#394).
         let mock = MockController::new(img_with_n_partitions(5, 95), true);
-        let liveness = liveness_all_alive().await;
-        let cfg = AutoRebalanceConfig {
-            check_interval: minutes(5),
-        };
-        rebalance_tick(&mock, &liveness, &cfg).await;
+        tick_all_alive(&mock).await;
         assert!(mock.submitted.lock().unwrap().len() == 5);
     }
 
@@ -326,12 +329,7 @@ mod tests {
         // second.
         for (imbalanced, balanced) in [(19_usize, 181_usize), (21, 179)] {
             let mock = MockController::new(img_with_n_partitions(imbalanced, balanced), true);
-            let liveness = liveness_all_alive().await;
-            let cfg = AutoRebalanceConfig {
-                check_interval: minutes(5),
-            };
-
-            rebalance_tick(&mock, &liveness, &cfg).await;
+            tick_all_alive(&mock).await;
 
             assert!(
                 mock.submitted.lock().unwrap().len() == imbalanced,
@@ -348,12 +346,7 @@ mod tests {
     async fn a_tick_submits_at_most_the_election_cap() {
         let over_cap = MAX_ELECTIONS_PER_TICK + 25;
         let mock = MockController::new(img_with_n_partitions(over_cap, 0), true);
-        let liveness = liveness_all_alive().await;
-        let cfg = AutoRebalanceConfig {
-            check_interval: minutes(5),
-        };
-
-        rebalance_tick(&mock, &liveness, &cfg).await;
+        tick_all_alive(&mock).await;
 
         assert!(mock.submitted.lock().unwrap().len() == MAX_ELECTIONS_PER_TICK);
     }
@@ -454,11 +447,7 @@ mod tests {
     #[tokio::test]
     async fn every_submitted_record_promotes_the_preferred_replica() {
         let mock = MockController::new(img_with_n_partitions(20, 80), true);
-        let liveness = liveness_all_alive().await;
-        let cfg = AutoRebalanceConfig {
-            check_interval: minutes(5),
-        };
-        rebalance_tick(&mock, &liveness, &cfg).await;
+        tick_all_alive(&mock).await;
         let submitted = mock.submitted.lock().unwrap();
         assert!(submitted.len() == 20);
         // Every submitted record must promote preferred (replicas[0] = 1).

@@ -114,9 +114,7 @@ pub(crate) struct RegisteredCluster {
 async fn registered_admin() -> RegisteredCluster {
     let (h1, h2, h3, cfg1, cfg2, cfg3, d1, d2, d3) =
         Box::pin(crate::jvm_acceptance::start_registered_sasl_cluster(
-            crate::jvm_acceptance::ADMIN,
-            crate::jvm_acceptance::ADMIN_PASS,
-            &[],
+            crate::jvm_acceptance::SaslClusterSetup::default(),
         ))
         .await;
     RegisteredCluster {
@@ -233,12 +231,12 @@ pub(crate) fn execute_plan(
     } else {
         "--execute"
     };
-    let out = crate::support::jvm_docker_command(
-        crate::jvm_acceptance::KAFKA_IMAGE_TXN,
-        &[admin_mount, &mount],
-        &args,
-        false,
-    )
+    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: crate::jvm_acceptance::KAFKA_IMAGE_TXN,
+        mounts: &[admin_mount, &mount],
+        args: &args,
+        ..Default::default()
+    })
     .output()
     .expect(context);
     eprintln!(

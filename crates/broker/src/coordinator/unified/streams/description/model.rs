@@ -219,16 +219,47 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, Default)]
+    enum DescribedNodeKind {
+        #[default]
+        Source,
+        Processor,
+        Sink,
+    }
+
+    impl DescribedNodeKind {
+        fn wire_code(self) -> i8 {
+            match self {
+                Self::Source => NODE_TYPE_SOURCE,
+                Self::Processor => NODE_TYPE_PROCESSOR,
+                Self::Sink => NODE_TYPE_SINK,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct DescribedNodeSetup<'a> {
+        #[default("node")]
+        name: &'a str,
+        kind: DescribedNodeKind,
+        source_topics: &'a [&'a str],
+        sink_topic: Option<&'a str>,
+        stores: &'a [&'a str],
+    }
+
     fn describe_node(
-        name: &str,
-        node_type: i8,
-        source_topics: &[&str],
-        sink_topic: Option<&str>,
-        stores: &[&str],
+        setup: DescribedNodeSetup<'_>,
     ) -> describe::topology_description_node::TopologyDescriptionNode {
+        let DescribedNodeSetup {
+            name,
+            kind,
+            source_topics,
+            sink_topic,
+            stores,
+        } = setup;
         describe::topology_description_node::TopologyDescriptionNode {
             name: name.into(),
-            node_type,
+            node_type: kind.wire_code(),
             source_topics: source_topics.iter().map(|&t| t.to_owned()).collect(),
             sink_topic: sink_topic.map(str::to_owned),
             stores: stores.iter().map(|&s| s.to_owned()).collect(),
@@ -273,23 +304,40 @@ mod tests {
                 describe::topology_description_subtopology::TopologyDescriptionSubtopology {
                     subtopology_id: "0".into(),
                     nodes: vec![
-                        describe_node("KSTREAM-SOURCE-0000000000", 1, &["in", "in-b"], None, &[]),
-                        describe_node("KSTREAM-MAPVALUES-0000000001", 2, &[], None, &["store"]),
-                        describe_node("KSTREAM-SINK-0000000002", 3, &[], Some("out"), &[]),
+                        describe_node(DescribedNodeSetup {
+                            name: "KSTREAM-SOURCE-0000000000",
+                            source_topics: &["in", "in-b"],
+                            ..Default::default()
+                        }),
+                        describe_node(DescribedNodeSetup {
+                            name: "KSTREAM-MAPVALUES-0000000001",
+                            kind: DescribedNodeKind::Processor,
+                            stores: &["store"],
+                            ..Default::default()
+                        }),
+                        describe_node(DescribedNodeSetup {
+                            name: "KSTREAM-SINK-0000000002",
+                            kind: DescribedNodeKind::Sink,
+                            sink_topic: Some("out"),
+                            ..Default::default()
+                        }),
                     ],
                     ..Default::default()
                 },
             ],
             global_stores: vec![
                 describe::topology_description_global_store::TopologyDescriptionGlobalStore {
-                    source: describe_node(
-                        "KSTREAM-SOURCE-0000000003",
-                        1,
-                        &["in", "in-b"],
-                        None,
-                        &[],
-                    ),
-                    processor: describe_node("KTABLE-SOURCE-0000000004", 2, &[], None, &["store"]),
+                    source: describe_node(DescribedNodeSetup {
+                        name: "KSTREAM-SOURCE-0000000003",
+                        source_topics: &["in", "in-b"],
+                        ..Default::default()
+                    }),
+                    processor: describe_node(DescribedNodeSetup {
+                        name: "KTABLE-SOURCE-0000000004",
+                        kind: DescribedNodeKind::Processor,
+                        stores: &["store"],
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
             ],

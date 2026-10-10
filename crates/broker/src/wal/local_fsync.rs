@@ -80,7 +80,17 @@ mod tests {
         let (results, leo, _) = crate::partition_writer::run_produce_append_batch(
             w.log.clone(),
             None,
-            (vec![sample_owned(2), sample_owned(3)], Vec::new()),
+            (
+                vec![
+                    sample_owned(crate::test_support::EmptyPayloadBatchSetup {
+                        count: crate::test_support::RecordCount(2),
+                    }),
+                    sample_owned(crate::test_support::EmptyPayloadBatchSetup {
+                        count: crate::test_support::RecordCount(3),
+                    }),
+                ],
+                Vec::new(),
+            ),
         )
         .await
         .unwrap();
@@ -108,7 +118,12 @@ mod tests {
         let (_results, leo, _) = crate::partition_writer::run_produce_append_batch(
             w.log.clone(),
             None,
-            (vec![sample_owned(3)], Vec::new()),
+            (
+                vec![sample_owned(crate::test_support::EmptyPayloadBatchSetup {
+                    count: crate::test_support::RecordCount(3),
+                })],
+                Vec::new(),
+            ),
         )
         .await
         .unwrap();
@@ -120,8 +135,8 @@ mod tests {
         assert!(w.log.lock().unwrap().log_start_offset() == start);
     }
 
-    fn sample_owned(n: i32) -> ProduceData {
-        ProduceData::Owned(sample_batch(n))
+    fn sample_owned(setup: crate::test_support::EmptyPayloadBatchSetup) -> ProduceData {
+        ProduceData::Owned(sample_batch(setup))
     }
 
     use crate::test_support::default_records_batch as sample_batch;

@@ -74,10 +74,9 @@ impl Segment {
 #[cfg(test)]
 mod tests {
     use krabka_units::prelude::kibibytes;
-    use tempfile::tempdir;
 
     use super::*;
-    use crate::segment::test_support::{NO_LIMIT, sample_batch, seeded_segment};
+    use crate::segment::test_support::{NO_LIMIT, sample_batch};
 
     // `Segment::read` maps the absolute fetch offset to a relative index key
     // via `offset - base_offset`. With a dense index and base_offset 100,
@@ -90,7 +89,12 @@ mod tests {
         let (_dir, seg) = super::super::test_support::indexed_segment();
         let read = seg.read(Offset(103), NO_LIMIT).unwrap();
         assert2::assert!(seg.last_offset() == Offset(105));
-        assert2::assert!(read == vec![sample_batch(103, 2, 200), sample_batch(105, 1, 300)]);
+        assert2::assert!(
+            read == vec![
+                sample_batch(crate::segment::test_support::INDEXED_READ_BATCHES[1]),
+                sample_batch(crate::segment::test_support::INDEXED_READ_BATCHES[2])
+            ]
+        );
     }
 
     /// `Segment::read` accumulates consumed bytes as `before - cursor.len()`,
@@ -101,39 +105,58 @@ mod tests {
     /// read stops after one batch.
     #[test]
     fn read_consumed_bytes_gates_max_bytes_budget() {
-        let dir = tempdir().unwrap();
-        let seg = seeded_segment(dir.path(), 0, &[(0, 1, 100), (1, 1, 200), (2, 1, 300)]);
+        let (_dir, seg) = crate::segment::test_support::seeded_fixture(
+            crate::segment::test_support::SeededSegmentSetup {
+                batches: &[
+                    crate::segment::test_support::ONE_RECORD_BATCH,
+                    crate::segment::test_support::SECOND_SINGLE_RECORD_BATCH,
+                    crate::segment::test_support::THIRD_SINGLE_RECORD_BATCH,
+                ],
+                ..Default::default()
+            },
+        );
         // Exactly the whole segment: correct consumed accounting fits all three
         // batches; inflated accounting overshoots after the first.
         let max_size = seg.size();
 
         let read = seg.read(Offset(0), max_size).unwrap();
-        assert2::assert!(
-            read == crate::segment::test_support::sample_batches(&[
-                (0, 1, 100),
-                (1, 1, 200),
-                (2, 1, 300)
-            ])
-        );
+        assert2::assert!(read == crate::segment::test_support::three_single_record_batches());
     }
 
     #[test]
     fn read_at_higher_offset_skips_earlier_batches() {
         let (_dir, mut seg) = crate::segment::test_support::test_segment();
-        seg.append(&sample_batch(0, 3, 1_000_000), kibibytes(4))
-            .unwrap();
-        seg.append(&sample_batch(3, 2, 2_000_000), kibibytes(4))
-            .unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::FIRST_LARGE_TIMESTAMP_BATCH),
+            kibibytes(4),
+        )
+        .unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SECOND_LARGE_TIMESTAMP_BATCH),
+            kibibytes(4),
+        )
+        .unwrap();
         let read = seg.read(Offset(4), NO_LIMIT).unwrap();
         // Offset 4 falls inside the second batch (offsets 3..=4).
-        assert2::assert!(read == vec![sample_batch(3, 2, 2_000_000)]);
+        assert2::assert!(
+            read == vec![sample_batch(
+                crate::segment::test_support::SECOND_LARGE_TIMESTAMP_BATCH
+            )]
+        );
     }
 
     #[test]
     fn read_past_last_offset_returns_empty() {
         let (_dir, mut seg) = crate::segment::test_support::test_segment();
-        seg.append(&sample_batch(0, 2, 1_000), kibibytes(4))
-            .unwrap();
+        seg.append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                records: crate::segment::test_support::RecordCount(2),
+                timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+                ..Default::default()
+            }),
+            kibibytes(4),
+        )
+        .unwrap();
         let read = seg.read(Offset(100), NO_LIMIT).unwrap();
         assert2::assert!(read.is_empty());
     }

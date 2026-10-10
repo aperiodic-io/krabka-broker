@@ -10,7 +10,7 @@ use std::sync::Arc;
 use assert2::{assert, check};
 use krabka_ids::PartitionIndex;
 use krabka_protocol::owned::{
-    create_topics_request::{self, CreatableTopic, CreateTopicsRequest},
+    create_topics_request::{self},
     leave_group_request::LeaveGroupRequest,
     offset_commit_request::OffsetCommitRequest,
 };
@@ -33,7 +33,7 @@ use crate::{
         },
     },
     test_support::{
-        dispatch_context, encode_request, peer, principal, request_context,
+        UnixMillis, dispatch_context, encode_request, peer, principal, request_context,
         start_broker_with_authorizer_no_audit,
     },
 };
@@ -86,16 +86,12 @@ async fn start() -> (crate::broker::BrokerHandle, tempfile::TempDir) {
     let admin = principal("admin");
     let address = peer();
     let ctx = request_context(&admin, &address, "retention-admin");
-    let request = CreateTopicsRequest {
-        topics: vec![CreatableTopic {
-            name: TOPIC.to_string(),
-            num_partitions: 1,
-            replication_factor: 1,
+    let request = crate::handlers::test_support::configured_topic_request(
+        crate::handlers::test_support::CreateTopicSetup {
+            topic: TOPIC,
             ..Default::default()
-        }],
-        timeout_ms: 5_000,
-        ..Default::default()
-    };
+        },
+    );
     dispatch_context(
         &broker.broker_arc_for_test(),
         create_topics_request::API_KEY,
@@ -106,6 +102,20 @@ async fn start() -> (crate::broker::BrokerHandle, tempfile::TempDir) {
     .await;
     broker.wait_until_partition_present(TOPIC, 0).await;
     (broker, dir)
+}
+
+/// Leave a real group memberless with its committed offset still retained.
+async fn memberless_group_with_committed_offset() -> (
+    crate::broker::BrokerHandle,
+    tempfile::TempDir,
+    std::sync::Arc<Broker>,
+) {
+    let (handle, dir) = start().await;
+    let broker = handle.broker_arc_for_test();
+    seed_group_with_member(&broker);
+    commit_offset(&broker, 42, -1).await;
+    remove_last_member(&broker).await;
+    (handle, dir, broker)
 }
 
 /// Install a `Stable` classic group holding one member, so a commit fences
@@ -130,14 +140,17 @@ fn seed_group_with_member(broker: &Broker) {
 /// committed offsets are back, its members are not, and `empty_since_ms` holds
 /// whatever moment the group's k2 snapshot carried — `None` for a group that
 /// never wrote one.
-fn seed_replayed_group(
-    broker: &Broker,
-    protocol_type: Option<&str>,
-    empty_since_ms: Option<i64>,
-    commit_timestamp_ms: i64,
-) {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct ReplayedGroupSetup<'a> {
+    protocol_type: Option<&'a str>,
+    empty_since_ms: Option<UnixMillis>,
+    #[default(UnixMillis(0))]
+    commit_timestamp_ms: UnixMillis,
+}
+
+fn seed_replayed_group(broker: &Broker, setup: ReplayedGroupSetup<'_>) {
     let mut state = ClassicGroup::new(GROUP);
-    state.protocol_type = protocol_type.map(str::to_string);
+    state.protocol_type = setup.protocol_type.map(str::to_string);
     let mut group = CoordinatorGroup::seeded(
         GROUP,
         GroupKind::Classic(state),
@@ -147,14 +160,14 @@ fn seed_replayed_group(
                 offset: krabka_log::Offset(42),
                 leader_epoch: -1,
                 metadata: String::new(),
-                commit_timestamp_ms,
+                commit_timestamp_ms: setup.commit_timestamp_ms.0,
                 expire_timestamp_ms: None,
                 topic_id: None,
             },
         )]
         .into(),
     );
-    group.empty_since_ms = empty_since_ms;
+    group.empty_since_ms = setup.empty_since_ms.map(|at| at.0);
     broker
         .group_coordinator
         .seed_classic(GROUP, Box::new(group));
@@ -188,12 +201,7 @@ async fn commit_offset(broker: &Broker, offset: i64, retention_time_ms: i64) {
         retention_time_ms,
         ..crate::coordinator::test_support::commit_request(GROUP, TOPIC, offset)
     };
-    let principal = principal("admin");
-    let peer = peer();
-    let ctx = request_context(&principal, &peer, "consumer");
-    let response = crate::handlers::offset_commit::handle(broker, request, COMMIT_VERSION, &ctx)
-        .await
-        .expect("OffsetCommit");
+    let response = commit_request(broker, request).await;
     let code = response.topics[0].partitions[0].error_code;
     assert!(code == codes::NONE, "commit failed with error_code {code}");
 }
@@ -286,10 +294,7 @@ async fn empty_group_loses_its_offsets_after_the_retention() {
     let swept = sweep_at(&broker, now_ms).await;
 
     assert!(swept == deleted_group(vec![(TOPIC.to_string(), 0)]));
-    // The group left the directory, rather than merely being emptied. Check it
-    // before the fetch, which re-creates an actor for an unknown id.
-    check!(broker.group_coordinator.find(GROUP).is_none());
-    check!(fetched_offset(&broker).await == -1);
+    check_group_deleted(&broker).await;
     let records = offsets_log_records(&broker);
     check!(has_tombstone(&records, &committed_offset_key()));
     // The group held nothing else, so its own record went in the same pass.
@@ -377,11 +382,7 @@ async fn per_commit_retention_time_expires_before_the_broker_default() {
 /// left alone: the leader sweeps it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_this_broker_does_not_own_is_not_swept() {
-    let (broker_handle, _dir) = start().await;
-    let broker = broker_handle.broker_arc_for_test();
-    seed_group_with_member(&broker);
-    commit_offset(&broker, 42, -1).await;
-    remove_last_member(&broker).await;
+    let (_broker_handle, _dir, broker) = memberless_group_with_committed_offset().await;
 
     let now_ms = crate::time_util::now_ms() + RETENTION_MS + 1;
     let swept = sweep(
@@ -402,11 +403,7 @@ async fn a_group_this_broker_does_not_own_is_not_swept() {
 /// entry's emptiness as "nobody is using these offsets".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_streams_group_offset_home_is_not_swept() {
-    let (broker_handle, _dir) = start().await;
-    let broker = broker_handle.broker_arc_for_test();
-    seed_group_with_member(&broker);
-    commit_offset(&broker, 42, -1).await;
-    remove_last_member(&broker).await;
+    let (_broker_handle, _dir, broker) = memberless_group_with_committed_offset().await;
     // Lock the id to the streams namespace, as a KIP-1071 group would.
     let _ = broker.group_coordinator.get_or_create_streams(GROUP);
 
@@ -477,11 +474,7 @@ async fn an_empty_group_that_holds_no_offsets_is_reaped() {
 /// group itself goes on the next pass, even though the pass expired nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_whose_last_offset_was_deleted_is_reaped_next_pass() {
-    let (broker_handle, _dir) = start().await;
-    let broker = broker_handle.broker_arc_for_test();
-    seed_group_with_member(&broker);
-    commit_offset(&broker, 42, -1).await;
-    remove_last_member(&broker).await;
+    let (_broker_handle, _dir, broker) = memberless_group_with_committed_offset().await;
 
     // Take the offset out from under the group the way `OffsetDelete` does,
     // leaving a memberless group that holds nothing.
@@ -551,13 +544,18 @@ async fn a_simple_group_expires_from_its_commit_not_from_the_restart() {
     let (broker_handle, _dir) = start().await;
     let broker = broker_handle.broker_arc_for_test();
     let restarted_at = crate::time_util::now_ms();
-    seed_replayed_group(&broker, None, None, restarted_at - RETENTION_MS * 10);
+    seed_replayed_group(
+        &broker,
+        ReplayedGroupSetup {
+            commit_timestamp_ms: UnixMillis(restarted_at - RETENTION_MS * 10),
+            ..Default::default()
+        },
+    );
 
     let swept = sweep_at(&broker, restarted_at).await;
 
     assert!(swept == deleted_group(vec![(TOPIC.to_string(), 0)]));
-    check!(broker.group_coordinator.find(GROUP).is_none());
-    check!(fetched_offset(&broker).await == -1);
+    check_group_deleted(&broker).await;
 }
 
 /// The other half of that rule. A classic group some consumer joined carries a
@@ -572,9 +570,11 @@ async fn a_joined_group_expires_from_the_moment_it_emptied() {
     let emptied_at = crate::time_util::now_ms();
     seed_replayed_group(
         &broker,
-        Some("consumer"),
-        Some(emptied_at),
-        emptied_at - RETENTION_MS * 10,
+        ReplayedGroupSetup {
+            protocol_type: Some("consumer"),
+            empty_since_ms: Some(UnixMillis(emptied_at)),
+            commit_timestamp_ms: UnixMillis(emptied_at - RETENTION_MS * 10),
+        },
     );
 
     let early = sweep_at(&broker, emptied_at + RETENTION_MS - 1).await;
@@ -668,16 +668,29 @@ async fn an_acknowledged_commit_is_never_reaped_by_a_concurrent_sweep() {
 /// simple consumer, and return the per-partition error code.
 async fn simple_commit(broker: &Broker, group: &str, offset: i64) -> i16 {
     let request = crate::coordinator::test_support::commit_request(group, TOPIC, offset);
-    let principal = principal("admin");
-    let peer = peer();
-    let ctx = request_context(&principal, &peer, "consumer");
-    let response = crate::handlers::offset_commit::handle(broker, request, COMMIT_VERSION, &ctx)
-        .await
-        .expect("OffsetCommit");
+    let response = commit_request(broker, request).await;
     response.topics[0].partitions[0].error_code
 }
 
 /// The committed offset `OffsetFetch` reports for `group`, `-1` for none.
 async fn simple_fetch(broker: &Broker, group: &str) -> i64 {
     crate::coordinator::test_support::fetch_offset(broker, group, TOPIC, FETCH_VERSION).await
+}
+
+async fn commit_request(
+    broker: &Broker,
+    request: krabka_protocol::owned::offset_commit_request::OffsetCommitRequest,
+) -> krabka_protocol::owned::offset_commit_response::OffsetCommitResponse {
+    let principal = principal("admin");
+    let peer = peer();
+    let ctx = request_context(&principal, &peer, "consumer");
+    crate::handlers::offset_commit::handle(broker, request, COMMIT_VERSION, &ctx)
+        .await
+        .expect("OffsetCommit")
+}
+
+/// Check the directory before fetching: an unknown id creates another actor.
+async fn check_group_deleted(broker: &Broker) {
+    check!(broker.group_coordinator.find(GROUP).is_none());
+    check!(fetched_offset(broker).await == -1);
 }

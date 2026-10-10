@@ -51,6 +51,8 @@ pub(crate) struct SiteBrokerView {
     pub fenced: bool,
 }
 
+krabka_macros::splitmix64_step!(placement_random_step);
+
 /// The random source of the placement, a `SplitMix64` generator.
 ///
 /// A handler passes [`PlacementRng::from_entropy`] to [`stretch_replicas`], as
@@ -72,11 +74,7 @@ impl PlacementRng {
     }
 
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
+        placement_random_step(&mut self.0)
     }
 
     /// A value in `0..bound`, or 0 when `bound` is 0.

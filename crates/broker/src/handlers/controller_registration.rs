@@ -14,21 +14,17 @@ use krabka_protocol::owned::{
 };
 use krabka_raft::RaftError;
 
-use crate::{codes, handlers::forward_to_controller::is_active_controller};
+use crate::codes;
 
 context_handler! {
     ControllerRegistrationRequest => ControllerRegistrationResponse,
     (broker, req, _version, ctx),
     {
         let image = broker.controller.current_image();
-        if crate::handlers::cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            return Ok(response(
-                codes::CLUSTER_AUTHORIZATION_FAILED,
-                Some("cluster action denied".into()),
-            ));
-        }
-        if !is_active_controller(broker) {
-            return Ok(response(codes::NOT_CONTROLLER, None));
+        if let Some(code) = super::registration_listeners::registration_refusal(broker, &image, ctx) {
+            let message = (code == codes::CLUSTER_AUTHORIZATION_FAILED)
+                .then(|| "cluster action denied".into());
+            return Ok(response(code, message));
         }
         // Kafka's `MetadataVersion.isControllerRegistrationSupported`. Before the
         // bootstrap records commit there is no finalized level, and Kafka's

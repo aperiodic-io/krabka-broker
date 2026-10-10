@@ -2,11 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_homogeneous_member_quotas": { "prover": "z3", "time": 0.499 },
+      "vc_homogeneous_member_quotas": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "z3", "time": 0.863 } ]
+      },
       "vc_len_usize": { "prover": "alt-ergo", "time": 0.009 },
       "vc_new_HomogeneousMemberQuota": {
         "prover": "alt-ergo",
-        "time": 0.009
+        "time": 0.022
       },
       "vc_push_HomogeneousMemberQuota": {
         "prover": "alt-ergo",

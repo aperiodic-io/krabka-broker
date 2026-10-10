@@ -13,25 +13,25 @@
 mod kafka_wire;
 
 mod support;
+#[path = "support/two_dir_topic.rs"]
+mod two_dir_topic;
 
 use std::net::SocketAddr;
 
 use assert2::assert;
-use krabka_broker::BrokerHandle;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::owned::{
     describe_log_dirs_request::DescribeLogDirsRequest,
     describe_log_dirs_response::DescribeLogDirsResponse,
 };
 use tokio::net::TcpStream;
 
-use crate::support::storage::start_two_dir_broker;
+use crate::{
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    support::wire::HeaderEncoding as RequestHeaderEncoding,
+};
 
 const CLIENT_ID: &str = "krabka-jbod-test";
-
-async fn create_topic(addr: SocketAddr, topic: &str, partitions: i32) {
-    kafka_wire::create_topic_plaintext(addr, CLIENT_ID, kafka_wire::topic(topic, partitions, 1))
-        .await;
-}
 
 async fn describe_log_dirs(addr: SocketAddr) -> DescribeLogDirsResponse {
     let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -41,25 +41,16 @@ async fn describe_log_dirs(addr: SocketAddr) -> DescribeLogDirsResponse {
             topics: None,
             ..Default::default()
         },
-        35,
-        4,
-        1,
-        CLIENT_ID,
-        true,
+        WireExchangeSetup {
+            api_key: WireApiKey(35),
+            version: WireApiVersion(4),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
     )
     .await
     .unwrap()
-}
-
-async fn wait_all_partitions(handle: &BrokerHandle, topic: &str, n: i32) {
-    // The on-disk / DescribeLogDirs assertions below read partition directories
-    // straight from the log dirs, so wait for each partition's LOCAL writer-actor
-    // to materialize (which creates its dir) — not just the metadata image, which
-    // can name the partition before the local replica exists. `min = 0` waits only
-    // for the local replica/writer to appear.
-    for p in 0..n {
-        handle.wait_until_local_log_end_offset(topic, p, 0).await;
-    }
 }
 
 /// Count `topic-partition` subdirs for `topic` directly under `dir`.
@@ -69,10 +60,14 @@ fn count_topic_dirs(dir: &std::path::Path, topic: &str) -> usize {
 
 #[tokio::test]
 async fn partitions_spread_across_dirs_and_describe_log_dirs_reports_them() {
-    let (handle, primary, extra, addr) = start_two_dir_broker().await;
     let n: i32 = 6;
-    create_topic(addr, "t", n).await;
-    wait_all_partitions(&handle, "t", n).await;
+    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
+        client_id: CLIENT_ID,
+        partitions: crate::support::topics::TopicPartitionCount(n),
+        readiness: crate::two_dir_topic::PartitionReadiness::LocalWriterPresent,
+        ..Default::default()
+    })
+    .await;
 
     // 1. Placement spread: both directories hold at least one partition of `t`.
     let in_primary = count_topic_dirs(primary.path(), "t");

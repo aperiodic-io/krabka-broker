@@ -10,11 +10,10 @@ use krabka_protocol::{
     krabka::freeze::{PATTERN_TYPE_LITERAL, SetTopicFreezeRequest},
     primitives::uuid::Uuid as ProtocolUuid,
 };
-use tempfile::TempDir;
 
 use super::{
     super::checks::{FreezeEnv, check_signature, is_signed, prepare, record_of},
-    ALICE, ALICE_KEY, ALICE_NAME, PROPOSAL, config_with_alice, freeze_request, sign,
+    ALICE, ALICE_KEY, ALICE_NAME, PROPOSAL, alice_key_configuration, freeze_request, sign,
 };
 use crate::{
     break_glass::handlers::principal_name,
@@ -22,6 +21,46 @@ use crate::{
     config::{BrokerConfig, FreezeConfig},
     time_util::now_ms,
 };
+
+#[derive(Clone, Copy, Debug, Default)]
+enum SignatureRequirement {
+    #[default]
+    Optional,
+    Required,
+}
+
+fn signature_requirement(base: &BrokerConfig, requirement: SignatureRequirement) -> BrokerConfig {
+    BrokerConfig {
+        freeze: FreezeConfig {
+            require_signature: matches!(requirement, SignatureRequirement::Required),
+            ..FreezeConfig::default()
+        },
+        ..base.clone()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SignatureExpectation {
+    Unsigned,
+    Verified,
+    Refused(crate::test_support::KafkaErrorCode),
+}
+
+fn check_signature_outcome(
+    outcome: Result<bool, super::super::outcome::Refusal>,
+    expected: SignatureExpectation,
+    label: &str,
+) {
+    let expected = match expected {
+        SignatureExpectation::Unsigned => Ok(false),
+        SignatureExpectation::Verified => Ok(true),
+        SignatureExpectation::Refused(code) => Err(code),
+    };
+    check!(
+        outcome.map_err(|refusal| crate::test_support::KafkaErrorCode(refusal.code)) == expected,
+        "{label}"
+    );
+}
 
 #[test]
 fn a_signature_is_named_by_either_half_of_the_pair() {
@@ -48,8 +87,7 @@ fn a_signature_is_named_by_either_half_of_the_pair() {
 /// exists to avoid.
 #[test]
 fn the_freeze_path_names_the_author_the_way_the_break_glass_path_does() {
-    let dir = TempDir::new().expect("tempdir");
-    let (config, _) = config_with_alice(&dir);
+    let (_dir, config, _) = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
 
     // What the listener actually authenticated, and what each path makes of it.
@@ -77,25 +115,24 @@ fn the_freeze_path_names_the_author_the_way_the_break_glass_path_does() {
 
 #[test]
 fn an_unsigned_freeze_is_accepted_by_default_and_refused_under_require_signature() {
-    let dir = TempDir::new().expect("tempdir");
-    let (base, _) = config_with_alice(&dir);
+    let (_dir, base, _) = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[]);
 
-    for (label, require_signature, expected) in [
-        ("the default accepts an unsigned freeze", false, None),
+    for (label, requirement, expected) in [
+        (
+            "the default accepts an unsigned freeze",
+            SignatureRequirement::Optional,
+            SignatureExpectation::Unsigned,
+        ),
         (
             "require_signature refuses one",
-            true,
-            Some(codes::OPERATOR_SIGNATURE_REQUIRED),
+            SignatureRequirement::Required,
+            SignatureExpectation::Refused(crate::test_support::KafkaErrorCode(
+                codes::OPERATOR_SIGNATURE_REQUIRED,
+            )),
         ),
     ] {
-        let config = BrokerConfig {
-            freeze: FreezeConfig {
-                require_signature,
-                ..FreezeConfig::default()
-            },
-            ..base.clone()
-        };
+        let config = signature_requirement(&base, requirement);
         let env = FreezeEnv {
             config: &config,
             image: &image,
@@ -107,30 +144,20 @@ fn an_unsigned_freeze_is_accepted_by_default_and_refused_under_require_signature
             ALICE,
         );
         let outcome = check_signature(&env, &record, None);
-        check!(
-            outcome.as_ref().err().map(|r| r.code) == expected,
-            "{label}"
-        );
-        if expected.is_none() {
-            check!(outcome == Ok(false), "{label}");
-        }
+        check_signature_outcome(outcome, expected, label);
     }
 }
 
 #[test]
 fn an_unsigned_thaw_is_refused_whatever_require_signature_says() {
-    let dir = TempDir::new().expect("tempdir");
-    let (base, _) = config_with_alice(&dir);
+    let (_dir, base, _) = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)]);
 
-    for require_signature in [false, true] {
-        let config = BrokerConfig {
-            freeze: FreezeConfig {
-                require_signature,
-                ..FreezeConfig::default()
-            },
-            ..base.clone()
-        };
+    for requirement in [
+        SignatureRequirement::Optional,
+        SignatureRequirement::Required,
+    ] {
+        let config = signature_requirement(&base, requirement);
         let env = FreezeEnv {
             config: &config,
             image: &image,
@@ -148,15 +175,14 @@ fn an_unsigned_thaw_is_refused_whatever_require_signature_says() {
         let outcome = check_signature(&env, &record, None);
         check!(
             outcome.err().map(|r| r.code) == Some(codes::OPERATOR_SIGNATURE_REQUIRED),
-            "require_signature = {require_signature}"
+            "signature requirement = {requirement:?}"
         );
     }
 }
 
 #[test]
 fn a_signed_freeze_verifies_and_a_tampered_one_answers_one_code() {
-    let dir = TempDir::new().expect("tempdir");
-    let (config, alice) = config_with_alice(&dir);
+    let (_dir, config, alice) = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
     let good = TopicFreezeRecord {
         key_id: ALICE_KEY.to_owned(),
@@ -176,7 +202,7 @@ fn a_signed_freeze_verifies_and_a_tampered_one_answers_one_code() {
                 signature: signature.clone(),
                 ..good.clone()
             },
-            None,
+            SignatureExpectation::Verified,
         ),
         (
             "the same signature presented as the thaw",
@@ -185,7 +211,9 @@ fn a_signed_freeze_verifies_and_a_tampered_one_answers_one_code() {
                 signature: signature.clone(),
                 ..good.clone()
             },
-            Some(codes::OPERATOR_SIGNATURE_INVALID),
+            SignatureExpectation::Refused(crate::test_support::KafkaErrorCode(
+                codes::OPERATOR_SIGNATURE_INVALID,
+            )),
         ),
         (
             "another scope under the same signature",
@@ -194,7 +222,9 @@ fn a_signed_freeze_verifies_and_a_tampered_one_answers_one_code() {
                 signature: signature.clone(),
                 ..good.clone()
             },
-            Some(codes::OPERATOR_SIGNATURE_INVALID),
+            SignatureExpectation::Refused(crate::test_support::KafkaErrorCode(
+                codes::OPERATOR_SIGNATURE_INVALID,
+            )),
         ),
         (
             "a key_id no trust set carries",
@@ -203,16 +233,12 @@ fn a_signed_freeze_verifies_and_a_tampered_one_answers_one_code() {
                 signature: signature.clone(),
                 ..good.clone()
             },
-            Some(codes::OPERATOR_SIGNATURE_INVALID),
+            SignatureExpectation::Refused(crate::test_support::KafkaErrorCode(
+                codes::OPERATOR_SIGNATURE_INVALID,
+            )),
         ),
     ] {
         let outcome = check_signature(&env, &record, None);
-        check!(
-            outcome.as_ref().err().map(|r| r.code) == expected,
-            "{label}"
-        );
-        if expected.is_none() {
-            check!(outcome == Ok(true), "{label}");
-        }
+        check_signature_outcome(outcome, expected, label);
     }
 }

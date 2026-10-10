@@ -6,12 +6,7 @@ use moxy::{
 };
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
-    if let Some(token) = meta.into_iter().next() {
-        return Err(ParseError::new(
-            token.span(),
-            "object_ops takes no arguments",
-        ));
-    }
+    crate::meta::no_arguments(meta, "object_ops")?;
     let (mut tokens, body) = crate::meta::item_body(item, "object_ops", |token| {
         token.is_keyword_trait() || token.is_keyword_impl()
     })?;

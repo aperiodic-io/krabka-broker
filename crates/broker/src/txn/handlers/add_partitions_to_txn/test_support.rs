@@ -57,7 +57,7 @@ pub(in crate::txn::handlers) async fn seed_topic(
             directories: vec![uuid::Uuid::nil()],
             ..crate::coordinator::test_support::single_replica_partition(
                 topic,
-                partition,
+                krabka_ids::PartitionIndex(partition),
                 broker.config.node_id,
             )
         })

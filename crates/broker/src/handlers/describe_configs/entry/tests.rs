@@ -151,13 +151,7 @@ const SECRET_FREE: registry::ConfigKey = registry::ConfigKey {
     check: ValueCheck::Parsed,
 };
 
-fn synonym(name: &str, value: &str, source: i8) -> DescribeConfigsSynonym {
-    tagged_wire!(DescribeConfigsSynonym {
-        name: name.to_owned(),
-        value: Some(value.to_owned()),
-        source,
-    })
-}
+use crate::handlers::describe_configs::test_support::synonym;
 
 #[test]
 fn an_empty_chain_reports_the_default_at_default_config() {

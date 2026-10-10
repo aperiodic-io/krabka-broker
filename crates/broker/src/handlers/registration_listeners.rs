@@ -1,5 +1,20 @@
 //! Validation shared by broker and controller registration listeners.
 
+/// Authorize registration before refusing a node that is not the active controller.
+pub(super) fn registration_refusal(
+    broker: &crate::broker::Broker,
+    image: &krabka_metadata::MetadataImage,
+    ctx: &super::RequestContext<'_>,
+) -> Option<i16> {
+    if super::cluster_action_denied(broker.config.authorizer.as_ref(), image, ctx) {
+        Some(crate::codes::CLUSTER_AUTHORIZATION_FAILED)
+    } else if !super::forward_to_controller::is_active_controller(broker) {
+        Some(crate::codes::NOT_CONTROLLER)
+    } else {
+        None
+    }
+}
+
 /// Retain the caller's errors while applying Kafka's ordered listener checks.
 /// Both wire listener types carry the same name, host, port and protocol fields.
 macro_rules! decode {

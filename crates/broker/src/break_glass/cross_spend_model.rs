@@ -56,14 +56,12 @@
 //! sibling model bounds it, so the state graph stays exhaustive.
 
 use krabka_metadata::BreakGlassAction;
-use stateright::Checker;
 
 use self::{
     transitions::CrossSpendModel,
     universe::{EXPIRES_AT, ProposalSpec, Request},
 };
 use super::state_model::config;
-use crate::model_check::run_bfs;
 
 mod properties;
 mod transitions;
@@ -85,17 +83,12 @@ const PINNED_UNIQUE_STATES_PARTITION_LOOKALIKE: usize = 432;
 const PINNED_UNIQUE_STATES_BOTH_COVER: usize = 432;
 
 fn run(model: CrossSpendModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, TARGET_STATE_COUNT);
-    assert2::assert!(
-        checker.unique_state_count() < MAX_UNIQUE_STATES,
-        "[{label}] unique-state bound exceeded"
-    );
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    crate::model_check::check_model(
+        model,
         label,
+        (MAX_DEPTH, TARGET_STATE_COUNT, MAX_UNIQUE_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }
 
 /// The approver set both scenarios use. `User:alice` and `User:bob` each open

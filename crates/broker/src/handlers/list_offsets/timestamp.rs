@@ -220,26 +220,48 @@ mod tests {
         }
     }
 
+    use std::ops::RangeInclusive;
+
+    use krabka_ids::Offset;
+    use krabka_units::{ByteSize, bytes};
+
+    use crate::test_support::UnixMillis;
+
+    #[derive(krabka_macros::FieldDefaults)]
+    struct TimestampSegmentSetup {
+        #[default(TopicIdPartition::new(uuid::Uuid::from_u128(1), "orders", 0))]
+        topic_partition: TopicIdPartition,
+        #[default(Offset(0)..=Offset(6))]
+        bounds: RangeInclusive<Offset>,
+        #[default(bytes(64))]
+        size: ByteSize,
+        #[default(UnixMillis(2_400))]
+        event: UnixMillis,
+    }
+
     fn copy_timestamp_segment(
         reader: &crate::remote_reader::RemoteReader,
-        topic_partition: TopicIdPartition,
-        bounds: (i64, i64),
-        size: usize,
-        event: i64,
         data: &LogSegmentData,
+        setup: TimestampSegmentSetup,
     ) -> RemoteLogSegmentId {
+        let TimestampSegmentSetup {
+            topic_partition,
+            bounds,
+            size,
+            event,
+        } = setup;
         let id = RemoteLogSegmentId::new(topic_partition, uuid::Uuid::new_v4());
         let metadata = RemoteLogSegmentMetadata::new(
             id.clone(),
-            bounds.0,
-            bounds.1,
+            bounds.start().0,
+            bounds.end().0,
             2_400,
             1,
-            event,
+            event.0,
             RemoteLogSegmentDetails::new(
-                i32::try_from(size).expect("segment size"),
+                i32::try_from(size.bytes_usize()).expect("segment size"),
                 RemoteLogSegmentState::CopySegmentStarted,
-                maplit::btreemap! {krabka_ids::LeaderEpoch(0) => bounds.0},
+                maplit::btreemap! {krabka_ids::LeaderEpoch(0) => bounds.start().0},
             ),
         )
         .expect("segment metadata");
@@ -255,7 +277,7 @@ mod tests {
             .rlmm
             .update_remote_log_segment_metadata(RemoteLogSegmentMetadataUpdate {
                 remote_log_segment_id: id.clone(),
-                event_timestamp_ms: event,
+                event_timestamp_ms: event.0,
                 custom_metadata: None,
                 state: RemoteLogSegmentState::CopySegmentFinished,
                 broker_id: 1,
@@ -351,10 +373,6 @@ mod tests {
         let reader = broker_arc.remote_reader.as_ref().expect("remote reader");
         let segment_id = copy_timestamp_segment(
             reader,
-            topic_partition.clone(),
-            (0, 6),
-            log_bytes.len(),
-            2_400,
             &LogSegmentData {
                 log_segment: log_path.clone(),
                 offset_index: offset_index_path.clone(),
@@ -362,6 +380,11 @@ mod tests {
                 transaction_index: None,
                 producer_snapshot_index: None,
                 leader_epoch_index: Bytes::from_static(b"0\n1\n0 0\n"),
+            },
+            TimestampSegmentSetup {
+                topic_partition: topic_partition.clone(),
+                size: ByteSize::from_bytes(u64::try_from(log_bytes.len()).expect("segment size")),
+                ..Default::default()
             },
         );
 
@@ -410,10 +433,6 @@ mod tests {
         .expect("write suffix time index");
         copy_timestamp_segment(
             reader,
-            topic_partition,
-            (4, 6),
-            suffix.len(),
-            2_500,
             &LogSegmentData {
                 log_segment: log_path,
                 offset_index: offset_index_path,
@@ -421,6 +440,12 @@ mod tests {
                 transaction_index: None,
                 producer_snapshot_index: None,
                 leader_epoch_index: Bytes::from_static(b"0\n1\n0 4\n"),
+            },
+            TimestampSegmentSetup {
+                topic_partition,
+                bounds: Offset(4)..=Offset(6),
+                size: ByteSize::from_bytes(u64::try_from(suffix.len()).expect("segment size")),
+                event: UnixMillis(2_500),
             },
         );
         let response = list_one(&client, TOPIC, 1_500).await;

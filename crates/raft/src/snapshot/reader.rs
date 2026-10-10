@@ -230,7 +230,7 @@ mod tests {
             image.apply(&MetadataRecord::V1Partition(PartitionRecord {
                 replicas: vec![NodeId(1), NodeId(2)],
                 isr: vec![NodeId(1), NodeId(2)],
-                ..single_replica_partition("orders", p, NodeId(1))
+                ..single_replica_partition("orders", krabka_ids::PartitionIndex(p), NodeId(1))
             }));
         }
         image.apply(&MetadataRecord::V1PartitionElr(PartitionElrRecord {

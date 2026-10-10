@@ -14,7 +14,6 @@ use crate::{
     admin_harness::create_topic_helper,
     support::{
         configs::{legacy_config, legacy_request, legacy_resource},
-        produce::single_partition_produce,
         records::{batch_from_records, value_record},
     },
 };
@@ -170,12 +169,13 @@ async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
 
     // acks=-1 ("all"): ISR={1} meets the clamped threshold of 1.
     let all = client
-        .send(single_partition_produce(
-            "t-min-isr",
-            topic_id,
-            0,
-            Some(batch.clone().into()),
-            (-1, 5_000),
+        .send(crate::support::produce::batch_request(
+            batch.clone(),
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: ("t-min-isr").into(),
+                topic_id,
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
         ))
         .await
         .expect("Produce (acks=-1)");
@@ -188,12 +188,13 @@ async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
 
     // acks=1: leader-only; min.insync.replicas never gates it.
     let ok = client
-        .send(single_partition_produce(
-            "t-min-isr",
-            topic_id,
-            0,
-            Some(batch.into()),
-            (1, 5_000),
+        .send(crate::support::produce::batch_request(
+            batch,
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: ("t-min-isr").into(),
+                topic_id,
+                ..Default::default()
+            },
         ))
         .await
         .expect("Produce (acks=1)");

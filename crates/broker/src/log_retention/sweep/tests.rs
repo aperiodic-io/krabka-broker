@@ -5,7 +5,7 @@
 
 use assert2::check;
 use krabka_ids::PartitionIndex;
-use krabka_metadata::{MetadataRecord, NodeId, PatternType, TopicFreezeRecord};
+use krabka_metadata::{MetadataRecord, NodeId, PatternType};
 use uuid::Uuid;
 
 use super::*;
@@ -15,6 +15,7 @@ use crate::{
         block_segment_deletion, expired_partition, log_size, segment_files,
     },
     metrics::{CleanerFailureLabel, CleanerFailureReason},
+    test_support::FreezeSetup,
 };
 
 /// The failure counter's value for one `(topic, partition, reason)`.
@@ -33,7 +34,10 @@ fn failures(metrics: &BrokerMetrics, topic: &str, reason: CleanerFailureReason) 
 fn image_with_freeze(scope: &str) -> MetadataImage {
     let mut image = MetadataImage::new(Uuid::from_u128(0x5150));
     image.apply(&MetadataRecord::V1TopicFreeze(
-        crate::test_support::topic_freeze_record(scope, PatternType::Literal, true, "DR cutover"),
+        crate::test_support::topic_freeze_record(FreezeSetup {
+            scope,
+            ..Default::default()
+        }),
     ));
     image
 }
@@ -49,7 +53,14 @@ fn image_with_freeze(scope: &str) -> MetadataImage {
 async fn a_sweep_deletes_expired_segments_and_the_log_size_follows() {
     let dir = tempfile::tempdir().expect("log root");
     let registry = PartitionRegistry::new();
-    let partition = expired_partition(&dir, "orders", NodeId(7), LogDirRegistry::default()).await;
+    let partition = expired_partition(
+        &dir,
+        crate::test_support::CommittedPartitionSetup {
+            leader: NodeId(7),
+            ..Default::default()
+        },
+    )
+    .await;
     registry.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
     let before_files = segment_files(&dir, "orders");
     let before_size = log_size(&partition);
@@ -93,7 +104,15 @@ async fn a_sweep_trims_a_follower_replica_as_well_as_a_led_one() {
     let cases = [("led", NodeId(7)), ("followed", NodeId(8))];
     let mut observed: Vec<(&str, Arc<Partition>, Vec<String>)> = Vec::new();
     for (topic, leader) in cases {
-        let partition = expired_partition(&dir, topic, leader, LogDirRegistry::default()).await;
+        let partition = expired_partition(
+            &dir,
+            crate::test_support::CommittedPartitionSetup {
+                topic,
+                leader,
+                ..Default::default()
+            },
+        )
+        .await;
         let before = segment_files(&dir, topic);
         registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
         observed.push((topic, partition, before));
@@ -123,7 +142,15 @@ async fn a_sweep_trims_a_follower_replica_as_well_as_a_led_one() {
 async fn a_frozen_topic_is_not_trimmed_until_it_thaws() {
     let dir = tempfile::tempdir().expect("log root");
     let registry = PartitionRegistry::new();
-    let partition = expired_partition(&dir, "frozen", NodeId(7), LogDirRegistry::default()).await;
+    let partition = expired_partition(
+        &dir,
+        crate::test_support::CommittedPartitionSetup {
+            topic: "frozen",
+            leader: NodeId(7),
+            ..Default::default()
+        },
+    )
+    .await;
     registry.insert("frozen".into(), PartitionIndex(0), Arc::clone(&partition));
     let before = segment_files(&dir, "frozen");
 
@@ -142,17 +169,9 @@ async fn a_frozen_topic_is_not_trimmed_until_it_thaws() {
 
     // The thaw record clears the entry, and the next sweep trims with no
     // operator step in between.
-    image.apply(&MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
-        scope: "frozen".to_owned(),
-        pattern_type: PatternType::Literal,
-        frozen: false,
-        reason: String::new(),
-        set_by: "User:bob".to_owned(),
-        set_at_ms: 1_770_000_100_000,
-        proposal_id: Uuid::from_u128(7),
-        key_id: String::new(),
-        signature: Vec::new(),
-    }));
+    image.apply(&MetadataRecord::V1TopicFreeze(
+        crate::test_support::topic_thaw_record("frozen", PatternType::Literal),
+    ));
     tick_all(&registry, Some(&image), &metrics).await;
 
     check!(
@@ -169,7 +188,15 @@ async fn a_failed_deletion_is_counted_and_takes_the_log_dir_offline() {
     let dir = tempfile::tempdir().expect("log root");
     let status = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
     let registry = PartitionRegistry::new();
-    let partition = expired_partition(&dir, "orders", NodeId(7), status.clone()).await;
+    let partition = expired_partition(
+        &dir,
+        crate::test_support::CommittedPartitionSetup {
+            leader: NodeId(7),
+            registry: status.clone(),
+            ..Default::default()
+        },
+    )
+    .await;
     {
         // This fault blocks the immediate-deletion tombstone path. Delayed
         // reclamation uses unique names and runs through writer maintenance.

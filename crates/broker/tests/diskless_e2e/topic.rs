@@ -12,10 +12,7 @@ use std::time::{Duration, Instant};
 use assert2::assert;
 use krabka_broker::NodeId;
 use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
-    primitives::uuid::Uuid as WireUuid,
-};
+use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
 use crate::{
     TOPIC, VOTERS,
@@ -32,20 +29,10 @@ use crate::{
 /// a 3-broker cluster is the assignment that guarantees it.
 pub(crate) async fn create_diskless_topic(client: &Client) -> WireUuid {
     let response = client
-        .send(CreateTopicsRequest {
-            topics: vec![crate::support::topics::creatable_topic_with_configs(
-                TOPIC.into(),
-                1,
-                i16::try_from(VOTERS).expect("small cluster"),
-                vec![CreatableTopicConfig {
-                    name: "krabka.diskless".into(),
-                    value: Some("true".into()),
-                    ..Default::default()
-                }],
-            )],
-            timeout_ms: 10_000,
-            ..Default::default()
-        })
+        .send(crate::support::topics::diskless_topic_request(
+            TOPIC,
+            i16::try_from(VOTERS).expect("small cluster"),
+        ))
         .await
         .expect("CreateTopics");
 
@@ -129,4 +116,33 @@ pub(crate) async fn seed_workload(
     .await;
     crate::wire::produce_all(&producer, topic_id, &values).await;
     (admin, topic_id, leader, values, producer)
+}
+
+/// Seed the same acknowledged workload after the requested flush cadence is ready.
+pub(crate) async fn flushing_workload(
+    interval: krabka_units::Time,
+) -> (
+    DisklessCluster,
+    Client,
+    WireUuid,
+    NodeId,
+    Vec<bytes::Bytes>,
+    Client,
+) {
+    let cluster = Box::pin(crate::cluster::start_flushing_cluster(interval)).await;
+    cluster.await_ready().await;
+    let (admin, topic, leader, values, producer) = Box::pin(seed_workload(&cluster)).await;
+    (cluster, admin, topic, leader, values, producer)
+}
+
+/// The live leader and the size of this suite's acknowledged seed prefix.
+pub(crate) fn seeded_leader(
+    cluster: &DisklessCluster,
+    leader: NodeId,
+) -> (&krabka_broker::BrokerHandle, i64) {
+    let broker = cluster
+        .handle_for_node(leader)
+        .expect("the diskless leader is up");
+    let committed = i64::try_from(crate::RECORDS).expect("small count");
+    (broker, committed)
 }

@@ -245,13 +245,11 @@ mod tests {
                 std::future::pending::<()>().await;
             });
         }
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
-            while started.load(Ordering::SeqCst) != 2 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("connection tasks start");
+        crate::test_support::wait_tasks_started(
+            || started.load(Ordering::SeqCst) == 2,
+            "connection tasks start",
+        )
+        .await;
 
         shutdown_connection_tasks(&mut connections).await;
 

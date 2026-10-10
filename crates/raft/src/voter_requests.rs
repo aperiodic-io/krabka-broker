@@ -132,6 +132,17 @@ fn leader_request_refusal(
         .or_else(|| (!quorum.is_leader).then_some((NOT_LEADER_OR_FOLLOWER, None)))
 }
 
+fn voter_identity_refusal(
+    request_cluster: Option<&str>,
+    cluster_id: &str,
+    quorum: &QuorumStateSnapshot,
+    valid: impl FnOnce() -> bool,
+    invalid_message: &str,
+) -> Option<Refusal> {
+    leader_request_refusal(request_cluster, cluster_id, quorum)
+        .or_else(|| (!valid()).then(|| (INVALID_REQUEST, Some(invalid_message.into()))))
+}
+
 /// The refusal of an `AddRaftVoter` request before the candidate probe, as
 /// `KafkaRaftClient.handleAddVoterRequest` orders it.
 #[must_use]
@@ -140,24 +151,24 @@ pub fn add_voter_refusal(
     cluster_id: &str,
     quorum: &QuorumStateSnapshot,
 ) -> Option<Refusal> {
-    if let Some(refusal) = leader_request_refusal(request.cluster_id.as_deref(), cluster_id, quorum)
-    {
+    if let Some(refusal) = voter_identity_refusal(
+        request.cluster_id.as_deref(),
+        cluster_id,
+        quorum,
+        || {
+            request.voter_id >= 0
+                && request.voter_directory_id != WireUuid::ZERO
+                && valid_wire_listeners(request.listeners.iter().map(|listener| {
+                    (
+                        listener.name.as_str(),
+                        listener.host.as_str(),
+                        listener.port,
+                    )
+                }))
+        },
+        "Add voter request didn't include a valid voter",
+    ) {
         return Some(refusal);
-    }
-    if request.voter_id < 0
-        || request.voter_directory_id == WireUuid::ZERO
-        || !valid_wire_listeners(request.listeners.iter().map(|listener| {
-            (
-                listener.name.as_str(),
-                listener.host.as_str(),
-                listener.port,
-            )
-        }))
-    {
-        return Some((
-            INVALID_REQUEST,
-            Some("Add voter request didn't include a valid voter".into()),
-        ));
     }
     if !carries_leader_listener(
         quorum,
@@ -220,17 +231,13 @@ pub fn remove_voter_refusal(
     cluster_id: &str,
     quorum: &QuorumStateSnapshot,
 ) -> Option<Refusal> {
-    if let Some(refusal) = leader_request_refusal(request.cluster_id.as_deref(), cluster_id, quorum)
-    {
-        return Some(refusal);
-    }
-    if request.voter_id < 0 || request.voter_directory_id == WireUuid::ZERO {
-        return Some((
-            INVALID_REQUEST,
-            Some("Remove voter request didn't include a valid voter".into()),
-        ));
-    }
-    None
+    voter_identity_refusal(
+        request.cluster_id.as_deref(),
+        cluster_id,
+        quorum,
+        || request.voter_id >= 0 && request.voter_directory_id != WireUuid::ZERO,
+        "Remove voter request didn't include a valid voter",
+    )
 }
 
 /// The refusal code of an `UpdateRaftVoter` request before the

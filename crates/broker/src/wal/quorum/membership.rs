@@ -177,11 +177,16 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn quorum_membership_descriptor_survives_reopen() {
+    fn prepared_three_voter_root() -> (tempfile::TempDir, Vec<NodeId>) {
         let root = tempfile::tempdir().unwrap();
         let voter_ids = vec![NodeId(0), NodeId(1), NodeId(2)];
         assert!(load_or_prepare_quorum_membership(root.path(), &voter_ids).unwrap());
+        (root, voter_ids)
+    }
+
+    #[test]
+    fn quorum_membership_descriptor_survives_reopen() {
+        let (root, voter_ids) = prepared_three_voter_root();
         persist_quorum_membership(root.path(), &voter_ids).unwrap();
 
         let is_new = load_or_prepare_quorum_membership(root.path(), &voter_ids).unwrap();
@@ -210,9 +215,7 @@ mod tests {
 
     #[test]
     fn quorum_membership_persist_replaces_a_stale_temporary_file() {
-        let root = tempfile::tempdir().unwrap();
-        let voter_ids = vec![NodeId(0), NodeId(1), NodeId(2)];
-        assert!(load_or_prepare_quorum_membership(root.path(), &voter_ids).unwrap());
+        let (root, voter_ids) = prepared_three_voter_root();
         let temporary = root
             .path()
             .join(QUORUM_STATE_FILE)

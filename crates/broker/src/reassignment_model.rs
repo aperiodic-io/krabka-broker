@@ -16,10 +16,10 @@ use std::collections::{BTreeSet, HashSet};
 
 use krabka_metadata::PartitionRecord;
 use krabka_raft::NodeId;
-use stateright::{Checker, Model, Property};
+use stateright::{Model, Property};
 
 use super::reassign_one;
-use crate::model_check::run_bfs;
+use crate::model_check::check_model;
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 80;
@@ -392,13 +392,12 @@ impl Model for ReassignModel {
 }
 
 fn run(model: ReassignModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, MAX_STATES);
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    check_model(
+        model,
         label,
+        (MAX_DEPTH, MAX_STATES, MAX_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }
 
 #[test]

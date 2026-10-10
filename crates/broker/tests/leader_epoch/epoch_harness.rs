@@ -21,7 +21,12 @@ use crate::support::{
 pub(crate) async fn create_topic(broker: &BrokerHandle, bootstrap: &str, name: &str) {
     let client = connect_client(bootstrap.to_string(), None).await;
     let _ = client
-        .send(create_topic_request(creatable_topic(name, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (name).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics");
     broker.wait_until_partition_present(name, 0).await;

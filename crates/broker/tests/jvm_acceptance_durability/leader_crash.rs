@@ -69,10 +69,9 @@ async fn acks_all_survives_leader_crash() {
 
     // 4. Spawn JVM producer in background (100 records, acks=-1, long timeout
     //    so it retries through the election window).
-    let producer_child = crate::support::jvm_docker_command(
-        KAFKA_IMAGE,
-        &[],
-        &[
+    let producer_child = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE,
+        args: &[
             "bash",
             "-c",
             &format!(
@@ -84,8 +83,9 @@ async fn acks_all_survives_leader_crash() {
                    --request-timeout-ms 30000"
             ),
         ],
-        true,
-    )
+        input: crate::support::ContainerInput::Attached,
+        ..Default::default()
+    })
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())

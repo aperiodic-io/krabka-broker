@@ -14,9 +14,8 @@ use krabka_protocol::owned::{
 };
 
 use crate::{
-    BROKER_WITNESS, CONFIG_OP_SET, CONFIG_SOURCE_DYNAMIC_BROKER,
-    CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER, RESOURCE_TYPE_BROKER, SITE_A,
-    STRETCH_PREFERRED_LEADER_SITE, WITNESS_ID, cluster_lock,
+    BROKER_WITNESS, CONFIG_SOURCE_DYNAMIC_BROKER, CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
+    RESOURCE_TYPE_BROKER, SITE_A, STRETCH_PREFERRED_LEADER_SITE, WITNESS_ID, cluster_lock,
     support::configs::{
         describe_resource, incremental_config, incremental_request, incremental_resource,
     },
@@ -100,16 +99,18 @@ async fn witness_role_is_a_read_only_broker_config() {
 
     let altered = witness
         .send(incremental_request(
-            vec![incremental_resource(
-                RESOURCE_TYPE_BROKER,
-                WITNESS_ID.to_string(),
-                vec![incremental_config(
-                    BROKER_WITNESS,
-                    Some("false".into()),
-                    CONFIG_OP_SET,
+            crate::support::configs::IncrementalConfigsSetup {
+                resources: vec![incremental_resource(
+                    RESOURCE_TYPE_BROKER,
+                    WITNESS_ID.to_string(),
+                    vec![incremental_config(
+                        BROKER_WITNESS,
+                        Some("false".into()),
+                        crate::support::configs::ConfigOperation::Set,
+                    )],
                 )],
-            )],
-            false,
+                ..Default::default()
+            },
         ))
         .await
         .expect("IncrementalAlterConfigs round-trip");

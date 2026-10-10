@@ -11,6 +11,7 @@ use krabka_protocol::{
 };
 
 use super::*;
+use crate::test_support::{PartitionCount, ReplicationFactor};
 
 fn configs(pairs: &[(&str, &str)]) -> Vec<CreatableTopicConfig> {
     pairs
@@ -23,16 +24,35 @@ fn configs(pairs: &[(&str, &str)]) -> Vec<CreatableTopicConfig> {
         .collect()
 }
 
-fn topic(
-    name: &str,
-    num_partitions: i32,
-    replication_factor: i16,
+struct AutoTopicSetup<'a> {
+    name: &'a str,
+    num_partitions: PartitionCount,
+    replication_factor: ReplicationFactor,
     configs: Vec<CreatableTopicConfig>,
-) -> CreatableTopic {
-    CreatableTopic {
-        name: name.to_owned(),
+}
+
+impl Default for AutoTopicSetup<'_> {
+    fn default() -> Self {
+        Self {
+            name: "orders",
+            num_partitions: PartitionCount(-1),
+            replication_factor: ReplicationFactor(-1),
+            configs: vec![],
+        }
+    }
+}
+
+fn topic(setup: AutoTopicSetup<'_>) -> CreatableTopic {
+    let AutoTopicSetup {
+        name,
         num_partitions,
         replication_factor,
+        configs,
+    } = setup;
+    CreatableTopic {
+        name: name.to_owned(),
+        num_partitions: num_partitions.0,
+        replication_factor: replication_factor.0,
         configs,
         ..Default::default()
     }
@@ -74,85 +94,95 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
             "__consumer_offsets",
             &config,
             crate::coordinator::bootstrap::OFFSETS_TOPIC,
-            topic(
-                crate::coordinator::bootstrap::OFFSETS_TOPIC,
-                11,
-                3,
-                configs(&[
+            topic(AutoTopicSetup {
+                name: crate::coordinator::bootstrap::OFFSETS_TOPIC,
+                num_partitions: PartitionCount(11),
+                replication_factor: ReplicationFactor(3),
+                configs: configs(&[
                     ("cleanup.policy", "compact"),
                     ("compression.type", "producer"),
                     ("segment.bytes", "104857600"),
                 ]),
-            ),
+            }),
         ),
         (
             "__transaction_state",
             &config,
             crate::txn::bootstrap::TOPIC,
-            topic(
-                crate::txn::bootstrap::TOPIC,
-                12,
-                2,
-                configs(&[
+            topic(AutoTopicSetup {
+                name: crate::txn::bootstrap::TOPIC,
+                num_partitions: PartitionCount(12),
+                replication_factor: ReplicationFactor(2),
+                configs: configs(&[
                     ("cleanup.policy", "compact"),
                     ("compression.type", "uncompressed"),
                     ("min.insync.replicas", "2"),
                     ("segment.bytes", "104857600"),
                     ("unclean.leader.election.enable", "false"),
                 ]),
-            ),
+            }),
         ),
         (
             "__share_group_state",
             &config,
             crate::share_coordinator::bootstrap::TOPIC,
-            topic(
-                crate::share_coordinator::bootstrap::TOPIC,
-                13,
-                4,
-                configs(&[
+            topic(AutoTopicSetup {
+                name: crate::share_coordinator::bootstrap::TOPIC,
+                num_partitions: PartitionCount(13),
+                replication_factor: ReplicationFactor(4),
+                configs: configs(&[
                     ("cleanup.policy", "delete"),
                     ("compression.type", "producer"),
                     ("min.insync.replicas", "3"),
                     ("retention.ms", "-1"),
                     ("segment.bytes", "104857600"),
                 ]),
-            ),
+            }),
         ),
         (
             "__barrier_state",
             &config,
             crate::barrier::STATE_TOPIC,
-            topic(
-                crate::barrier::STATE_TOPIC,
-                14,
-                5,
-                configs(&[("cleanup.policy", "compact")]),
-            ),
+            topic(AutoTopicSetup {
+                name: crate::barrier::STATE_TOPIC,
+                num_partitions: PartitionCount(14),
+                replication_factor: ReplicationFactor(5),
+                configs: configs(&[("cleanup.policy", "compact")]),
+            }),
         ),
         (
             "no default supplied",
             &config,
             "orders",
-            topic("orders", -1, -1, vec![]),
+            topic(AutoTopicSetup::default()),
         ),
         (
             "an internal name that is not a coordinator topic",
             &config,
             "__remote_log_metadata",
-            topic("__remote_log_metadata", -1, -1, vec![]),
+            topic(AutoTopicSetup {
+                name: "__remote_log_metadata",
+                ..Default::default()
+            }),
         ),
         (
             "num.partitions supplied",
             &partitions_supplied,
             "orders",
-            topic("orders", 6, -1, vec![]),
+            topic(AutoTopicSetup {
+                num_partitions: PartitionCount(6),
+                ..Default::default()
+            }),
         ),
         (
             "both defaults supplied",
             &both_supplied,
             "orders",
-            topic("orders", 6, 7, vec![]),
+            topic(AutoTopicSetup {
+                num_partitions: PartitionCount(6),
+                replication_factor: ReplicationFactor(7),
+                ..Default::default()
+            }),
         ),
     ];
     for (case, config, name, expected) in cases {
@@ -176,15 +206,14 @@ async fn an_unbound_request_creates_nothing() {
 fn the_dead_letter_topic_is_created_as_kafka_creates_it() {
     check!(
         dead_letter_topic("dlq.orders")
-            == topic(
-                "dlq.orders",
-                -1,
-                -1,
-                configs(&[
+            == topic(AutoTopicSetup {
+                name: "dlq.orders",
+                configs: configs(&[
                     ("errors.deadletterqueue.group.enable", "true"),
                     ("message.timestamp.type", "CreateTime"),
                 ]),
-            )
+                ..Default::default()
+            })
     );
 }
 
@@ -383,8 +412,16 @@ async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
     creation.create_streams_internal_topics(
         &broker,
         vec![
-            topic("backed-off", 1, -1, vec![]),
-            topic("in-flight", 1, -1, vec![]),
+            topic(AutoTopicSetup {
+                name: "backed-off",
+                num_partitions: PartitionCount(1),
+                ..Default::default()
+            }),
+            topic(AutoTopicSetup {
+                name: "in-flight",
+                num_partitions: PartitionCount(1),
+                ..Default::default()
+            }),
         ],
         identity.clone(),
         60_000,
@@ -394,8 +431,16 @@ async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
     creation.create_streams_internal_topics(
         &broker,
         vec![
-            topic("backed-off", 1, -1, vec![]),
-            topic("fresh", 1, -1, vec![]),
+            topic(AutoTopicSetup {
+                name: "backed-off",
+                num_partitions: PartitionCount(1),
+                ..Default::default()
+            }),
+            topic(AutoTopicSetup {
+                name: "fresh",
+                num_partitions: PartitionCount(1),
+                ..Default::default()
+            }),
         ],
         identity,
         60_000,

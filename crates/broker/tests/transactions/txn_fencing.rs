@@ -144,9 +144,14 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
             // against that epoch instead of colliding with the sentinel.
             let bump = client
                 .send(init_producer_request(
-                    Some(tid.clone()),
-                    60_000,
-                    (producer_id, producer_epoch),
+                    crate::support::transactions::InitProducerSetup {
+                        transactional_id: Some(tid.clone()),
+                        producer: crate::support::transactions::ProducerIdentity::from_wire((
+                            producer_id,
+                            producer_epoch,
+                        )),
+                        ..Default::default()
+                    },
                 ))
                 .await
                 .unwrap();
@@ -162,9 +167,14 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
 
         let response = client
             .send(init_producer_request(
-                Some(tid.clone()),
-                60_000,
-                (request_id, request_epoch),
+                crate::support::transactions::InitProducerSetup {
+                    transactional_id: Some(tid.clone()),
+                    producer: crate::support::transactions::ProducerIdentity::from_wire((
+                        request_id,
+                        request_epoch,
+                    )),
+                    ..Default::default()
+                },
             ))
             .await
             .unwrap();
@@ -231,7 +241,10 @@ async fn txn_offset_commit_fences_classic_generation_and_member() {
         topics: vec![txn_offset_topic(
             "fence-in",
             topic_id,
-            vec![txn_offset_partition(0, 1)],
+            vec![txn_offset_partition(
+                krabka_ids::PartitionIndex(0),
+                krabka_ids::Offset(1),
+            )],
         )],
         ..Default::default()
     };
@@ -314,7 +327,10 @@ async fn txn_offset_commit_fences_next_gen_member_epoch() {
         topics: vec![txn_offset_topic(
             "ng-in",
             topic_id,
-            vec![txn_offset_partition(0, 1)],
+            vec![txn_offset_partition(
+                krabka_ids::PartitionIndex(0),
+                krabka_ids::Offset(1),
+            )],
         )],
         ..Default::default()
     };

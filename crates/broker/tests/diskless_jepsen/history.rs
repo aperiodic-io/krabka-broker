@@ -125,10 +125,12 @@ async fn produce_appender(
         let invoke_order = clock.fetch_add(1, Ordering::SeqCst);
         let metadata = producer
             .send(crate::support::producer::producer_record(
-                TOPIC,
-                Some(0),
-                None,
-                Some(Bytes::copy_from_slice(&value)),
+                crate::support::producer::ProducerRecordSetup {
+                    topic: (TOPIC).into(),
+                    partition: Some(krabka_ids::PartitionIndex(0)),
+                    value: Some(Bytes::copy_from_slice(&value)),
+                    ..Default::default()
+                },
             ))
             .await
             .expect("acks=all record");

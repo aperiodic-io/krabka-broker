@@ -155,7 +155,12 @@ fn retention_prefix_applies_each_kafka_predicate_and_keeps_the_newest_range() {
             &max_timestamps,
             &BYTE_LENS,
             &LAST_OFFSETS,
-            policy(retention_ms, retention_bytes, floor, NOW_MS),
+            policy(DisklessRetentionSetup {
+                retention: retention_ms.map(RetentionMillis),
+                bytes: retention_bytes.map(RetentionBytes),
+                start: LogicalOffset(floor),
+                now: UnixMillis(NOW_MS),
+            }),
         );
         check!(prefix == expired, "{what}");
     }
@@ -173,7 +178,10 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[100, 200][..],
             &[10, 10][..],
             &[10, 20][..],
-            policy(None, None, 10, 1_000),
+            policy(DisklessRetentionSetup {
+                start: LogicalOffset(10),
+                ..Default::default()
+            }),
             0,
         ),
         (
@@ -181,7 +189,10 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[500, 900][..],
             &[10, 10][..],
             &[10, 20][..],
-            policy(Some(500), None, 0, 1_000),
+            policy(DisklessRetentionSetup {
+                retention: Some(RetentionMillis(500)),
+                ..Default::default()
+            }),
             0,
         ),
         // `diff` is 0 and `0 - 0 >= 0`.
@@ -190,7 +201,10 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[100, 200][..],
             &[0, 10][..],
             &[10, 20][..],
-            policy(None, Some(10), 0, 1_000),
+            policy(DisklessRetentionSetup {
+                bytes: Some(RetentionBytes(10)),
+                ..Default::default()
+            }),
             1,
         ),
         (
@@ -198,7 +212,11 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             THREE_TIMESTAMPS,
             THREE_BYTE_LENS,
             THREE_LAST_OFFSETS,
-            policy(Some(1), None, 0, i64::MIN),
+            policy(DisklessRetentionSetup {
+                retention: Some(RetentionMillis(1)),
+                now: UnixMillis(i64::MIN),
+                ..Default::default()
+            }),
             0,
         ),
         (
@@ -206,7 +224,11 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             THREE_TIMESTAMPS,
             THREE_BYTE_LENS,
             THREE_LAST_OFFSETS,
-            policy(Some(-1), None, 0, i64::MAX),
+            policy(DisklessRetentionSetup {
+                retention: Some(RetentionMillis(-1)),
+                now: UnixMillis(i64::MAX),
+                ..Default::default()
+            }),
             0,
         ),
         (
@@ -214,7 +236,10 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             THREE_TIMESTAMPS,
             &[u64::MAX, u64::MAX, u64::MAX][..],
             THREE_LAST_OFFSETS,
-            policy(None, Some(u64::MAX), 0, 1_000),
+            policy(DisklessRetentionSetup {
+                bytes: Some(RetentionBytes(u64::MAX)),
+                ..Default::default()
+            }),
             2,
         ),
         (
@@ -222,7 +247,12 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[10][..],
             &[100][..],
             &[4][..],
-            policy(Some(1), Some(0), 99, 1_000),
+            policy(DisklessRetentionSetup {
+                retention: Some(RetentionMillis(1)),
+                bytes: Some(RetentionBytes(0)),
+                start: LogicalOffset(99),
+                ..Default::default()
+            }),
             0,
         ),
         (
@@ -230,7 +260,12 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[][..],
             &[][..],
             &[][..],
-            policy(Some(1), Some(0), 99, 1_000),
+            policy(DisklessRetentionSetup {
+                retention: Some(RetentionMillis(1)),
+                bytes: Some(RetentionBytes(0)),
+                start: LogicalOffset(99),
+                ..Default::default()
+            }),
             0,
         ),
     ] {

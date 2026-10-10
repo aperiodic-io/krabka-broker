@@ -34,16 +34,25 @@ const MAX_FRAME_BYTES: usize = 100 * 1024 * 1024;
 /// truncated or byte-swapped write cannot pass.
 const CORRELATION_ID: CorrelationId = 0x0102_0304;
 
-const API_VERSIONS: ApiKeyCode = ApiKey::ApiVersions as i16;
-const METADATA: ApiKeyCode = ApiKey::Metadata as i16;
+#[derive(Clone, Copy)]
+enum ResponseBodyEncoding {
+    Legacy,
+    Flexible,
+}
+
+impl ResponseBodyEncoding {
+    const fn is_flexible(self) -> bool {
+        matches!(self, Self::Flexible)
+    }
+}
 
 /// One framing case: the api key, the flexibility of the body the handler
 /// produced, and how many bytes that body is.
 struct Case {
     name: &'static str,
-    api_key: ApiKeyCode,
-    body_flexible: bool,
-    body_len: usize,
+    api_key: ApiKey,
+    encoding: ResponseBodyEncoding,
+    body_len: PatternedPayloadLength,
 }
 
 /// Both header shapes, on both sides of the `ApiVersions` exception, plus the
@@ -51,33 +60,33 @@ struct Case {
 const CASES: [Case; 5] = [
     Case {
         name: "a flexible body takes the v1 header",
-        api_key: METADATA,
-        body_flexible: true,
-        body_len: 1024,
+        api_key: ApiKey::Metadata,
+        encoding: ResponseBodyEncoding::Flexible,
+        body_len: PatternedPayloadLength(1024),
     },
     Case {
         name: "a non-flexible body takes the v0 header",
-        api_key: METADATA,
-        body_flexible: false,
-        body_len: 1024,
+        api_key: ApiKey::Metadata,
+        encoding: ResponseBodyEncoding::Legacy,
+        body_len: PatternedPayloadLength(1024),
     },
     Case {
         name: "ApiVersions keeps the v0 header even when its body is flexible",
-        api_key: API_VERSIONS,
-        body_flexible: true,
-        body_len: 37,
+        api_key: ApiKey::ApiVersions,
+        encoding: ResponseBodyEncoding::Flexible,
+        body_len: PatternedPayloadLength(37),
     },
     Case {
         name: "a non-flexible ApiVersions body takes the same v0 header",
-        api_key: API_VERSIONS,
-        body_flexible: false,
-        body_len: 37,
+        api_key: ApiKey::ApiVersions,
+        encoding: ResponseBodyEncoding::Legacy,
+        body_len: PatternedPayloadLength(37),
     },
     Case {
         name: "an empty flexible body still carries its tagged-fields byte",
-        api_key: METADATA,
-        body_flexible: true,
-        body_len: 0,
+        api_key: ApiKey::Metadata,
+        encoding: ResponseBodyEncoding::Flexible,
+        body_len: PatternedPayloadLength(0),
     },
 ];
 
@@ -90,10 +99,10 @@ krabka_macros::patterned_bytes_fixture!(body);
 /// tagged-fields byte when the body is flexible. `ApiVersions` is the standing
 /// exception and stays on the v0 header at every version, because a client has
 /// to parse that response before it knows which versions the broker speaks.
-fn expected_header(api_key: ApiKeyCode, body_flexible: bool) -> Bytes {
+fn expected_header(api_key: ApiKey, encoding: ResponseBodyEncoding) -> Bytes {
     let mut header = BytesMut::new();
     header.put_i32(CORRELATION_ID);
-    if body_flexible && api_key != API_VERSIONS {
+    if encoding.is_flexible() && api_key != ApiKey::ApiVersions {
         header.put_u8(0);
     }
     header.freeze()
@@ -126,16 +135,22 @@ krabka_macros::frame_prefix_fixture!(wire_frame_prefix);
 /// helpers the way `benches/perf_deferrals.rs` assembles it: the codec's
 /// 4-byte frame length and the response header in one leading segment, then
 /// the handler's body.
-fn chained_prototype_wire(api_key: ApiKeyCode, body_flexible: bool, body: &Bytes) -> Vec<u8> {
+fn chained_prototype_wire(
+    api_key: ApiKey,
+    encoding: ResponseBodyEncoding,
+    body: &Bytes,
+) -> Vec<u8> {
+    let api_key = api_key as ApiKeyCode;
+    let body_flexible = encoding.is_flexible();
     let header_len = response_header_len(api_key, body_flexible);
-    let mut wire = wire_frame_prefix(
-        header_len,
-        CORRELATION_ID,
-        response_header_v1(api_key, body_flexible),
-        body.len(),
-        4 + header_len + body.len(),
-        "a test body fits in a frame",
-    );
+    let mut wire = wire_frame_prefix(ResponsePrefixSetup {
+        header_len: ResponseByteCount(header_len),
+        correlation_id: ResponseCorrelationId(CORRELATION_ID),
+        header: ResponseHeaderEncoding::from_wire(response_header_v1(api_key, body_flexible)),
+        body_len: ResponseByteCount(body.len()),
+        capacity: ResponseByteCount(4 + header_len + body.len()),
+        context: "a test body fits in a frame",
+    });
     wire.put_slice(body);
     wire.to_vec()
 }
@@ -147,15 +162,17 @@ fn chained_prototype_wire(api_key: ApiKeyCode, body_flexible: bool, body: &Bytes
 fn the_seam_encodes_the_response_header_the_dispatch_loop_encodes() {
     for case in CASES {
         let payload = body(case.body_len);
-        let header = expected_header(case.api_key, case.body_flexible);
+        let header = expected_header(case.api_key, case.encoding);
 
         assert!(
-            response_header_len(case.api_key, case.body_flexible) == header.len(),
+            response_header_len(case.api_key as ApiKeyCode, case.encoding.is_flexible())
+                == header.len(),
             "{}",
             case.name
         );
         assert!(
-            response_header_v1(case.api_key, case.body_flexible) == (header.len() == 5),
+            response_header_v1(case.api_key as ApiKeyCode, case.encoding.is_flexible())
+                == (header.len() == 5),
             "{}",
             case.name
         );
@@ -170,9 +187,9 @@ fn the_seam_encodes_the_response_header_the_dispatch_loop_encodes() {
         // crate-internal. A reimplementation that drifted from it shows up
         // here rather than in a benchmark number nobody re-derives.
         let production = super::super::response::encode_response(
-            case.api_key,
+            case.api_key as ApiKeyCode,
             CORRELATION_ID,
-            case.body_flexible,
+            case.encoding.is_flexible(),
             &payload,
         )
         .unwrap_or_else(|error| panic!("{}: {error}", case.name));
@@ -212,7 +229,7 @@ async fn the_chained_prototype_the_bench_prices_is_wire_identical() {
         let (payload, framed) = encoded_case(&case);
 
         let copy_path = wire_bytes(framed, codec(MAX_FRAME_BYTES)).await;
-        let prototype = chained_prototype_wire(case.api_key, case.body_flexible, &payload);
+        let prototype = chained_prototype_wire(case.api_key, case.encoding, &payload);
 
         assert!(copy_path == prototype, "{}", case.name);
     }
@@ -241,8 +258,13 @@ fn the_seam_codec_frames_a_response_over_the_request_limit() {
 }
 
 fn encode_case(case: &Case, payload: &Bytes) -> Bytes {
-    encode_response(case.api_key, CORRELATION_ID, case.body_flexible, payload)
-        .unwrap_or_else(|error| panic!("{}: {error}", case.name))
+    encode_response(
+        case.api_key as ApiKeyCode,
+        CORRELATION_ID,
+        case.encoding.is_flexible(),
+        payload,
+    )
+    .unwrap_or_else(|error| panic!("{}: {error}", case.name))
 }
 
 fn encoded_case(case: &Case) -> (Bytes, Bytes) {

@@ -19,11 +19,16 @@ use krabka_protocol::{
 
 use crate::support::{
     records::{batch_from_records, value_record},
-    transactions::init_producer_request as producer_initialization,
+    transactions::{
+        PartitionRegistration, ProducerIdentity, init_producer_request as producer_initialization,
+    },
 };
 
 pub(crate) fn init_producer_request(transactional_id: &str) -> InitProducerIdRequest {
-    producer_initialization(Some(transactional_id.into()), 60_000, (-1, -1))
+    producer_initialization(crate::support::transactions::InitProducerSetup {
+        transactional_id: Some(transactional_id.into()),
+        ..Default::default()
+    })
 }
 
 /// Supply both layouts so the client can negotiate either protocol version.
@@ -33,10 +38,12 @@ pub(crate) fn add_partition_request(
     (producer_id, epoch): (i64, i16),
 ) -> AddPartitionsToTxnRequest {
     partitions_request(
-        transactional_id,
-        (producer_id, epoch),
-        false,
-        vec![transaction_topic(topic, vec![0])],
+        crate::support::transaction_wire::TransactionPartitionsSetup {
+            transactional_id,
+            producer: ProducerIdentity::from_wire((producer_id, epoch)),
+            topics: vec![transaction_topic(topic, vec![0])],
+            ..Default::default()
+        },
     )
 }
 
@@ -49,24 +56,37 @@ pub(crate) fn transaction_topic(name: &str, partitions: Vec<i32>) -> AddPartitio
 }
 
 /// Both request layouts carry the same explicit transaction and partition set.
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct TransactionPartitionsSetup<'a> {
+    #[default("transaction")]
+    pub transactional_id: &'a str,
+    pub producer: ProducerIdentity,
+    pub registration: PartitionRegistration,
+    #[default(vec![transaction_topic("orders", vec![0])])]
+    pub topics: Vec<AddPartitionsToTxnTopic>,
+}
+
 pub(crate) fn partitions_request(
-    transactional_id: &str,
-    (producer_id, producer_epoch): (i64, i16),
-    verify_only: bool,
-    topics: Vec<AddPartitionsToTxnTopic>,
+    setup: TransactionPartitionsSetup<'_>,
 ) -> AddPartitionsToTxnRequest {
+    let TransactionPartitionsSetup {
+        transactional_id,
+        producer,
+        registration,
+        topics,
+    } = setup;
     AddPartitionsToTxnRequest {
         transactions: vec![AddPartitionsToTxnTransaction {
             transactional_id: transactional_id.into(),
-            producer_id,
-            producer_epoch,
-            verify_only,
+            producer_id: producer.id.0,
+            producer_epoch: producer.epoch.0,
+            verify_only: registration == PartitionRegistration::VerifyOnly,
             topics: topics.clone(),
             ..Default::default()
         }],
         v3_and_below_transactional_id: transactional_id.into(),
-        v3_and_below_producer_id: producer_id,
-        v3_and_below_producer_epoch: producer_epoch,
+        v3_and_below_producer_id: producer.id.0,
+        v3_and_below_producer_epoch: producer.epoch.0,
         v3_and_below_topics: topics,
         ..Default::default()
     }
@@ -77,23 +97,40 @@ pub(crate) fn assert_partition_added(response: &AddPartitionsToTxnResponse) {
     assert!(code == 0, "AddPartitionsToTxn: {response:?}");
 }
 
-pub(crate) fn produce_request(
-    transactional_id: &str,
-    topic: &str,
-    topic_id: Uuid,
-    producer: Option<(i64, i16)>,
-    values: &[&'static str],
-) -> ProduceRequest {
-    let batch = records_batch(producer, values);
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct TransactionProduceSetup<'a> {
+    #[default("transaction")]
+    pub transactional_id: &'a str,
+    #[default("orders")]
+    pub topic: &'a str,
+    pub topic_id: Uuid,
+    pub producer: Option<ProducerIdentity>,
+    #[default(&["v"])]
+    pub values: &'a [&'static str],
+}
+
+pub(crate) fn produce_request(setup: TransactionProduceSetup<'_>) -> ProduceRequest {
+    let TransactionProduceSetup {
+        transactional_id,
+        topic,
+        topic_id,
+        producer,
+        values,
+    } = setup;
+    let batch = records_batch(
+        producer.map(|identity| (identity.id.0, identity.epoch.0)),
+        values,
+    );
     ProduceRequest {
         // KIP-890 verification needs the transactional id for transactional batches.
         transactional_id: producer.map(|_| transactional_id.to_string()),
-        ..crate::support::produce::single_partition_produce(
-            topic,
-            topic_id,
-            0,
-            Some(batch.into()),
-            (-1, 5_000),
+        ..crate::support::produce::batch_request(
+            batch,
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: (topic).into(),
+                topic_id,
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
         )
     }
 }
@@ -135,21 +172,38 @@ pub(crate) fn partition_error(response: &AddPartitionsToTxnResponse, legacy: boo
         .map_or(response.error_code, |row| row.partition_error_code)
 }
 
-/// The topic creation used by transaction fixtures accepts only success or an existing topic.
-pub async fn create_topic(
-    client: &krabka_client_core::Client,
-    name: &str,
-    partitions: i32,
-    configs: Vec<krabka_protocol::owned::create_topics_request::CreatableTopicConfig>,
-    context: &str,
-) {
+use krabka_protocol::owned::create_topics_request::CreatableTopicConfig;
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct TransactionTopicSetup<'a> {
+    #[default("orders")]
+    pub name: &'a str,
+    #[default(crate::support::topics::TopicPartitionCount(1))]
+    pub partitions: crate::support::topics::TopicPartitionCount,
+    pub configs: Vec<CreatableTopicConfig>,
+    #[default("CreateTopics")]
+    pub context: &'a str,
+}
+
+pub async fn create_topic(client: &krabka_client_core::Client, setup: TransactionTopicSetup<'_>) {
+    let TransactionTopicSetup {
+        name,
+        partitions,
+        configs,
+        context,
+    } = setup;
     let response = client
         .send(crate::support::topics::create_topic_request(
             krabka_protocol::owned::create_topics_request::CreatableTopic {
                 configs,
-                ..crate::support::topics::creatable_topic(name, partitions, 1)
+                ..crate::support::topics::creatable_topic(
+                    crate::support::topics::ConfiguredTopicSetup {
+                        name: (name).into(),
+                        partitions: crate::support::topics::TopicPartitionCount(partitions.0),
+                        ..Default::default()
+                    },
+                )
             },
-            5_000,
         ))
         .await
         .unwrap();
@@ -231,6 +285,18 @@ pub(crate) async fn produce_succeeds<E: std::fmt::Debug>(
     assert!(code == 0, "Produce: {response:?}");
 }
 
+/// Send the fixture through either a client or a direct connection, keeping the success oracle.
+pub(crate) async fn produce_fixture<E: std::fmt::Debug, F>(
+    setup: TransactionProduceSetup<'_>,
+    send: impl FnOnce(ProduceRequest) -> F,
+) where
+    F: std::future::Future<
+            Output = Result<krabka_protocol::owned::produce_response::ProduceResponse, E>,
+        >,
+{
+    produce_succeeds(send(produce_request(setup))).await;
+}
+
 pub(crate) async fn partition_added<E: std::fmt::Debug>(
     response: impl std::future::Future<
         Output = Result<
@@ -271,20 +337,23 @@ pub(crate) async fn settled_produce(
     .await
 }
 
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct AssignedTransactionTopicSetup<'a> {
+    pub topic: crate::support::topics::AssignedTopicSetup,
+    pub context: Option<&'a str>,
+}
+
 pub(crate) async fn create_assigned_topic(
     client: &krabka_client_core::Client,
-    name: &str,
-    replicas: &[i32],
-    context: Option<&str>,
+    setup: AssignedTransactionTopicSetup<'_>,
 ) -> Uuid {
     let created = client
         .send(crate::support::topics::create_topic_request(
-            crate::support::topic_on(name, &[replicas]),
-            5_000,
+            crate::support::topics::assigned_topic(setup.topic),
         ))
         .await
         .expect("CreateTopics");
-    match context {
+    match setup.context {
         Some(context) => assert!(created.topics[0].error_code == 0, "{context}: {created:?}"),
         None => assert!(created.topics[0].error_code == 0, "{created:?}"),
     }
@@ -344,14 +413,29 @@ pub(crate) async fn read_committed_through(
     seen
 }
 
-/// Build the same earliest-offset consumer, with security only when the caller configured it.
+use krabka_client_core::security::ClientSecurity;
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct TransactionConsumerSetup<'a> {
+    #[default("transaction-reader".into())]
+    pub group: String,
+    #[default("orders")]
+    pub topic: &'a str,
+    #[default(IsolationLevel::ReadCommitted)]
+    pub isolation: IsolationLevel,
+    pub security: Option<ClientSecurity>,
+}
+
 pub(crate) async fn consumer(
     bootstrap: impl Into<String>,
-    group: impl Into<String>,
-    topic: &str,
-    isolation: IsolationLevel,
-    security: Option<krabka_client_core::security::ClientSecurity>,
+    setup: TransactionConsumerSetup<'_>,
 ) -> Result<Consumer, krabka_client_consumer::ConsumerError> {
+    let TransactionConsumerSetup {
+        group,
+        topic,
+        isolation,
+        security,
+    } = setup;
     let builder = Consumer::builder()
         .bootstrap(bootstrap)
         .group_id(group)
@@ -396,9 +480,17 @@ pub(crate) async fn observed_values(
     done: impl Fn(&[String]) -> bool,
     context: Option<&str>,
 ) -> (Consumer, Vec<String>) {
-    let mut consumer = consumer(bootstrap, group, topic, isolation, security)
-        .await
-        .unwrap();
+    let mut consumer = consumer(
+        bootstrap,
+        TransactionConsumerSetup {
+            group: group.into(),
+            topic,
+            isolation,
+            security,
+        },
+    )
+    .await
+    .unwrap();
     let seen = poll_values(&mut consumer, timeout, done, context).await;
     (consumer, seen)
 }

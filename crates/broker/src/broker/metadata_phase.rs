@@ -159,19 +159,25 @@ fn observer_snapshot_fetch_max(
     .map_err(BrokerError::Startup)
 }
 
+/// Metadata publication and its optional controller administration endpoint.
+pub(super) struct MetadataControlPlane {
+    pub(super) source: Arc<dyn crate::metadata_source::MetadataSource>,
+    pub(super) admin_router: Option<Arc<crate::controller_admin::BrokerControllerAdminRouter>>,
+}
+
+/// Handles owned by startup after metadata quorum readiness has completed.
+pub(super) struct MetadataPhase {
+    pub(super) control_plane: MetadataControlPlane,
+    pub(super) audit: crate::raft_handshake::AuditLogArc,
+}
+
 async fn start_metadata_source(
     config: &BrokerConfig,
     bootstrap_records: Vec<krabka_metadata::MetadataRecord>,
     controller_listener: Option<tokio::net::TcpListener>,
     transport: RaftTransport,
     wal_shards: Arc<crate::wal::quorum::registry::WalShardRegistry>,
-) -> Result<
-    (
-        Arc<dyn crate::metadata_source::MetadataSource>,
-        Option<Arc<crate::controller_admin::BrokerControllerAdminRouter>>,
-    ),
-    BrokerError,
-> {
+) -> Result<MetadataControlPlane, BrokerError> {
     let RaftTransport {
         controller_cell,
         audit_cell: _,
@@ -244,10 +250,10 @@ async fn start_metadata_source(
                 })?,
         );
         let _ = controller_cell.set(Arc::clone(&controller));
-        return Ok((
-            controller as Arc<dyn crate::metadata_source::MetadataSource>,
+        return Ok(MetadataControlPlane {
+            source: controller as Arc<dyn crate::metadata_source::MetadataSource>,
             admin_router,
-        ));
+        });
     }
 
     drop(controller_listener);
@@ -286,13 +292,13 @@ async fn start_metadata_source(
         client_id: format!("krabka-broker-{}-writer", config.broker_id),
         leader: observer.watch_leader(),
     };
-    Ok((
-        Arc::new(crate::metadata_source::ObserverSource::new(
+    Ok(MetadataControlPlane {
+        source: Arc::new(crate::metadata_source::ObserverSource::new(
             observer,
             Arc::new(forwarder),
         )),
-        None,
-    ))
+        admin_router: None,
+    })
 }
 
 fn spawn_auto_join(
@@ -427,14 +433,7 @@ pub(super) async fn start_metadata_phase(
     tls_dynamic: Option<&Arc<krabka_security::DynamicServerConfig>>,
     inter_broker_client: &Arc<crate::network::client::InterBrokerClient>,
     wal_shards: Arc<crate::wal::quorum::registry::WalShardRegistry>,
-) -> Result<
-    (
-        Arc<dyn crate::metadata_source::MetadataSource>,
-        Option<Arc<crate::controller_admin::BrokerControllerAdminRouter>>,
-        crate::raft_handshake::AuditLogArc,
-    ),
-    BrokerError,
-> {
+) -> Result<MetadataPhase, BrokerError> {
     let controller_listener =
         bind_ephemeral_controller_listener(config, controller_listener).await?;
     let transport = prepare_raft_transport(config, tls_dynamic, inter_broker_client);
@@ -456,17 +455,20 @@ pub(super) async fn start_metadata_phase(
         wal_shards,
     )
     .await?;
-    spawn_auto_join(config, &controller.0, inter_broker_client);
+    spawn_auto_join(config, &controller.source, inter_broker_client);
     // A controller that stops itself over a fatal fault fails every later
     // submit with a bare "controller shut down", and each submit retries under
     // backoff first. Kafka's process halts on that fault at once and with its
     // message, so the fault ends the join and is what a failed start reports.
     or_fatal_fault(
-        controller.0.watch_fatal(),
-        join_metadata_quorum(config, &controller.0),
+        controller.source.watch_fatal(),
+        join_metadata_quorum(config, &controller.source),
     )
     .await?;
-    Ok((controller.0, controller.1, audit_cell))
+    Ok(MetadataPhase {
+        control_plane: controller,
+        audit: audit_cell,
+    })
 }
 
 /// Waits for the metadata leader and, on a broker, for the bootstrap

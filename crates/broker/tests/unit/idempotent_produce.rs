@@ -9,10 +9,7 @@ use assert2::assert;
 use crate::{
     harness::{create_topic, topic_id_for},
     support,
-    support::{
-        produce::single_partition_produce,
-        records::producer_values_batch as one_batch_with_producer,
-    },
+    support::records::producer_values_batch as one_batch_with_producer,
 };
 
 #[tokio::test]
@@ -25,12 +22,17 @@ async fn idempotent_produce_dedups_duplicate_batch() {
     let init = crate::support::transactions::claim_idempotent_producer(&p.client).await;
     let pid = init.producer_id;
 
-    let req = single_partition_produce(
-        "idem",
-        idem_id,
-        0,
-        Some(one_batch_with_producer(pid, 0, 0, &["a", "b", "c"]).into()),
-        (-1, 5_000),
+    let req = crate::support::produce::batch_request(
+        one_batch_with_producer(crate::support::records::ProducerValuesSetup {
+            pid: krabka_ids::ProducerId(pid),
+            values: &["a", "b", "c"],
+            ..Default::default()
+        }),
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: ("idem").into(),
+            topic_id: idem_id,
+            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+        },
     );
 
     let r1 = p.client.send(req.clone()).await.expect("Produce 1");
@@ -56,12 +58,18 @@ async fn out_of_order_returns_45() {
     let pid = init.producer_id;
 
     let mk = |base_seq: i32| {
-        single_partition_produce(
-            "ooo",
-            ooo_id,
-            0,
-            Some(one_batch_with_producer(pid, 0, base_seq, &["x", "y"]).into()),
-            (-1, 5_000),
+        crate::support::produce::batch_request(
+            one_batch_with_producer(crate::support::records::ProducerValuesSetup {
+                pid: krabka_ids::ProducerId(pid),
+                base_seq: crate::support::records::ProducerSequence(base_seq),
+                values: &["x", "y"],
+                ..Default::default()
+            }),
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: ("ooo").into(),
+                topic_id: ooo_id,
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
         )
     };
 

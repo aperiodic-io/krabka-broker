@@ -4,7 +4,6 @@
 //! one batch the way `materialize` does.
 
 use bytes::{Bytes, BytesMut};
-use clap::Parser as _;
 use krabka_ids::ProducerId;
 use krabka_protocol::{
     DecodeBorrow as _,
@@ -20,28 +19,13 @@ use crate::{
 const BASE_OFFSET: i64 = 1_000;
 pub(super) const BASE_TIMESTAMP: i64 = 1_700_000_000_000;
 
-pub(super) fn partition(topic: &str, index: i32) -> PartitionRef {
-    PartitionRef {
-        topic: topic.to_owned(),
-        partition: index,
-    }
-}
+pub(super) use crate::args::test_support::partition;
 
 /// Parses `RestoreArgs` the same way the binary does, with a fixed
 /// archive source and target so a test only has to state the bound
 /// flags under test.
 pub(super) fn args_from(extra: &[&str]) -> RestoreArgs {
-    let mut argv = vec![
-        "krabka-restore",
-        "--archive-local",
-        "/archive",
-        "--log-dir",
-        "/target",
-    ];
-    argv.extend_from_slice(extra);
-    crate::Cli::try_parse_from(argv)
-        .expect("valid command line")
-        .args
+    crate::args::test_support::args_from(extra).expect("valid command line")
 }
 
 pub(super) fn predicates(extra: &[&str]) -> Predicates {
@@ -163,4 +147,16 @@ pub(super) fn try_decide(
         })
         .collect::<Result<Vec<_>, RestoreError>>()?;
     Ok((batch_decision, record_decisions))
+}
+
+pub(super) fn check_record_parse_error(
+    predicates: &Predicates,
+    partition: &PartitionRef,
+    owned: &RecordBatch,
+) {
+    let error = try_decide(predicates, partition, owned).unwrap_err();
+    assert2::check!(matches!(
+        error,
+        RestoreError::Records(krabka_protocol::records::RecordsError::RecordParse(_))
+    ));
 }

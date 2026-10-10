@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use assert2::{assert, check};
 use krabka_client_admin::{AdminClient, DeleteRecordsOp};
 use krabka_client_core::Client;
-use krabka_protocol::{owned::fetch_request::FetchRequest, primitives::uuid::Uuid as WireUuid};
+use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
 use crate::{
     rlmm_cluster::{
@@ -186,10 +186,17 @@ async fn fetch_once(
 ) -> krabka_protocol::owned::fetch_response::PartitionData {
     let resp = client
         .send(single_partition_fetch(
-            TOPIC,
-            topic_id,
-            fetch_partition(0, fetch_offset, 1_048_576),
-            (500, 1, FetchRequest::default().max_bytes),
+            crate::support::fetch::SinglePartitionFetchSetup {
+                topic: TOPIC.into(),
+                topic_id,
+                partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
+                    offset: krabka_ids::Offset(fetch_offset),
+                    ..Default::default()
+                }),
+                limits: crate::support::fetch::FetchLimits::wait_for_data(
+                    crate::support::fetch::RequestWaitMillis(500),
+                ),
+            },
         ))
         .await
         .expect("Fetch");

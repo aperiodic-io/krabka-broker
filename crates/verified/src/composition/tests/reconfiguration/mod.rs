@@ -2,7 +2,52 @@ use super::*;
 use crate::reconfiguration::{
     CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter, VoterChangeKind,
     VoterChangeRequest, VoterReconfigurationPlan,
+    test_support::{KraftFeatureLevel, VoterCount},
 };
+
+#[derive(Clone, Copy)]
+struct RequestFlags(u16);
+
+#[derive(Clone, Copy)]
+#[repr(u16)]
+enum RequestProperty {
+    Leader = 1 << 0,
+    NoPendingChange = 1 << 1,
+    EpochCommitted = 1 << 2,
+    ControlsCommitted = 1 << 3,
+    VotersSupportVersion = 1 << 4,
+    CompatibleTargetVersion = 1 << 5,
+    TargetCaughtUp = 1 << 6,
+}
+
+impl RequestFlags {
+    fn contains(self, property: RequestProperty) -> bool {
+        self.0 & property as u16 != 0
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GeneratedRequestSetup {
+    count: VoterCount,
+    flags: RequestFlags,
+    kind: VoterChangeKind,
+    membership: TargetMembership,
+    version: KraftFeatureLevel,
+    requested: KraftFeatureLevel,
+}
+
+impl Default for GeneratedRequestSetup {
+    fn default() -> Self {
+        Self {
+            count: VoterCount(3),
+            flags: RequestFlags(0x7f),
+            kind: VoterChangeKind::Add,
+            membership: TargetMembership::Absent,
+            version: KraftFeatureLevel(1),
+            requested: KraftFeatureLevel(1),
+        }
+    }
+}
 
 mod oracle;
 use oracle::{check_overlap, current, leading, target};
@@ -33,57 +78,63 @@ fn request_cases() -> impl Strategy<Value = RequestCase> {
     )
         .prop_map(
             |(old, node, bits, operation, membership, version, requested)| {
-                let facts =
-                    generated_request(old.len(), bits, operation, membership, version, requested);
+                let kind = match operation {
+                    0 => VoterChangeKind::Add,
+                    1 => VoterChangeKind::Remove,
+                    2 => VoterChangeKind::Update,
+                    _ => VoterChangeKind::FinalizeKraftVersion,
+                };
+                let membership = match membership {
+                    0 => TargetMembership::Absent,
+                    1 => TargetMembership::PresentUnknownDirectory,
+                    2 => TargetMembership::PresentSameDirectory,
+                    _ => TargetMembership::PresentOtherDirectory,
+                };
+                let facts = generated_request(GeneratedRequestSetup {
+                    count: VoterCount(old.len()),
+                    flags: RequestFlags(bits),
+                    kind,
+                    membership,
+                    version: KraftFeatureLevel(version),
+                    requested: KraftFeatureLevel(requested),
+                });
                 (old, node, facts)
             },
         )
 }
 
 fn generated_request(
-    count: usize,
-    bits: u16,
-    operation: u8,
-    membership: u8,
-    version: u16,
-    requested: u16,
+    setup: GeneratedRequestSetup,
 ) -> (
     ReconfigurationLeadership,
     CurrentVoterSet,
     VoterChangeRequest,
     TargetVoter,
 ) {
-    let flag = |i: u32| bits & (1u16 << i) != 0;
+    use RequestProperty::{
+        CompatibleTargetVersion, ControlsCommitted, EpochCommitted, Leader, NoPendingChange,
+        TargetCaughtUp, VotersSupportVersion,
+    };
     (
         ReconfigurationLeadership {
-            is_leader: flag(0),
-            no_pending_change: flag(1),
-            epoch_committed: flag(2),
+            is_leader: setup.flags.contains(Leader),
+            no_pending_change: setup.flags.contains(NoPendingChange),
+            epoch_committed: setup.flags.contains(EpochCommitted),
         },
         CurrentVoterSet {
-            voter_count: count,
-            kraft_version: version,
-            latest_controls_committed: flag(3),
-            all_voters_support_requested: flag(4),
+            voter_count: setup.count.0,
+            kraft_version: setup.version.0,
+            latest_controls_committed: setup.flags.contains(ControlsCommitted),
+            all_voters_support_requested: setup.flags.contains(VotersSupportVersion),
         },
         VoterChangeRequest {
-            kind: match operation {
-                0 => VoterChangeKind::Add,
-                1 => VoterChangeKind::Remove,
-                2 => VoterChangeKind::Update,
-                _ => VoterChangeKind::FinalizeKraftVersion,
-            },
-            requested_kraft_version: requested,
+            kind: setup.kind,
+            requested_kraft_version: setup.requested.0,
         },
         TargetVoter {
-            membership: match membership {
-                0 => TargetMembership::Absent,
-                1 => TargetMembership::PresentUnknownDirectory,
-                2 => TargetMembership::PresentSameDirectory,
-                _ => TargetMembership::PresentOtherDirectory,
-            },
-            version_compatible: flag(5),
-            caught_up: flag(6),
+            membership: setup.membership,
+            version_compatible: setup.flags.contains(CompatibleTargetVersion),
+            caught_up: setup.flags.contains(TargetCaughtUp),
         },
     )
 }

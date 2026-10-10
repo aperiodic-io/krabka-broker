@@ -32,8 +32,7 @@
 use assert2::{assert, check};
 
 use crate::support::{
-    client::connect_owned,
-    configs::{incremental_config, incremental_request, incremental_resource},
+    client::connect_owned, configs::client_metrics_subscription,
     discovery::api_versions_request_for,
 };
 mod support;
@@ -49,12 +48,6 @@ use krabka_protocol::{
     primitives::uuid::Uuid as WireUuid,
 };
 use support::start_n_node_with;
-
-/// Kafka resource type id for `CLIENT_METRICS` (KIP-714).
-const RESOURCE_TYPE_CLIENT_METRICS: i8 = 16;
-
-/// `config_operation` SET = 0 in the `IncrementalAlterConfigs` wire protocol.
-const CONFIG_OP_SET: i8 = 0;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -113,21 +106,12 @@ async fn configure_match_all_subscription(
     name: &str,
     interval_ms: &str,
 ) {
-    let alter_req = incremental_request(
-        vec![incremental_resource(
-            RESOURCE_TYPE_CLIENT_METRICS,
-            name.to_string(),
-            vec![
-                incremental_config("metrics".to_string(), Some("*".to_string()), CONFIG_OP_SET),
-                incremental_config(
-                    "interval.ms".to_string(),
-                    Some(interval_ms.to_string()),
-                    CONFIG_OP_SET,
-                ),
-            ],
-        )],
-        false,
-    );
+    let alter_req =
+        client_metrics_subscription(crate::support::configs::ClientMetricsSubscriptionSetup {
+            name,
+            interval: interval_ms,
+            ..Default::default()
+        });
 
     let alter_resp: IncrementalAlterConfigsResponse = client
         .send(alter_req)
@@ -187,15 +171,42 @@ async fn advertised_apis(client: &krabka_client_core::Client) -> std::collection
     resp.api_keys.iter().map(|k| k.api_key).collect()
 }
 
-fn telemetry_push_request(
+#[derive(Clone, Copy, Default)]
+struct SubscriptionId(i32);
+
+#[derive(Clone, Copy)]
+struct TelemetryCompressionCode(i8);
+
+#[derive(Clone, Copy, Default)]
+enum TelemetryCompression {
+    #[default]
+    Uncompressed,
+    Invalid(TelemetryCompressionCode),
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+struct TelemetryPushSetup {
+    #[default(WireUuid::ZERO)]
     client_instance_id: WireUuid,
-    subscription_id: i32,
-    compression_type: i8,
+    subscription_id: SubscriptionId,
+    compression: TelemetryCompression,
     metrics: bytes::Bytes,
-) -> PushTelemetryRequest {
-    PushTelemetryRequest {
+}
+
+fn telemetry_push_request(setup: TelemetryPushSetup) -> PushTelemetryRequest {
+    let TelemetryPushSetup {
         client_instance_id,
         subscription_id,
+        compression,
+        metrics,
+    } = setup;
+    let compression_type = match compression {
+        TelemetryCompression::Uncompressed => 0,
+        TelemetryCompression::Invalid(code) => code.0,
+    };
+    PushTelemetryRequest {
+        client_instance_id,
+        subscription_id: subscription_id.0,
         terminating: false,
         compression_type,
         metrics,
@@ -331,12 +342,11 @@ async fn push_telemetry_unknown_instance_rejected() {
     ] {
         let resp: PushTelemetryResponse = p
             .client
-            .send(telemetry_push_request(
-                instance,
-                0,
-                0,
-                bytes::Bytes::from_static(b"\x00\x01\x02"),
-            ))
+            .send(telemetry_push_request(TelemetryPushSetup {
+                client_instance_id: instance,
+                metrics: bytes::Bytes::from_static(b"\x00\x01\x02"),
+                ..Default::default()
+            }))
             .await
             .expect("PushTelemetry");
 
@@ -409,12 +419,12 @@ async fn push_telemetry_happy_path_after_subscription() {
     // compression_type = 0 is NONE (uncompressed); sample_otlp_metrics()
     // returns raw (uncompressed) proto bytes, so no codec mismatch.
     let push_resp: PushTelemetryResponse = client
-        .send(telemetry_push_request(
-            assigned_id,
-            subscription_id,
-            0,
-            sample_otlp_metrics(),
-        ))
+        .send(telemetry_push_request(TelemetryPushSetup {
+            client_instance_id: assigned_id,
+            subscription_id: SubscriptionId(subscription_id),
+            metrics: sample_otlp_metrics(),
+            ..Default::default()
+        }))
         .await
         .expect("PushTelemetry");
 
@@ -438,12 +448,12 @@ async fn push_telemetry_stale_subscription_id_rejected() {
     let stale_sub_id = real_sub_id ^ 0x5555;
 
     let push_resp: PushTelemetryResponse = client
-        .send(telemetry_push_request(
-            assigned_id,
-            stale_sub_id,
-            0,
-            sample_otlp_metrics(),
-        ))
+        .send(telemetry_push_request(TelemetryPushSetup {
+            client_instance_id: assigned_id,
+            subscription_id: SubscriptionId(stale_sub_id),
+            metrics: sample_otlp_metrics(),
+            ..Default::default()
+        }))
         .await
         .expect("PushTelemetry");
 
@@ -468,12 +478,12 @@ async fn push_telemetry_unsupported_compression_rejected() {
 
     // Kafka's `CompressionType.forId` knows the ids 0 to 4 only.
     let push_resp: PushTelemetryResponse = client
-        .send(telemetry_push_request(
-            assigned_id,
-            subscription_id,
-            5,
-            sample_otlp_metrics(),
-        ))
+        .send(telemetry_push_request(TelemetryPushSetup {
+            client_instance_id: assigned_id,
+            subscription_id: SubscriptionId(subscription_id),
+            compression: TelemetryCompression::Invalid(TelemetryCompressionCode(5)),
+            metrics: sample_otlp_metrics(),
+        }))
         .await
         .expect("PushTelemetry");
 

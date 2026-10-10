@@ -143,6 +143,13 @@ async fn durable_advance_waits_for_an_offset_strictly_after_the_observation() {
     assert!(waiting.await.unwrap() == second);
 }
 
+async fn appended_distributed_store() -> (tempfile::TempDir, QuorumWalStore, Offset) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::test_support::fresh_distributed_store(dir.path());
+    let (_, end) = append_source(&store, 1).await;
+    (dir, store, end)
+}
+
 #[tokio::test]
 async fn distributed_wal_rejects_misordered_incomplete_or_duplicate_voter_sets() {
     for voters in [
@@ -151,10 +158,7 @@ async fn distributed_wal_rejects_misordered_incomplete_or_duplicate_voter_sets()
         vec![NodeId(1), NodeId(2), NodeId(2)],
         vec![NodeId(1), NodeId(1), NodeId(2)],
     ] {
-        let dir = tempfile::tempdir().unwrap();
-        let source = source_log(dir.path());
-        let store = distributed_store(source, Uuid::new_v4(), 3);
-        let (_results, leo) = append_source(&store, 1).await;
+        let (_dir, store, leo) = appended_distributed_store().await;
 
         store.engine.configure_distributed(NodeId(1), &voters);
 
@@ -165,10 +169,7 @@ async fn distributed_wal_rejects_misordered_incomplete_or_duplicate_voter_sets()
 
 #[tokio::test]
 async fn distributed_wal_reconfiguration_replaces_the_remote_voter_set() {
-    let dir = tempfile::tempdir().unwrap();
-    let source = source_log(dir.path());
-    let store = distributed_store(source, Uuid::new_v4(), 3);
-    let (_results, leo) = append_source(&store, 1).await;
+    let (_dir, store, leo) = appended_distributed_store().await;
     store
         .engine
         .configure_distributed(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);

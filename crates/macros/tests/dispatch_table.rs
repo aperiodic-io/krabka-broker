@@ -220,6 +220,26 @@ fn text(body: &[u8]) -> String {
     String::from_utf8_lossy(body).into_owned()
 }
 
+macro_rules! context_bytes_handler {
+    ($name:literal) => {
+        pub fn handle<'a>(
+            broker: &'a crate::Broker,
+            version: crate::ApiVersion,
+            body: &'a [u8],
+            ctx: &'a crate::RequestContext<'a>,
+        ) -> crate::BoxFuture<'a, Result<crate::Bytes, crate::BrokerError>> {
+            Box::pin(std::future::ready(crate::reply(&[
+                &$name,
+                &broker.name,
+                &version,
+                &ctx.correlation_id,
+                &ctx.client_id,
+                &crate::text(body),
+            ])))
+        }
+    };
+}
+
 mod handlers {
     use crate::{ApiVersion, BrokerError, Bytes, krabka_protocol::Decode};
 
@@ -332,23 +352,7 @@ mod handlers {
     }
 
     pub mod metadata {
-        use crate::{ApiVersion, BoxFuture, Broker, BrokerError, Bytes, RequestContext};
-
-        pub fn handle<'a>(
-            broker: &'a Broker,
-            version: ApiVersion,
-            body: &'a [u8],
-            ctx: &'a RequestContext<'a>,
-        ) -> BoxFuture<'a, Result<Bytes, BrokerError>> {
-            Box::pin(std::future::ready(crate::reply(&[
-                &"metadata",
-                &broker.name,
-                &version,
-                &ctx.correlation_id,
-                &ctx.client_id,
-                &crate::text(body),
-            ])))
-        }
+        context_bytes_handler!("metadata");
     }
 
     pub mod describe_configs {
@@ -396,23 +400,7 @@ mod handlers {
 /// The `=> path` override: a handler outside `crate::handlers`.
 mod txn {
     pub mod add_partitions_to_txn {
-        use crate::{ApiVersion, BoxFuture, Broker, BrokerError, Bytes, RequestContext};
-
-        pub fn handle<'a>(
-            broker: &'a Broker,
-            version: ApiVersion,
-            body: &'a [u8],
-            ctx: &'a RequestContext<'a>,
-        ) -> BoxFuture<'a, Result<Bytes, BrokerError>> {
-            Box::pin(std::future::ready(crate::reply(&[
-                &"txn::add_partitions_to_txn",
-                &broker.name,
-                &version,
-                &ctx.correlation_id,
-                &ctx.client_id,
-                &crate::text(body),
-            ])))
-        }
+        context_bytes_handler!("txn::add_partitions_to_txn");
     }
 }
 
@@ -593,8 +581,7 @@ fn every_section_registers_an_adapter_that_reaches_its_handler() {
     }
 }
 
-#[test]
-fn a_typed_adapter_maps_a_decode_failure_to_a_broker_error() {
+fn check_typed_adapter_error(body: &[u8], error: &BrokerError) {
     let mut registry = DispatchRegistry::default();
     register_dispatch_table(&mut registry);
 
@@ -605,8 +592,13 @@ fn a_typed_adapter_maps_a_decode_failure_to_a_broker_error() {
         ApiKey::DescribeAcls,
     ] {
         let entry = registry.0[&(api as i16)];
-        assert!(call(entry, &[0xff]) == Err(BrokerError::Decode), "{api:?}");
+        assert!(call(entry, body).as_ref() == Err(error), "{api:?}");
     }
+}
+
+#[test]
+fn a_typed_adapter_maps_a_decode_failure_to_a_broker_error() {
+    check_typed_adapter_error(&[0xff], &BrokerError::Decode);
 }
 
 #[test]
@@ -628,18 +620,7 @@ fn only_a_typed_group_adapter_decodes_through_decode_group_request() {
 
 #[test]
 fn a_typed_adapter_returns_the_encoders_error() {
-    let mut registry = DispatchRegistry::default();
-    register_dispatch_table(&mut registry);
-
-    for api in [
-        ApiKey::ListGroups,
-        ApiKey::Heartbeat,
-        ApiKey::ListConfigResources,
-        ApiKey::DescribeAcls,
-    ] {
-        let entry = registry.0[&(api as i16)];
-        assert!(call(entry, b"nope") == Err(BrokerError::Encode), "{api:?}");
-    }
+    check_typed_adapter_error(b"nope", &BrokerError::Encode);
 }
 
 #[test]

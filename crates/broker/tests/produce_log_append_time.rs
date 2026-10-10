@@ -37,12 +37,11 @@ use krabka_protocol::{
         produce_response::{BatchIndexAndErrorMessage, LeaderIdAndEpoch, PartitionProduceResponse},
     },
     primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch, RecordsPayload, TimestampType},
+    records::{Record, RecordBatch, TimestampType},
 };
 
 use crate::support::{
     offsets::{list_offset_partition, single_partition_list_offsets},
-    produce::single_partition_produce,
     records::{batch_from_records, value_record},
 };
 
@@ -345,16 +344,16 @@ async fn produce(
             ..value_record(0, Some(Bytes::from_static(b"frame")))
         }])
     };
-    let response = client
-        .send(single_partition_produce(
-            topic.to_owned(),
+    let response = crate::support::produce::send_batch(
+        &client,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: topic.to_owned(),
             topic_id,
-            0,
-            Some(RecordsPayload::V2(vec![batch])),
-            (1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+            ..Default::default()
+        },
+    )
+    .await;
     response.responses[0].partition_responses[0].clone()
 }
 

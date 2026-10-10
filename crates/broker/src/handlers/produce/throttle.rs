@@ -96,9 +96,11 @@ mod tests {
         use krabka_units::{Time, convert::TimeExt};
 
         let img = crate::quota::test_support::image_with_quota(
-            vec![("user", Some("alice")), ("client-id", Some("app-x"))],
-            "producer_byte_rate",
-            1024.0,
+            crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("user", Some("alice")), ("client-id", Some("app-x"))],
+                value: crate::quota::test_support::QuotaValue(1024.0),
+                ..Default::default()
+            },
         );
         // A one-second window, so 4096 bytes at 1024 B/s is 3072 over the
         // burst rather than inside the default 11-second one.

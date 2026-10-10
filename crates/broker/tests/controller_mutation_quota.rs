@@ -34,8 +34,25 @@ use krabka_metadata::AclOperation;
 use crate::support::client::metric_value;
 use crate::{
     cluster::start_single_broker_sasl_plaintext_with_users,
+    support::acl::{ClusterAclSetup, TopicAclSetup},
     topic_admin::{drive_create_topics_sasl, drive_delete_topics_sasl},
 };
+
+/// Install Alice's shared mutation quota and return its complete wire response.
+async fn set_controller_mutation_quota(
+    addr: std::net::SocketAddr,
+) -> Vec<(crate::kafka_wire::quotas::QuotaEntity, i16)> {
+    crate::kafka_wire::quotas::alter_user_quota(
+        addr,
+        crate::kafka_wire::quotas::UserQuotaSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+            key: "controller_mutation_rate",
+            value: crate::kafka_wire::quotas::QuotaValue(2.0),
+            ..Default::default()
+        },
+    )
+    .await
+}
 
 /// Test 1: Set `controller_mutation_rate=2.0` for alice. A strict v7 request
 /// may cross the limit, but the following mutation is rejected while debt
@@ -50,22 +67,17 @@ async fn controller_mutation_rate_throttles_create_topics() {
 
     // Seed an ACL granting alice Cluster Create — this also disables the
     // compat shim (allow-all when no ACLs present in image).
-    let admin_acl =
-        crate::support::acl::cluster_acl_record("User:alice", "*", AclOperation::Create);
+    let admin_acl = crate::support::acl::cluster_acl_record(ClusterAclSetup {
+        operation: AclOperation::Create,
+        ..Default::default()
+    });
     handle
         .submit_metadata_record_for_test(admin_acl)
         .await
         .expect("seed ACL");
 
     // Set controller_mutation_rate=2.0 for (user=alice).
-    let alter = crate::kafka_wire::quotas::alter_user_quota(
-        addr,
-        crate::CLIENT_ID,
-        ("admin", "admin-secret"),
-        "alice",
-        ("controller_mutation_rate", 2.0),
-    )
-    .await;
+    let alter = set_controller_mutation_quota(addr).await;
     assert!(alter[0].1 == 0, "alter should succeed");
 
     // Wait until the controller_mutation_rate quota is committed to this
@@ -131,11 +143,11 @@ async fn controller_mutation_rate_throttles_delete_topics() {
 
     // Seed a dummy ACL to disable the compat shim (allow-all when no ACLs present).
     // Use an unrelated ACL; the real alice ACLs come below.
-    let shim_disable = crate::support::acl::topic_acl_record(
-        "__compat_shim_disable__",
-        "User:admin",
-        AclOperation::Read,
-    );
+    let shim_disable = crate::support::acl::topic_acl_record(TopicAclSetup {
+        topic: "__compat_shim_disable__",
+        principal: "User:admin",
+        ..Default::default()
+    });
     handle
         .submit_metadata_record_for_test(shim_disable)
         .await
@@ -154,8 +166,11 @@ async fn controller_mutation_rate_throttles_delete_topics() {
     assert!(ec == 0);
 
     // Grant alice Topic Delete on "to-delete".
-    let alice_delete_acl =
-        crate::support::acl::topic_acl_record("to-delete", "User:alice", AclOperation::Delete);
+    let alice_delete_acl = crate::support::acl::topic_acl_record(TopicAclSetup {
+        topic: "to-delete",
+        operation: AclOperation::Delete,
+        ..Default::default()
+    });
     handle
         .submit_metadata_record_for_test(alice_delete_acl)
         .await
@@ -170,14 +185,7 @@ async fn controller_mutation_rate_throttles_delete_topics() {
         .await;
 
     // Now set the quota for alice and delete.
-    let alter = crate::kafka_wire::quotas::alter_user_quota(
-        addr,
-        crate::CLIENT_ID,
-        ("admin", "admin-secret"),
-        "alice",
-        ("controller_mutation_rate", 2.0),
-    )
-    .await;
+    let alter = set_controller_mutation_quota(addr).await;
     assert!(alter[0].1 == 0);
     // Wait for alice's controller_mutation_rate quota to land in the image
     // before deleting; DeleteTopics reads the rate from the image on consume.

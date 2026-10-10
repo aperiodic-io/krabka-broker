@@ -114,8 +114,15 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(broker, "share-group-authorization-test", name, 1)
-        .await
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "share-group-authorization-test",
+            name,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// The versions that both RPCs serve.

@@ -32,27 +32,20 @@ fn coordinator(log: Arc<InMemoryOffsetsLog>) -> Arc<GroupCoordinator> {
 }
 
 fn commit(topic: &str, partition: i32, offset: i64) -> Record {
-    crate::coordinator::test_support::offset_record("g", topic, partition, offset)
-}
-
-fn offset_tombstone(topic: &str, partition: i32) -> (Key, Option<Bytes>) {
-    (
-        Key::OffsetCommit {
-            group_id: "g".into(),
-            topic: topic.into(),
-            partition,
+    crate::coordinator::test_support::offset_record(
+        crate::coordinator::test_support::OffsetRecordSetup {
+            topic,
+            partition: krabka_ids::PartitionIndex(partition),
+            offset: krabka_log::Offset(offset),
+            ..Default::default()
         },
-        None,
     )
 }
 
-fn group_tombstone() -> (Key, Option<Bytes>) {
-    (
-        Key::GroupMetadata {
-            group_id: "g".into(),
-        },
-        None,
-    )
+#[derive(Clone, Copy)]
+enum MarkerAfterDelete {
+    None,
+    Commit,
 }
 
 struct Row {
@@ -62,52 +55,61 @@ struct Row {
     /// Offset commits of an open transaction of producer 7.
     transactional: Vec<Record>,
     /// Append a commit marker for producer 7 after the delete batch.
-    commit_after_delete: bool,
+    marker_after_delete: MarkerAfterDelete,
     expected_batch: Vec<(Key, Option<Bytes>)>,
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_deleted_group_and_its_offsets_stay_deleted_after_replay() {
+    let orders_group_tombstones = crate::coordinator::test_support::topic_deletion_tombstones(
+        crate::coordinator::test_support::TopicDeletionTombstonesSetup {
+            partitions: &[krabka_ids::PartitionIndex(0), krabka_ids::PartitionIndex(1)],
+            target: crate::coordinator::test_support::DeletionTarget::Group,
+            ..Default::default()
+        },
+    );
     let rows = [
         Row {
             name: "no offsets",
             committed: vec![],
             transactional: vec![],
-            commit_after_delete: false,
-            expected_batch: vec![group_tombstone()],
+            marker_after_delete: MarkerAfterDelete::None,
+            expected_batch: crate::coordinator::test_support::deletion_tombstones(
+                crate::coordinator::test_support::DeletionTombstonesSetup {
+                    target: crate::coordinator::test_support::DeletionTarget::Group,
+                    ..Default::default()
+                },
+            ),
         },
         Row {
             name: "two offsets on two topics",
             committed: vec![commit("orders", 0, 10), commit("payments", 3, 30)],
             transactional: vec![],
-            commit_after_delete: false,
-            expected_batch: vec![
-                offset_tombstone("orders", 0),
-                offset_tombstone("payments", 3),
-                group_tombstone(),
-            ],
+            marker_after_delete: MarkerAfterDelete::None,
+            expected_batch: crate::coordinator::test_support::deletion_tombstones(
+                crate::coordinator::test_support::DeletionTombstonesSetup {
+                    offsets: &[
+                        ("orders", krabka_ids::PartitionIndex(0)),
+                        ("payments", krabka_ids::PartitionIndex(3)),
+                    ],
+                    target: crate::coordinator::test_support::DeletionTarget::Group,
+                    ..Default::default()
+                },
+            ),
         },
         Row {
             name: "one pending transactional offset",
             committed: vec![commit("orders", 0, 10)],
             transactional: vec![commit("orders", 1, 11)],
-            commit_after_delete: false,
-            expected_batch: vec![
-                offset_tombstone("orders", 0),
-                offset_tombstone("orders", 1),
-                group_tombstone(),
-            ],
+            marker_after_delete: MarkerAfterDelete::None,
+            expected_batch: orders_group_tombstones.clone(),
         },
         Row {
             name: "transaction commits after the delete",
             committed: vec![commit("orders", 0, 10)],
             transactional: vec![commit("orders", 0, 12), commit("orders", 1, 11)],
-            commit_after_delete: true,
-            expected_batch: vec![
-                offset_tombstone("orders", 0),
-                offset_tombstone("orders", 1),
-                group_tombstone(),
-            ],
+            marker_after_delete: MarkerAfterDelete::Commit,
+            expected_batch: orders_group_tombstones.clone(),
         },
     ];
 
@@ -151,7 +153,7 @@ async fn a_deleted_group_and_its_offsets_stay_deleted_after_replay() {
         for mut delete in appended {
             log.append(&mut delete).unwrap();
         }
-        if row.commit_after_delete {
+        if matches!(row.marker_after_delete, MarkerAfterDelete::Commit) {
             log.append(&mut build_marker_batch(
                 ProducerId(7),
                 0,

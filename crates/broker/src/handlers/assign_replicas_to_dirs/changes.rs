@@ -155,6 +155,7 @@ fn assignment_change(
 #[cfg(test)]
 mod tests {
     use assert2::assert;
+    use krabka_ids::{NodeId, PartitionIndex};
     use krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord, TopicRecord};
     use krabka_protocol::{
         owned::assign_replicas_to_dirs_request::{
@@ -164,30 +165,38 @@ mod tests {
     };
 
     use super::*;
+    use crate::test_support::KafkaErrorCode;
 
     const DIR: uuid::Uuid = uuid::Uuid::from_u128(0xAA);
 
-    /// An image with the topic `name` (id `topic_id`) and its partition 0 on
-    /// `replicas`, with `directories` in the replica slots.
-    fn image_with(
-        name: &str,
+    const UNASSIGNED_DIRECTORIES: [uuid::Uuid; 2] = [uuid::Uuid::nil(); 2];
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct ReplicaImageSetup<'a> {
+        #[default("t")]
+        name: &'a str,
+        #[default(uuid::Uuid::from_u128(7))]
         topic_id: uuid::Uuid,
-        replicas: &[u64],
-        directories: &[uuid::Uuid],
-    ) -> MetadataImage {
+        #[default(&[NodeId(1), NodeId(2)])]
+        replicas: &'a [NodeId],
+        #[default(&UNASSIGNED_DIRECTORIES)]
+        directories: &'a [uuid::Uuid],
+    }
+
+    fn image_with(setup: ReplicaImageSetup<'_>) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
-        apply_topic(&mut image, name, topic_id, replicas, directories);
+        apply_topic(&mut image, setup);
         image
     }
 
-    fn apply_topic(
-        image: &mut MetadataImage,
-        name: &str,
-        topic_id: uuid::Uuid,
-        replicas: &[u64],
-        directories: &[uuid::Uuid],
-    ) {
-        let nodes: Vec<_> = replicas.iter().map(|&n| krabka_audit::NodeId(n)).collect();
+    fn apply_topic(image: &mut MetadataImage, setup: ReplicaImageSetup<'_>) {
+        let ReplicaImageSetup {
+            name,
+            topic_id,
+            replicas,
+            directories,
+        } = setup;
+        let nodes = replicas.to_vec();
         image.apply(&MetadataRecord::V1Topic(TopicRecord {
             name: name.into(),
             topic_id,
@@ -208,11 +217,11 @@ mod tests {
         }));
     }
 
-    fn assigned(topic: &str, broker: u64) -> MetadataRecord {
+    fn assigned(topic: &str, broker: NodeId) -> MetadataRecord {
         MetadataRecord::V1PartitionDirAssignment(PartitionDirAssignmentRecord {
             topic: topic.into(),
             partition: 0,
-            replica: krabka_audit::NodeId(broker),
+            replica: broker,
             directory: DIR,
         })
     }
@@ -224,31 +233,44 @@ mod tests {
         let cases = [
             (
                 "broker 2 sets its own slot",
-                image_with("t", topic_id, &[1, 2], &[nil, nil]),
-                2,
-                0,
-                Ok(Some(assigned("t", 2))),
+                image_with(ReplicaImageSetup {
+                    topic_id,
+                    ..Default::default()
+                }),
+                NodeId(2),
+                PartitionIndex(0),
+                Ok(Some(assigned("t", NodeId(2)))),
             ),
             (
                 "a slot that holds the directory is a no-op",
-                image_with("t", topic_id, &[1, 2], &[nil, DIR]),
-                2,
-                0,
+                image_with(ReplicaImageSetup {
+                    topic_id,
+                    directories: &[nil, DIR],
+                    ..Default::default()
+                }),
+                NodeId(2),
+                PartitionIndex(0),
                 Ok(None),
             ),
             (
                 "a broker that is not a replica",
-                image_with("t", topic_id, &[1, 2], &[nil, nil]),
-                99,
-                0,
-                Err(codes::NOT_LEADER_OR_FOLLOWER),
+                image_with(ReplicaImageSetup {
+                    topic_id,
+                    ..Default::default()
+                }),
+                NodeId(99),
+                PartitionIndex(0),
+                Err(KafkaErrorCode(codes::NOT_LEADER_OR_FOLLOWER)),
             ),
             (
                 "a partition that the topic does not have",
-                image_with("t", topic_id, &[1, 2], &[nil, nil]),
-                2,
-                99,
-                Err(codes::UNKNOWN_TOPIC_OR_PARTITION),
+                image_with(ReplicaImageSetup {
+                    topic_id,
+                    ..Default::default()
+                }),
+                NodeId(2),
+                PartitionIndex(99),
+                Err(KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION)),
             ),
         ];
         let mut actual = Vec::new();
@@ -256,9 +278,9 @@ mod tests {
         for (label, image, broker, partition, want) in cases {
             actual.push((
                 label,
-                assignment_change(&image, broker, "t", partition, DIR),
+                assignment_change(&image, broker.0, "t", partition.0, DIR),
             ));
-            expected.push((label, want));
+            expected.push((label, want.map_err(|code| code.0)));
         }
         assert!(actual == expected);
     }
@@ -267,7 +289,10 @@ mod tests {
     fn delta_preserves_replica_order_and_only_changes_the_reporting_slot() {
         let topic_id = uuid::Uuid::from_u128(0x42);
         let nil = uuid::Uuid::nil();
-        let mut image = image_with("t", topic_id, &[1, 2], &[nil, nil]);
+        let mut image = image_with(ReplicaImageSetup {
+            topic_id,
+            ..Default::default()
+        });
         let change = assignment_change(&image, 2, "t", 0, DIR)
             .expect("broker 2 is a replica")
             .expect("the slot changes");
@@ -289,8 +314,19 @@ mod tests {
         let elsewhere = uuid::Uuid::from_u128(0x43);
         let unknown = uuid::Uuid::from_u128(0x44);
         let nil = uuid::Uuid::nil();
-        let mut image = image_with("t", known, &[1, 2], &[nil, nil]);
-        apply_topic(&mut image, "other", elsewhere, &[1], &[nil]);
+        let mut image = image_with(ReplicaImageSetup {
+            topic_id: known,
+            ..Default::default()
+        });
+        apply_topic(
+            &mut image,
+            ReplicaImageSetup {
+                name: "other",
+                topic_id: elsewhere,
+                replicas: &[NodeId(1)],
+                directories: &[nil],
+            },
+        );
 
         let topic = |topic_id: uuid::Uuid, partitions: &[i32]| ReqTopicData {
             topic_id: ProtocolUuid(topic_id.into_bytes()),
@@ -332,7 +368,7 @@ mod tests {
             ..Default::default()
         };
         let expected = AssignmentPlan {
-            changes: vec![assigned("t", 2)],
+            changes: vec![assigned("t", NodeId(2))],
             response: AssignReplicasToDirsResponse {
                 directories: vec![RespDirData {
                     id: ProtocolUuid(DIR.into_bytes()),

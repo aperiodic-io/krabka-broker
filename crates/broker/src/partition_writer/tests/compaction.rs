@@ -19,15 +19,22 @@ use super::*;
 use crate::{
     partition::{ProduceData, ProduceJob},
     replica_state::ReplicaState,
+    test_support::UnixMillis,
     txn::marker::{MarkerType, build_marker_batch},
 };
 
 /// The idempotent producer: `(id, epoch)`.
-const IDEMPOTENT: (i64, i16) = (9_101, 0);
+const IDEMPOTENT: ProducerIdentity = ProducerIdentity {
+    id: ProducerId(9_101),
+    epoch: ProducerEpoch(0),
+};
 
 /// The transactional producer. Its commit marker is at the next epoch, as a
 /// transaction-version-2 coordinator writes it.
-const TRANSACTIONAL: (i64, i16) = (9_102, 3);
+const TRANSACTIONAL: ProducerIdentity = ProducerIdentity {
+    id: ProducerId(9_102),
+    epoch: ProducerEpoch(3),
+};
 
 /// Compaction passes for each row. The third pass is the first that can drop
 /// a commit marker: the first pass still meets a batch of its transaction, the
@@ -48,19 +55,67 @@ enum Role {
 
 krabka_macros::compacted_batch!(Kept);
 
-/// A one-record data batch of `key` and `value`. `producer` is `(id, epoch,
-/// base_sequence)`, or `None` for a client with no idempotence.
-fn record(
-    producer: Option<(i64, i16, i32)>,
-    transactional: bool,
-    (key, value): (&str, &str),
-    timestamp: i64,
-) -> RecordBatch {
-    let (producer_id, producer_epoch, base_sequence) = producer.unwrap_or((-1, -1, -1));
+#[derive(Clone, Copy)]
+struct ProducerEpoch(i16);
+
+#[derive(Clone, Copy, Default)]
+struct ProducerSequence(i32);
+
+#[derive(Clone, Copy)]
+struct ProducerIdentity {
+    id: ProducerId,
+    epoch: ProducerEpoch,
+}
+
+#[derive(Clone, Copy)]
+struct ProducerBatchIdentity {
+    identity: ProducerIdentity,
+    sequence: ProducerSequence,
+}
+
+#[derive(Clone, Copy, Default)]
+enum BatchTransaction {
+    #[default]
+    Ordinary,
+    Transactional,
+}
+
+#[derive(Clone, Copy, Default)]
+enum ProducerExpiry {
+    #[default]
+    Active,
+    Swept,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct RecordSetup<'a> {
+    producer: Option<ProducerBatchIdentity>,
+    transaction: BatchTransaction,
+    #[default(("k", "v"))]
+    payload: (&'a str, &'a str),
+    timestamp: UnixMillis,
+}
+
+/// A one-record data batch, ordinary and anonymous by default.
+fn record(setup: RecordSetup<'_>) -> RecordBatch {
+    let RecordSetup {
+        producer,
+        transaction,
+        payload: (key, value),
+        timestamp,
+    } = setup;
+    let (producer_id, producer_epoch, base_sequence) = producer.map_or((-1, -1, -1), |producer| {
+        (
+            producer.identity.id.0,
+            producer.identity.epoch.0,
+            producer.sequence.0,
+        )
+    });
     RecordBatch {
-        attributes: Attributes::default().with_transactional(transactional),
-        base_timestamp: timestamp,
-        max_timestamp: timestamp,
+        attributes: Attributes::default()
+            .with_transactional(matches!(transaction, BatchTransaction::Transactional)),
+        base_timestamp: timestamp.0,
+        max_timestamp: timestamp.0,
         producer_id,
         producer_epoch,
         base_sequence,
@@ -79,39 +134,75 @@ fn record(
 struct History {
     name: &'static str,
     batches: Vec<RecordBatch>,
-    swept: bool,
+    expiry: ProducerExpiry,
     want: Vec<Kept>,
 }
 
 /// Each history ends with a batch that stays in the active segment, which no
 /// pass rewrites.
-fn histories(now_ms: i64) -> Vec<History> {
-    let (idempotent_id, idempotent_epoch) = IDEMPOTENT;
-    let idempotent = |sequence| Some((idempotent_id, idempotent_epoch, sequence));
+fn histories(now_ms: UnixMillis) -> Vec<History> {
+    let idempotent = |sequence| {
+        Some(ProducerBatchIdentity {
+            identity: IDEMPOTENT,
+            sequence,
+        })
+    };
     let superseded = vec![
-        record(idempotent(0), false, ("a", "p-a"), now_ms),
-        record(idempotent(1), false, ("b", "p-b"), now_ms),
-        record(None, false, ("a", "a-2"), now_ms),
-        record(None, false, ("b", "b-3"), now_ms),
-        record(None, false, ("c", "c-4"), now_ms),
+        record(RecordSetup {
+            producer: idempotent(ProducerSequence(0)),
+            payload: ("a", "p-a"),
+            timestamp: now_ms,
+            ..Default::default()
+        }),
+        record(RecordSetup {
+            producer: idempotent(ProducerSequence(1)),
+            payload: ("b", "p-b"),
+            timestamp: now_ms,
+            ..Default::default()
+        }),
+        record(RecordSetup {
+            payload: ("a", "a-2"),
+            timestamp: now_ms,
+            ..Default::default()
+        }),
+        record(RecordSetup {
+            payload: ("b", "b-3"),
+            timestamp: now_ms,
+            ..Default::default()
+        }),
+        record(RecordSetup {
+            payload: ("c", "c-4"),
+            timestamp: now_ms,
+            ..Default::default()
+        }),
     ];
-    let (transactional_id, transactional_epoch) = TRANSACTIONAL;
     let committed = vec![
-        record(
-            Some((transactional_id, transactional_epoch, 0)),
-            true,
-            ("a", "t-a"),
-            now_ms,
-        ),
+        record(RecordSetup {
+            producer: Some(ProducerBatchIdentity {
+                identity: TRANSACTIONAL,
+                sequence: ProducerSequence::default(),
+            }),
+            transaction: BatchTransaction::Transactional,
+            payload: ("a", "t-a"),
+            timestamp: now_ms,
+        }),
         build_marker_batch(
-            ProducerId(transactional_id),
-            transactional_epoch + 1,
+            TRANSACTIONAL.id,
+            TRANSACTIONAL.epoch.0 + 1,
             Offset(1),
             MarkerType::Commit,
             17,
         ),
-        record(None, false, ("a", "a-2"), now_ms),
-        record(None, false, ("c", "c-3"), now_ms),
+        record(RecordSetup {
+            payload: ("a", "a-2"),
+            timestamp: now_ms,
+            ..Default::default()
+        }),
+        record(RecordSetup {
+            payload: ("c", "c-3"),
+            timestamp: now_ms,
+            ..Default::default()
+        }),
     ];
     vec![
         // Kafka keeps the batch that holds the last sequence of an active
@@ -125,7 +216,7 @@ fn histories(now_ms: i64) -> Vec<History> {
                 Kept::whole(4, &superseded[4]),
             ],
             batches: superseded.clone(),
-            swept: false,
+            expiry: ProducerExpiry::Active,
         },
         // `ProducerStateManager.removeExpiredProducers` removed the producer,
         // so nothing keeps its batches.
@@ -137,7 +228,7 @@ fn histories(now_ms: i64) -> Vec<History> {
                 Kept::whole(4, &superseded[4]),
             ],
             batches: superseded,
-            swept: true,
+            expiry: ProducerExpiry::Swept,
         },
         // A marker that moves the epoch removes the batches from the producer
         // state, so the marker is the last record of the producer. Kafka keeps
@@ -151,7 +242,7 @@ fn histories(now_ms: i64) -> Vec<History> {
                 Kept::whole(3, &committed[3]),
             ],
             batches: committed,
-            swept: false,
+            expiry: ProducerExpiry::Active,
         },
     ]
 }
@@ -267,7 +358,7 @@ async fn compacted(role: Role, history: &History, now_ms: i64) -> Vec<Kept> {
     }
     let log_end = log.lock().expect("log lock").log_end_offset();
     replica_state.lock().await.hw = log_end;
-    if history.swept {
+    if matches!(history.expiry, ProducerExpiry::Swept) {
         // The maintenance loop sweeps the tracker and the log of every
         // hosted partition (`spawn_producer_expiry`).
         let expiration = crate::config::BrokerConfig::default().producer_id_expiration;
@@ -306,7 +397,7 @@ async fn compacted(role: Role, history: &History, now_ms: i64) -> Vec<Kept> {
 #[tokio::test]
 async fn compaction_keeps_the_last_record_of_each_active_producer_on_every_replica() {
     let now_ms = crate::time_util::now_ms();
-    for history in histories(now_ms) {
+    for history in histories(UnixMillis(now_ms)) {
         for role in [Role::Leader, Role::Follower] {
             let kept = compacted(role, &history, now_ms).await;
             check!(kept == history.want, "{}, {role:?}", history.name);

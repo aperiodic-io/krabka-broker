@@ -47,3 +47,11 @@ pub(super) struct Node<L: SimNodeLog> {
     /// with the quorum and resigns.
     pub(super) check_quorum_deadline: Option<SimInstant>,
 }
+
+impl<L: SimNodeLog> Node<L> {
+    /// Append under the machine's current epoch without advancing its durability frontier.
+    pub(super) fn append_in_current_epoch(&mut self, count: usize) {
+        self.log
+            .append_in_epoch(self.machine.quorum_state().leader_epoch, count);
+    }
+}

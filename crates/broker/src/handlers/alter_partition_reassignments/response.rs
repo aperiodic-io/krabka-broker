@@ -75,7 +75,9 @@ mod tests {
     use super::*;
     use crate::{
         codes::{CLUSTER_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_OR_PARTITION},
-        handlers::alter_partition_reassignments::test_support::request,
+        handlers::alter_partition_reassignments::test_support::{
+            ReassignmentRequestSetup, request,
+        },
     };
 
     #[test]
@@ -99,7 +101,11 @@ mod tests {
 
     #[test]
     fn whole_request_error_preserves_request_shape() {
-        let req = request(false, "payments", 8, Some(vec![1, 2]));
+        let req = request(ReassignmentRequestSetup {
+            topic: "payments",
+            partition_index: krabka_ids::PartitionIndex(8),
+            ..Default::default()
+        });
 
         let resp = whole_request_error(&req, CLUSTER_AUTHORIZATION_FAILED, "denied");
 

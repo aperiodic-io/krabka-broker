@@ -238,7 +238,14 @@ mod tests {
     };
 
     fn commit(group: &str, topic: &str, partition: i32, offset: i64) -> Record {
-        crate::coordinator::test_support::offset_record(group, topic, partition, offset)
+        crate::coordinator::test_support::offset_record(
+            crate::coordinator::test_support::OffsetRecordSetup {
+                group,
+                topic,
+                partition: krabka_ids::PartitionIndex(partition),
+                offset: krabka_log::Offset(offset),
+            },
+        )
     }
 
     fn tombstone(group: &str, topic: &str, partition: i32) -> Record {

@@ -133,38 +133,39 @@ impl FollowerLog {
     }
 
     pub(super) async fn reset_to(&self, offset: Offset) -> Result<(), crate::BrokerError> {
-        let log = self.log.clone();
-        let durable_offset_path = self.durable_offset_path.clone();
-        run_blocking(move || {
-            let mut log = log.lock();
+        self.mutate_and_checkpoint(move |log| {
             log.reset_to(offset)?;
-            log.sync()?;
-            write_durable_offset(
-                &durable_offset_path,
-                DurableRange {
-                    start: offset,
-                    end: offset,
-                },
-            )?;
-            Ok(())
+            Ok(DurableRange {
+                start: offset,
+                end: offset,
+            })
         })
         .await
     }
 
     pub(super) async fn truncate_to(&self, offset: Offset) -> Result<(), crate::BrokerError> {
+        self.mutate_and_checkpoint(move |log| {
+            log.truncate_to(offset)?;
+            Ok(DurableRange {
+                start: log.log_start_offset(),
+                end: log.log_end_offset(),
+            })
+        })
+        .await
+    }
+
+    /// Fsync the mutation before publishing its new durable range.
+    async fn mutate_and_checkpoint(
+        &self,
+        mutation: impl FnOnce(&mut Log) -> Result<DurableRange, crate::BrokerError> + Send + 'static,
+    ) -> Result<(), crate::BrokerError> {
         let log = self.log.clone();
         let durable_offset_path = self.durable_offset_path.clone();
         run_blocking(move || {
             let mut log = log.lock();
-            log.truncate_to(offset)?;
+            let range = mutation(&mut log)?;
             log.sync()?;
-            write_durable_offset(
-                &durable_offset_path,
-                DurableRange {
-                    start: log.log_start_offset(),
-                    end: log.log_end_offset(),
-                },
-            )?;
+            write_durable_offset(&durable_offset_path, range)?;
             Ok(())
         })
         .await
@@ -293,6 +294,12 @@ mod tests {
 
     use super::*;
 
+    fn fresh_follower() -> (tempfile::TempDir, FollowerLog) {
+        let dir = tempfile::tempdir().unwrap();
+        let log = Log::open(dir.path(), LogConfig::default()).unwrap();
+        (dir, FollowerLog::for_log(log))
+    }
+
     #[cfg(unix)]
     #[test]
     fn interrupted_trim_keeps_a_recoverable_durable_range() {
@@ -405,8 +412,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_appends_and_syncs_a_contiguous_fetch() {
-        let dir = tempfile::tempdir().unwrap();
-        let follower = FollowerLog::for_log(Log::open(dir.path(), LogConfig::default()).unwrap());
+        let (dir, follower) = fresh_follower();
         let batch = RecordBatch {
             base_offset: 0,
             records: vec![Record::default()],
@@ -426,8 +432,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_rejects_a_gap_before_writing() {
-        let dir = tempfile::tempdir().unwrap();
-        let follower = FollowerLog::for_log(Log::open(dir.path(), LogConfig::default()).unwrap());
+        let (_dir, follower) = fresh_follower();
         let batch = RecordBatch {
             base_offset: 1,
             records: vec![Record::default()],
@@ -445,8 +450,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_accepts_a_partial_fetch_and_rejects_a_leader_overrun() {
-        let dir = tempfile::tempdir().unwrap();
-        let follower = FollowerLog::for_log(Log::open(dir.path(), LogConfig::default()).unwrap());
+        let (_dir, follower) = fresh_follower();
         let first = RecordBatch {
             base_offset: 0,
             records: vec![Record::default()],
@@ -478,8 +482,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_reset_persists_the_leader_log_start() {
-        let dir = tempfile::tempdir().unwrap();
-        let follower = FollowerLog::for_log(Log::open(dir.path(), LogConfig::default()).unwrap());
+        let (dir, follower) = fresh_follower();
 
         follower.reset_to(Offset(7)).await.unwrap();
 
@@ -492,8 +495,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_trim_persists_the_leader_log_start() {
-        let dir = tempfile::tempdir().unwrap();
-        let follower = FollowerLog::for_log(Log::open(dir.path(), LogConfig::default()).unwrap());
+        let (dir, follower) = fresh_follower();
         let batches = (0..2)
             .map(|base_offset| RecordBatch {
                 base_offset,
@@ -522,8 +524,7 @@ mod tests {
     /// epoch 5, so its copy of that epoch ends where epoch 7 starts.
     #[tokio::test]
     async fn unplaceable_epoch_divergence_truncates_to_the_local_end_of_the_leader_epoch() {
-        let dir = tempfile::tempdir().unwrap();
-        let follower = FollowerLog::for_log(Log::open(dir.path(), LogConfig::default()).unwrap());
+        let (_dir, follower) = fresh_follower();
         follower
             .append(
                 Offset(0),
@@ -556,8 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn divergence_before_the_retained_range_resets_to_the_leader_start() {
-        let dir = tempfile::tempdir().unwrap();
-        let follower = FollowerLog::for_log(Log::open(dir.path(), LogConfig::default()).unwrap());
+        let (_dir, follower) = fresh_follower();
         follower
             .append(
                 Offset(0),

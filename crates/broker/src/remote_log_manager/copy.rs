@@ -370,13 +370,14 @@ mod tests {
     use std::sync::Arc;
 
     use assert2::{assert, check};
-    use krabka_ids::LeaderEpoch;
+    use krabka_ids::{LeaderEpoch, Offset};
     use krabka_remote_storage::{
         ChainHead, ChainStamp, CustomMetadata, EpochId, IndexType,
         InmemoryRemoteLogMetadataManager, LogSegmentData, ManifestSeq, RemoteLogMetadataManager,
         RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
         RemoteLogSegmentMetadataUpdate, RemoteStorageError, RemoteStorageManager, WormChainRecord,
     };
+    use krabka_units::bytes;
     use uuid::Uuid;
 
     use super::*;
@@ -386,10 +387,10 @@ mod tests {
             ArchiveMode, test_support as fixtures,
             test_support::{
                 FakeWormArchive, archived_backends, copy_exports, local_backends,
-                missing_remote_reads, stuck_started_segment, synth_export, three_exports, tier,
-                tier_with_metrics, tp,
+                missing_remote_reads, stuck_started_segment, synth_export, three_exports, tier, tp,
             },
         },
+        test_support::UnixMillis,
     };
 
     /// KIP-405's `RemoteCopyRequestsPerSec`, `RemoteCopyBytesPerSec` and the
@@ -400,7 +401,15 @@ mod tests {
         ($rsm:ident, $rlmm:ident, $metrics:ident, $tier:ident, $unstable:expr) => {
             let ($rsm, $rlmm) = accepting_backends(None);
             let $metrics = BrokerMetrics::new();
-            let $tier = tier_with_metrics(&$rsm, &$rlmm, &$metrics, $unstable);
+            let $tier = fixtures::configured_tier(
+                &$rsm,
+                &$rlmm,
+                fixtures::TierSetup {
+                    metrics: &$metrics,
+                    unstable_api_versions: $unstable,
+                    ..Default::default()
+                },
+            );
         };
     }
 
@@ -610,14 +619,20 @@ mod tests {
         let rsm: Arc<dyn RemoteStorageManager> = Arc::new(RefusingRsm);
         let rlmm = fixtures::in_memory_metadata();
         let metrics = BrokerMetrics::new();
-        let tier = tier_with_metrics(
+        let tier = fixtures::configured_tier(
             &rsm,
             &rlmm,
-            &metrics,
-            crate::api_catalog::UnstableApiVersions::Disabled,
+            fixtures::TierSetup {
+                metrics: &metrics,
+                ..Default::default()
+            },
         );
 
-        let copied = copy_exports(&tier, vec![synth_export(0, 9, 100, 64)]).await;
+        let copied = copy_exports(
+            &tier,
+            vec![synth_export(fixtures::SegmentExportSetup::default())],
+        )
+        .await;
 
         check!(copied == 0);
         let topic = fixtures::orders_label();
@@ -760,7 +775,7 @@ mod tests {
 
         let copied = copy_exports(
             &tier(ArchiveMode::Mutable, &rsm, &rlmm),
-            vec![synth_export(0, 9, 100, 64)],
+            vec![synth_export(fixtures::SegmentExportSetup::default())],
         )
         .await;
 
@@ -878,7 +893,7 @@ mod tests {
             let (rsm, rlmm) = fixtures::write_once_backends();
             let copied = copy_exports(
                 &tier(ArchiveMode::WriteOnce, &rsm, &rlmm),
-                vec![synth_export(0, 9, 100, 64)],
+                vec![synth_export(fixtures::SegmentExportSetup::default())],
             )
             .await;
             check!(copied == 1);
@@ -898,25 +913,37 @@ mod tests {
     /// metadata manager, the way a previous leader's copy pass left it. The
     /// boundaries are the caller's, which is the point: the next leader's are
     /// its own.
-    fn finished_segment(
-        rlmm: &Arc<dyn RemoteLogMetadataManager>,
-        id: u128,
-        base: i64,
-        last: i64,
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct FinishedSegmentSetup {
+        #[default(Uuid::from_u128(1))]
+        id: Uuid,
+        #[default(krabka_log::Offset(0))]
+        base: krabka_log::Offset,
+        #[default(krabka_log::Offset(99))]
+        last: krabka_log::Offset,
+        #[default(LeaderEpoch(0))]
         epoch: LeaderEpoch,
-    ) {
-        let segment_id = RemoteLogSegmentId::new(tp(), Uuid::from_u128(id));
-        let started = RemoteLogSegmentMetadata::new(
-            segment_id.clone(),
+    }
+
+    fn finished_segment(rlmm: &Arc<dyn RemoteLogMetadataManager>, setup: FinishedSegmentSetup) {
+        let FinishedSegmentSetup {
+            id,
             base,
             last,
+            epoch,
+        } = setup;
+        let segment_id = RemoteLogSegmentId::new(tp(), id);
+        let started = RemoteLogSegmentMetadata::new(
+            segment_id.clone(),
+            base.0,
+            last.0,
             100,
             1,
             100,
             RemoteLogSegmentDetails::new(
                 64,
                 RemoteLogSegmentState::CopySegmentStarted,
-                maplit::btreemap! {epoch => base},
+                maplit::btreemap! {epoch => base.0},
             ),
         )
         .unwrap();
@@ -1035,6 +1062,31 @@ mod tests {
         );
     }
 
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct MisalignedExportSetup {
+        #[default([bytes(64); 3])]
+        sizes: [krabka_units::ByteSize; 3],
+    }
+
+    /// The new leader's offset ranges straddle the old leader's segment boundary.
+    fn misaligned_exports(setup: MisalignedExportSetup) -> Vec<SegmentExport> {
+        [
+            (Offset(0)..=Offset(49), UnixMillis(100)),
+            (Offset(50)..=Offset(149), UnixMillis(200)),
+            (Offset(150)..=Offset(249), UnixMillis(300)),
+        ]
+        .into_iter()
+        .zip(setup.sizes)
+        .map(|((bounds, timestamp), size)| {
+            synth_export(fixtures::SegmentExportSetup {
+                bounds,
+                timestamp,
+                size,
+            })
+        })
+        .collect()
+    }
+
     /// The failover case the whole change is for. The previous leader copied
     /// its own `0..=99` and `100..=199`; the new leader rolled `0..=49`,
     /// `50..=149` and `150..=249` over the same records. Under the old
@@ -1045,19 +1097,29 @@ mod tests {
     #[tokio::test]
     async fn a_new_leaders_misaligned_segments_below_the_watermark_are_not_re_copied() {
         let (rsm, rlmm) = accepting_backends(None);
-        finished_segment(&rlmm, 0xa1, 0, 99, LeaderEpoch(0));
-        finished_segment(&rlmm, 0xa2, 100, 199, LeaderEpoch(0));
+        finished_segment(
+            &rlmm,
+            FinishedSegmentSetup {
+                id: Uuid::from_u128(0xa1),
+                ..Default::default()
+            },
+        );
+        finished_segment(
+            &rlmm,
+            FinishedSegmentSetup {
+                id: Uuid::from_u128(0xa2),
+                base: krabka_log::Offset(100),
+                last: krabka_log::Offset(199),
+                ..Default::default()
+            },
+        );
 
         let copied = copy_eligible(
             &tier(ArchiveMode::Mutable, &rsm, &rlmm),
             &tp(),
             2,
             LeaderEpoch(1),
-            vec![
-                synth_export(0, 49, 100, 64),
-                synth_export(50, 149, 200, 64),
-                synth_export(150, 249, 300, 64),
-            ],
+            misaligned_exports(MisalignedExportSetup::default()),
         )
         .await;
 
@@ -1086,15 +1148,40 @@ mod tests {
     #[tokio::test]
     async fn a_hole_is_filled_without_re_copying_the_segments_above_it() {
         let (rsm, rlmm) = accepting_backends(None);
-        finished_segment(&rlmm, 0xb1, 0, 99, LeaderEpoch(0));
-        finished_segment(&rlmm, 0xb2, 200, 299, LeaderEpoch(0));
+        finished_segment(
+            &rlmm,
+            FinishedSegmentSetup {
+                id: Uuid::from_u128(0xb1),
+                ..Default::default()
+            },
+        );
+        finished_segment(
+            &rlmm,
+            FinishedSegmentSetup {
+                id: Uuid::from_u128(0xb2),
+                base: krabka_log::Offset(200),
+                last: krabka_log::Offset(299),
+                ..Default::default()
+            },
+        );
 
         let copied = copy_exports(
             &tier(ArchiveMode::Mutable, &rsm, &rlmm),
             vec![
-                synth_export(0, 99, 100, 64),
-                synth_export(100, 199, 200, 64),
-                synth_export(200, 299, 300, 64),
+                synth_export(fixtures::SegmentExportSetup {
+                    bounds: Offset(0)..=Offset(99),
+                    ..Default::default()
+                }),
+                synth_export(fixtures::SegmentExportSetup {
+                    bounds: Offset(100)..=Offset(199),
+                    timestamp: UnixMillis(200),
+                    ..Default::default()
+                }),
+                synth_export(fixtures::SegmentExportSetup {
+                    bounds: Offset(200)..=Offset(299),
+                    timestamp: UnixMillis(300),
+                    ..Default::default()
+                }),
             ],
         )
         .await;
@@ -1109,13 +1196,21 @@ mod tests {
     async fn copy_lag_counts_the_segments_the_tier_does_not_hold_whole() {
         let rsm: Arc<dyn RemoteStorageManager> = Arc::new(RefusingRsm);
         let rlmm = fixtures::in_memory_metadata();
-        finished_segment(&rlmm, 0xc1, 0, 99, LeaderEpoch(0));
+        finished_segment(
+            &rlmm,
+            FinishedSegmentSetup {
+                id: Uuid::from_u128(0xc1),
+                ..Default::default()
+            },
+        );
         let metrics = BrokerMetrics::new();
-        let tier = tier_with_metrics(
+        let tier = fixtures::configured_tier(
             &rsm,
             &rlmm,
-            &metrics,
-            crate::api_catalog::UnstableApiVersions::Disabled,
+            fixtures::TierSetup {
+                metrics: &metrics,
+                ..Default::default()
+            },
         );
 
         // 0..=49 the tier holds; 50..=149 it holds only through 99, and
@@ -1126,11 +1221,9 @@ mod tests {
             &tp(),
             2,
             LeaderEpoch(1),
-            vec![
-                synth_export(0, 49, 100, 64),
-                synth_export(50, 149, 200, 32),
-                synth_export(150, 249, 300, 16),
-            ],
+            misaligned_exports(MisalignedExportSetup {
+                sizes: [bytes(64), bytes(32), bytes(16)],
+            }),
         )
         .await;
 
@@ -1161,7 +1254,7 @@ mod tests {
 
             let copied = copy_exports(
                 &tier(archive, &rsm, &rlmm),
-                vec![synth_export(0, 9, 100, 64)],
+                vec![synth_export(fixtures::SegmentExportSetup::default())],
             )
             .await;
 

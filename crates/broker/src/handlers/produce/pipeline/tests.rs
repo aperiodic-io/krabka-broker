@@ -37,7 +37,8 @@ async fn process_partition_non_leader_skips_schema_registry_and_preserves_hint()
         .expect("validator"),
     );
     let image = non_leader_image();
-    let fixture = crate::handlers::produce::test_support::PipelineFixture::new(1);
+    let fixture =
+        crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(1));
     let payload = encode_batch(&RecordBatch {
         records: vec![Record {
             value: Some(Bytes::from_static(&[0, 0, 0, 0, 42, b'a'])),
@@ -80,7 +81,8 @@ async fn process_partition_leader_without_local_replica_hints_leader() {
     // defaults a struct-field-deletion mutant would leave.
     let image = non_leader_image();
     // Empty registry → `fixture.partitions.get(..)` returns None.
-    let fixture = crate::handlers::produce::test_support::PipelineFixture::new(2);
+    let fixture =
+        crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(2));
     let payload = encode_batch(&RecordBatch {
         records: vec![Record {
             value: Some(Bytes::from_static(b"hello")),
@@ -130,10 +132,11 @@ fn non_leader_image() -> Arc<krabka_metadata::MetadataImage> {
         leader_epoch: krabka_metadata::LeaderEpoch(17),
         partition_epoch: 1,
         ..crate::handlers::test_support::replicated_partition(
-            "orders",
-            0,
-            krabka_audit::NodeId(2),
-            &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
+            crate::handlers::test_support::ReplicatedPartitionSetup {
+                leader: krabka_audit::NodeId(2),
+                replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
+                ..Default::default()
+            },
         )
     }));
     Arc::new(img)

@@ -40,15 +40,26 @@ fn partition_quorum_bootstraps_existing_source_into_every_replica() {
     );
 }
 
+async fn committed_source_prefix(
+    root: &std::path::Path,
+    records: i32,
+) -> (
+    std::path::PathBuf,
+    std::sync::Arc<std::sync::Mutex<krabka_log::Log>>,
+    super::QuorumWalStore,
+) {
+    let (source_dir, source) = super::test_support::reopenable_source(root);
+    let store = partition_store(root, source.clone(), 3);
+    let (_, leo) = append_source(&store, records).await;
+    assert!(store.sync_durable(leo).await.unwrap() == Offset(i64::from(records)));
+    (source_dir, source, store)
+}
+
 #[tokio::test]
 async fn partition_quorum_recovers_watermark_and_repairs_one_lost_replica() {
     let dir = tempfile::tempdir().unwrap();
-    let source_dir = dir.path().join("source");
-    let source = open_log(&source_dir);
-    let store = partition_store(dir.path(), source.clone(), 3);
+    let (source_dir, source, store) = committed_source_prefix(dir.path(), 1).await;
 
-    let (_results, leo) = append_source(&store, 1).await;
-    assert!(store.sync_durable(leo).await.unwrap() == Offset(1));
     drop(store);
     drop(source);
 
@@ -70,11 +81,7 @@ async fn partition_quorum_recovers_watermark_and_repairs_one_lost_replica() {
 #[tokio::test]
 async fn partition_quorum_discards_uncommitted_suffix_on_reopen() {
     let dir = tempfile::tempdir().unwrap();
-    let source_dir = dir.path().join("source");
-    let source = open_log(&source_dir);
-    let store = partition_store(dir.path(), source.clone(), 3);
-    let (_results, leo) = append_source(&store, 2).await;
-    assert!(store.sync_durable(leo).await.unwrap() == Offset(2));
+    let (source_dir, source, store) = committed_source_prefix(dir.path(), 2).await;
 
     store.engine.set_replica_alive(NodeId(1), false);
     store.engine.set_replica_alive(NodeId(2), false);

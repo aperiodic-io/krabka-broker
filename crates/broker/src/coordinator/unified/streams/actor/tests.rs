@@ -2,8 +2,6 @@
 //! heartbeat epoch sequence with no connected `MetadataSource`, and the
 //! resolution of a persisted per-group config override.
 
-use std::sync::atomic::Ordering;
-
 use assert2::{assert, check};
 
 use super::{
@@ -18,6 +16,16 @@ use crate::coordinator::unified::{
 };
 
 krabka_macros::single_replica_partition_fixture!(partition_record);
+
+fn epoch_five_member() -> crate::coordinator::unified::streams::state::StreamsMemberState {
+    let mut member = crate::coordinator::unified::streams::state::StreamsMemberState::joining(
+        "m1",
+        "client",
+        "/127.0.0.1",
+    );
+    member.member_epoch = 5;
+    member
+}
 
 #[test]
 fn persisted_group_config_overrides_actor_defaults() {
@@ -301,25 +309,18 @@ async fn fenced_epoch_is_rejected() {
 /// up again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_write_answers_its_code_and_writes_no_partial_batch() {
-    for (what, failure, expected) in
-        crate::coordinator::unified::test_support::heartbeat_write_failures()
-    {
-        let (coord, log) = make_coordinator();
-        let handle = coord.get_or_create_streams("g");
-        match failure {
-            Some(error) => {
-                *log.fail_next_with.lock().expect("not poisoned") = Some(error);
-            }
-            None => log.fail_next.store(true, Ordering::SeqCst),
-        }
+    for case in crate::coordinator::unified::test_support::heartbeat_write_failures() {
+        let fixture = case.coordinator(make_coordinator);
+        let handle = fixture.coordinator.get_or_create_streams("g");
 
         let response = heartbeat(&handle, member_request("m1", 0)).await;
 
         check!(
-            response == super::response::error_resp(expected, None),
-            "{what}"
+            response == super::response::error_resp(fixture.expected.0, None),
+            "{}",
+            fixture.label
         );
-        check!(log.batches().await.is_empty(), "{what}");
+        fixture.check_no_batches().await;
     }
 }
 
@@ -478,7 +479,7 @@ fn image_of(
     let mut records = vec![MetadataRecord::V1BrokerRegistration(
         BrokerRegistrationRecord {
             rack: broker_rack.map(str::to_owned),
-            ..crate::test_support::broker_registration(broker.0)
+            ..crate::test_support::broker_registration(broker)
         },
     )];
     for &(name, id, partitions) in topics {
@@ -490,17 +491,31 @@ fn image_of(
         }));
         for partition in 0..partitions {
             records.push(MetadataRecord::V1Partition(partition_record(
-                name, partition, broker,
+                name,
+                krabka_ids::PartitionIndex(partition),
+                broker,
             )));
         }
     }
     krabka_metadata::MetadataImage::from_records(uuid::Uuid::nil(), &records)
 }
 
-/// A topology with one subtopology `0` that reads `in` and, when `stateful`,
+#[derive(Clone, Copy, Default)]
+enum TopologyStorage {
+    #[default]
+    Stateless,
+    StoreChangelog,
+}
+
+#[derive(Clone, Copy, Default)]
+struct SingleSubtopologySetup {
+    storage: TopologyStorage,
+}
+
+/// A topology with one subtopology `0` that reads `in` and, with a state store,
 /// keeps the changelog topic `store-changelog`.
 fn one_subtopology(
-    stateful: bool,
+    setup: SingleSubtopologySetup,
 ) -> krabka_protocol::owned::streams_group_heartbeat_request::Topology {
     use krabka_protocol::owned::{
         common::streams_group_heartbeat_request::topic_info::TopicInfo,
@@ -512,7 +527,7 @@ fn one_subtopology(
         subtopologies: vec![Subtopology {
             subtopology_id: "0".into(),
             source_topics: vec!["in".into()],
-            state_changelog_topics: if stateful {
+            state_changelog_topics: if matches!(setup.storage, TopologyStorage::StoreChangelog) {
                 vec![TopicInfo {
                     name: "store-changelog".into(),
                     ..Default::default()
@@ -548,7 +563,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
     struct Row {
         name: &'static str,
         initial: krabka_metadata::MetadataImage,
-        stateful: bool,
+        storage: TopologyStorage,
         change: Change,
         /// The owned active tasks of the heartbeat, when it reports them.
         owned_active: Option<Vec<i32>>,
@@ -561,7 +576,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         Row {
             name: "the missing source topic is created",
             initial: image_of(None, &[]),
-            stateful: false,
+            storage: TopologyStorage::Stateless,
             change: Change::Image(Box::new(image_of(None, &[("in", 1, 2)]))),
             owned_active: None,
             epoch: 3,
@@ -571,7 +586,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         Row {
             name: "partitions are added to the source topic",
             initial: image_of(None, &[("in", 1, 1)]),
-            stateful: false,
+            storage: TopologyStorage::Stateless,
             change: Change::Image(Box::new(image_of(None, &[("in", 1, 2)]))),
             owned_active: Some(vec![0]),
             epoch: 3,
@@ -581,7 +596,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         Row {
             name: "the source topic is deleted",
             initial: image_of(None, &[("in", 1, 2)]),
-            stateful: false,
+            storage: TopologyStorage::Stateless,
             change: Change::Image(Box::new(image_of(None, &[]))),
             owned_active: Some(vec![]),
             epoch: 3,
@@ -595,7 +610,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         Row {
             name: "the member sends a new rack id",
             initial: image_of(None, &[("in", 1, 1)]),
-            stateful: false,
+            storage: TopologyStorage::Stateless,
             change: Change::Rack("rack-b"),
             owned_active: Some(vec![0]),
             epoch: 3,
@@ -605,7 +620,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         Row {
             name: "the member sends a new process id",
             initial: image_of(None, &[("in", 1, 1)]),
-            stateful: false,
+            storage: TopologyStorage::Stateless,
             change: Change::Process("process-b"),
             owned_active: Some(vec![0]),
             epoch: 3,
@@ -615,7 +630,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         Row {
             name: "the internal topic is created",
             initial: image_of(None, &[("in", 1, 1)]),
-            stateful: true,
+            storage: TopologyStorage::StoreChangelog,
             change: Change::Image(Box::new(image_of(
                 None,
                 &[("in", 1, 1), ("store-changelog", 2, 1)],
@@ -644,7 +659,9 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         let joined = heartbeat(
             &handle,
             StreamsGroupHeartbeatRequest {
-                topology: Some(one_subtopology(row.stateful)),
+                topology: Some(one_subtopology(SingleSubtopologySetup {
+                    storage: row.storage,
+                })),
                 ..request(0, "rack-a", "process-a")
             },
         )
@@ -679,8 +696,19 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         )
         .await;
 
-        let expected =
-            super::test_support::expected_active_response("m1", row.epoch, row.status, row.active);
+        let expected = super::test_support::expected_active_response(
+            super::test_support::ActiveResponseSetup {
+                epoch: crate::coordinator::unified::test_support::MemberEpoch(row.epoch),
+                status: row.status,
+                active: row.active.map(|partitions| {
+                    partitions
+                        .into_iter()
+                        .map(krabka_ids::PartitionIndex)
+                        .collect()
+                }),
+                ..Default::default()
+            },
+        );
         check!(resp == expected, "{}", row.name);
     }
 }
@@ -710,7 +738,7 @@ async fn a_new_target_persists_the_target_of_every_member() {
         member_id: member_id.into(),
         member_epoch,
         rebalance_timeout_ms: 1_000,
-        topology: (member_epoch == 0).then(|| one_subtopology(false)),
+        topology: (member_epoch == 0).then(|| one_subtopology(SingleSubtopologySetup::default())),
         ..Default::default()
     };
     let m1 = heartbeat(&handle, request("m1", 0)).await;
@@ -765,7 +793,9 @@ async fn a_seeded_group_asks_for_its_missing_internal_topics_again() {
             member_id: "m1".into(),
             member_epoch: 0,
             rebalance_timeout_ms: 1_000,
-            topology: Some(one_subtopology(true)),
+            topology: Some(one_subtopology(SingleSubtopologySetup {
+                storage: TopologyStorage::StoreChangelog,
+            })),
             ..Default::default()
         },
     )
@@ -842,7 +872,7 @@ async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() 
         member_epoch,
         process_id: Some(format!("process-{member_id}")),
         rebalance_timeout_ms: 60_000,
-        topology: (member_epoch == 0).then(|| one_subtopology(false)),
+        topology: (member_epoch == 0).then(|| one_subtopology(SingleSubtopologySetup::default())),
         active_tasks: Some(if owned.is_empty() {
             vec![]
         } else {
@@ -857,7 +887,17 @@ async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() 
         ..Default::default()
     };
     let expected = |member_id: &str, epoch, active: Option<Vec<i32>>| {
-        super::test_support::expected_active_response(member_id, epoch, Some(vec![]), active)
+        super::test_support::expected_active_response(super::test_support::ActiveResponseSetup {
+            member_id,
+            epoch: crate::coordinator::unified::test_support::MemberEpoch(epoch),
+            status: Some(vec![]),
+            active: active.map(|partitions| {
+                partitions
+                    .into_iter()
+                    .map(krabka_ids::PartitionIndex)
+                    .collect()
+            }),
+        })
     };
 
     let (before, _log) = make_coordinator();
@@ -981,12 +1021,7 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
         let topology = Topology {
             epoch: 1,
             subtopologies: vec![
-                Subtopology {
-                    subtopology_id: "0".into(),
-                    source_topics: vec!["orders".into()],
-                    repartition_sink_topics: vec!["rp".into()],
-                    ..Default::default()
-                },
+                crate::test_support::source_to_repartition(),
                 Subtopology {
                     subtopology_id: "1".into(),
                     source_topics: vec!["customers".into()],
@@ -1231,19 +1266,26 @@ async fn the_heartbeat_status_list_follows_kafka() {
         }
 
         let expected = super::test_support::expected_active_response(
-            row.member,
-            row.epoch,
-            Some(
-                row.status
-                    .iter()
-                    .map(|(status_code, detail)| Status {
-                        status_code: *status_code,
-                        status_detail: (*detail).into(),
-                        ..Default::default()
-                    })
-                    .collect(),
-            ),
-            row.active,
+            super::test_support::ActiveResponseSetup {
+                member_id: row.member,
+                epoch: crate::coordinator::unified::test_support::MemberEpoch(row.epoch),
+                status: Some(
+                    row.status
+                        .iter()
+                        .map(|(status_code, detail)| Status {
+                            status_code: *status_code,
+                            status_detail: (*detail).into(),
+                            ..Default::default()
+                        })
+                        .collect(),
+                ),
+                active: row.active.map(|partitions| {
+                    partitions
+                        .into_iter()
+                        .map(krabka_ids::PartitionIndex)
+                        .collect()
+                }),
+            },
         );
         check!(last == Some(expected), "{}", row.name);
     }
@@ -1424,7 +1466,8 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
                         port,
                         ..Default::default()
                     }),
-                    topology: (member_epoch == 0).then(|| one_subtopology(false)),
+                    topology: (member_epoch == 0)
+                        .then(|| one_subtopology(SingleSubtopologySetup::default())),
                     ..Default::default()
                 },
             )
@@ -1494,7 +1537,8 @@ async fn a_member_keeps_its_epoch_until_it_revokes_and_is_fenced_after_its_timeo
                 member_id: member_id.into(),
                 member_epoch,
                 rebalance_timeout_ms,
-                topology: (member_epoch == 0).then(|| one_subtopology(false)),
+                topology: (member_epoch == 0)
+                    .then(|| one_subtopology(SingleSubtopologySetup::default())),
                 active_tasks: owned.map(|partitions| {
                     vec![OwnedTaskIds {
                         subtopology_id: "0".into(),
@@ -1551,20 +1595,16 @@ async fn a_topology_update_or_an_invalid_owned_task_is_refused() {
     use crate::test_support::FakeMetadataSource;
 
     let join = |member_id: &str, epoch, source: &str| {
-        let mut topology = one_subtopology(false);
+        let mut topology = one_subtopology(SingleSubtopologySetup::default());
         topology.epoch = epoch;
         topology.subtopologies[0].source_topics = vec![source.into()];
-        StreamsGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: member_id.into(),
-            member_epoch: 0,
-            rebalance_timeout_ms: 1_000,
-            active_tasks: Some(vec![]),
-            standby_tasks: Some(vec![]),
-            warmup_tasks: Some(vec![]),
-            topology: Some(topology),
-            ..Default::default()
-        }
+        crate::test_support::streams_join_request(
+            topology,
+            crate::test_support::StreamsJoinSetup {
+                member_id,
+                ..Default::default()
+            },
+        )
     };
     let owning = |subtopology: &str, partition| StreamsGroupHeartbeatRequest {
         group_id: "g".into(),
@@ -1657,7 +1697,7 @@ async fn a_static_member_follows_kafka_static_membership() {
         active_tasks: Some(vec![]),
         standby_tasks: Some(vec![]),
         warmup_tasks: Some(vec![]),
-        topology: Some(one_subtopology(false)),
+        topology: Some(one_subtopology(SingleSubtopologySetup::default())),
         ..Default::default()
     };
     let beat = |member_id: &str, member_epoch, instance_id: &str| StreamsGroupHeartbeatRequest {
@@ -1799,12 +1839,7 @@ fn validate_offset_commit_follows_kafka_streams_group() {
     let offset = |api_version| CommitFence::Offset { api_version };
     let txn = CommitFence::Transactional;
     let mut group = crate::coordinator::unified::streams::state::StreamsGroupState::new("g");
-    let mut member = crate::coordinator::unified::streams::state::StreamsMemberState::joining(
-        "m1",
-        "client",
-        "/127.0.0.1",
-    );
-    member.member_epoch = 5;
+    let member = epoch_five_member();
     group.members.insert("m1".into(), member);
     let empty = crate::coordinator::unified::streams::state::StreamsGroupState::new("g");
 
@@ -1935,12 +1970,7 @@ fn older_epoch_commit_checks_each_tasks_assignment_epoch() {
         ],
     };
     let mut group = crate::coordinator::unified::streams::state::StreamsGroupState::new("g");
-    let mut member = crate::coordinator::unified::streams::state::StreamsMemberState::joining(
-        "m1",
-        "client",
-        "/127.0.0.1",
-    );
-    member.member_epoch = 5;
+    let mut member = epoch_five_member();
     member.active = maplit::btreemap! {"0".to_string() => vec![0, 1, 3]};
     member.active_pending_revocation = maplit::btreemap! {"0".to_string() => vec![2]};
     member.active_epochs = maplit::btreemap! {
@@ -2113,7 +2143,12 @@ async fn a_member_missing_a_rack_aware_tag_gets_missing_client_tags_at_version_1
         let mut last = None;
         for beat in row.beats {
             let (version, member_epoch, tags, topology) = match *beat {
-                Beat::Join(version, tags) => (version, 0, tags, Some(one_subtopology(false))),
+                Beat::Join(version, tags) => (
+                    version,
+                    0,
+                    tags,
+                    Some(one_subtopology(SingleSubtopologySetup::default())),
+                ),
                 Beat::Heartbeat(version, tags) => (version, epoch, tags, None),
                 Beat::Leave(version) => (version, -1, None, None),
             };
@@ -2673,7 +2708,7 @@ async fn a_bump_records_the_validated_topology_epoch() {
                 member_id: "m1".into(),
                 member_epoch: 0,
                 rebalance_timeout_ms: 1_000,
-                topology: Some(one_subtopology(false)),
+                topology: Some(one_subtopology(SingleSubtopologySetup::default())),
                 ..Default::default()
             },
         )

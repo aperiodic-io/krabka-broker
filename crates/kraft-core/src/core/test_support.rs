@@ -134,3 +134,16 @@ pub fn win_election(
     }
     actions
 }
+
+/// Both an election timeout and an accepted end-epoch request start pre-voting.
+pub fn check_prevote_started(machine: &QuorumStateMachine, actions: &[Action]) {
+    assert2::assert!(matches!(
+        machine.role(),
+        crate::role::Role::Prospective { .. }
+    ));
+    assert2::assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::SendVoteRequest { pre_vote: true, .. }))
+    );
+}

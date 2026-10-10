@@ -116,7 +116,6 @@ impl GroupCoordinator {
             group_id.into(),
             self.share_config.clone(),
             self.metadata.clone(),
-            self.offsets_log.clone(),
             self.clone(),
         ));
         let inserted = self
@@ -163,7 +162,6 @@ impl GroupCoordinator {
         let h = Arc::new(StreamsGroupActorHandle::spawn(
             group_id.into(),
             self.streams_config.clone(),
-            self.offsets_log.clone(),
             self.clone(),
         ));
         let inserted = self

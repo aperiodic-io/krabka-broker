@@ -42,7 +42,37 @@ pub fn empty_record_batch(n: i32) -> RecordBatch {
 ///
 /// # Panics
 /// Panics if the count or an index does not fit its original i32 field.
-pub fn producer_values_batch(pid: i64, epoch: i16, base_seq: i32, values: &[&str]) -> RecordBatch {
+/// A producer's sequence coordinate, independent of log offsets.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub struct ProducerSequence(pub i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct ProducerValuesSetup<'a> {
+    #[default(krabka_ids::ProducerId(7))]
+    pub pid: krabka_ids::ProducerId,
+    pub epoch: crate::support::transactions::ProducerEpoch,
+    pub base_seq: ProducerSequence,
+    #[default(&["v"])]
+    pub values: &'a [&'a str],
+}
+
+pub fn producer_values_batch(setup: ProducerValuesSetup<'_>) -> RecordBatch {
+    let ProducerValuesSetup {
+        pid,
+        epoch,
+        base_seq,
+        values,
+    } = setup;
     let n = i32::try_from(values.len()).expect("values.len fits i32");
     let mut records = Vec::with_capacity(values.len());
     for (i, value) in values.iter().enumerate() {
@@ -52,9 +82,9 @@ pub fn producer_values_batch(pid: i64, epoch: i16, base_seq: i32, values: &[&str
         ));
     }
     RecordBatch {
-        producer_id: pid,
-        producer_epoch: epoch,
-        base_sequence: base_seq,
+        producer_id: pid.0,
+        producer_epoch: epoch.0,
+        base_sequence: base_seq.0,
         last_offset_delta: n - 1,
         max_timestamp: i64::from(n),
         ..batch_from_records(records)
@@ -77,3 +107,52 @@ pub fn record_count(payload: Option<&krabka_protocol::records::RecordsPayload>) 
 krabka_macros::unix_millis_fixture!(
     pub now_ms, "clock after the epoch", "milliseconds fit an i64"
 );
+
+/// Lazily decode each metadata batch so callers retain their image-application order.
+pub fn metadata_batches(mut wire: &[u8]) -> impl Iterator<Item = RecordBatch> + '_ {
+    std::iter::from_fn(move || {
+        if wire.is_empty() {
+            None
+        } else {
+            Some(RecordBatch::decode(&mut wire).expect("decode a metadata batch"))
+        }
+    })
+}
+
+/// Number of records in a transaction-version probe batch.
+#[derive(Clone, Copy)]
+pub struct ProbeRecordCount(pub i32);
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum BatchTransaction {
+    #[default]
+    Transactional,
+    Ordinary,
+}
+
+/// The producer headers and record count needed by transaction-version probes.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct TransactionProbeBatchSetup {
+    pub producer: crate::support::transactions::ProducerIdentity,
+    pub sequence: ProducerSequence,
+    #[default(ProbeRecordCount(1))]
+    pub records: ProbeRecordCount,
+    pub transaction: BatchTransaction,
+}
+
+pub fn transaction_probe_batch(setup: TransactionProbeBatchSetup) -> RecordBatch {
+    RecordBatch {
+        attributes: krabka_protocol::records::Attributes::default()
+            .with_transactional(setup.transaction == BatchTransaction::Transactional),
+        producer_id: setup.producer.id.0,
+        producer_epoch: setup.producer.epoch.0,
+        base_sequence: setup.sequence.0,
+        last_offset_delta: setup.records.0 - 1,
+        max_timestamp: 1,
+        ..batch_from_records(
+            (0..setup.records.0)
+                .map(|offset| value_record(offset, Some(Bytes::from_static(b"v"))))
+                .collect(),
+        )
+    }
+}

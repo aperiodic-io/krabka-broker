@@ -38,7 +38,14 @@ async fn unknown_topic_returns_unknown_topic_or_partition() {
 #[tokio::test]
 async fn out_of_range_partition_returns_unknown_topic_or_partition() {
     let p = support::start().await;
-    create_topic(&p.client, "small", 1).await;
+    create_topic(
+        &p.client,
+        crate::support::topics::CreateTopicSetup {
+            topic: "small",
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Partition 5 doesn't exist (topic was created with 1 partition).
     let resp = p
@@ -79,7 +86,14 @@ async fn metadata_known_partition_not_hosted_locally_returns_not_leader() {
         "admin client",
     )
     .await;
-    create_topic(&admin, "remote", 1).await;
+    create_topic(
+        &admin,
+        crate::support::topics::CreateTopicSetup {
+            topic: "remote",
+            ..Default::default()
+        },
+    )
+    .await;
     cluster[0].0.wait_until_partition_present("remote", 0).await;
 
     let leader = cluster[0]

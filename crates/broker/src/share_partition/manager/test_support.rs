@@ -45,9 +45,23 @@ fn fake_source(image: Arc<MetadataImage>) -> Arc<dyn MetadataSource> {
     )
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, derive_more::Display, derive_more::From, derive_more::Into,
+)]
+pub(super) struct SessionCapacity(pub usize);
+
+#[derive(krabka_macros::FieldDefaults)]
+struct ManagerSetup {
+    #[default(SessionCapacity(crate::config::BrokerConfig::default().share_session_cache_max_when_unlimited))]
+    capacity: SessionCapacity,
+    #[default(Arc::new(RecordingDlq::default()))]
+    dlq: Arc<dyn DlqSink>,
+}
+
 pub(super) fn manager() -> Arc<SharePartitionLeaderManager> {
-    manager_with_unlimited_fallback(
-        crate::config::BrokerConfig::default().share_session_cache_max_when_unlimited,
+    manager_over(
+        fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil()))),
+        Arc::new(PartitionRegistry::new()),
     )
 }
 
@@ -78,20 +92,19 @@ pub(super) fn manager_over(
     controller: Arc<dyn MetadataSource>,
     reg: Arc<PartitionRegistry>,
 ) -> Arc<SharePartitionLeaderManager> {
-    build(
-        controller,
-        reg,
-        crate::config::BrokerConfig::default().share_session_cache_max_when_unlimited,
-        Arc::new(RecordingDlq::default()),
-    )
+    build(controller, reg, ManagerSetup::default())
 }
 
-pub(super) fn manager_with_unlimited_fallback(fallback: usize) -> Arc<SharePartitionLeaderManager> {
+pub(super) fn manager_with_unlimited_fallback(
+    fallback: SessionCapacity,
+) -> Arc<SharePartitionLeaderManager> {
     build(
         fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil()))),
         Arc::new(PartitionRegistry::new()),
-        fallback,
-        Arc::new(RecordingDlq::default()),
+        ManagerSetup {
+            capacity: fallback,
+            ..Default::default()
+        },
     )
 }
 
@@ -100,17 +113,19 @@ pub(super) fn manager_with_dlq(dlq: Arc<dyn DlqSink>) -> Arc<SharePartitionLeade
     build(
         fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil()))),
         Arc::new(PartitionRegistry::new()),
-        crate::config::BrokerConfig::default().share_session_cache_max_when_unlimited,
-        dlq,
+        ManagerSetup {
+            dlq,
+            ..Default::default()
+        },
     )
 }
 
 fn build(
     controller: Arc<dyn MetadataSource>,
     reg: Arc<PartitionRegistry>,
-    session_max: usize,
-    dlq: Arc<dyn DlqSink>,
+    setup: ManagerSetup,
 ) -> Arc<SharePartitionLeaderManager> {
+    let ManagerSetup { capacity, dlq } = setup;
     let coord = Arc::new(ShareCoordinator::new(
         krabka_audit::NodeId(1),
         reg.clone(),
@@ -132,30 +147,53 @@ fn build(
         controller,
         persister,
         Arc::new(ShareGroupConfig::default()),
-        session_max,
+        capacity.0,
         dlq,
     )
 }
 
-/// Opens a real data partition under `log_dir`, appends `batches`, publishes
-/// `hw` as its high watermark, and registers it in `reg`.
-///
-/// Each batch is `(timestamp_ms, values)`, and every record in it carries that
-/// timestamp, which is what a `by_duration` strategy resolves against.
+/// One timestamped batch of data records.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct TimedValues<'a> {
+    pub timestamp: crate::test_support::UnixMillis,
+    #[default(&[b"v"])]
+    pub values: &'a [&'static [u8]],
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(crate) struct DataPartitionSetup<'a> {
+    #[default("t")]
+    pub topic: &'a str,
+    pub partition: PartitionIndex,
+    pub batches: Vec<TimedValues<'a>>,
+    pub high_watermark: Offset,
+}
+
+/// Append the selected batches, publish the high watermark, and register a real partition.
 pub(crate) async fn open_data_partition(
     reg: &PartitionRegistry,
     log_dir: &Path,
-    topic: &str,
-    partition: i32,
-    batches: &[(i64, &[&'static [u8]])],
-    hw: Offset,
+    setup: DataPartitionSetup<'_>,
 ) {
-    let part = crate::test_support::open_partition(log_dir, topic, partition);
-    for (timestamp_ms, values) in batches {
+    let DataPartitionSetup {
+        topic,
+        partition,
+        batches,
+        high_watermark,
+    } = setup;
+    let part = crate::test_support::open_partition(
+        log_dir,
+        crate::test_support::StandalonePartitionSetup {
+            topic,
+            partition,
+            ..Default::default()
+        },
+    );
+    for TimedValues { timestamp, values } in batches {
         let mut batch = RecordBatch {
             partition_leader_epoch: 0,
             last_offset_delta: i32::try_from(values.len() - 1).expect("record count fits"),
-            ..crate::test_support::static_records_batch(values, *timestamp_ms)
+            ..crate::test_support::static_records_batch(values, timestamp)
         };
         part.log
             .lock()
@@ -163,6 +201,6 @@ pub(crate) async fn open_data_partition(
             .append(&mut batch)
             .expect("append records");
     }
-    part.replica_state.lock().await.hw = hw;
-    reg.insert(topic.into(), PartitionIndex(partition), part);
+    part.replica_state.lock().await.hw = high_watermark;
+    reg.insert(topic.into(), partition, part);
 }

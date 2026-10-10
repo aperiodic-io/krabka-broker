@@ -13,7 +13,7 @@ use super::{OP_DELETE, OP_SET, RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC};
 pub(super) fn make_image_with_broker(node_id: NodeId) -> MetadataImage {
     let mut img = MetadataImage::new(uuid::Uuid::nil());
     img.apply(&MetadataRecord::V1BrokerRegistration(
-        crate::test_support::broker_registration(node_id.0),
+        crate::test_support::broker_registration(node_id),
     ));
     img
 }

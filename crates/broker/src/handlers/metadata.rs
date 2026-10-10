@@ -679,7 +679,7 @@ mod tests {
             port: 1000,
             rack: Some("rack-a".to_string()),
             endpoints,
-            ..crate::test_support::broker_registration(7)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(7))
         }
     }
 

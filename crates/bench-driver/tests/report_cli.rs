@@ -88,26 +88,12 @@ fn report_reads_the_run_output_encoding_and_renders_operator_units() {
     check!(summary_csv.contains(",4.250,"));
 }
 
+krabka_macros::benchmark_latency_fixture!(sample_latency);
+krabka_macros::benchmark_scenario_fixture!(benchmark_scenario);
+
 fn write_run(dir: &Path, name: &str, stack: Stack) {
     let run = RunOutput {
-        scenario: Scenario {
-            name: "cell".into(),
-            mode_tag: ModeTag::Ci,
-            msg_size: kibibytes(1),
-            key_size: ByteSize::ZERO,
-            partitions: 6,
-            replication_factor: 1,
-            producers: 1,
-            consumers: 1,
-            mode: LoadMode::Saturate,
-            acks: Acks::Leader,
-            compression: Compression::None,
-            linger: millis(5),
-            batch_size: kibibytes(16),
-            duration: secs(60),
-            warmup: secs(10),
-            failover: None,
-        },
+        scenario: benchmark_scenario("cell", kibibytes(1)),
         stack,
         topology: Topology {
             partitions: 6,
@@ -124,15 +110,7 @@ fn write_run(dir: &Path, name: &str, stack: Stack) {
             producer_rate: per_sec(10_000),
             consumer_rate: per_sec(10_000),
         },
-        producer_latency: LatencyPercentiles {
-            p50: micros(1500),
-            p95: micros(3200),
-            p99: micros(4250),
-            p999: millis(9),
-            max: millis(42),
-            mean: micros(1800),
-            count: 600_000,
-        },
+        producer_latency: sample_latency(),
         consumer_e2e_latency: LatencyPercentiles::default(),
         resource: Resource {
             broker_cpu: secs(120),

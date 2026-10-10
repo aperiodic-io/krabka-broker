@@ -92,7 +92,8 @@ pub(crate) use self::{
         start_sasl_plaintext_broker_with_super_user,
     },
     three_broker_cluster::{
-        SaslCluster, start_registered_sasl_cluster, start_three_broker_sasl_plaintext_jvm_cluster,
+        SaslCluster, SaslClusterSetup, start_registered_sasl_cluster,
+        start_three_broker_sasl_plaintext_jvm_cluster,
         start_three_broker_sasl_plaintext_jvm_cluster_with_users,
     },
     tiered::start_host_broker_with_minio_tier,

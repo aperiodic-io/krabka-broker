@@ -11,7 +11,7 @@ use krabka_broker::{BrokerHandle, NodeId, codes};
 use krabka_metadata::{
     BreakGlassProposalRecord, MetadataImage, MetadataRecord, UnregisterBrokerRecord,
 };
-use krabka_protocol::{primitives::uuid::Uuid as WireUuid, records::RecordBatch};
+use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
 use crate::{
     cluster::boot,
@@ -35,10 +35,8 @@ async fn metadata_batches(
         crate::support::client::metadata_fetch(broker.controller_addr(), "break-glass-test", from)
             .await;
 
-    let mut bytes: &[u8] = &response.records;
     let mut batches = Vec::new();
-    while !bytes.is_empty() {
-        let batch = RecordBatch::decode(&mut bytes).expect("decode a metadata batch");
+    for batch in crate::support::records::metadata_batches(&response.records) {
         if batch.attributes.is_control_batch() {
             continue;
         }

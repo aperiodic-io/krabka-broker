@@ -96,18 +96,18 @@ fn create_topic(topic: &str) {
 /// Produce `count` records to `topic` through `kafka-console-producer`, one
 /// line per record on the tool's stdin.
 fn produce_lines(topic: &str, count: usize) {
-    let mut child = crate::support::jvm_docker_command(
-        KAFKA_IMAGE,
-        &[],
-        &[
+    let mut child = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE,
+        args: &[
             "kafka-console-producer",
             "--bootstrap-server",
             broker0_advertised(),
             "--topic",
             topic,
         ],
-        true,
-    )
+        input: crate::support::ContainerInput::Attached,
+        ..Default::default()
+    })
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped())

@@ -23,18 +23,54 @@ use tokio::{
 
 use super::{BrokerRaftHandshake, frame::read_kafka_request};
 
-pub(super) fn request_frame(
-    api_key: i16,
-    api_version: i16,
-    corr_id: i32,
-    client_id: Option<&[u8]>,
-    flexible: bool,
-    body: &[u8],
-) -> Vec<u8> {
+#[derive(Clone, Copy, Default)]
+pub(super) struct HandshakeApiKey(pub i16);
+#[derive(Clone, Copy, Default)]
+pub(super) struct HandshakeApiVersion(pub i16);
+#[derive(Clone, Copy, Default)]
+pub(super) struct HandshakeCorrelationId(pub i32);
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum HandshakeHeader {
+    #[default]
+    Legacy,
+    Flexible,
+}
+
+impl HandshakeHeader {
+    pub(super) fn is_flexible(self) -> bool {
+        self == Self::Flexible
+    }
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct RequestFrameSetup<'a> {
+    #[default(HandshakeApiKey(super::API_KEY_SASL_HANDSHAKE))]
+    pub api_key: HandshakeApiKey,
+    #[default(HandshakeApiVersion(1))]
+    pub api_version: HandshakeApiVersion,
+    #[default(HandshakeCorrelationId(1))]
+    pub correlation: HandshakeCorrelationId,
+    #[default(Some(b"c"))]
+    pub client_id: Option<&'a [u8]>,
+    pub header: HandshakeHeader,
+    #[default(b"")]
+    pub body: &'a [u8],
+}
+
+pub(super) fn request_frame(setup: RequestFrameSetup<'_>) -> Vec<u8> {
+    let RequestFrameSetup {
+        api_key,
+        api_version,
+        correlation,
+        client_id,
+        header,
+        body,
+    } = setup;
     let mut frame = Vec::new();
-    frame.extend_from_slice(&api_key.to_be_bytes());
-    frame.extend_from_slice(&api_version.to_be_bytes());
-    frame.extend_from_slice(&corr_id.to_be_bytes());
+    frame.extend_from_slice(&api_key.0.to_be_bytes());
+    frame.extend_from_slice(&api_version.0.to_be_bytes());
+    frame.extend_from_slice(&correlation.0.to_be_bytes());
     match client_id {
         Some(id) => {
             let len = i16::try_from(id.len()).expect("client id fits i16");
@@ -43,7 +79,7 @@ pub(super) fn request_frame(
         }
         None => frame.extend_from_slice(&(-1i16).to_be_bytes()),
     }
-    if flexible {
+    if header == HandshakeHeader::Flexible {
         frame.push(0);
     }
     frame.extend_from_slice(body);
@@ -82,27 +118,29 @@ pub(super) async fn read_response_frame<R: tokio::io::AsyncRead + Unpin>(
 }
 
 pub(super) fn sasl_test_config() -> BrokerRaftHandshake {
-    handshake_config(
-        ListenerProtocol::SaslPlaintext,
-        vec![SaslMechanism::Plain],
-        HashMap::from([("broker".to_owned(), "secret".to_owned())]),
-    )
+    handshake_config(HandshakeSetup::default())
 }
 
-pub(super) fn handshake_config(
-    protocol: ListenerProtocol,
-    enabled_sasl_mechanisms: Vec<SaslMechanism>,
-    plain_credentials: HashMap<String, String>,
-) -> BrokerRaftHandshake {
+#[derive(krabka_macros::FieldDefaults)]
+pub(super) struct HandshakeSetup {
+    #[default(ListenerProtocol::SaslPlaintext)]
+    pub protocol: ListenerProtocol,
+    #[default(vec![SaslMechanism::Plain])]
+    pub mechanisms: Vec<SaslMechanism>,
+    #[default(HashMap::from([("broker".to_owned(), "secret".to_owned())]))]
+    pub credentials: HashMap<String, String>,
+}
+
+pub(super) fn handshake_config(setup: HandshakeSetup) -> BrokerRaftHandshake {
     BrokerRaftHandshake {
         tls_acceptor: None,
-        plain_credentials,
-        enabled_sasl_mechanisms,
+        plain_credentials: setup.credentials,
+        enabled_sasl_mechanisms: setup.mechanisms,
         gssapi: None,
         oauthbearer_validator: krabka_security::OAuthBearerValidator::default(),
         oauthbearer_jwks_cache_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         oauthbearer_jwks_last_successful_fetch_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
-        protocol,
+        protocol: setup.protocol,
         controller: Arc::new(OnceCell::new()),
         delegation_token_secret_key: None,
         audit_log: Arc::new(OnceCell::new()),
@@ -124,14 +162,14 @@ pub(super) fn sasl_handshake_body() -> Vec<u8> {
     body.to_vec()
 }
 
-pub(super) fn api_versions_body(version: i16) -> Vec<u8> {
+pub(super) fn api_versions_body(version: HandshakeApiVersion) -> Vec<u8> {
     let mut body = bytes::BytesMut::new();
     ApiVersionsRequest {
         client_software_name: "raft-peer".to_string(),
         client_software_version: "1.0".to_string(),
         ..Default::default()
     }
-    .encode(&mut body, version)
+    .encode(&mut body, version.0)
     .expect("encode api versions");
     body.to_vec()
 }

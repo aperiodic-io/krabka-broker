@@ -11,6 +11,21 @@ use crate::producer_snapshot::{
 };
 use crate::raft::frontier_reaches;
 
+open_logic! {
+pub(super) fn retry_row_matches(
+    rows: Seq<ProducerSnapshotEntryFacts>,
+    request: (i16, i32, i32, bool),
+    window: (Int, Int),
+    publication: (Int, Int, bool),
+) -> bool {
+    pearlite! { publication.2 == (publication.0 >= publication.1)
+        && request.0 == rows[window.1].producer_epoch
+        && snapshot_sequence_matches(rows[window.1], request.1@, request.2@)
+        && (forall<i: Int> window.0 <= i && i < window.1 ==>
+            !snapshot_sequence_matches(rows[i], request.1@, request.2@)) }
+}
+}
+
 type RebuiltRetry = (usize, ProducerDecision, Option<(usize, i64, i64, bool)>);
 
 /// The latest contiguous epoch's last five data rows form the retry window.
@@ -35,11 +50,7 @@ type RebuiltRetry = (usize, ProducerDecision, Option<(usize, i64, i64, bool)>);
             && (match result.1 { ProducerDecision::Duplicate { retained: slot } =>
                 slot@ == if index@ + 1 == rows@.len() { 4 } else { index@ - result.0@ }, _ => false })
             && recovered_batch_coordinates(rows@[index@], base@, frontier@, end@)
-            && ready == (hwm@ >= frontier@)
-            && request.0 == rows@[index@].producer_epoch
-            && snapshot_sequence_matches(rows@[index@], request.1@, request.2@)
-            && (forall<i: Int> result.0@ <= i && i < index@ ==>
-                !(snapshot_sequence_matches(rows@[i], request.1@, request.2@))),
+            && retry_row_matches(rows@, request, (result.0@, index@), (hwm@, frontier@, ready)),
     }
     && (rows@.len() == 0 ==> result.1 == if request.3 && end@ == 0 && request.1@ != 0 {
         ProducerDecision::OutOfOrder } else { ProducerDecision::Append })

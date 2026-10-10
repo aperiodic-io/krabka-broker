@@ -604,10 +604,7 @@ fn tiered_storage_rules_follow_kafkas_log_config() {
         ),
     ];
     for (tier_on, pairs, want) in cases {
-        let map: BTreeMap<String, String> = pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-            .collect();
+        let map = crate::test_support::config_map(&pairs);
         check!(
             canonical_topic_config_map(
                 &map,
@@ -726,10 +723,7 @@ fn cross_key_rules_read_the_cluster_broker_defaults() {
                 },
             ));
         }
-        let map: BTreeMap<String, String> = topic
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-            .collect();
+        let map = crate::test_support::config_map(&topic);
         check!(
             canonical_topic_config_map(
                 &map,

@@ -41,3 +41,16 @@ pub use self::{
         UNKNOWN_TOPIC_NAME,
     },
 };
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) struct ShareKeyVersion(pub i16);
+
+/// Check the independent schema discriminator and the decoded key together.
+#[cfg(test)]
+pub(super) fn check_key_round_trip(key: &ShareGroupKey, expected: ShareKeyVersion) {
+    let bytes = encode_share_key(key).unwrap();
+    let (version, body) = crate::coordinator::unified::test_support::peek_version(&bytes);
+    assert2::assert!(version == expected.0);
+    assert2::assert!(parse_share_key(version, body).unwrap() == *key);
+}

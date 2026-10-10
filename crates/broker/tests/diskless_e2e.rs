@@ -79,14 +79,6 @@ const VOTERS: usize = 3;
 /// follower is refused, so a plaintext cluster could never form a quorum here.
 const PASSWORD: &str = "diskless-e2e";
 
-/// The principal broker `node` authenticates as when it dials a peer.
-/// `wal::quorum::wire::conventional_node_id` reads the node id back out of
-/// this `broker-<id>` form, which is what lets the WAL leader tie the fetch to
-/// a voter without any per-cluster principal mapping.
-fn broker_principal(node: u64) -> String {
-    format!("broker-{node}")
-}
-
 /// The principal this suite's own admin, producer and fetch clients use. It is
 /// deliberately not a `broker-*` name: a client is not a voter.
 const CLIENT_PRINCIPAL: &str = "diskless-e2e-client";

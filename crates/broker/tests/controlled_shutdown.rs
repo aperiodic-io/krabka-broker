@@ -18,10 +18,15 @@ use std::{net::SocketAddr, time::Duration};
 use assert2::assert;
 use bytes::BytesMut;
 use krabka_broker::BrokerHandle;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
+use krabka_metadata::NodeId as MetadataNodeId;
 use krabka_protocol::{Decode, Encode, owned::create_topics_response::CreateTopicsResponse};
 use tokio::net::TcpStream;
 
-use crate::support::topics::{creatable_topic, create_topic_request};
+use crate::{
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    support::wire::HeaderEncoding as RequestHeaderEncoding,
+};
 
 mod kafka_wire;
 mod support;
@@ -32,19 +37,22 @@ const CREATE_TOPICS_VERSION: i16 = 7;
 /// The client id every request header in this suite carries.
 const CLIENT_ID: &str = "krabka-controlled-shutdown-test";
 
-async fn create_topic(addr: SocketAddr, name: &str, partitions: i32, rf: i16) {
-    let req = create_topic_request(creatable_topic(name.to_string(), partitions, rf), 5_000);
+async fn create_topic(addr: SocketAddr, setup: crate::support::topics::CreateTopicSetup<'_>) {
+    let name = setup.topic;
+    let req = crate::support::topics::configured_topic_request(setup);
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let mut body = BytesMut::new();
     req.encode(&mut body, CREATE_TOPICS_VERSION)
         .expect("encode CreateTopics");
     let resp_bytes = kafka_wire::round_trip(
         &mut stream,
-        CREATE_TOPICS_API_KEY,
-        CREATE_TOPICS_VERSION,
-        1,
-        CLIENT_ID,
-        true,
+        WireExchangeSetup {
+            api_key: WireApiKey(CREATE_TOPICS_API_KEY),
+            version: WireApiVersion(CREATE_TOPICS_VERSION),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
         &body,
     )
     .await
@@ -66,18 +74,29 @@ async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i3
     handle.wait_until_partition_present(topic, partition).await;
 }
 
+#[derive(krabka_macros::FieldDefaults)]
+struct ForcedLeadershipSetup<'a> {
+    #[default("drain-me")]
+    topic: &'a str,
+    #[default(crate::support::topics::TopicPartitionCount(4))]
+    partitions: crate::support::topics::TopicPartitionCount,
+    #[default(krabka_metadata::NodeId(1))]
+    leader: krabka_metadata::NodeId,
+    #[default(vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2), krabka_metadata::NodeId(3)])]
+    replicas: Vec<MetadataNodeId>,
+}
+
 /// Injects a `PartitionRecord` that makes `target` the leader for every
 /// partition of `topic`. It uses `submit_metadata_record_for_test` to bypass
 /// the public wire path, so the test does not have to drive `ElectLeaders`.
 /// It returns after the image shows `leader=target` for every partition.
-async fn force_leadership_for_test(
-    leader_handle: &BrokerHandle,
-    topic: &str,
-    partitions: i32,
-    target: u64,
-    replicas: &[u64],
-) {
+async fn force_leadership_for_test(leader_handle: &BrokerHandle, setup: ForcedLeadershipSetup<'_>) {
     use krabka_metadata::{MetadataRecord, PartitionRecord};
+
+    let topic = setup.topic;
+    let partitions = setup.partitions.0;
+    let target = setup.leader.0;
+    let replicas = setup.replicas;
 
     let image = leader_handle.controller_image_for_test();
     for p in 0..partitions {
@@ -88,16 +107,8 @@ async fn force_leadership_for_test(
             topic: topic.to_string(),
             partition: p,
             leader: krabka_metadata::NodeId(target),
-            replicas: replicas
-                .iter()
-                .copied()
-                .map(krabka_metadata::NodeId)
-                .collect(),
-            isr: replicas
-                .iter()
-                .copied()
-                .map(krabka_metadata::NodeId)
-                .collect(),
+            replicas: replicas.clone(),
+            isr: replicas.clone(),
             leader_epoch: pr.leader_epoch.next(),
             adding_replicas: vec![],
             removing_replicas: vec![],
@@ -135,9 +146,7 @@ fn leader_count(observer: &BrokerHandle, topic: &str, partitions: i32, target: u
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn controlled_shutdown_drains_leadership_and_returns_ok() {
-    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let lock = LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
-    let _g = lock.lock().await;
+    let _g = support::cluster_lock().lock().await;
 
     support::init_tracing();
 
@@ -168,7 +177,16 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
     let addr = cluster[raft_leader_idx].1.listen_addr;
     let topic: &str = "drain-me";
     let partitions: i32 = 4;
-    create_topic(addr, topic, partitions, 3).await;
+    create_topic(
+        addr,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            num_partitions: crate::support::topics::TopicPartitionCount(partitions),
+            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            ..Default::default()
+        },
+    )
+    .await;
     for p in 0..partitions {
         for (h, _, _) in &cluster {
             wait_partition_exists(h, topic, p).await;
@@ -184,10 +202,16 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
     replicas.sort_by_key(|n| i32::from(*n != target_node_id));
     force_leadership_for_test(
         &cluster[raft_leader_idx].0,
-        topic,
-        partitions,
-        target_node_id.0,
-        &replicas,
+        ForcedLeadershipSetup {
+            topic,
+            partitions: crate::support::topics::TopicPartitionCount(partitions),
+            leader: krabka_metadata::NodeId(target_node_id.0),
+            replicas: replicas
+                .iter()
+                .copied()
+                .map(krabka_metadata::NodeId)
+                .collect(),
+        },
     )
     .await;
 

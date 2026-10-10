@@ -227,6 +227,36 @@ mod tests {
         status_registry, validator, value_check,
     };
 
+    async fn bound_subject_validator() -> (MockServer, SchemaValidator, Vec<u8>) {
+        let server = registry(1).await;
+        let validator = validator(server.uri());
+        let field = framed(KNOWN_ID, b"anything");
+        check!(
+            value_check(&validator, ValidationMode::Id, &field)
+                .await
+                .is_ok()
+        );
+        (server, validator, field)
+    }
+
+    async fn json_id_endpoint(server: &MockServer, schema: serde_json::Value) {
+        super::super::test_support::schema_versions(server, 1).await;
+        response_endpoint(
+            server,
+            &format!("/schemas/ids/{KNOWN_ID}"),
+            ResponseTemplate::new(200).set_body_json(schema),
+            Some(1),
+        )
+        .await;
+    }
+
+    async fn fail_open_rejection(uri: String, case: &str) -> RejectReason {
+        let validator = configured_validator(uri, true).unwrap();
+        let result = value_check(&validator, ValidationMode::Id, &framed(KNOWN_ID, b"x")).await;
+        assert!(let Err(reason) = result, "{case}");
+        reason
+    }
+
     #[tokio::test]
     async fn a_field_that_carries_no_frame_is_rejected() {
         let server = registry(0).await;
@@ -274,11 +304,7 @@ mod tests {
     async fn a_bound_id_is_accepted_and_an_unbound_one_is_not() {
         // `expect(1)`: the cache is keyed by schema id, so the second check
         // decides from the cached subject set without a second registry call.
-        let server = registry(1).await;
-        let v = validator(server.uri());
-        let field = framed(KNOWN_ID, b"anything");
-
-        check!(value_check(&v, ValidationMode::Id, &field).await.is_ok());
+        let (_server, v, field) = bound_subject_validator().await;
 
         // Same id, different topic: the subject is `other-value`, which this
         // id is not registered under.
@@ -299,12 +325,7 @@ mod tests {
     async fn the_role_selects_the_subject() {
         // One call, for the same reason as above: the id is cached, and only
         // the subject the role derives differs between the two checks.
-        let server = registry(1).await;
-        let v = validator(server.uri());
-        let field = framed(KNOWN_ID, b"anything");
-
-        // `orders-value` is bound; `orders-key` is not.
-        check!(value_check(&v, ValidationMode::Id, &field).await.is_ok());
+        let (_server, v, field) = bound_subject_validator().await;
         let got = v
             .check(
                 "orders",
@@ -375,15 +396,18 @@ mod tests {
         check!(reason.label() == "body_mismatch", "{reason}");
     }
 
+    async fn check_full_avro(uri: String, datum: &[u8]) {
+        let v = validator(uri);
+        let field = framed(KNOWN_ID, datum);
+        let result = value_check(&v, ValidationMode::Full, &field).await;
+        check!(result.is_ok(), "{result:?}");
+    }
+
     #[tokio::test]
     async fn full_mode_accepts_a_body_that_matches_its_schema() {
         let server = registry(1).await;
-        let v = validator(server.uri());
-        // One Avro datum of AVRO: `id = "a"`. A string is a zig-zag varint
-        // length then the bytes, and 1 zig-zag encodes to 0x02.
-        let field = framed(KNOWN_ID, &[0x02, b'a']);
-        let result = value_check(&v, ValidationMode::Full, &field).await;
-        check!(result.is_ok(), "{result:?}");
+        // Avro string "a": zig-zag length 1 followed by its byte.
+        check_full_avro(server.uri(), &[0x02, b'a']).await;
     }
 
     #[tokio::test]
@@ -393,10 +417,7 @@ mod tests {
         )
         .await;
 
-        let v = validator(server.uri());
-        let field = framed(KNOWN_ID, &[0x02, b'a']);
-        let result = value_check(&v, ValidationMode::Full, &field).await;
-        check!(result.is_ok(), "{result:?}");
+        check_full_avro(server.uri(), &[0x02, b'a']).await;
     }
 
     #[tokio::test]
@@ -414,18 +435,11 @@ mod tests {
     #[tokio::test]
     async fn full_mode_resolves_json_schema_references_before_validating() {
         let server = MockServer::start().await;
-        super::super::test_support::schema_versions(&server, 1).await;
-        response_endpoint(
-            &server,
-            &format!("/schemas/ids/{KNOWN_ID}"),
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        json_id_endpoint(&server, serde_json::json!({
                 "schemaType": "JSON",
                 "schema": r#"{"$id":"https://schemas.example/root.json","$ref":"base.json"}"#,
                 "references": [{"name":"base.json","subject":"order-base","version":1}]
-            })),
-            Some(1),
-        )
-        .await;
+})).await;
         response_endpoint(&server, "/subjects/order-base/versions/1", ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "subject": "order-base",
                 "version": 1,
@@ -448,15 +462,12 @@ mod tests {
     #[tokio::test]
     async fn full_mode_never_fetches_json_references_outside_the_registry_cache() {
         let server = MockServer::start().await;
-        super::super::test_support::schema_versions(&server, 1).await;
-        response_endpoint(
+        json_id_endpoint(
             &server,
-            &format!("/schemas/ids/{KNOWN_ID}"),
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "schemaType": "JSON",
-                "schema": format!(r#"{{"$ref":"{}/outside.json"}}"#, server.uri())
-            })),
-            Some(1),
+            serde_json::json!({
+                            "schemaType": "JSON",
+                            "schema": format!(r#"{{"$ref":"{}/outside.json"}}"#, server.uri())
+            }),
         )
         .await;
         response_endpoint(
@@ -519,9 +530,7 @@ mod tests {
 
         // 404 is the registry answering, not failing to answer. `fail_open`
         // governs only the second case.
-        let v = configured_validator(server.uri(), true).unwrap();
-        let got = value_check(&v, ValidationMode::Id, &framed(KNOWN_ID, b"x")).await;
-        assert!(let Err(reason) = got);
+        let reason = fail_open_rejection(server.uri(), "an unregistered id").await;
         check!(reason.label() == "unknown_id", "{reason}");
     }
 
@@ -530,9 +539,7 @@ mod tests {
         for status in [400, 401, 403, 600] {
             let server = status_registry(status).await;
 
-            let v = configured_validator(server.uri(), true).unwrap();
-            let got = value_check(&v, ValidationMode::Id, &framed(KNOWN_ID, b"x")).await;
-            assert!(let Err(reason) = got, "status {status}");
+            let reason = fail_open_rejection(server.uri(), &format!("status {status}")).await;
             check!(
                 reason.label() == "registry_unavailable",
                 "status {status}: {reason}"
@@ -548,9 +555,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let v = configured_validator(server.uri(), true).unwrap();
-        let got = value_check(&v, ValidationMode::Id, &framed(KNOWN_ID, b"x")).await;
-        assert!(let Err(reason) = got);
+        let reason = fail_open_rejection(server.uri(), "a malformed success").await;
         check!(reason.label() == "registry_unavailable", "{reason}");
     }
 

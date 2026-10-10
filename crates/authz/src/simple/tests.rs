@@ -11,8 +11,8 @@ use super::*;
 use crate::{
     authorize_topics,
     simple::test_support::{
-        AliceAuthorizer, acl_image, addr, alice, check_resource_type_access, check_topic_access,
-        img, no_super, one_super, req, topic_acl, topic_acl_op,
+        AclSetup, AliceAuthorizer, QuerySetup, acl_image, addr, alice, check_resource_type_access,
+        check_topic_access, img, no_super, one_super, req, topic_acl,
     },
 };
 
@@ -30,16 +30,15 @@ fn empty_image_with_no_super_users_defaults_to_deny() {
 fn super_user_bypass_grants_everything_even_with_acls() {
     let mut img = img();
     // A DENY ACL that would otherwise reject.
-    img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl_op(
-        PermissionType::Deny,
-        AclOperation::Read,
-        "foo",
-    )));
+    img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(AclSetup {
+        permission: PermissionType::Deny,
+        ..Default::default()
+    })));
     let a = alice();
     let h = addr();
     let auth = SimpleAclAuthorizer::new(one_super("alice"));
     assert2::assert!(
-        auth.authorize(&img, &req(&a, &h, "foo", AclOperation::Read)) == AuthorizationResult::Allow
+        auth.authorize(&img, &req(&a, &h, QuerySetup::default())) == AuthorizationResult::Allow
     );
 }
 
@@ -47,29 +46,21 @@ fn super_user_bypass_grants_everything_even_with_acls() {
 fn deny_by_default_when_super_user_set_but_principal_mismatches() {
     let mut img = img();
     // An ACL exists but doesn't match alice.
-    img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(
-        PermissionType::Allow,
-        AclOperation::Read,
-        "User:bob",
-        "*",
-        PatternType::Literal,
-        "foo",
-    )));
+    img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(AclSetup {
+        principal: "User:bob",
+        ..Default::default()
+    })));
     let a = alice();
     let h = addr();
     let auth = SimpleAclAuthorizer::new(one_super("admin"));
     assert2::assert!(
-        auth.authorize(&img, &req(&a, &h, "foo", AclOperation::Read)) == AuthorizationResult::Deny
+        auth.authorize(&img, &req(&a, &h, QuerySetup::default())) == AuthorizationResult::Deny
     );
 }
 
 #[test]
 fn literal_allow_matches_exact_name() {
-    let img = acl_image([topic_acl_op(
-        PermissionType::Allow,
-        AclOperation::Read,
-        "foo",
-    )]);
+    let img = acl_image([topic_acl(AclSetup::default())]);
     let caller = AliceAuthorizer::default();
     for (_name, resource, expected) in [
         ("exact match", "foo", AuthorizationResult::Allow),
@@ -81,14 +72,11 @@ fn literal_allow_matches_exact_name() {
 
 #[test]
 fn prefixed_allow_matches_prefix() {
-    let img = acl_image([topic_acl(
-        PermissionType::Allow,
-        AclOperation::Read,
-        "User:alice",
-        "*",
-        PatternType::Prefixed,
-        "team-",
-    )]);
+    let img = acl_image([topic_acl(AclSetup {
+        pattern: PatternType::Prefixed,
+        name: "team-",
+        ..Default::default()
+    })]);
     let caller = AliceAuthorizer::default();
     for (_name, resource, expected) in [
         ("prefix match", "team-foo", AuthorizationResult::Allow),
@@ -101,8 +89,11 @@ fn prefixed_allow_matches_prefix() {
 #[test]
 fn deny_wins_over_allow() {
     let img = acl_image([
-        topic_acl_op(PermissionType::Allow, AclOperation::Read, "foo"),
-        topic_acl_op(PermissionType::Deny, AclOperation::Read, "foo"),
+        topic_acl(AclSetup::default()),
+        topic_acl(AclSetup {
+            permission: PermissionType::Deny,
+            ..Default::default()
+        }),
     ]);
     check_topic_access(&img, "foo", AclOperation::Read, AuthorizationResult::Deny);
 }
@@ -110,8 +101,15 @@ fn deny_wins_over_allow() {
 #[test]
 fn authorize_topics_batch_returns_per_topic_decisions() {
     let img = acl_image([
-        topic_acl_op(PermissionType::Allow, AclOperation::Read, "t1"),
-        topic_acl_op(PermissionType::Deny, AclOperation::Read, "t2"),
+        topic_acl(AclSetup {
+            name: "t1",
+            ..Default::default()
+        }),
+        topic_acl(AclSetup {
+            permission: PermissionType::Deny,
+            name: "t2",
+            ..Default::default()
+        }),
     ]);
     let caller = AliceAuthorizer::default();
     let map = authorize_topics(
@@ -157,8 +155,19 @@ fn multi_super_user_all_bypass() {
     };
     let alice = alice();
     let auth = SimpleAclAuthorizer::new(supers);
-    let actual = [&admin, &ops, &alice]
-        .map(|principal| auth.authorize(&img, &req(principal, &h, "foo", AclOperation::Write)));
+    let actual = [&admin, &ops, &alice].map(|principal| {
+        auth.authorize(
+            &img,
+            &req(
+                principal,
+                &h,
+                QuerySetup {
+                    op: AclOperation::Write,
+                    ..Default::default()
+                },
+            ),
+        )
+    });
     // alice is not a super-user and the image has no matching ACL,
     // so default-deny applies (no compat shim).
     assert2::assert!(
@@ -199,11 +208,11 @@ mod authorize_by_resource_type {
 
     #[test]
     fn literal_allow_on_one_resource_allows() {
-        let img = acl_image([topic_acl_op(
-            PermissionType::Allow,
-            AclOperation::Write,
-            "orders",
-        )]);
+        let img = acl_image([topic_acl(AclSetup {
+            op: AclOperation::Write,
+            name: "orders",
+            ..Default::default()
+        })]);
         check_resource_type_access(
             &img,
             ResourceType::Topic,
@@ -214,48 +223,45 @@ mod authorize_by_resource_type {
 
     #[test]
     fn prefixed_allow_allows() {
-        let img = acl_image([topic_acl(
-            PermissionType::Allow,
-            AclOperation::Write,
-            "User:alice",
-            "*",
-            PatternType::Prefixed,
-            "ord",
-        )]);
+        let img = acl_image([topic_acl(AclSetup {
+            op: AclOperation::Write,
+            pattern: PatternType::Prefixed,
+            name: "ord",
+            ..Default::default()
+        })]);
         check_resource_type_access(
             &img,
             ResourceType::Topic,
             AclOperation::Write,
             AuthorizationResult::Allow,
         );
+    }
+
+    fn allow_orders_with_deny(denied_resource: &str, expected: AuthorizationResult) {
+        let img = acl_image([
+            topic_acl(AclSetup {
+                op: AclOperation::Write,
+                name: "orders",
+                ..Default::default()
+            }),
+            topic_acl(AclSetup {
+                permission: PermissionType::Deny,
+                op: AclOperation::Write,
+                name: denied_resource,
+                ..Default::default()
+            }),
+        ]);
+        check_resource_type_access(&img, ResourceType::Topic, AclOperation::Write, expected);
     }
 
     #[test]
     fn allow_fully_covered_by_a_broader_deny_denies() {
-        let img = acl_image([
-            topic_acl_op(PermissionType::Allow, AclOperation::Write, "orders"),
-            topic_acl_op(PermissionType::Deny, AclOperation::Write, "*"),
-        ]);
-        check_resource_type_access(
-            &img,
-            ResourceType::Topic,
-            AclOperation::Write,
-            AuthorizationResult::Deny,
-        );
+        allow_orders_with_deny("*", AuthorizationResult::Deny);
     }
 
     #[test]
     fn allow_on_one_resource_with_deny_on_a_different_resource_still_allows() {
-        let img = acl_image([
-            topic_acl_op(PermissionType::Allow, AclOperation::Write, "orders"),
-            topic_acl_op(PermissionType::Deny, AclOperation::Write, "payments"),
-        ]);
-        check_resource_type_access(
-            &img,
-            ResourceType::Topic,
-            AclOperation::Write,
-            AuthorizationResult::Allow,
-        );
+        allow_orders_with_deny("payments", AuthorizationResult::Allow);
     }
 
     /// A literal DENY on the bare prefix string must not shadow a prefixed
@@ -265,15 +271,18 @@ mod authorize_by_resource_type {
     #[test]
     fn literal_deny_on_the_bare_prefix_string_does_not_shadow_the_prefixed_allow() {
         let img = acl_image([
-            topic_acl(
-                PermissionType::Allow,
-                AclOperation::Write,
-                "User:alice",
-                "*",
-                PatternType::Prefixed,
-                "ord",
-            ),
-            topic_acl_op(PermissionType::Deny, AclOperation::Write, "ord"),
+            topic_acl(AclSetup {
+                op: AclOperation::Write,
+                pattern: PatternType::Prefixed,
+                name: "ord",
+                ..Default::default()
+            }),
+            topic_acl(AclSetup {
+                permission: PermissionType::Deny,
+                op: AclOperation::Write,
+                name: "ord",
+                ..Default::default()
+            }),
         ]);
         check_resource_type_access(
             &img,
@@ -293,14 +302,13 @@ mod authorize_by_resource_type {
     fn hardcoded_name_probe_honours_allow_everyone_if_no_acl_found() {
         // (stored entries, allow.everyone.if.no.acl.found, result)
         let other_topic = |pattern, name| {
-            topic_acl(
-                PermissionType::Allow,
-                AclOperation::Write,
-                "User:bob",
-                "*",
+            topic_acl(AclSetup {
+                op: AclOperation::Write,
+                principal: "User:bob",
                 pattern,
                 name,
-            )
+                ..Default::default()
+            })
         };
         let cases = [
             (
@@ -454,42 +462,34 @@ fn allow_everyone_if_no_acl_found_applies_only_when_no_acl_touches_the_resource(
         match case {
             Case::NoAcls => {}
             Case::AclForResourceOtherPrincipal => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(
-                    PermissionType::Allow,
-                    AclOperation::Read,
-                    "User:bob",
-                    "*",
-                    PatternType::Literal,
-                    "foo",
-                )));
+                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(AclSetup {
+                    principal: "User:bob",
+                    ..Default::default()
+                })));
             }
             Case::AclForOtherResource => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl_op(
-                    PermissionType::Allow,
-                    AclOperation::Read,
-                    "other",
-                )));
+                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(AclSetup {
+                    name: "other",
+                    ..Default::default()
+                })));
             }
             Case::MatchingAllow => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl_op(
-                    PermissionType::Allow,
-                    AclOperation::Read,
-                    "foo",
+                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(
+                    AclSetup::default(),
                 )));
             }
             Case::MatchingDeny => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl_op(
-                    PermissionType::Deny,
-                    AclOperation::Read,
-                    "foo",
-                )));
+                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(AclSetup {
+                    permission: PermissionType::Deny,
+                    ..Default::default()
+                })));
             }
         }
         let a = alice();
         let h = addr();
         let auth = SimpleAclAuthorizer::new(no_super()).with_allow_everyone_if_no_acl_found(flag);
         assert2::assert!(
-            auth.authorize(&img, &req(&a, &h, "foo", AclOperation::Read)) == expected,
+            auth.authorize(&img, &req(&a, &h, QuerySetup::default())) == expected,
             "{name}"
         );
     }
@@ -500,16 +500,15 @@ fn allow_everyone_if_no_acl_found_applies_only_when_no_acl_touches_the_resource(
 /// grant access.
 #[test]
 fn allow_everyone_if_no_acl_found_does_not_change_super_user_bypass() {
-    let img = acl_image([topic_acl_op(
-        PermissionType::Deny,
-        AclOperation::Read,
-        "foo",
-    )]);
+    let img = acl_image([topic_acl(AclSetup {
+        permission: PermissionType::Deny,
+        ..Default::default()
+    })]);
     let a = alice();
     let h = addr();
     let auth =
         SimpleAclAuthorizer::new(one_super("alice")).with_allow_everyone_if_no_acl_found(false);
     assert2::assert!(
-        auth.authorize(&img, &req(&a, &h, "foo", AclOperation::Read)) == AuthorizationResult::Allow
+        auth.authorize(&img, &req(&a, &h, QuerySetup::default())) == AuthorizationResult::Allow
     );
 }

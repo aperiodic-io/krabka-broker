@@ -127,76 +127,40 @@ pub(super) async fn handle_replicate_verbatim(
     }
 }
 
-/// Truncates the log at `offset` and answers `ack`. Returns whether the log was
-/// cut.
-pub(super) async fn handle_truncate(
-    log: &Arc<Mutex<Log>>,
-    storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
-    replica_state: &tokio::sync::Mutex<ReplicaState>,
-    wal: Option<&crate::wal::SharedWal>,
-    offset: Offset,
-    ack: tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>,
-) -> bool {
-    let log_for_blocking = Arc::clone(log);
-    let result = run_log_mutation(
-        move || {
-            lock_log(&log_for_blocking)
-                .truncate_to(offset)
-                .map_err(crate::error::BrokerError::from)
-        },
-        "truncate task panicked",
-        storage_status,
-    )
-    .await;
-    let succeeded = result.is_ok();
-    if succeeded {
-        if let Some(wal) = wal {
-            wal.invalidate_hot_tail();
-        }
-        let new_leo = lock_log(log).log_end_offset();
-        replica_state
-            .lock()
-            .await
-            .recompute_hw_for_leader_append(new_leo);
-    }
-    let _ = ack.send(result);
-    succeeded
+/// The two mutations that reset the writer's replication and WAL frontiers.
+pub(super) enum ResetMutation {
+    Truncate(Offset),
+    Reset(Offset),
 }
 
-/// Resets the log to start at `new_base` and answers `ack`. Returns whether the
-/// log was reset.
-pub(super) async fn handle_reset(
+/// Apply the selected reset and answer its acknowledgement after resetting the frontiers.
+pub(super) async fn handle_log_reset(
     log: &Arc<Mutex<Log>>,
     storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
     replica_state: &tokio::sync::Mutex<ReplicaState>,
     wal: Option<&crate::wal::SharedWal>,
-    new_base: Offset,
+    mutation: ResetMutation,
     ack: tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>,
 ) -> bool {
+    let panic_context = match mutation {
+        ResetMutation::Truncate(_) => "truncate task panicked",
+        ResetMutation::Reset(_) => "reset_to task panicked",
+    };
     let log_for_blocking = Arc::clone(log);
     let result = run_log_mutation(
         move || {
-            lock_log(&log_for_blocking)
-                .reset_to(new_base)
-                .map_err(crate::error::BrokerError::from)
+            let mut log = lock_log(&log_for_blocking);
+            match mutation {
+                ResetMutation::Truncate(offset) => log.truncate_to(offset),
+                ResetMutation::Reset(offset) => log.reset_to(offset),
+            }
+            .map_err(crate::error::BrokerError::from)
         },
-        "reset_to task panicked",
+        panic_context,
         storage_status,
     )
     .await;
-    let succeeded = result.is_ok();
-    if succeeded {
-        if let Some(wal) = wal {
-            wal.invalidate_hot_tail();
-        }
-        let new_leo = lock_log(log).log_end_offset();
-        replica_state
-            .lock()
-            .await
-            .recompute_hw_for_leader_append(new_leo);
-    }
-    let _ = ack.send(result);
-    succeeded
+    finish_log_reset(result, log, replica_state, wal, ack).await
 }
 
 pub(super) async fn handle_trim(
@@ -280,4 +244,27 @@ async fn reconcile_trim_frontiers(
             requested.0, wal_start.0, local_start.0
         ))),
     }
+}
+
+/// Publish a successful reset to the WAL cache and replica watermark, then ack.
+async fn finish_log_reset(
+    result: Result<(), crate::error::BrokerError>,
+    log: &Mutex<Log>,
+    replica_state: &tokio::sync::Mutex<ReplicaState>,
+    wal: Option<&crate::wal::SharedWal>,
+    ack: super::storage::MaintenanceAck,
+) -> bool {
+    let succeeded = result.is_ok();
+    if succeeded {
+        if let Some(wal) = wal {
+            wal.invalidate_hot_tail();
+        }
+        let new_leo = lock_log(log).log_end_offset();
+        replica_state
+            .lock()
+            .await
+            .recompute_hw_for_leader_append(new_leo);
+    }
+    let _ = ack.send(result);
+    succeeded
 }

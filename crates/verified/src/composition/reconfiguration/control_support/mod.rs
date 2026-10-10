@@ -3,7 +3,7 @@ use creusot_std::prelude::*;
 #[cfg(creusot)]
 use self::spec::{
     common_prefix_reported, control_inputs_coherent, control_prefix_majorities,
-    control_record_count, control_request_admitted, prefix_count, prefix_grants_agree,
+    control_record_count, control_supported_request, prefix_count, prefix_grants_agree,
 };
 #[cfg(creusot)]
 use super::spec::membership_matches_change;

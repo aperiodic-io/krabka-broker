@@ -17,10 +17,13 @@ use tempfile::TempDir;
 ///
 /// # Panics
 /// Panics if the one-based index cannot be represented as a broker or node ID.
-pub fn node_config(index: usize, log_dir: &std::path::Path) -> BrokerConfig {
+#[derive(Clone, Copy, Default)]
+pub struct NodeIndex(pub usize);
+
+pub fn node_config(index: NodeIndex, log_dir: &std::path::Path) -> BrokerConfig {
     let mut cfg = BrokerConfig::for_tests(log_dir.to_path_buf());
-    cfg.broker_id = i32::try_from(index + 1).unwrap();
-    cfg.node_id = NodeId(u64::try_from(index + 1).unwrap());
+    cfg.broker_id = i32::try_from(index.0 + 1).unwrap();
+    cfg.node_id = NodeId(u64::try_from(index.0 + 1).unwrap());
     cfg
 }
 
@@ -57,27 +60,24 @@ pub async fn await_broker_start(
 /// `controller_quorum_voters` set, so each node seeds the full voter set and
 /// elects among the configured peers over the real KIP-595 wire. There is no
 /// auto-join, because KIP-853 dynamic reconfiguration is a separate work stream.
-fn static_voter_broker_config(
-    i: usize,
-    own_client_addr: SocketAddr,
-    own_controller_addr: SocketAddr,
-    voters: &[(u64, SocketAddr)],
-    log_dir: &std::path::Path,
-) -> BrokerConfig {
-    let mut cfg = crate::support::node_config(i, log_dir);
+#[derive(krabka_macros::FieldDefaults)]
+struct StaticVoterSetup {
+    node: crate::support::AddressedNodeSetup,
+    voters: Vec<(NodeId, String)>,
+}
+
+fn static_voter_broker_config(log_dir: &std::path::Path, setup: StaticVoterSetup) -> BrokerConfig {
+    let mut cfg = crate::support::addressed_node_config(log_dir, setup.node);
     // Bind a concrete (pre-bound) client port. The broker self-registers its
     // `advertised_listener` host:port into the controller image *before* it
     // binds its listeners and rewrites a `:0` advertised port to the real one
     // — so a `:0` here would register port 0 and break the inter-broker
     // heartbeat / replication dial. Give it a real port up front.
-    cfg.listen_addr = own_client_addr;
-    cfg.advertised_listener = own_client_addr.to_string();
     // The controller listener must bind the *same* concrete port that this
     // node advertises in the shared voter set, or its peers can't dial it.
-    cfg.controller_listen_addr = own_controller_addr;
     cfg.directory_id = uuid::Uuid::from_u128(u128::from(cfg.node_id.0));
     cfg.bootstrap_mode = BootstrapMode::Bootstrap;
-    cfg.controller_quorum_voters = crate::support::controller_voters(voters);
+    cfg.controller_quorum_voters = setup.voters;
     cfg.auto_join = false;
     cfg.bootstrap_servers = vec![];
     cfg
@@ -147,11 +147,15 @@ pub async fn start_n_node_with(
         // size them for a production one: replication factor `min(n, 3)`.
         // `customize` runs after, so a suite can still override them.
         let mut cfg = static_voter_broker_config(
-            i,
-            client_addrs[i],
-            controller_addrs[i],
-            &voters,
             dir.path(),
+            StaticVoterSetup {
+                node: crate::support::AddressedNodeSetup {
+                    node: NodeId(u64::try_from((i) + 1).expect("one-based node id")),
+                    client: client_addrs[i],
+                    controller: controller_addrs[i],
+                },
+                voters: crate::support::controller_voters(&voters),
+            },
         )
         .with_internal_topics_for(n_usize);
         customize(i, &mut cfg);

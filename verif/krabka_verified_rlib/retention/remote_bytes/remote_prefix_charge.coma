@@ -38,4 +38,3 @@ goal vc_remote_prefix_charge: if count <= 0 then
     true
   else
     [@expl:variant decreases] well_founded_relation_Int ([%#sremote_bytes] count) ([%#sremote_bytes] count - 1)
-

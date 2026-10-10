@@ -7,8 +7,7 @@ mod support;
 
 use assert2::check;
 use krabka_metadata::{
-    ControllerRegistrationRecord, MetadataRecord, NodeId as MetadataNodeId,
-    metadata_version::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
+    NodeId as MetadataNodeId, metadata_version::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
 };
 use krabka_protocol::owned::{
     unregister_controller_request::UnregisterControllerRequest,
@@ -43,17 +42,8 @@ async fn a_follower_forwards_unregister_controller_to_the_active_controller() {
         .find(|(_, cfg, _)| i64::from(cfg.broker_id) == i64::try_from(leader.0).unwrap())
         .expect("the leader");
     leader_handle
-        .submit_metadata_record_for_test(MetadataRecord::V1ControllerRegistration(
-            ControllerRegistrationRecord {
-                node_id: MetadataNodeId(7),
-                incarnation_id: uuid::Uuid::from_u128(7),
-                zk_migration_ready: false,
-                endpoints: Vec::new(),
-                features: std::collections::BTreeMap::from([(
-                    "metadata.version".to_owned(),
-                    (7, krabka_metadata::metadata_version::METADATA_VERSION_MAX),
-                )]),
-            },
+        .submit_metadata_record_for_test(crate::support::configs::controller_registration(
+            MetadataNodeId(7),
         ))
         .await
         .expect("seed the registration");

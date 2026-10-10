@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use assert2::assert;
 use bytes::BytesMut;
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -28,8 +29,16 @@ use super::{
     quota_admin::drive_alter_client_quotas_sasl,
 };
 use crate::{
-    kafka_wire::{self, Flexibility},
-    support::discovery::api_versions_request_for,
+    kafka_wire,
+    kafka_wire::{
+        ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup,
+        ResponseHeaderSelection as WireResponseHeaderSelection,
+    },
+    support::{
+        acl::TopicAclSetup,
+        discovery::api_versions_request_for,
+        wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+    },
 };
 
 /// `ApiVersions` is `api_key` 18.
@@ -66,32 +75,9 @@ macro_rules! throttled_response {
 /// exact value is not load-bearing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn producer_byte_rate_throttles_produce() {
-    let (handle, _dir, addr) = quota_fixture().await;
+    let (handle, _dir, resp) = throttled_producer_fixture("throttle-produce").await;
 
-    // Seed ACL entries so the authorizer engages (compat shim disabled) and
-    // alice can Write to the topic.
-    prepare_quota_topic(
-        &handle,
-        addr,
-        "throttle-produce",
-        krabka_metadata::AclOperation::Write,
-    )
-    .await;
-
-    // Set low producer quota for alice.
-    set_alice_quota(&handle, addr, "producer_byte_rate", 128.0).await;
-
-    // Alice produces 8 KB (8 records of 1 KB each). Rate = 128 bytes/sec.
-    // Retry loop: TOPIC_AUTHORIZATION_FAILED (29) can fire if the alice ACL
-    // hasn't propagated yet to the image snapshot used by the handler.
-    let resp = produce_when_acl_applied(addr, "throttle-produce", 1024, 8).await;
-
-    let part = &resp.responses[0].partition_responses[0];
-    assert!(
-        part.error_code == 0,
-        "produce must succeed, error_code={}",
-        part.error_code
-    );
+    check_successful_produce(&resp);
     assert!(
         resp.throttle_time_ms > 0,
         "expected throttle_time_ms > 0, got {}",
@@ -127,18 +113,21 @@ async fn request_percentage_throttles_produce() {
     .await;
 
     // Set a tiny request_percentage for alice (no byte-rate quota).
-    set_alice_quota(&handle, addr, "request_percentage", 0.001).await;
+    set_alice_quota(&handle, addr, QuotaSettingSetup::request_time()).await;
 
     // Alice produces a single small record. Retry past TOPIC_AUTHORIZATION_FAILED
     // (29) while the alice Write ACL propagates to the handler's image snapshot.
-    let resp = produce_when_acl_applied(addr, "throttle-request", 16, 1).await;
+    let resp = produce_when_acl_applied(
+        addr,
+        crate::kafka_wire::ZeroFilledRecordsSetup {
+            topic: ("throttle-request").to_string(),
+            value_bytes: crate::kafka_wire::ProduceValueBytes(16),
+            ..Default::default()
+        },
+    )
+    .await;
 
-    let part = &resp.responses[0].partition_responses[0];
-    assert!(
-        part.error_code == 0,
-        "produce must succeed, error_code={}",
-        part.error_code
-    );
+    check_successful_produce(&resp);
     assert!(
         resp.throttle_time_ms > 0,
         "expected request-quota throttle_time_ms > 0, got {}",
@@ -162,21 +151,7 @@ use crate::support::client::metric_value;
 /// quota asks for nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn producer_byte_rate_throttle_moves_the_throttle_metrics() {
-    let (handle, _dir, addr) = quota_fixture().await;
-
-    prepare_quota_topic(
-        &handle,
-        addr,
-        "throttle-metrics",
-        krabka_metadata::AclOperation::Write,
-    )
-    .await;
-
-    set_alice_quota(&handle, addr, "producer_byte_rate", 128.0).await;
-
-    // Alice produces 8 KB against a 128 B/s quota. Retry past
-    // TOPIC_AUTHORIZATION_FAILED (29) while the Write ACL propagates.
-    let resp = produce_when_acl_applied(addr, "throttle-metrics", 1024, 8).await;
+    let (handle, _dir, resp) = throttled_producer_fixture("throttle-metrics").await;
     assert!(
         resp.throttle_time_ms > 0,
         "expected throttle_time_ms > 0, got {}",
@@ -242,10 +217,12 @@ async fn consumer_byte_rate_throttles_fetch() {
     // Set low consumer quota for alice.
     let alter_resp = crate::kafka_wire::quotas::alter_user_quota(
         addr,
-        crate::CLIENT_ID,
-        ("admin", "admin-secret"),
-        "alice",
-        ("consumer_byte_rate", 128.0),
+        crate::kafka_wire::quotas::UserQuotaSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+            key: "consumer_byte_rate",
+            value: crate::kafka_wire::quotas::QuotaValue(128.0),
+            ..Default::default()
+        },
     )
     .await;
     assert!(
@@ -254,20 +231,24 @@ async fn consumer_byte_rate_throttles_fetch() {
     );
 
     // Wait for the quota to appear in the image.
-    handle
-        .wait_for_image(|img| {
-            let key: krabka_metadata::EntityKey = vec![("user".into(), Some("alice".into()))];
-            img.client_quotas()
-                .get(&key)
-                .and_then(|cfgs| cfgs.get("consumer_byte_rate"))
-                == Some(&128.0)
-        })
-        .await;
+    crate::cluster::wait_alice_quota(&handle, "consumer_byte_rate", 128.0).await;
 
     // Produce 8 KB as admin (not subject to quota yet).
     seed_alice_write_acl(&handle, "throttle-fetch").await; // give admin path a topic
-    let produce_resp =
-        drive_produce_sasl(addr, "admin", b"admin-secret", "throttle-fetch", 1024, 8).await;
+    let produce_resp = drive_produce_sasl(
+        addr,
+        crate::kafka_wire::ZeroFilledRecordsSetup {
+            topic: ("throttle-fetch").to_string(),
+            count: crate::kafka_wire::ProduceRecordCount(8),
+            ..Default::default()
+        },
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            user: "admin",
+            password: (b"admin-secret").to_vec(),
+        },
+    )
+    .await;
     let part = &produce_resp.responses[0].partition_responses[0];
     assert!(
         part.error_code == 0,
@@ -328,10 +309,11 @@ async fn user_client_tuple_overrides_user_specific() {
     // Set a lenient user-only quota.
     let alter_user = crate::kafka_wire::quotas::alter_user_quota(
         addr,
-        crate::CLIENT_ID,
-        ("admin", "admin-secret"),
-        "alice",
-        ("producer_byte_rate", 8192.0),
+        crate::kafka_wire::quotas::UserQuotaSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+            value: crate::kafka_wire::quotas::QuotaValue(8192.0),
+            ..Default::default()
+        },
     )
     .await;
     assert!(alter_user[0].1 == 0, "alter user quota must succeed");
@@ -339,9 +321,6 @@ async fn user_client_tuple_overrides_user_specific() {
     // Set a tight tuple quota for `CLIENT_ID`.
     let alter_tuple = drive_alter_client_quotas_sasl(
         addr,
-        crate::CLIENT_ID,
-        "admin",
-        "admin-secret",
         vec![(
             vec![
                 ("user".into(), Some("alice".into())),
@@ -349,7 +328,10 @@ async fn user_client_tuple_overrides_user_specific() {
             ],
             vec![("producer_byte_rate".into(), 128.0, false)],
         )],
-        false,
+        &crate::kafka_wire::quotas::QuotaAlterSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+            ..Default::default()
+        },
     )
     .await;
     assert!(alter_tuple[0].1 == 0, "alter tuple quota must succeed");
@@ -378,14 +360,17 @@ async fn user_client_tuple_overrides_user_specific() {
 
     // Alice produces 8 KB with `krabka-quota-test`. The 128-byte tuple quota
     // throttles it; the 8192-byte user-only quota would fit in the burst window.
-    let resp = produce_when_acl_applied(addr, "precedence-topic", 1024, 8).await;
+    let resp = produce_when_acl_applied(
+        addr,
+        crate::kafka_wire::ZeroFilledRecordsSetup {
+            topic: ("precedence-topic").to_string(),
+            count: crate::kafka_wire::ProduceRecordCount(8),
+            ..Default::default()
+        },
+    )
+    .await;
 
-    let part = &resp.responses[0].partition_responses[0];
-    assert!(
-        part.error_code == 0,
-        "produce must succeed, error_code={}",
-        part.error_code
-    );
+    check_successful_produce(&resp);
     assert!(
         resp.throttle_time_ms > 0,
         "expected throttle_time_ms > 0 because the user/client tuple rate applies; got {}",
@@ -418,9 +403,7 @@ async fn request_percentage_throttle_is_echoed_on_a_patched_api() {
 
     // One connection for every alice request: re-authenticating would charge
     // each handshake to the same quota bucket.
-    let mut stream = kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, "alice", b"alice-secret")
-        .await
-        .expect("SASL authenticate for AddOffsetsToTxn");
+    let mut stream = alice_quota_connection(addr, "SASL authenticate for AddOffsetsToTxn").await;
 
     // Baseline: no quota is configured yet, so there is no delay to report.
     let baseline = drive_add_offsets_to_txn(&mut stream, 10).await;
@@ -430,7 +413,7 @@ async fn request_percentage_throttle_is_echoed_on_a_patched_api() {
         baseline.throttle_time_ms
     );
 
-    set_alice_quota(&handle, addr, "request_percentage", 0.001).await;
+    set_alice_quota(&handle, addr, QuotaSettingSetup::request_time()).await;
 
     // Drive the same request until the request bucket runs dry. Each request
     // charges its own handler time, so the first one over budget is throttled.
@@ -458,6 +441,20 @@ async fn request_percentage_throttle_is_echoed_on_a_patched_api() {
 /// modern client negotiates with.
 const API_VERSIONS_VERSION: i16 = 3;
 
+/// Open the fixture's Alice session without charging a second handshake.
+async fn alice_quota_connection(addr: std::net::SocketAddr, context: &str) -> TcpStream {
+    kafka_wire::sasl_plain_authenticate(
+        addr,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            password: b"alice-secret".to_vec(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect(context)
+}
+
 /// Drives one `ApiVersions` v3 handshake on an already-authenticated `stream`
 /// and returns the decoded response.
 ///
@@ -470,15 +467,15 @@ async fn drive_api_versions(stream: &mut TcpStream, corr_id: i32) -> ApiVersions
     let mut body = BytesMut::new();
     req.encode(&mut body, API_VERSIONS_VERSION)
         .expect("encode ApiVersions");
-    let resp_bytes = kafka_wire::round_trip_with(
+    let resp_bytes = kafka_wire::round_trip(
         stream,
-        API_VERSIONS_KEY,
-        API_VERSIONS_VERSION,
-        corr_id,
-        CLIENT_ID,
-        Flexibility {
-            request: true,
-            response: false,
+        WireExchangeSetup {
+            api_key: WireApiKey(API_VERSIONS_KEY),
+            version: WireApiVersion(API_VERSIONS_VERSION),
+            correlation: WireCorrelationId(corr_id),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            response_header: WireResponseHeaderSelection::Exact(RequestHeaderEncoding::Legacy),
         },
         &body,
     )
@@ -505,9 +502,7 @@ async fn drive_api_versions(stream: &mut TcpStream, corr_id: i32) -> ApiVersions
 async fn request_percentage_throttle_is_reported_on_api_versions() {
     let (handle, _dir, addr) = quota_fixture().await;
 
-    let mut stream = kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, "alice", b"alice-secret")
-        .await
-        .expect("SASL authenticate for ApiVersions");
+    let mut stream = alice_quota_connection(addr, "SASL authenticate for ApiVersions").await;
 
     // Baseline: no quota is configured yet, so there is no delay to report.
     let baseline = drive_api_versions(&mut stream, 10).await;
@@ -522,7 +517,7 @@ async fn request_percentage_throttle_is_reported_on_api_versions() {
         baseline.throttle_time_ms
     );
 
-    set_alice_quota(&handle, addr, "request_percentage", 0.001).await;
+    set_alice_quota(&handle, addr, QuotaSettingSetup::request_time()).await;
 
     let throttled = throttled_response!(
         &mut stream,
@@ -555,13 +550,20 @@ async fn request_percentage_throttle_is_reported_on_api_versions() {
 
 async fn produce_when_acl_applied(
     addr: std::net::SocketAddr,
-    topic: &str,
-    bytes: usize,
-    records: usize,
+    records: crate::kafka_wire::ZeroFilledRecordsSetup,
 ) -> krabka_protocol::owned::produce_response::ProduceResponse {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let r = drive_produce_sasl(addr, "alice", b"alice-secret", topic, bytes, records).await;
+        let r = drive_produce_sasl(
+            addr,
+            records.clone(),
+            &crate::kafka_wire::PlainAuthenticationSetup {
+                client_id: CLIENT_ID,
+                password: (b"alice-secret").to_vec(),
+                ..Default::default()
+            },
+        )
+        .await;
         let code = r
             .responses
             .first()
@@ -597,25 +599,97 @@ async fn prepare_quota_topic(
     operation: krabka_metadata::AclOperation,
 ) {
     seed_compat_shim_disable_acl(broker).await;
-    create_topic_as_admin(addr, crate::CLIENT_ID, topic, 1, 1).await;
+    create_topic_as_admin(
+        addr,
+        crate::kafka_wire::AutomaticTopicSetup {
+            client_id: crate::CLIENT_ID,
+            topic: crate::support::topics::ConfiguredTopicSetup {
+                name: (topic).into(),
+                ..Default::default()
+            },
+        },
+    )
+    .await;
     wait_partition_exists(broker, topic, 0).await;
-    crate::support::acl::seed_topic_acl(broker, topic, "User:alice", operation).await;
+    crate::support::acl::seed_topic_acl(
+        broker,
+        TopicAclSetup {
+            topic,
+            operation,
+            ..Default::default()
+        },
+    )
+    .await;
+}
+
+fn check_successful_produce(response: &krabka_protocol::owned::produce_response::ProduceResponse) {
+    let part = &response.responses[0].partition_responses[0];
+    assert!(
+        part.error_code == 0,
+        "produce must succeed, error_code={}",
+        part.error_code
+    );
+}
+
+/// A successful Produce request after Alice's topic ACL and 128-byte quota become visible.
+async fn throttled_producer_fixture(
+    topic: &str,
+) -> (
+    krabka_broker::BrokerHandle,
+    tempfile::TempDir,
+    krabka_protocol::owned::produce_response::ProduceResponse,
+) {
+    let (handle, directory, addr) = quota_fixture().await;
+    prepare_quota_topic(&handle, addr, topic, krabka_metadata::AclOperation::Write).await;
+    set_alice_quota(&handle, addr, QuotaSettingSetup::low_producer()).await;
+    let response = produce_when_acl_applied(
+        addr,
+        crate::kafka_wire::ZeroFilledRecordsSetup {
+            topic: topic.to_string(),
+            count: crate::kafka_wire::ProduceRecordCount(8),
+            ..Default::default()
+        },
+    )
+    .await;
+    (handle, directory, response)
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+struct QuotaSettingSetup<'a> {
+    #[default("producer_byte_rate")]
+    key: &'a str,
+    value: crate::kafka_wire::quotas::QuotaValue,
+}
+
+impl QuotaSettingSetup<'_> {
+    fn low_producer() -> Self {
+        Self {
+            value: crate::kafka_wire::quotas::QuotaValue(128.0),
+            ..Default::default()
+        }
+    }
+    fn request_time() -> Self {
+        Self {
+            key: "request_percentage",
+            value: crate::kafka_wire::quotas::QuotaValue(0.001),
+        }
+    }
 }
 
 async fn set_alice_quota(
     broker: &krabka_broker::BrokerHandle,
     addr: std::net::SocketAddr,
-    key: &str,
-    value: f64,
+    setup: QuotaSettingSetup<'_>,
 ) {
     kafka_wire::quotas::set_user_quota(
-        CLIENT_ID,
         broker,
         addr,
-        ("admin", "admin-secret"),
-        "alice",
-        key,
-        value,
+        crate::kafka_wire::quotas::UserQuotaSetup {
+            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(CLIENT_ID),
+            key: setup.key,
+            value: setup.value,
+            ..Default::default()
+        },
     )
     .await;
 }

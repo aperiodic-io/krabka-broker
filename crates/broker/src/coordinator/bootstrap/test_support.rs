@@ -151,6 +151,17 @@ pub(super) fn consumer_group_records(
     ]
 }
 
+/// Replay ordinary values through the same parser and record application path.
+pub(super) fn replay_values(
+    coordinator: &Arc<GroupCoordinator>,
+    records: impl IntoIterator<Item = (bytes::Bytes, bytes::Bytes)>,
+) -> super::replay::Replayed {
+    replay_stream(
+        coordinator,
+        records.into_iter().map(|(key, value)| (key, Some(value))),
+    )
+}
+
 /// Apply a stream of record values and tombstones in log order.
 pub(super) fn replay_stream(
     coordinator: &Arc<GroupCoordinator>,
@@ -221,7 +232,14 @@ pub(super) fn commit_record_for_group(
     partition: i32,
     offset: i64,
 ) -> krabka_protocol::records::Record {
-    crate::coordinator::test_support::offset_record(group, "t", partition, offset)
+    crate::coordinator::test_support::offset_record(
+        crate::coordinator::test_support::OffsetRecordSetup {
+            group,
+            partition: krabka_ids::PartitionIndex(partition),
+            offset: krabka_log::Offset(offset),
+            ..Default::default()
+        },
+    )
 }
 
 /// Write each `(key, value)` record (a `None` value is a tombstone) to a fresh

@@ -52,8 +52,6 @@ const INVALID_SHARE_SESSION_EPOCH: i16 = 123;
 const SHARE_SESSION_NOT_FOUND: i16 = 122;
 
 // Ack types (KIP-932): one i8 per offset.
-const ACCEPT: i8 = 1;
-const RELEASE: i8 = 2;
 const REJECT: i8 = 3;
 const RENEW: i8 = 4;
 

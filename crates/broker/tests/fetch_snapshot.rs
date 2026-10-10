@@ -84,10 +84,12 @@ async fn fetch_snapshot_serves_the_named_metadata_snapshot() {
 
     // Make the metadata image non-empty so the snapshot has real content.
     let resp = client
-        .send(create_topic_request(
-            creatable_topic("snap-topic", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("snap-topic").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .unwrap();
     assert!(resp.topics[0].error_code == 0);

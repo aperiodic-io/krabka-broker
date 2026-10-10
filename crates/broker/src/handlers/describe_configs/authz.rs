@@ -203,12 +203,12 @@ mod tests {
             let mut image = MetadataImage::new(Uuid::nil());
             if let Some(operation) = grant {
                 image.apply(&krabka_metadata::MetadataRecord::V1AccessControlEntry(
-                    crate::test_support::allow_acl(
-                        ResourceType::Cluster,
-                        crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
-                        "User:ANONYMOUS",
+                    crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+                        resource_type: ResourceType::Cluster,
+                        resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+                        principal: "User:ANONYMOUS",
                         operation,
-                    ),
+                    }),
                 ));
             }
             let code = super::resource_authz_failure(

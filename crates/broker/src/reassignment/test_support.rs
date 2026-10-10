@@ -10,17 +10,9 @@ use krabka_metadata::{
 };
 use uuid::Uuid;
 
-use crate::heartbeat::controller_state::ControllerLivenessState;
-
-pub(super) fn img(
-    replicas: &[u64],
-    isr: &[u64],
-    adding: &[u64],
-    removing: &[u64],
-    leader: u64,
-) -> Arc<MetadataImage> {
-    img_with_dirs(replicas, isr, adding, removing, leader, &[])
-}
+use crate::{
+    heartbeat::controller_state::ControllerLivenessState, test_support::ReassignmentSetup,
+};
 
 pub(super) async fn liveness(alive: &[u64]) -> ControllerLivenessState {
     let l = ControllerLivenessState::new(krabka_units::secs(10));
@@ -40,21 +32,14 @@ pub(super) fn first_partition(rec: &MetadataRecord) -> &PartitionRecord {
 /// Builds an image with explicit directories. It tests that
 /// `compute_reassignment_progress` keeps the directories aligned after a
 /// completion removes a replica from the set.
-pub(super) fn img_with_dirs(
-    replicas: &[u64],
-    isr: &[u64],
-    adding: &[u64],
-    removing: &[u64],
-    leader: u64,
-    directories: &[Uuid],
-) -> Arc<MetadataImage> {
+pub(super) fn img(setup: ReassignmentSetup<'_>) -> Arc<MetadataImage> {
     let mut image = MetadataImage::new(Uuid::nil());
     for n in 1..=6u64 {
         image.apply(&MetadataRecord::V1BrokerRegistration(
             BrokerRegistrationRecord {
                 host: String::new(),
                 port: 0,
-                ..crate::test_support::broker_registration(n)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(n))
             },
         ));
     }
@@ -62,11 +47,11 @@ pub(super) fn img_with_dirs(
         name: "foo".into(),
         topic_id: Uuid::nil(),
         partitions: 1,
-        replication_factor: i16::try_from(replicas.len()).expect("replication factor fits i16"),
+        replication_factor: i16::try_from(setup.replicas.len())
+            .expect("replication factor fits i16"),
     }));
-    image.apply(&MetadataRecord::V1Partition(PartitionRecord {
-        directories: directories.to_vec(),
-        ..crate::test_support::reassignment_partition(replicas, isr, (adding, removing), leader)
-    }));
+    image.apply(&MetadataRecord::V1Partition(
+        crate::test_support::reassignment_partition(setup),
+    ));
     Arc::new(image)
 }

@@ -12,15 +12,8 @@ use std::{
 };
 
 use assert2::assert;
-use krabka_broker::BrokerHandle;
 
 use crate::wire::describe_log_dirs;
-
-pub(crate) async fn wait_all_partitions(handle: &BrokerHandle, topic: &str, n: i32) {
-    for p in 0..n {
-        handle.wait_until_partition_present(topic, p).await;
-    }
-}
 
 pub(crate) fn count_topic_dirs(dir: &std::path::Path, topic: &str) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {

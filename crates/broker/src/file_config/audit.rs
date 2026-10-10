@@ -205,6 +205,12 @@ mod tests {
     // An absent `[audit]` table, like any other absent table, keeps what the
     // broker config already holds, and so does an absent subtable of a
     // present one. A present table and its subtables still apply.
+    fn check_default_audit(cfg: &crate::config::BrokerConfig) {
+        assert2::check!(cfg.audit_enabled);
+        assert2::check!(cfg.audit_failure_mode == krabka_audit::AuditMode::FailOpen);
+        assert2::check!(cfg.audit_topic == "__krabka_audit");
+    }
+
     #[test]
     fn apply_keeps_the_audit_settings_the_file_leaves_out() {
         let embedded = AuditSettings {
@@ -294,9 +300,7 @@ mod tests {
         assert2::check!(audit.topic == "__krabka_audit");
 
         let cfg = applied_for_tests(fc);
-        assert2::check!(cfg.audit_enabled);
-        assert2::check!(cfg.audit_failure_mode == krabka_audit::AuditMode::FailOpen);
-        assert2::check!(cfg.audit_topic == "__krabka_audit");
+        check_default_audit(&cfg);
     }
 
     #[test]
@@ -304,9 +308,7 @@ mod tests {
         // Absent [audit] section → secure default (enabled, standard topic name).
         let fc: FileConfig = toml::from_str("").expect("parse empty");
         let cfg = applied_for_tests(fc);
-        assert2::check!(cfg.audit_enabled);
-        assert2::check!(cfg.audit_failure_mode == krabka_audit::AuditMode::FailOpen);
-        assert2::check!(cfg.audit_topic == "__krabka_audit");
+        check_default_audit(&cfg);
     }
 
     #[test]

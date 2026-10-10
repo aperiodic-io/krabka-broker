@@ -15,8 +15,10 @@ use crate::{
     ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED,
     acl_admin::create_topic_as_admin,
     client_api::{drive_init_producer_id_as_plain, drive_join_group_as_plain, join_group_request},
-    polling::{retry_join_group_until_allowed, retry_metadata_until_topic_visible},
-    support::transactions::init_producer_request,
+    polling::{
+        named_metadata_as_alice, retry_join_group_until_allowed, retry_metadata_until_topic_visible,
+    },
+    support::{acl::TopicAclSetup, transactions::init_producer_request},
 };
 
 /// Only t1 is visible to Alice, with a real ACL image disabling the compat shim.
@@ -30,11 +32,11 @@ async fn alice_metadata_fixture() -> (
     create_topic_as_admin(addr, "t1", 1).await;
     create_topic_as_admin(addr, "t2", 1).await;
     handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(
-            "t1",
-            "User:alice",
-            krabka_metadata::AclOperation::Describe,
-        ))
+        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+            topic: "t1",
+            operation: krabka_metadata::AclOperation::Describe,
+            ..Default::default()
+        }))
         .await
         .expect("seed Describe-on-t1 ACL for alice");
     (handle, dir, addr)
@@ -74,15 +76,7 @@ async fn metadata_explicit_deny_on_named_topic() {
     // Ask Metadata for t2 *by name*. The named-topic path returns an
     // error row instead of silently filtering. Use the retry helper so
     // we don't race the raft commit-then-apply gap on the seeded ACL.
-    let resp = retry_metadata_until_topic_visible(
-        addr,
-        "alice",
-        b"wonderland",
-        "t2",
-        Some(vec!["t2".to_string()]),
-    )
-    .await
-    .expect("Metadata must round-trip");
+    let resp = named_metadata_as_alice(addr, "t2").await;
     handle.shutdown().await;
 
     assert!(resp.topics.len() == 1, "one topic row in response");
@@ -103,20 +97,19 @@ async fn join_group_denied_without_group_read_acl() {
     // Seed a meaningless ACL so the compat shim is off. Without this the
     // authorizer would short-circuit to Allow on every check and the
     // Deny assertion below would never fire.
-    handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(
-            "_nothing",
-            "User:admin",
-            krabka_metadata::AclOperation::Read,
-        ))
-        .await
-        .expect("seed dummy ACL");
+    crate::support::acl::seed_dummy_acl(&handle).await;
 
     // alice has NO Group Read ACL on "cg-1" → JoinGroup must return 30.
-    let denied =
-        drive_join_group_as_plain(addr, "alice", b"wonderland", join_group_request("cg-1"))
-            .await
-            .expect("JoinGroup must round-trip");
+    let denied = drive_join_group_as_plain(
+        addr,
+        join_group_request("cg-1"),
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: crate::framing::CLIENT_ID,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("JoinGroup must round-trip");
     assert!(
         denied.error_code == ERR_GROUP_AUTHORIZATION_FAILED,
         "alice has no Group Read on cg-1, expected GROUP_AUTHORIZATION_FAILED (30), got {denied:?}"
@@ -159,9 +152,16 @@ async fn join_group_denied_without_group_read_acl() {
     // rebalance (single-member group) and return error_code=0.
     let mut req2 = join_group_request("cg-1");
     req2.member_id = bootstrap.member_id;
-    let joined = drive_join_group_as_plain(addr, "alice", b"wonderland", req2)
-        .await
-        .expect("second JoinGroup must round-trip");
+    let joined = drive_join_group_as_plain(
+        addr,
+        req2,
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: crate::framing::CLIENT_ID,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("second JoinGroup must round-trip");
     handle.shutdown().await;
 
     assert!(
@@ -176,19 +176,22 @@ async fn init_producer_id_denied_without_txn_acl() {
     let addr = handle.listen_addr();
 
     // Seed a dummy ACL to disable the compat shim.
-    handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(
-            "_nothing",
-            "User:admin",
-            krabka_metadata::AclOperation::Read,
-        ))
-        .await
-        .expect("seed dummy ACL");
+    crate::support::acl::seed_dummy_acl(&handle).await;
 
-    let req = init_producer_request(Some("tx-1".to_string()), 60_000, (-1, -1));
-    let resp = drive_init_producer_id_as_plain(addr, "alice", b"wonderland", req)
-        .await
-        .expect("InitProducerId must round-trip");
+    let req = init_producer_request(crate::support::transactions::InitProducerSetup {
+        transactional_id: Some("tx-1".to_string()),
+        ..Default::default()
+    });
+    let resp = drive_init_producer_id_as_plain(
+        addr,
+        req,
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: crate::framing::CLIENT_ID,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("InitProducerId must round-trip");
     handle.shutdown().await;
 
     assert!(

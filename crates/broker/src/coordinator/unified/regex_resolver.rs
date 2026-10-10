@@ -270,10 +270,11 @@ mod tests {
 
     fn describe_acl(topic: &str) -> MetadataRecord {
         MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-            krabka_metadata::ResourceType::Topic,
-            topic,
-            "User:alice",
-            AclOperation::Describe,
+            crate::test_support::AllowAclSetup {
+                resource_name: topic,
+                operation: AclOperation::Describe,
+                ..Default::default()
+            },
         ))
     }
 

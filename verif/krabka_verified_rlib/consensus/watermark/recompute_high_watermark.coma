@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/consensus/watermark.rs" 70 0 77 8 *)
+(* #"/workspace/crates/verified/src/consensus/watermark.rs" 77 0 84 8 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
@@ -15,31 +15,31 @@ let%span sfailover'0 = "/workspace/crates/verified/src/consensus/failover.rs" 19
 let%span sfailover'1 = "/workspace/crates/verified/src/consensus/failover.rs" 175 8 175 48
 let%span sfailover'2 = "/workspace/crates/verified/src/consensus/failover.rs" 181 10 181 15
 let%span sfailover'3 = "/workspace/crates/verified/src/consensus/failover.rs" 184 8 190 9
-let%span swatermark = "/workspace/crates/verified/src/consensus/watermark.rs" 78 12 78 34
-let%span swatermark'0 = "/workspace/crates/verified/src/consensus/watermark.rs" 79 30 79 38
-let%span swatermark'1 = "/workspace/crates/verified/src/consensus/watermark.rs" 80 7 80 90
-let%span swatermark'2 = "/workspace/crates/verified/src/consensus/watermark.rs" 84 16 84 17
-let%span swatermark'3 = "/workspace/crates/verified/src/consensus/watermark.rs" 92 14 92 21
-let%span swatermark'4 = "/workspace/crates/verified/src/consensus/watermark.rs" 89 16 91 77
-let%span swatermark'5 = "/workspace/crates/verified/src/consensus/watermark.rs" 87 16 88 94
-let%span swatermark'6 = "/workspace/crates/verified/src/consensus/watermark.rs" 86 16 86 44
-let%span swatermark'7 = "/workspace/crates/verified/src/consensus/watermark.rs" 85 16 85 24
-let%span swatermark'8 = "/workspace/crates/verified/src/consensus/watermark.rs" 94 19 94 38
-let%span swatermark'9 = "/workspace/crates/verified/src/consensus/watermark.rs" 96 15 96 95
-let%span swatermark'10 = "/workspace/crates/verified/src/consensus/watermark.rs" 100 13 100 14
-let%span swatermark'11 = "/workspace/crates/verified/src/consensus/watermark.rs" 100 8 100 14
-let%span swatermark'12 = "/workspace/crates/verified/src/consensus/watermark.rs" 103 4 109 5
-let%span swatermark'13 = "/workspace/crates/verified/src/consensus/watermark.rs" 115 4 115 26
-let%span swatermark'14 = "/workspace/crates/verified/src/consensus/watermark.rs" 56 11 56 69
-let%span swatermark'15 = "/workspace/crates/verified/src/consensus/watermark.rs" 57 11 57 64
-let%span swatermark'16 = "/workspace/crates/verified/src/consensus/watermark.rs" 58 11 58 35
-let%span swatermark'17 = "/workspace/crates/verified/src/consensus/watermark.rs" 59 11 60 41
-let%span swatermark'18 = "/workspace/crates/verified/src/consensus/watermark.rs" 61 10 61 33
-let%span swatermark'19 = "/workspace/crates/verified/src/consensus/watermark.rs" 62 10 62 29
-let%span swatermark'20 = "/workspace/crates/verified/src/consensus/watermark.rs" 63 10 65 20
-let%span swatermark'21 = "/workspace/crates/verified/src/consensus/watermark.rs" 66 10 68 85
-let%span swatermark'22 = "/workspace/crates/verified/src/consensus/watermark.rs" 6 11 6 69
-let%span swatermark'23 = "/workspace/crates/verified/src/consensus/watermark.rs" 7 10 7 94
+let%span swatermark = "/workspace/crates/verified/src/consensus/watermark.rs" 85 12 85 34
+let%span swatermark'0 = "/workspace/crates/verified/src/consensus/watermark.rs" 86 30 86 38
+let%span swatermark'1 = "/workspace/crates/verified/src/consensus/watermark.rs" 87 7 87 90
+let%span swatermark'2 = "/workspace/crates/verified/src/consensus/watermark.rs" 91 16 91 17
+let%span swatermark'3 = "/workspace/crates/verified/src/consensus/watermark.rs" 99 14 99 21
+let%span swatermark'4 = "/workspace/crates/verified/src/consensus/watermark.rs" 96 16 98 77
+let%span swatermark'5 = "/workspace/crates/verified/src/consensus/watermark.rs" 94 16 95 94
+let%span swatermark'6 = "/workspace/crates/verified/src/consensus/watermark.rs" 93 16 93 44
+let%span swatermark'7 = "/workspace/crates/verified/src/consensus/watermark.rs" 92 16 92 24
+let%span swatermark'8 = "/workspace/crates/verified/src/consensus/watermark.rs" 101 19 101 38
+let%span swatermark'9 = "/workspace/crates/verified/src/consensus/watermark.rs" 103 15 103 95
+let%span swatermark'10 = "/workspace/crates/verified/src/consensus/watermark.rs" 107 13 107 14
+let%span swatermark'11 = "/workspace/crates/verified/src/consensus/watermark.rs" 107 8 107 14
+let%span swatermark'12 = "/workspace/crates/verified/src/consensus/watermark.rs" 110 4 116 5
+let%span swatermark'13 = "/workspace/crates/verified/src/consensus/watermark.rs" 122 4 122 26
+let%span swatermark'14 = "/workspace/crates/verified/src/consensus/watermark.rs" 65 11 65 69
+let%span swatermark'15 = "/workspace/crates/verified/src/consensus/watermark.rs" 66 11 66 64
+let%span swatermark'16 = "/workspace/crates/verified/src/consensus/watermark.rs" 67 11 67 78
+let%span swatermark'17 = "/workspace/crates/verified/src/consensus/watermark.rs" 68 10 68 33
+let%span swatermark'18 = "/workspace/crates/verified/src/consensus/watermark.rs" 69 10 69 29
+let%span swatermark'19 = "/workspace/crates/verified/src/consensus/watermark.rs" 70 10 72 20
+let%span swatermark'20 = "/workspace/crates/verified/src/consensus/watermark.rs" 73 10 75 85
+let%span swatermark'21 = "/workspace/crates/verified/src/consensus/watermark.rs" 15 11 15 69
+let%span swatermark'22 = "/workspace/crates/verified/src/consensus/watermark.rs" 16 10 16 94
+let%span swatermark'23 = "/workspace/crates/verified/src/consensus/watermark.rs" 10 8 10 97
 let%span slog_is_up_to_date = "/workspace/crates/verified/src/consensus/log_is_up_to_date.rs" 136 11 136 54
 let%span slog_is_up_to_date'0 = "/workspace/crates/verified/src/consensus/log_is_up_to_date.rs" 137 11 139 47
 let%span slog_is_up_to_date'1 = "/workspace/crates/verified/src/consensus/log_is_up_to_date.rs" 140 10 140 93
@@ -88,10 +88,10 @@ axiom count_ge_def:
 
 let candidate_has_majority (log_end: Int64.t) (follower_offsets: Slice64.slice Int64.t) (cand: Int64.t)
   (majority: UInt64.t) (leader_counts: bool) (return (x: bool)) =
-{[@stop_split] [@expl:candidate_has_majority requires] [%#swatermark'22] 1 <= UInt64.t'int majority
+{[@stop_split] [@expl:candidate_has_majority requires] [%#swatermark'21] 1 <= UInt64.t'int majority
   /\ UInt64.t'int majority <= Seq.length (Slice64.view follower_offsets) + 1}
   any
-  [ return (result: bool) -> {[@stop_split] [@expl:candidate_has_majority ensures] [%#swatermark'23] result
+  [ return (result: bool) -> {[@stop_split] [@expl:candidate_has_majority ensures] [%#swatermark'22] result
     = ge_log_Int (count_ge (Int64.to_int log_end) (Slice64.view follower_offsets) (Int64.to_int cand) leader_counts) (UInt64.t'int majority)}
     (! return {result}) ]
 
@@ -128,11 +128,15 @@ let max_i64 (self_: Int64.t) (o: Int64.t) (return (x: Int64.t)) = any
     /\ ([@stop_split] [@expl:max ensures #4] [%#scmp'3] deep_model_i64 o < deep_model_i64 self_ -> result = self_)}
     (! return {result}) ]
 
+predicate watermark_inputs_bounded [#"/workspace/crates/verified/src/consensus/watermark.rs" 8 0 8 80] (current': int) (end': int) (followers: Seq.seq Int64.t) =
+  [%#swatermark'23] current' <= end'
+  /\ (forall k: int. 0 <= k /\ k < Seq.length followers -> Int64.to_int (Seq.get followers k) <= end')
+
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let recompute_high_watermark [#"/workspace/crates/verified/src/consensus/watermark.rs" 70 0 77 8] (log_end: Int64.t)
+let recompute_high_watermark [#"/workspace/crates/verified/src/consensus/watermark.rs" 77 0 84 8] (log_end: Int64.t)
   (follower_offsets: Slice64.slice Int64.t) (majority: UInt64.t) (epoch_start_offset: Int64.t) (current_hwm: Int64.t)
   (leader_counts: bool) (return (x: Int64.t)) =
 {[@stop_split] [@expl:recompute_high_watermark requires] ([@stop_split] [@expl:recompute_high_watermark requires #0] [%#swatermark'14] 1
@@ -140,18 +144,14 @@ let recompute_high_watermark [#"/workspace/crates/verified/src/consensus/waterma
     /\ UInt64.t'int majority <= Seq.length (Slice64.view follower_offsets) + 1)
   /\ ([@stop_split] [@expl:recompute_high_watermark requires #1] [%#swatermark'15] leader_counts
     \/ UInt64.t'int majority <= Seq.length (Slice64.view follower_offsets))
-  /\ ([@stop_split] [@expl:recompute_high_watermark requires #2] [%#swatermark'16] Int64.to_int current_hwm
-    <= Int64.to_int log_end)
-  /\ ([@stop_split] [@expl:recompute_high_watermark requires #3] [%#swatermark'17] forall k: int. 0 <= k
-      /\ k < Seq.length (Slice64.view follower_offsets)
-    -> Int64.to_int (Seq.get (Slice64.view follower_offsets) k) <= Int64.to_int log_end)}
+  /\ ([@stop_split] [@expl:recompute_high_watermark requires #2] [%#swatermark'16] watermark_inputs_bounded (Int64.to_int current_hwm) (Int64.to_int log_end) (Slice64.view follower_offsets))}
   (! bb0
   [ bb0 = s0
     [ s0 = len_i64 [%#swatermark] {follower_offsets} (fun (_x: UInt64.t) -> [ &n <- _x ] s1)
     | s1 = [ &majority_offset <- [%#swatermark'0] const_MIN ] s2
     | s2 = candidate_has_majority [%#swatermark'1] {log_end} {follower_offsets} {log_end} {majority} {leader_counts}
-        (fun (_x: bool) -> [ &_41 <- _x ] s3)
-    | s3 = any [ br0 -> {_41 = false} (! bb5) | br1 -> {_41} (! bb3) ] ]
+        (fun (_x: bool) -> [ &_39 <- _x ] s3)
+    | s3 = any [ br0 -> {_39 = false} (! bb5) | br1 -> {_39} (! bb3) ] ]
   | bb3 = s0 [ s0 = [ &majority_offset <- log_end ] s1 | s1 = bb5 ]
   | bb5 = s0 [ s0 = [ &i <- [%#swatermark'2] (0: UInt64.t) ] s1 | s1 = bb6 ]
   | bb6 = bb6invariant
@@ -167,19 +167,19 @@ let recompute_high_watermark [#"/workspace/crates/verified/src/consensus/waterma
           /\ ge_log_Int (count_ge (Int64.to_int log_end) (Slice64.view follower_offsets) (hwm_member_at (Int64.to_int log_end) (Slice64.view follower_offsets) k) leader_counts) (UInt64.t'int majority)
         -> hwm_member_at (Int64.to_int log_end) (Slice64.view follower_offsets) k <= Int64.to_int majority_offset}
       (! [ &variant_old_bb6 <- [%#swatermark'3] UInt64.t'int n - UInt64.t'int i ] s0)
-      [ s0 = [ &_74 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_74 = false} (! bb17) | br1 -> {_74} (! bb8) ] ]
+      [ s0 = [ &_72 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_72 = false} (! bb17) | br1 -> {_72} (! bb8) ] ]
       [ bb8 = s0
-        [ s0 = [ &_78 <- i ] s1
-        | s1 = [ &_79 <- Slice64.length follower_offsets ] s2
-        | s2 = [ &_80 <- UInt64.lt _78 _79 ] s3
-        | s3 = {[@expl:index in bounds] [%#swatermark'8] _80} s4
-        | s4 = Slice64.get [%#swatermark'8] <Int64.t> {follower_offsets} {_78} (fun (r: Int64.t) -> [ &cand <- r ] s5)
-        | s5 = [ &_82 <- Int64.gt cand majority_offset ] s6
-        | s6 = any [ br0 -> {_82 = false} (! bb16) | br1 -> {_82} (! bb10) ] ]
+        [ s0 = [ &_76 <- i ] s1
+        | s1 = [ &_77 <- Slice64.length follower_offsets ] s2
+        | s2 = [ &_78 <- UInt64.lt _76 _77 ] s3
+        | s3 = {[@expl:index in bounds] [%#swatermark'8] _78} s4
+        | s4 = Slice64.get [%#swatermark'8] <Int64.t> {follower_offsets} {_76} (fun (r: Int64.t) -> [ &cand <- r ] s5)
+        | s5 = [ &_80 <- Int64.gt cand majority_offset ] s6
+        | s6 = any [ br0 -> {_80 = false} (! bb16) | br1 -> {_80} (! bb10) ] ]
       | bb10 = s0
         [ s0 = candidate_has_majority [%#swatermark'9] {log_end} {follower_offsets} {cand} {majority} {leader_counts}
-            (fun (_x: bool) -> [ &_85 <- _x ] s1)
-        | s1 = any [ br0 -> {_85 = false} (! bb16) | br1 -> {_85} (! bb12) ] ]
+            (fun (_x: bool) -> [ &_83 <- _x ] s1)
+        | s1 = any [ br0 -> {_83 = false} (! bb16) | br1 -> {_83} (! bb12) ] ]
       | bb12 = s0 [ s0 = [ &majority_offset <- cand ] s1 | s1 = bb16 ]
       | bb16 = s0
         [ s0 = UInt64.add [%#swatermark'11] {i} {[%#swatermark'10] (1: UInt64.t)}
@@ -187,9 +187,9 @@ let recompute_high_watermark [#"/workspace/crates/verified/src/consensus/waterma
         | s1 = bb6 ] ] ]
   | bb17 = s0
     [ s0 = lemma_hwm_member_maximal [%#swatermark'12] {log_end} {follower_offsets} {majority} {majority_offset}
-        {leader_counts} (fun (_x: ()) -> [ &_93 <- _x ] s1)
-    | s1 = [ &_100 <- Int64.gt majority_offset epoch_start_offset ] s2
-    | s2 = any [ br0 -> {_100 = false} (! bb20) | br1 -> {_100} (! bb19) ] ]
+        {leader_counts} (fun (_x: ()) -> [ &_91 <- _x ] s1)
+    | s1 = [ &_98 <- Int64.gt majority_offset epoch_start_offset ] s2
+    | s2 = any [ br0 -> {_98 = false} (! bb20) | br1 -> {_98} (! bb19) ] ]
   | bb19 = s0 [ s0 = [ &gated <- majority_offset ] s1 | s1 = bb21 ]
   | bb20 = s0 [ s0 = [ &gated <- current_hwm ] s1 | s1 = bb21 ]
   | bb21 = s0
@@ -204,27 +204,27 @@ let recompute_high_watermark [#"/workspace/crates/verified/src/consensus/waterma
   | & leader_counts: bool = leader_counts
   | & n: UInt64.t = Any.any_l ()
   | & majority_offset: Int64.t = Any.any_l ()
-  | & _41: bool = Any.any_l ()
+  | & _39: bool = Any.any_l ()
   | & i: UInt64.t = Any.any_l ()
-  | & _74: bool = Any.any_l ()
+  | & _72: bool = Any.any_l ()
   | & cand: Int64.t = Any.any_l ()
-  | & _78: UInt64.t = Any.any_l ()
-  | & _79: UInt64.t = Any.any_l ()
+  | & _76: UInt64.t = Any.any_l ()
+  | & _77: UInt64.t = Any.any_l ()
+  | & _78: bool = Any.any_l ()
   | & _80: bool = Any.any_l ()
-  | & _82: bool = Any.any_l ()
-  | & _85: bool = Any.any_l ()
-  | & _93: () = Any.any_l ()
+  | & _83: bool = Any.any_l ()
+  | & _91: () = Any.any_l ()
   | & gated: Int64.t = Any.any_l ()
-  | & _100: bool = Any.any_l ()
+  | & _98: bool = Any.any_l ()
   | & variant_old_bb6: int = Any.any_l () ])
   [ return (result: Int64.t) ->
-  {[@stop_split] [@expl:recompute_high_watermark ensures] ([@stop_split] [@expl:recompute_high_watermark ensures #0] [%#swatermark'18] ge_log_Int (Int64.to_int result) (Int64.to_int current_hwm))
-    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #1] [%#swatermark'19] Int64.to_int result
+  {[@stop_split] [@expl:recompute_high_watermark ensures] ([@stop_split] [@expl:recompute_high_watermark ensures #0] [%#swatermark'17] ge_log_Int (Int64.to_int result) (Int64.to_int current_hwm))
+    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #1] [%#swatermark'18] Int64.to_int result
       <= Int64.to_int log_end)
-    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #2] [%#swatermark'20] forall v: int. gt_log_Int v (Int64.to_int epoch_start_offset)
+    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #2] [%#swatermark'19] forall v: int. gt_log_Int v (Int64.to_int epoch_start_offset)
           /\ ge_log_Int (count_ge (Int64.to_int log_end) (Slice64.view follower_offsets) v leader_counts) (UInt64.t'int majority)
         -> v <= Int64.to_int result)
-    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #3] [%#swatermark'21] gt_log_Int (Int64.to_int result) (Int64.to_int current_hwm)
+    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #3] [%#swatermark'20] gt_log_Int (Int64.to_int result) (Int64.to_int current_hwm)
     -> gt_log_Int (Int64.to_int result) (Int64.to_int epoch_start_offset)
     /\ ge_log_Int (count_ge (Int64.to_int log_end) (Slice64.view follower_offsets) (Int64.to_int result) leader_counts) (UInt64.t'int majority))}
     (! return {result}) ]

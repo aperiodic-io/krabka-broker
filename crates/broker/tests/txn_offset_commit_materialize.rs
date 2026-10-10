@@ -29,7 +29,8 @@ use crate::support::{
     offsets::{offset_commit_topic, offset_fetch_group, offset_fetch_request, offset_fetch_topic},
     topics::{creatable_topic, create_topic_request},
     transactions::{
-        end_transaction_request, init_producer_request, txn_offset_partition, txn_offset_topic,
+        EndTransactionSetup, ProducerIdentity, TransactionOutcome, end_transaction_request,
+        init_producer_request, txn_offset_partition, txn_offset_topic,
     },
 };
 
@@ -72,7 +73,12 @@ const TOPIC: &str = "src";
 /// by name.
 async fn create_topic(client: &krabka_client_core::Client) {
     let resp = client
-        .send(create_topic_request(creatable_topic(TOPIC, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (TOPIC).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("create topic");
     assert!(resp.topics[0].error_code == 0, "create topic: {resp:?}");
@@ -139,7 +145,12 @@ async fn begin_and_commit_offsets(
     let deadline = Instant::now() + Duration::from_secs(30);
     let (pid, epoch) = loop {
         let init = client
-            .send(init_producer_request(Some(tid.into()), 60_000, (-1, -1)))
+            .send(init_producer_request(
+                crate::support::transactions::InitProducerSetup {
+                    transactional_id: Some(tid.into()),
+                    ..Default::default()
+                },
+            ))
             .await
             .expect("init producer id");
         if init.error_code == 0 {
@@ -184,7 +195,10 @@ async fn begin_and_commit_offsets(
             topics: vec![txn_offset_topic(
                 TOPIC,
                 topic_id,
-                vec![txn_offset_partition(0, offset)],
+                vec![txn_offset_partition(
+                    krabka_ids::PartitionIndex(0),
+                    krabka_ids::Offset(offset),
+                )],
             )],
             ..Default::default()
         })
@@ -220,12 +234,15 @@ async fn txn_offset_commit_visible_via_offset_fetch_after_commit_marker() {
     );
 
     // EndTxn(commit) writes the COMMIT marker → materializes the buffer.
-    let end = p
-        .client
-        .send(end_transaction_request(tid, (pid, epoch), true))
-        .await
-        .expect("end txn commit");
-    assert!(end.error_code == 0, "EndTxn(commit): {end:?}");
+    finish_transaction(
+        &p.client,
+        tid,
+        EndTransactionSetup {
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Post-commit: the offset is now visible via OffsetFetch.
     assert!(
@@ -250,12 +267,15 @@ async fn txn_offset_commit_dropped_on_abort_marker() {
     let (pid, epoch) = begin_and_commit_offsets(&p.client, tid, group, 5).await;
 
     // EndTxn(abort): the buffer is dropped without applying.
-    let end = p
-        .client
-        .send(end_transaction_request(tid, (pid, epoch), false))
-        .await
-        .expect("end txn abort");
-    assert!(end.error_code == 0, "EndTxn(abort): {end:?}");
+    finish_transaction(
+        &p.client,
+        tid,
+        EndTransactionSetup {
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            outcome: TransactionOutcome::Abort,
+        },
+    )
+    .await;
 
     // Still absent: an aborted transactional offset is never committed.
     assert!(
@@ -275,7 +295,11 @@ const OFFSET_FETCH_V10: i16 = 10;
 /// Commit an ordinary, non-transactional offset for `(TOPIC, 0)`, so that the
 /// group has a stable offset for a `require_stable` fetch to be tempted to
 /// hand back while the later transaction is still open.
-async fn commit_stable_offset(client: &krabka_client_core::Client, group_id: &str, offset: i64) {
+async fn commit_stable_offset(
+    client: &krabka_client_core::Client,
+    group_id: &str,
+    offset: krabka_ids::Offset,
+) {
     let resp = client
         .send(OffsetCommitRequest {
             group_id: group_id.into(),
@@ -286,7 +310,7 @@ async fn commit_stable_offset(client: &krabka_client_core::Client, group_id: &st
                 topic_id_for(client, TOPIC).await,
                 vec![OffsetCommitRequestPartition {
                     partition_index: 0,
-                    committed_offset: offset,
+                    committed_offset: offset.0,
                     ..Default::default()
                 }],
             )],
@@ -300,6 +324,12 @@ async fn commit_stable_offset(client: &krabka_client_core::Client, group_id: &st
     );
 }
 
+#[derive(Clone, Copy)]
+enum OffsetStability {
+    RequireStable,
+    AllowPending,
+}
+
 /// `OffsetFetch` at v10 for `(TOPIC, 0)`, with `require_stable` as given.
 /// `send_at_least` refuses to downgrade, so the decoded response is always the
 /// v10 shape.
@@ -307,12 +337,12 @@ async fn fetch_at_v10(
     client: &krabka_client_core::Client,
     group_id: &str,
     topic_id: WireUuid,
-    require_stable: bool,
+    stability: OffsetStability,
 ) -> OffsetFetchResponse {
     client
         .send_at_least(
             OffsetFetchRequest {
-                require_stable,
+                require_stable: matches!(stability, OffsetStability::RequireStable),
                 ..offset_fetch_request(offset_fetch_group(
                     group_id,
                     Some(vec![offset_fetch_topic(TOPIC, topic_id, vec![0])]),
@@ -353,10 +383,10 @@ fn v10_response(
 /// A stable `(TOPIC, 0)` row at `offset`. Both the plain `OffsetCommit` and
 /// the `TxnOffsetCommit` in this file leave the leader epoch at `-1` and the
 /// metadata empty.
-fn stable_row(offset: i64) -> OffsetFetchResponsePartitions {
+fn stable_row(offset: krabka_ids::Offset) -> OffsetFetchResponsePartitions {
     OffsetFetchResponsePartitions {
         partition_index: 0,
-        committed_offset: offset,
+        committed_offset: offset.0,
         committed_leader_epoch: -1,
         metadata: Some(String::new()),
         error_code: 0,
@@ -383,7 +413,7 @@ async fn require_stable_offset_fetch_is_unstable_until_the_commit_marker() {
     let tid = "tid-require-stable";
     let group = "g-require-stable";
 
-    commit_stable_offset(&p.client, group, 3).await;
+    commit_stable_offset(&p.client, group, krabka_ids::Offset(3)).await;
     let (pid, epoch) = begin_and_commit_offsets(&p.client, tid, group, 9).await;
 
     let unstable = OffsetFetchResponsePartitions {
@@ -396,25 +426,28 @@ async fn require_stable_offset_fetch_is_unstable_until_the_commit_marker() {
     };
 
     // require_stable = true, transaction still open: retry, do not rewind.
-    let strict = fetch_at_v10(&p.client, group, topic_id, true).await;
+    let strict = fetch_at_v10(&p.client, group, topic_id, OffsetStability::RequireStable).await;
     assert!(strict == v10_response(group, topic_id, unstable));
 
     // require_stable = false is unchanged by KIP-447: it still reads the
     // stable offset the open transaction is about to replace.
-    let relaxed = fetch_at_v10(&p.client, group, topic_id, false).await;
-    assert!(relaxed == v10_response(group, topic_id, stable_row(3)));
+    let relaxed = fetch_at_v10(&p.client, group, topic_id, OffsetStability::AllowPending).await;
+    assert!(relaxed == v10_response(group, topic_id, stable_row(krabka_ids::Offset(3))));
 
-    let end = p
-        .client
-        .send(end_transaction_request(tid, (pid, epoch), true))
-        .await
-        .expect("end txn commit");
-    assert!(end.error_code == 0, "EndTxn(commit): {end:?}");
+    finish_transaction(
+        &p.client,
+        tid,
+        EndTransactionSetup {
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            ..Default::default()
+        },
+    )
+    .await;
 
     // The marker resolved the transaction: the offset is stable again, at the
     // value the transaction committed.
-    let settled = fetch_at_v10(&p.client, group, topic_id, true).await;
-    assert!(settled == v10_response(group, topic_id, stable_row(9)));
+    let settled = fetch_at_v10(&p.client, group, topic_id, OffsetStability::RequireStable).await;
+    assert!(settled == v10_response(group, topic_id, stable_row(krabka_ids::Offset(9))));
 
     p.broker.shutdown().await;
 }
@@ -432,18 +465,38 @@ async fn require_stable_offset_fetch_becomes_stable_again_after_an_abort_marker(
     let tid = "tid-require-stable-abort";
     let group = "g-require-stable-abort";
 
-    commit_stable_offset(&p.client, group, 3).await;
+    commit_stable_offset(&p.client, group, krabka_ids::Offset(3)).await;
     let (pid, epoch) = begin_and_commit_offsets(&p.client, tid, group, 9).await;
 
-    let end = p
-        .client
-        .send(end_transaction_request(tid, (pid, epoch), false))
-        .await
-        .expect("end txn abort");
-    assert!(end.error_code == 0, "EndTxn(abort): {end:?}");
+    finish_transaction(
+        &p.client,
+        tid,
+        EndTransactionSetup {
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            outcome: TransactionOutcome::Abort,
+        },
+    )
+    .await;
 
-    let settled = fetch_at_v10(&p.client, group, topic_id, true).await;
-    assert!(settled == v10_response(group, topic_id, stable_row(3)));
+    let settled = fetch_at_v10(&p.client, group, topic_id, OffsetStability::RequireStable).await;
+    assert!(settled == v10_response(group, topic_id, stable_row(krabka_ids::Offset(3))));
 
     p.broker.shutdown().await;
+}
+
+/// Resolve the pending offsets through `EndTxn`, retaining the full response on failure.
+async fn finish_transaction(
+    client: &krabka_client_core::Client,
+    tid: &str,
+    setup: EndTransactionSetup,
+) {
+    let label = match setup.outcome {
+        TransactionOutcome::Commit => "commit",
+        TransactionOutcome::Abort => "abort",
+    };
+    let end = client
+        .send(end_transaction_request(tid, setup))
+        .await
+        .expect("end transaction");
+    assert!(end.error_code == 0, "EndTxn({label}): {end:?}");
 }

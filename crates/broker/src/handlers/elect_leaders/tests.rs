@@ -58,10 +58,12 @@ fn image_with(proposals: &[BreakGlassProposalRecord]) -> MetadataImage {
         isr: vec![NodeId(1)],
         leader_epoch: LeaderEpoch(5),
         ..crate::handlers::test_support::replicated_partition(
-            TOPIC,
-            0,
-            NodeId(1),
-            &[NodeId(1), NodeId(2)],
+            crate::handlers::test_support::ReplicatedPartitionSetup {
+                topic: TOPIC,
+                leader: NodeId(1),
+                replicas: &[NodeId(1), NodeId(2)],
+                ..Default::default()
+            },
         )
     }));
     for proposal in proposals {
@@ -78,10 +80,12 @@ fn elected() -> PartitionRecord {
         leader_epoch: LeaderEpoch(6),
         partition_epoch: 1,
         ..crate::handlers::test_support::replicated_partition(
-            TOPIC,
-            0,
-            NodeId(2),
-            &[NodeId(1), NodeId(2)],
+            crate::handlers::test_support::ReplicatedPartitionSetup {
+                topic: TOPIC,
+                leader: NodeId(2),
+                replicas: &[NodeId(1), NodeId(2)],
+                ..Default::default()
+            },
         )
     }
 }
@@ -125,10 +129,7 @@ async fn elect(
 
 #[tokio::test]
 async fn an_unclean_election_with_no_proposal_is_refused_and_appends_nothing() {
-    let (handle, _dir) = broker_with(gated_config()).await;
-    let broker = handle.broker_arc_for_test();
-
-    let (row, records) = elect(&broker, &image_with(&[]), ElectionType::Unclean).await;
+    let (handle, _dir, row, records) = election_fixture(ElectionCaseSetup::default()).await;
 
     check!(row.error_code == codes::POLICY_VIOLATION);
     check!(
@@ -210,10 +211,11 @@ async fn a_topic_wide_proposal_is_spent_once_for_every_partition_it_covers() {
 
 #[tokio::test]
 async fn a_preferred_election_is_never_gated() {
-    let (handle, _dir) = broker_with(gated_config()).await;
-    let broker = handle.broker_arc_for_test();
-
-    let (row, records) = elect(&broker, &image_with(&[]), ElectionType::Preferred).await;
+    let (handle, _dir, row, records) = election_fixture(ElectionCaseSetup {
+        election: ElectionType::Preferred,
+        ..Default::default()
+    })
+    .await;
 
     // Broker 1 leads, but it is dead, so Kafka would have left the partition
     // leaderless and the preferred replica is not available. It is never
@@ -225,10 +227,11 @@ async fn a_preferred_election_is_never_gated() {
 
 #[tokio::test]
 async fn a_broker_with_no_approver_set_gates_nothing() {
-    let (handle, _dir) = broker_with(BreakGlassConfig::default()).await;
-    let broker = handle.broker_arc_for_test();
-
-    let (row, records) = elect(&broker, &image_with(&[]), ElectionType::Unclean).await;
+    let (handle, _dir, row, records) = election_fixture(ElectionCaseSetup {
+        config: BreakGlassConfig::default(),
+        ..Default::default()
+    })
+    .await;
 
     check!(row.error_code == codes::NONE);
     assert!(*one_partition_change(&records) == elected());
@@ -378,7 +381,7 @@ async fn seed_preferred_topic(broker: &Broker) {
     records.extend((0..3).map(|partition| {
         MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
             TOPIC,
-            partition,
+            krabka_ids::PartitionIndex(partition),
             NodeId(1),
         ))
     }));
@@ -489,4 +492,27 @@ async fn handle_request(
 ) -> i16 {
     let response = handle(broker, req, VERSION, ctx).await.expect("handle");
     response.replica_election_results[0].partition_result[0].error_code
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+struct ElectionCaseSetup<'a> {
+    #[default(gated_config())]
+    config: BreakGlassConfig,
+    #[default(ElectionType::Unclean)]
+    election: ElectionType,
+    proposals: &'a [BreakGlassProposalRecord],
+}
+
+async fn election_fixture(
+    setup: ElectionCaseSetup<'_>,
+) -> (
+    BrokerHandle,
+    tempfile::TempDir,
+    PartitionResult,
+    Vec<MetadataRecord>,
+) {
+    let (handle, dir) = Box::pin(broker_with(setup.config)).await;
+    let broker = handle.broker_arc_for_test();
+    let (row, records) = elect(&broker, &image_with(setup.proposals), setup.election).await;
+    (handle, dir, row, records)
 }

@@ -114,9 +114,11 @@ macro_rules! named_acl_gates {
 
 named_acl_gates!(
     group_read_denied: Group(Read, group_id),
+    group_delete_denied: Group(Delete, group_id),
     /// The `Describe` gate on `Group(group_id)`, the twin of [`group_read_denied`].
     group_describe_denied: Group(Describe, group_id),
     cluster_alter_denied: Cluster(Alter),
+    cluster_alter_configs_denied: Cluster(AlterConfigs),
     cluster_action_denied: Cluster(ClusterAction),
     /// The `Describe` gate on `Cluster("kafka-cluster")`, the twin of [`cluster_alter_denied`].
     /// The barrier, write-freeze and break-glass control planes all use this gate.
@@ -233,6 +235,29 @@ pub(crate) fn subscribed_names_describe_denied(
         unique,
     )
     .is_empty()
+}
+
+/// Preserve whole-request rejection at the caller before validation or coordinator routing.
+macro_rules! authorize_subscription {
+    (($broker:expr, $image:expr, $ctx:expr), $names:expr => $reply:expr) => {
+        if let Some(error_code) =
+            $crate::handlers::acl_gates::subscribed_names_refusal($broker, $image, $ctx, $names)
+        {
+            return Ok($reply(error_code, None));
+        }
+    };
+}
+pub(crate) use authorize_subscription;
+
+/// Subscription denial code shared by consumer and share heartbeats.
+pub(crate) fn subscribed_names_refusal(
+    broker: &crate::broker::Broker,
+    image: &krabka_metadata::MetadataImage,
+    ctx: &RequestContext<'_>,
+    names: Option<&[String]>,
+) -> Option<i16> {
+    subscribed_names_describe_denied(broker.config.authorizer.as_ref(), image, ctx, names)
+        .then_some(codes::TOPIC_AUTHORIZATION_FAILED)
 }
 
 /// Kafka's `filterByAuthorized(DESCRIBE, TOPIC, requiredTopics)` as the
@@ -412,12 +437,10 @@ mod tests {
         );
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&krabka_metadata::MetadataRecord::V1AccessControlEntry(
-            crate::test_support::allow_acl(
-                ResourceType::Topic,
-                "orders",
-                "User:alice",
-                AclOperation::Write,
-            ),
+            crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+                operation: AclOperation::Write,
+                ..Default::default()
+            }),
         ));
         let authorizer = crate::authorizer::SimpleAclAuthorizer::new(HashSet::new());
 

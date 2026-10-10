@@ -237,9 +237,9 @@ kdc_url = "tcp://kdc:88"
 
     #[test]
     fn apply_to_inter_broker_credentials_oauthbearer_reads_redacted_token_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let token_path = dir.path().join("token");
-        std::fs::write(&token_path, "header.payload.\n").unwrap();
+        let (_dir, token_path) = crate::test_support::oauth_token_file(
+            crate::test_support::OAuthTokenContents::Nonempty,
+        );
         let src = format!(
             r#"
 [inter_broker_credentials]
@@ -262,9 +262,8 @@ token_path = {}
 
     #[test]
     fn apply_to_inter_broker_credentials_oauthbearer_rejects_empty_token_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let token_path = dir.path().join("token");
-        std::fs::write(&token_path, "\n").unwrap();
+        let (_dir, token_path) =
+            crate::test_support::oauth_token_file(crate::test_support::OAuthTokenContents::Empty);
         let src = format!(
             r#"
 [inter_broker_credentials]

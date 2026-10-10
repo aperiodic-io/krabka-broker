@@ -193,7 +193,7 @@ impl MarkerFanout<'_> {
 mod tests {
     use std::{collections::BTreeMap, sync::Arc};
 
-    use assert2::{assert, check};
+    use assert2::assert;
     use krabka_ids::PartitionIndex;
     use krabka_log::Offset;
     use krabka_metadata::NodeId;
@@ -208,7 +208,6 @@ mod tests {
                 MarkerPlacement, MockRemoteMarkerWriter,
                 test_support::{at, fast_config, marker, source},
             },
-            marker::parse_barrier_marker,
             metrics::BrokerBarrierMetrics,
             test_support::{open_partition, topic_records},
         },
@@ -261,6 +260,20 @@ mod tests {
             .await
     }
 
+    async fn check_remote_placement(
+        registry: &PartitionRegistry,
+        controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+        remote: MockRemoteMarkerWriter,
+        metrics: &BrokerBarrierMetrics,
+        config: &BarrierConfig,
+        offset: Offset,
+    ) {
+        let remote: Arc<dyn RemoteMarkerWriter> = Arc::new(remote);
+        let fanout = test_fanout(registry, controller, Some(&remote), metrics, config);
+        let placed = place_one(fanout).await;
+        assert!(placed == maplit::btreemap! {at("orders", 0) => offset});
+    }
+
     macro_rules! remote_fixture {
         ($registry:ident, $controller:ident, $metrics:ident, $config:ident = $configuration:expr) => {
             let $registry = PartitionRegistry::new();
@@ -288,7 +301,14 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let registry = PartitionRegistry::new();
         for p in 0..2 {
-            open_partition(&registry, dir.path(), "orders", p);
+            open_partition(
+                &registry,
+                dir.path(),
+                crate::test_support::StandalonePartitionSetup {
+                    partition: krabka_ids::PartitionIndex(p),
+                    ..Default::default()
+                },
+            );
             registry
                 .get("orders", PartitionIndex(p))
                 .expect("the partition is open")
@@ -310,8 +330,7 @@ mod tests {
                 .read_log(Offset(0), krabka_units::mebibytes(1))
                 .expect("read the log back");
             let batch = &read.batches[0];
-            check!(batch.attributes.is_control_batch());
-            check!(parse_barrier_marker(&batch.records[0]).ok() == Some(marker()));
+            crate::barrier::test_support::check_control_marker(batch, &marker());
         }
     }
 
@@ -319,7 +338,11 @@ mod tests {
     async fn a_partition_that_is_not_open_locally_stays_unmarked() {
         let dir = tempdir().expect("tempdir");
         let registry = PartitionRegistry::new();
-        open_partition(&registry, dir.path(), "orders", 0);
+        open_partition(
+            &registry,
+            dir.path(),
+            crate::test_support::StandalonePartitionSetup::default(),
+        );
         registry
             .get("orders", PartitionIndex(0))
             .expect("the partition is open")
@@ -341,11 +364,15 @@ mod tests {
                 assert!(leader == NodeId(2));
                 Ok(placements(targets, Offset(77)))
             });
-        let remote: Arc<dyn RemoteMarkerWriter> = Arc::new(remote);
-
-        let fanout = test_fanout(&registry, &controller, Some(&remote), &metrics, &config);
-        let placed = place_one(fanout).await;
-        assert!(placed == maplit::btreemap! {at("orders", 0) => Offset(77)});
+        check_remote_placement(
+            &registry,
+            &controller,
+            remote,
+            &metrics,
+            &config,
+            Offset(77),
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -405,11 +432,15 @@ mod tests {
                 }
                 Ok(placements(targets, Offset(12)))
             });
-        let remote: Arc<dyn RemoteMarkerWriter> = Arc::new(remote);
-
-        let fanout = test_fanout(&registry, &controller, Some(&remote), &metrics, &config);
-        let placed = place_one(fanout).await;
-        assert!(placed == maplit::btreemap! {at("orders", 0) => Offset(12)});
+        check_remote_placement(
+            &registry,
+            &controller,
+            remote,
+            &metrics,
+            &config,
+            Offset(12),
+        )
+        .await;
     }
 
     #[tokio::test]

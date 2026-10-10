@@ -27,11 +27,10 @@ use krabka_broker::{
     RemoteStorageBackend, RlmmKind, config::ListenerSpec,
 };
 use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::create_topics_request::{CreatableTopicConfig, CreateTopicsRequest};
-use krabka_security::{ListenerProtocol, SaslMechanism};
+use krabka_security::ListenerProtocol;
 use tempfile::TempDir;
 
-use crate::{PASSWORD, TOPIC, VOTERS, broker_principal, support, support::client::connect_owned};
+use crate::{PASSWORD, TOPIC, VOTERS, support, support::client::connect_owned};
 
 /// The listener every client in this suite and every JVM container speaks to.
 const CLIENT_LISTENER: &str = "PLAINTEXT";
@@ -129,12 +128,14 @@ pub(crate) async fn start_jepsen_cluster(object_dir: &Path) -> Vec<TestNode> {
         };
         let client_addr = addrs.client;
         let config = broker_config(
-            index,
             data_dir.path(),
             object_dir,
-            &addrs,
-            &rlmm_bootstrap,
-            &voters,
+            DisklessNodeSetup {
+                index: crate::support::NodeIndex(index),
+                addrs,
+                rlmm_bootstrap: &rlmm_bootstrap,
+                voters: voters.clone(),
+            },
         );
 
         let start_config = config.clone();
@@ -170,37 +171,52 @@ pub(crate) async fn start_jepsen_cluster(object_dir: &Path) -> Vec<TestNode> {
 /// The four addresses one broker needs: what each of its two data-plane
 /// listeners binds, what the client-facing one advertises, and where its raft
 /// controller listens.
+#[derive(krabka_macros::FieldDefaults)]
 struct NodeAddrs {
+    #[default("127.0.0.1:0".parse().expect("loopback listener"))]
     client: SocketAddr,
+    #[default("127.0.0.1:0".into())]
     client_advertised: String,
+    #[default("127.0.0.1:0".parse().expect("loopback listener"))]
     inter: SocketAddr,
+    #[default("127.0.0.1:0".parse().expect("loopback listener"))]
     controller: SocketAddr,
 }
 
 /// One broker's config: the two listeners, the static-voter bootstrap, the
 /// distinct rack the WAL placement policy requires, the shared object store,
 /// and the topic-backed metadata log the flush index rides on.
-fn broker_config(
-    index: usize,
-    log_dir: &Path,
-    object_dir: &Path,
-    addrs: &NodeAddrs,
-    rlmm_bootstrap: &str,
-    voters: &[(NodeId, String)],
-) -> BrokerConfig {
-    let node = u64::try_from(index + 1).expect("small cluster");
-    let mut config = BrokerConfig::for_tests(log_dir.to_path_buf());
-    config.broker_id = i32::try_from(index + 1).expect("small cluster");
-    config.node_id = NodeId(node);
-    config.directory_id = uuid::Uuid::from_u128(u128::from(node));
+#[derive(krabka_macros::FieldDefaults)]
+struct DisklessNodeSetup<'a> {
+    index: crate::support::NodeIndex,
+    addrs: NodeAddrs,
+    #[default("127.0.0.1:0")]
+    rlmm_bootstrap: &'a str,
+    voters: Vec<(NodeId, String)>,
+}
+
+fn broker_config(log_dir: &Path, object_dir: &Path, setup: DisklessNodeSetup<'_>) -> BrokerConfig {
+    let DisklessNodeSetup {
+        index,
+        addrs,
+        rlmm_bootstrap,
+        voters,
+    } = setup;
+    let node = NodeId(u64::try_from(index.0 + 1).expect("small cluster"));
+    let mut config = support::addressed_node_config(
+        log_dir,
+        support::AddressedNodeSetup {
+            node,
+            client: addrs.inter,
+            controller: addrs.controller,
+        },
+    );
+    config.directory_id = uuid::Uuid::from_u128(u128::from(node.0));
     // `listen_addr` and `advertised_listener` name the inter-broker endpoint.
     // The broker self-registers that pair before it binds the data plane, and
     // `Metadata` still answers a client on `PLAINTEXT` with the `PLAINTEXT`
     // endpoint, which is the one that carries `host.docker.internal`.
-    config.listen_addr = addrs.inter;
-    config.advertised_listener = addrs.inter.to_string();
-    config.controller_listen_addr = addrs.controller;
-    config.controller_quorum_voters = voters.to_vec();
+    config.controller_quorum_voters = voters;
     config.bootstrap_mode = BootstrapMode::Bootstrap;
     config.auto_join = false;
     config.bootstrap_servers.clear();
@@ -223,20 +239,18 @@ fn broker_config(
             ListenerProtocol::SaslPlaintext,
         ),
     ];
-    INTER_BROKER_LISTENER.clone_into(&mut config.inter_broker_listener_name);
-    config.enabled_sasl_mechanisms = vec![SaslMechanism::Plain];
-    // Every broker holds every peer's credential, because any of them can end
-    // up leading the shard and having to authenticate the other two.
-    config.plain_credentials =
-        support::diskless::peer_credentials(VOTERS, PASSWORD, broker_principal).collect();
-    // Distinct racks preserve the three-voter WAL placement's AZ-loss budget.
-    support::diskless::configure_identity(
+    support::diskless::configure_authentication(
         &mut config,
-        index,
-        node,
-        VOTERS,
-        PASSWORD,
-        broker_principal,
+        support::diskless::DisklessAuthenticationSetup {
+            listener: INTER_BROKER_LISTENER,
+            identity: support::diskless::DisklessIdentitySetup {
+                index,
+                node,
+                voters: support::diskless::WalVoterCount(VOTERS),
+                password: PASSWORD,
+            },
+            ..Default::default()
+        },
     );
     config.diskless_wal_flush_interval = krabka_units::millis(100);
     config.diskless_wal_index_projection_timeout = krabka_units::secs(10);
@@ -280,20 +294,7 @@ pub(crate) async fn await_brokers_registered(cluster: &[TestNode]) {
 pub(crate) async fn create_diskless_topic(bootstrap: &str) {
     let client = connect_owned(bootstrap, "diskless-jepsen-admin", "admin client").await;
     let response = client
-        .send(CreateTopicsRequest {
-            topics: vec![crate::support::topics::creatable_topic_with_configs(
-                TOPIC.into(),
-                1,
-                1,
-                vec![CreatableTopicConfig {
-                    name: "krabka.diskless".into(),
-                    value: Some("true".into()),
-                    ..Default::default()
-                }],
-            )],
-            timeout_ms: 10_000,
-            ..Default::default()
-        })
+        .send(crate::support::topics::diskless_topic_request(TOPIC, 1))
         .await
         .expect("CreateTopics");
     assert!(

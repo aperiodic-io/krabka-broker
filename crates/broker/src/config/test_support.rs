@@ -18,6 +18,15 @@ pub fn assert_invalid_runtime(config: &BrokerConfig, expected: &str) {
     assert!(actual == expected);
 }
 
+/// Exercise each scalar rejection from an independently initialized default config.
+pub fn assert_invalid_runtime_cases(cases: impl IntoIterator<Item = RuntimeInvalidator>) {
+    for (expected, invalidate) in cases {
+        let mut config = BrokerConfig::default();
+        invalidate(&mut config);
+        assert_invalid_runtime(&config, expected);
+    }
+}
+
 /// A well-formed two-listener config used as the base for validation
 /// tests.
 pub fn base() -> BrokerConfig {

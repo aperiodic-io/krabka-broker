@@ -62,15 +62,11 @@ mod tests {
                 codes::UNKNOWN_TOPIC_OR_PARTITION,
                 codes::COORDINATOR_NOT_AVAILABLE,
             ),
-            (codes::NOT_ENOUGH_REPLICAS, codes::COORDINATOR_NOT_AVAILABLE),
-            (codes::REQUEST_TIMED_OUT, codes::COORDINATOR_NOT_AVAILABLE),
-            (codes::NOT_LEADER_OR_FOLLOWER, codes::NOT_COORDINATOR),
-            (codes::KAFKA_STORAGE_ERROR, codes::NOT_COORDINATOR),
-            (codes::MESSAGE_TOO_LARGE, codes::UNKNOWN_SERVER_ERROR),
-            (codes::RECORD_LIST_TOO_LARGE, codes::UNKNOWN_SERVER_ERROR),
-            (codes::UNKNOWN_SERVER_ERROR, codes::UNKNOWN_SERVER_ERROR),
             (codes::CORRUPT_MESSAGE, codes::CORRUPT_MESSAGE),
-        ] {
+        ]
+        .into_iter()
+        .chain(crate::test_support::COORDINATOR_WRITE_ERROR_CASES)
+        {
             check!(operation_error_code(write) == want, "{write}");
         }
     }

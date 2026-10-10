@@ -31,10 +31,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::Bytes;
 use criterion::{Criterion, criterion_group, criterion_main};
 use krabka_log::{Log, LogConfig, Offset};
-use krabka_protocol::records::{Record, RecordBatch};
 use krabka_units::prelude::{ByteSize, mebibytes};
 use tempfile::TempDir;
 
@@ -61,21 +59,7 @@ struct BenchPartition {
     limit: Offset,
 }
 
-fn make_batch(records: i32, payload: usize) -> RecordBatch {
-    let mut batch = RecordBatch {
-        last_offset_delta: (records - 1).max(0),
-        ..RecordBatch::default()
-    };
-    for i in 0..records {
-        batch.records.push(Record {
-            offset_delta: i,
-            key: Some(Bytes::from(format!("k{i:08}"))),
-            value: Some(Bytes::from(vec![0xABu8; payload])),
-            ..Record::default()
-        });
-    }
-    batch
-}
+krabka_macros::record_batch_fixture!(make_batch);
 
 /// `count` partition logs, each holding one batch of the given shape.
 fn partitions(count: usize, records: i32, payload: usize) -> Arc<Vec<BenchPartition>> {

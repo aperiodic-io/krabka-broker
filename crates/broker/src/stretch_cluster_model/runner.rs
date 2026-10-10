@@ -4,10 +4,8 @@
 //! exhaustive, because a truncated search proves nothing and the two must move
 //! together.
 
-use stateright::Checker;
-
 use super::config::StretchModel;
-use crate::model_check::run_bfs;
+use crate::model_check::check_model;
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 60;
@@ -31,11 +29,10 @@ pub(super) const PINNED_UNIQUE_STATES_RED_LEGACY_ELECT: usize = 5_724;
 pub(super) const PINNED_UNIQUE_STATES_RED_MIN_INSYNC_ONE: usize = 2_660;
 
 pub fn run(model: StretchModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, MAX_STATES);
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    check_model(
+        model,
         label,
+        (MAX_DEPTH, MAX_STATES, MAX_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }

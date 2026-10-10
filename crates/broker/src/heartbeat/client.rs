@@ -418,7 +418,6 @@ mod tests {
             broker_heartbeat_response::BrokerHeartbeatResponse,
         },
     };
-    use tempfile::tempdir;
 
     use super::*;
     use crate::test_support::FakeMetadataSource;
@@ -546,7 +545,7 @@ mod tests {
                     BrokerRegistrationRecord {
                         broker_epoch: 11,
                         host: "localhost".into(),
-                        ..crate::test_support::broker_registration(7)
+                        ..crate::test_support::broker_registration(krabka_raft::NodeId(7))
                     },
                 )])
                 .leader(Some(krabka_raft::NodeId(1)))
@@ -610,9 +609,7 @@ mod tests {
 
     #[test]
     fn offline_dir_uuids_maps_offline_paths() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        let paths = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+        let (a, _b, paths) = crate::test_support::two_log_dirs();
         let ids = crate::log_dir_id::LogDirIds::resolve(&paths);
         let status = crate::log_dir_status::LogDirRegistry::probe(&paths);
 
@@ -629,9 +626,7 @@ mod tests {
 
     #[test]
     fn all_dirs_offline_true_only_when_every_dir_offline() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        let paths = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+        let (a, b, paths) = crate::test_support::two_log_dirs();
         let status = crate::log_dir_status::LogDirRegistry::probe(&paths);
 
         // Empty all_log_dirs: always false.
@@ -704,9 +699,7 @@ mod tests {
     /// `metadata.version` `4.3-IV0`, and an empty set is still sent.
     #[test]
     fn heartbeats_carry_cordoned_dirs_once_caught_up_on_a_supporting_version() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        let paths = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+        let (_a, b, paths) = crate::test_support::two_log_dirs();
         let ids = crate::log_dir_id::LogDirIds::resolve(&paths);
         let wire = |dir: &std::path::Path| {
             krabka_protocol::primitives::uuid::Uuid(*ids.id_for(dir).unwrap().as_bytes())

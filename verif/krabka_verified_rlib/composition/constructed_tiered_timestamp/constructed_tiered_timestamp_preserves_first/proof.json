@@ -14,7 +14,7 @@
       },
       "vc_earliest_timestamp_candidate": {
         "prover": "alt-ergo",
-        "time": 0.027
+        "time": 0.011
       },
       "vc_from_i64": { "prover": "alt-ergo", "time": 0.015 },
       "vc_list_offsets_kind": { "prover": "alt-ergo", "time": 0.012 },

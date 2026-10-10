@@ -17,7 +17,7 @@ use krabka_protocol::{
         api_versions_request,
         api_versions_response::{ApiVersion, ApiVersionsResponse},
         create_topics_request::CreatableTopic,
-        create_topics_response::{CreatableTopicConfigs, CreatableTopicResult},
+        create_topics_response::CreatableTopicResult,
         envelope_request,
         envelope_response::EnvelopeResponse,
     },
@@ -130,24 +130,14 @@ async fn without_principal_creates_a_topic_and_then_reports_that_it_exists() {
     // KIP-525 (v5+): the row carries the effective configs of the new topic.
     // The request set no overrides, so they are the defaults.
     let image = broker.controller.current_image();
-    let configs = crate::handlers::describe_configs::effective_topic_configs(
+    let configs = crate::test_support::described_creation_configs(
         &image,
-        broker.config.node_id,
-        "fresh",
-        &std::collections::BTreeMap::new(),
-        crate::api_catalog::UnstableApiVersions::Disabled,
-        &std::collections::BTreeMap::new(),
-    )
-    .into_iter()
-    .map(|entry| CreatableTopicConfigs {
-        name: entry.name,
-        value: entry.value,
-        read_only: entry.read_only,
-        config_source: entry.config_source,
-        is_sensitive: entry.is_sensitive,
-        unknown_tagged_fields: UnknownTaggedFields::default(),
-    })
-    .collect();
+        crate::test_support::DescribedCreationSetup {
+            node: broker.config.node_id,
+            topic: "fresh",
+            overrides: &std::collections::BTreeMap::new(),
+        },
+    );
     let created = response(CreatableTopicResult {
         name: "fresh".to_owned(),
         topic_id: committed_topic_id(&broker, "fresh"),
@@ -408,17 +398,7 @@ fn flexible_for(api_key: i16, version: i16) -> bool {
     }
 }
 
-/// A response body, after the correlation id: the tagged-fields byte of a v1
-/// response header when `flexible`, then `body` at `version`.
-fn encode_body(body: &impl krabka_protocol::Encode, version: i16, flexible: bool) -> Vec<u8> {
-    let mut out = BytesMut::new();
-    if flexible {
-        out.put_u8(0);
-    }
-    body.encode(&mut out, version)
-        .expect("encode the scripted answer");
-    out.to_vec()
-}
+use crate::test_support::scripted_response_body as encode_body;
 
 /// The `CreateTopicsResponse` for `answer`.
 fn create_topics_answer(answer: Answer, name: &str) -> CreateTopicsResponse {

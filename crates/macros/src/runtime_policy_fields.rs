@@ -2,11 +2,20 @@
 
 use moxy::{
     ast::{Field, List, ParseError, Parser, Token},
-    token::{Span, ToTokenStream, TokenStream, TokenTree},
+    token::{LitStr, Span, ToTokenStream, TokenStream, TokenTree},
 };
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
-    let (startup_before, cli) = match crate::meta::mode(meta, ["toml", "cli"])? {
+    let mode = crate::meta::mode(meta, ["toml", "cli", "node_cli"])?;
+    if mode == "node_cli" {
+        return controller_fields(item, ControllerFieldInterface::CommandLine);
+    }
+    let item = if mode == "toml" {
+        controller_fields(item, ControllerFieldInterface::Toml)?
+    } else {
+        item
+    };
+    let (startup_before, cli) = match mode {
         "toml" => ("client_metrics_enable", false),
         "cli" => ("client_metrics_eviction_tick", true),
         _ => unreachable!(),
@@ -62,6 +71,30 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
     pub self_registration_max_attempts: Option<u32>,
     /// Maximum bytes fetched by one metadata observer request.
     pub observer_fetch_max: Option<ByteSize>,
+    };
+    let share_timings = moxy::template! {
+    /// Default share-group session timeout, Kafka's
+    /// `group.share.session.timeout.ms`.
+    pub share_group_session_timeout: Option<Time>,
+    /// Default share-group heartbeat interval, Kafka's
+    /// `group.share.heartbeat.interval.ms`.
+    pub share_group_heartbeat_interval: Option<Time>,
+    /// Lower bound on the share-group session timeout, and on a group's
+    /// `share.session.timeout.ms`, Kafka's
+    /// `group.share.min.session.timeout.ms`.
+    pub share_group_min_session_timeout: Option<Time>,
+    /// Upper bound on the share-group session timeout, and on a group's
+    /// `share.session.timeout.ms`, Kafka's
+    /// `group.share.max.session.timeout.ms`.
+    pub share_group_max_session_timeout: Option<Time>,
+    /// Lower bound on the share-group heartbeat interval, and on a group's
+    /// `share.heartbeat.interval.ms`, Kafka's
+    /// `group.share.min.heartbeat.interval.ms`.
+    pub share_group_min_heartbeat_interval: Option<Time>,
+    /// Upper bound on the share-group heartbeat interval, and on a group's
+    /// `share.heartbeat.interval.ms`, Kafka's
+    /// `group.share.max.heartbeat.interval.ms`.
+    pub share_group_max_heartbeat_interval: Option<Time>,
     };
     let share_limits = moxy::template! {
     /// How long an acquired share record stays locked before it is released
@@ -203,11 +236,7 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
     pub consumer_group_max_heartbeat_interval: Option<Time>,
 
     };
-    let (mut tokens, body) = crate::meta::named_body(item, "runtime_policy_fields")?;
-    let TokenTree::Group(group) = &mut tokens[body] else {
-        unreachable!()
-    };
-    for (before, fields) in [
+    let groups = [
         (
             if cli {
                 "oauth_jwks_http_timeout"
@@ -219,6 +248,7 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         (startup_before, startup),
         ("audit_event_queue_capacity", operations),
         ("streams_group_max_size", streams),
+        ("share_group_max_size", share_timings),
         (
             if cli {
                 "streams_group_enable"
@@ -228,7 +258,9 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
             share_limits,
         ),
         ("consumer_group_max_size", replication),
-    ] {
+    ];
+    let mut prepared = Vec::new();
+    for (before, fields) in groups {
         // TOML documentation is schema text; the CLI fields originally had no
         // help text, and clap would otherwise turn these docs into help.
         let fields = if cli {
@@ -240,6 +272,20 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         } else {
             fields
         };
+        prepared.push((before, fields));
+    }
+    insert_fields(item, prepared)
+}
+
+fn insert_fields(
+    item: TokenStream,
+    fields: impl IntoIterator<Item = (&'static str, TokenStream)>,
+) -> Result<TokenStream, ParseError> {
+    let (mut tokens, body) = crate::meta::named_body(item, "runtime_policy_fields")?;
+    let TokenTree::Group(group) = &mut tokens[body] else {
+        unreachable!()
+    };
+    for (before, fields) in fields {
         let mut start = group
             .tokens
             .windows(2)
@@ -265,4 +311,62 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         group.tokens = body.into();
     }
     Ok(tokens.into())
+}
+
+/// Preserve each interface's documentation while sharing the operational field schema.
+#[derive(Clone, Copy)]
+enum ControllerFieldInterface {
+    CommandLine,
+    Toml,
+}
+
+fn controller_fields(
+    item: TokenStream,
+    interface: ControllerFieldInterface,
+) -> Result<TokenStream, ParseError> {
+    let cli = matches!(interface, ControllerFieldInterface::CommandLine);
+    let [observer_lag_bound_doc, heartbeat_interval_doc, heartbeat_timeout_doc, replica_lag_time_max_doc, controller_election_timeout_doc, controller_heartbeat_interval_doc, controller_fetch_miss_limit_doc] = if cli {
+        [
+            "KIP-853 observer promotion lag bound.",
+            "Broker heartbeat interval in milliseconds.",
+            "Broker heartbeat timeout in milliseconds.",
+            "Follower lag timeout in milliseconds before ISR shrink.",
+            "Controller election timeout in milliseconds.",
+            "Controller heartbeat interval in milliseconds.",
+            "Consecutive controller fetch misses tolerated before election.",
+        ]
+    } else {
+        [
+            "KIP-853: maximum log-entry lag an observer may have and still be\npromotable to a voter.",
+            "How often this broker sends `BrokerHeartbeat` to the controller leader.",
+            "How long the controller waits without a heartbeat before it marks a\nbroker dead.",
+            "Maximum follower lag before the leader proposes an ISR shrink. Kafka's\n`replica.lag.time.max.ms`.",
+            "Controller election timeout, Kafka's\n`controller.quorum.fetch.timeout.ms`. It is the follower fetch\nwatchdog, and 1.5x of it is the leader's check-quorum window: a leader\nthat a majority of the voters has not fetched from within that window\nresigns its epoch.",
+            "Raft heartbeat interval on the controller quorum. It should stay at or\nbelow `controller_election_timeout / 3`.",
+            "Consecutive follower fetch misses tolerated before a new election.",
+        ]
+    }.map(|doc| LitStr::new(doc, Span::call_site()));
+    let observer_arg = if cli {
+        moxy::template! { #[arg(long, env = "KRABKA_OBSERVER_LAG_BOUND")] }
+    } else {
+        TokenStream::new()
+    };
+    let fields = moxy::template! {
+        #[doc = {{ observer_lag_bound_doc }}]
+        {{ observer_arg }}
+        pub observer_lag_bound: Option<u64>,
+        #[doc = {{ heartbeat_interval_doc }}]
+        pub heartbeat_interval: Option<Time>,
+        #[doc = {{ heartbeat_timeout_doc }}]
+        pub heartbeat_timeout: Option<Time>,
+        #[doc = {{ replica_lag_time_max_doc }}]
+        pub replica_lag_time_max: Option<Time>,
+        #[doc = {{ controller_election_timeout_doc }}]
+        pub controller_election_timeout: Option<Time>,
+        #[doc = {{ controller_heartbeat_interval_doc }}]
+        pub controller_heartbeat_interval: Option<Time>,
+        #[doc = {{ controller_fetch_miss_limit_doc }}]
+        pub controller_fetch_miss_limit: Option<u32>,
+    };
+    insert_fields(item, [("metadata_raft_command_queue_capacity", fields)])
 }

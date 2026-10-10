@@ -461,14 +461,46 @@ mod tests {
     /// A round of records with `values` for partition `partition` of the topic
     /// `dlq.<id>`, numbered from zero, all stamped `timestamp`: what
     /// `record::build_round` builds.
-    fn round(id: u8, partition: i32, timestamp: i64, values: &[&str], limit: i32) -> Produce {
+    use krabka_ids::PartitionIndex;
+
+    use crate::test_support::UnixMillis;
+
+    #[derive(Clone, Copy)]
+    struct FixtureTopicId(u8);
+
+    #[derive(Clone, Copy)]
+    struct MessageByteLimit(i32);
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct RoundSetup<'a> {
+        #[default(FixtureTopicId(1))]
+        id: FixtureTopicId,
+        #[default(PartitionIndex(0))]
+        partition: PartitionIndex,
+        #[default(UnixMillis(1_000))]
+        timestamp: UnixMillis,
+        #[default(&["a0"])]
+        values: &'a [&'a str],
+        #[default(MessageByteLimit(ROOMY))]
+        limit: MessageByteLimit,
+    }
+
+    fn round(setup: RoundSetup<'_>) -> Produce {
+        let RoundSetup {
+            id,
+            partition,
+            timestamp,
+            values,
+            limit,
+        } = setup;
+        let id = id.0;
         let records: Vec<(i64, &str)> = values.iter().map(|value| (0, *value)).collect();
         Produce {
             topic: format!("dlq.{id}"),
             topic_id: uuid::Uuid::from_bytes([id; 16]),
-            partition,
-            max_message_bytes: limit,
-            batch: batch_of(timestamp, timestamp, &records),
+            partition: partition.0,
+            max_message_bytes: limit.0,
+            batch: batch_of(timestamp.0, timestamp.0, &records),
             admitted: Arc::new(|| {}),
         }
     }
@@ -562,7 +594,14 @@ mod tests {
         let coalescer = Arc::clone(coalescer);
         tokio::spawn(async move {
             coalescer
-                .produce(NodeId(1), round(1, partition, 1_000, &[value], ROOMY))
+                .produce(
+                    NodeId(1),
+                    round(RoundSetup {
+                        partition: PartitionIndex(partition),
+                        values: &[value],
+                        ..Default::default()
+                    }),
+                )
                 .await
         })
     }
@@ -584,14 +623,45 @@ mod tests {
         let (broker, coalescer) = healthy();
 
         let answers = join_all([
-            coalescer.produce(NodeId(1), round(1, 0, 1_000, &["a0", "a1"], ROOMY)),
-            coalescer.produce(NodeId(1), round(1, 1, 1_000, &["b0"], ROOMY)),
-            coalescer.produce(NodeId(1), round(1, 0, 1_000, &["c0"], ROOMY)),
-            coalescer.produce(NodeId(2), round(1, 0, 1_000, &["d0"], ROOMY)),
+            coalescer.produce(
+                NodeId(1),
+                round(RoundSetup {
+                    values: &["a0", "a1"],
+                    ..Default::default()
+                }),
+            ),
+            coalescer.produce(
+                NodeId(1),
+                round(RoundSetup {
+                    partition: PartitionIndex(1),
+                    values: &["b0"],
+                    ..Default::default()
+                }),
+            ),
+            coalescer.produce(
+                NodeId(1),
+                round(RoundSetup {
+                    values: &["c0"],
+                    ..Default::default()
+                }),
+            ),
+            coalescer.produce(
+                NodeId(2),
+                round(RoundSetup {
+                    values: &["d0"],
+                    ..Default::default()
+                }),
+            ),
         ])
         .await;
         let later = coalescer
-            .produce(NodeId(1), round(1, 0, 1_000, &["e0"], ROOMY))
+            .produce(
+                NodeId(1),
+                round(RoundSetup {
+                    values: &["e0"],
+                    ..Default::default()
+                }),
+            )
             .await;
 
         // Which broker's queue empties first is the scheduler's choice, so the
@@ -697,8 +767,21 @@ mod tests {
             let (broker, coalescer) = healthy();
 
             let answers = join_all([
-                coalescer.produce(NodeId(1), round(1, 0, 1_000, &["a0"], limit)),
-                coalescer.produce(NodeId(1), round(1, 0, 1_000, &["b0"], limit)),
+                coalescer.produce(
+                    NodeId(1),
+                    round(RoundSetup {
+                        limit: MessageByteLimit(limit),
+                        ..Default::default()
+                    }),
+                ),
+                coalescer.produce(
+                    NodeId(1),
+                    round(RoundSetup {
+                        values: &["b0"],
+                        limit: MessageByteLimit(limit),
+                        ..Default::default()
+                    }),
+                ),
             ])
             .await;
 
@@ -723,8 +806,21 @@ mod tests {
         let (broker, coalescer) = healthy();
 
         join_all([
-            coalescer.produce(NodeId(1), round(1, 0, 2_000, &["new"], ROOMY)),
-            coalescer.produce(NodeId(1), round(1, 0, 1_000, &["old"], ROOMY)),
+            coalescer.produce(
+                NodeId(1),
+                round(RoundSetup {
+                    timestamp: UnixMillis(2_000),
+                    values: &["new"],
+                    ..Default::default()
+                }),
+            ),
+            coalescer.produce(
+                NodeId(1),
+                round(RoundSetup {
+                    values: &["old"],
+                    ..Default::default()
+                }),
+            ),
         ])
         .await;
 
@@ -754,12 +850,19 @@ mod tests {
         let coalescer = Coalescer::new(broker.clone());
 
         let failed = join_all([
-            coalescer.produce(NodeId(1), round(1, 0, 1_000, &["a0"], ROOMY)),
-            coalescer.produce(NodeId(1), round(2, 0, 1_000, &["b0"], ROOMY)),
+            coalescer.produce(NodeId(1), round(RoundSetup::default())),
+            coalescer.produce(
+                NodeId(1),
+                round(RoundSetup {
+                    id: FixtureTopicId(2),
+                    values: &["b0"],
+                    ..Default::default()
+                }),
+            ),
         ])
         .await;
         let next = coalescer
-            .produce(NodeId(1), round(1, 0, 1_000, &["a0"], ROOMY))
+            .produce(NodeId(1), round(RoundSetup::default()))
             .await;
 
         assert!(failed == vec![Err("connection refused".to_owned()); 2]);
@@ -793,7 +896,14 @@ mod tests {
         .await;
         let next = tokio::time::timeout(
             limit,
-            coalescer.produce(NodeId(1), round(1, 2, 1_000, &["c0"], ROOMY)),
+            coalescer.produce(
+                NodeId(1),
+                round(RoundSetup {
+                    partition: PartitionIndex(2),
+                    values: &["c0"],
+                    ..Default::default()
+                }),
+            ),
         )
         .await;
 
@@ -815,7 +925,13 @@ mod tests {
         // A limit that one record of a batch fits under, and two do not.
         let two = batch_of(1_000, 1_000, &[(0, "b0"), (0, "c0")]);
         let limit = i32::try_from(two.encoded_len()).unwrap() - 1;
-        let rounds = ["a0", "b0", "c0"].map(|value| counted(round(1, 0, 1_000, &[value], limit)));
+        let rounds = ["a0", "b0", "c0"].map(|value| {
+            counted(round(RoundSetup {
+                values: &[value],
+                limit: MessageByteLimit(limit),
+                ..Default::default()
+            }))
+        });
         let counts: Vec<_> = rounds.iter().map(|(_, count)| Arc::clone(count)).collect();
         let read = |counts: &[Arc<std::sync::atomic::AtomicUsize>]| -> Vec<usize> {
             counts

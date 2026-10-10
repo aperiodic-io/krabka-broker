@@ -11,6 +11,19 @@ async fn start_broker() -> (krabka_broker::BrokerHandle, tempfile::TempDir) {
     (broker, dir)
 }
 
+async fn describe_topic(
+    controller_admin: &AdminClient,
+    topic: &ConfigResource,
+) -> krabka_client_admin::DescribeConfigsResults {
+    controller_admin
+        .describe_configs(
+            std::slice::from_ref(topic),
+            DescribeConfigsOptions::default(),
+        )
+        .await
+        .unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_bootstrap_routes_supported_and_rejects_unsupported_admin_rpc() {
     let (broker, _dir) = start_broker().await;
@@ -33,13 +46,7 @@ async fn controller_bootstrap_routes_supported_and_rejects_unsupported_admin_rpc
             .await
             .unwrap();
     let topic = ConfigResource::topic("controller-admin");
-    let configs = controller_admin
-        .describe_configs(
-            std::slice::from_ref(&topic),
-            DescribeConfigsOptions::default(),
-        )
-        .await
-        .unwrap();
+    let configs = describe_topic(&controller_admin, &topic).await;
 
     check!(configs.keys().collect::<Vec<_>>() == vec![&topic]);
     check!(configs[&topic].is_ok());
@@ -88,13 +95,7 @@ async fn controller_bootstrap_routes_supported_and_rejects_unsupported_admin_rpc
 
     // Kafka's KIP-919 error 115 is a local AdminClient preflight failure. The
     // same controller connection therefore remains usable after rejection.
-    let configs = controller_admin
-        .describe_configs(
-            std::slice::from_ref(&topic),
-            DescribeConfigsOptions::default(),
-        )
-        .await
-        .unwrap();
+    let configs = describe_topic(&controller_admin, &topic).await;
     check!(configs.keys().collect::<Vec<_>>() == vec![&topic]);
     broker.shutdown().await;
 }

@@ -29,9 +29,13 @@ async fn create_acls_super_user_can_provision_and_describe() {
         creations: vec![topic_allow_creation("foo", "User:alice", OPERATION_READ)],
         ..Default::default()
     };
-    let create_resp = drive_create_acls_as_plain(addr, "admin", b"admin-secret", create_req)
-        .await
-        .expect("CreateAcls as super-user must succeed");
+    let create_resp = drive_create_acls_as_plain(
+        addr,
+        create_req,
+        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+    )
+    .await
+    .expect("CreateAcls as super-user must succeed");
     assert!(
         create_resp.results.len() == 1,
         "one result per creation: {create_resp:?}"
@@ -45,10 +49,13 @@ async fn create_acls_super_user_can_provision_and_describe() {
     // Describe with a permissive filter (resource_type=Topic, everything
     // else any/null) — must return exactly one resource entry carrying
     // one ACL description for User:alice / Read / Allow.
-    let describe_resp =
-        drive_describe_acls_as_plain(addr, "admin", b"admin-secret", describe_all_topic_acls())
-            .await
-            .expect("DescribeAcls as super-user must succeed");
+    let describe_resp = drive_describe_acls_as_plain(
+        addr,
+        describe_all_topic_acls(),
+        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+    )
+    .await
+    .expect("DescribeAcls as super-user must succeed");
     handle.shutdown().await;
 
     assert!(
@@ -97,9 +104,16 @@ async fn create_acls_non_super_user_rejected() {
         ],
         ..Default::default()
     };
-    let resp = drive_create_acls_as_plain(addr, "alice", b"wonderland", req)
-        .await
-        .expect("CreateAcls request must round-trip even when denied");
+    let resp = drive_create_acls_as_plain(
+        addr,
+        req,
+        &crate::kafka_wire::PlainAuthenticationSetup {
+            client_id: crate::framing::CLIENT_ID,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("CreateAcls request must round-trip even when denied");
     handle.shutdown().await;
 
     assert!(resp.results.len() == 2, "one result row per creation");
@@ -124,9 +138,13 @@ async fn delete_acls_removes_matching() {
         ],
         ..Default::default()
     };
-    let create_resp = drive_create_acls_as_plain(addr, "admin", b"admin-secret", create_req)
-        .await
-        .expect("provisioning CreateAcls must succeed");
+    let create_resp = drive_create_acls_as_plain(
+        addr,
+        create_req,
+        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+    )
+    .await
+    .expect("provisioning CreateAcls must succeed");
     assert!(create_resp.results.len() == 2);
     for r in &create_resp.results {
         assert!(r.error_code == 0, "provisioning must succeed, got {r:?}");
@@ -146,9 +164,13 @@ async fn delete_acls_removes_matching() {
         }],
         ..Default::default()
     };
-    let delete_resp = drive_delete_acls_as_plain(addr, "admin", b"admin-secret", delete_req)
-        .await
-        .expect("DeleteAcls must succeed");
+    let delete_resp = drive_delete_acls_as_plain(
+        addr,
+        delete_req,
+        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+    )
+    .await
+    .expect("DeleteAcls must succeed");
     assert!(
         delete_resp.filter_results.len() == 1,
         "one filter result row per filter"
@@ -168,10 +190,13 @@ async fn delete_acls_removes_matching() {
     check!(matching[0].error_code == 0);
 
     // Describe — only the Write-on-bar binding should remain.
-    let describe_resp =
-        drive_describe_acls_as_plain(addr, "admin", b"admin-secret", describe_all_topic_acls())
-            .await
-            .expect("DescribeAcls must succeed");
+    let describe_resp = drive_describe_acls_as_plain(
+        addr,
+        describe_all_topic_acls(),
+        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+    )
+    .await
+    .expect("DescribeAcls must succeed");
     handle.shutdown().await;
 
     assert!(describe_resp.error_code == 0);

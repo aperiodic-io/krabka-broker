@@ -142,10 +142,8 @@ fn ascii_digits(text: &str, max: usize) -> bool {
 /// `Integer.parseInt` over ASCII: an optional sign, then one or more digits,
 /// within `i32`.
 fn java_parse_int(text: &str) -> Option<i32> {
-    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
+    // Rust's signed decimal parser already requires an optional ASCII sign
+    // followed by a nonempty ASCII digit run and checks the i32 bounds.
     text.parse().ok()
 }
 

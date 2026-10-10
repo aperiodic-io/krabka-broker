@@ -13,15 +13,13 @@ use bytes::Bytes;
 use krabka_broker::{BrokerHandle, codes};
 use krabka_client_core::Client;
 use krabka_protocol::{
-    owned::produce_response::PartitionProduceResponse,
-    primitives::uuid::Uuid as WireUuid,
-    records::{RecordBatch, RecordsPayload},
+    owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
+    records::RecordBatch,
 };
 
 use crate::{
     support,
     support::{
-        produce::single_partition_produce,
         records::value_record,
         topics::{creatable_topic, create_topic_request},
     },
@@ -42,7 +40,12 @@ krabka_macros::unix_millis_fixture!(
 /// Create a one-partition topic and wait for its partition to exist locally.
 pub(super) async fn create_topic(broker: &BrokerHandle, client: &Client, name: &str) -> WireUuid {
     let resp = client
-        .send(create_topic_request(creatable_topic(name, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (name).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics");
     let created = &resp.topics[0];
@@ -103,16 +106,16 @@ pub(super) async fn produce(
     topic: &str,
     topic_id: WireUuid,
 ) -> PartitionProduceResponse {
-    let resp = client
-        .send(single_partition_produce(
-            topic,
+    let resp = crate::support::produce::send_batch(
+        &client,
+        one_record("v"),
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: (topic).into(),
             topic_id,
-            0,
-            Some(RecordsPayload::V2(vec![one_record("v")])),
-            (1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+            ..Default::default()
+        },
+    )
+    .await;
     resp.responses[0].partition_responses[0].clone()
 }
 
@@ -204,3 +207,23 @@ macro_rules! check_produce {
     };
 }
 pub(super) use check_produce;
+
+/// Create a topic with one accepted record, freeze it and verify refusal.
+pub(super) async fn frozen_topic_with_record(
+    broker: &BrokerHandle,
+    client: &Client,
+    topic: &str,
+    reason: &str,
+) -> (WireUuid, WireUuid) {
+    let (frozen, control) = create_controlled_topic(broker, client, topic).await;
+    check_produce!(broker, client, topic, frozen => accepted(1));
+    crate::control_plane::freeze_scope(
+        client,
+        krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL,
+        topic,
+        reason,
+    )
+    .await;
+    check_produce!(broker, client, topic, frozen => refused("literal", topic, reason, 1));
+    (frozen, control)
+}

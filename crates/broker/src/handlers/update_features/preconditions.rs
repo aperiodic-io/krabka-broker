@@ -208,7 +208,7 @@ mod tests {
             host: String::new(),
             port: 0,
             features,
-            ..crate::test_support::broker_registration(node_id)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
         })
     }
 

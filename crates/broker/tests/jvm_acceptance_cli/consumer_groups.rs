@@ -66,10 +66,9 @@ async fn kafka_consumer_groups_delete_offsets() {
     // generally does not prompt for --delete-offsets when all flags are
     // supplied; the piped "y\n" is defensive and ignored otherwise.
     let mut child = crate::support::jvm_spawn_piped(
-        &mut crate::support::jvm_docker_command(
-            KAFKA_IMAGE,
-            &[],
-            &[
+        &mut crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+            image: KAFKA_IMAGE,
+            args: &[
                 "kafka-consumer-groups",
                 "--bootstrap-server",
                 broker0_advertised(),
@@ -79,8 +78,9 @@ async fn kafka_consumer_groups_delete_offsets() {
                 "--topic",
                 TOPIC,
             ],
-            true,
-        ),
+            input: crate::support::ContainerInput::Attached,
+            ..Default::default()
+        }),
         "spawn delete-offsets",
     );
     {

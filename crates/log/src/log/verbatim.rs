@@ -15,7 +15,7 @@
 use bytes::{Bytes, BytesMut};
 use krabka_ids::{LeaderEpoch, Offset, ProducerId};
 use krabka_protocol::records::{
-    Attributes, CRC_COVERAGE_START, HEADER_LEN, RecordBatch, TimestampType,
+    Attributes, CRC_COVERAGE_START, HEADER_LEN, RecordBatch, RecordBatchHeader, TimestampType,
 };
 use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
 use tracing::instrument;
@@ -75,6 +75,21 @@ pub struct VerbatimBatch {
 }
 
 impl VerbatimBatch {
+    /// Preserve a validated batch's wire bytes and copy its header bookkeeping fields.
+    #[must_use]
+    pub fn from_header(header: &RecordBatchHeader, bytes: Bytes) -> Self {
+        Self {
+            bytes,
+            last_offset_delta: header.last_offset_delta.get(),
+            max_timestamp: header.max_timestamp.get(),
+            leader_epoch: LeaderEpoch(header.partition_leader_epoch.get()),
+            producer_id: ProducerId(header.producer_id.get()),
+            producer_epoch: header.producer_epoch.get(),
+            base_sequence: header.base_sequence.get(),
+            is_transactional: Attributes(header.attributes.get()).is_transactional(),
+        }
+    }
+
     /// This batch with Kafka's log-append time stamped into it.
     ///
     /// This is `LogValidator`'s `batch.setMaxTimestamp(LOG_APPEND_TIME, now)`

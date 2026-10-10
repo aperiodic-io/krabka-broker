@@ -104,6 +104,21 @@ impl S3RemoteStorage {
         self
     }
 
+    pub(crate) fn from_backend_config(
+        config: &ObjectStoreConfig,
+        prefix: Option<String>,
+        threshold: u64,
+        chunk_size: usize,
+        worm_bucket: WormBucket,
+    ) -> Result<Self, RemoteStorageError> {
+        let store = build_object_store(config)
+            .map_err(|error| RemoteStorageError::InvalidArgument(error.to_string()))?;
+        let mut storage = Self::with_store(store, prefix)
+            .with_multipart_tuning(ByteSize::from_bytes(threshold), size_from_usize(chunk_size));
+        storage.worm_bucket = worm_bucket;
+        Ok(storage)
+    }
+
     /// Builds an `AmazonS3` client from `cfg` and wraps it.
     ///
     /// # Errors
@@ -111,14 +126,13 @@ impl S3RemoteStorage {
     /// Returns [`RemoteStorageError::InvalidArgument`] if `object_store`'s
     /// builder rejects the bucket, region, and endpoint combination.
     pub fn from_s3_config(cfg: &S3Config) -> Result<Self, RemoteStorageError> {
-        let store = build_object_store(&ObjectStoreConfig::S3(cfg.clone()))
-            .map_err(|e| RemoteStorageError::InvalidArgument(e.to_string()))?;
-        let mut storage = Self::with_store(store, cfg.prefix.clone()).with_multipart_tuning(
-            ByteSize::from_bytes(cfg.multipart_threshold),
-            size_from_usize(cfg.multipart_chunk_size),
-        );
-        storage.worm_bucket = WormBucket::S3(cfg.clone());
-        Ok(storage)
+        Self::from_backend_config(
+            &ObjectStoreConfig::S3(cfg.clone()),
+            cfg.prefix.clone(),
+            cfg.multipart_threshold,
+            cfg.multipart_chunk_size,
+            WormBucket::S3(cfg.clone()),
+        )
     }
 
     /// Runs an async [`ObjectOps`](krabka_object_store::ObjectOps) call to
@@ -204,7 +218,10 @@ mod tests {
 
         let error = S3RemoteStorage::from_s3_config(&s3)
             .unwrap()
-            .with_worm(&worm_config(keys.path(), false))
+            .with_worm(&worm_config(
+                keys.path(),
+                crate::s3::test_support::WormAccess::ReadWrite,
+            ))
             .unwrap_err();
 
         check!(error.to_string().contains("conditional_put = true"));

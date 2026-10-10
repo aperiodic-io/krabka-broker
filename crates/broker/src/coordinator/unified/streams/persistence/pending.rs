@@ -24,7 +24,9 @@ use super::{
 use crate::{
     coordinator::unified::{
         OffsetRecordBatchBuilder,
-        member_records::{MemberRecordFamilies, MemberRecordLists},
+        member_records::{
+            MemberRecordFamilies, MemberRecordLists, MemberTombstone, append_removed_members,
+        },
     },
     error::BrokerError,
 };
@@ -82,35 +84,19 @@ impl PendingStreamsRecords {
     /// longer than 32767 bytes, which a non-flexible key string cannot carry.
     pub fn into_batch(self, group_id: &str, now_ms: i64) -> Result<RecordBatch, BrokerError> {
         let mut batch = OffsetRecordBatchBuilder::default();
-        let removed: Vec<String> = self
-            .member_metadata
-            .iter()
-            .filter(|(_, value)| value.is_none())
-            .map(|(member_id, _)| member_id.clone())
-            .collect();
-        for member_id in &removed {
-            if self
-                .current_per_member
-                .iter()
-                .any(|(id, value)| id == member_id && value.is_none())
-            {
-                batch.push(
-                    encode_current_member_assignment_key(group_id, member_id)?,
-                    None,
-                );
-            }
-            if self
-                .target_per_member
-                .iter()
-                .any(|(id, value)| id == member_id && value.is_none())
-            {
-                batch.push(
-                    encode_target_assignment_member_key(group_id, member_id)?,
-                    None,
-                );
-            }
-            batch.push(encode_member_metadata_key(group_id, member_id)?, None);
-        }
+        let removed = append_removed_members(
+            &mut batch,
+            &self.member_metadata,
+            &self.target_per_member,
+            &self.current_per_member,
+            |family, member_id| match family {
+                MemberTombstone::Current => {
+                    encode_current_member_assignment_key(group_id, member_id)
+                }
+                MemberTombstone::Target => encode_target_assignment_member_key(group_id, member_id),
+                MemberTombstone::Metadata => encode_member_metadata_key(group_id, member_id),
+            },
+        )?;
         for (member_id, v) in self.member_metadata {
             if let Some(v) = v {
                 batch.push(

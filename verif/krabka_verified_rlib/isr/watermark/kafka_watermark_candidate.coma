@@ -79,5 +79,3 @@ goal vc_kafka_watermark_candidate: if n <= 0 then
       )
     else
       [@expl:variant decreases] well_founded_relation_Int ([%#swatermark] n) ([%#swatermark] n - 1)
-
-

@@ -229,11 +229,7 @@ mod tests {
     #[test]
     fn the_max_timestamp_offset_comes_from_the_first_segment_holding_it() {
         let dir = tempdir().unwrap();
-        let mut log = crate::test_support::segmented_log(dir.path(), kibibytes(1));
-        // Every batch carries the same timestamps, so several segments share
-        // the maximum and only the ordering separates them.
-        crate::log::test_support::append_samples(&mut log, 40, 4);
-        check!(!log.segments.is_empty(), "the appends should have rolled");
+        let log = crate::log::test_support::rolled_sample_log(dir.path());
 
         let (offset, ts) = log
             .max_timestamp_offset_and_ts()

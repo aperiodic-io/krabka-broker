@@ -57,32 +57,24 @@ pub(crate) fn spawn(
         // loaded refreshes the resolutions of its regular expressions once,
         // at its first heartbeat.
         coordinator.bump_regex_refresh_version(metadata.current_metadata_offset());
-        loop {
-            tokio::select! {
-                () = shutdown.cancelled() => return,
-                changed = images.changed() => {
-                    if changed.is_err() {
-                        return;
-                    }
-                    let image = images.borrow_and_update().clone();
-                    let owned = |group_id: &str| {
-                        local_partition_for_group(&image, node_id, group_id).is_ok()
-                    };
-                    let changed = changed_topics(&previous, &image);
-                    if !changed.is_empty() {
-                        on_metadata_update(&coordinator, owned, &changed).await;
-                    }
-                    if regex_resolution_may_change(&previous, &image) {
-                        coordinator.bump_regex_refresh_version(metadata.current_metadata_offset());
-                    }
-                    let deleted = deleted_topics(&previous, &image);
-                    if !deleted.is_empty() {
-                        remember_deletions(&coordinator, &deleted);
-                        on_topics_deleted(&coordinator, owned, &deleted).await;
-                    }
-                    previous = image;
-                }
+        while let Some(image) =
+            crate::metadata_source::next_image_until_shutdown(&mut images, &shutdown).await
+        {
+            let owned =
+                |group_id: &str| local_partition_for_group(&image, node_id, group_id).is_ok();
+            let changed = changed_topics(&previous, &image);
+            if !changed.is_empty() {
+                on_metadata_update(&coordinator, owned, &changed).await;
             }
+            if regex_resolution_may_change(&previous, &image) {
+                coordinator.bump_regex_refresh_version(metadata.current_metadata_offset());
+            }
+            let deleted = deleted_topics(&previous, &image);
+            if !deleted.is_empty() {
+                remember_deletions(&coordinator, &deleted);
+                on_topics_deleted(&coordinator, owned, &deleted).await;
+            }
+            previous = image;
         }
     });
 }

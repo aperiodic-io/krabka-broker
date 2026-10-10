@@ -14,10 +14,9 @@ use crate::kraft::controller::{
     },
     records::decode_control_record,
     test_support::{
-        TEST_ELECTION_TIMEOUT, await_leader, build_engine_only,
-        build_with_max_bytes_between_snapshots, build_with_snapshot_interval,
-        elect_single_voter_engine, one_offset_batch, submit_change_with_timeout, test_metadata_log,
-        topic_record, voter_set,
+        ControllerSetup, EngineSetup, TEST_ELECTION_TIMEOUT, await_leader, build,
+        build_engine_only, elect_single_voter_engine, one_offset_batch, submit_change_with_timeout,
+        test_metadata_log, topic_record, voter_set,
     },
 };
 
@@ -119,6 +118,17 @@ fn ordinary_snapshot_does_not_reload_the_live_image() {
     );
 }
 
+/// Elect the single-voter fixture before snapshot submissions.
+async fn single_leader_snapshot_fixture() -> (KraftController, tempfile::TempDir) {
+    let (ctrl, dir) = build(ControllerSetup {
+        ids: &[NodeId(1)],
+        snapshot_interval_records: crate::kraft::controller::test_support::SnapshotRecordCount(3),
+        ..Default::default()
+    });
+    super::test_support::elect_single_voter_controller(&ctrl).await;
+    (ctrl, dir)
+}
+
 /// A single-voter leader with `snapshot_interval_records = 3` snapshots each
 /// time the committed offset advances past the threshold. The test engine
 /// keeps no log beyond its newest snapshot, so the cleaning after the second
@@ -126,9 +136,7 @@ fn ordinary_snapshot_does_not_reload_the_live_image() {
 /// exists on disk and the log start has risen above 0.
 #[tokio::test]
 async fn leader_snapshots_and_prunes_at_threshold() {
-    let (ctrl, dir) = build_with_snapshot_interval(NodeId(1), &[NodeId(1)], 3);
-    ctrl.inject_event(Event::ElectionTimeout).await.unwrap();
-    await_leader(&ctrl, Some(NodeId(1))).await;
+    let (ctrl, dir) = single_leader_snapshot_fixture().await;
 
     // Four distinct topics, each committed immediately (single voter). Each
     // commit advances the HWM well past the 3-record interval, so a snapshot
@@ -155,11 +163,11 @@ async fn leader_snapshots_and_prunes_at_threshold() {
 /// later, identical read of the same unchanged range).
 #[tokio::test]
 async fn leader_snapshots_and_prunes_at_byte_threshold_across_many_small_commits() {
-    let (ctrl, dir) = build_with_max_bytes_between_snapshots(
-        NodeId(1),
-        &[NodeId(1)],
-        krabka_units::prelude::bytes(200),
-    );
+    let (ctrl, dir) = build(ControllerSetup {
+        ids: &[NodeId(1)],
+        max_bytes_between_snapshots: krabka_units::prelude::bytes(200),
+        ..Default::default()
+    });
     ctrl.inject_event(Event::ElectionTimeout).await.unwrap();
     await_leader(&ctrl, Some(NodeId(1))).await;
 
@@ -197,6 +205,14 @@ fn latest_checkpoint_id_picks_highest_offset_then_epoch() {
     assert2::assert!(latest == b"eleven-one");
 }
 
+fn checkpoint_entry_count(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir)
+        .expect("read checkpoint dir")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("read entries")
+        .len()
+}
+
 #[test]
 fn retain_recent_checkpoints_keeps_the_two_newest_ids_and_deletes_the_rest() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -216,11 +232,7 @@ fn retain_recent_checkpoints_keeps_the_two_newest_ids_and_deletes_the_rest() {
             load_checkpoint_by_id(&cp_dir, end_offset, epoch).is_some() == want_present
         );
     }
-    let entries: Vec<_> = std::fs::read_dir(&cp_dir)
-        .expect("read checkpoint dir")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("read entries");
-    assert2::assert!(entries.len() == 2);
+    assert2::assert!(checkpoint_entry_count(&cp_dir) == 2);
 }
 
 #[test]
@@ -247,11 +259,7 @@ fn retain_latest_checkpoint_keeps_only_the_single_newest_id() {
     assert2::assert!(load_checkpoint_by_id(&cp_dir, 6, 1) == Some(b"newest".to_vec()));
     assert2::assert!(load_checkpoint_by_id(&cp_dir, 6, 0).is_none());
     assert2::assert!(load_checkpoint_by_id(&cp_dir, 5, 1).is_none());
-    let entries: Vec<_> = std::fs::read_dir(&cp_dir)
-        .expect("read checkpoint dir")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("read entries");
-    assert2::assert!(entries.len() == 1);
+    assert2::assert!(checkpoint_entry_count(&cp_dir) == 1);
 
     // Empty dir no-ops
     let empty_dir = tempfile::tempdir().expect("tempdir");
@@ -265,7 +273,10 @@ fn retain_latest_checkpoint_keeps_only_the_single_newest_id() {
 /// tracking in-flight readers.
 #[test]
 fn a_snapshot_roll_keeps_the_checkpoint_it_replaces_until_the_next_one() {
-    let (mut engine, dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut engine);
     let cp_dir = dir.path().to_path_buf();
 
@@ -302,7 +313,10 @@ fn a_snapshot_roll_keeps_the_checkpoint_it_replaces_until_the_next_one() {
 /// literal `0` and every checkpoint claimed 1970.
 #[test]
 fn the_checkpoint_header_carries_the_last_contained_batch_create_time() {
-    let (mut engine, dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut engine);
 
     // Append below the engine's own submit path so the create-times are
@@ -334,7 +348,10 @@ fn the_checkpoint_header_carries_the_last_contained_batch_create_time() {
 /// both land here.
 #[test]
 fn a_snapshot_at_an_already_pruned_boundary_keeps_the_header_timestamp() {
-    let (mut engine, dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut engine);
     let stamp = 1_700_000_222_333;
     let mut batch = one_offset_batch(0, 1, b"only");
@@ -360,7 +377,11 @@ fn a_snapshot_at_an_already_pruned_boundary_keeps_the_header_timestamp() {
 /// own header — the one place the record's stamp still exists on this node.
 #[test]
 fn an_installed_snapshot_hands_its_header_timestamp_to_the_next_checkpoint() {
-    let (mut engine, dir) = build_engine_only(NodeId(2), &[NodeId(1), NodeId(2)]);
+    let (mut engine, dir) = build_engine_only(EngineSetup {
+        me: NodeId(2),
+        ids: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    });
     let stamp = 1_700_000_444_555;
     let mut image = engine.image.clone();
     image.apply(&MetadataRecord::V1Voters(VotersRecord {
@@ -386,7 +407,10 @@ async fn a_restart_recovers_the_header_timestamp_from_the_checkpoint() {
     let stamp = 1_700_000_666_777;
     // Snapshot and prune without an election, so the reopened controller's
     // bootstrap epoch matches and its checkpoint lands on the same id.
-    let (mut engine, dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     let mut batch = one_offset_batch(0, 0, b"restart");
     engine.log.append(&mut batch, stamp).expect("append");
     engine.log.advance_hwm(engine.log.log_end_offset());
@@ -428,9 +452,7 @@ async fn a_restart_recovers_the_header_timestamp_from_the_checkpoint() {
 /// over it names that instant rather than the epoch.
 #[tokio::test]
 async fn a_submitted_change_stamps_its_checkpoint_with_the_append_wall_clock() {
-    let (ctrl, dir) = build_with_snapshot_interval(NodeId(1), &[NodeId(1)], 3);
-    ctrl.inject_event(Event::ElectionTimeout).await.unwrap();
-    await_leader(&ctrl, Some(NodeId(1))).await;
+    let (ctrl, dir) = single_leader_snapshot_fixture().await;
 
     let before = KraftController::wall_clock_ms();
     for name in ["a", "b", "c", "d"] {

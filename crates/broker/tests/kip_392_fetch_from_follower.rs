@@ -36,9 +36,7 @@ use krabka_protocol::{
 use support::cluster_lock;
 use tempfile::TempDir;
 
-use crate::support::{
-    client::connect_client, fetch::fetch_topic_row, produce::single_partition_produce,
-};
+use crate::support::{client::connect_client, fetch::fetch_topic_row};
 
 mod support;
 
@@ -104,7 +102,24 @@ use crate::support::client::value_batch as record_batch;
 /// at `offset`, with `rack_id`. The shared `Client` negotiates the broker's
 /// max Fetch version (>= 11). So the client serializes `rack_id` on the wire,
 /// and the decoded response carries `preferred_read_replica`.
-fn consumer_fetch(topic: &str, topic_id: WireUuid, offset: i64, rack: &str) -> FetchRequest {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct ConsumerFetchSetup<'a> {
+    #[default("t")]
+    topic: &'a str,
+    #[default(WireUuid::ZERO)]
+    topic_id: WireUuid,
+    offset: krabka_ids::Offset,
+    #[default(RACK_B)]
+    rack: &'a str,
+}
+
+fn consumer_fetch(setup: ConsumerFetchSetup<'_>) -> FetchRequest {
+    let ConsumerFetchSetup {
+        topic,
+        topic_id,
+        offset,
+        rack,
+    } = setup;
     FetchRequest {
         replica_id: -1,
         max_wait_ms: 800,
@@ -118,7 +133,7 @@ fn consumer_fetch(topic: &str, topic_id: WireUuid, offset: i64, rack: &str) -> F
             topic_id,
             vec![FetchPartition {
                 partition: 0,
-                fetch_offset: offset,
+                fetch_offset: offset.0,
                 current_leader_epoch: -1,
                 partition_max_bytes: 1_048_576,
                 ..Default::default()
@@ -132,7 +147,10 @@ async fn fetch_all_from_follower(client: &Client, topic_id: WireUuid) -> usize {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let response = client
-            .send(consumer_fetch("t", topic_id, 0, RACK_B))
+            .send(consumer_fetch(ConsumerFetchSetup {
+                topic_id,
+                ..Default::default()
+            }))
             .await
             .expect("Fetch to follower (rack-b)");
         let partition = &response.responses[0].partitions[0];
@@ -157,7 +175,11 @@ async fn fetch_all_from_follower(client: &Client, topic_id: WireUuid) -> usize {
 
 async fn assert_leader_serves_same_rack(client: &Client, topic_id: WireUuid) {
     let response = client
-        .send(consumer_fetch("t", topic_id, 0, RACK_A))
+        .send(consumer_fetch(ConsumerFetchSetup {
+            topic_id,
+            rack: RACK_A,
+            ..Default::default()
+        }))
         .await
         .expect("Fetch to leader (rack-a)");
     assert!(
@@ -213,16 +235,18 @@ async fn rack_aware_consumer_is_redirected_to_same_rack_follower() {
 
     // Step 3: produce N records to the leader with acks=all so they commit.
     let producer = connect_client(leader_addr.clone(), None).await;
-    let prod = producer
-        .send(single_partition_produce(
-            "t",
+    let prod = crate::support::produce::send_batch(
+        &producer,
+        record_batch(crate::support::client::ValueBatchSetup {
+            records: crate::support::client::ValueRecordCount(N_RECORDS),
+        }),
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: ("t").into(),
             topic_id,
-            0,
-            Some(record_batch(N_RECORDS).into()),
-            (-1, 5_000),
-        ))
-        .await
-        .expect("Produce");
+            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+        },
+    )
+    .await;
     assert!(
         prod.responses[0].partition_responses[0].error_code == 0,
         "Produce acks=all"
@@ -239,7 +263,10 @@ async fn rack_aware_consumer_is_redirected_to_same_rack_follower() {
     // selector should redirect to the same-rack follower (node 2).
     let leader_client = connect_client(leader_addr.clone(), None).await;
     let r_leader = leader_client
-        .send(consumer_fetch("t", topic_id, 0, RACK_B))
+        .send(consumer_fetch(ConsumerFetchSetup {
+            topic_id,
+            ..Default::default()
+        }))
         .await
         .expect("Fetch to leader (rack-b)");
     let part = &r_leader.responses[0].partitions[0];

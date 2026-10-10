@@ -95,9 +95,8 @@ mod tests {
     use crate::coordinator::unified::{
         share::persistence::{
             KEY_SHARE_CURRENT_MEMBER_ASSIGNMENT, KEY_SHARE_TARGET_ASSIGNMENT_MEMBER, ShareGroupKey,
-            encode_share_key, parse_share_key,
         },
-        test_support::{peek_version, wire_bytes},
+        test_support::wire_bytes,
     };
 
     #[test]
@@ -122,10 +121,10 @@ mod tests {
             group_id: "g1".into(),
             member_id: "m1".into(),
         };
-        let b = encode_share_key(&key).unwrap();
-        let (ver, body) = peek_version(&b);
-        assert!(ver == KEY_SHARE_TARGET_ASSIGNMENT_MEMBER);
-        assert!(parse_share_key(ver, body).unwrap() == key);
+        super::super::check_key_round_trip(
+            &key,
+            super::super::ShareKeyVersion(KEY_SHARE_TARGET_ASSIGNMENT_MEMBER),
+        );
 
         let v = ShareGroupTargetAssignmentMemberValue {
             topic_partitions: vec![(Uuid([1; 16]), vec![0, 1, 2]), (Uuid([2; 16]), vec![])],
@@ -156,10 +155,10 @@ mod tests {
             group_id: "g1".into(),
             member_id: "m1".into(),
         };
-        let b = encode_share_key(&key).unwrap();
-        let (ver, body) = peek_version(&b);
-        assert!(ver == KEY_SHARE_CURRENT_MEMBER_ASSIGNMENT);
-        assert!(parse_share_key(ver, body).unwrap() == key);
+        super::super::check_key_round_trip(
+            &key,
+            super::super::ShareKeyVersion(KEY_SHARE_CURRENT_MEMBER_ASSIGNMENT),
+        );
 
         let v = ShareGroupCurrentMemberAssignmentValue {
             member_epoch: 5,

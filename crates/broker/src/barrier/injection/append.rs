@@ -77,6 +77,21 @@ mod tests {
         partition_registry::PartitionRegistry,
     };
 
+    async fn leader_partition(dir: &std::path::Path) -> std::sync::Arc<Partition> {
+        let registry = PartitionRegistry::new();
+        open_partition(
+            &registry,
+            dir,
+            crate::test_support::StandalonePartitionSetup {
+                topic: "test-barrier",
+                ..Default::default()
+            },
+        );
+        let partition = registry.get("test-barrier", PartitionIndex(0)).unwrap();
+        partition.install_leader_change(1, 5).await;
+        partition
+    }
+
     /// The marker value carries the group name with an `i16` length. A name of
     /// 32767 bytes goes into the log, and one of 32768 bytes is an error that
     /// appends nothing. The marker can reach here from a `WriteBarrierMarkers`
@@ -84,10 +99,7 @@ mod tests {
     #[tokio::test]
     async fn a_group_of_32768_bytes_is_refused_and_appends_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let registry = PartitionRegistry::new();
-        open_partition(&registry, dir.path(), "test-barrier", 0);
-        let partition = registry.get("test-barrier", PartitionIndex(0)).unwrap();
-        partition.install_leader_change(1, 5).await;
+        let partition = leader_partition(dir.path()).await;
 
         for (length, appended) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
             let marker = BarrierMarker {
@@ -105,11 +117,7 @@ mod tests {
     #[tokio::test]
     async fn append_marker_appends_when_fencing_matches_and_fences_when_mismatched() {
         let dir = tempfile::tempdir().unwrap();
-        let registry = PartitionRegistry::new();
-        open_partition(&registry, dir.path(), "test-barrier", 0);
-        let partition = registry.get("test-barrier", PartitionIndex(0)).unwrap();
-
-        partition.install_leader_change(1, 5).await;
+        let partition = leader_partition(dir.path()).await;
 
         let marker = BarrierMarker {
             group: "bg-1".into(),

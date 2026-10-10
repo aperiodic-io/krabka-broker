@@ -52,11 +52,13 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     let jvm_epoch = LeaderEpoch(pr.leader_epoch.0 + 1);
     c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
         crate::mixed_cluster::single_leader_record(
-            TOPIC,
             &pr,
-            krabka_broker::NodeId(3),
-            jvm_epoch,
-            1,
+            crate::mixed_cluster::SingleLeaderSetup {
+                topic: TOPIC,
+                leader: krabka_broker::NodeId(3),
+                epoch: jvm_epoch,
+                ..Default::default()
+            },
         ),
     ))
     .await
@@ -86,11 +88,13 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     // leadership/epoch state.
     let parked_epoch = LeaderEpoch(jvm_epoch.0 + 1);
     let forged = MetadataRecord::V1Partition(crate::mixed_cluster::single_leader_record(
-        TOPIC,
         &pr,
-        krabka_broker::NodeId(99),
-        parked_epoch,
-        2,
+        crate::mixed_cluster::SingleLeaderSetup {
+            topic: TOPIC,
+            leader: krabka_broker::NodeId(99),
+            epoch: parked_epoch,
+            partition_epoch_delta: crate::mixed_cluster::PartitionEpochDelta(2),
+        },
     ));
     c1.submit_metadata_record_for_test(forged)
         .await
@@ -133,11 +137,13 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     // follower (3) back in the replica set so it re-fetches and detects
     // divergence.
     let restore = MetadataRecord::V1Partition(crate::mixed_cluster::single_leader_record(
-        TOPIC,
         &pr,
-        krabka_broker::NodeId(1),
-        LeaderEpoch(parked_epoch.0 + 1),
-        3,
+        crate::mixed_cluster::SingleLeaderSetup {
+            topic: TOPIC,
+            epoch: LeaderEpoch(parked_epoch.0 + 1),
+            partition_epoch_delta: crate::mixed_cluster::PartitionEpochDelta(3),
+            ..Default::default()
+        },
     ));
     c1.submit_metadata_record_for_test(restore)
         .await

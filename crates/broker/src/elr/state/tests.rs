@@ -8,6 +8,16 @@ use krabka_metadata::{
 use super::TopicElr;
 use crate::test_support::partition_elr as elr;
 
+fn orders_partition_image() -> MetadataImage {
+    let mut image = MetadataImage::new(uuid::Uuid::nil());
+    image.apply(&MetadataRecord::V1Partition(PartitionRecord {
+        topic: "orders".into(),
+        partition: 0,
+        ..Default::default()
+    }));
+    image
+}
+
 /// The grammar, one row per shape the controller can publish, plus the
 /// malformed shapes that must degrade to "no ELR" rather than fail a request.
 #[test]
@@ -46,12 +56,7 @@ fn parse_projects_each_partition_of_the_config_value() {
 /// controller has never published ELR for answers with empty lists.
 #[test]
 fn of_topic_reads_the_published_config_and_defaults_to_no_elr() {
-    let mut image = MetadataImage::new(uuid::Uuid::nil());
-    image.apply(&MetadataRecord::V1Partition(PartitionRecord {
-        topic: "orders".into(),
-        partition: 0,
-        ..Default::default()
-    }));
+    let mut image = orders_partition_image();
     image.apply(&MetadataRecord::V1PartitionElr(PartitionElrRecord {
         topic: "orders".into(),
         partition: 0,
@@ -66,12 +71,7 @@ fn of_topic_reads_the_published_config_and_defaults_to_no_elr() {
 
 #[test]
 fn of_topic_reads_legacy_elr_until_it_is_migrated() {
-    let mut image = MetadataImage::new(uuid::Uuid::nil());
-    image.apply(&MetadataRecord::V1Partition(PartitionRecord {
-        topic: "orders".into(),
-        partition: 0,
-        ..Default::default()
-    }));
+    let mut image = orders_partition_image();
     image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
         topic: "orders".into(),
         overrides: [("krabka.elr".to_owned(), "0:2,3:4".to_owned())]

@@ -5,19 +5,17 @@
 use std::{io, net::SocketAddr};
 
 use assert2::{assert, check};
-use bytes::BytesMut;
 use krabka_broker::Broker;
-use krabka_protocol::{
-    Encode,
-    owned::{
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_authenticate_response::SaslAuthenticateResponse,
-    },
-};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
+use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
 use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
-use crate::harness::{alice_password, round_trip, wrong_scram_password};
+use crate::{
+    harness::{alice_password, round_trip, wrong_scram_password},
+    kafka_wire::PlainAuthenticationSetup,
+    support::wire::{HeaderEncoding as RequestHeaderEncoding, SocketExchangeSetup},
+};
 
 /// Happy-path drive of a SASL/PLAIN session: `ApiVersions` → `SaslHandshake`
 /// → `SaslAuthenticate` → Metadata.
@@ -127,8 +125,15 @@ async fn drive_sasl_plain_session(
     password: &[u8],
 ) -> Result<(), io::Error> {
     let mut stream = TcpStream::connect(addr).await?;
-    crate::kafka_wire::sasl_plain_authenticate_on(&mut stream, "krabka-sasl-test", user, password)
-        .await?;
+    crate::kafka_wire::sasl_plain_authenticate_on(
+        &mut stream,
+        &PlainAuthenticationSetup {
+            client_id: "krabka-sasl-test",
+            user,
+            password: (password).to_vec(),
+        },
+    )
+    .await?;
     crate::harness::metadata_probe(&mut stream, 4).await
 }
 
@@ -138,18 +143,10 @@ async fn drive_sasl_plain_session(
 /// in-band re-auth on the same connection.
 pub async fn plain_authenticate(
     stream: &mut TcpStream,
-    corr: &mut i32,
-    user: &str,
-    password: &[u8],
+    corr: &mut crate::support::wire::CorrelationId,
+    setup: &PlainAuthenticationSetup<'_>,
 ) -> Result<SaslAuthenticateResponse, io::Error> {
-    crate::kafka_wire::sasl_plain_reauthenticate_on(
-        stream,
-        "krabka-sasl-test",
-        corr,
-        user,
-        password,
-    )
-    .await
+    crate::kafka_wire::sasl_plain_reauthenticate_on(stream, corr, setup).await
 }
 
 /// KIP-368: with `connections.max.reauth.ms` set, a PLAIN session reports the
@@ -190,16 +187,21 @@ async fn plain_authenticate_without_handshake_closes_the_connection() {
     let addr = handle.listen_addr();
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let auth_req = SaslAuthenticateRequest {
-        auth_bytes: crate::kafka_wire::plain_payload("alice", alice_password().as_bytes()),
-        ..Default::default()
-    };
-    let mut auth_body = BytesMut::new();
-    auth_req.encode(&mut auth_body, 2).unwrap();
+    let auth_body =
+        crate::support::sasl::plain_authentication_body("alice", alice_password().as_bytes());
     check!(
-        round_trip(&mut stream, 36, 2, 1, true, &auth_body)
-            .await
-            .is_err(),
+        round_trip(
+            &mut stream,
+            SocketExchangeSetup {
+                api_key: WireApiKey(36),
+                version: WireApiVersion(2),
+                header: RequestHeaderEncoding::Flexible,
+                ..Default::default()
+            },
+            &auth_body
+        )
+        .await
+        .is_err(),
         "a SaslAuthenticate before a handshake must close with no response"
     );
 

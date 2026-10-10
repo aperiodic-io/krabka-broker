@@ -374,13 +374,19 @@ mod tests {
         assert2::assert!((store.engine().durable_watermark()) == (leo));
     }
 
+    fn divergent_follower(dir: &std::path::Path, epoch: i32, tail: &'static [u8]) -> FollowerLog {
+        let mut log = Log::open(dir, LogConfig::default()).unwrap();
+        log.append_at(&mut batch(0, b"shared"), Offset(0)).unwrap();
+        log.append_at(&mut batch(epoch, tail), Offset(1)).unwrap();
+        log.sync().unwrap();
+        FollowerLog::for_log(log)
+    }
+
     #[tokio::test]
     async fn follower_truncates_a_divergent_epoch_and_replicates_the_leader_tail() {
         let leader_dir = tempfile::tempdir().unwrap();
         let follower_dir = tempfile::tempdir().unwrap();
-        let leader = Arc::new(Mutex::new(
-            Log::open(leader_dir.path(), LogConfig::default()).unwrap(),
-        ));
+        let leader = super::super::test_support::open_log(leader_dir.path());
         let mut common_batch = batch(0, b"shared");
         leader
             .lock()
@@ -395,15 +401,7 @@ mod tests {
             .unwrap();
         leader.lock().unwrap().sync().unwrap();
 
-        let mut follower_log = Log::open(follower_dir.path(), LogConfig::default()).unwrap();
-        follower_log
-            .append_at(&mut batch(0, b"shared"), Offset(0))
-            .unwrap();
-        follower_log
-            .append_at(&mut batch(0, b"divergent"), Offset(1))
-            .unwrap();
-        follower_log.sync().unwrap();
-        let follower = FollowerLog::for_log(follower_log);
+        let follower = divergent_follower(follower_dir.path(), 0, b"divergent");
 
         let shard = ShardId {
             topic_id: uuid::Uuid::from_u128(100),
@@ -462,9 +460,7 @@ mod tests {
     async fn follower_with_an_epoch_the_leader_cannot_place_recovers() {
         let leader_dir = tempfile::tempdir().unwrap();
         let follower_dir = tempfile::tempdir().unwrap();
-        let leader = Arc::new(Mutex::new(
-            Log::open(leader_dir.path(), LogConfig::default()).unwrap(),
-        ));
+        let leader = super::super::test_support::open_log(leader_dir.path());
         for (offset, value) in [(0, b"shared".as_slice()), (1, b"one"), (2, b"two")] {
             let mut record_batch = batch(0, value);
             leader
@@ -475,15 +471,7 @@ mod tests {
         }
         leader.lock().unwrap().sync().unwrap();
 
-        let mut follower_log = Log::open(follower_dir.path(), LogConfig::default()).unwrap();
-        follower_log
-            .append_at(&mut batch(0, b"shared"), Offset(0))
-            .unwrap();
-        follower_log
-            .append_at(&mut batch(1, b"lost election"), Offset(1))
-            .unwrap();
-        follower_log.sync().unwrap();
-        let follower = FollowerLog::for_log(follower_log);
+        let follower = divergent_follower(follower_dir.path(), 1, b"lost election");
 
         let shard = ShardId {
             topic_id: uuid::Uuid::from_u128(101),

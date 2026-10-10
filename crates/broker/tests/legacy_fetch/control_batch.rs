@@ -45,10 +45,11 @@ async fn fetch_v3_drops_control_batch() {
     let transaction = producer.begin_transaction().await.unwrap();
     producer
         .send(crate::support::producer::producer_record(
-            "legacy_fetch_ctrl",
-            None,
-            None,
-            Some(Bytes::from_static(b"data-before-marker")),
+            crate::support::producer::ProducerRecordSetup {
+                topic: ("legacy_fetch_ctrl").into(),
+                value: Some(Bytes::from_static(b"data-before-marker")),
+                ..Default::default()
+            },
         ))
         .await
         .expect("transactional produce");

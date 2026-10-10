@@ -5,7 +5,7 @@
       "vc_branch_Option_i64": { "prover": "alt-ergo", "time": 0.013 },
       "vc_closure0": { "prover": "alt-ergo", "time": 0.017 },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.012 },
-      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.01 },
+      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.022 },
       "vc_from_residual_Option_tup2_Option_usize_i64": {
         "prover": "alt-ergo",
         "time": 0.013

@@ -6,20 +6,8 @@
 
 use krabka_ids::PartitionIndex;
 use krabka_log::Offset;
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{
-        array::put_array_len,
-        fixed::{get_i8, get_i32, get_i64, put_i8, put_i16, put_i32, put_i64},
-        string_bytes::get_string_owned,
-    },
-};
 
-use super::{
-    RECORD_VERSION,
-    primitives::{decode_vec, expect_end, expect_version},
-};
-use crate::{coordinator::unified::persistence::put_string, error::BrokerError};
+use super::primitives as codec;
 
 /// Whether an injection reached every partition of its frozen target set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,13 +30,15 @@ impl CutStatus {
 }
 
 impl TryFrom<i8> for CutStatus {
-    type Error = ProtocolError;
+    type Error = codec::ProtocolError;
 
     fn try_from(value: i8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Complete),
             1 => Ok(Self::Partial),
-            _ => Err(ProtocolError::InvalidValue("unknown barrier cut status")),
+            _ => Err(codec::ProtocolError::InvalidValue(
+                "unknown barrier cut status",
+            )),
         }
     }
 }
@@ -89,27 +79,27 @@ pub(crate) struct CutValue {
 /// Encode a cut.
 ///
 /// # Errors
-/// Returns [`BrokerError::Protocol`] when a topic name is longer than 32767
+/// Returns [`codec::BrokerError::Protocol`] when a topic name is longer than 32767
 /// bytes, which the `i16` length cannot carry.
-pub(crate) fn encode_cut(value: &CutValue) -> Result<Vec<u8>, BrokerError> {
+pub(crate) fn encode_cut(value: &CutValue) -> Result<Vec<u8>, codec::BrokerError> {
     let mut out = Vec::new();
-    put_i16(&mut out, RECORD_VERSION);
-    put_i64(&mut out, value.triggered_at);
-    put_i64(&mut out, value.completed_at);
-    put_i8(&mut out, value.status.code());
-    put_array_len(&mut out, value.topics.len(), false);
+    codec::put_i16(&mut out, codec::RECORD_VERSION);
+    codec::put_i64(&mut out, value.triggered_at);
+    codec::put_i64(&mut out, value.completed_at);
+    codec::put_i8(&mut out, value.status.code());
+    codec::put_array_len(&mut out, value.topics.len(), false);
     for topic in &value.topics {
-        put_string(&mut out, &topic.topic)?;
-        put_array_len(&mut out, topic.partitions.len(), false);
+        codec::put_string(&mut out, &topic.topic)?;
+        codec::put_array_len(&mut out, topic.partitions.len(), false);
         for entry in &topic.partitions {
-            put_i32(&mut out, entry.partition.get());
-            put_i64(&mut out, entry.offset.0);
+            codec::put_i32(&mut out, entry.partition.get());
+            codec::put_i64(&mut out, entry.offset.0);
         }
     }
-    put_array_len(&mut out, value.missing.len(), false);
+    codec::put_array_len(&mut out, value.missing.len(), false);
     for entry in &value.missing {
-        put_string(&mut out, &entry.topic)?;
-        put_i32(&mut out, entry.partition.get());
+        codec::put_string(&mut out, &entry.topic)?;
+        codec::put_i32(&mut out, entry.partition.get());
     }
     Ok(out)
 }
@@ -117,30 +107,30 @@ pub(crate) fn encode_cut(value: &CutValue) -> Result<Vec<u8>, BrokerError> {
 /// Decode a cut.
 ///
 /// # Errors
-/// Returns a [`ProtocolError`] when the value is truncated, carries a version
-/// other than [`RECORD_VERSION`], names an unknown status, holds a negative
+/// Returns a [`codec::ProtocolError`] when the value is truncated, carries a version
+/// other than [`codec::RECORD_VERSION`], names an unknown status, holds a negative
 /// array length, holds a non-UTF-8 topic name, or has trailing bytes.
-pub(crate) fn decode_cut(bytes: &[u8]) -> Result<CutValue, ProtocolError> {
+pub(crate) fn decode_cut(bytes: &[u8]) -> Result<CutValue, codec::ProtocolError> {
     let mut cur = bytes;
-    expect_version(&mut cur)?;
-    let triggered_at = get_i64(&mut cur)?;
-    let completed_at = get_i64(&mut cur)?;
-    let status = CutStatus::try_from(get_i8(&mut cur)?)?;
-    let topics = decode_vec(&mut cur, |c| {
-        let topic = get_string_owned(c)?;
-        let partitions = decode_vec(c, |p| {
-            let partition = PartitionIndex(get_i32(p)?);
-            let offset = Offset(get_i64(p)?);
+    codec::expect_version(&mut cur)?;
+    let triggered_at = codec::get_i64(&mut cur)?;
+    let completed_at = codec::get_i64(&mut cur)?;
+    let status = CutStatus::try_from(codec::get_i8(&mut cur)?)?;
+    let topics = codec::decode_vec(&mut cur, |c| {
+        let topic = codec::get_string_owned(c)?;
+        let partitions = codec::decode_vec(c, |p| {
+            let partition = PartitionIndex(codec::get_i32(p)?);
+            let offset = Offset(codec::get_i64(p)?);
             Ok(PartitionOffset { partition, offset })
         })?;
         Ok(TopicOffsets { topic, partitions })
     })?;
-    let missing = decode_vec(&mut cur, |c| {
-        let topic = get_string_owned(c)?;
-        let partition = PartitionIndex(get_i32(c)?);
+    let missing = codec::decode_vec(&mut cur, |c| {
+        let topic = codec::get_string_owned(c)?;
+        let partition = PartitionIndex(codec::get_i32(c)?);
         Ok(MissingPartition { topic, partition })
     })?;
-    expect_end(cur)?;
+    codec::expect_end(cur)?;
     Ok(CutValue {
         triggered_at,
         completed_at,
@@ -233,19 +223,7 @@ mod tests {
             triggered_at: 1_724_500_000_000,
             completed_at: 1_724_500_000_042,
             status: CutStatus::Complete,
-            topics: vec![TopicOffsets {
-                topic: "orders".to_owned(),
-                partitions: vec![
-                    PartitionOffset {
-                        partition: PartitionIndex(0),
-                        offset: Offset(1024),
-                    },
-                    PartitionOffset {
-                        partition: PartitionIndex(1),
-                        offset: Offset(2048),
-                    },
-                ],
-            }],
+            topics: vec![super::super::test_support::orders_offsets()],
             missing: Vec::new(),
         }
     }

@@ -1,6 +1,7 @@
 //! Native admin request and cluster fixtures.
 
 use krabka_client_admin::CreateTopicSpec;
+use krabka_ids::PartitionIndex as ElectionPartitionIndex;
 
 pub fn topic_spec(name: impl Into<String>, partitions: i32, replicas: i32) -> CreateTopicSpec {
     CreateTopicSpec {
@@ -62,6 +63,52 @@ pub fn describe_producers_request(
                 ..Default::default()
             },
         ],
+        ..Default::default()
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum ElectionKind {
+    #[default]
+    Preferred,
+    Unclean,
+}
+
+impl ElectionKind {
+    pub fn wire_code(self) -> i8 {
+        match self {
+            Self::Preferred => 0,
+            Self::Unclean => 1,
+        }
+    }
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct ElectionSetup {
+    #[default("orders".to_string())]
+    pub topic: String,
+    #[default(vec![krabka_ids::PartitionIndex(0)])]
+    pub partitions: Vec<ElectionPartitionIndex>,
+    pub kind: ElectionKind,
+}
+
+/// The named-partition `ElectLeaders` fixture, with its original thirty-second timeout.
+pub fn election_request(
+    setup: ElectionSetup,
+) -> krabka_protocol::owned::elect_leaders_request::ElectLeadersRequest {
+    use krabka_protocol::owned::elect_leaders_request::{ElectLeadersRequest, TopicPartitions};
+    ElectLeadersRequest {
+        election_type: setup.kind.wire_code(),
+        topic_partitions: Some(vec![TopicPartitions {
+            topic: setup.topic,
+            partitions: setup
+                .partitions
+                .into_iter()
+                .map(|partition| partition.0)
+                .collect(),
+            ..Default::default()
+        }]),
+        timeout_ms: 30_000,
         ..Default::default()
     }
 }

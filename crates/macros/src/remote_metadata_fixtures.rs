@@ -8,12 +8,14 @@ fn started_metadata(
     start: &TokenStream,
     end: &TokenStream,
     timestamp: &TokenStream,
+    event_timestamp: &TokenStream,
+    size: &TokenStream,
 ) -> TokenStream {
     moxy::template! {
         {{ root }}::RemoteLogSegmentMetadata::new(
-            {{ id }}, {{ start }}, {{ end }}, {{ timestamp }}, 1, 100,
+            {{ id }}, {{ start }}, {{ end }}, {{ timestamp }}, 1, {{ event_timestamp }},
             {{ root }}::RemoteLogSegmentDetails::new(
-                2048,
+                {{ size }},
                 {{ root }}::RemoteLogSegmentState::CopySegmentStarted,
                 ::maplit::btreemap! { ::krabka_ids::LeaderEpoch(0) => {{ start }} },
             ),
@@ -22,8 +24,7 @@ fn started_metadata(
 }
 
 pub(crate) fn remote_started_segment(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input, 2)?.into_iter();
-    let name = crate::fixtures::name(arguments.next().unwrap())?;
+    let (name, mut arguments) = crate::fixtures::named_arguments(input, 2)?;
     let root = arguments.next().unwrap();
     let metadata = started_metadata(
         &root,
@@ -31,6 +32,8 @@ pub(crate) fn remote_started_segment(input: TokenStream) -> Result<TokenStream, 
         &moxy::template! { start },
         &moxy::template! { end },
         &moxy::template! { timestamp },
+        &moxy::template! { 100 },
+        &moxy::template! { 2048 },
     );
     Ok(moxy::template! {
         pub(crate) fn {{ name }}(
@@ -62,6 +65,8 @@ pub(crate) fn segment(input: TokenStream) -> Result<TokenStream, ParseError> {
         &moxy::template! { start },
         &moxy::template! { end },
         &timestamp,
+        &moxy::template! { 100 },
+        &moxy::template! { 2048 },
     );
     Ok(moxy::template! {
         pub(crate) fn {{ started }}(id: u128, start: i64, end: i64) -> {{ root }}::RemoteLogSegmentMetadata {
@@ -80,12 +85,38 @@ pub(crate) fn segment(input: TokenStream) -> Result<TokenStream, ParseError> {
     })
 }
 
+/// Indexed, version-zero WORM metadata with the caller's segment-id namespace.
+pub(crate) fn worm_segment(input: TokenStream) -> Result<TokenStream, ParseError> {
+    let [name, root, id_base, topic, partition, span]: [TokenStream; 6] =
+        crate::meta::arguments(input, 6)?
+            .try_into()
+            .expect("six arguments");
+    let name = crate::fixtures::name(name)?;
+    let metadata = started_metadata(
+        &root,
+        &moxy::template! {
+            {{ root }}::RemoteLogSegmentId::new(
+                {{ root }}::TopicIdPartition::new(::uuid::Uuid::from_u128(1), {{ topic }}, {{ partition }}),
+                ::uuid::Uuid::from_u128({{ id_base }} + u128::try_from(index).unwrap()),
+            )
+        },
+        &moxy::template! { start },
+        &moxy::template! { start + {{ span }} - 1 },
+        &moxy::template! { 1_713_000_000_000 },
+        &moxy::template! { 1_713_000_001_000 },
+        &moxy::template! { 4096 },
+    );
+    Ok(moxy::template! {
+        pub(crate) fn {{ name }}(index: usize) -> {{ root }}::RemoteLogSegmentMetadata {
+            let start = i64::try_from(index).unwrap() * {{ span }};
+            {{ metadata }}
+        }
+    })
+}
+
 /// `check_name, metadata_crate`; callers retain the unknown partition identity.
 pub(crate) fn missing(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let [name, root]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
-        .try_into()
-        .expect("two arguments");
-    let name = crate::fixtures::name(name)?;
+    let (name, root) = crate::fixtures::named_root(input)?;
     Ok(moxy::template! {
         fn {{ name }}(
             manager: &impl {{ root }}::RemoteLogMetadataManager,
@@ -99,8 +130,7 @@ pub(crate) fn missing(input: TokenStream) -> Result<TokenStream, ParseError> {
 }
 
 pub(crate) fn wal_capture_topic_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input, 4)?.into_iter();
-    let name = crate::fixtures::name(arguments.next().unwrap())?;
+    let (name, mut arguments) = crate::fixtures::named_arguments(input, 4)?;
     let topic_id = arguments.next().unwrap();
     let topic = arguments.next().unwrap();
     let partitions = arguments.next().unwrap();

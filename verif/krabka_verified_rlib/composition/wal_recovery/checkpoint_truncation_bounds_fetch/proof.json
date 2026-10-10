@@ -6,7 +6,7 @@
         "prover": "z3",
         "time": 0.087
       },
-      "vc_fetch_visibility": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_fetch_visibility": { "prover": "alt-ergo", "time": 0.008 },
       "vc_is_none_i64": { "prover": "alt-ergo", "time": 0.019 },
       "vc_len_i64": { "prover": "alt-ergo", "time": 0.016 },
       "vc_truncation_batch_retained": { "prover": "alt-ergo", "time": 0.02 },

@@ -15,47 +15,102 @@ use krabka_protocol::{
 use super::*;
 use crate::server::test_support::{decoded, single_voter_engine, wait_for_leader};
 
+#[derive(Clone, Copy)]
+struct ListenerPort(u16);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ListenerUsability {
+    Usable,
+    Unusable,
+}
+
+#[derive(Clone, Copy)]
+struct VoterApiVersion(i16);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct VoterResponseSetup<'a> {
+    #[default(VoterApiVersion(remove_raft_voter_request::MAX_VERSION))]
+    version: VoterApiVersion,
+    #[default("response")]
+    context: &'a str,
+}
+
 /// A wire listener set is usable only when every entry is named, hosted
 /// and on a real port, no name repeats, and there is at least one.
 #[test]
 fn wire_listeners_must_be_usable_and_uniquely_named() {
-    type Row<'a> = (&'a str, Vec<(&'a str, &'a str, u16)>, bool);
+    type Row<'a> = (
+        &'a str,
+        Vec<(&'a str, &'a str, ListenerPort)>,
+        ListenerUsability,
+    );
     let cases: Vec<Row<'_>> = vec![
         (
             "one usable listener",
-            vec![("CONTROLLER", "host", 9093)],
-            true,
+            vec![("CONTROLLER", "host", ListenerPort(9093))],
+            ListenerUsability::Usable,
         ),
         (
             "two, differently named",
-            vec![("CONTROLLER", "host", 9093), ("PLAINTEXT", "host", 9092)],
-            true,
+            vec![
+                ("CONTROLLER", "host", ListenerPort(9093)),
+                ("PLAINTEXT", "host", ListenerPort(9092)),
+            ],
+            ListenerUsability::Usable,
         ),
-        ("none at all", vec![], false),
-        ("a nameless listener", vec![("", "host", 9093)], false),
-        ("a hostless listener", vec![("CONTROLLER", "", 9093)], false),
-        ("port zero", vec![("CONTROLLER", "host", 0)], false),
+        ("none at all", vec![], ListenerUsability::Unusable),
+        (
+            "a nameless listener",
+            vec![("", "host", ListenerPort(9093))],
+            ListenerUsability::Unusable,
+        ),
+        (
+            "a hostless listener",
+            vec![("CONTROLLER", "", ListenerPort(9093))],
+            ListenerUsability::Unusable,
+        ),
+        (
+            "port zero",
+            vec![("CONTROLLER", "host", ListenerPort(0))],
+            ListenerUsability::Unusable,
+        ),
         (
             "a repeated name",
-            vec![("CONTROLLER", "host", 9093), ("CONTROLLER", "other", 9094)],
-            false,
+            vec![
+                ("CONTROLLER", "host", ListenerPort(9093)),
+                ("CONTROLLER", "other", ListenerPort(9094)),
+            ],
+            ListenerUsability::Unusable,
         ),
         (
             "one good listener followed by a bad one",
-            vec![("CONTROLLER", "host", 9093), ("", "host", 9094)],
-            false,
+            vec![
+                ("CONTROLLER", "host", ListenerPort(9093)),
+                ("", "host", ListenerPort(9094)),
+            ],
+            ListenerUsability::Unusable,
         ),
     ];
     for (what, listeners, usable) in cases {
-        check!(valid_wire_listeners(listeners.clone()) == usable, "{what}");
+        let actual = if valid_wire_listeners(
+            listeners
+                .iter()
+                .map(|&(name, host, port)| (name, host, port.0)),
+        ) {
+            ListenerUsability::Usable
+        } else {
+            ListenerUsability::Unusable
+        };
+        check!(actual == usable, "{what}");
     }
 }
 
 async fn add_response(
     request: AddRaftVoterRequest,
-    version: i16,
     engine: &KraftController,
+    setup: VoterResponseSetup<'_>,
 ) -> AddRaftVoterResponse {
+    let version = setup.version.0;
     let mut body = BytesMut::new();
     krabka_protocol::Encode::encode(&request, &mut body, version).expect("encode");
     let response = add_raft_voter_response(version, &body.freeze(), engine)
@@ -66,15 +121,15 @@ async fn add_response(
 
 async fn remove_response(
     request: &RemoveRaftVoterRequest,
-    version: i16,
     engine: &KraftController,
-    context: &str,
+    setup: VoterResponseSetup<'_>,
 ) -> RemoveRaftVoterResponse {
+    let version = setup.version.0;
     let mut body = BytesMut::new();
     request.encode(&mut body, version).expect("encode request");
     let bytes = remove_raft_voter_response(version, &body.freeze(), engine)
         .await
-        .expect(context);
+        .expect(setup.context);
     decoded::<RemoveRaftVoterResponse>(&bytes, version)
 }
 
@@ -88,6 +143,10 @@ async fn remove_response(
 async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
     const INVALID_REQUEST: i16 = 42;
     let version = remove_raft_voter_request::MAX_VERSION;
+    let response_setup = VoterResponseSetup {
+        version: VoterApiVersion(version),
+        ..Default::default()
+    };
     let (engine, _dir) = single_voter_engine();
     wait_for_leader(&engine).await;
     let cluster_id = engine.current_image().cluster_id().to_string();
@@ -143,8 +202,15 @@ async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
             voter_directory_id,
             ..Default::default()
         };
-        let response =
-            remove_response(&request, version, &engine, "a refusal is still a response").await;
+        let response = remove_response(
+            &request,
+            &engine,
+            VoterResponseSetup {
+                context: "a refusal is still a response",
+                ..response_setup
+            },
+        )
+        .await;
         check!(response == expected, "{what}");
     }
 
@@ -156,7 +222,7 @@ async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
         voter_directory_id: real_directory,
         ..Default::default()
     };
-    let response = remove_response(&request, version, &engine, "response").await;
+    let response = remove_response(&request, &engine, response_setup).await;
     check!(
         response.error_code != INVALID_REQUEST,
         "a well-formed request reaches the quorum, got {}",
@@ -170,7 +236,7 @@ async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
         voter_directory_id: real_directory,
         ..Default::default()
     };
-    let response = remove_response(&request, version, &engine, "response").await;
+    let response = remove_response(&request, &engine, response_setup).await;
     check!(
         response.error_code != INVALID_REQUEST,
         "voter_id 0 reaches the quorum, got {}",
@@ -197,6 +263,10 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
 
     const INVALID_REQUEST: i16 = 42;
     let version = add_raft_voter_request::MAX_VERSION;
+    let response_setup = VoterResponseSetup {
+        version: VoterApiVersion(version),
+        ..Default::default()
+    };
     let (engine, _dir) = single_voter_engine();
     wait_for_leader(&engine).await;
 
@@ -263,7 +333,7 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
         listeners: vec![good_listener()],
         ..Default::default()
     };
-    let response = add_response(request, version, &engine).await;
+    let response = add_response(request, &engine, response_setup).await;
     check!(response.error_code == 104);
 
     // Matching cluster_id is accepted (does not return INVALID_REQUEST)
@@ -274,7 +344,7 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
         listeners: vec![good_listener()],
         ..Default::default()
     };
-    let response = add_response(request, version, &engine).await;
+    let response = add_response(request, &engine, response_setup).await;
     check!(response.error_code != INVALID_REQUEST);
 
     // At kraft.version >= 1, AddRaftVoter probes the candidate listeners.
@@ -287,7 +357,7 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
         listeners: vec![good_listener()],
         ..Default::default()
     };
-    let response = add_response(request, version, &engine).await;
+    let response = add_response(request, &engine, response_setup).await;
     check!(
         response.error_code == 7,
         "ApiVersions probe failed on unreachable candidate"

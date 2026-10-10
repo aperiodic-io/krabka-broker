@@ -208,6 +208,22 @@ mod tests {
     /// here is a change to the 1.x on-disk contract.
     const GOLDEN_CHECKPOINT: &str = "0\n3 7\n";
 
+    fn empty_checkpoint_log() -> (tempfile::TempDir, std::path::PathBuf, Log) {
+        let dir = tempfile::tempdir().unwrap();
+        let checkpoint = dir.path().join(DURABLE_OFFSET_FILE);
+        let log = Log::open(dir.path(), LogConfig::default()).unwrap();
+        (dir, checkpoint, log)
+    }
+
+    fn checkpoint_log(
+        records: crate::test_support::RecordCount,
+    ) -> (tempfile::TempDir, std::path::PathBuf, Log) {
+        let (dir, checkpoint, mut log) = empty_checkpoint_log();
+        let mut batch = crate::wal::quorum::test_support::batch(records.0);
+        log.append(&mut batch).unwrap();
+        (dir, checkpoint, log)
+    }
+
     #[test]
     fn durable_offset_checkpoint_matches_the_golden_bytes() {
         let range = DurableRange {
@@ -297,9 +313,7 @@ mod tests {
 
     #[test]
     fn follower_recovery_discards_a_suffix_beyond_the_durable_checkpoint() {
-        let dir = tempfile::tempdir().unwrap();
-        let checkpoint = dir.path().join(DURABLE_OFFSET_FILE);
-        let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
+        let (dir, checkpoint, mut log) = empty_checkpoint_log();
         let mut durable = RecordBatch {
             base_offset: 0,
             records: vec![Record::default()],
@@ -340,20 +354,7 @@ mod tests {
             (Some("0\n1 1\n"), true, 1, 1),
             (None, true, 1, 1),
         ] {
-            let dir = tempfile::tempdir().unwrap();
-            let checkpoint = dir.path().join(DURABLE_OFFSET_FILE);
-            let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
-            let mut batch = RecordBatch {
-                last_offset_delta: 2,
-                records: (0..3)
-                    .map(|offset_delta| Record {
-                        offset_delta,
-                        ..Record::default()
-                    })
-                    .collect(),
-                ..RecordBatch::default()
-            };
-            log.append(&mut batch).unwrap();
+            let (dir, checkpoint, mut log) = checkpoint_log(crate::test_support::RecordCount(3));
             if let Some(value) = value {
                 std::fs::write(&checkpoint, value).unwrap();
             } else {
@@ -399,14 +400,7 @@ mod tests {
             ("0 1\n", "predates krabka 1.0"),
             ("1\n0 1\n", "unsupported checkpoint version \"1\""),
         ] {
-            let dir = tempfile::tempdir().unwrap();
-            let checkpoint = dir.path().join(DURABLE_OFFSET_FILE);
-            let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
-            let mut batch = RecordBatch {
-                records: vec![Record::default()],
-                ..RecordBatch::default()
-            };
-            log.append(&mut batch).unwrap();
+            let (_dir, checkpoint, mut log) = checkpoint_log(crate::test_support::RecordCount(1));
             log.sync().unwrap();
             std::fs::write(&checkpoint, checkpoint_value).unwrap();
 

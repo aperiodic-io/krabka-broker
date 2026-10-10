@@ -137,23 +137,15 @@ impl MetadataSource for ControllerHandle {
 
 #[cfg(test)]
 mod tests {
-    use krabka_raft::{BootstrapMode, Controller, ControllerConfig};
-    use tempfile::TempDir;
 
     use super::*;
-    use crate::metadata_source::test_support::{topic_record, wait_for_controller_leader};
+    use crate::metadata_source::test_support::topic_record;
 
     krabka_macros::bind_retry_fixture!(bind_eventually, ::std::time::Duration::from_secs(2));
 
     #[tokio::test]
     async fn controller_handle_metadata_source_forwards_snapshot_reconfig_and_cancel() {
-        let dir = TempDir::new().unwrap();
-        let cfg = ControllerConfig {
-            bootstrap_mode: BootstrapMode::Bootstrap,
-            ..ControllerConfig::for_tests(NodeId(1), dir.path().to_path_buf())
-        };
-        let ctrl = Controller::start(cfg).await.expect("controller");
-        wait_for_controller_leader(&ctrl).await;
+        let (_dir, ctrl) = crate::metadata_source::test_support::start_controller().await;
         let source: &dyn MetadataSource = &ctrl;
 
         source

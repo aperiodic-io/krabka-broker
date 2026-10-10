@@ -11,7 +11,7 @@ let%span scmp'3 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span sconvert = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/convert.rs" 274 26 274 51
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span squota = "/workspace/crates/verified/src/quota.rs" 222 16 222 67
+let%span squota = "/workspace/crates/verified/src/quota.rs" 225 16 225 67
 let%span srefill = "/workspace/crates/verified/src/quota/refill.rs" 9 11 9 36
 let%span srefill'0 = "/workspace/crates/verified/src/quota/refill.rs" 10 11 10 66
 let%span srefill'1 = "/workspace/crates/verified/src/quota/refill.rs" 11 10 11 67
@@ -276,7 +276,7 @@ type tup4_u64_u64_u64_u64 = { f0'10: UInt64.t; f1'10: UInt64.t; f2'10: UInt64.t;
 
 type tup3_u128_tup4_u64_u64_u64_u64_u128 = { f0'11: UInt128.t; f1'11: tup4_u64_u64_u64_u64; f2'11: UInt128.t }
 
-predicate balance_within_burst [#"/workspace/crates/verified/src/quota.rs" 221 0 221 81] (available: int) (debt: int) (burst: int) =
+predicate balance_within_burst [#"/workspace/crates/verified/src/quota.rs" 224 0 224 81] (available: int) (debt: int) (burst: int) =
   [%#squota] available <= burst /\ (available = 0 \/ debt = 0)
 
 meta "compute_max_steps" 1000000

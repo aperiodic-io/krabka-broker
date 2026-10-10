@@ -20,6 +20,37 @@ const UPGRADE: i8 = 1;
 const SAFE: i8 = 2;
 const UNSAFE: i8 = 3;
 
+/// The advertised feature ranges are wire data, including unsupported levels.
+struct RegisteredFeatureRanges(std::collections::BTreeMap<String, (i16, i16)>);
+
+impl Default for RegisteredFeatureRanges {
+    fn default() -> Self {
+        Self(krabka_metadata::supported_feature_ranges())
+    }
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+struct RemoteFeatureSetup {
+    #[default(NodeId(2))]
+    node_id: NodeId,
+    ranges: RegisteredFeatureRanges,
+}
+
+fn remote_feature_image(
+    mut image: krabka_metadata::MetadataImage,
+    setup: RemoteFeatureSetup,
+) -> krabka_metadata::MetadataImage {
+    image.apply(&MetadataRecord::V1BrokerRegistration(
+        krabka_metadata::BrokerRegistrationRecord {
+            host: String::new(),
+            port: 0,
+            features: setup.ranges.0,
+            ..crate::test_support::broker_registration(setup.node_id)
+        },
+    ));
+    image
+}
+
 fn feature_record(name: &str, level: i16) -> MetadataRecord {
     MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
         name: name.into(),
@@ -431,18 +462,16 @@ fn an_elr_downgrade_clears_the_published_state_before_the_feature_record() {
 fn a_feature_unaware_broker_blocks_only_enabling() {
     let elr = crate::features::ELR_VERSION;
     let unaware = |elr_level| {
-        let mut image = elr_image(elr_level, false);
+        let image = elr_image(elr_level, false);
         let mut features = krabka_metadata::supported_feature_ranges();
         features.remove(elr);
-        image.apply(&MetadataRecord::V1BrokerRegistration(
-            krabka_metadata::BrokerRegistrationRecord {
-                host: String::new(),
-                port: 0,
-                features,
-                ..crate::test_support::broker_registration(2)
+        remote_feature_image(
+            image,
+            RemoteFeatureSetup {
+                ranges: RegisteredFeatureRanges(features),
+                ..Default::default()
             },
-        ));
-        image
+        )
     };
     let cases = [
         (
@@ -530,21 +559,19 @@ fn krabka_version_finalizes_as_kafka_finalizes_a_non_metadata_feature() {
     let kv = krabka_metadata::krabka_version::KRABKA_VERSION_FEATURE;
     let mv = "metadata.version";
     let with_broker = |levels: &[(&str, i16)], range: Option<(i16, i16)>| {
-        let mut image = image(levels);
+        let image = image(levels);
         let mut features = krabka_metadata::supported_feature_ranges();
         match range {
             Some(range) => features.insert(kv.to_owned(), range),
             None => features.remove(kv),
         };
-        image.apply(&MetadataRecord::V1BrokerRegistration(
-            krabka_metadata::BrokerRegistrationRecord {
-                host: String::new(),
-                port: 0,
-                features,
-                ..crate::test_support::broker_registration(2)
+        remote_feature_image(
+            image,
+            RemoteFeatureSetup {
+                ranges: RegisteredFeatureRanges(features),
+                ..Default::default()
             },
-        ));
-        image
+        )
     };
     let cases = [
         (

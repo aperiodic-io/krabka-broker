@@ -151,13 +151,11 @@ mod tests {
             cancels.push(cancel);
         }
 
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
-            while started.load(Ordering::SeqCst) != 2 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("move tasks start");
+        crate::test_support::wait_tasks_started(
+            || started.load(Ordering::SeqCst) == 2,
+            "move tasks start",
+        )
+        .await;
 
         tokio::time::timeout(
             std::time::Duration::from_secs(1),

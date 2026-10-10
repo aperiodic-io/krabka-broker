@@ -78,8 +78,18 @@ pub(crate) struct CliRun {
     pub(crate) stderr: String,
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct CliRunSetup<'a> {
+    #[default("krabka")]
+    side: &'a str,
+    #[default("kafka-topics")]
+    tool: &'a str,
+    args: &'a [&'a str],
+}
+
 impl CliRun {
-    fn new(side: &str, tool: &str, args: &[&str], out: &Output) -> Self {
+    fn new(out: &Output, setup: CliRunSetup<'_>) -> Self {
+        let CliRunSetup { side, tool, args } = setup;
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         eprintln!(
@@ -149,6 +159,17 @@ pub(crate) enum Side<'a> {
     Oracle(&'a Oracle),
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct AssignedTopicCommandSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    #[default("1")]
+    pub assignment: &'a str,
+    #[default("/tmp/client.properties")]
+    pub props_path: &'a str,
+    pub files: &'a [ToolFile],
+}
+
 impl Side<'_> {
     /// A label for the panic message, so a failure says which side failed.
     pub(crate) fn label(&self) -> &'static str {
@@ -167,13 +188,13 @@ impl Side<'_> {
     }
 
     /// Create a fixed assignment through this side's own JVM admin client.
-    pub(crate) fn create_assigned_topic(
-        &self,
-        topic: &str,
-        assignment: &str,
-        props_path: &str,
-        files: &[ToolFile],
-    ) {
+    pub(crate) fn create_assigned_topic(&self, setup: AssignedTopicCommandSetup<'_>) {
+        let AssignedTopicCommandSetup {
+            topic,
+            assignment,
+            props_path,
+            files,
+        } = setup;
         self.run_with_files(
             "kafka-topics",
             &[
@@ -294,7 +315,7 @@ fn run_against_host(
     let mut command = support::docker_tool_command(ORACLE_IMAGE, &options);
     command.arg(format!("{BIN}/{tool}.sh")).args(args);
     let out = feed(command, stdin);
-    CliRun::new(side, tool, args, &out)
+    CliRun::new(&out, CliRunSetup { side, tool, args })
 }
 
 /// Write `contents` to a tempfile the non-root container user can read.
@@ -418,7 +439,14 @@ impl Oracle {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let out = feed(command, stdin);
-        CliRun::new("apache/kafka:4.3.1", tool, args, &out)
+        CliRun::new(
+            &out,
+            CliRunSetup {
+                side: "apache/kafka:4.3.1",
+                tool,
+                args,
+            },
+        )
     }
 
     /// Write `contents` to `path` inside the container, world-readable.

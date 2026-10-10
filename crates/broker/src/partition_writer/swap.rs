@@ -122,14 +122,36 @@ mod tests {
     use super::*;
     use crate::partition_writer::test_support::{FixedStamp, open_log_with_records};
 
+    struct SwapPaths {
+        source_dir: PathBuf,
+        target_dir: PathBuf,
+        source_partition: PathBuf,
+        future_path: PathBuf,
+        target_partition_path: PathBuf,
+    }
+
+    fn swap_paths(dir: &std::path::Path) -> SwapPaths {
+        let source_dir = dir.join("source");
+        let target_dir = dir.join("target");
+        SwapPaths {
+            source_partition: source_dir.join("t-0"),
+            future_path: target_dir.join("t-0.future"),
+            target_partition_path: target_dir.join("t-0"),
+            source_dir,
+            target_dir,
+        }
+    }
+
     #[test]
     fn swap_future_log_accepts_future_at_same_leo() {
         let dir = tempdir().expect("tempdir");
-        let source_dir = dir.path().join("source");
-        let target_dir = dir.path().join("target");
-        let source_partition = source_dir.join("t-0");
-        let future_path = target_dir.join("t-0.future");
-        let target_partition_path = target_dir.join("t-0");
+        let SwapPaths {
+            source_dir,
+            target_dir,
+            source_partition,
+            future_path,
+            target_partition_path,
+        } = swap_paths(dir.path());
 
         let mut source_log = open_log_with_records(&source_partition, 2);
         source_log
@@ -173,71 +195,47 @@ mod tests {
     }
 
     #[test]
-    fn swap_future_log_rejects_future_behind_current_leo() {
-        let dir = tempdir().expect("tempdir");
-        let source_dir = dir.path().join("source");
-        let target_dir = dir.path().join("target");
-        let source_partition = source_dir.join("t-0");
-        let future_path = target_dir.join("t-0.future");
-        let target_partition_path = target_dir.join("t-0");
+    fn swap_future_log_rejects_mismatched_leo() {
+        for (current_records, future_records) in [(2, 1), (1, 2)] {
+            let dir = tempdir().expect("tempdir");
+            let SwapPaths {
+                source_dir,
+                target_dir,
+                source_partition,
+                future_path,
+                target_partition_path,
+            } = swap_paths(dir.path());
 
-        let log = Arc::new(Mutex::new(open_log_with_records(&source_partition, 2)));
-        let future_log = Arc::new(Mutex::new(open_log_with_records(&future_path, 1)));
-        let log_dir = Arc::new(ArcSwap::from_pointee(source_dir.clone()));
+            let log = Arc::new(Mutex::new(open_log_with_records(
+                &source_partition,
+                current_records,
+            )));
+            let future_log = Arc::new(Mutex::new(open_log_with_records(
+                &future_path,
+                future_records,
+            )));
+            let log_dir = Arc::new(ArcSwap::from_pointee(source_dir.clone()));
+            let result = swap_future_log(
+                &log,
+                &log_dir,
+                target_dir,
+                &future_log,
+                &future_path,
+                &target_partition_path,
+            )
+            .expect("not caught up response");
 
-        let result = swap_future_log(
-            &log,
-            &log_dir,
-            target_dir,
-            &future_log,
-            &future_path,
-            &target_partition_path,
-        )
-        .expect("not caught up response");
-
-        // Pull both log observations under one lock acquisition — two
-        // `lock()` temporaries in a single assert statement would deadlock.
-        let (leo, log_dir_now) = {
-            let guard = log.lock().unwrap();
-            (guard.log_end_offset(), guard.dir().to_path_buf())
-        };
-        check!(result == SwapOutcome::NotCaughtUp);
-        check!(leo == 2);
-        check!(log_dir_now == source_partition.clone());
-        check!(log_dir.load().as_ref().clone() == source_dir);
-        check!(source_partition.exists());
-        check!(future_path.exists());
-        check!(!target_partition_path.exists());
-    }
-
-    #[test]
-    fn swap_future_log_rejects_future_ahead_of_current_leo() {
-        let dir = tempdir().expect("tempdir");
-        let source_dir = dir.path().join("source");
-        let target_dir = dir.path().join("target");
-        let source_partition = source_dir.join("t-0");
-        let future_path = target_dir.join("t-0.future");
-        let target_partition_path = target_dir.join("t-0");
-
-        let log = Arc::new(Mutex::new(open_log_with_records(&source_partition, 1)));
-        let future_log = Arc::new(Mutex::new(open_log_with_records(&future_path, 2)));
-        let log_dir = Arc::new(ArcSwap::from_pointee(source_dir.clone()));
-
-        let result = swap_future_log(
-            &log,
-            &log_dir,
-            target_dir,
-            &future_log,
-            &future_path,
-            &target_partition_path,
-        )
-        .expect("not caught up response");
-
-        check!(result == SwapOutcome::NotCaughtUp);
-        check!(log.lock().expect("source log").log_end_offset() == 1);
-        check!(log_dir.load().as_ref().clone() == source_dir);
-        check!(source_partition.exists());
-        check!(future_path.exists());
-        check!(!target_partition_path.exists());
+            let (leo, log_dir_now) = {
+                let guard = log.lock().unwrap();
+                (guard.log_end_offset(), guard.dir().to_path_buf())
+            };
+            check!(result == SwapOutcome::NotCaughtUp);
+            check!(leo == i64::from(current_records));
+            check!(log_dir_now == source_partition);
+            check!(log_dir.load().as_ref().clone() == source_dir);
+            check!(source_partition.exists());
+            check!(future_path.exists());
+            check!(!target_partition_path.exists());
+        }
     }
 }

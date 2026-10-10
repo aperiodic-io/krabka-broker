@@ -554,10 +554,8 @@ mod tests {
             std::fs::create_dir_all(&part_dir).expect("partition dir");
             let partition = crate::test_support::spawn_standalone_partition(
                 dir.path(),
-                "orders",
-                0,
                 krabka_log::Log::open(&part_dir, krabka_log::LogConfig::default()).expect("log"),
-                false,
+                crate::test_support::StandalonePartitionSetup::default(),
             );
             let isr: Vec<NodeId> = case.isr.iter().copied().map(NodeId).collect();
             partition

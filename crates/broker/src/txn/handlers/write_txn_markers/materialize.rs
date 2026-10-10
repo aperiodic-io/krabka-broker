@@ -349,7 +349,14 @@ mod tests {
 
         let (broker_handle, dir) = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
-        open_partition(&broker, dir.path(), "stamped-orders", 0);
+        open_partition(
+            &broker,
+            dir.path(),
+            crate::test_support::StandalonePartitionSetup {
+                topic: "stamped-orders",
+                ..Default::default()
+            },
+        );
         let part = broker
             .partitions
             .get("stamped-orders", PartitionIndex(0))
@@ -456,7 +463,14 @@ mod tests {
             cases.into_iter().enumerate()
         {
             let topic = format!("tv-marker-{index}");
-            let part = open_partition(&broker, dir.path(), &topic, 0);
+            let part = open_partition(
+                &broker,
+                dir.path(),
+                crate::test_support::StandalonePartitionSetup {
+                    topic: &topic,
+                    ..Default::default()
+                },
+            );
             part.produce_batch(single_transactional_batch(
                 (producer_id, 4),
                 Record {
@@ -508,7 +522,14 @@ mod tests {
 
         let (broker_handle, dir) = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
-        open_partition(&broker, dir.path(), "fenced-orders", 0);
+        open_partition(
+            &broker,
+            dir.path(),
+            crate::test_support::StandalonePartitionSetup {
+                topic: "fenced-orders",
+                ..Default::default()
+            },
+        );
         let part = broker
             .partitions
             .get("fenced-orders", PartitionIndex(0))

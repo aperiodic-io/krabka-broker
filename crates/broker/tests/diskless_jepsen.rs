@@ -97,14 +97,6 @@ const VOTERS: usize = 3;
 /// plaintext listener.
 const PASSWORD: &str = "diskless-jepsen";
 
-/// The principal broker `node` authenticates as when it dials a peer.
-/// `wal::quorum::wire::conventional_node_id` reads the node id back out of
-/// this `broker-<id>` form, which is what lets the WAL leader tie a shard
-/// fetch to a voter without a per-cluster principal map.
-fn broker_principal(node: u64) -> String {
-    format!("broker-{node}")
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 #[ignore = "requires Docker; Linux-bound (host.docker.internal bridge)"]
 async fn three_broker_fault_schedule_preserves_the_acked_ledger() {

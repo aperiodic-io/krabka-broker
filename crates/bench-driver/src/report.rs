@@ -691,31 +691,29 @@ fn require_rate_samples(
     }
 }
 
-fn mean_failover_recovery(runs: &[&RunOutput]) -> Option<Time> {
+fn mean_failover_value(
+    runs: &[&RunOutput],
+    value: impl Fn(&crate::scenario::Disturbance) -> f64,
+) -> Option<f64> {
     let vals: Vec<f64> = runs
         .iter()
         .filter_map(|r| r.disturbance.as_ref())
-        .map(|d| d.recovery_at_ms.since(d.kill_at_ms).secs_f64())
-        .collect();
-    (!vals.is_empty()).then(|| Time::from_secs_f64(mean(&vals)))
-}
-
-fn mean_failover_dropped(runs: &[&RunOutput]) -> Option<f64> {
-    let vals: Vec<f64> = runs
-        .iter()
-        .filter_map(|r| r.disturbance.as_ref())
-        .map(|d| to_f64(d.dropped.0))
+        .map(value)
         .collect();
     (!vals.is_empty()).then(|| mean(&vals))
 }
 
+fn mean_failover_recovery(runs: &[&RunOutput]) -> Option<Time> {
+    mean_failover_value(runs, |d| d.recovery_at_ms.since(d.kill_at_ms).secs_f64())
+        .map(Time::from_secs_f64)
+}
+
+fn mean_failover_dropped(runs: &[&RunOutput]) -> Option<f64> {
+    mean_failover_value(runs, |d| to_f64(d.dropped.0))
+}
+
 fn mean_failover_latency_spike(runs: &[&RunOutput]) -> Option<Time> {
-    let vals: Vec<f64> = runs
-        .iter()
-        .filter_map(|r| r.disturbance.as_ref())
-        .map(|d| d.latency_spike_max.secs_f64())
-        .collect();
-    (!vals.is_empty()).then(|| Time::from_secs_f64(mean(&vals)))
+    mean_failover_value(runs, |d| d.latency_spike_max.secs_f64()).map(Time::from_secs_f64)
 }
 
 fn mean_rate_recovery(runs: &[&RunOutput], select: SampleRate) -> Option<RateRecovery> {
@@ -1124,32 +1122,12 @@ mod tests {
     use crate::{
         ids::WallclockMs,
         numeric::{event_rate, nonnegative_i64_to_u64},
-        scenario::{
-            Acks, Compression, Disturbance, LoadMode, ModeTag, Sample, Scenario, Throughput,
-            Topology,
-        },
+        scenario::{Disturbance, ModeTag, Sample, Throughput, Topology},
     };
 
     fn fake_run(stack: Stack, msgs: u64) -> RunOutput {
         RunOutput {
-            scenario: Scenario {
-                name: "small-msg-saturate".into(),
-                mode_tag: ModeTag::Ci,
-                msg_size: bytes(100),
-                key_size: ByteSize::ZERO,
-                partitions: 6,
-                replication_factor: 1,
-                producers: 1,
-                consumers: 1,
-                mode: LoadMode::Saturate,
-                acks: Acks::Leader,
-                compression: Compression::None,
-                linger: millis(5),
-                batch_size: kibibytes(16),
-                duration: secs(60),
-                warmup: secs(10),
-                failover: None,
-            },
+            scenario: crate::scenario::fixture::scenario("small-msg-saturate"),
             stack,
             topology: Topology {
                 partitions: 6,
@@ -1224,24 +1202,7 @@ mod tests {
     impl RunOutput {
         fn default_placeholder() -> Self {
             Self {
-                scenario: Scenario {
-                    name: "x".into(),
-                    mode_tag: ModeTag::Ci,
-                    msg_size: bytes(100),
-                    key_size: ByteSize::ZERO,
-                    partitions: 1,
-                    replication_factor: 1,
-                    producers: 1,
-                    consumers: 1,
-                    mode: LoadMode::Saturate,
-                    acks: Acks::Leader,
-                    compression: Compression::None,
-                    linger: Time::ZERO,
-                    batch_size: kibibytes(16),
-                    duration: secs(1),
-                    warmup: Time::ZERO,
-                    failover: None,
-                },
+                scenario: crate::scenario::fixture::short_scenario(1),
                 stack: Stack::Krabka,
                 topology: Topology {
                     partitions: 1,
@@ -1270,16 +1231,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let krabka = fake_run(Stack::Krabka, 600_000);
         let kafka = fake_run(Stack::Kafka, 400_000);
-        std::fs::write(
-            dir.path().join("krabka.json"),
-            serde_json::to_string(&krabka).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path().join("kafka.json"),
-            serde_json::to_string(&kafka).unwrap(),
-        )
-        .unwrap();
+        write_run(dir.path().join("krabka.json"), &krabka);
+        write_run(dir.path().join("kafka.json"), &kafka);
         let md = render_markdown(dir.path(), true).unwrap();
         // "1.50×" is the ratio 600k / 400k.
         for needle in ["small-msg-saturate", "producer msgs/s", "1.50×"] {
@@ -1294,18 +1247,16 @@ mod tests {
         // kafka runs (400k). The report should average each stack and ratio
         // the means: 700k/400k = 1.75×.
         for (i, msgs) in [600_000u64, 700_000, 800_000].iter().enumerate() {
-            std::fs::write(
+            write_run(
                 dir.path().join(format!("krabka-run{i}.json")),
-                serde_json::to_string(&fake_run(Stack::Krabka, *msgs)).unwrap(),
-            )
-            .unwrap();
+                &fake_run(Stack::Krabka, *msgs),
+            );
         }
         for i in 0..3 {
-            std::fs::write(
+            write_run(
                 dir.path().join(format!("kafka-run{i}.json")),
-                serde_json::to_string(&fake_run(Stack::Kafka, 400_000)).unwrap(),
-            )
-            .unwrap();
+                &fake_run(Stack::Kafka, 400_000),
+            );
         }
         let md = render_markdown(dir.path(), true).unwrap();
         // Multi-run cells carry a coefficient-of-variation marker ("±").
@@ -1324,11 +1275,7 @@ mod tests {
     #[test]
     fn failover_summary_compares_recovery_and_rate_over_time() {
         let dir = tempdir().unwrap();
-        write_failover_runs(
-            dir.path(),
-            &fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000)),
-            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
-        );
+        write_default_failover_runs(dir.path());
 
         let md = render_markdown(dir.path(), true).unwrap();
 
@@ -1346,24 +1293,46 @@ mod tests {
     #[test]
     fn failover_gate_passes_when_krabka_recovers_no_slower_with_rate_samples() {
         let dir = tempdir().unwrap();
-        write_failover_runs(
-            dir.path(),
-            &fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000)),
-            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
-        );
+        write_default_failover_runs(dir.path());
 
         let violations = failover_gate_violations(dir.path(), true).unwrap();
 
         assert2::assert!(violations.is_empty());
     }
 
+    fn write_default_failover_runs(dir: &Path) {
+        write_failover_runs(
+            dir,
+            &fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000)),
+            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
+        );
+    }
+
+    fn check_failover_violation(dir: &Path, krabka: &RunOutput, expected: &str) {
+        write_failover_runs(
+            dir,
+            krabka,
+            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
+        );
+        let violations = failover_gate_violations(dir, true).unwrap();
+        assert2::assert!(
+            violations
+                .iter()
+                .any(|violation| violation.contains(expected)),
+            "{expected}"
+        );
+    }
+
+    fn write_run(path: impl AsRef<Path>, run: &RunOutput) {
+        std::fs::write(path, serde_json::to_string(run).unwrap()).unwrap();
+    }
+
     fn write_failover_runs(dir: &Path, krabka: &RunOutput, kafka: &RunOutput) {
         for (name, run) in [("krabka", krabka), ("kafka", kafka)] {
-            std::fs::write(
+            write_run(
                 dir.join(format!("{name}-failover-3broker-rf3-run01.json")),
-                serde_json::to_string(run).unwrap(),
-            )
-            .unwrap();
+                run,
+            );
         }
     }
 
@@ -1377,6 +1346,12 @@ mod tests {
         );
     }
 
+    fn check_failover_pair(dir: &Path, krabka: &RunOutput, expected: impl Fn(&String) -> bool) {
+        write_failover_pair(dir, krabka);
+        let violations = failover_gate_violations(dir, true).unwrap();
+        assert2::assert!(violations.iter().any(expected), "{violations:?}");
+    }
+
     /// A run whose producer tasks failed still writes a `RunOutput`. Its
     /// recovery stamp is meaningless, so the gate must refuse it rather than
     /// compare it.
@@ -1385,17 +1360,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
         krabka.errors = vec!["producer-0-build: connection refused".into()];
-        write_failover_pair(dir.path(), &krabka);
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("krabka failover run is not a measurement")
-                    && v.contains("reported errors")),
-            "{violations:?}"
-        );
+        check_failover_pair(dir.path(), &krabka, |v| {
+            v.contains("krabka failover run is not a measurement") && v.contains("reported errors")
+        });
     }
 
     /// A transient error before the kill used to stamp recovery earlier than
@@ -1408,16 +1375,9 @@ mod tests {
         if let Some(disturbance) = krabka.disturbance.as_mut() {
             disturbance.recovery_at_ms = TimeOffsetMs(3_000);
         }
-        write_failover_pair(dir.path(), &krabka);
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("is before the kill stamp")),
-            "{violations:?}"
-        );
+        check_failover_pair(dir.path(), &krabka, |v| {
+            v.contains("is before the kill stamp")
+        });
     }
 
     /// A workload that moved nothing has a zero baseline, and a zero baseline
@@ -1428,16 +1388,7 @@ mod tests {
         let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
         krabka.throughput.msgs_produced = MessageCount(0);
         krabka.throughput.producer_rate = Frequency::ZERO;
-        write_failover_pair(dir.path(), &krabka);
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("produced no messages")),
-            "{violations:?}"
-        );
+        check_failover_pair(dir.path(), &krabka, |v| v.contains("produced no messages"));
     }
 
     /// A kill that never landed leaves `kill_at_ms` at zero.
@@ -1446,33 +1397,24 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
         krabka.disturbance = None;
-        write_failover_pair(dir.path(), &krabka);
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("recorded no disturbance")),
-            "{violations:?}"
-        );
+        check_failover_pair(dir.path(), &krabka, |v| {
+            v.contains("recorded no disturbance")
+        });
     }
 
     #[test]
     fn failover_gate_fails_without_failover_results() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_run(
             dir.path()
                 .join("krabka-small-msg-saturate-3broker-rf3-run01.json"),
-            serde_json::to_string(&fake_run(Stack::Krabka, 600_000)).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
+            &fake_run(Stack::Krabka, 600_000),
+        );
+        write_run(
             dir.path()
                 .join("kafka-small-msg-saturate-3broker-rf3-run01.json"),
-            serde_json::to_string(&fake_run(Stack::Kafka, 400_000)).unwrap(),
-        )
-        .unwrap();
+            &fake_run(Stack::Kafka, 400_000),
+        );
 
         let violations = failover_gate_violations(dir.path(), true).unwrap();
 
@@ -1492,16 +1434,14 @@ mod tests {
         let mut kafka = fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000));
         kafka.topology.partitions = 24;
         kafka.topology.replication_factor = 3;
-        std::fs::write(
+        write_run(
             dir.path().join("krabka-failover-3broker-rf3-run01.json"),
-            serde_json::to_string(&krabka).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
+            &krabka,
+        );
+        write_run(
             dir.path().join("kafka-failover-3broker-rf3-24p-run01.json"),
-            serde_json::to_string(&kafka).unwrap(),
-        )
-        .unwrap();
+            &kafka,
+        );
 
         let violations = failover_gate_violations(dir.path(), true).unwrap();
 
@@ -1547,24 +1487,19 @@ mod tests {
         }
     }
 
+    fn check_slow_rate_recovery(mut krabka: RunOutput, expected: &str) {
+        let dir = tempdir().unwrap();
+        krabka.samples.push(rate_recovery_tail());
+        check_failover_violation(dir.path(), &krabka, expected);
+    }
+
     #[test]
     fn failover_gate_fails_when_krabka_message_rate_recovers_slower_than_kafka() {
-        let dir = tempdir().unwrap();
         let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
-        krabka.samples[3].producer_rate = per_sec(8_500);
-        krabka.samples.push(rate_recovery_tail());
-        write_failover_runs(
-            dir.path(),
-            &krabka,
-            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
-        );
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations.iter().any(|v| {
-                v.contains("Krabka producer rate recovery 4s is slower than kafka 2s")
-            })
+        krabka.samples[3].producer_rate = per_sec(8500);
+        check_slow_rate_recovery(
+            krabka,
+            "Krabka producer rate recovery 4s is slower than kafka 2s",
         );
     }
 
@@ -1600,80 +1535,53 @@ mod tests {
 
     #[test]
     fn failover_gate_fails_when_krabka_consumer_rate_recovers_slower_than_kafka() {
-        let dir = tempdir().unwrap();
         let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
-        krabka.samples[3].consumer_rate = per_sec(8_000);
-        krabka.samples.push(rate_recovery_tail());
-        write_failover_runs(
-            dir.path(),
-            &krabka,
-            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
-        );
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations.iter().any(|v| {
-                v.contains("Krabka consumer rate recovery 4s is slower than kafka 2s")
-            })
+        krabka.samples[3].consumer_rate = per_sec(8000);
+        check_slow_rate_recovery(
+            krabka,
+            "Krabka consumer rate recovery 4s is slower than kafka 2s",
         );
     }
 
     #[test]
-    fn failover_gate_fails_when_krabka_drops_more_messages_than_kafka() {
-        let dir = tempdir().unwrap();
-        let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
-        krabka.disturbance.as_mut().unwrap().dropped = MessageCount(5);
-        write_failover_runs(
-            dir.path(),
-            &krabka,
-            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
-        );
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("Krabka dropped 5 messages vs kafka 0"))
-        );
+    fn failover_gate_rejects_worse_drops_and_latency_than_kafka() {
+        let rows = [
+            (
+                MessageCount(5),
+                millis(42),
+                "Krabka dropped 5 messages vs kafka 0",
+            ),
+            (
+                MessageCount(0),
+                millis(90),
+                "Krabka latency spike 90ms is higher than kafka 42ms",
+            ),
+        ];
+        for (dropped, latency, expected) in rows {
+            let dir = tempdir().unwrap();
+            let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
+            let disturbance = krabka.disturbance.as_mut().unwrap();
+            disturbance.dropped = dropped;
+            disturbance.latency_spike_max = latency;
+            check_failover_violation(dir.path(), &krabka, expected);
+        }
     }
 
-    #[test]
-    fn failover_gate_fails_when_krabka_latency_spike_is_higher_than_kafka() {
-        let dir = tempdir().unwrap();
-        let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
-        krabka.disturbance.as_mut().unwrap().latency_spike_max = millis(90);
-        write_failover_runs(
-            dir.path(),
-            &krabka,
-            &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
+    fn write_comparison_runs(dir: &Path) {
+        write_run(
+            dir.join("krabka-small-msg-saturate-6broker-rf3-run01.json"),
+            &fake_run(Stack::Krabka, 600_000),
         );
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("Krabka latency spike 90ms is higher than kafka 42ms"))
+        write_run(
+            dir.join("kafka-small-msg-saturate-6broker-rf3-run01.json"),
+            &fake_run(Stack::Kafka, 400_000),
         );
     }
 
     #[test]
     fn html_report_loads_runs_and_embeds_plotly() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path()
-                .join("krabka-small-msg-saturate-6broker-rf3-run01.json"),
-            serde_json::to_string(&fake_run(Stack::Krabka, 600_000)).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path()
-                .join("kafka-small-msg-saturate-6broker-rf3-run01.json"),
-            serde_json::to_string(&fake_run(Stack::Kafka, 400_000)).unwrap(),
-        )
-        .unwrap();
+        write_comparison_runs(dir.path());
         let html = render_html(dir.path(), true, "Bench").unwrap();
         for needle in [
             "<html",
@@ -1699,18 +1607,7 @@ mod tests {
     #[test]
     fn web_fragment_loads_runs_with_tags() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path()
-                .join("krabka-small-msg-saturate-6broker-rf3-run01.json"),
-            serde_json::to_string(&fake_run(Stack::Krabka, 600_000)).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path()
-                .join("kafka-small-msg-saturate-6broker-rf3-run01.json"),
-            serde_json::to_string(&fake_run(Stack::Kafka, 400_000)).unwrap(),
-        )
-        .unwrap();
+        write_comparison_runs(dir.path());
         let frag = render_web_fragment(dir.path(), true).unwrap();
         // A fragment, not a full page (no `<html>` wrapper). It is inlined into
         // a page the site serves online, so it keeps the CDN reference that the
@@ -1728,12 +1625,11 @@ mod tests {
     #[test]
     fn summary_csv_has_header_and_one_row_per_run() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_run(
             dir.path()
                 .join("krabka-small-msg-saturate-6broker-rf3-run01.json"),
-            serde_json::to_string(&fake_run(Stack::Krabka, 600_000)).unwrap(),
-        )
-        .unwrap();
+            &fake_run(Stack::Krabka, 600_000),
+        );
         let csv = render_csv(dir.path(), true).unwrap();
         let lines: Vec<&str> = csv.lines().collect();
         assert2::assert!(lines.len() == 2); // header + 1 run (index guard)
@@ -1771,11 +1667,7 @@ mod tests {
             cpu_cores: 2.5,
             mem_working_set: mebibytes(1),
         }];
-        std::fs::write(
-            dir.path().join("krabka-x-6broker-rf3-run03.json"),
-            serde_json::to_string(&r).unwrap(),
-        )
-        .unwrap();
+        write_run(dir.path().join("krabka-x-6broker-rf3-run03.json"), &r);
         let csv = render_timeseries_csv(dir.path(), true).unwrap();
         assert2::assert!(
             csv.lines()

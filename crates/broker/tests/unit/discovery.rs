@@ -34,7 +34,13 @@ async fn api_versions_round_trip() {
 async fn metadata_returns_this_broker_and_listed_topics() {
     let p = support::start().await;
     // Create a topic first.
-    let create = create_topic_request(creatable_topic("beta", 3, 1), 5_000);
+    let create = create_topic_request(creatable_topic(
+        crate::support::topics::ConfiguredTopicSetup {
+            name: ("beta").into(),
+            partitions: crate::support::topics::TopicPartitionCount(3),
+            ..Default::default()
+        },
+    ));
     let _ = p.client.send(create).await.unwrap();
 
     let resp = p

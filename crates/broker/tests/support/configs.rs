@@ -8,15 +8,59 @@ use krabka_protocol::owned::{
     update_features_request::FeatureUpdateKey,
 };
 
+#[derive(Clone, Copy, Default)]
+pub enum ConfigOperation {
+    #[default]
+    Set,
+    Delete,
+    Append,
+    Subtract,
+    Invalid(ConfigOperationCode),
+}
+
+#[derive(Clone, Copy)]
+pub struct ConfigOperationCode(pub i8);
+
+impl ConfigOperation {
+    pub const fn from_wire(code: i8) -> Self {
+        match code {
+            0 => Self::Set,
+            1 => Self::Delete,
+            2 => Self::Append,
+            3 => Self::Subtract,
+            _ => Self::Invalid(ConfigOperationCode(code)),
+        }
+    }
+    pub const fn wire_code(self) -> i8 {
+        match self {
+            Self::Set => 0,
+            Self::Delete => 1,
+            Self::Append => 2,
+            Self::Subtract => 3,
+            Self::Invalid(code) => code.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct TopicConfigMutationSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    #[default("cleanup.policy")]
+    pub name: &'a str,
+    pub operation: ConfigOperation,
+    pub value: Option<&'a str>,
+}
+
 pub fn incremental_config(
     name: impl Into<String>,
     value: Option<String>,
-    config_operation: i8,
+    config_operation: ConfigOperation,
 ) -> AlterableConfig {
     AlterableConfig {
         name: name.into(),
         value,
-        config_operation,
+        config_operation: config_operation.wire_code(),
         ..Default::default()
     }
 }
@@ -34,13 +78,23 @@ pub fn incremental_resource(
     }
 }
 
-pub fn incremental_request(
-    resources: Vec<AlterConfigsResource>,
-    validate_only: bool,
-) -> IncrementalAlterConfigsRequest {
+#[derive(Clone, Copy, Default)]
+pub enum ConfigMutation {
+    #[default]
+    Apply,
+    Validate,
+}
+
+#[derive(Default)]
+pub struct IncrementalConfigsSetup {
+    pub resources: Vec<AlterConfigsResource>,
+    pub mutation: ConfigMutation,
+}
+
+pub fn incremental_request(setup: IncrementalConfigsSetup) -> IncrementalAlterConfigsRequest {
     IncrementalAlterConfigsRequest {
-        resources,
-        validate_only,
+        resources: setup.resources,
+        validate_only: matches!(setup.mutation, ConfigMutation::Validate),
         ..Default::default()
     }
 }
@@ -114,23 +168,28 @@ pub async fn topic_config(
 /// Panics if the request fails or the broker omits the topic response.
 pub async fn alter_topic_config(
     client: &krabka_client_core::Client,
-    topic: &str,
-    name: &str,
-    operation: i8,
-    value: Option<&str>,
+    setup: TopicConfigMutationSetup<'_>,
 ) -> (i16, Option<String>) {
+    let TopicConfigMutationSetup {
+        topic,
+        name,
+        operation,
+        value,
+    } = setup;
     let response = client
         .send(incremental_request(
-            vec![incremental_resource(
-                2,
-                topic.to_owned(),
-                vec![incremental_config(
-                    name.to_owned(),
-                    value.map(ToOwned::to_owned),
-                    operation,
+            crate::support::configs::IncrementalConfigsSetup {
+                resources: vec![incremental_resource(
+                    2,
+                    topic.to_owned(),
+                    vec![incremental_config(
+                        name.to_owned(),
+                        value.map(ToOwned::to_owned),
+                        operation,
+                    )],
                 )],
-            )],
-            false,
+                ..Default::default()
+            },
         ))
         .await
         .expect("IncrementalAlterConfigs");
@@ -174,4 +233,57 @@ pub fn legacy_request(
         validate_only,
         ..Default::default()
     }
+}
+
+/// A controller supporting every stable metadata version, without endpoints.
+pub fn controller_registration(
+    node_id: krabka_metadata::NodeId,
+) -> krabka_metadata::MetadataRecord {
+    krabka_metadata::MetadataRecord::V1ControllerRegistration(
+        krabka_metadata::ControllerRegistrationRecord {
+            node_id,
+            incarnation_id: uuid::Uuid::from_u128(u128::from(node_id.0)),
+            zk_migration_ready: false,
+            endpoints: Vec::new(),
+            features: std::collections::BTreeMap::from([(
+                "metadata.version".to_owned(),
+                (7, krabka_metadata::metadata_version::METADATA_VERSION_MAX),
+            )]),
+        },
+    )
+}
+
+/// A valid client-metrics subscription input shared by telemetry and config round trips.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct ClientMetricsSubscriptionSetup<'a> {
+    #[default("sub-a")]
+    pub name: &'a str,
+    #[default("*")]
+    pub metrics: &'a str,
+    #[default("60000")]
+    pub interval: &'a str,
+}
+
+pub fn client_metrics_subscription(
+    setup: ClientMetricsSubscriptionSetup<'_>,
+) -> IncrementalAlterConfigsRequest {
+    incremental_request(IncrementalConfigsSetup {
+        resources: vec![incremental_resource(
+            16,
+            setup.name,
+            vec![
+                incremental_config(
+                    "metrics",
+                    Some(setup.metrics.to_owned()),
+                    ConfigOperation::Set,
+                ),
+                incremental_config(
+                    "interval.ms",
+                    Some(setup.interval.to_owned()),
+                    ConfigOperation::Set,
+                ),
+            ],
+        )],
+        ..Default::default()
+    })
 }

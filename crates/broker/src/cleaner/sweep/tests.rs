@@ -7,18 +7,57 @@ use std::sync::atomic::Ordering;
 
 use assert2::{assert, check};
 use krabka_ids::PartitionIndex;
-use krabka_metadata::{MetadataRecord, NodeId, PatternType, TopicFreezeRecord};
+use krabka_metadata::{MetadataRecord, NodeId, PatternType};
 use tempfile::TempDir;
-use uuid::Uuid;
 
 use super::*;
 use crate::{
-    cleaner::test_support::{
-        block_compaction_swap, compactable_partition, compactable_partition_in_registry,
-        compactable_partition_with_config, record_count,
-    },
+    cleaner::test_support::{block_compaction_swap, compactable_partition, record_count},
     metrics::{CleanerFailureLabel, CleanerFailureReason},
 };
+
+struct HostedCompactPartition {
+    dir: TempDir,
+    status: crate::log_dir_status::LogDirRegistry,
+    registry: PartitionRegistry,
+    partition: Arc<crate::partition::Partition>,
+}
+
+async fn hosted_compact_partition() -> HostedCompactPartition {
+    let dir = tempfile::tempdir().expect("log root");
+    let status = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
+    let registry = PartitionRegistry::new();
+    let partition = compactable_partition(
+        &dir,
+        crate::cleaner::test_support::CompactionSetup {
+            log_dir_status: status.clone(),
+            ..Default::default()
+        },
+    )
+    .await;
+    registry.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
+    HostedCompactPartition {
+        dir,
+        status,
+        registry,
+        partition,
+    }
+}
+
+async fn blocked_sweep(
+    dir: &TempDir,
+    registry: &PartitionRegistry,
+) -> (
+    Vec<std::path::PathBuf>,
+    BrokerMetrics,
+    UncleanablePartitions,
+) {
+    let blocked = block_compaction_swap(dir, "orders");
+    let metrics = BrokerMetrics::new();
+    let mut uncleanable = UncleanablePartitions::default();
+    tick_all(registry, None, &metrics, &mut uncleanable).await;
+    (blocked, metrics, uncleanable)
+}
 
 /// The cleanup policy is the only thing that makes a partition the cleaner's
 /// work. Leadership is not: Kafka's `LogCleanerManager` walks every log the
@@ -60,7 +99,19 @@ async fn tick_all_compacts_every_hosted_compact_topic_whoever_leads_it() {
     ];
     let mut cases = Vec::new();
     for (topic, leader, policy, expect_compacted) in specs {
-        let partition = compactable_partition(&dir, topic, 0, NodeId(leader), policy).await;
+        let partition = compactable_partition(
+            &dir,
+            crate::cleaner::test_support::CompactionSetup {
+                topic,
+                leader: NodeId(leader),
+                cfg: krabka_log::LogConfig {
+                    cleanup_policy: policy,
+                    ..crate::cleaner::test_support::CompactionSetup::default().cfg
+                },
+                ..Default::default()
+            },
+        )
+        .await;
         let before = record_count(&partition);
         registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
         cases.push((topic, partition, before, expect_compacted));
@@ -108,8 +159,15 @@ async fn tick_all_skips_a_partition_below_its_dirty_ratio_until_the_max_lag() {
         min_cleanable_dirty_ratio: krabka_units::fraction(1.0),
         ..Default::default()
     };
-    let partition =
-        compactable_partition_with_config(&dir, "too-clean", 0, NodeId(7), base.clone()).await;
+    let partition = compactable_partition(
+        &dir,
+        crate::cleaner::test_support::CompactionSetup {
+            topic: "too-clean",
+            cfg: base.clone(),
+            ..Default::default()
+        },
+    )
+    .await;
     let before = record_count(&partition);
     registry.insert(
         "too-clean".into(),
@@ -155,31 +213,14 @@ async fn tick_all_skips_a_partition_below_its_dirty_ratio_until_the_max_lag() {
 
 // ── KFC-9 topic write freeze ─────────────────────────────────────
 
-/// An image holding one live freeze entry per `(scope, pattern_type)`.
-fn image_with_freezes(scopes: &[(&str, PatternType)]) -> MetadataImage {
-    let mut image = MetadataImage::new(Uuid::from_u128(0x5150));
-    for &(scope, pattern_type) in scopes {
-        image.apply(&MetadataRecord::V1TopicFreeze(
-            crate::test_support::topic_freeze_record(scope, pattern_type, true, "DR cutover"),
-        ));
-    }
-    image
-}
+use crate::test_support::frozen_topics_image as image_with_freezes;
 
 /// The thaw record for `scope`: the same entry with `frozen` cleared,
 /// which is what removes it from the registry.
 fn thaw(image: &mut MetadataImage, scope: &str, pattern_type: PatternType) {
-    image.apply(&MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
-        scope: scope.to_owned(),
-        pattern_type,
-        frozen: false,
-        reason: String::new(),
-        set_by: "User:bob".to_owned(),
-        set_at_ms: 1_770_000_100_000,
-        proposal_id: Uuid::from_u128(7),
-        key_id: String::new(),
-        signature: Vec::new(),
-    }));
+    image.apply(&MetadataRecord::V1TopicFreeze(
+        crate::test_support::topic_thaw_record(scope, pattern_type),
+    ));
 }
 
 /// Register one compactable, locally-led partition per topic and report
@@ -191,11 +232,8 @@ async fn compactable_topics(
 ) -> Vec<(&'static str, Arc<Partition>, usize)> {
     let mut built = Vec::new();
     for &topic in topics {
-        let partition =
-            compactable_partition(dir, topic, 0, NodeId(7), krabka_log::CleanupPolicy::Compact)
-                .await;
-        let before = record_count(&partition);
-        registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
+        let (partition, before) =
+            crate::cleaner::test_support::register_compactable(dir, registry, topic).await;
         built.push((topic, partition, before));
     }
     built
@@ -214,10 +252,13 @@ async fn tick_all_skips_a_frozen_partition_and_compacts_an_unfrozen_control() {
     // One image, one sweep. The control partition is compactable in
     // exactly the same way as the two frozen ones, so a sweep that
     // compacted nothing at all could not pass this test.
-    let image = image_with_freezes(&[
-        ("frozen-literal", PatternType::Literal),
-        ("tenant-a.", PatternType::Prefixed),
-    ]);
+    let image = image_with_freezes(
+        &[
+            ("frozen-literal", PatternType::Literal),
+            ("tenant-a.", PatternType::Prefixed),
+        ],
+        crate::test_support::FrozenTopicsImageSetup::default(),
+    );
 
     tick_all(
         &registry,
@@ -248,7 +289,10 @@ async fn tick_all_compacts_again_once_the_thaw_leaves_the_image() {
     let registry = PartitionRegistry::new();
     let cases = compactable_topics(&dir, &registry, &["orders"]).await;
     let (_, partition, before) = &cases[0];
-    let mut image = image_with_freezes(&[("orders", PatternType::Literal)]);
+    let mut image = image_with_freezes(
+        &[("orders", PatternType::Literal)],
+        crate::test_support::FrozenTopicsImageSetup::default(),
+    );
     let metrics = BrokerMetrics::new();
 
     tick_all(
@@ -280,10 +324,13 @@ async fn tick_all_compacts_again_once_the_thaw_leaves_the_image() {
 
 #[test]
 fn freeze_stops_compaction_reads_the_registry_the_produce_path_reads() {
-    let image = image_with_freezes(&[
-        ("orders", PatternType::Literal),
-        ("tenant-a.", PatternType::Prefixed),
-    ]);
+    let image = image_with_freezes(
+        &[
+            ("orders", PatternType::Literal),
+            ("tenant-a.", PatternType::Prefixed),
+        ],
+        crate::test_support::FrozenTopicsImageSetup::default(),
+    );
 
     for (label, topic, want) in [
         (
@@ -339,20 +386,16 @@ fn failures(metrics: &BrokerMetrics, topic: &str, reason: CleanerFailureReason) 
 /// the partition marked uncleanable until a pass succeeds.
 #[tokio::test]
 async fn tick_all_accounts_a_failed_compaction_and_takes_the_log_dir_offline() {
-    let dir = tempfile::tempdir().expect("log root");
-    let status = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
-    let registry = PartitionRegistry::new();
-    let partition =
-        compactable_partition_in_registry(&dir, "orders", NodeId(7), status.clone()).await;
+    let HostedCompactPartition {
+        dir,
+        status,
+        registry,
+        partition,
+    } = hosted_compact_partition().await;
     let before = record_count(&partition);
-    registry.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
     // A directory where the rewrite must create its `.cleaned` file: the open
     // fails with EISDIR, which is a storage error the filesystem raises.
-    let blocked = block_compaction_swap(&dir, "orders");
-
-    let metrics = BrokerMetrics::new();
-    let mut uncleanable = UncleanablePartitions::default();
-    tick_all(&registry, None, &metrics, &mut uncleanable).await;
+    let (blocked, metrics, mut uncleanable) = blocked_sweep(&dir, &registry).await;
 
     check!(record_count(&partition) == before, "nothing was compacted");
     check!(failures(&metrics, "orders", CleanerFailureReason::Io) == 1);
@@ -391,12 +434,12 @@ async fn tick_all_leaves_a_partition_uncleanable_for_a_record_above_the_decompre
     use krabka_compression::CompressionType;
     use krabka_protocol::records::{Attributes, Record, RecordBatch};
 
-    let dir = tempfile::tempdir().expect("log root");
-    let status = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
-    let registry = PartitionRegistry::new();
-    let partition =
-        compactable_partition_in_registry(&dir, "orders", NodeId(7), status.clone()).await;
-    registry.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
+    let HostedCompactPartition {
+        dir,
+        status,
+        registry,
+        partition,
+    } = hosted_compact_partition().await;
 
     // A gzip record with a 1000-byte value under a key the log already holds,
     // then a plain one that seals its segment.
@@ -430,12 +473,7 @@ async fn tick_all_leaves_a_partition_uncleanable_for_a_record_above_the_decompre
             }],
             ..Default::default()
         };
-        partition
-            .log
-            .lock()
-            .expect("partition log lock")
-            .append(&mut batch)
-            .expect("append");
+        crate::test_support::append_partition_batch(&partition, &mut batch);
     }
     // The pass is bounded at the high watermark, so let it cover what was added.
     partition
@@ -503,16 +541,13 @@ async fn tick_all_leaves_a_partition_uncleanable_for_a_record_above_the_decompre
 /// cleaner's problem and stays counted until a pass succeeds on it.
 #[tokio::test]
 async fn a_partition_this_broker_stops_hosting_leaves_the_uncleanable_set() {
-    let dir = tempfile::tempdir().expect("log root");
-    let status = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
-    let registry = PartitionRegistry::new();
-    let partition = compactable_partition_in_registry(&dir, "orders", NodeId(7), status).await;
-    registry.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
-    let blocked = block_compaction_swap(&dir, "orders");
-
-    let metrics = BrokerMetrics::new();
-    let mut uncleanable = UncleanablePartitions::default();
-    tick_all(&registry, None, &metrics, &mut uncleanable).await;
+    let HostedCompactPartition {
+        dir,
+        status: _status,
+        registry,
+        partition,
+    } = hosted_compact_partition().await;
+    let (blocked, metrics, mut uncleanable) = blocked_sweep(&dir, &registry).await;
     check!(metrics.log_cleaner_uncleanable_partitions.get() == 1);
 
     // Another broker takes the leadership. The replica stays here, so the

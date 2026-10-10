@@ -55,18 +55,19 @@ async fn three_node_jvm_round_trip() {
     //    Rust producer doesn't yet route across brokers per partition,
     //    so we use the JVM tool here; cross-broker producer routing is
     //    a follow-up that the Rust client will pick up.
-    let mut producer_child_command = crate::support::jvm_docker_command(
-        KAFKA_IMAGE,
-        &[],
-        &[
-            "kafka-console-producer",
-            "--bootstrap-server",
-            &bootstrap_2,
-            "--topic",
-            TOPIC,
-        ],
-        true,
-    );
+    let mut producer_child_command =
+        crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+            image: KAFKA_IMAGE,
+            args: &[
+                "kafka-console-producer",
+                "--bootstrap-server",
+                &bootstrap_2,
+                "--topic",
+                TOPIC,
+            ],
+            input: crate::support::ContainerInput::Attached,
+            ..Default::default()
+        });
     let producer_out = crate::support::jvm_stdin_output(&mut producer_child_command, b"a\nb\nc\n");
     assert!(
         producer_out.status.success(),

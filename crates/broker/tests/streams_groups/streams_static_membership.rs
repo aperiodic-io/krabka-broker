@@ -64,19 +64,39 @@ async fn every_static_member_request_is_refused_and_changes_nothing() {
         ),
         (
             "a heartbeat of the known member with an instance id",
-            instance(follow_up("static-app", &member_id, epoch, None)),
+            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+                group: "static-app",
+                member_id: &member_id,
+                epoch: crate::support::streams::StreamsMemberEpoch(epoch),
+                ..Default::default()
+            })),
         ),
         (
             "a heartbeat with an instance id and another member id",
-            instance(follow_up("static-app", "another-member", epoch, None)),
+            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+                group: "static-app",
+                member_id: "another-member",
+                epoch: crate::support::streams::StreamsMemberEpoch(epoch),
+                ..Default::default()
+            })),
         ),
         (
             "a temporary leave at epoch -2",
-            instance(follow_up("static-app", &member_id, -2, None)),
+            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+                group: "static-app",
+                member_id: &member_id,
+                epoch: crate::support::streams::StreamsMemberEpoch(-2),
+                ..Default::default()
+            })),
         ),
         (
             "a permanent leave at epoch -1 with an instance id",
-            instance(follow_up("static-app", &member_id, -1, None)),
+            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+                group: "static-app",
+                member_id: &member_id,
+                epoch: crate::support::streams::StreamsMemberEpoch(-1),
+                ..Default::default()
+            })),
         ),
         (
             "a first join with an instance id to a group that does not exist",

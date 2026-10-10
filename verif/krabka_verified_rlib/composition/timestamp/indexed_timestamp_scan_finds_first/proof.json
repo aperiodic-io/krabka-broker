@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_branch_Option_usize": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_branch_Option_usize": { "prover": "alt-ergo", "time": 0.009 },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.009 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.015 },
       "vc_first_timestamp_index": { "prover": "alt-ergo", "time": 0.014 },
       "vc_from_residual_Option_usize": {

@@ -214,13 +214,13 @@ mod tests {
 
     /// A log at `<dir>/<name>` with `batches` one-record batches, each stamped
     /// with the epoch it is paired with.
-    fn log_with_epochs(dir: &std::path::Path, name: &str, batches: &[i32]) -> Mutex<Log> {
+    fn log_with_epochs(dir: &std::path::Path, name: &str, batches: &[LeaderEpoch]) -> Mutex<Log> {
         let path = log_dir::partition_dir(dir, name, 0);
         std::fs::create_dir_all(&path).unwrap();
         let mut log = Log::open(&path, LogConfig::default()).unwrap();
         for &epoch in batches {
             let mut batch = RecordBatch {
-                partition_leader_epoch: epoch,
+                partition_leader_epoch: epoch.0,
                 records: vec![Record {
                     value: Some(Bytes::from_static(b"v")),
                     ..Record::default()
@@ -236,35 +236,83 @@ mod tests {
         log.lock().unwrap().log_end_offset()
     }
 
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct TruncationLogsSetup<'a> {
+        #[default(&[])]
+        future: &'a [LeaderEpoch],
+        #[default(&[LeaderEpoch(1), LeaderEpoch(1)])]
+        current: &'a [LeaderEpoch],
+    }
+
+    struct TruncationLogsFixture {
+        current: Mutex<Log>,
+        future: Mutex<Log>,
+        _directory: tempfile::TempDir,
+    }
+
+    impl TruncationLogsFixture {
+        fn truncate(&self) {
+            truncate_to_current_epochs(&self.current, &self.future).unwrap();
+        }
+    }
+
+    fn truncation_logs(setup: TruncationLogsSetup<'_>) -> TruncationLogsFixture {
+        let directory = tempdir().unwrap();
+        let future = log_with_epochs(directory.path(), "future", setup.future);
+        let current = log_with_epochs(directory.path(), "current", setup.current);
+        TruncationLogsFixture {
+            current,
+            future,
+            _directory: directory,
+        }
+    }
+
     /// The case the truncation mark cannot cover: the current log lost its tail
     /// while no move task ran (across a restart) and grew back in a newer
     /// epoch, to a log end equal to the future log's. A swap that checks only
     /// the log ends would install the future log's discarded tail.
     #[test]
     fn a_future_log_that_kept_a_discarded_tail_is_cut_at_the_end_of_the_shared_epoch() {
-        let dir = tempdir().unwrap();
         // Both logs hold offsets 0-1 in epoch 1. The future log went on with
         // offsets 2-3 in epoch 1, which the current log dropped and replaced
         // with offsets 2-3 in epoch 2.
-        let future = log_with_epochs(dir.path(), "future", &[1, 1, 1, 1]);
-        let current = log_with_epochs(dir.path(), "current", &[1, 1, 2, 2]);
-        assert!(leo(&future) == leo(&current));
+        let logs = truncation_logs(TruncationLogsSetup {
+            future: &[
+                LeaderEpoch(1),
+                LeaderEpoch(1),
+                LeaderEpoch(1),
+                LeaderEpoch(1),
+            ],
+            current: &[
+                LeaderEpoch(1),
+                LeaderEpoch(1),
+                LeaderEpoch(2),
+                LeaderEpoch(2),
+            ],
+        });
+        assert!(leo(&logs.future) == leo(&logs.current));
 
-        truncate_to_current_epochs(&current, &future).unwrap();
+        logs.truncate();
 
-        assert!(leo(&future) == Offset(2));
-        assert!(leo(&current) == Offset(4));
+        assert!(leo(&logs.future) == Offset(2));
+        assert!(leo(&logs.current) == Offset(4));
     }
 
     #[test]
     fn a_future_log_that_is_a_prefix_of_the_current_log_is_left_alone() {
-        let dir = tempdir().unwrap();
-        let future = log_with_epochs(dir.path(), "future", &[1, 1]);
-        let current = log_with_epochs(dir.path(), "current", &[1, 1, 1, 2]);
+        let logs = truncation_logs(TruncationLogsSetup {
+            future: &[LeaderEpoch(1), LeaderEpoch(1)],
+            current: &[
+                LeaderEpoch(1),
+                LeaderEpoch(1),
+                LeaderEpoch(1),
+                LeaderEpoch(2),
+            ],
+        });
 
-        truncate_to_current_epochs(&current, &future).unwrap();
+        logs.truncate();
 
-        assert!(leo(&future) == Offset(2));
+        assert!(leo(&logs.future) == Offset(2));
     }
 
     /// The future log holds an epoch the current log never had, above the
@@ -272,34 +320,34 @@ mod tests {
     /// two share.
     #[test]
     fn epochs_the_current_log_does_not_know_are_dropped_one_at_a_time() {
-        let dir = tempdir().unwrap();
-        let future = log_with_epochs(dir.path(), "future", &[1, 1, 2, 3, 3]);
-        let current = log_with_epochs(dir.path(), "current", &[1, 1]);
+        let logs = truncation_logs(TruncationLogsSetup {
+            future: &[
+                LeaderEpoch(1),
+                LeaderEpoch(1),
+                LeaderEpoch(2),
+                LeaderEpoch(3),
+                LeaderEpoch(3),
+            ],
+            ..Default::default()
+        });
 
-        truncate_to_current_epochs(&current, &future).unwrap();
+        logs.truncate();
 
-        assert!(leo(&future) == Offset(2));
+        assert!(leo(&logs.future) == Offset(2));
     }
 
     #[test]
-    fn a_future_log_without_epochs_is_emptied() {
-        let dir = tempdir().unwrap();
-        let future = log_with_epochs(dir.path(), "future", &[-1, -1]);
-        let current = log_with_epochs(dir.path(), "current", &[1, 1]);
-
-        truncate_to_current_epochs(&current, &future).unwrap();
-
-        assert!(leo(&future) == Offset(0));
-    }
-
-    #[test]
-    fn an_empty_future_log_stays_empty() {
-        let dir = tempdir().unwrap();
-        let future = log_with_epochs(dir.path(), "future", &[]);
-        let current = log_with_epochs(dir.path(), "current", &[1, 1]);
-
-        truncate_to_current_epochs(&current, &future).unwrap();
-
-        assert!(leo(&future) == Offset(0));
+    fn future_logs_with_no_epoch_history_are_emptied_or_stay_empty() {
+        for (label, epochs) in [
+            ("without epochs", &[LeaderEpoch(-1), LeaderEpoch(-1)][..]),
+            ("already empty", &[][..]),
+        ] {
+            let logs = truncation_logs(TruncationLogsSetup {
+                future: epochs,
+                ..Default::default()
+            });
+            logs.truncate();
+            assert!(leo(&logs.future) == Offset(0), "{label}");
+        }
     }
 }

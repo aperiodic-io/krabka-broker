@@ -81,7 +81,9 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::coordinator::unified::streams::topology::test_support::example_subtopology;
+    use crate::coordinator::unified::streams::topology::test_support::{
+        example_source_topics, example_subtopology,
+    };
 
     #[test]
     fn to_stored_topology_maps_all_fields() {
@@ -93,7 +95,7 @@ mod tests {
             epoch: 9,
             subtopologies: vec![wire::Subtopology {
                 subtopology_id: "0".into(),
-                source_topics: vec!["in-a".into(), "in-b".into()],
+                source_topics: example_source_topics(),
                 source_topic_regex: vec!["^orders-.*".into()],
                 repartition_sink_topics: vec!["rp-1".into()],
                 state_changelog_topics: vec![TopicInfo {

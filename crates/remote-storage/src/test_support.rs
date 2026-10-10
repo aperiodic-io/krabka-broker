@@ -13,12 +13,16 @@ use crate::{
     storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
 };
 
-pub fn sample_metadata(id: u128) -> RemoteLogSegmentMetadata {
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum TransactionIndex {
+    #[default]
+    Present,
+    Omitted,
+}
+
+pub fn sample_metadata(id: Uuid) -> RemoteLogSegmentMetadata {
     RemoteLogSegmentMetadata::new(
-        RemoteLogSegmentId::new(
-            TopicIdPartition::new(Uuid::from_u128(1), "orders", 0),
-            Uuid::from_u128(id),
-        ),
+        RemoteLogSegmentId::new(TopicIdPartition::new(Uuid::from_u128(1), "orders", 0), id),
         0,
         99,
         123,
@@ -39,12 +43,13 @@ pub fn write_file(dir: &Path, name: &str, contents: &[u8]) -> PathBuf {
     p
 }
 
-pub fn sample_data(src: &Path, with_txn: bool) -> LogSegmentData {
+pub fn sample_data(src: &Path, transaction_index: TransactionIndex) -> LogSegmentData {
     LogSegmentData {
         log_segment: write_file(src, "00.log", b"0123456789"),
         offset_index: write_file(src, "00.index", b"OFFSET-IDX"),
         time_index: write_file(src, "00.timeindex", b"TIME-IDX"),
-        transaction_index: with_txn.then(|| write_file(src, "00.txnindex", b"TXN-IDX")),
+        transaction_index: (transaction_index == TransactionIndex::Present)
+            .then(|| write_file(src, "00.txnindex", b"TXN-IDX")),
         producer_snapshot_index: Some(write_file(src, "00.snapshot", b"SNAP")),
         leader_epoch_index: Bytes::from_static(b"EPOCH-BYTES"),
     }

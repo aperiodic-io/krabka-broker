@@ -25,7 +25,7 @@ use crate::{
     authorizer::{AuthorizationResult, Authorizer},
     broker::BrokerHandle,
     codes,
-    handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+    handlers::{acl_wire::CLUSTER_RESOURCE_NAME, test_support::CreateTopicSetup},
     test_support::{peer, principal, start_broker_no_audit_with},
 };
 
@@ -104,11 +104,10 @@ async fn start(auto_create_topics_enable: bool) -> Fixture {
         .expect("client build");
     let response = client
         .send(crate::handlers::test_support::configured_topic_request(
-            EXISTING,
-            &[],
-            1,
-            1,
-            5_000,
+            CreateTopicSetup {
+                topic: EXISTING,
+                ..Default::default()
+            },
         ))
         .await
         .expect("CreateTopics");

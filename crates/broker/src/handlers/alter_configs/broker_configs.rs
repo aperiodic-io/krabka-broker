@@ -12,16 +12,15 @@
 
 use std::collections::BTreeMap;
 
-use krabka_metadata::{BrokerConfigRecord, MetadataRecord, NodeId};
+use krabka_metadata::{BrokerConfigRecord, MetadataRecord};
 use krabka_protocol::owned::alter_configs_request::AlterConfigsResource;
 
 use crate::{
-    api_catalog::UnstableApiVersions,
     codes,
     config_keys::{
         self,
         broker_dynamic::{
-            CLUSTER_DEFAULT_ONLY, broker_resource_node, cordoned_log_dirs_disabled_error,
+            BrokerConfigContext, CLUSTER_DEFAULT_ONLY, cordoned_log_dirs_disabled_error,
             cordoned_log_dirs_error, elr_min_isr_error, validate_dynamic_broker_configs,
         },
     },
@@ -32,12 +31,9 @@ use crate::{
 /// name, and are empty on a node without the broker role.
 pub(super) fn broker_config_records(
     resource: &AlterConfigsResource,
-    image: &krabka_metadata::MetadataImage,
-    serving: NodeId,
-    log_dirs: &[std::path::PathBuf],
-    unstable: UnstableApiVersions,
+    context: BrokerConfigContext<'_>,
 ) -> Result<Vec<MetadataRecord>, (i16, String)> {
-    let node_id = broker_resource_node(&resource.resource_name, serving)?;
+    let node_id = context.resource_node(&resource.resource_name)?;
     let per_broker = node_id != krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID;
     let mut replacement = BTreeMap::new();
     for config in &resource.configs {
@@ -67,12 +63,12 @@ pub(super) fn broker_config_records(
     }
     // The records carry the client's strings, as Kafka's do: validation
     // parses a value and keeps nothing of the parse.
-    validate_dynamic_broker_configs(&replacement, per_broker, unstable)?;
+    validate_dynamic_broker_configs(&replacement, per_broker, context.unstable)?;
     if per_broker {
-        cordoned_log_dirs_error(&replacement, log_dirs)?;
+        cordoned_log_dirs_error(&replacement, context.log_dirs)?;
     }
 
-    let current = image.broker_config(node_id);
+    let current = context.image.broker_config(node_id);
     let deleted: Vec<&String> = current
         .into_iter()
         .flat_map(BTreeMap::keys)
@@ -88,10 +84,10 @@ pub(super) fn broker_config_records(
         .map(|(name, value)| (name, Some(value.as_str())))
         .chain(deleted.iter().map(|name| (*name, None)))
     {
-        if let Some(error) = elr_min_isr_error(image, node_id, name, value) {
+        if let Some(error) = elr_min_isr_error(context.image, node_id, name, value) {
             return Err(error);
         }
-        if let Some(error) = cordoned_log_dirs_disabled_error(image, name) {
+        if let Some(error) = cordoned_log_dirs_disabled_error(context.image, name) {
             return Err(error);
         }
     }
@@ -116,9 +112,13 @@ pub(super) fn broker_config_records(
 #[cfg(test)]
 mod tests {
     use assert2::{assert, check};
+    use krabka_metadata::NodeId;
 
     use super::*;
-    use crate::handlers::alter_configs::test_support::{broker_resource, image_with_broker};
+    use crate::handlers::{
+        alter_configs::test_support::{broker_resource, image_with_broker},
+        test_support::{BrokerConfigMutationSetup, broker_config_context},
+    };
 
     const SERVING: NodeId = NodeId(1);
 
@@ -138,11 +138,25 @@ mod tests {
     ) -> Result<Vec<MetadataRecord>, (i16, String)> {
         broker_config_records(
             &broker_resource(name, configs),
-            image,
-            SERVING,
-            &[],
-            UnstableApiVersions::Disabled,
+            broker_config_context(image, BrokerConfigMutationSetup::default()),
         )
+    }
+
+    fn replace_follower_throttle_with_leader(
+        image: &mut krabka_metadata::MetadataImage,
+    ) -> Vec<MetadataRecord> {
+        image.apply(&record(
+            SERVING,
+            crate::throttle::FOLLOWER_THROTTLED_RATE_KEY,
+            Some("512"),
+        ));
+
+        replacement_records(
+            image,
+            "1",
+            &[(crate::throttle::LEADER_THROTTLED_RATE_KEY, "2048")],
+        )
+        .expect("valid broker replacement")
     }
 
     #[test]
@@ -153,18 +167,7 @@ mod tests {
             crate::throttle::LEADER_THROTTLED_RATE_KEY,
             Some("1024"),
         ));
-        image.apply(&record(
-            SERVING,
-            crate::throttle::FOLLOWER_THROTTLED_RATE_KEY,
-            Some("512"),
-        ));
-
-        let records = replacement_records(
-            &image,
-            "1",
-            &[(crate::throttle::LEADER_THROTTLED_RATE_KEY, "2048")],
-        )
-        .expect("valid broker replacement");
+        let records = replace_follower_throttle_with_leader(&mut image);
 
         let expected = vec![
             record(
@@ -194,7 +197,7 @@ mod tests {
         image.apply(&MetadataRecord::V1BrokerRegistration(
             krabka_metadata::BrokerRegistrationRecord {
                 port: 9093,
-                ..crate::test_support::broker_registration(2)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
             },
         ));
         let cluster = krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID;
@@ -342,18 +345,7 @@ mod tests {
             crate::config_keys::BROKER_WITNESS,
             Some(crate::config_keys::WITNESS_TRUE),
         ));
-        image.apply(&record(
-            SERVING,
-            crate::throttle::FOLLOWER_THROTTLED_RATE_KEY,
-            Some("512"),
-        ));
-
-        let records = replacement_records(
-            &image,
-            "1",
-            &[(crate::throttle::LEADER_THROTTLED_RATE_KEY, "2048")],
-        )
-        .expect("valid broker replacement");
+        let records = replace_follower_throttle_with_leader(&mut image);
 
         assert!(
             records

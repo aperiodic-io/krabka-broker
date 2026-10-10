@@ -182,7 +182,7 @@ pub(crate) fn resolve_freeze_verdict(image: &MetadataImage, topic: &str) -> Opti
 #[cfg(test)]
 mod tests {
     use assert2::check;
-    use krabka_metadata::{MetadataImage, MetadataRecord, PatternType, TopicFreezeRecord};
+    use krabka_metadata::{MetadataImage, MetadataRecord, PatternType};
     use krabka_verified::FreezeMutationKind;
     use uuid::Uuid;
 
@@ -190,21 +190,16 @@ mod tests {
         FreezeMutationResolution, FreezeVerdict, resolve_freeze_mutation, resolve_freeze_verdict,
         resolve_topic_freeze,
     };
+    use crate::test_support::FreezeSetup;
 
     fn image() -> MetadataImage {
         MetadataImage::new(Uuid::from_u128(0x5150))
     }
 
-    fn freeze(scope: &str, pattern_type: PatternType, reason: &str) -> TopicFreezeRecord {
-        crate::test_support::topic_freeze_record(scope, pattern_type, true, reason)
-    }
+    use crate::test_support::topic_freeze_record as freeze;
 
-    fn frozen(image: &mut MetadataImage, scope: &str, pattern_type: PatternType, reason: &str) {
-        image.apply(&MetadataRecord::V1TopicFreeze(freeze(
-            scope,
-            pattern_type,
-            reason,
-        )));
+    fn frozen(image: &mut MetadataImage, setup: FreezeSetup<'_>) {
+        image.apply(&MetadataRecord::V1TopicFreeze(freeze(setup)));
     }
 
     #[test]
@@ -225,9 +220,7 @@ mod tests {
     fn mutation_resolution_hides_freeze_detail_until_authorized() {
         let mut image = image();
         image.apply(&MetadataRecord::V1TopicFreeze(freeze(
-            "orders",
-            PatternType::Literal,
-            "DR cutover",
+            FreezeSetup::default(),
         )));
 
         check!(
@@ -247,18 +240,31 @@ mod tests {
     #[test]
     fn a_literal_scope_beats_a_prefix_and_the_longest_prefix_wins() {
         let mut image = image();
-        frozen(&mut image, "tenant-a.", PatternType::Prefixed, "wide");
         frozen(
             &mut image,
-            "tenant-a.orders.",
-            PatternType::Prefixed,
-            "narrow",
+            FreezeSetup {
+                scope: "tenant-a.",
+                pattern_type: PatternType::Prefixed,
+                reason: "wide",
+                ..Default::default()
+            },
         );
         frozen(
             &mut image,
-            "tenant-a.orders.eu",
-            PatternType::Literal,
-            "one topic",
+            FreezeSetup {
+                scope: "tenant-a.orders.",
+                pattern_type: PatternType::Prefixed,
+                reason: "narrow",
+                ..Default::default()
+            },
+        );
+        frozen(
+            &mut image,
+            FreezeSetup {
+                scope: "tenant-a.orders.eu",
+                reason: "one topic",
+                ..Default::default()
+            },
         );
 
         for (label, topic, expected) in [
@@ -322,7 +328,15 @@ mod tests {
             ),
         ] {
             let mut image = image();
-            frozen(&mut image, scope, pattern_type, "incident");
+            frozen(
+                &mut image,
+                FreezeSetup {
+                    scope,
+                    pattern_type,
+                    reason: "incident",
+                    ..Default::default()
+                },
+            );
 
             check!(
                 resolve_topic_freeze(&image, "__consumer_offsets").is_none(),
@@ -343,7 +357,14 @@ mod tests {
     #[test]
     fn a_verdict_carries_the_scope_the_pattern_type_and_the_reason() {
         let mut image = image();
-        frozen(&mut image, "tenant-a.", PatternType::Prefixed, "DR cutover");
+        frozen(
+            &mut image,
+            FreezeSetup {
+                scope: "tenant-a.",
+                pattern_type: PatternType::Prefixed,
+                ..Default::default()
+            },
+        );
 
         let expected = FreezeVerdict {
             scope: "tenant-a.".to_owned(),

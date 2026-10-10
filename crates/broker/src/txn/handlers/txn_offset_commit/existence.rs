@@ -84,7 +84,7 @@ mod tests {
                     leader,
                     ..crate::coordinator::test_support::single_replica_partition(
                         name,
-                        partition,
+                        krabka_ids::PartitionIndex(partition),
                         NodeId(1),
                     )
                 },

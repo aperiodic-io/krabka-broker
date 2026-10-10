@@ -1,45 +1,26 @@
-(* #"/workspace/crates/verified/src/composition/offset_index.rs" 37 0 42 35 *)
+(* #"/workspace/crates/verified/src/composition/offset_index.rs" 18 0 53 1 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span soffset_index = "/workspace/crates/verified/src/composition/offset_index.rs" 43 16 43 22
-let%span soffset_index'0 = "/workspace/crates/verified/src/composition/offset_index.rs" 50 14 50 33
-let%span soffset_index'1 = "/workspace/crates/verified/src/composition/offset_index.rs" 51 14 51 27
-let%span soffset_index'2 = "/workspace/crates/verified/src/composition/offset_index.rs" 48 16 49 78
-let%span soffset_index'3 = "/workspace/crates/verified/src/composition/offset_index.rs" 47 16 47 114
-let%span soffset_index'4 = "/workspace/crates/verified/src/composition/offset_index.rs" 46 16 46 79
-let%span soffset_index'5 = "/workspace/crates/verified/src/composition/offset_index.rs" 45 16 45 36
-let%span soffset_index'6 = "/workspace/crates/verified/src/composition/offset_index.rs" 52 35 52 45
-let%span soffset_index'7 = "/workspace/crates/verified/src/composition/offset_index.rs" 52 13 52 21
-let%span soffset_index'8 = "/workspace/crates/verified/src/composition/offset_index.rs" 52 23 52 31
-let%span soffset_index'9 = "/workspace/crates/verified/src/composition/offset_index.rs" 53 12 53 99
-let%span soffset_index'10 = "/workspace/crates/verified/src/composition/offset_index.rs" 58 13 58 14
-let%span soffset_index'11 = "/workspace/crates/verified/src/composition/offset_index.rs" 58 8 58 14
-let%span soffset_index'12 = "/workspace/crates/verified/src/composition/offset_index.rs" 60 16 60 52
-let%span soffset_index'13 = "/workspace/crates/verified/src/composition/offset_index.rs" 61 18 61 68
-let%span soffset_index'14 = "/workspace/crates/verified/src/composition/offset_index.rs" 21 10 36 1
-let%span soffset_index'15 = "/workspace/crates/verified/src/composition/offset_index.rs" 10 8 13 79
+let%span soffset_index = "/workspace/crates/verified/src/composition/offset_index.rs" 18 0 53 1
+let%span soffset_index'0 = "/workspace/crates/verified/src/composition/offset_index.rs" 10 8 13 79
 let%span srestore_producer_ids_strict = "/workspace/crates/verified/src/restore_sidecar/restore_producer_ids_strict.rs" 38 10 44 6
-let%span slog_index = "/workspace/crates/verified/src/log_index.rs" 13 19 14 52
-let%span slog_index'0 = "/workspace/crates/verified/src/log_index.rs" 15 18 18 92
-let%span slog_index'1 = "/workspace/crates/verified/src/log_index.rs" 19 18 19 109
-let%span slog_index'2 = "/workspace/crates/verified/src/log_index.rs" 81 11 82 39
-let%span slog_index'3 = "/workspace/crates/verified/src/log_index.rs" 83 10 87 72
-let%span slog_index'4 = "/workspace/crates/verified/src/log_index.rs" 88 10 89 22
+let%span slog_index = "/workspace/crates/verified/src/log_index.rs" 50 19 51 52
+let%span slog_index'0 = "/workspace/crates/verified/src/log_index.rs" 52 18 55 92
+let%span slog_index'1 = "/workspace/crates/verified/src/log_index.rs" 56 18 56 109
+let%span slog_index'2 = "/workspace/crates/verified/src/log_index.rs" 109 11 110 39
+let%span slog_index'3 = "/workspace/crates/verified/src/log_index.rs" 111 10 115 72
+let%span slog_index'4 = "/workspace/crates/verified/src/log_index.rs" 116 10 117 22
 
 use creusot.int.UInt64
-use creusot.int.UInt32
 use seq.Seq
 use creusot.slice.Slice64
+use creusot.int.UInt32
 use creusot.int.Int64
 use creusot.prelude.Any
 use int.Int
-
-type tup2_u32_u32 = { f0: UInt32.t; f1: UInt32.t }
-
-type t_Option_tup2_u32_u32 = None | Some tup2_u32_u32
 
 predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other <= self
 
@@ -54,10 +35,14 @@ predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
 
 meta "rewrite_def" predicate well_founded_relation_Int
 
+type tup2_u32_u32 = { f0: UInt32.t; f1: UInt32.t }
+
 let len_tup2_u32_u32 (self_: Slice64.slice tup2_u32_u32) (return (x: UInt64.t)) = any
   [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#sslice] Seq.length (Slice64.view self_)
     = UInt64.t'int result}
     (! return {result}) ]
+
+type t_Option_tup2_u32_u32 = None | Some tup2_u32_u32
 
 let restore_offset_index_entry_valid (previous: t_Option_tup2_u32_u32) (relative_offset: UInt32.t) (position: UInt32.t)
   (max_relative: Int64.t) (log_bytes: UInt64.t) (return (x: bool)) = any
@@ -124,7 +109,7 @@ let offset_index_position_at_or_after (entries: Slice64.slice tup2_u32_u32) (tar
     (! return {result}) ]
 
 predicate offset_archive_valid [#"/workspace/crates/verified/src/composition/offset_index.rs" 8 0 8 96] (entries: Seq.seq tup2_u32_u32) (max_relative: int) (log_bytes: int) =
-  [%#soffset_index'15] (forall i: int. 0 <= i /\ i < Seq.length entries
+  [%#soffset_index'0] (forall i: int. 0 <= i /\ i < Seq.length entries
       -> UInt32.t'int (Seq.get entries i).f0 <= max_relative /\ UInt32.t'int (Seq.get entries i).f1 < log_bytes)
   /\ (forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length entries
     -> UInt32.t'int (Seq.get entries i).f0 < UInt32.t'int (Seq.get entries j).f0
@@ -134,54 +119,62 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let validated_index_bounds_lookup [#"/workspace/crates/verified/src/composition/offset_index.rs" 37 0 42 35]
+let validated_index_bounds_lookup [#"/workspace/crates/verified/src/composition/offset_index.rs" 18 0 53 1]
   (entries: Slice64.slice tup2_u32_u32) (target: UInt32.t) (max_relative: Int64.t) (log_bytes: UInt64.t)
   (return (x: t_Result_tup2_u32_Option_u32_unit)) = (! bb0
-  [ bb0 = s0 [ s0 = [ &i <- [%#soffset_index] (0: UInt64.t) ] s1 | s1 = [ &previous <- None ] s2 | s2 = bb1 ]
+  [ bb0 = s0 [ s0 = [ &i <- [%#soffset_index] (0: UInt64.t) ] s1 | s1 = bb1 ]
   | bb1 = bb1invariant
     [ bb1 =
-      {[@expl:loop variant] well_founded_relation_Int variant_old_bb1 ([%#soffset_index'0] Seq.length (Slice64.view entries)
+      {[@expl:loop variant] well_founded_relation_Int variant_old_bb1 ([%#soffset_index] Seq.length (Slice64.view entries)
       - UInt64.t'int i)}
       bb1invariant
-    | bb1invariant = {[@expl:loop invariant #0] [%#soffset_index'5] UInt64.t'int i <= Seq.length (Slice64.view entries)}
-      {[@expl:loop invariant #1] [%#soffset_index'4] previous
-      = (if UInt64.t'int i = 0 then None else Some (Seq.get (Slice64.view entries) (UInt64.t'int i - 1)))}
-      {[@expl:loop invariant #2] [%#soffset_index'3] forall j: int. 0 <= j /\ j < UInt64.t'int i
+    | bb1invariant = {[@expl:loop invariant #0] [%#soffset_index] UInt64.t'int i <= Seq.length (Slice64.view entries)}
+      {[@expl:loop invariant #1] [%#soffset_index] forall j: int. 0 <= j /\ j < UInt64.t'int i
         -> UInt32.t'int (Seq.get (Slice64.view entries) j).f0 <= Int64.to_int max_relative
         /\ UInt32.t'int (Seq.get (Slice64.view entries) j).f1 < UInt64.t'int log_bytes}
-      {[@expl:loop invariant #3] [%#soffset_index'2] forall j: int, k: int. 0 <= j /\ j < k /\ k < UInt64.t'int i
+      {[@expl:loop invariant #2] [%#soffset_index] forall j: int, k: int. 0 <= j /\ j < k /\ k < UInt64.t'int i
         -> UInt32.t'int (Seq.get (Slice64.view entries) j).f0 < UInt32.t'int (Seq.get (Slice64.view entries) k).f0
         /\ UInt32.t'int (Seq.get (Slice64.view entries) j).f1 < UInt32.t'int (Seq.get (Slice64.view entries) k).f1}
-      (! [ &variant_old_bb1 <- [%#soffset_index'0] Seq.length (Slice64.view entries) - UInt64.t'int i ] s0)
-      [ s0 = len_tup2_u32_u32 [%#soffset_index'1] {entries} (fun (_x: UInt64.t) -> [ &_35 <- _x ] s1)
-      | s1 = [ &_33 <- UInt64.lt i _35 ] s2
-      | s2 = any [ br0 -> {_33 = false} (! bb9) | br1 -> {_33} (! bb4) ] ]
+      (! [ &variant_old_bb1 <- [%#soffset_index] Seq.length (Slice64.view entries) - UInt64.t'int i ] s0)
+      [ s0 = len_tup2_u32_u32 [%#soffset_index] {entries} (fun (_x: UInt64.t) -> [ &_30 <- _x ] s1)
+      | s1 = [ &_28 <- UInt64.lt i _30 ] s2
+      | s2 = any [ br0 -> {_28 = false} (! bb13) | br1 -> {_28} (! bb4) ] ]
       [ bb4 = s0
-        [ s0 = [ &_39 <- i ] s1
-        | s1 = [ &_40 <- Slice64.length entries ] s2
-        | s2 = [ &_41 <- UInt64.lt _39 _40 ] s3
-        | s3 = {[@expl:index in bounds] [%#soffset_index'6] _41} s4
-        | s4 = Slice64.get [%#soffset_index'7] <tup2_u32_u32> {entries} {_39}
+        [ s0 = [ &_33 <- i = ([%#soffset_index] (0: UInt64.t)) ] s1
+        | s1 = any [ br0 -> {_33 = false} (! bb6) | br1 -> {_33} (! bb5) ] ]
+      | bb5 = s0 [ s0 = [ &previous <- None ] s1 | s1 = bb8 ]
+      | bb6 = s0
+        [ s0 = UInt64.sub [%#soffset_index] {i} {[%#soffset_index] (1: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &_36 <- _x ] s1)
+        | s1 = [ &_38 <- Slice64.length entries ] s2
+        | s2 = [ &_39 <- UInt64.lt _36 _38 ] s3
+        | s3 = {[@expl:index in bounds] [%#soffset_index] _39} s4
+        | s4 = Slice64.get [%#soffset_index] <tup2_u32_u32> {entries} {_36} (fun (r: tup2_u32_u32) -> [ &_35 <- r ] s5)
+        | s5 = [ &previous <- Some _35 ] s6
+        | s6 = bb8 ]
+      | bb8 = s0
+        [ s0 = [ &_42 <- i ] s1
+        | s1 = [ &_43 <- Slice64.length entries ] s2
+        | s2 = [ &_44 <- UInt64.lt _42 _43 ] s3
+        | s3 = {[@expl:index in bounds] [%#soffset_index] _44} s4
+        | s4 = Slice64.get [%#soffset_index] <tup2_u32_u32> {entries} {_42}
             (fun (r: tup2_u32_u32) -> [ &relative <- r.f0 ] s5)
-        | s5 = Slice64.get [%#soffset_index'8] <tup2_u32_u32> {entries} {_39}
+        | s5 = Slice64.get [%#soffset_index] <tup2_u32_u32> {entries} {_42}
             (fun (r: tup2_u32_u32) -> [ &position <- r.f1 ] s6)
-        | s6 = restore_offset_index_entry_valid [%#soffset_index'9] {previous} {relative} {position} {max_relative}
-            {log_bytes} (fun (_x: bool) -> [ &_43 <- _x ] s7)
-        | s7 = any [ br0 -> {_43 = false} (! bb8) | br1 -> {_43} (! bb7) ] ]
-      | bb7 = s0
-        [ s0 = [ &_52 <- { f0 = relative; f1 = position } ] s1
-        | s1 = [ &_51 <- Some _52 ] s2
-        | s2 = [ &previous <- _51 ] s3
-        | s3 = UInt64.add [%#soffset_index'11] {i} {[%#soffset_index'10] (1: UInt64.t)}
-            (fun (_x: UInt64.t) -> [ &i <- _x ] s4)
-        | s4 = bb1 ] ] ]
-  | bb8 = s0 [ s0 = [ &_ret <- Err _50 ] s1 | s1 = return {_ret} ]
-  | bb9 = s0
-    [ s0 = offset_index_lookup [%#soffset_index'12] {entries} {target} (fun (_x: UInt32.t) -> [ &floor <- _x ] s1)
-    | s1 = offset_index_position_at_or_after [%#soffset_index'13] {entries} {target}
+        | s6 = restore_offset_index_entry_valid [%#soffset_index] {previous} {relative} {position} {max_relative}
+            {log_bytes} (fun (_x: bool) -> [ &_46 <- _x ] s7)
+        | s7 = any [ br0 -> {_46 = false} (! bb12) | br1 -> {_46} (! bb11) ] ]
+      | bb11 = s0
+        [ s0 = UInt64.add [%#soffset_index] {i} {[%#soffset_index] (1: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb1 ] ] ]
+  | bb12 = s0 [ s0 = [ &_ret <- Err _53 ] s1 | s1 = return {_ret} ]
+  | bb13 = s0
+    [ s0 = offset_index_lookup [%#soffset_index] {entries} {target} (fun (_x: UInt32.t) -> [ &floor <- _x ] s1)
+    | s1 = offset_index_position_at_or_after [%#soffset_index] {entries} {target}
         (fun (_x: t_Option_u32) -> [ &ceiling <- _x ] s2)
-    | s2 = [ &_62 <- { f0'0 = floor; f1'0 = ceiling } ] s3
-    | s3 = [ &_ret <- Ok _62 ] s4
+    | s2 = [ &_61 <- { f0'0 = floor; f1'0 = ceiling } ] s3
+    | s3 = [ &_ret <- Ok _61 ] s4
     | s4 = return {_ret} ] ]
   [ & _ret: t_Result_tup2_u32_Option_u32_unit = Any.any_l ()
   | & entries: Slice64.slice tup2_u32_u32 = entries
@@ -189,24 +182,27 @@ let validated_index_bounds_lookup [#"/workspace/crates/verified/src/composition/
   | & max_relative: Int64.t = max_relative
   | & log_bytes: UInt64.t = log_bytes
   | & i: UInt64.t = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & _30: UInt64.t = Any.any_l ()
   | & previous: t_Option_tup2_u32_u32 = Any.any_l ()
   | & _33: bool = Any.any_l ()
-  | & _35: UInt64.t = Any.any_l ()
+  | & _35: tup2_u32_u32 = Any.any_l ()
+  | & _36: UInt64.t = Any.any_l ()
+  | & _38: UInt64.t = Any.any_l ()
+  | & _39: bool = Any.any_l ()
   | & relative: UInt32.t = Any.any_l ()
   | & position: UInt32.t = Any.any_l ()
-  | & _39: UInt64.t = Any.any_l ()
-  | & _40: UInt64.t = Any.any_l ()
-  | & _41: bool = Any.any_l ()
-  | & _43: bool = Any.any_l ()
-  | & _50: () = Any.any_l ()
-  | & _51: t_Option_tup2_u32_u32 = Any.any_l ()
-  | & _52: tup2_u32_u32 = Any.any_l ()
+  | & _42: UInt64.t = Any.any_l ()
+  | & _43: UInt64.t = Any.any_l ()
+  | & _44: bool = Any.any_l ()
+  | & _46: bool = Any.any_l ()
+  | & _53: () = Any.any_l ()
   | & floor: UInt32.t = Any.any_l ()
   | & ceiling: t_Option_u32 = Any.any_l ()
-  | & _62: tup2_u32_Option_u32 = Any.any_l ()
+  | & _61: tup2_u32_Option_u32 = Any.any_l ()
   | & variant_old_bb1: int = Any.any_l () ])
   [ return (result: t_Result_tup2_u32_Option_u32_unit) ->
-  {[@stop_split] [@expl:validated_index_bounds_lookup ensures] [%#soffset_index'14] match result with
+  {[@stop_split] [@expl:validated_index_bounds_lookup ensures] [%#soffset_index] match result with
       | Err () -> not offset_archive_valid (Slice64.view entries) (Int64.to_int max_relative) (UInt64.t'int log_bytes)
       | Ok {f0'0 = floor; f1'0 = ceiling} -> offset_archive_valid (Slice64.view entries) (Int64.to_int max_relative) (UInt64.t'int log_bytes)
       /\ (Seq.length (Slice64.view entries) = 0 \/ UInt32.t'int floor < UInt64.t'int log_bytes)

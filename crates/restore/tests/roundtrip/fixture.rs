@@ -18,7 +18,7 @@ use krabka_remote_storage::{
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use crate::batches::{text_batch, tiny_segment_config};
+use crate::batches::{append_groups, tiny_segment_config};
 
 /// One archived segment: the id it was archived under, and the exact batch
 /// (with its real, log-assigned `base_offset`) a correct restore must
@@ -106,15 +106,7 @@ fn build_partition(storage: &LocalTieredStorage, spec: PartitionSpec<'_>) -> Par
     let local = tempfile::tempdir().expect("local log tempdir");
     let mut log = Log::open(local.path(), tiny_segment_config()).expect("open local log");
 
-    let mut appended: Vec<RecordBatch> = Vec::with_capacity(spec.groups.len());
-    for values in spec.groups {
-        let mut batch = text_batch(values);
-        log.append(&mut batch).expect("append batch");
-        appended.push(batch);
-    }
-
-    log.sync().unwrap();
-    let exports = log.tierable_segments();
+    let (appended, exports) = append_groups(&mut log, spec.groups);
     assert!(
         exports.len() == spec.groups.len() - 1,
         "{}-{}: every append after the first should roll exactly one segment",

@@ -65,12 +65,8 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::coordinator::unified::{
-        share::persistence::{
-            KEY_SHARE_GROUP_METADATA, KEY_SHARE_TARGET_ASSIGNMENT_METADATA, ShareGroupKey,
-            encode_share_key, parse_share_key,
-        },
-        test_support::peek_version,
+    use crate::coordinator::unified::share::persistence::{
+        KEY_SHARE_GROUP_METADATA, KEY_SHARE_TARGET_ASSIGNMENT_METADATA, ShareGroupKey,
     };
 
     /// i16 version | i32 `Epoch` | i64 `MetadataHash` | uvarint tagged count, as
@@ -111,10 +107,10 @@ mod tests {
         let key = ShareGroupKey::GroupMetadata {
             group_id: "g1".into(),
         };
-        let bytes = encode_share_key(&key).unwrap();
-        let (ver, body) = peek_version(&bytes);
-        assert!(ver == KEY_SHARE_GROUP_METADATA);
-        assert!(parse_share_key(ver, body).unwrap() == key);
+        super::super::check_key_round_trip(
+            &key,
+            super::super::ShareKeyVersion(KEY_SHARE_GROUP_METADATA),
+        );
 
         let v = ShareGroupMetadataValue {
             epoch: 7,
@@ -128,26 +124,16 @@ mod tests {
     /// the default 0.
     #[test]
     fn target_assignment_metadata_bytes_match_kafka_schema() {
-        // (case, value, Kafka's bytes)
-        let rows: [(&str, ShareGroupTargetAssignmentMetadataValue, &[u8]); 2] = [
-            (
-                "the time is unknown",
-                ShareGroupTargetAssignmentMetadataValue {
-                    assignment_epoch: 12,
-                    assignment_timestamp_ms: 0,
-                },
-                b"\x00\x00\x00\x00\x00\x0c\x00",
-            ),
-            (
-                "an assignment that finished at 2026-10-07T00:00:00Z",
-                ShareGroupTargetAssignmentMetadataValue {
-                    assignment_epoch: 12,
-                    assignment_timestamp_ms: 1_791_331_200_000,
-                },
-                b"\x00\x00\x00\x00\x00\x0c\x01\x00\x08\x00\x00\x01\xa1\x13\xa8\xec\x00",
-            ),
-        ];
-        for (case, value, bytes) in rows {
+        let rows = crate::coordinator::unified::test_support::assignment_metadata_golden_cases(
+            crate::coordinator::unified::test_support::AssignmentMetadataGoldenSetup::default(),
+        );
+        for row in rows {
+            let case = row.description;
+            let bytes = row.bytes;
+            let value = ShareGroupTargetAssignmentMetadataValue {
+                assignment_epoch: row.epoch.0,
+                assignment_timestamp_ms: row.timestamp.0,
+            };
             check!(&value.encode()[..] == bytes, "{case}");
             check!(
                 ShareGroupTargetAssignmentMetadataValue::decode(bytes).unwrap() == value,
@@ -161,10 +147,10 @@ mod tests {
         let key = ShareGroupKey::TargetAssignmentMetadata {
             group_id: "g1".into(),
         };
-        let b = encode_share_key(&key).unwrap();
-        let (ver, body) = peek_version(&b);
-        assert!(ver == KEY_SHARE_TARGET_ASSIGNMENT_METADATA);
-        assert!(parse_share_key(ver, body).unwrap() == key);
+        super::super::check_key_round_trip(
+            &key,
+            super::super::ShareKeyVersion(KEY_SHARE_TARGET_ASSIGNMENT_METADATA),
+        );
 
         let v = ShareGroupTargetAssignmentMetadataValue {
             assignment_epoch: 12,

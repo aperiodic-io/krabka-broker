@@ -174,6 +174,17 @@ mod tests {
         }
     }
 
+    /// Independent expected replacement for the ordinary delete policy.
+    fn expected_delete_policy_record(extra: (&str, &str)) -> MetadataRecord {
+        MetadataRecord::V1TopicConfig(TopicConfigRecord {
+            topic: "orders".into(),
+            overrides: maplit::btreemap! {
+                crate::config_keys::CLEANUP_POLICY.to_string() => "delete".to_string(),
+                extra.0.to_string() => extra.1.to_string(),
+            },
+        })
+    }
+
     /// The same replacement without compaction is ordinary, so the refusal
     /// above is the pair and not the tiered-storage key alone.
     #[test]
@@ -192,12 +203,8 @@ mod tests {
         )
         .expect("a tiered delete-policy topic is valid");
 
-        let expected = MetadataRecord::V1TopicConfig(TopicConfigRecord {
-            topic: "orders".into(),
-            overrides: maplit::btreemap! {
-            crate::config_keys::CLEANUP_POLICY.to_string() => "delete".to_string(),
-            crate::config_keys::REMOTE_STORAGE_ENABLE.to_string() => "true".to_string()},
-        });
+        let expected =
+            expected_delete_policy_record((crate::config_keys::REMOTE_STORAGE_ENABLE, "true"));
         assert!(record == expected);
     }
 
@@ -217,12 +224,8 @@ mod tests {
         )
         .expect("a scheduled delete-policy topic is valid");
 
-        let expected = MetadataRecord::V1TopicConfig(TopicConfigRecord {
-            topic: "orders".into(),
-            overrides: maplit::btreemap! {
-            crate::config_keys::CLEANUP_POLICY.to_string() => "delete".to_string(),
-            crate::config_keys::DELIVERY_MODE.to_string() => "scheduled".to_string()},
-        });
+        let expected =
+            expected_delete_policy_record((crate::config_keys::DELIVERY_MODE, "scheduled"));
         assert!(record == expected);
     }
 

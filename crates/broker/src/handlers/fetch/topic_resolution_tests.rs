@@ -28,11 +28,11 @@ use super::{
     FIRST_TOPIC_ID_VERSION, test_support::expected_refused_partition as refused_partition,
 };
 use crate::{
-    authorizer::{AllowAllAuthorizer, Authorizer},
+    authorizer::AllowAllAuthorizer,
     broker::BrokerHandle,
     codes,
     fetch_session::{FINAL_EPOCH, INITIAL_EPOCH, INVALID_SESSION_ID},
-    test_support::{DenyAll, start_broker_with_authorizer_no_audit},
+    test_support::{DenyAll, start_broker_with_authorizer_no_audit as start},
 };
 
 /// An id that no topic in these tests has.
@@ -92,18 +92,31 @@ fn fetch_topic(name: &str, topic_id: WireUuid) -> FetchTopic {
     }
 }
 
-async fn start(authorizer: Arc<dyn Authorizer>) -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_with_authorizer_no_audit(authorizer).await
-}
-
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(broker, "fetch-resolution-test", name, 1).await
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "fetch-resolution-test",
+            name,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// Send one `Fetch` at `version` and return the response as a client decodes
 /// it.
 async fn fetch(broker: &BrokerHandle, version: i16, request: &FetchRequest) -> FetchResponse {
-    super::test_support::fetch_wire(broker, version, "consumer", "consumer-client", request).await
+    super::test_support::fetch_wire(
+        broker,
+        request,
+        super::test_support::FetchWireSetup {
+            version: krabka_ids::ApiVersion(version),
+            user: "consumer",
+            client_id: "consumer-client",
+        },
+    )
+    .await
 }
 
 /// Send one sessionless single-row `Fetch` at `case.version` for `case.topic`.
@@ -134,10 +147,15 @@ async fn drive(
     let partition = if case.error_code == codes::NONE {
         empty_partition(case.version)
     } else {
-        refused_partition(0, case.error_code)
+        refused_partition(
+            krabka_ids::PartitionIndex(0),
+            crate::test_support::KafkaErrorCode(case.error_code),
+        )
     };
-    let id_only = case.version >= FIRST_TOPIC_ID_VERSION;
-    let expected = super::test_support::expected_single_topic(id_only, (name, topic_id), partition);
+    let representation =
+        super::test_support::TopicRepresentation::for_version(krabka_ids::ApiVersion(case.version));
+    let expected =
+        super::test_support::expected_single_topic(representation, (name, topic_id), partition);
     (
         (case.version, case.topic, actual),
         (case.version, case.topic, expected),
@@ -162,14 +180,10 @@ async fn topic_row_error_follows_version_and_topic_reference() {
     let (broker, _dir) = start(Arc::new(AllowAllAuthorizer)).await;
     let known_id = create_topic(&broker, "resolution").await;
 
-    let mut actual = Vec::with_capacity(cases.len());
-    let mut expected = Vec::with_capacity(cases.len());
-    for case in cases {
-        let (got, want) = drive(&broker, Some(("resolution", known_id)), case).await;
-        actual.push(got);
-        expected.push(want);
-    }
-    assert!(actual == expected);
+    crate::handlers::test_support::check_cases(cases, async |case| {
+        drive(&broker, Some(("resolution", known_id)), case).await
+    })
+    .await;
     broker.shutdown().await;
 }
 
@@ -210,7 +224,10 @@ async fn every_unresolved_id_keeps_its_own_topic_row() {
     let refused_topic = |topic_id| FetchableTopicResponse {
         topic: String::new(),
         topic_id,
-        partitions: vec![refused_partition(0, codes::UNKNOWN_TOPIC_ID)],
+        partitions: vec![refused_partition(
+            krabka_ids::PartitionIndex(0),
+            crate::test_support::KafkaErrorCode(codes::UNKNOWN_TOPIC_ID),
+        )],
         ..Default::default()
     };
     let expected = FetchResponse {
@@ -265,7 +282,10 @@ async fn a_fetch_session_repeats_unknown_topic_id() {
         responses: vec![FetchableTopicResponse {
             topic: String::new(),
             topic_id: UNKNOWN_ID,
-            partitions: vec![refused_partition(0, codes::UNKNOWN_TOPIC_ID)],
+            partitions: vec![refused_partition(
+                krabka_ids::PartitionIndex(0),
+                crate::test_support::KafkaErrorCode(codes::UNKNOWN_TOPIC_ID),
+            )],
             ..Default::default()
         }],
         ..Default::default()
@@ -298,11 +318,13 @@ async fn a_partition_the_metadata_holds_and_this_broker_does_not_host_is_not_lea
     let topic_id = uuid::Uuid::from_u128(0x51);
     crate::handlers::test_support::seed_partition_replicas(
         &broker,
-        "moved",
-        topic_id,
-        krabka_audit::NodeId(2),
-        &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-        4,
+        crate::handlers::test_support::ReplicatedTopicSetup {
+            topic: "moved",
+            topic_id,
+            leader: krabka_audit::NodeId(2),
+            replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
+            leader_epoch: krabka_ids::LeaderEpoch(4),
+        },
     )
     .await;
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -374,7 +396,10 @@ async fn a_partition_the_metadata_holds_and_this_broker_does_not_host_is_not_lea
                 topic_id: id,
                 partitions: vec![
                     hosted_elsewhere,
-                    refused_partition(ABSENT, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    refused_partition(
+                        krabka_ids::PartitionIndex(ABSENT),
+                        crate::test_support::KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    ),
                 ],
                 ..Default::default()
             }],

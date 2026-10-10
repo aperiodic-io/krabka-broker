@@ -50,9 +50,10 @@ mod submit_failure;
 pub(crate) use self::{
     acl_gates::{
         acl_denied, acl_denied_quiet, allowed_topics, any_topic_describe_denied,
-        cluster_action_denied, cluster_alter_denied, cluster_describe_denied,
-        cluster_shortcut_denied, config_resource_refusal, denied_topics, group_describe_denied,
-        group_read_denied, requested_topic_name, subscribed_names_describe_denied, topic_decisions,
+        cluster_action_denied, cluster_alter_configs_denied, cluster_alter_denied,
+        cluster_describe_denied, cluster_shortcut_denied, config_resource_refusal, denied_topics,
+        group_delete_denied, group_describe_denied, group_read_denied, requested_topic_name,
+        topic_decisions,
     },
     admin_audit::{audit_admin, audit_admin_for, audit_admin_success, audit_resource},
     coordinator_routing::{

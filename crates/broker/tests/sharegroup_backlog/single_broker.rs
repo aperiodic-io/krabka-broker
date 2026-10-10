@@ -15,7 +15,6 @@ use krabka_protocol::owned::{
         AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestPartition,
         AlterShareGroupOffsetsRequestTopic,
     },
-    delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
     share_group_heartbeat_request::ShareGroupHeartbeatRequest,
 };
 use krabka_security::ListenerProtocol;
@@ -26,6 +25,8 @@ use crate::{
 };
 
 const GROUP: &str = "backlog-workers";
+
+krabka_macros::delete_topic_request!(delete_request);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn backlog_is_scraped_and_survives_scale_to_zero() {
@@ -139,18 +140,7 @@ async fn backlog_is_scraped_and_survives_scale_to_zero() {
     );
     assert!(scrape(metrics_addr).await.contains(&drained));
 
-    let deleted = client
-        .send(DeleteTopicsRequest {
-            topics: vec![DeleteTopicState {
-                name: Some(TOPIC.into()),
-                ..Default::default()
-            }],
-            topic_names: vec![TOPIC.into()],
-            timeout_ms: 5_000,
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    let deleted = client.send(delete_request(TOPIC)).await.unwrap();
     assert!(deleted.responses[0].error_code == 0, "{deleted:?}");
     broker
         .wait_for_image(|image| image.topic(TOPIC).is_none())

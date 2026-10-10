@@ -67,17 +67,14 @@ const DELAY_MS: i64 = 30_000;
 /// The probe's own report of what a stock JVM client saw.
 ///
 /// The Java side only measures and prints; every assertion is made here.
-const PROBE_JAVA: &str = r#"
+const PROBE_JAVA: &str = krabka_macros::java_string_producer_source!(
+    r#"
 import java.time.Duration;
 import java.util.Collections;
-import java.util.Properties;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 
 public final class DeliverAtTimeProbe {
@@ -90,13 +87,9 @@ public final class DeliverAtTimeProbe {
     long delayMillis = Long.parseLong(args[3]);
     long deliverAt = System.currentTimeMillis() + delayMillis;
 
-    Properties config = new Properties();
-    config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
-    config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    try (KafkaProducer<String, String> producer = new KafkaProducer<>(config)) {
+"#,
+    "bootstrap",
+    r#"    try (KafkaProducer<String, String> producer = new KafkaProducer<>(config)) {
       // The stock constructor that has carried a timestamp since Kafka 0.10.
       producer.send(new ProducerRecord<>(scheduled, 0, deliverAt, "k", "payload")).get();
       producer.send(new ProducerRecord<>(immediate, 0, deliverAt, "k", "payload")).get();
@@ -146,7 +139,8 @@ public final class DeliverAtTimeProbe {
     System.out.println("PROBE " + phase + " " + topic + " " + count + " " + timestamp + " " + served);
   }
 }
-"#;
+"#
+);
 
 // Create `topic` with the given `delivery.mode`, over the wire, from the host.
 //
@@ -171,11 +165,11 @@ async fn create_topic(bootstrap: &str, topic: &str, mode: &str) {
             .await;
     support::client::create_configured_topic(
         &client,
-        topic,
-        &[("delivery.mode", mode)],
-        1,
-        1,
-        5_000,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            configs: &[("delivery.mode", mode)],
+            ..Default::default()
+        },
     )
     .await;
 }
@@ -197,7 +191,7 @@ async fn wait_for_delivery_policy(broker: &BrokerHandle, topic: &str, policy: De
 
 // Compile and run the probe in the container, and return everything it printed.
 fn run_probe(bootstrap: &str) -> String {
-    let mut probe = crate::support::jvm_docker_command("--entrypoint", &[], &["bash",
+    let mut probe = crate::support::jvm_docker_command(crate::support::JvmDockerSetup { image: "--entrypoint", args: &["bash",
             KAFKA_IMAGE_TXN,
             "-c",
             r#"set -e; cat >/tmp/DeliverAtTimeProbe.java; \
@@ -209,7 +203,7 @@ fn run_probe(bootstrap: &str) -> String {
             SCHEDULED_TOPIC,
             IMMEDIATE_TOPIC,
             &DELAY_MS.to_string(),
-        ], true)
+        ], input: crate::support::ContainerInput::Attached, ..Default::default() })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

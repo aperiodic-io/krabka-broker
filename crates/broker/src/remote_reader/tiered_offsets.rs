@@ -100,34 +100,59 @@ mod tests {
         (RemoteReader::new(rsm, rlmm), remote_dir)
     }
 
-    fn add_segment(
-        reader: &RemoteReader,
-        start: i64,
-        end: i64,
-        epochs: std::collections::BTreeMap<LeaderEpoch, i64>,
-        finished: bool,
-    ) {
+    use std::collections::BTreeMap;
+
+    use krabka_ids::Offset;
+
+    #[derive(Clone, Copy, Default)]
+    enum SegmentPublication {
+        #[default]
+        Finished,
+        Started,
+    }
+
+    #[derive(krabka_macros::FieldDefaults)]
+    struct TieredSegmentSetup {
+        #[default(Offset(0))]
+        start: Offset,
+        #[default(Offset(9))]
+        end: Offset,
+        #[default(maplit::btreemap! {LeaderEpoch(0) => Offset(0)})]
+        epochs: BTreeMap<LeaderEpoch, Offset>,
+        publication: SegmentPublication,
+    }
+
+    fn add_segment(reader: &RemoteReader, setup: TieredSegmentSetup) {
+        let TieredSegmentSetup {
+            start,
+            end,
+            epochs,
+            publication,
+        } = setup;
         let id = krabka_remote_storage::RemoteLogSegmentId::new(tp(), Uuid::new_v4());
         reader
             .rlmm
             .add_remote_log_segment_metadata(
                 RemoteLogSegmentMetadata::new(
                     id.clone(),
-                    start,
-                    end,
+                    start.0,
+                    end.0,
                     0,
                     1,
                     0,
                     krabka_remote_storage::RemoteLogSegmentDetails::new(
                         1,
                         RemoteLogSegmentState::CopySegmentStarted,
-                        epochs,
+                        epochs
+                            .into_iter()
+                            .map(|(epoch, offset)| (epoch, offset.0))
+                            .collect(),
                     ),
                 )
                 .unwrap(),
             )
             .unwrap();
-        if finished {
+        if matches!(publication, SegmentPublication::Finished) {
             reader
                 .rlmm
                 .update_remote_log_segment_metadata(RemoteLogSegmentMetadataUpdate {
@@ -146,35 +171,41 @@ mod tests {
         let (reader, _remote_dir) = reader_with_metadata();
         add_segment(
             &reader,
-            -10,
-            -1,
-            maplit::btreemap! {LeaderEpoch(0) => -10},
-            true,
-        );
-        add_segment(
-            &reader,
-            20,
-            39,
-            maplit::btreemap! {
-                LeaderEpoch(0) => 20,
-                LeaderEpoch(2) => 30,
-                LeaderEpoch(4) => 35,
+            TieredSegmentSetup {
+                start: Offset(-10),
+                end: Offset(-1),
+                epochs: maplit::btreemap! {LeaderEpoch(0) => Offset(-10)},
+                ..Default::default()
             },
-            true,
         );
         add_segment(
             &reader,
-            0,
-            19,
-            maplit::btreemap! {LeaderEpoch(0) => 0},
-            true,
+            TieredSegmentSetup {
+                start: Offset(20),
+                end: Offset(39),
+                epochs: maplit::btreemap! {
+                    LeaderEpoch(0) => Offset(20),
+                    LeaderEpoch(2) => Offset(30),
+                    LeaderEpoch(4) => Offset(35),
+                },
+                ..Default::default()
+            },
         );
         add_segment(
             &reader,
-            40,
-            99,
-            maplit::btreemap! {LeaderEpoch(8) => 40},
-            false,
+            TieredSegmentSetup {
+                end: Offset(19),
+                ..Default::default()
+            },
+        );
+        add_segment(
+            &reader,
+            TieredSegmentSetup {
+                start: Offset(40),
+                end: Offset(99),
+                epochs: maplit::btreemap! {LeaderEpoch(8) => Offset(40)},
+                publication: SegmentPublication::Started,
+            },
         );
 
         assert!(reader.earliest_offset(&tp()).await.unwrap() == Some(0));
@@ -192,13 +223,15 @@ mod tests {
     #[tokio::test]
     async fn latest_tiered_offset_rejects_a_segment_without_an_owning_epoch() {
         let (reader, _remote_dir) = reader_with_metadata();
-        add_segment(&reader, 0, 9, maplit::btreemap! {LeaderEpoch(0) => 0}, true);
+        add_segment(&reader, TieredSegmentSetup::default());
         add_segment(
             &reader,
-            10,
-            19,
-            maplit::btreemap! {LeaderEpoch(7) => 20},
-            true,
+            TieredSegmentSetup {
+                start: Offset(10),
+                end: Offset(19),
+                epochs: maplit::btreemap! {LeaderEpoch(7) => Offset(20)},
+                ..Default::default()
+            },
         );
         assert!(reader.latest_tiered_offset(&tp()).await.unwrap() == None);
     }
@@ -208,10 +241,12 @@ mod tests {
         let (reader, _remote_dir) = reader_with_metadata();
         add_segment(
             &reader,
-            i64::MAX,
-            i64::MAX,
-            maplit::btreemap! {LeaderEpoch(i32::MAX) => i64::MAX},
-            true,
+            TieredSegmentSetup {
+                start: Offset(i64::MAX),
+                end: Offset(i64::MAX),
+                epochs: maplit::btreemap! {LeaderEpoch(i32::MAX) => Offset(i64::MAX)},
+                ..Default::default()
+            },
         );
         assert!(reader.earliest_offset(&tp()).await.unwrap() == Some(i64::MAX));
         assert!(

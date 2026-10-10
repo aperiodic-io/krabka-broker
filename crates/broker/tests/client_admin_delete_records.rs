@@ -20,10 +20,12 @@ async fn delete_records_truncates_wal_and_maps_outcome() {
     for offset in 0..100 {
         producer
             .send(crate::support::producer::producer_record(
-                "wal".to_string(),
-                Some(0),
-                None,
-                Some(format!("frame-{offset}").into_bytes().into()),
+                crate::support::producer::ProducerRecordSetup {
+                    topic: "wal".to_string(),
+                    partition: Some(krabka_ids::PartitionIndex(0)),
+                    value: Some(format!("frame-{offset}").into_bytes().into()),
+                    ..Default::default()
+                },
             ))
             .await
             .unwrap();

@@ -92,37 +92,24 @@ mod tests {
         );
     }
     #[test]
-    fn process_roles_witness_from_toml() {
-        let toml = r#"
-            [process]
-            roles = ["broker", "controller", "witness"]
-        "#;
-        let cfg = crate::file_config::test_support::configured(toml, "parse").expect("apply");
-        assert!(
-            cfg.roles
-                == vec![
-                    crate::config::NodeRole::Broker,
-                    crate::config::NodeRole::Controller,
-                    crate::config::NodeRole::Witness
-                ]
-        );
-        assert!(cfg.is_witness());
-    }
-    #[test]
-    fn process_roles_are_case_insensitive() {
-        let toml = r#"
-            [process]
-            roles = ["BROKER", "Controller", "WiTnEsS"]
-        "#;
-        let cfg = crate::file_config::test_support::configured(toml, "parse").expect("apply");
-        assert!(
-            cfg.roles
-                == vec![
-                    crate::config::NodeRole::Broker,
-                    crate::config::NodeRole::Controller,
-                    crate::config::NodeRole::Witness
-                ]
-        );
+    fn process_roles_witness_are_case_insensitive() {
+        for roles in [
+            r#"["broker", "controller", "witness"]"#,
+            r#"["BROKER", "Controller", "WiTnEsS"]"#,
+        ] {
+            let toml = format!("[process]\nroles = {roles}");
+            let cfg = crate::file_config::test_support::configured(&toml, "parse").expect("apply");
+            assert!(
+                cfg.roles
+                    == vec![
+                        crate::config::NodeRole::Broker,
+                        crate::config::NodeRole::Controller,
+                        crate::config::NodeRole::Witness
+                    ],
+                "{roles}"
+            );
+            assert!(cfg.is_witness(), "{roles}");
+        }
     }
     #[test]
     fn stretch_table_becomes_a_stretch_profile() {

@@ -2,7 +2,7 @@
 //! updates, and log bookkeeping, plus the replication the harness performs on a
 //! follower's behalf. This is where the core's outputs become the peers' inputs.
 
-use krabka_raft::kraft::{event::Event, types::NodeId};
+use krabka_raft::kraft::types::NodeId;
 
 use super::{cluster::Sim, node::Message, node_log::SimNodeLog};
 
@@ -39,18 +39,10 @@ impl<L: SimNodeLog> Sim<L> {
     /// `leader` actually believes it is the leader and neither endpoint is
     /// partitioned.
     fn replicate_from_leader(&mut self, follower: NodeId, leader: NodeId) {
-        if follower == leader {
+        if !self.can_replicate(follower, leader) {
             return;
         }
-        if self.partitioned.contains(&follower) || self.partitioned.contains(&leader) {
-            return;
-        }
-        if !self.nodes[&leader].machine.role().is_leader() {
-            return;
-        }
-        // Two distinct nodes need simultaneous access (follower mut, leader ref).
-        // `BTreeMap` has no stable disjoint-borrow API, so lift the follower out,
-        // replicate against the still-resident leader, then put it back.
+        // Lift the follower out to borrow both nodes without aliasing.
         let leader_hwm = self.leader_high_watermark(leader);
         let mut follower_node = self.nodes.remove(&follower).expect("follower exists");
         follower_node.log.replicate_from(&self.nodes[&leader].log);
@@ -63,17 +55,5 @@ impl<L: SimNodeLog> Sim<L> {
         self.nodes.insert(follower, follower_node);
     }
 
-    /// Enqueues an event for delivery to `dst`. If either endpoint is currently
-    /// partitioned, the harness silently drops the message, the same way a real
-    /// network partition does.
-    pub(super) fn send(&mut self, src: NodeId, dst: NodeId, event: Event) {
-        if self.partitioned.contains(&src) || self.partitioned.contains(&dst) {
-            return;
-        }
-        self.queue.push_back(Message { src, dst, event });
-    }
-
-    fn all_node_ids(&self) -> Vec<NodeId> {
-        self.nodes.keys().copied().collect()
-    }
+    krabka_macros::simulation_transport!(krabka_kraft_core);
 }

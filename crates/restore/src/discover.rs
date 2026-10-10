@@ -104,6 +104,16 @@ pub struct PartitionInventory {
     pub segments: Vec<SegmentInventory>,
 }
 
+impl PartitionInventory {
+    /// Order partitions by topic name and index, preserving scan order for equal keys.
+    pub(crate) fn sort_by_topic_and_partition(partitions: &mut [Self]) {
+        partitions.sort_by(|a, b| {
+            (a.partition.topic.as_str(), a.partition.partition)
+                .cmp(&(b.partition.topic.as_str(), b.partition.partition))
+        });
+    }
+}
+
 /// How many unattributable keys the scan keeps. Past this many the scan
 /// counts and drops, because the sample is diagnostic: an operator who
 /// pointed `--archive-prefix` at the wrong tree learns it from the first
@@ -346,10 +356,7 @@ pub async fn inventory(
             }
         })
         .collect();
-    partitions.sort_by(|a, b| {
-        (a.partition.topic.as_str(), a.partition.partition)
-            .cmp(&(b.partition.topic.as_str(), b.partition.partition))
-    });
+    PartitionInventory::sort_by_topic_and_partition(&mut partitions);
 
     // Checked against the raw scan before RLMM reconciliation. When a diskless
     // capture is present, `diskless::add_partitions` performs this check after

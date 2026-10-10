@@ -242,12 +242,12 @@ fn soak_duration() -> Duration {
 
 /// One record of `PAYLOAD_BYTES` bytes on `topic`.
 fn record(topic: &str, key: String, value: Vec<u8>) -> ProducerRecord {
-    crate::support::producer::producer_record(
-        topic.to_owned(),
-        None,
-        Some(key.into()),
-        Some(value.into()),
-    )
+    crate::support::producer::producer_record(crate::support::producer::ProducerRecordSetup {
+        topic: topic.to_owned(),
+        key: Some(key.into()),
+        value: Some(value.into()),
+        ..Default::default()
+    })
 }
 
 /// A producer for the load tasks.

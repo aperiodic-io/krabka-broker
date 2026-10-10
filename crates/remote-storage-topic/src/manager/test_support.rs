@@ -149,6 +149,20 @@ pub fn start_manager_in(
     )
 }
 
+/// Assign every partition and publish the caller's completed-segment fixture in this directory.
+pub async fn start_seeded_manager_in(
+    log: Arc<dyn MetadataEventLog>,
+    dir: std::path::PathBuf,
+    segments: &[(u128, i64, i64)],
+) -> Arc<TopicBasedRemoteLogMetadataManager> {
+    let manager = start_manager_in(log.clone(), dir).unwrap();
+    manager
+        .reconcile_assignment(&(0..log.partition_count()).collect::<Vec<_>>())
+        .await;
+    seed_finished(&manager, segments).await;
+    manager
+}
+
 /// Start a manager that consumes NOTHING until the caller drives
 /// `reconcile_assignment`. The assignment and readiness tests use this,
 /// and they assert that pre-assignment reads are a genuine miss.

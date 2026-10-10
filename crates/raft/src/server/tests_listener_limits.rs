@@ -42,6 +42,26 @@ fn context(limits: ListenerLimits) -> ConnectionContext {
     }
 }
 
+fn duplex_connection(
+    engine: crate::kraft::KraftController,
+    limits: ListenerLimits,
+) -> (
+    tokio::io::DuplexStream,
+    tokio::task::JoinHandle<Result<(), RaftError>>,
+) {
+    let (client, server) = tokio::io::duplex(1 << 16);
+    let connection = tokio::spawn(handle_conn(
+        server,
+        engine,
+        CancellationToken::new(),
+        None,
+        None,
+        context(limits),
+        crate::kraft::KraftController::wall_clock_ms,
+    ));
+    (client, connection)
+}
+
 /// Reads one response frame and returns its correlation id.
 async fn read_correlation_id<R: AsyncReadExt + Unpin>(stream: &mut R) -> i32 {
     let frame = super::test_support::read_frame(stream).await;
@@ -58,16 +78,7 @@ async fn an_oversize_request_frame_closes_the_connection() {
         max_request_size: krabka_units::prelude::bytes(64),
         ..ListenerLimits::default()
     };
-    let (mut client, server) = tokio::io::duplex(1 << 16);
-    let connection = tokio::spawn(handle_conn(
-        server,
-        engine,
-        CancellationToken::new(),
-        None,
-        None,
-        context(limits),
-        crate::kraft::KraftController::wall_clock_ms,
-    ));
+    let (mut client, connection) = duplex_connection(engine, limits);
 
     // A frame at the limit is served.
     client.write_all(&api_versions_request(7)).await.unwrap();
@@ -98,16 +109,7 @@ async fn an_idle_connection_closes_after_the_idle_window() {
         max_idle: Some(window),
         ..ListenerLimits::default()
     };
-    let (mut client, server) = tokio::io::duplex(1 << 16);
-    let mut connection = tokio::spawn(handle_conn(
-        server,
-        engine,
-        CancellationToken::new(),
-        None,
-        None,
-        context(limits),
-        crate::kraft::KraftController::wall_clock_ms,
-    ));
+    let (mut client, mut connection) = duplex_connection(engine, limits);
 
     // Two requests 20 s apart keep a 30 s window open for 40 s.
     for correlation_id in [1, 2] {
@@ -136,16 +138,7 @@ async fn a_listener_without_an_idle_window_keeps_a_silent_connection() {
         max_idle: None,
         ..ListenerLimits::default()
     };
-    let (_client, server) = tokio::io::duplex(1 << 16);
-    let connection = tokio::spawn(handle_conn(
-        server,
-        engine,
-        CancellationToken::new(),
-        None,
-        None,
-        context(limits),
-        crate::kraft::KraftController::wall_clock_ms,
-    ));
+    let (_client, connection) = duplex_connection(engine, limits);
 
     // Longer than the ten-minute Kafka default, which `None` replaces.
     tokio::time::sleep(Duration::from_mins(11)).await;

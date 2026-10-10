@@ -226,10 +226,8 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
             .chain_heads
             .insert(CAPTURE_HEAD_NAME.to_owned(), head.clone());
     }
-    let metadata_authenticated =
-        authenticate_metadata_snapshot(args, diskless_capture.as_ref(), trusted.is_some()).await?;
-    let rlmm_authenticated =
-        authenticate_rlmm_snapshot(args, diskless_capture.as_ref(), trusted.is_some()).await?;
+    let (metadata_authenticated, rlmm_authenticated) =
+        authenticate_snapshots(args, diskless_capture.as_ref(), trusted.is_some()).await?;
     if rlmm_authenticated && has_classic {
         let rlmm_snapshot = args.archive.rlmm_snapshot.as_deref().ok_or_else(|| {
             RestoreError::Integrity("authenticated RLMM snapshot has no path".to_owned())
@@ -353,56 +351,49 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
     })
 }
 
-async fn authenticate_metadata_snapshot(
+async fn authenticate_snapshots(
     args: &RestoreArgs,
     capture: Option<&krabka_remote_storage::diskless::DisklessWalCapture>,
     authenticated_restore: bool,
-) -> Result<bool, RestoreError> {
-    let Some(path) = args.archive.metadata_snapshot.as_ref() else {
-        return Ok(false);
-    };
-    if !authenticated_restore {
-        return Ok(false);
-    }
-    let expected = capture
-        .and_then(|capture| capture.metadata_snapshot_sha256)
-        .ok_or_else(|| RestoreError::Authenticity {
-            reason: "--metadata-snapshot is not bound to the signed diskless capture".to_owned(),
-        })?;
-    let bytes = tokio::fs::read(path).await?;
-    let actual = Sha256Digest::of(&bytes);
-    if actual != expected {
-        return Err(RestoreError::Authenticity {
-            reason: format!(
-                "--metadata-snapshot differs from the signed capture: expected SHA-256 {expected}, found {actual}"
-            ),
-        });
-    }
-    Ok(true)
+) -> Result<(bool, bool), RestoreError> {
+    let metadata = authenticate_captured_snapshot(
+        args.archive.metadata_snapshot.as_deref(),
+        capture.and_then(|capture| capture.metadata_snapshot_sha256),
+        authenticated_restore,
+        "--metadata-snapshot",
+    )
+    .await?;
+    let rlmm = authenticate_captured_snapshot(
+        args.archive.rlmm_snapshot.as_deref(),
+        capture.and_then(|capture| capture.rlmm_snapshot_sha256),
+        authenticated_restore,
+        "--rlmm-snapshot",
+    )
+    .await?;
+    Ok((metadata, rlmm))
 }
 
-async fn authenticate_rlmm_snapshot(
-    args: &RestoreArgs,
-    capture: Option<&krabka_remote_storage::diskless::DisklessWalCapture>,
+async fn authenticate_captured_snapshot(
+    path: Option<&std::path::Path>,
+    expected: Option<Sha256Digest>,
     authenticated_restore: bool,
+    flag: &str,
 ) -> Result<bool, RestoreError> {
-    let Some(path) = args.archive.rlmm_snapshot.as_ref() else {
+    let Some(path) = path else {
         return Ok(false);
     };
     if !authenticated_restore {
         return Ok(false);
     }
-    let expected = capture
-        .and_then(|capture| capture.rlmm_snapshot_sha256)
-        .ok_or_else(|| RestoreError::Authenticity {
-            reason: "--rlmm-snapshot is not bound to the signed diskless capture".to_owned(),
-        })?;
+    let expected = expected.ok_or_else(|| RestoreError::Authenticity {
+        reason: format!("{flag} is not bound to the signed diskless capture"),
+    })?;
     let bytes = tokio::fs::read(path).await?;
     let actual = Sha256Digest::of(&bytes);
     if actual != expected {
         return Err(RestoreError::Authenticity {
             reason: format!(
-                "--rlmm-snapshot differs from the signed capture: expected SHA-256 {expected}, found {actual}"
+                "{flag} differs from the signed capture: expected SHA-256 {expected}, found {actual}"
             ),
         });
     }

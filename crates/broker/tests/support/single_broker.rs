@@ -131,9 +131,10 @@ pub async fn start_with_deny_all_authz() -> InProcess {
     // becomes alive in the liveness registry, and nothing here needs it to.
     let (broker, client) = crate::support::client::start_broker_client(
         config,
-        "krabka-broker-test-deny",
-        "broker start",
-        "client build",
+        crate::support::client::BrokerClientSetup {
+            client_id: "krabka-broker-test-deny",
+            ..Default::default()
+        },
     )
     .await;
     InProcess {

@@ -442,6 +442,22 @@ mod tests {
             .collect()
     }
 
+    fn overshared_first_partition(c_subscriptions: &[Uuid]) -> Vec<MemberSubscription> {
+        vec![
+            member("A", &[T1], &[(T1, &[0])]),
+            member("B", &[T1], &[(T1, &[0])]),
+            member("C", c_subscriptions, &[(T1, &[0])]),
+        ]
+    }
+
+    fn repeated_member_expected(c_partitions: &[(Uuid, &[i32])]) -> Assignment {
+        expected(&[
+            ("A", &[(T1, &[1])]),
+            ("B", &[(T1, &[0])]),
+            ("C", c_partitions),
+        ])
+    }
+
     /// The whole assignment for inputs from Kafka's `SimpleAssignorTest` and
     /// from the issue: balance over the group, sharing when members outnumber
     /// partitions, and stickiness.
@@ -590,39 +606,17 @@ mod tests {
             // assignments: partition 1 ends with one member, not two.
             (
                 "a repeated member counts twice, as in Kafka (homogeneous)",
-                spec(
-                    vec![
-                        member("A", &[T1], &[(T1, &[0])]),
-                        member("B", &[T1], &[(T1, &[0])]),
-                        member("C", &[T1], &[(T1, &[0])]),
-                    ],
-                    Homogeneous,
-                ),
+                spec(overshared_first_partition(&[T1]), Homogeneous),
                 topics(&[(T1, 2)]),
                 None,
-                expected(&[
-                    ("A", &[(T1, &[1])]),
-                    ("B", &[(T1, &[0])]),
-                    ("C", &[(T1, &[0])]),
-                ]),
+                repeated_member_expected(&[(T1, &[0])]),
             ),
             (
                 "a repeated member counts twice, as in Kafka (heterogeneous)",
-                spec(
-                    vec![
-                        member("A", &[T1], &[(T1, &[0])]),
-                        member("B", &[T1], &[(T1, &[0])]),
-                        member("C", &[T1, T2], &[(T1, &[0])]),
-                    ],
-                    Heterogeneous,
-                ),
+                spec(overshared_first_partition(&[T1, T2]), Heterogeneous),
                 topics(&[(T1, 2), (T2, 1)]),
                 None,
-                expected(&[
-                    ("A", &[(T1, &[1])]),
-                    ("B", &[(T1, &[0])]),
-                    ("C", &[(T1, &[0]), (T2, &[0])]),
-                ]),
+                repeated_member_expected(&[(T1, &[0]), (T2, &[0])]),
             ),
         ];
         for (name, group, topics, assignable, want) in rows {

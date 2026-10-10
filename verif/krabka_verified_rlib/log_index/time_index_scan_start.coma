@@ -1,19 +1,19 @@
-(* #"/workspace/crates/verified/src/log_index.rs" 70 0 70 82 *)
+(* #"/workspace/crates/verified/src/log_index.rs" 98 0 98 82 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span snum = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/num.rs" 328 20 329 89
 let%span snum'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/num.rs" 332 26 332 87
-let%span slog_index = "/workspace/crates/verified/src/log_index.rs" 71 39 71 40
-let%span slog_index'0 = "/workspace/crates/verified/src/log_index.rs" 71 10 71 41
-let%span slog_index'1 = "/workspace/crates/verified/src/log_index.rs" 72 24 72 58
-let%span slog_index'2 = "/workspace/crates/verified/src/log_index.rs" 73 16 73 17
-let%span slog_index'3 = "/workspace/crates/verified/src/log_index.rs" 59 11 60 40
-let%span slog_index'4 = "/workspace/crates/verified/src/log_index.rs" 61 10 66 52
-let%span slog_index'5 = "/workspace/crates/verified/src/log_index.rs" 67 10 68 20
-let%span slog_index'6 = "/workspace/crates/verified/src/log_index.rs" 13 19 14 52
-let%span slog_index'7 = "/workspace/crates/verified/src/log_index.rs" 15 18 18 92
-let%span slog_index'8 = "/workspace/crates/verified/src/log_index.rs" 19 18 19 109
+let%span slog_index = "/workspace/crates/verified/src/log_index.rs" 99 39 99 40
+let%span slog_index'0 = "/workspace/crates/verified/src/log_index.rs" 99 10 99 41
+let%span slog_index'1 = "/workspace/crates/verified/src/log_index.rs" 100 24 100 58
+let%span slog_index'2 = "/workspace/crates/verified/src/log_index.rs" 101 16 101 17
+let%span slog_index'3 = "/workspace/crates/verified/src/log_index.rs" 87 11 88 40
+let%span slog_index'4 = "/workspace/crates/verified/src/log_index.rs" 89 10 94 52
+let%span slog_index'5 = "/workspace/crates/verified/src/log_index.rs" 95 10 96 20
+let%span slog_index'6 = "/workspace/crates/verified/src/log_index.rs" 50 19 51 52
+let%span slog_index'7 = "/workspace/crates/verified/src/log_index.rs" 52 18 55 92
+let%span slog_index'8 = "/workspace/crates/verified/src/log_index.rs" 56 18 56 109
 
 use creusot.int.Int64
 use creusot.slice.Slice64
@@ -81,7 +81,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let time_index_scan_start [#"/workspace/crates/verified/src/log_index.rs" 70 0 70 82]
+let time_index_scan_start [#"/workspace/crates/verified/src/log_index.rs" 98 0 98 82]
   (entries: Slice64.slice tup2_i64_u32) (target_timestamp: Int64.t) (return (x: UInt32.t)) =
 {[@stop_split] [@expl:time_index_scan_start requires] [%#slog_index'3] forall i: int, j: int. 0 <= i
       /\ i < j /\ j < Seq.length (Slice64.view entries)

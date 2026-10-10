@@ -29,7 +29,7 @@
 //! group-level response and the encoder, and `tombstone` the
 //! `__consumer_offsets` append.
 
-use krabka_metadata::{AclOperation, ResourceType};
+use krabka_metadata::AclOperation;
 use krabka_protocol::{
     owned::{
         offset_delete_request::OffsetDeleteRequest, offset_delete_response::OffsetDeleteResponse,
@@ -61,13 +61,8 @@ context_handler! {
         let image = broker.controller.current_image();
 
         // Group `Delete` ACL — `OffsetDeleteRequest.getErrorResponse` on Deny.
-        if crate::handlers::acl_denied(
-            broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            ResourceType::Group,
-            req.group_id.as_str(),
-            AclOperation::Delete,
+        if crate::handlers::group_delete_denied(
+            broker.config.authorizer.as_ref(), &image, ctx, req.group_id.as_str(),
         ) {
             return Ok(OffsetDeleteResponse::error(
                 codes::GROUP_AUTHORIZATION_FAILED,

@@ -40,7 +40,9 @@ pub(super) async fn register_topic(
                 replication_factor: 1,
             }),
             MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
-                name, 0, leader,
+                name,
+                krabka_ids::PartitionIndex(0),
+                leader,
             )),
         ])
         .await

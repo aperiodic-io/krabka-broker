@@ -22,10 +22,10 @@ async fn jvm_kafka_reassign_partitions_with_throttle_end_to_end() {
         crate::cluster::execute_plan(&admin_mount, TOPIC, staying, new_node, true);
 
     // Verify throttle configs were applied via kafka-configs --describe.
-    let desc = crate::support::jvm_docker_command(
-        KAFKA_IMAGE_TXN,
-        &[&admin_mount],
-        &[
+    let desc = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE_TXN,
+        mounts: &[&admin_mount],
+        args: &[
             "kafka-configs",
             "--describe",
             "--entity-type",
@@ -37,8 +37,8 @@ async fn jvm_kafka_reassign_partitions_with_throttle_end_to_end() {
             "--command-config",
             "/client.properties",
         ],
-        false,
-    )
+        ..Default::default()
+    })
     .output()
     .expect("spawn kafka-configs --describe");
     eprintln!(

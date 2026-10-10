@@ -124,7 +124,9 @@ mod tests {
     use crate::coordinator::unified::{
         actor::{
             GroupKindTag,
-            test_support::{bidirectional_coordinator, make_coordinator, rpc, seed_classic_member},
+            test_support::{
+                BidirectionalClassicSetup, bidirectional_coordinator, make_coordinator, rpc,
+            },
         },
         classic_state::OffsetEntry,
     };
@@ -262,17 +264,15 @@ mod tests {
     /// handler maps the code by version.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn upgraded_group_fences_stale_native_consumer_commit() {
-        let (coord, _log) = bidirectional_coordinator();
-
-        // SPAWN classic-kind via a seeded classic member, then UPGRADE by having
-        // a native consumer heartbeat in. The handle's spawn-time `kind` stays
-        // the stale `Classic`.
-        let handle = seed_classic_member(&coord, "m1", "t", None);
+        let (_coord, _log, handle) =
+            crate::coordinator::unified::actor::test_support::seeded_bidirectional_coordinator(
+                BidirectionalClassicSetup::default(),
+            );
         assert!(handle.kind == GroupKindTag::Classic);
-        let up = rpc::consumer_heartbeat(&handle, "", 0, Some("t")).await;
-        assert!(up.error_code == codes::NONE);
-        let native = up.member_id.expect("native member id");
-        let current_epoch = up.member_epoch;
+        let joined =
+            crate::coordinator::unified::actor::test_support::join_native_consumer(&handle).await;
+        let native = joined.member_id;
+        let current_epoch = joined.epoch.0;
 
         // The handle's spawn-time kind is the stale `Classic`; validation must
         // not consult it — it must run the consumer epoch fence.

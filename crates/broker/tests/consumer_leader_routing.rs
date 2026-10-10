@@ -28,9 +28,7 @@ use krabka_client_core::Client;
 use krabka_protocol::records::RecordBatch;
 use support::cluster_lock;
 
-use crate::support::{
-    client::connect_client, produce::single_partition_produce, records::value_record,
-};
+use crate::support::{client::connect_client, records::value_record};
 
 mod support;
 
@@ -52,12 +50,14 @@ async fn produce_one(
     batch.last_offset_delta = 0;
     for attempt in 1..=10 {
         let resp = client
-            .send(single_partition_produce(
-                topic,
-                topic_id,
-                partition,
-                Some(batch.clone().into()),
-                (-1, 5_000),
+            .send(crate::support::produce::batch_request(
+                batch.clone(),
+                crate::support::produce::SinglePartitionProduceSetup {
+                    topic: (topic).into(),
+                    topic_id,
+                    partition: krabka_ids::PartitionIndex(partition),
+                    ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                },
             ))
             .await
             .expect("produce");
@@ -109,8 +109,15 @@ async fn consumer_fetches_from_non_bootstrap_leaders() {
     // Create the topic with replication_factor=1. Each partition lives on
     // exactly ONE broker; the bootstrap broker has NO replica for partitions
     // placed on the other two nodes.
-    let topic_id =
-        crate::support::client::create_topic_with(&admin, topic, n_partitions, 1, 5_000).await;
+    let topic_id = crate::support::client::create_topic_with(
+        &admin,
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            num_partitions: crate::support::topics::TopicPartitionCount(n_partitions),
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Wait until node 1's controller image knows every partition AND its
     // assigned leader. The metadata image is raft-replicated and is the exact

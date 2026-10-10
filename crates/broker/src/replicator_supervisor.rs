@@ -372,8 +372,8 @@ mod tests {
     #[tokio::test]
     async fn run_reconciles_initial_image_before_shutdown() {
         let img = image_with(&[
-            topic_record("t", 1),
-            partition_record("t", 0, NodeId(2), vec![NodeId(2)], 0),
+            topic_record(crate::replicator_supervisor::test_support::SupervisorTopicSetup::default()),
+            partition_record(crate::replicator_supervisor::test_support::SupervisorPartitionSetup::single_replica("t", NodeId(2))),
         ]);
         let (supervisor, partitions, _reporter, _dir) = supervisor_fixture(img);
         supervisor.shutdown.cancel();

@@ -120,6 +120,8 @@ mod tests {
         crate::Cli::parse_from(argv).args
     }
 
+    krabka_macros::s3_archive_config_fixture!(expected_s3_config, krabka_object_store::S3Config);
+
     /// The mapping itself is pinned in `krabka-object-store`; this checks the
     /// flags reach it through restore's own command line.
     #[test]
@@ -141,17 +143,7 @@ mod tests {
         let ObjectStoreConfig::S3(s3) = config else {
             panic!("expected an S3 config");
         };
-        check!(
-            s3 == krabka_object_store::S3Config {
-                bucket: "backups".into(),
-                region: "eu-west-1".into(),
-                endpoint: Some("http://minio:9000".into()),
-                access_key_id: Some("key".into()),
-                secret_access_key: Some("secret".into()),
-                allow_http: true,
-                ..Default::default()
-            }
-        );
+        check!(s3 == expected_s3_config());
     }
 
     #[test]

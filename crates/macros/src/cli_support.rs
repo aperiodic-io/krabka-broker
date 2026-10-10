@@ -18,8 +18,7 @@ pub(crate) fn flag_metadata_fixture(input: TokenStream) -> Result<TokenStream, P
 }
 
 pub(crate) fn bind_retry_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input, 2)?.into_iter();
-    let name = crate::fixtures::name(arguments.next().unwrap())?;
+    let (name, mut arguments) = crate::fixtures::named_arguments(input, 2)?;
     let timeout = arguments.next().unwrap();
     Ok(moxy::template! {
         pub(super) async fn {{ name }}(addr: ::std::net::SocketAddr) -> ::tokio::net::TcpListener {
@@ -142,8 +141,7 @@ pub(crate) fn duration_cases(input: TokenStream) -> Result<TokenStream, ParseErr
 }
 
 pub(crate) fn directory_tree(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input, 4)?.into_iter();
-    let name = crate::fixtures::name(arguments.next().unwrap())?;
+    let (name, mut arguments) = crate::fixtures::named_arguments(input, 4)?;
     let element = arguments.next().unwrap();
     let docs = arguments.next().unwrap().into_iter().collect::<Vec<_>>();
     let [TokenTree::Group(docs)] = docs.as_slice() else {

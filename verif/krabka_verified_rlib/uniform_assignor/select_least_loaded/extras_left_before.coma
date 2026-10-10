@@ -47,4 +47,3 @@ goal vc_extras_left_before: if index <= 0 then
       - 1))
     /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sselect_least_loaded] index) ([%#sselect_least_loaded] index
     - 1))
-

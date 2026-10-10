@@ -16,6 +16,53 @@ use crate::{
     test_support::{DenyAll, peer, principal, start_broker_no_audit, start_broker_no_audit_with},
 };
 
+#[derive(Clone, Copy, Default)]
+struct LookupKeyType(i8);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct LookupSetup<'a> {
+    #[default("g")]
+    key: &'a str,
+    key_type: LookupKeyType,
+    #[default(&["g"])]
+    keys: &'a [&'a str],
+}
+
+async fn check_lookup_versions(
+    broker: &crate::broker::Broker,
+    setup: LookupSetup<'_>,
+    rows: Vec<(krabka_ids::ApiVersion, FindCoordinatorResponse)>,
+) {
+    for (version, expected) in rows {
+        let request = FindCoordinatorRequest {
+            key: setup.key.into(),
+            key_type: setup.key_type.0,
+            coordinator_keys: if version.0 >= 4 {
+                setup.keys.iter().map(|key| (*key).into()).collect()
+            } else {
+                vec![]
+            },
+            ..Default::default()
+        };
+        let response = find(broker, &request, version.0, "alice").await;
+        assert!(response == expected, "v{}", version.0);
+    }
+}
+
+fn legacy_coordinator_error(
+    code: crate::test_support::KafkaErrorCode,
+    message: Option<String>,
+) -> FindCoordinatorResponse {
+    FindCoordinatorResponse {
+        error_code: code.0,
+        error_message: message,
+        node_id: -1,
+        host: String::new(),
+        port: -1,
+        ..Default::default()
+    }
+}
+
 const KAFKA_TOPIC_ID: &str = "BQUFBQUFBQUFBQUFBQUFBQ";
 
 #[derive(Debug)]
@@ -312,40 +359,23 @@ async fn denied_group_key_answers_kafka_row_shape_per_version() {
     let (broker_handle, _dir) =
         start_broker_no_audit_with(|config| config.authorizer = std::sync::Arc::new(DenyAll)).await;
     let broker = broker_handle.broker_arc_for_test();
-    let rows = [
+    let rows = vec![
         (
-            4,
+            krabka_ids::ApiVersion(4),
             FindCoordinatorResponse {
                 coordinators: vec![row("g", codes::GROUP_AUTHORIZATION_FAILED, None)],
                 ..Default::default()
             },
         ),
         (
-            3,
-            FindCoordinatorResponse {
-                error_code: codes::GROUP_AUTHORIZATION_FAILED,
-                error_message: Some("Group authorization failed.".into()),
-                node_id: -1,
-                host: String::new(),
-                port: -1,
-                ..Default::default()
-            },
+            krabka_ids::ApiVersion(3),
+            legacy_coordinator_error(
+                crate::test_support::KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED),
+                Some("Group authorization failed.".into()),
+            ),
         ),
     ];
-    for (version, expected) in rows {
-        let request = FindCoordinatorRequest {
-            key: "g".into(),
-            key_type: KEY_TYPE_GROUP,
-            coordinator_keys: if version >= 4 {
-                vec!["g".into()]
-            } else {
-                vec![]
-            },
-            ..Default::default()
-        };
-        let response = find(&broker, &request, version, "alice").await;
-        assert!(response == expected, "v{version}");
-    }
+    check_lookup_versions(&broker, LookupSetup::default(), rows).await;
     broker_handle.shutdown().await;
 }
 
@@ -394,9 +424,9 @@ async fn unknown_key_type_fails_the_whole_request() {
     let (broker_handle, _dir) = start_broker_no_audit().await;
     let broker = broker_handle.broker_arc_for_test();
     let message = response::error_message(codes::INVALID_REQUEST);
-    let rows = [
+    let rows = vec![
         (
-            krabka_protocol::owned::find_coordinator_response::MAX_VERSION,
+            krabka_ids::ApiVersion(krabka_protocol::owned::find_coordinator_response::MAX_VERSION),
             FindCoordinatorResponse {
                 coordinators: vec![
                     row("a", codes::INVALID_REQUEST, message.clone()),
@@ -406,31 +436,23 @@ async fn unknown_key_type_fails_the_whole_request() {
             },
         ),
         (
-            3,
-            FindCoordinatorResponse {
-                error_code: codes::INVALID_REQUEST,
-                error_message: message.clone(),
-                node_id: -1,
-                host: String::new(),
-                port: -1,
-                ..Default::default()
-            },
+            krabka_ids::ApiVersion(3),
+            legacy_coordinator_error(
+                crate::test_support::KafkaErrorCode(codes::INVALID_REQUEST),
+                message.clone(),
+            ),
         ),
     ];
-    for (version, expected) in rows {
-        let request = FindCoordinatorRequest {
-            key: "a".into(),
-            key_type: i8::MAX,
-            coordinator_keys: if version >= 4 {
-                vec!["a".into(), "b".into()]
-            } else {
-                vec![]
-            },
-            ..Default::default()
-        };
-        let response = find(&broker, &request, version, "alice").await;
-        assert!(response == expected, "v{version}");
-    }
+    check_lookup_versions(
+        &broker,
+        LookupSetup {
+            key: "a",
+            key_type: LookupKeyType(i8::MAX),
+            keys: &["a", "b"],
+        },
+        rows,
+    )
+    .await;
     let image = broker_handle.controller_image_for_test();
     assert!(image.topic(crate::txn::bootstrap::TOPIC).is_none());
     assert!(
@@ -498,7 +520,7 @@ fn resolve_image() -> krabka_metadata::MetadataImage {
                 host: "legacy".into(),
                 port: 1000,
                 endpoints,
-                ..crate::test_support::broker_registration(node)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
             },
         ));
     }
@@ -506,7 +528,7 @@ fn resolve_image() -> krabka_metadata::MetadataImage {
         image.apply(&MetadataRecord::V1Partition(
             crate::handlers::test_support::single_replica_partition(
                 topic,
-                partition,
+                krabka_ids::PartitionIndex(partition),
                 NodeId(leader),
             ),
         ));
@@ -712,12 +734,11 @@ async fn a_lookup_with_too_few_brokers_creates_nothing_until_enough_register() {
         ..Default::default()
     };
 
-    check!(find(&broker, &request, 6, "admin").await == unavailable);
-    wait_until_creation_ends(&broker, topic).await;
-    check!(broker.controller.current_image().topic(topic).is_none());
-    check!(find(&broker, &request, 6, "admin").await == unavailable);
-    wait_until_creation_ends(&broker, topic).await;
-    check!(broker.controller.current_image().topic(topic).is_none());
+    for _ in 0..2 {
+        check!(find(&broker, &request, 6, "admin").await == unavailable);
+        wait_until_creation_ends(&broker, topic).await;
+        check!(broker.controller.current_image().topic(topic).is_none());
+    }
     check!(broker.auto_topic_creation.started() == 2);
 
     let other = krabka_metadata::NodeId(broker.config.node_id.0 + 1);
@@ -728,7 +749,7 @@ async fn a_lookup_with_too_few_brokers_creates_nothing_until_enough_register() {
                 broker_epoch: -1,
                 incarnation_id: uuid::Uuid::from_u128(2),
                 port: 9094,
-                ..crate::test_support::broker_registration(other.0)
+                ..crate::test_support::broker_registration(other)
             },
         )])
         .await

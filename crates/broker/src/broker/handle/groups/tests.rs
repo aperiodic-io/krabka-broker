@@ -3,7 +3,7 @@ use std::sync::Arc;
 use assert2::{assert, check};
 
 use super::*;
-use crate::{broker::Broker, config::BrokerConfig};
+use crate::broker::Broker;
 
 fn consumer_group_seed(member_id: &str) -> crate::coordinator::unified::GroupSeed {
     let mut seed = crate::coordinator::unified::GroupSeed {
@@ -181,9 +181,7 @@ async fn assert_streams_group_helpers_observe_live_actor_view(
 
 #[tokio::test]
 async fn group_handle_helpers_observe_live_actor_views() {
-    let dir = tempfile::tempdir().unwrap();
-    let config = BrokerConfig::for_tests(dir.path().to_path_buf());
-    let handle = Broker::start(config).await.expect("broker start");
+    let (handle, _dir) = crate::test_support::start_broker_with(|_| {}).await;
     let broker = handle.broker_arc_for_test();
 
     let group_id = "handle-next-gen-group-mutant";

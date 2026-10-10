@@ -188,15 +188,20 @@ pub struct CellAgg {
     pub kafka: StackAgg,
 }
 
+fn runs_by_cell(runs: &[RunOutput]) -> BTreeMap<CellKey, Vec<&RunOutput>> {
+    let mut cells: BTreeMap<CellKey, Vec<&RunOutput>> = BTreeMap::new();
+    for run in runs {
+        cells.entry(CellKey::of(run)).or_default().push(run);
+    }
+    cells
+}
+
 /// Groups runs by [`CellKey`] and reduces each stack's runs to a per-metric
 /// [`Stat`]. This returns the cells in key order.
 #[must_use]
 pub fn aggregate_cells(runs: &[RunOutput]) -> Vec<CellAgg> {
     let metrics = scalar_metrics();
-    let mut by_cell: BTreeMap<CellKey, Vec<&RunOutput>> = BTreeMap::new();
-    for r in runs {
-        by_cell.entry(CellKey::of(r)).or_default().push(r);
-    }
+    let by_cell = runs_by_cell(runs);
 
     let mut out = Vec::with_capacity(by_cell.len());
     for (key, cell_runs) in by_cell {
@@ -276,10 +281,7 @@ pub fn averaged_timeseries(runs: &[RunOutput]) -> Vec<TsSeries> {
     let client_metrics = client_ts_metrics();
     let broker_metrics = broker_ts_metrics();
 
-    let mut by_cell: BTreeMap<CellKey, Vec<&RunOutput>> = BTreeMap::new();
-    for r in runs {
-        by_cell.entry(CellKey::of(r)).or_default().push(r);
-    }
+    let by_cell = runs_by_cell(runs);
 
     let mut out = Vec::new();
     for (key, cell_runs) in by_cell {
@@ -354,90 +356,24 @@ fn series_from_buckets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        ids::WallclockMs,
-        scenario::{
-            Acks, Compression, LatencyPercentiles, LoadMode, ModeTag, Resource, Scenario,
-            Throughput, Topology,
-        },
+    use crate::scenario::{
+        Topology,
+        fixture::{RunSetup, empty_run as run},
     };
 
-    fn run(
-        stack: Stack,
-        scenario: &str,
-        broker_count: u32,
-        producer_rate: Frequency,
-        samples: Vec<Sample>,
-        broker_samples: Vec<BrokerSample>,
-    ) -> RunOutput {
-        run_at(
-            stack,
-            scenario,
-            Topology {
-                partitions: 100,
-                replication_factor: 3,
-                broker_count,
-            },
-            producer_rate,
-            samples,
-            broker_samples,
-        )
-    }
-
-    fn run_at(
-        stack: Stack,
-        scenario: &str,
-        topology: Topology,
-        producer_rate: Frequency,
-        samples: Vec<Sample>,
-        broker_samples: Vec<BrokerSample>,
-    ) -> RunOutput {
-        RunOutput {
-            scenario: Scenario {
-                name: scenario.into(),
-                mode_tag: ModeTag::Cluster,
-                msg_size: bytes(100),
-                key_size: ByteSize::ZERO,
-                partitions: topology.partitions,
-                replication_factor: topology.replication_factor,
-                producers: 1,
-                consumers: 1,
-                mode: LoadMode::Saturate,
-                acks: Acks::Leader,
-                compression: Compression::None,
-                linger: millis(5),
-                batch_size: kibibytes(16),
-                duration: secs(60),
-                warmup: secs(10),
-                failover: None,
-            },
-            stack,
-            topology,
-            wallclock_start_unix_ms: WallclockMs(0),
-            wallclock_end_unix_ms: WallclockMs(60_000),
-            throughput: Throughput {
-                producer_rate,
-                ..Throughput::default()
-            },
-            producer_latency: LatencyPercentiles::default(),
-            consumer_e2e_latency: LatencyPercentiles::default(),
-            resource: Resource::default(),
-            disturbance: None,
-            startup: None,
-            first_ack: Time::ZERO,
-            errors: vec![],
-            notes: vec![],
-            samples,
-            broker_samples,
-        }
-    }
-
-    fn sample(t: u64, producer_rate: Frequency) -> Sample {
+    fn sample(t: TimeOffsetMs, producer_rate: Frequency) -> Sample {
         Sample {
-            t_offset_ms: TimeOffsetMs(t),
+            t_offset_ms: t,
             producer_rate,
             ..Sample::default()
         }
+    }
+
+    fn producer_series(series: &[TsSeries], stack: Stack) -> &TsSeries {
+        series
+            .iter()
+            .find(|s| s.metric == "producer_msgs_per_sec" && s.stack == stack)
+            .expect("producer series present")
     }
 
     #[test]
@@ -472,11 +408,33 @@ mod tests {
     #[test]
     fn aggregate_cells_groups_and_averages_each_stack() {
         let runs = vec![
-            run(Stack::Krabka, "sat", 6, per_sec(100), vec![], vec![]),
-            run(Stack::Krabka, "sat", 6, per_sec(200), vec![], vec![]),
-            run(Stack::Krabka, "sat", 6, per_sec(300), vec![], vec![]),
-            run(Stack::Kafka, "sat", 6, per_sec(50), vec![], vec![]),
-            run(Stack::Kafka, "sat", 6, per_sec(50), vec![], vec![]),
+            run(RunSetup {
+                scenario: "sat",
+                producer_rate: per_sec(100),
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                producer_rate: per_sec(200),
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                producer_rate: per_sec(300),
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                stack: Stack::Kafka,
+                producer_rate: per_sec(50),
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                stack: Stack::Kafka,
+                producer_rate: per_sec(50),
+                ..Default::default()
+            }),
         ];
         let cells = aggregate_cells(&runs);
         assert2::assert!(cells.len() == 1);
@@ -504,8 +462,20 @@ mod tests {
     #[test]
     fn aggregate_cells_separates_topologies() {
         let runs = vec![
-            run(Stack::Krabka, "sat", 3, per_sec(10), vec![], vec![]),
-            run(Stack::Krabka, "sat", 6, per_sec(20), vec![], vec![]),
+            run(RunSetup {
+                scenario: "sat",
+                topology: Topology {
+                    broker_count: 3,
+                    ..RunSetup::default().topology
+                },
+                producer_rate: per_sec(10),
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                producer_rate: per_sec(20),
+                ..Default::default()
+            }),
         ];
         let cells = aggregate_cells(&runs);
         assert2::assert!(cells.len() == 2);
@@ -524,30 +494,23 @@ mod tests {
             broker_count: 6,
         };
         let runs = vec![
-            run_at(
-                Stack::Krabka,
-                "sat",
-                topology(12, 3),
-                per_sec(10),
-                vec![],
-                vec![],
-            ),
-            run_at(
-                Stack::Krabka,
-                "sat",
-                topology(100, 3),
-                per_sec(1000),
-                vec![],
-                vec![],
-            ),
-            run_at(
-                Stack::Krabka,
-                "sat",
-                topology(100, 1),
-                per_sec(5000),
-                vec![],
-                vec![],
-            ),
+            run(RunSetup {
+                scenario: "sat",
+                topology: topology(12, 3),
+                producer_rate: per_sec(10),
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                topology: topology(100, 3),
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                topology: topology(100, 1),
+                producer_rate: per_sec(5000),
+                ..Default::default()
+            }),
         ];
         let cells = aggregate_cells(&runs);
         assert2::assert!(cells.len() == 3);
@@ -573,22 +536,20 @@ mod tests {
             broker_count: 6,
         };
         let runs = vec![
-            run_at(
-                Stack::Krabka,
-                "sat",
-                topology(12),
-                Frequency::ZERO,
-                vec![sample(0, per_sec(100))],
-                vec![],
-            ),
-            run_at(
-                Stack::Krabka,
-                "sat",
-                topology(100),
-                Frequency::ZERO,
-                vec![sample(0, per_sec(900))],
-                vec![],
-            ),
+            run(RunSetup {
+                scenario: "sat",
+                topology: topology(12),
+                producer_rate: Frequency::ZERO,
+                samples: vec![sample(TimeOffsetMs(0), per_sec(100))],
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                topology: topology(100),
+                producer_rate: Frequency::ZERO,
+                samples: vec![sample(TimeOffsetMs(0), per_sec(900))],
+                ..Default::default()
+            }),
         ];
         let series = averaged_timeseries(&runs);
         let producer: Vec<&TsSeries> = series
@@ -606,36 +567,37 @@ mod tests {
     #[test]
     fn averaged_timeseries_averages_across_runs_per_offset() {
         let runs = vec![
-            run(
-                Stack::Krabka,
-                "sat",
-                6,
-                Frequency::ZERO,
-                vec![sample(0, per_sec(1000)), sample(2000, per_sec(2000))],
-                vec![BrokerSample {
+            run(RunSetup {
+                scenario: "sat",
+                producer_rate: Frequency::ZERO,
+                samples: vec![
+                    sample(TimeOffsetMs(0), per_sec(1000)),
+                    sample(TimeOffsetMs(2000), per_sec(2000)),
+                ],
+                broker_samples: vec![BrokerSample {
                     t_offset_ms: TimeOffsetMs(0),
                     cpu_cores: 2.0,
                     mem_working_set: mebibytes(1),
                 }],
-            ),
-            run(
-                Stack::Krabka,
-                "sat",
-                6,
-                Frequency::ZERO,
-                vec![sample(0, per_sec(3000)), sample(2000, per_sec(4000))],
-                vec![BrokerSample {
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                producer_rate: Frequency::ZERO,
+                samples: vec![
+                    sample(TimeOffsetMs(0), per_sec(3000)),
+                    sample(TimeOffsetMs(2000), per_sec(4000)),
+                ],
+                broker_samples: vec![BrokerSample {
                     t_offset_ms: TimeOffsetMs(0),
                     cpu_cores: 4.0,
                     mem_working_set: mebibytes(3),
                 }],
-            ),
+                ..Default::default()
+            }),
         ];
         let series = averaged_timeseries(&runs);
-        let prod = series
-            .iter()
-            .find(|s| s.metric == "producer_msgs_per_sec" && s.stack == Stack::Krabka)
-            .expect("producer series present");
+        let prod = producer_series(&series, Stack::Krabka);
         assert2::assert!(
             prod.points
                 == vec![
@@ -674,28 +636,26 @@ mod tests {
     #[test]
     fn averaged_timeseries_handles_ragged_runs() {
         let runs = vec![
-            run(
-                Stack::Kafka,
-                "sat",
-                6,
-                Frequency::ZERO,
-                vec![sample(0, per_sec(10)), sample(2000, per_sec(20))],
-                vec![],
-            ),
-            run(
-                Stack::Kafka,
-                "sat",
-                6,
-                Frequency::ZERO,
-                vec![sample(0, per_sec(30))],
-                vec![],
-            ),
+            run(RunSetup {
+                scenario: "sat",
+                stack: Stack::Kafka,
+                producer_rate: Frequency::ZERO,
+                samples: vec![
+                    sample(TimeOffsetMs(0), per_sec(10)),
+                    sample(TimeOffsetMs(2000), per_sec(20)),
+                ],
+                ..Default::default()
+            }),
+            run(RunSetup {
+                scenario: "sat",
+                stack: Stack::Kafka,
+                producer_rate: Frequency::ZERO,
+                samples: vec![sample(TimeOffsetMs(0), per_sec(30))],
+                ..Default::default()
+            }),
         ];
         let series = averaged_timeseries(&runs);
-        let prod = series
-            .iter()
-            .find(|s| s.metric == "producer_msgs_per_sec" && s.stack == Stack::Kafka)
-            .expect("series");
+        let prod = producer_series(&series, Stack::Kafka);
         assert2::assert!(
             prod.points[0]
                 == TsPoint {

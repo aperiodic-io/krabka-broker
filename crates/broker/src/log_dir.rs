@@ -203,6 +203,14 @@ mod tests {
 
     use super::*;
 
+    fn partition_dirs(names: &[&str]) -> tempfile::TempDir {
+        let dir = tempdir().unwrap();
+        for name in names {
+            std::fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        dir
+    }
+
     #[test]
     fn scan_creates_dir_when_missing() {
         let dir = tempdir().expect("tempdir");
@@ -245,9 +253,7 @@ mod tests {
 
     #[test]
     fn place_reuses_existing_location() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        let dirs = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+        let (_a, b, dirs) = crate::test_support::two_log_dirs();
         // Pre-create the partition in the *second* dir.
         std::fs::create_dir(b.path().join("t-0")).unwrap();
         let placed = place_partition_dir(&dirs, "t", 0);
@@ -256,9 +262,7 @@ mod tests {
 
     #[test]
     fn place_picks_least_loaded_then_order() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        let dirs = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+        let (a, b, dirs) = crate::test_support::two_log_dirs();
         // Empty cluster: tie → first dir.
         assert!(place_partition_dir(&dirs, "t", 0) == a.path().join("t-0"));
         // Load `a` with two partitions; next placement should go to `b`.
@@ -271,9 +275,7 @@ mod tests {
     /// loaded, and a partition that already lives in one stays there.
     #[test]
     fn placement_avoids_cordoned_dirs_but_keeps_existing_partitions() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        let dirs = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+        let (a, b, dirs) = crate::test_support::two_log_dirs();
         std::fs::create_dir(b.path().join("t-0")).unwrap();
         let cordoned = crate::cordoned_log_dirs::CordonedLogDirs::new(
             dirs.clone(),
@@ -298,10 +300,8 @@ mod tests {
 
     #[test]
     fn scan_all_merges_dirs_and_sorts() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        std::fs::create_dir(a.path().join("foo-0")).unwrap();
-        std::fs::create_dir(b.path().join("bar-1")).unwrap();
+        let a = partition_dirs(&["foo-0"]);
+        let b = partition_dirs(&["bar-1"]);
         let dirs = vec![a.path().to_path_buf(), b.path().to_path_buf()];
         let out = scan_all(&dirs).expect("scan_all ok");
         assert!(
@@ -334,18 +334,14 @@ mod tests {
 
     #[test]
     fn scan_does_not_pick_up_future_dirs() {
-        let dir = tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("foo-0")).unwrap();
-        std::fs::create_dir(dir.path().join("foo-1-future")).unwrap();
+        let dir = partition_dirs(&["foo-0", "foo-1-future"]);
         let out = scan(dir.path()).expect("scan ok");
         assert!(out == vec![("foo".into(), 0)]);
     }
 
     #[test]
     fn scan_future_returns_only_future_dirs() {
-        let dir = tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("foo-0")).unwrap();
-        std::fs::create_dir(dir.path().join("foo-1-future")).unwrap();
+        let dir = partition_dirs(&["foo-0", "foo-1-future"]);
         std::fs::create_dir(dir.path().join("bar-3-future")).unwrap();
         let mut out = scan_future(dir.path()).expect("scan_future ok");
         out.sort();
@@ -363,18 +359,14 @@ mod tests {
     fn count_partitions_ignores_future_dirs() {
         // KIP-113 placement should not see future-log dirs as load —
         // they are transient state belonging to an in-flight move.
-        let dir = tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("foo-0")).unwrap();
-        std::fs::create_dir(dir.path().join("foo-1-future")).unwrap();
+        let dir = partition_dirs(&["foo-0", "foo-1-future"]);
         assert!(count_partitions(dir.path()) == 1);
     }
 
     #[test]
     fn scan_all_first_dir_wins_on_duplicate() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        std::fs::create_dir(a.path().join("foo-0")).unwrap();
-        std::fs::create_dir(b.path().join("foo-0")).unwrap();
+        let a = partition_dirs(&["foo-0"]);
+        let b = partition_dirs(&["foo-0"]);
         let dirs = vec![a.path().to_path_buf(), b.path().to_path_buf()];
         let out = scan_all(&dirs).expect("scan_all ok");
         assert!(out == vec![("foo".to_string(), 0, a.path().to_path_buf())]);

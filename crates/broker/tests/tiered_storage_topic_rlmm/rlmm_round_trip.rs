@@ -12,12 +12,8 @@ use std::time::{Duration, Instant};
 use assert2::assert;
 use krabka_broker::BrokerHandle;
 use krabka_client_core::Client;
-use krabka_protocol::owned::fetch_request::FetchRequest;
 
-use crate::support::{
-    fetch::{fetch_partition, single_partition_fetch},
-    topic_id_for,
-};
+use crate::support::{fetch::single_partition_fetch, topic_id_for};
 
 /// Shared copy→metadata→read body: create a tiered topic, wait for the
 /// config to propagate, produce enough to seal segments, wait for the RLM
@@ -101,10 +97,14 @@ pub(crate) async fn copy_then_fetch_round_trip(
     let value = loop {
         let r = client
             .send(single_partition_fetch(
-                topic,
-                topic_id,
-                fetch_partition(0, 0, 1_048_576),
-                (500, 1, FetchRequest::default().max_bytes),
+                crate::support::fetch::SinglePartitionFetchSetup {
+                    topic: topic.into(),
+                    topic_id,
+                    limits: crate::support::fetch::FetchLimits::wait_for_data(
+                        crate::support::fetch::RequestWaitMillis(500),
+                    ),
+                    ..Default::default()
+                },
             ))
             .await
             .expect("Fetch");

@@ -419,7 +419,8 @@ mod tests {
         let mut positions = Vec::new();
         for off in 0..20i64 {
             positions.push(seg.log_size);
-            seg.append(&test_batch_at(off), DENSE_INDEX).unwrap();
+            seg.append(&test_batch_at(crate::Offset(off)), DENSE_INDEX)
+                .unwrap();
         }
         let advice = recording_advice(&mut seg);
         let budget = 100u64;

@@ -40,15 +40,11 @@ use crate::{
 ///     only on token-authed sessions.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn act_as_super_user_mints_token_owned_by_target() {
-    let (handle, _dir, addr) =
-        start_broker_with_super_users(&[("admin", "admin-pw"), ("alice", "alice-pw")], &["admin"])
-            .await;
+    let (handle, _dir, addr) = crate::cluster::start_admin_alice().await;
 
     let result: Result<(), String> = async {
         // (1) admin authenticates via SASL/PLAIN.
-        let mut admin = sasl_plain_authenticate(addr, "admin", b"admin-pw")
-            .await
-            .map_err(|e| format!("admin PLAIN auth: {e}"))?;
+        let mut admin = crate::wire::admin_plain(addr).await?;
 
         // (2) admin mints a token owned by alice. owner_principal_type=User,
         // owner_principal_name=alice, empty renewers, broker-chosen lifetime.
@@ -72,12 +68,7 @@ async fn act_as_super_user_mints_token_owned_by_target() {
                 create_resp.token_requester_principal_name,
             ));
         }
-        check!(create_resp.principal_type == "User");
-        check!(create_resp.principal_name == "alice");
-        check!(create_resp.token_requester_principal_type == "User");
-        check!(create_resp.token_requester_principal_name == "admin");
-        check!(!create_resp.token_id.is_empty(), "token_id must be set");
-        check!(create_resp.hmac.len() == 64, "HMAC length must be 64 bytes");
+        crate::rpc::check_created_identity(&create_resp, "alice", "admin");
 
         let token_id = create_resp.token_id.clone();
         let hmac_bytes = create_resp.hmac.clone();

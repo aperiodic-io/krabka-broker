@@ -21,10 +21,10 @@ use std::{
 
 use krabka_log::Offset;
 use krabka_raft::NodeId;
-use stateright::{Checker, Model, Property};
+use stateright::{Model, Property};
 
 use super::ReplicaState;
-use crate::model_check::run_bfs;
+use crate::model_check::check_model;
 
 /// Hard backstop on generated states. It bounds host memory even if
 /// `within_boundary` is looser than intended.
@@ -303,13 +303,12 @@ impl Model for IsrModel {
 /// Runs one bounded config to completion. Asserts that the run was exhaustive,
 /// that the cap or the depth did not truncate it, and that all properties hold.
 fn run(model: IsrModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, MAX_STATES);
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    check_model(
+        model,
         label,
+        (MAX_DEPTH, MAX_STATES, MAX_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }
 
 #[test]

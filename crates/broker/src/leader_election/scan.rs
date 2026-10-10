@@ -80,6 +80,20 @@ impl ScanElr {
     }
 }
 
+/// Snapshot liveness once and prepare per-topic ELR caching for a scan.
+async fn scan_inputs(
+    image: &MetadataImage,
+    liveness: &ControllerLivenessState,
+) -> (
+    std::collections::HashSet<NodeId>,
+    std::collections::HashSet<NodeId>,
+    ScanElr,
+) {
+    let alive = liveness.alive_node_ids().await;
+    let witnesses = witness_node_ids(image);
+    (alive, witnesses, ScanElr::default())
+}
+
 /// Tell `publisher` that the scan leaves `pr` without a leader once `gone`
 /// leaves its ISR, because no rung of the ladder could elect one.
 ///
@@ -89,11 +103,23 @@ fn mark_leaderless(publisher: &mut ElrPublisher<'_>, pr: &PartitionRecord, gone:
     publisher.leaderless(pr, pr.isr.iter().copied().filter(|n| *n != gone).collect());
 }
 
+/// Queue offset-aware recovery and publish the departed replica's leaderless state.
+fn record_recovery(
+    recoveries: &mut Vec<(String, i32, RecoveryStrategy)>,
+    publisher: &mut ElrPublisher<'_>,
+    pr: &PartitionRecord,
+    gone: NodeId,
+    strategy: RecoveryStrategy,
+) {
+    recoveries.push((pr.topic.clone(), pr.partition, strategy));
+    mark_leaderless(publisher, pr, gone);
+}
+
 /// Validate a scan's epoch change, preserving its exhaustion diagnostic.
 fn checked_epochs(
     pr: &PartitionRecord,
     leader_changes: bool,
-    exhausted: impl FnOnce(),
+    exhausted_message: &str,
 ) -> Option<(i32, krabka_metadata::LeaderEpoch)> {
     crate::metadata_epoch::next_partition_change(
         pr.partition_epoch,
@@ -101,9 +127,33 @@ fn checked_epochs(
         leader_changes,
     )
     .or_else(|| {
-        exhausted();
+        warn!(topic = %pr.topic, partition = pr.partition, "{exhausted_message}");
         None
     })
+}
+
+/// Check the partition epoch before publishing a clean ISR shrink.
+fn push_checked_isr_shrink(
+    changes: &mut Vec<MetadataRecord>,
+    pr: &PartitionRecord,
+    isr: Vec<NodeId>,
+    exhausted_message: &str,
+    applied: impl FnOnce(&[NodeId]),
+) -> bool {
+    let Some((partition_epoch, leader_epoch)) = checked_epochs(pr, false, exhausted_message) else {
+        return false;
+    };
+    applied(&isr);
+    push_partition_change(
+        changes,
+        pr,
+        pr.leader,
+        isr,
+        partition_epoch,
+        leader_epoch,
+        false,
+    );
+    true
 }
 
 /// Compute the failover `MetadataRecord` changes for `dead` against
@@ -116,18 +166,12 @@ pub(crate) async fn compute_failover_changes(
     liveness: &ControllerLivenessState,
     metrics: &crate::metrics::BrokerMetrics,
 ) -> FailoverPlan {
-    let mut changes: Vec<MetadataRecord> = Vec::new();
-    let mut recoveries: Vec<(String, i32, RecoveryStrategy)> = Vec::new();
-    let mut unavailable: Vec<(String, i32)> = Vec::new();
-    // Snapshot the alive set once (single lock) rather than taking the
-    // liveness lock per ISR/replica entry inside the scan below.
-    let alive = liveness.alive_node_ids().await;
-    // Witness nodes never lead a partition. Build the set once, next to the
-    // alive snapshot, so the scan stays one walk over the image.
-    let witnesses = witness_node_ids(image);
-    // KIP-966: the replicas that are known to hold every committed record.
-    // `failover_one` elects one of them, cleanly, when the live ISR empties.
-    let mut elr = ScanElr::default();
+    let FailoverPlan {
+        mut changes,
+        mut recoveries,
+        mut unavailable,
+    } = FailoverPlan::default();
+    let (alive, witnesses, mut elr) = scan_inputs(image, liveness).await;
     // A partition with nothing to elect has no leader, which its ELR says.
     let mut publisher = ElrPublisher::new(image);
     // Single O(P) walk over every partition in the image.
@@ -141,13 +185,11 @@ pub(crate) async fn compute_failover_changes(
                 isr,
                 unclean,
             } => {
-                let Some((partition_epoch, new_leader_epoch)) = checked_epochs(pr, true, || {
-                    warn!(
-                        topic = %pr.topic,
-                        partition = pr.partition,
-                        "failover skipped because a metadata epoch is exhausted"
-                    );
-                }) else {
+                let Some((partition_epoch, new_leader_epoch)) = checked_epochs(
+                    pr,
+                    true,
+                    "failover skipped because a metadata epoch is exhausted",
+                ) else {
                     unavailable.push((pr.topic.clone(), pr.partition));
                     continue;
                 };
@@ -187,31 +229,20 @@ pub(crate) async fn compute_failover_changes(
                 );
             }
             FailoverDecision::ShrinkIsr { isr } => {
-                let Some((partition_epoch, leader_epoch)) = checked_epochs(pr, false, || {
-                    warn!(
-                        topic = %pr.topic,
-                        partition = pr.partition,
-                        "ISR shrink skipped because the partition epoch is exhausted"
-                    );
-                }) else {
-                    unavailable.push((pr.topic.clone(), pr.partition));
-                    continue;
-                };
-                push_partition_change(
+                if !push_checked_isr_shrink(
                     &mut changes,
                     pr,
-                    pr.leader,
                     isr,
-                    partition_epoch,
-                    leader_epoch,
-                    false,
-                );
+                    "ISR shrink skipped because the partition epoch is exhausted",
+                    |_| {},
+                ) {
+                    unavailable.push((pr.topic.clone(), pr.partition));
+                }
             }
             FailoverDecision::Recover(strategy) => {
                 // KIP-966: defer to the offset-aware Unclean Recovery Manager —
                 // it polls surviving replicas and elects the most complete log.
-                recoveries.push((pr.topic.clone(), pr.partition, strategy));
-                mark_leaderless(&mut publisher, pr, dead);
+                record_recovery(&mut recoveries, &mut publisher, pr, dead, strategy);
             }
             FailoverDecision::Unavailable => {
                 unavailable.push((pr.topic.clone(), pr.partition));
@@ -255,9 +286,7 @@ pub(crate) async fn compute_offline_dir_failover_changes(
 ) -> FailoverPlan {
     let mut changes: Vec<MetadataRecord> = Vec::new();
     let mut recoveries: Vec<(String, i32, RecoveryStrategy)> = Vec::new();
-    let alive = liveness.alive_node_ids().await;
-    let witnesses = witness_node_ids(image);
-    let mut elr = ScanElr::default();
+    let (alive, witnesses, mut elr) = scan_inputs(image, liveness).await;
     let mut publisher = ElrPublisher::new(image);
     for pr in image.all_partitions() {
         let Some(slot) = pr.replicas.iter().position(|n| *n == broker) else {
@@ -276,13 +305,11 @@ pub(crate) async fn compute_offline_dir_failover_changes(
                 isr,
                 unclean,
             } => {
-                let Some((partition_epoch, leader_epoch)) = checked_epochs(pr, true, || {
-                    warn!(
-                        topic = %pr.topic,
-                        partition = pr.partition,
-                        "offline-dir failover skipped because a metadata epoch is exhausted"
-                    );
-                }) else {
+                let Some((partition_epoch, leader_epoch)) = checked_epochs(
+                    pr,
+                    true,
+                    "offline-dir failover skipped because a metadata epoch is exhausted",
+                ) else {
                     continue;
                 };
                 if unclean {
@@ -303,28 +330,16 @@ pub(crate) async fn compute_offline_dir_failover_changes(
                 );
             }
             FailoverDecision::ShrinkIsr { isr } => {
-                let Some((partition_epoch, leader_epoch)) = checked_epochs(pr, false, || {
-                    warn!(
-                        topic = %pr.topic,
-                        partition = pr.partition,
-                        "offline-dir ISR shrink skipped because the partition epoch is exhausted"
-                    );
-                }) else {
-                    continue;
-                };
-                push_partition_change(
+                push_checked_isr_shrink(
                     &mut changes,
                     pr,
-                    pr.leader,
                     isr,
-                    partition_epoch,
-                    leader_epoch,
-                    false,
+                    "offline-dir ISR shrink skipped because the partition epoch is exhausted",
+                    |_| {},
                 );
             }
             FailoverDecision::Recover(strategy) => {
-                recoveries.push((pr.topic.clone(), pr.partition, strategy));
-                mark_leaderless(&mut publisher, pr, broker);
+                record_recovery(&mut recoveries, &mut publisher, pr, broker, strategy);
             }
             FailoverDecision::Unavailable => {
                 warn!(
@@ -381,12 +396,15 @@ pub(crate) async fn compute_unclean_restart_changes(
     liveness: &ControllerLivenessState,
     metrics: &crate::metrics::BrokerMetrics,
 ) -> FailoverPlan {
-    let mut changes = crate::elr::withdraw_elr_membership(image, returning);
-    let mut recoveries: Vec<(String, i32, RecoveryStrategy)> = Vec::new();
-    let mut unavailable: Vec<(String, i32)> = Vec::new();
-    let alive = liveness.alive_node_ids().await;
-    let witnesses = witness_node_ids(image);
-    let mut elr = ScanElr::default();
+    let FailoverPlan {
+        mut changes,
+        mut recoveries,
+        mut unavailable,
+    } = FailoverPlan {
+        changes: crate::elr::withdraw_elr_membership(image, returning),
+        ..Default::default()
+    };
+    let (alive, witnesses, mut elr) = scan_inputs(image, liveness).await;
     // The ISR removals below are the candidate set the next eligibility is
     // derived from, so the broker they remove has to be excluded from that
     // derivation too.
@@ -412,13 +430,11 @@ pub(crate) async fn compute_unclean_restart_changes(
                 isr,
                 unclean,
             } => {
-                let Some((partition_epoch, new_leader_epoch)) = checked_epochs(pr, true, || {
-                    warn!(
-                        topic = %pr.topic,
-                        partition = pr.partition,
-                        "unclean-restart failover skipped because a metadata epoch is exhausted"
-                    );
-                }) else {
+                let Some((partition_epoch, new_leader_epoch)) = checked_epochs(
+                    pr,
+                    true,
+                    "unclean-restart failover skipped because a metadata epoch is exhausted",
+                ) else {
                     unavailable.push((pr.topic.clone(), pr.partition));
                     continue;
                 };
@@ -452,37 +468,22 @@ pub(crate) async fn compute_unclean_restart_changes(
                 );
             }
             FailoverDecision::ShrinkIsr { isr } => {
-                let Some((partition_epoch, leader_epoch)) = checked_epochs(pr, false, || {
-                    warn!(
-                        topic = %pr.topic,
-                        partition = pr.partition,
-                        "unclean-restart ISR shrink skipped because the partition epoch is exhausted"
-                    );
-                }) else {
-                    unavailable.push((pr.topic.clone(), pr.partition));
-                    continue;
-                };
-                tracing::info!(
-                    topic = %pr.topic,
-                    partition = pr.partition,
-                    returning = returning.0,
-                    old_isr = ?pr.isr,
-                    new_isr = ?isr,
-                    "unclean restart: dropping returning broker from ISR"
-                );
-                push_partition_change(
+                if !push_checked_isr_shrink(
                     &mut changes,
                     pr,
-                    pr.leader,
                     isr,
-                    partition_epoch,
-                    leader_epoch,
-                    false,
-                );
+                    "unclean-restart ISR shrink skipped because the partition epoch is exhausted",
+                    |isr| {
+                        tracing::info!(topic = %pr.topic, partition = pr.partition,
+                            returning = returning.0, old_isr = ?pr.isr, new_isr = ?isr,
+                            "unclean restart: dropping returning broker from ISR");
+                    },
+                ) {
+                    unavailable.push((pr.topic.clone(), pr.partition));
+                }
             }
             FailoverDecision::Recover(strategy) => {
-                recoveries.push((pr.topic.clone(), pr.partition, strategy));
-                mark_leaderless(&mut publisher, pr, returning);
+                record_recovery(&mut recoveries, &mut publisher, pr, returning, strategy);
             }
             FailoverDecision::Unavailable => {
                 unavailable.push((pr.topic.clone(), pr.partition));
@@ -551,13 +552,11 @@ pub(crate) async fn compute_unfence_changes(
         else {
             continue;
         };
-        let Some((partition_epoch, leader_epoch)) = checked_epochs(pr, true, || {
-            warn!(
-                topic = %pr.topic,
-                partition = pr.partition,
-                "election of a leaderless partition skipped because a metadata epoch is exhausted"
-            );
-        }) else {
+        let Some((partition_epoch, leader_epoch)) = checked_epochs(
+            pr,
+            true,
+            "election of a leaderless partition skipped because a metadata epoch is exhausted",
+        ) else {
             continue;
         };
         if unclean {

@@ -515,17 +515,7 @@ mod tests {
             let seed = StreamsGroupSeed {
                 members: [(
                     "m1".to_string(),
-                    StreamsGroupMemberMetadataValue {
-                        instance_id: None,
-                        rack_id: None,
-                        client_id: "c1".into(),
-                        client_host: "/127.0.0.1".into(),
-                        process_id: "p1".into(),
-                        user_endpoint: None,
-                        client_tags: vec![],
-                        rebalance_timeout_ms: 60_000,
-                        topology_epoch: 0,
-                    },
+                    crate::coordinator::unified::test_support::plain_streams_member(0),
                 )]
                 .into(),
                 current_per_member: [(

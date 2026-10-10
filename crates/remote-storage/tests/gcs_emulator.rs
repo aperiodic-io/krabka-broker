@@ -331,6 +331,18 @@ fn sample_metadata(topic_id: Uuid, partition: i32) -> RemoteLogSegmentMetadata {
     .expect("valid remote metadata")
 }
 
+async fn seeded_segment(
+    index: i32,
+) -> (FakeGcs, String, S3RemoteStorage, RemoteLogSegmentMetadata) {
+    let server = FakeGcs::start().await;
+    let bucket = server.create_bucket(false).await;
+    let config = gcs_config(&server, bucket.clone());
+    let storage = S3RemoteStorage::from_gcs_config(&config).expect("open the emulator bucket");
+    let metadata = sample_metadata(Uuid::new_v4(), index);
+    server.seed_segment(&bucket, &metadata).await;
+    (server, bucket, storage, metadata)
+}
+
 /// Every artifact of a segment in a real bucket reads back byte for byte
 /// through the backend, whole and by range, and each index reads back as
 /// itself rather than as a neighbour.
@@ -341,12 +353,7 @@ fn sample_metadata(topic_id: Uuid, partition: i32) -> RemoteLogSegmentMetadata {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn a_segment_seeded_in_the_emulator_fetches_back_byte_for_byte() {
-    let server = FakeGcs::start().await;
-    let bucket = server.create_bucket(false).await;
-    let config = gcs_config(&server, bucket.clone());
-    let storage = S3RemoteStorage::from_gcs_config(&config).expect("open the emulator bucket");
-    let metadata = sample_metadata(Uuid::new_v4(), 0);
-    server.seed_segment(&bucket, &metadata).await;
+    let (_server, _bucket, storage, metadata) = seeded_segment(0).await;
 
     tokio::task::spawn_blocking(move || {
         check!(
@@ -386,12 +393,7 @@ async fn a_segment_seeded_in_the_emulator_fetches_back_byte_for_byte() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn a_deleted_segment_is_gone_from_the_bucket() {
-    let server = FakeGcs::start().await;
-    let bucket = server.create_bucket(false).await;
-    let config = gcs_config(&server, bucket.clone());
-    let storage = S3RemoteStorage::from_gcs_config(&config).expect("open the emulator bucket");
-    let metadata = sample_metadata(Uuid::new_v4(), 3);
-    server.seed_segment(&bucket, &metadata).await;
+    let (server, bucket, storage, metadata) = seeded_segment(3).await;
     let seeded = server.object_names(&bucket).await;
     check!(seeded.len() == segment_artifacts().len());
 

@@ -43,11 +43,21 @@ pub(super) fn fixture_partition(
     topic: &str,
     partition: PartitionIndex,
 ) -> Arc<Partition> {
-    crate::test_support::open_partition(log_dir, topic, partition.get())
+    crate::test_support::open_partition(
+        log_dir,
+        crate::test_support::StandalonePartitionSetup {
+            topic,
+            partition: krabka_ids::PartitionIndex(partition.get()),
+            ..Default::default()
+        },
+    )
 }
 
-pub(super) fn append_records(part: &Arc<Partition>, count: i32) {
-    let mut batch = crate::test_support::repeated_records_batch(count, 1_700_000_000);
+pub(super) fn append_records(
+    part: &Arc<Partition>,
+    setup: crate::test_support::PartitionRecordsSetup,
+) {
+    let mut batch = crate::test_support::partition_records_batch(setup);
     part.log
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -55,17 +65,128 @@ pub(super) fn append_records(part: &Arc<Partition>, count: i32) {
         .expect("append source records");
 }
 
-/// Appends a one-record batch stamped with leader epoch 1.
-pub(super) fn append_value_batch(part: &Arc<Partition>, value_size: usize) {
-    append_epoch_batch(part, value_size, 1);
+pub(super) struct FutureSourceSetup {
+    pub count: crate::test_support::RecordCount,
+    pub stamp_source: Option<Arc<dyn krabka_log::StampSource>>,
 }
 
-/// Appends a one-record batch stamped with `leader_epoch`, as a replicated
-/// partition holds them.
-pub(super) fn append_epoch_batch(part: &Arc<Partition>, value_size: usize, leader_epoch: i32) {
+impl Default for FutureSourceSetup {
+    fn default() -> Self {
+        Self {
+            count: crate::test_support::RecordCount(3),
+            stamp_source: None,
+        }
+    }
+}
+
+pub(super) fn source_partition(primary: &Path, setup: FutureSourceSetup) -> Arc<Partition> {
+    let part = fixture_partition(primary, "t", PartitionIndex(0));
+    if let Some(stamp_source) = setup.stamp_source {
+        part.log
+            .lock()
+            .expect("source log")
+            .set_stamp_source(stamp_source)
+            .expect("source stamp index");
+    }
+    append_records(
+        &part,
+        crate::test_support::PartitionRecordsSetup {
+            count: setup.count,
+            ..Default::default()
+        },
+    );
+    part
+}
+
+/// Own both log roots for a populated source and its future replica.
+pub(super) struct SourceFixture {
+    pub partition: Arc<Partition>,
+    pub target: tempfile::TempDir,
+    pub primary: tempfile::TempDir,
+}
+
+pub(super) fn source_fixture(setup: FutureSourceSetup) -> SourceFixture {
+    let primary = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let partition = source_partition(primary.path(), setup);
+    SourceFixture {
+        partition,
+        target,
+        primary,
+    }
+}
+
+pub(super) struct RegisteredSourceFixture {
+    pub partition: Arc<Partition>,
+    pub future_logs: Arc<dashmap::DashMap<(String, PartitionIndex), Arc<super::FutureLogState>>>,
+    pub partitions: Arc<crate::partition_registry::PartitionRegistry>,
+}
+
+/// Publish a populated source in registries using its configured timestamp source.
+pub(super) fn registered_source_fixture(
+    primary: &Path,
+    setup: FutureSourceSetup,
+) -> RegisteredSourceFixture {
+    let partitions = Arc::new(
+        crate::partition_registry::PartitionRegistry::with_stamp_source(setup.stamp_source.clone()),
+    );
+    let future_logs = Arc::new(dashmap::DashMap::new());
+    let partition = source_partition(primary, setup);
+    partitions.insert("t".into(), PartitionIndex(0), partition.clone());
+    RegisteredSourceFixture {
+        partition,
+        future_logs,
+        partitions,
+    }
+}
+
+pub(super) struct PlantedFutureLog {
+    pub path: PathBuf,
+    pub cancel: tokio_util::sync::CancellationToken,
+}
+
+pub(super) fn plant_future_log(
+    future_logs: &dashmap::DashMap<(String, PartitionIndex), Arc<super::FutureLogState>>,
+    target: &Path,
+) -> PlantedFutureLog {
+    let (path, log) = open_future_log(target);
+    let cancel = tokio_util::sync::CancellationToken::new();
+    future_logs.insert(
+        ("t".into(), PartitionIndex(0)),
+        Arc::new(super::FutureLogState {
+            target_log_dir: target.to_path_buf(),
+            future_path: path.clone(),
+            future_log: log,
+            cancel: cancel.clone(),
+            task: Mutex::new(None),
+        }),
+    );
+    PlantedFutureLog { path, cancel }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct RecordValueBytes(pub usize);
+
+impl Default for RecordValueBytes {
+    fn default() -> Self {
+        Self(20)
+    }
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct FutureRecordSetup {
+    pub value_size: RecordValueBytes,
+    #[default(krabka_ids::LeaderEpoch(1))]
+    pub leader_epoch: krabka_ids::LeaderEpoch,
+}
+
+pub(super) use append_epoch_batch as append_value_batch;
+
+/// Appends one repeated-value record at the selected leader epoch.
+pub(super) fn append_epoch_batch(part: &Arc<Partition>, setup: FutureRecordSetup) {
     let mut batch = RecordBatch {
         base_offset: 0,
-        partition_leader_epoch: leader_epoch,
+        partition_leader_epoch: setup.leader_epoch.0,
         attributes: Attributes::default(),
         last_offset_delta: 0,
         base_timestamp: 1_700_000_000,
@@ -78,7 +199,7 @@ pub(super) fn append_epoch_batch(part: &Arc<Partition>, value_size: usize, leade
             offset_delta: 0,
             timestamp_delta: 0,
             key: None,
-            value: Some(Bytes::from(vec![b'x'; value_size])),
+            value: Some(Bytes::from(vec![b'x'; setup.value_size.0])),
             headers: vec![],
         }],
     };

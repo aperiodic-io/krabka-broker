@@ -169,16 +169,10 @@ mod tests {
             ("0B", Some(0)),
             ("1.5B", None),
         ] {
-            let applied = toml::from_str::<FileConfig>(&format!(
-                "[runtime]\nlog_read_ahead_max = \"{value}\"\n"
-            ))
-            .ok()
-            .and_then(|file| {
-                let mut cfg = crate::config::BrokerConfig::default();
-                file.apply_to(&mut cfg)
-                    .ok()
-                    .map(|()| cfg.log_config.read_ahead_max.bytes_u64())
-            });
+            let applied = crate::file_config::test_support::optional_configured_feature(
+                &format!("[runtime]\nlog_read_ahead_max = \"{value}\"\n"),
+                |config| config.log_config.read_ahead_max.bytes_u64(),
+            );
             assert!(applied == expected, "log_read_ahead_max={value}");
         }
     }
@@ -236,16 +230,10 @@ mod tests {
             ("2GiB", None),
             ("1.5B", None),
         ] {
-            let applied = toml::from_str::<FileConfig>(&format!(
-                "[runtime]\nmessage_max_bytes = \"{value}\"\n"
-            ))
-            .ok()
-            .and_then(|file| {
-                let mut cfg = crate::config::BrokerConfig::default();
-                file.apply_to(&mut cfg)
-                    .ok()
-                    .map(|()| cfg.log_config.max_message_size.bytes_u64())
-            });
+            let applied = crate::file_config::test_support::optional_configured_feature(
+                &format!("[runtime]\nmessage_max_bytes = \"{value}\"\n"),
+                |config| config.log_config.max_message_size.bytes_u64(),
+            );
             assert!(applied == expected, "message_max_bytes={value}");
         }
     }

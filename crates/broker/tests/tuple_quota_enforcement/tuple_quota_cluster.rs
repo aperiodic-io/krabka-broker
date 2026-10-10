@@ -6,33 +6,13 @@
 //! exists only to disable the compatibility shim, which allows every operation
 //! while the image holds no ACL at all.
 
-use std::net::SocketAddr;
-
 use krabka_broker::BrokerHandle;
-
-pub use crate::support::sasl::start_single_broker_sasl_plaintext_with_users;
-use crate::{CLIENT_ID, kafka_wire};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cluster setup helpers (copied from client_quotas.rs)
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Creates a topic over SASL/PLAIN as admin, and asserts that it succeeds.
-pub(crate) async fn create_topic_as_admin(
-    addr: SocketAddr,
-    password: &[u8],
-    topic: &str,
-    partitions: i32,
-    replication_factor: i16,
-) {
-    kafka_wire::create_topic_sasl(
-        addr,
-        CLIENT_ID,
-        ("admin", password),
-        kafka_wire::topic(topic, partitions, replication_factor),
-    )
-    .await;
-}
+pub(crate) use crate::kafka_wire::create_configured_topic_sasl as create_topic_as_admin;
+pub use crate::support::sasl::start_single_broker_sasl_plaintext_with_users;
 
 /// Waits until `handle` sees `(topic, partition)` in its image.
 pub(crate) async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i32) {

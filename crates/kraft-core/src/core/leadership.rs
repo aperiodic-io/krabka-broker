@@ -227,12 +227,7 @@ mod tests {
             SimInstant(11),
         );
         // immediately start pre-vote (Prospective), not wait for timeout
-        assert2::assert!(matches!(m.role(), Role::Prospective { .. }));
-        assert2::assert!(
-            actions
-                .iter()
-                .any(|a| matches!(a, Action::SendVoteRequest { pre_vote: true, .. }))
-        );
+        crate::core::test_support::check_prevote_started(&m, &actions);
     }
 
     #[test]

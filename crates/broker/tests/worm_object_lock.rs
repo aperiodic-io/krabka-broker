@@ -224,12 +224,14 @@ async fn start_worm_broker(
         // this suite never restarts.
         remote_log_metadata: krabka_broker::RlmmKind::InMemory,
         ..support::jvm_broker_config(
-            1,
-            listen_addr,
-            controller_addr,
-            broker0_advertised(),
             dir.path().to_path_buf(),
-            &[(1, controller_addr)],
+            crate::support::JvmBrokerSetup {
+                listen: listen_addr,
+                controller: controller_addr,
+                advertised: (broker0_advertised()).to_owned(),
+                voters: crate::support::controller_voters(&[(1, controller_addr)]),
+                ..Default::default()
+            },
         )
     };
     let handle = krabka_broker::Broker::start(config)

@@ -16,24 +16,45 @@ use krabka_ids::PartitionIndex;
 use krabka_log::{Log, LogConfig, ProducerId};
 use krabka_protocol::records::{Attributes, Record, RecordBatch};
 
-use super::{Decision, ProducerState};
-use crate::txn::marker::{MarkerType, build_marker_batch};
+use super::{
+    Decision, ProducerState,
+    test_support::{ProducerEpoch, ProducerSequence},
+};
+use crate::{
+    test_support::RecordCount,
+    txn::marker::{MarkerType, build_marker_batch},
+};
 
 const TOPIC: &str = "orders";
 const PARTITION: PartitionIndex = PartitionIndex(0);
-const PRODUCER_ID: i64 = 42;
+const PRODUCER_ID: ProducerId = ProducerId(42);
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) enum TransactionMode {
+    NonTransactional,
+    #[default]
+    Transactional,
+}
+
+#[derive(Debug, Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct DataBatchSetup {
+    #[default(ProducerEpoch(3))]
+    pub epoch: ProducerEpoch,
+    pub base_sequence: ProducerSequence,
+    #[default(RecordCount(3))]
+    pub records: RecordCount,
+    pub transaction: TransactionMode,
+}
 
 #[derive(Debug, Clone, Copy)]
 enum Step {
-    /// A data batch of `records` records at `(epoch, base_sequence)`.
-    Data {
-        epoch: i16,
-        base_sequence: i32,
-        records: i32,
-        transactional: bool,
-    },
+    /// A data batch with the exact producer epoch, sequence and record count.
+    Data(DataBatchSetup),
     /// A COMMIT or ABORT marker at `epoch`.
-    Marker { epoch: i16, marker: MarkerType },
+    Marker {
+        epoch: ProducerEpoch,
+        marker: MarkerType,
+    },
 }
 
 /// One probe batch: `(epoch, base_sequence, last_offset_delta)`.
@@ -45,21 +66,17 @@ struct Case {
     expected: &'static [(Probe, Decision)],
 }
 
-pub(super) fn data_batch(
-    epoch: i16,
-    base_sequence: i32,
-    records: i32,
-    transactional: bool,
-) -> RecordBatch {
+pub(super) fn data_batch(setup: DataBatchSetup) -> RecordBatch {
     RecordBatch {
-        attributes: Attributes::default().with_transactional(transactional),
-        last_offset_delta: records - 1,
+        attributes: Attributes::default()
+            .with_transactional(matches!(setup.transaction, TransactionMode::Transactional)),
+        last_offset_delta: setup.records.0 - 1,
         base_timestamp: 1_700_000_000_000,
         max_timestamp: 1_700_000_000_000,
-        producer_id: PRODUCER_ID,
-        producer_epoch: epoch,
-        base_sequence,
-        records: (0..records)
+        producer_id: PRODUCER_ID.0,
+        producer_epoch: setup.epoch.0,
+        base_sequence: setup.base_sequence.0,
+        records: (0..setup.records.0)
             .map(|offset_delta| Record {
                 offset_delta,
                 value: Some(Bytes::from_static(b"v")),
@@ -97,13 +114,8 @@ pub(super) fn producer_partition() -> (
 async fn run_steps(partition: &crate::partition::Partition, state: &ProducerState, steps: &[Step]) {
     for step in steps {
         match *step {
-            Step::Data {
-                epoch,
-                base_sequence,
-                records,
-                transactional,
-            } => {
-                let batch = data_batch(epoch, base_sequence, records, transactional);
+            Step::Data(setup) => {
+                let batch = data_batch(setup);
                 let timestamp = batch.max_timestamp;
                 let offset = partition
                     .produce_batch(batch)
@@ -113,20 +125,19 @@ async fn run_steps(partition: &crate::partition::Partition, state: &ProducerStat
                     .commit(
                         TOPIC,
                         PARTITION,
-                        (PRODUCER_ID, epoch),
-                        (base_sequence, records - 1),
-                        (offset.get(), timestamp, transactional),
+                        (PRODUCER_ID.0, setup.epoch.0),
+                        (setup.base_sequence.0, setup.records.0 - 1),
+                        (
+                            offset.get(),
+                            timestamp,
+                            matches!(setup.transaction, TransactionMode::Transactional),
+                        ),
                     )
                     .await;
             }
             Step::Marker { epoch, marker } => {
-                let batch = build_marker_batch(
-                    ProducerId(PRODUCER_ID),
-                    epoch,
-                    partition.log_end_offset(),
-                    marker,
-                    0,
-                );
+                let batch =
+                    build_marker_batch(PRODUCER_ID, epoch.0, partition.log_end_offset(), marker, 0);
                 partition
                     .produce_control_batch(batch)
                     .await
@@ -144,7 +155,7 @@ async fn decisions(state: &ProducerState, probes: &[(Probe, Decision)]) -> Vec<(
             .check(
                 TOPIC,
                 PARTITION,
-                PRODUCER_ID,
+                PRODUCER_ID.0,
                 epoch,
                 base_sequence,
                 last_offset_delta,
@@ -182,81 +193,74 @@ async fn live_and_recovered(case: &Case) -> (Vec<(Probe, Decision)>, Vec<(Probe,
     (live, recovered)
 }
 
+const FIRST_TRANSACTION_BATCH: Step = Step::Data(DataBatchSetup {
+    epoch: ProducerEpoch(3),
+    base_sequence: ProducerSequence(0),
+    records: RecordCount(3),
+    transaction: TransactionMode::Transactional,
+});
+
 const TV2_COMMIT: &[Step] = &[
-    Step::Data {
-        epoch: 3,
-        base_sequence: 0,
-        records: 3,
-        transactional: true,
-    },
+    FIRST_TRANSACTION_BATCH,
     Step::Marker {
-        epoch: 4,
+        epoch: ProducerEpoch(4),
         marker: MarkerType::Commit,
     },
 ];
 
 const TV2_ABORT: &[Step] = &[
-    Step::Data {
-        epoch: 3,
-        base_sequence: 0,
-        records: 3,
-        transactional: true,
-    },
+    FIRST_TRANSACTION_BATCH,
     Step::Marker {
-        epoch: 4,
+        epoch: ProducerEpoch(4),
         marker: MarkerType::Abort,
     },
 ];
 
 const TV2_TWO_TRANSACTIONS: &[Step] = &[
-    Step::Data {
-        epoch: 3,
-        base_sequence: 0,
-        records: 3,
-        transactional: true,
-    },
+    FIRST_TRANSACTION_BATCH,
     Step::Marker {
-        epoch: 4,
+        epoch: ProducerEpoch(4),
         marker: MarkerType::Commit,
     },
-    Step::Data {
-        epoch: 4,
-        base_sequence: 0,
-        records: 2,
-        transactional: true,
-    },
+    Step::Data(DataBatchSetup {
+        epoch: ProducerEpoch(4),
+        base_sequence: ProducerSequence(0),
+        records: RecordCount(2),
+        transaction: TransactionMode::Transactional,
+    }),
     Step::Marker {
-        epoch: 5,
+        epoch: ProducerEpoch(5),
         marker: MarkerType::Commit,
     },
 ];
 
 const TV1_COMMIT: &[Step] = &[
-    Step::Data {
-        epoch: 3,
-        base_sequence: 0,
-        records: 3,
-        transactional: true,
-    },
+    FIRST_TRANSACTION_BATCH,
     Step::Marker {
-        epoch: 3,
+        epoch: ProducerEpoch(3),
         marker: MarkerType::Commit,
     },
 ];
 
 const IDEMPOTENT_EPOCH_BUMP: &[Step] = &[
-    Step::Data {
-        epoch: 0,
-        base_sequence: 0,
-        records: 3,
-        transactional: false,
-    },
-    Step::Data {
-        epoch: 1,
-        base_sequence: 0,
-        records: 2,
-        transactional: false,
-    },
+    Step::Data(DataBatchSetup {
+        epoch: ProducerEpoch(0),
+        base_sequence: ProducerSequence(0),
+        records: RecordCount(3),
+        transaction: TransactionMode::NonTransactional,
+    }),
+    Step::Data(DataBatchSetup {
+        epoch: ProducerEpoch(1),
+        base_sequence: ProducerSequence(0),
+        records: RecordCount(2),
+        transaction: TransactionMode::NonTransactional,
+    }),
+];
+
+const TV2_MARKER_EPOCH_EXPECTATIONS: [(Probe, Decision); 3] = [
+    ((4, 0, 0), Decision::Append),
+    ((4, 3, 0), Decision::OutOfOrder),
+    ((3, 0, 2), Decision::Fenced),
 ];
 
 const CASES: &[Case] = &[
@@ -264,9 +268,9 @@ const CASES: &[Case] = &[
         name: "transaction version 2 commit bumps the epoch",
         steps: TV2_COMMIT,
         expected: &[
-            ((4, 0, 0), Decision::Append),
-            ((4, 3, 0), Decision::OutOfOrder),
-            ((3, 0, 2), Decision::Fenced),
+            TV2_MARKER_EPOCH_EXPECTATIONS[0],
+            TV2_MARKER_EPOCH_EXPECTATIONS[1],
+            TV2_MARKER_EPOCH_EXPECTATIONS[2],
             ((3, 3, 0), Decision::Fenced),
             ((5, 0, 0), Decision::Append),
             ((5, 3, 0), Decision::OutOfOrder),
@@ -275,11 +279,7 @@ const CASES: &[Case] = &[
     Case {
         name: "transaction version 2 abort bumps the epoch",
         steps: TV2_ABORT,
-        expected: &[
-            ((4, 0, 0), Decision::Append),
-            ((4, 3, 0), Decision::OutOfOrder),
-            ((3, 0, 2), Decision::Fenced),
-        ],
+        expected: &TV2_MARKER_EPOCH_EXPECTATIONS,
     },
     Case {
         name: "transaction version 2 second transaction restarts at 0",

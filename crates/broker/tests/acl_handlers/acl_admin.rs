@@ -9,7 +9,7 @@
 //! because that is the simplest model for "a client doing one admin
 //! action"; reuse is unnecessary for these tests.
 
-use std::{io, net::SocketAddr};
+use std::net::SocketAddr;
 
 use krabka_protocol::owned::{
     create_acls_request::{AclCreation, CreateAclsRequest},
@@ -63,63 +63,44 @@ pub fn describe_all_topic_acls() -> DescribeAclsRequest {
 pub async fn create_topic_as_admin(addr: SocketAddr, name: &str, partitions: i32) {
     crate::kafka_wire::create_topic_as_super_user(
         addr,
-        crate::framing::CLIENT_ID,
-        name,
-        partitions,
+        crate::kafka_wire::AutomaticTopicSetup {
+            client_id: crate::framing::CLIENT_ID,
+            topic: crate::support::topics::ConfiguredTopicSetup {
+                name: name.to_string(),
+                partitions: crate::support::topics::TopicPartitionCount(partitions),
+                ..Default::default()
+            },
+        },
     )
     .await;
 }
 
-pub async fn drive_create_acls_as_plain(
-    addr: SocketAddr,
-    user: &str,
-    password: &[u8],
-    req: CreateAclsRequest,
-) -> Result<CreateAclsResponse, io::Error> {
-    crate::framing::request_as_plain(
-        addr,
-        user,
-        password,
-        &req,
-        30,
-        CREATE_ACLS_VERSION,
-        "CreateAcls",
-    )
-    .await
-}
+crate::plain_request_driver_fixture!(pub drive_create_acls_as_plain {
+    request: CreateAclsRequest,
+    response: CreateAclsResponse,
+    api: crate::support::wire::ApiRequestSetup {
+        api_key: krabka_ids::ApiKey(30),
+        version: krabka_ids::ApiVersion(CREATE_ACLS_VERSION),
+    },
+    operation: "CreateAcls",
+});
 
-pub async fn drive_describe_acls_as_plain(
-    addr: SocketAddr,
-    user: &str,
-    password: &[u8],
-    req: DescribeAclsRequest,
-) -> Result<DescribeAclsResponse, io::Error> {
-    crate::framing::request_as_plain(
-        addr,
-        user,
-        password,
-        &req,
-        29,
-        DESCRIBE_ACLS_VERSION,
-        "DescribeAcls",
-    )
-    .await
-}
+crate::plain_request_driver_fixture!(pub drive_describe_acls_as_plain {
+    request: DescribeAclsRequest,
+    response: DescribeAclsResponse,
+    api: crate::support::wire::ApiRequestSetup {
+        api_key: krabka_ids::ApiKey(29),
+        version: krabka_ids::ApiVersion(DESCRIBE_ACLS_VERSION),
+    },
+    operation: "DescribeAcls",
+});
 
-pub async fn drive_delete_acls_as_plain(
-    addr: SocketAddr,
-    user: &str,
-    password: &[u8],
-    req: DeleteAclsRequest,
-) -> Result<DeleteAclsResponse, io::Error> {
-    crate::framing::request_as_plain(
-        addr,
-        user,
-        password,
-        &req,
-        31,
-        DELETE_ACLS_VERSION,
-        "DeleteAcls",
-    )
-    .await
-}
+crate::plain_request_driver_fixture!(pub drive_delete_acls_as_plain {
+    request: DeleteAclsRequest,
+    response: DeleteAclsResponse,
+    api: crate::support::wire::ApiRequestSetup {
+        api_key: krabka_ids::ApiKey(31),
+        version: krabka_ids::ApiVersion(DELETE_ACLS_VERSION),
+    },
+    operation: "DeleteAcls",
+});

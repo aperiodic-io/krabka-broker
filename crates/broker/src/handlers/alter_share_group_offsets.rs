@@ -285,6 +285,7 @@ mod tests {
         authorizer::{AuthorizationResult, Authorizer},
         codes,
         coordinator::unified::{GroupType, ShareGroupSeed, share::actor::ShareGroupActorMessage},
+        handlers::test_support::CreateTopicSetup,
         test_support::{DenyAll, test_ctx},
     };
 
@@ -369,14 +370,14 @@ mod tests {
 
     async fn create_topic(
         broker_handle: &crate::broker::BrokerHandle,
-        broker: &crate::broker::Broker,
-        topic_name: &str,
         ctx: &crate::handlers::RequestContext<'_>,
+        setup: CreateTopicSetup<'_>,
     ) {
+        let broker = broker_handle.broker_arc_for_test();
+        let topic_name = setup.topic;
         let version = create_topics_response::MAX_VERSION;
-        let request =
-            crate::handlers::test_support::configured_topic_request(topic_name, &[], 1, 1, 5_000);
-        let response = crate::handlers::create_topics::handle(broker, request, version, ctx)
+        let request = crate::handlers::test_support::configured_topic_request(setup);
+        let response = crate::handlers::create_topics::handle(&broker, request, version, ctx)
             .await
             .expect("create topic");
         assert!(response.topics[0].error_code == codes::NONE, "{response:?}");
@@ -390,7 +391,7 @@ mod tests {
         type Case<'a> = (
             &'a str,
             Arc<dyn Authorizer>,
-            bool,
+            crate::test_support::ShareApiSupport,
             &'a str,
             Vec<i32>,
             AlterShareGroupOffsetsResponse,
@@ -400,7 +401,7 @@ mod tests {
             (
                 "disabled feature returns top-level unsupported version",
                 Arc::new(crate::authorizer::AllowAllAuthorizer),
-                false,
+                crate::test_support::ShareApiSupport::Disabled,
                 "missing",
                 vec![0],
                 unthrottled_wire!(AlterShareGroupOffsetsResponse {
@@ -412,7 +413,7 @@ mod tests {
             (
                 "denied group returns top-level authorization failure",
                 Arc::new(crate::test_support::ControllerPeerAllowed(DenyAll)),
-                true,
+                crate::test_support::ShareApiSupport::Enabled,
                 "missing",
                 vec![0],
                 unthrottled_wire!(AlterShareGroupOffsetsResponse {
@@ -424,7 +425,7 @@ mod tests {
             (
                 "unknown topic preserves topic and partition fields",
                 Arc::new(crate::authorizer::AllowAllAuthorizer),
-                true,
+                crate::test_support::ShareApiSupport::Enabled,
                 "missing-topic",
                 vec![3, 5],
                 unthrottled_wire!(AlterShareGroupOffsetsResponse {
@@ -518,12 +519,23 @@ mod tests {
                     Vec::new()
                 },
             });
-            let (broker_handle, _dir) =
-                crate::test_support::start_share_broker(authorizer, true).await;
+            let (broker_handle, _dir) = crate::test_support::start_share_broker(
+                authorizer,
+                crate::test_support::ShareBrokerSetup::default(),
+            )
+            .await;
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
             if topic_exists {
-                create_topic(&broker_handle, &broker, topic_name, &ctx).await;
+                create_topic(
+                    &broker_handle,
+                    &ctx,
+                    CreateTopicSetup {
+                        topic: topic_name,
+                        ..Default::default()
+                    },
+                )
+                .await;
                 crate::share_coordinator::handlers::test_support::lead_share_state_partitions(
                     &broker,
                 )
@@ -637,7 +649,15 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topic(&broker_handle, &broker, "new-topic", &ctx).await;
+        create_topic(
+            &broker_handle,
+            &ctx,
+            CreateTopicSetup {
+                topic: "new-topic",
+                ..Default::default()
+            },
+        )
+        .await;
         crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
             .await;
         let topic_id = broker
@@ -751,7 +771,15 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topic(&broker_handle, &broker, "reset-topic", &ctx).await;
+        create_topic(
+            &broker_handle,
+            &ctx,
+            CreateTopicSetup {
+                topic: "reset-topic",
+                ..Default::default()
+            },
+        )
+        .await;
         crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
             .await;
         let persister = broker

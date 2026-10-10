@@ -310,22 +310,23 @@ mod tests {
         assert!(leo == Offset(1));
     }
 
+    fn two_single_record_batches() -> Vec<ProduceData> {
+        std::iter::repeat_with(|| {
+            ProduceData::Owned(sample_batch(
+                crate::test_support::EmptyPayloadBatchSetup::default(),
+            ))
+        })
+        .take(2)
+        .collect()
+    }
+
     #[test]
     fn grouped_produce_surfaces_nth_log_write_failure_without_advancing_leo() {
         let dir = tempdir().expect("tempdir");
         let log = failing_log(dir.path());
 
-        let (results, leo, _) = append_produce_batch(
-            &log,
-            None,
-            (
-                vec![
-                    ProduceData::Owned(sample_batch(1)),
-                    ProduceData::Owned(sample_batch(1)),
-                ],
-                Vec::new(),
-            ),
-        );
+        let (results, leo, _) =
+            append_produce_batch(&log, None, (two_single_record_batches(), Vec::new()));
 
         assert_partial_append(&results, leo);
         assert!(log.lock().unwrap().log_end_offset() == Offset(1));
@@ -340,13 +341,7 @@ mod tests {
             &log,
             Offset(0),
             None,
-            (
-                vec![
-                    ProduceData::Owned(sample_batch(1)),
-                    ProduceData::Owned(sample_batch(1)),
-                ],
-                Vec::new(),
-            ),
+            (two_single_record_batches(), Vec::new()),
         );
 
         assert_partial_append(&results, leo);
@@ -355,7 +350,12 @@ mod tests {
             &log,
             Offset(2),
             None,
-            (vec![ProduceData::Owned(sample_batch(1))], Vec::new()),
+            (
+                vec![ProduceData::Owned(sample_batch(
+                    crate::test_support::EmptyPayloadBatchSetup::default(),
+                ))],
+                Vec::new(),
+            ),
         );
 
         assert!(results[0].as_ref().unwrap().base_offset == Offset(2));
@@ -367,7 +367,9 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let log = lz4_log(dir.path());
 
-        let original = sample_batch(2);
+        let original = sample_batch(crate::test_support::EmptyPayloadBatchSetup {
+            count: crate::test_support::RecordCount(2),
+        });
         assert!(original.attributes.compression() == CompressionType::None);
 
         let (results, leo, _) =
@@ -377,14 +379,9 @@ mod tests {
         assert!(assigned.base_offset == 0);
         assert!(leo == 2);
 
-        let read = log
-            .lock()
-            .unwrap()
-            .read(Offset(0), krabka_units::mebibytes(10))
-            .unwrap();
-        assert!(read.batches.len() == 1);
-        check!(read.batches[0].attributes.compression() == CompressionType::Lz4);
-        check!(read.batches[0].records.len() == 2);
+        let batch = one_appended_batch(&log);
+        check!(batch.attributes.compression() == CompressionType::Lz4);
+        check!(batch.records.len() == 2);
     }
 
     /// A control batch that arrives uncompressed stays uncompressed, whatever
@@ -397,7 +394,7 @@ mod tests {
     /// and a 6-byte value (version 0, coordinator epoch 17), so the append
     /// path's control-record check accepts it.
     fn commit_marker_batch() -> krabka_protocol::records::RecordBatch {
-        let mut marker = sample_batch(1);
+        let mut marker = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
         marker.attributes = marker
             .attributes
             .with_transactional(true)
@@ -409,6 +406,28 @@ mod tests {
             record.value = Some(bytes::Bytes::from_static(&[0, 0, 0, 0, 0, 17]));
         }
         marker
+    }
+
+    fn one_appended_batch(log: &Mutex<Log>) -> krabka_protocol::records::RecordBatch {
+        let read = log
+            .lock()
+            .unwrap()
+            .read(Offset(0), krabka_units::mebibytes(10))
+            .unwrap();
+        assert!(read.batches.len() == 1);
+        read.batches.into_iter().next().unwrap()
+    }
+
+    fn check_control_append(
+        log: &Mutex<Log>,
+        control_entries: &[krabka_log::ProducerSnapshotEntry],
+    ) {
+        assert!(control_entries.len() == 1);
+        check!(control_entries[0].producer_id == krabka_log::ProducerId(7));
+        check!(control_entries[0].producer_epoch == 3);
+        let batch = one_appended_batch(log);
+        check!(batch.attributes.compression() == CompressionType::None);
+        check!(batch.attributes.is_control_batch());
     }
 
     #[test]
@@ -431,18 +450,7 @@ mod tests {
         // second one: this is what keeps a produce-path mirror from ever
         // blocking a worker thread behind a concurrent blocking-pool log
         // operation.
-        assert!(control_entries.len() == 1);
-        check!(control_entries[0].producer_id == krabka_log::ProducerId(7));
-        check!(control_entries[0].producer_epoch == 3);
-
-        let read = log
-            .lock()
-            .unwrap()
-            .read(Offset(0), krabka_units::mebibytes(10))
-            .unwrap();
-        assert!(read.batches.len() == 1);
-        check!(read.batches[0].attributes.compression() == CompressionType::None);
-        check!(read.batches[0].attributes.is_control_batch());
+        check_control_append(&log, &control_entries);
     }
 
     /// A group that carries a transaction marker first releases every
@@ -451,13 +459,13 @@ mod tests {
     #[test]
     fn a_marker_group_releases_transactions_below_the_high_watermark() {
         fn data(producer_id: i64) -> ProduceData {
-            let mut batch = sample_batch(1);
+            let mut batch = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
             batch.producer_id = producer_id;
             batch.attributes = batch.attributes.with_transactional(true);
             ProduceData::Owned(batch)
         }
         fn commit(producer_id: i64) -> ProduceData {
-            let mut batch = sample_batch(1);
+            let mut batch = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
             batch.producer_id = producer_id;
             batch.attributes = batch.attributes.with_transactional(true).with_control(true);
             batch.records[0].key = Some(bytes::Bytes::from_static(&[0, 0, 0, 1]));
@@ -527,16 +535,6 @@ mod tests {
                 .base_offset
                 == 0
         );
-        assert!(control_entries.len() == 1);
-        check!(control_entries[0].producer_id == krabka_log::ProducerId(7));
-        check!(control_entries[0].producer_epoch == 3);
-
-        let read = log
-            .lock()
-            .unwrap()
-            .read(Offset(0), krabka_units::mebibytes(10))
-            .unwrap();
-        check!(read.batches[0].attributes.compression() == CompressionType::None);
-        check!(read.batches[0].attributes.is_control_batch());
+        check_control_append(&log, &control_entries);
     }
 }

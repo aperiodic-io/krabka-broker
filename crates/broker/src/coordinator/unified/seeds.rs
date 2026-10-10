@@ -107,6 +107,65 @@ pub struct StreamsGroupSeed {
     >,
 }
 
+// Each protocol owns its record types and placeholder factory; member-map replay is shared.
+macro_rules! replay_member_maps {
+    ($seed:ty, $metadata:ty, $current:ty, $kind:ident) => {
+        impl $seed {
+            pub(super) fn install_current_member(
+                &mut self,
+                member_id: &str,
+                value: $current,
+                uninitialized: impl FnOnce() -> $metadata,
+            ) {
+                self.members
+                    .entry(member_id.into())
+                    .or_insert_with(uninitialized);
+                self.current_per_member.insert(member_id.into(), value);
+            }
+
+            pub(super) fn member_tombstone(
+                &self,
+                member_id: &str,
+            ) -> Result<bool, crate::error::BrokerError> {
+                super::replay_policy::member_tombstone(
+                    super::replay_policy::ModernGroupType::$kind,
+                    member_id,
+                    self.members.contains_key(member_id).then(|| {
+                        self.current_per_member
+                            .get(member_id)
+                            .map_or(0, |current| current.member_epoch)
+                    }),
+                    self.target_per_member.contains_key(member_id),
+                )
+            }
+
+            pub(super) fn remove_replayed_member(&mut self, member_id: &str) {
+                self.members.remove(member_id);
+                self.current_per_member.remove(member_id);
+            }
+        }
+    };
+}
+
+replay_member_maps!(
+    GroupSeed,
+    persistence_next_gen::MemberMetadataValue,
+    persistence_next_gen::CurrentMemberAssignmentValue,
+    Consumer
+);
+replay_member_maps!(
+    ShareGroupSeed,
+    share::persistence::ShareGroupMemberMetadataValue,
+    share::persistence::ShareGroupCurrentMemberAssignmentValue,
+    Share
+);
+replay_member_maps!(
+    StreamsGroupSeed,
+    streams::persistence::StreamsGroupMemberMetadataValue,
+    streams::persistence::StreamsGroupCurrentMemberAssignmentValue,
+    Streams
+);
+
 /// Snapshot member metadata, current assignments, then the protocol's target map.
 macro_rules! snapshot_member_maps {
     ($state:ident; $members:ident, $current:ident, $targets:ident;

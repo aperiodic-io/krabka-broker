@@ -63,14 +63,9 @@ context_handler! {
         // `group_coordinator_error` -- Kafka authorizes the request before it
         // ever reaches coordinator routing, so an unauthorized subscription
         // must not be masked by `NOT_COORDINATOR` / `COORDINATOR_NOT_AVAILABLE`.
-        if crate::handlers::subscribed_names_describe_denied(
-            broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            req.subscribed_topic_names.as_deref(),
-        ) {
-            return Ok(reply(codes::TOPIC_AUTHORIZATION_FAILED, None));
-        }
+        crate::handlers::acl_gates::authorize_subscription!(
+            (broker, &image, ctx), req.subscribed_topic_names.as_deref() => reply
+        );
 
         // Kafka's `GroupCoordinatorService.throwIfShareGroupHeartbeatRequestIsInvalid`
         // runs before the operation reaches a coordinator shard.
@@ -348,11 +343,7 @@ mod tests {
             (broker_handle, _dir, broker),
             start_broker(Arc::new(acl_authorizer()))
         );
-        broker
-            .controller
-            .submit_change(vec![group_read_acl("g")])
-            .await
-            .expect("grant group Read");
+        crate::handlers::group_heartbeat_test_support::grant_group_read(&broker, "g").await;
         request_identity!(
             (principal, peer, ctx),
             alice(),
@@ -548,7 +539,14 @@ mod tests {
         let allowed_id = uuid::Uuid::from_u128(1);
         let node = krabka_raft::NodeId(broker_handle.node_id());
         let mut records = vec![group_read_acl("g"), describe_acl("topic-a")];
-        records.extend(topic_with_partitions("topic-a", allowed_id, 1, node));
+        records.extend(topic_with_partitions(
+            crate::handlers::group_heartbeat_test_support::GroupTopicSetup {
+                name: "topic-a",
+                topic_id: allowed_id,
+                partitions: crate::test_support::PartitionCount(1),
+                node,
+            },
+        ));
         broker
             .controller
             .submit_change(records)

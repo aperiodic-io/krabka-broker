@@ -112,6 +112,13 @@ enum Refusal {
     MetadataFetch(KrabkaMetadataFetchResponse),
 }
 
+fn check_refusal_cases(cases: impl IntoIterator<Item = (&'static str, i16, i16, Bytes, Refusal)>) {
+    for (name, api, version, body, expected) in cases {
+        let bytes = refusal(api, version, &body).expect("encode the refusal");
+        check!(decode(api, version, &bytes) == expected, "{name}");
+    }
+}
+
 fn decode(api: i16, version: i16, bytes: &[u8]) -> Refusal {
     let mut cursor = bytes;
     let refusal = match api {
@@ -275,10 +282,7 @@ fn fetch_and_quorum_refusals_are_kafka_error_responses() {
             }),
         ),
     ];
-    for (name, api, version, body, expected) in cases {
-        let bytes = refusal(api, version, &body).expect("encode the refusal");
-        check!(decode(api, version, &bytes) == expected, "{name}");
-    }
+    check_refusal_cases(cases);
 }
 
 #[test]
@@ -395,10 +399,7 @@ fn admin_and_private_refusals_are_kafka_error_responses() {
             }),
         ),
     ];
-    for (name, api, version, body, expected) in cases {
-        let bytes = refusal(api, version, &body).expect("encode the refusal");
-        check!(decode(api, version, &bytes) == expected, "{name}");
-    }
+    check_refusal_cases(cases);
 }
 
 /// Grants that allow exactly the listed operations.

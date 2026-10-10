@@ -13,21 +13,13 @@
 //! retention as well as compaction -- an `unlink` that fails with `EIO` takes
 //! the log directory offline just as a failed compaction rewrite does.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-
-use arc_swap::ArcSwap;
-use krabka_log::Log;
-
-use super::storage::maintain_log;
-use crate::{log_dir_status::LogDirRegistry, replica_state::ReplicaState};
+use super::storage::{LogStorage, MaintenanceAck, maintain_log};
+use crate::replica_state::ReplicaState;
 
 pub(super) async fn handle_retention(
-    storage: (&Arc<Mutex<Log>>, &Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
+    storage: LogStorage<'_>,
     replica_state: &tokio::sync::Mutex<ReplicaState>,
-    ack: tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>,
+    ack: MaintenanceAck,
 ) {
     // Every eviction reason is bounded at the high watermark, the same as
     // `handle_compact`'s read of it: a record above the watermark can still
@@ -46,8 +38,14 @@ pub(super) async fn handle_retention(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use arc_swap::ArcSwap;
+
     use super::*;
-    use crate::partition_writer::test_support::open_log_with_records;
+    use crate::{
+        log_dir_status::LogDirRegistry, partition_writer::test_support::open_log_with_records,
+    };
 
     #[tokio::test]
     async fn handle_retention_completes_ack() {

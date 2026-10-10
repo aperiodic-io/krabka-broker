@@ -1,44 +1,18 @@
-# Rust duplicate-code gate
+# Duplicate code check
 
-`aspect check-cpd --base origin/main` runs native PMD 7.28.0 Rust CPD with
-`minimumTokens = 100`. CI supplies the immutable PR target SHA or the previous
-main SHA and requires the `cpd` job through the merge gate. Manual workflow
-runs compare with `HEAD^`. Unresolvable bases fail.
+`aspect check-cpd` runs jscpd 5.4.1 with a zero-duplicate gate over Rust sources.
+The `cpd` CI job remains required by the merge gate. The minimum clone size is
+60 tokens and 5 lines, in weak mode (whitespace and comments are ignored).
 
-The Java helper uses PMD's token APIs, which AXL cannot call directly. AXL owns
-source snapshots, verified downloads, compilation, regression tests, and execution.
-All tracked and nonignored untracked Rust files are included, including hidden
-directories. The comparison uses exact lexer token images, independently of file
-names, line numbers, comments, and whitespace. A removed repeat cannot compensate
-for a different new repeat. Extra copies of an existing repeat fail too.
+The AXL task copies Git's tracked and non-ignored untracked Rust inventory to a
+temporary directory, including tests, benchmarks and hidden paths. Deleted
+sources are omitted; missing sources, sparse checkouts and symlinks fail.
+The isolated scan uses an explicit empty config, so local jscpd settings and
+Git ignore files cannot weaken the check. No baseline or file exclusions apply.
 
-PMD's XML prunes some overlapping or nested matches. The regression check
-therefore also indexes every exact 100-token window, extends matching occurrence
-pairs, and counts every repeated prefix with at least 100 tokens in both source
-trees. Counts use nonoverlapping copies within each file and reset at file
-boundaries. This catches longer new repeats even when their 100-token windows
-already existed, and copies hidden by PMD's report pruning. Work and memory
-budgets fail explicitly if the exact comparison cannot complete; they never
-truncate or accept a partial scan.
+Git, Node.js 18+ and npm are required. `npm ci --ignore-scripts` installs the
+exact detector version and checks artifact integrity using `package-lock.json`.
+The npm package selects the pinned native binary for the host platform.
 
-The allowance is computed from the target revision’s source. Each target update
-therefore establishes the allowance for the next change.
-
-## Lexer correction
-
-The pinned PMD Rust grammar permits backslashes as unescaped string content.
-That can consume a closing quote and cause valid files to be skipped. The task
-changes only the two string/byte-string character classes to exclude backslashes,
-generates the replacement Rust lexer with ANTLR 4.13.2, and puts it first on the
-classpath. Matching, token filtering, and reporting remain PMD's implementation.
-SHA-256 checks pin the distribution, ANTLR jar, and original grammar.
-
-Lexical errors, missing sources, Rust symlinks, and comment directives that
-suppress CPD are failures. Reports and regression diagnostics are retained in
-`.cpd/` locally or the `cpd` CI artifact. The Java fixture suite runs before each
-comparison; orchestration tests run with `aspect axl-tests --suite check-cpd`.
-
-Local runs require Git, JDK 17+, curl, unzip, and tar. Optional `--pmd-archive`,
-`--antlr-jar`, and `--rust-grammar` reuse local downloads only after checking the
-same pinned digests. `--heap` defaults to `5g`; the dedicated CI job avoids
-competing with Rust builds for memory.
+Reports and `source-inventory.json` are saved under `.cpd/` locally, or in the
+`cpd` CI artifact. AXL tests run with `aspect axl-tests --suite check-cpd`.

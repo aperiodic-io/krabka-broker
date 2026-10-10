@@ -4,23 +4,56 @@
 
 use std::collections::HashSet;
 
+use krabka_ids::ProducerId;
 use krabka_protocol::owned::txn_offset_commit_request::{
     TxnOffsetCommitRequest, TxnOffsetCommitRequestPartition, TxnOffsetCommitRequestTopic,
 };
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct ProducerEpoch(pub i16);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct TxnCommitProducer {
+    #[default(ProducerId(42))]
+    pub id: ProducerId,
+    pub epoch: ProducerEpoch,
+}
+
+impl TxnCommitProducer {
+    /// A producer before its first epoch bump.
+    pub(super) fn initial(id: ProducerId) -> Self {
+        Self {
+            id,
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn from_wire((id, epoch): (i64, i16)) -> Self {
+        Self {
+            id: ProducerId(id),
+            epoch: ProducerEpoch(epoch),
+        }
+    }
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(super) struct TxnCommitSetup<'a> {
+    #[default("tid".into())]
+    pub transactional_id: String,
+    #[default("group-a")]
+    pub group_id: &'a str,
+    pub producer: TxnCommitProducer,
+    pub topics: Vec<TxnOffsetCommitRequestTopic>,
+}
+
 /// A transactional commit request whose remaining wire fields keep their defaults.
-pub(super) fn request_for(
-    transactional_id: String,
-    group_id: &str,
-    (producer_id, producer_epoch): (i64, i16),
-    topics: Vec<TxnOffsetCommitRequestTopic>,
-) -> TxnOffsetCommitRequest {
+pub(super) fn request_for(setup: TxnCommitSetup<'_>) -> TxnOffsetCommitRequest {
     TxnOffsetCommitRequest {
-        transactional_id,
-        group_id: group_id.to_owned(),
-        producer_id,
-        producer_epoch,
-        topics,
+        transactional_id: setup.transactional_id,
+        group_id: setup.group_id.to_owned(),
+        producer_id: setup.producer.id.0,
+        producer_epoch: setup.producer.epoch.0,
+        topics: setup.topics,
         ..Default::default()
     }
 }

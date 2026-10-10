@@ -141,14 +141,7 @@ pub(super) fn random_seed() -> u64 {
     std::collections::hash_map::RandomState::new().hash_one(0_u8)
 }
 
-/// One step of the `SplitMix64` generator.
-fn split_mix_64(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
+krabka_macros::splitmix64_step!(split_mix_64);
 
 /// Builds the response envelope over the per-topic rows.
 pub(super) fn delete_topics_response(

@@ -10,14 +10,16 @@ use std::net::SocketAddr;
 
 use assert2::assert;
 use bytes::{Buf, BytesMut};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{Decode, Encode};
 use tokio::net::TcpStream;
 
 use crate::{
     CLIENT_ID, kafka_wire,
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
     support::{
-        fetch::{fetch_partition, single_partition_fetch},
         records::{batch_from_records, value_record},
+        wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
 
@@ -42,17 +44,18 @@ pub async fn produce_plaintext(addr: SocketAddr, topic: &str, record_bytes: usiz
         .collect();
 
     let req = crate::support::produce::single_partition_produce(
-        topic.to_string(),
-        krabka_protocol::primitives::uuid::Uuid::default(),
-        0,
-        Some(
-            RecordBatch {
-                last_offset_delta: i32::try_from(count - 1).unwrap(),
-                ..batch_from_records(records)
-            }
-            .into(),
-        ),
-        (1, 5_000), // leader ack only (rf=1 topic)
+        // leader ack only (rf=1 topic)
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: topic.to_string(),
+            records: Some(
+                RecordBatch {
+                    last_offset_delta: i32::try_from(count - 1).unwrap(),
+                    ..batch_from_records(records)
+                }
+                .into(),
+            ),
+            ..Default::default()
+        },
     );
 
     let mut stream = TcpStream::connect(addr).await.expect("connect");
@@ -63,9 +66,19 @@ pub async fn produce_plaintext(addr: SocketAddr, topic: &str, record_bytes: usiz
     // leadership errors of that window as any Kafka client does.
     let mut attempts = 0;
     let error_code = loop {
-        let resp_bytes = kafka_wire::round_trip(&mut stream, 0, VERSION, 1, CLIENT_ID, true, &body)
-            .await
-            .expect("Produce round-trip");
+        let resp_bytes = kafka_wire::round_trip(
+            &mut stream,
+            WireExchangeSetup {
+                api_key: WireApiKey(0),
+                version: WireApiVersion(VERSION),
+                client_id: CLIENT_ID,
+                header: RequestHeaderEncoding::Flexible,
+                ..Default::default()
+            },
+            &body,
+        )
+        .await
+        .expect("Produce round-trip");
         let mut cur: &[u8] = &resp_bytes;
         let resp = ProduceResponse::decode(&mut cur, VERSION).expect("decode ProduceResponse");
         let error_code = resp.responses[0].partition_responses[0].error_code;
@@ -93,11 +106,11 @@ pub async fn fetch_plaintext_replica(addr: SocketAddr, topic: &str, replica_id: 
 
     let req = FetchRequest {
         replica_id,
-        ..single_partition_fetch(
-            topic.to_string(),
-            krabka_protocol::primitives::uuid::Uuid::default(),
-            fetch_partition(0, 0, 1 << 20),
-            (0, 1, 1 << 20),
+        ..crate::support::fetch::named_topic_fetch(
+            topic,
+            crate::support::fetch::FetchLimits::one_mebibyte(
+                crate::support::fetch::RequestWaitMillis(0),
+            ),
         )
     };
 
@@ -107,13 +120,15 @@ pub async fn fetch_plaintext_replica(addr: SocketAddr, topic: &str, replica_id: 
 
     // Send raw frame and capture the full raw response (before decode) so we
     // can measure response bytes.
-    let frame = crate::support::wire::request_frame(
-        (1, VERSION, 1, true),
-        "krabka-throttle-test",
-        &body,
-        Some(16 + body.len()),
-        None,
-    );
+    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+        api_key: krabka_ids::ApiKey(1),
+        version: krabka_ids::ApiVersion(VERSION),
+        header: crate::support::wire::HeaderEncoding::Flexible,
+        client_id: "krabka-throttle-test",
+        body: &body,
+        capacity: Some(crate::support::wire::request_body_capacity(&body)),
+        ..Default::default()
+    });
 
     crate::support::wire::write_frame(&mut stream, &frame, None)
         .await

@@ -229,7 +229,14 @@ mod tests {
         transactional_id: &str,
     ) -> Arc<crate::partition::Partition> {
         let index = coordinator.partition_for(transactional_id);
-        let opened = crate::test_support::open_partition(directory, bootstrap::TOPIC, index.get());
+        let opened = crate::test_support::open_partition(
+            directory,
+            crate::test_support::StandalonePartitionSetup {
+                topic: bootstrap::TOPIC,
+                partition: krabka_ids::PartitionIndex(index.get()),
+                ..Default::default()
+            },
+        );
         coordinator
             .partitions
             .insert(bootstrap::TOPIC.into(), index, Arc::clone(&opened));

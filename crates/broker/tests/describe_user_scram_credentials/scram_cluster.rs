@@ -12,6 +12,8 @@ use krabka_metadata::{AclOperation, MetadataRecord, ResourceType};
 use krabka_security::SaslMechanism;
 use tempfile::TempDir;
 
+use crate::support::acl::ClusterAclSetup;
+
 pub(crate) fn admin_test_password() -> String {
     ['a', 'd', 'm', 'i', 'n', '-', 's', 'e', 'c', 'r', 'e', 't']
         .iter()
@@ -58,11 +60,11 @@ pub(crate) async fn seed_cluster_acl(
     operation: AclOperation,
 ) {
     handle
-        .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(
-            &format!("User:{principal}"),
-            "*",
+        .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(ClusterAclSetup {
+            principal: &format!("User:{principal}"),
             operation,
-        ))
+            ..Default::default()
+        }))
         .await
         .expect("seed cluster ACL");
     handle

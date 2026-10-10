@@ -30,12 +30,21 @@ const REFUSAL: &str = "Tried to apply FeatureLevelRecord \
     FeatureLevelRecord(name='metadata.version', featureLevel=33), \
     but this controller only supports versions 7-30";
 
-fn config(
-    dir: &TempDir,
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct FeatureControllerSetup {
     cluster_id: Uuid,
+    #[default(BootstrapMode::Bootstrap)]
     mode: BootstrapMode,
+    #[default(UnstableFeatureVersions::Disabled)]
     unstable: UnstableFeatureVersions,
-) -> ControllerConfig {
+}
+
+fn config(dir: &TempDir, setup: FeatureControllerSetup) -> ControllerConfig {
+    let FeatureControllerSetup {
+        cluster_id,
+        mode,
+        unstable,
+    } = setup;
     let mut cfg = ControllerConfig::for_tests(NodeId(1), dir.path().to_path_buf());
     cfg.election_timeout = FAST_ELECTION_TIMEOUT;
     cfg.cluster_id = Some(cluster_id);
@@ -67,9 +76,11 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     // The first boot has the flag on and finalizes the unstable level.
     let controller = Controller::start(config(
         &dir,
-        cluster_id,
-        BootstrapMode::Bootstrap,
-        UnstableFeatureVersions::Enabled,
+        FeatureControllerSetup {
+            cluster_id,
+            unstable: UnstableFeatureVersions::Enabled,
+            ..Default::default()
+        },
     ))
     .await
     .expect("first boot");
@@ -83,9 +94,11 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     // With the flag off the node refuses the log, with Kafka's message.
     let Err(refused) = Controller::start(config(
         &dir,
-        cluster_id,
-        BootstrapMode::Rejoin,
-        UnstableFeatureVersions::Disabled,
+        FeatureControllerSetup {
+            cluster_id,
+            mode: BootstrapMode::Rejoin,
+            ..Default::default()
+        },
     ))
     .await
     else {
@@ -97,9 +110,11 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     // The refusal changed nothing on disk: the same log starts with the flag on.
     let controller = Controller::start(config(
         &dir,
-        cluster_id,
-        BootstrapMode::Rejoin,
-        UnstableFeatureVersions::Enabled,
+        FeatureControllerSetup {
+            cluster_id,
+            mode: BootstrapMode::Rejoin,
+            unstable: UnstableFeatureVersions::Enabled,
+        },
     ))
     .await
     .expect("restart with the flag on");
@@ -113,9 +128,10 @@ async fn a_controller_stops_when_it_replays_a_level_it_does_not_support() {
     let dir = TempDir::new().unwrap();
     let controller = Controller::start(config(
         &dir,
-        Uuid::new_v4(),
-        BootstrapMode::Bootstrap,
-        UnstableFeatureVersions::Disabled,
+        FeatureControllerSetup {
+            cluster_id: Uuid::new_v4(),
+            ..Default::default()
+        },
     ))
     .await
     .expect("boot");
@@ -161,9 +177,11 @@ async fn a_controller_that_stops_for_any_other_reason_reports_no_fault() {
     let dir = TempDir::new().unwrap();
     let controller = Controller::start(config(
         &dir,
-        Uuid::new_v4(),
-        BootstrapMode::Bootstrap,
-        UnstableFeatureVersions::Enabled,
+        FeatureControllerSetup {
+            cluster_id: Uuid::new_v4(),
+            unstable: UnstableFeatureVersions::Enabled,
+            ..Default::default()
+        },
     ))
     .await
     .expect("boot");

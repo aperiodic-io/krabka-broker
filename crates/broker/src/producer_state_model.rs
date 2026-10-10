@@ -24,14 +24,14 @@
 use std::collections::VecDeque;
 
 use krabka_verified::increment_sequence;
-use stateright::{Checker, Model, Property};
+use stateright::{Model, Property};
 
 use super::{
     Decision, ProducerEntry, RetainedBatch,
     decision::{Checked, SequenceContext, check_retained},
     entry::{EarlierBatches, NUM_BATCHES_TO_RETAIN},
 };
-use crate::{model_check::run_bfs, partition::LogOffset};
+use crate::{model_check::check_model, partition::LogOffset};
 
 const MAX_STATES: usize = 2_000_000;
 const MAX_DEPTH: usize = 40;
@@ -354,13 +354,12 @@ impl Model for ProducerModel {
 }
 
 fn run(model: ProducerModel, label: &str, pinned_unique_states: usize) {
-    let checker = run_bfs(model, label, MAX_DEPTH, MAX_STATES);
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
+    check_model(
+        model,
         label,
+        (MAX_DEPTH, MAX_STATES, MAX_STATES),
+        pinned_unique_states,
     );
-    checker.assert_properties();
 }
 
 #[test]

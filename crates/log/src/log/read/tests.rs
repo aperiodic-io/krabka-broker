@@ -204,21 +204,18 @@ fn log_read_raw_desc_multi_segment_regions_equal_read_raw() {
 #[test]
 fn a_descriptor_read_never_skips_past_a_segment_its_budget_clipped() {
     use std::os::unix::fs::FileExt;
-    let (_dir, log, small) = seam_log();
-    let end = log.log_end_offset();
-    let mut actual = Vec::new();
-    let mut expected = Vec::new();
-    for (label, offset, budget, bases) in seam_cases(small) {
-        let mut wire = Vec::new();
-        for region in log.read_raw_desc(offset, end, budget).unwrap().regions {
-            let mut bytes = vec![0u8; region.len];
-            region.file.read_exact_at(&mut bytes, region.offset).unwrap();
-            wire.extend_from_slice(&bytes);
-        }
-        actual.push((label, batch_bases(&wire)));
-        expected.push((label, bases));
-    }
-    check!(actual == expected);
+    check_seam_reads(
+        |log, offset, end, budget| {
+            let mut wire = Vec::new();
+            for region in log.read_raw_desc(offset, end, budget).unwrap().regions {
+                let mut bytes = vec![0u8; region.len];
+                region.file.read_exact_at(&mut bytes, region.offset).unwrap();
+                wire.extend_from_slice(&bytes);
+            }
+            batch_bases(&wire)
+        },
+        |bases| bases,
+    );
 }
 } // sendfile_cfg!
 
@@ -319,23 +316,34 @@ fn batch_bases(mut wire: &[u8]) -> Vec<i64> {
     bases
 }
 
-#[test]
-fn a_read_never_skips_past_a_segment_its_budget_clipped() {
+fn check_seam_reads<T: std::fmt::Debug + PartialEq>(
+    read: impl Fn(&Log, Offset, Offset, ByteSize) -> T,
+    expect: impl Fn(Vec<i64>) -> T,
+) {
     let (_dir, log, small) = seam_log();
     let end = log.log_end_offset();
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (label, offset, budget, bases) in seam_cases(small) {
-        let decoded = log.read(offset, budget).unwrap().batches;
-        let raw = log.read_raw(offset, end, budget).unwrap().bytes;
-        actual.push((
-            label,
-            decoded.iter().map(|batch| batch.base_offset).collect(),
-            batch_bases(&raw),
-        ));
-        expected.push((label, bases.clone(), bases));
+        actual.push((label, read(&log, offset, end, budget)));
+        expected.push((label, expect(bases)));
     }
     check!(actual == expected);
+}
+
+#[test]
+fn a_read_never_skips_past_a_segment_its_budget_clipped() {
+    check_seam_reads(
+        |log, offset, end, budget| {
+            let decoded = log.read(offset, budget).unwrap().batches;
+            let raw = log.read_raw(offset, end, budget).unwrap().bytes;
+            (
+                decoded.iter().map(|batch| batch.base_offset).collect(),
+                batch_bases(&raw),
+            )
+        },
+        |bases| (bases.clone(), bases),
+    );
 }
 
 #[test]

@@ -29,6 +29,7 @@ use crate::{
         actor::{GroupActorMessage, GroupKindTag},
         classic_state::OffsetEntry,
     },
+    handlers::test_support::CreateTopicSetup,
     test_support::{peer, principal},
 };
 
@@ -41,22 +42,34 @@ use crate::{
 // and the sweep that runs at broker start would tombstone the offsets — and
 // the group with them — out from under a test that is asking about
 // `require_stable`.
-async fn seed_committed_offset(
-    broker: &Broker,
-    group: &str,
-    topic: &str,
-    partition: i32,
-    offset: i64,
-) {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct CommittedOffsetSetup<'a> {
+    #[default("grp")]
+    group: &'a str,
+    #[default("orders")]
+    topic: &'a str,
+    #[default(krabka_ids::PartitionIndex(0))]
+    partition: krabka_ids::PartitionIndex,
+    #[default(Offset(42))]
+    offset: Offset,
+}
+
+async fn seed_committed_offset(broker: &Broker, setup: CommittedOffsetSetup<'_>) {
+    let CommittedOffsetSetup {
+        group,
+        topic,
+        partition,
+        offset,
+    } = setup;
     let h = broker
         .group_coordinator
         .get_or_create_group(group, GroupKindTag::Classic);
     let (tx, rx) = oneshot::channel();
     h.tx.send(GroupActorMessage::UpdateCommitted {
         entries: vec![(
-            (topic.to_string(), partition),
+            (topic.to_string(), partition.0),
             OffsetEntry {
-                offset: Offset(offset),
+                offset,
                 leader_epoch: 5,
                 metadata: String::new(),
                 commit_timestamp_ms: crate::time_util::now_ms(),
@@ -93,7 +106,7 @@ fn named_topic_request(group: &str, topic: &str, partitions: Vec<i32>) -> Offset
 async fn named_topic_fetch_returns_committed_offset() {
     const VERSION: i16 = 7; // legacy single-group path (< 8)
     broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-    seed_committed_offset(&broker, "grp", "orders", 0, 42).await;
+    seed_committed_offset(&broker, CommittedOffsetSetup::default()).await;
 
     request_identity!((p, peer, ctx), principal("admin"), client_id = "consumer");
     let req = named_topic_request("grp", "orders", vec![0]);
@@ -123,23 +136,52 @@ async fn named_topic_fetch_returns_committed_offset() {
 const TXN_RECORDS_AT: i64 = 10;
 const TXN_MARKER_AT: i64 = 11;
 
+#[derive(krabka_macros::FieldDefaults)]
+struct PendingTxnOffsetsSetup<'a> {
+    #[default("grp")]
+    group: &'a str,
+    #[default(krabka_ids::ProducerId(91))]
+    producer: krabka_ids::ProducerId,
+    #[default(Offset(TXN_RECORDS_AT))]
+    written_at: Offset,
+    #[default(vec![("orders".into(), krabka_ids::PartitionIndex(0))])]
+    keys: Vec<(String, krabka_ids::PartitionIndex)>,
+}
+
+#[derive(Default)]
+struct TxnOffsetCommits(Vec<((String, i32), OffsetEntry)>);
+
+#[derive(krabka_macros::FieldDefaults)]
+struct ResolvedTxnOffsetsSetup<'a> {
+    #[default("grp")]
+    group: &'a str,
+    #[default(krabka_ids::ProducerId(91))]
+    producer: krabka_ids::ProducerId,
+    #[default(Offset(TXN_MARKER_AT))]
+    resolved_through: Offset,
+    committed: TxnOffsetCommits,
+}
+
 // Mark (topic, partition) keys as written by an unresolved transaction, the
 // way `TxnOffsetCommit` does once its records are durable.
-async fn seed_pending_txn_offsets(
-    broker: &Broker,
-    group: &str,
-    producer_id: i64,
-    written_at: i64,
-    keys: Vec<(String, i32)>,
-) {
+async fn seed_pending_txn_offsets(broker: &Broker, setup: PendingTxnOffsetsSetup<'_>) {
+    let PendingTxnOffsetsSetup {
+        group,
+        producer,
+        written_at,
+        keys,
+    } = setup;
     let h = broker
         .group_coordinator
         .get_or_create_group(group, GroupKindTag::Classic);
     let (tx, rx) = oneshot::channel();
     h.tx.send(GroupActorMessage::AddPendingTxnOffsets {
-        producer_id,
-        written_at,
-        keys,
+        producer_id: producer.0,
+        written_at: written_at.0,
+        keys: keys
+            .into_iter()
+            .map(|(topic, partition)| (topic, partition.0))
+            .collect(),
         reply: tx,
     })
     .await
@@ -150,21 +192,21 @@ async fn seed_pending_txn_offsets(
 // Resolve the transaction the way its marker does: publish the offsets a
 // commit carries (an abort carries none) and drop the producer's pending
 // marks, stamped with the marker's own position in the offsets log.
-async fn resolve_pending_txn_offsets(
-    broker: &Broker,
-    group: &str,
-    producer_id: i64,
-    resolved_through: i64,
-    committed: Vec<((String, i32), OffsetEntry)>,
-) {
+async fn resolve_pending_txn_offsets(broker: &Broker, setup: ResolvedTxnOffsetsSetup<'_>) {
+    let ResolvedTxnOffsetsSetup {
+        group,
+        producer,
+        resolved_through,
+        committed,
+    } = setup;
     let h = broker
         .group_coordinator
         .get_or_create_group(group, GroupKindTag::Classic);
     let (tx, rx) = oneshot::channel();
     h.tx.send(GroupActorMessage::ResolveTxnOffsets {
-        producer_id,
-        resolved_through,
-        committed,
+        producer_id: producer.0,
+        resolved_through: resolved_through.0,
+        committed: committed.0,
         reply: tx,
     })
     .await
@@ -309,7 +351,7 @@ async fn a_mark_for_records_below_an_applied_marker_does_not_strand_the_partitio
     const VERSION: i16 = 7;
     const PRODUCER_ID: i64 = 91;
     broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-    seed_committed_offset(&broker, "grp", "orders", 0, 42).await;
+    seed_committed_offset(&broker, CommittedOffsetSetup::default()).await;
 
     let request = OffsetFetchRequest {
         require_stable: true,
@@ -329,13 +371,20 @@ async fn a_mark_for_records_below_an_applied_marker_does_not_strand_the_partitio
 
     // The abort marker for the records at TXN_RECORDS_AT lands first and
     // publishes nothing; the commit's own mark arrives after it.
-    resolve_pending_txn_offsets(&broker, "grp", PRODUCER_ID, TXN_MARKER_AT, Vec::new()).await;
+    resolve_pending_txn_offsets(
+        &broker,
+        ResolvedTxnOffsetsSetup {
+            producer: krabka_ids::ProducerId(PRODUCER_ID),
+            ..Default::default()
+        },
+    )
+    .await;
     seed_pending_txn_offsets(
         &broker,
-        "grp",
-        PRODUCER_ID,
-        TXN_RECORDS_AT,
-        vec![("orders".to_string(), 0)],
+        PendingTxnOffsetsSetup {
+            producer: krabka_ids::ProducerId(PRODUCER_ID),
+            ..Default::default()
+        },
     )
     .await;
 
@@ -356,10 +405,11 @@ async fn a_mark_for_records_below_an_applied_marker_does_not_strand_the_partitio
     // reported unstable as usual.
     seed_pending_txn_offsets(
         &broker,
-        "grp",
-        PRODUCER_ID,
-        TXN_MARKER_AT + 1,
-        vec![("orders".to_string(), 0)],
+        PendingTxnOffsetsSetup {
+            producer: krabka_ids::ProducerId(PRODUCER_ID),
+            written_at: Offset(TXN_MARKER_AT + 1),
+            ..Default::default()
+        },
     )
     .await;
     let next_transaction = fetch(&broker, VERSION, &request).await;
@@ -396,14 +446,32 @@ async fn seed_topic_reference_group(broker_handle: &crate::broker::BrokerHandle)
         (client, response),
         broker_handle,
         "offset-fetch-resolution-test",
-        crate::handlers::test_support::configured_topic_request(KNOWN_NAME, &[], 1, 1, 5_000,)
+        crate::handlers::test_support::configured_topic_request(CreateTopicSetup {
+            topic: KNOWN_NAME,
+            ..Default::default()
+        })
     );
     broker_handle
         .wait_until_partition_present(KNOWN_NAME, 0)
         .await;
     let broker = broker_handle.broker_arc_for_test();
-    seed_committed_offset(&broker, "grp", KNOWN_NAME, 0, 42).await;
-    seed_committed_offset(&broker, "grp", "", 0, 7).await;
+    seed_committed_offset(
+        &broker,
+        CommittedOffsetSetup {
+            topic: KNOWN_NAME,
+            ..Default::default()
+        },
+    )
+    .await;
+    seed_committed_offset(
+        &broker,
+        CommittedOffsetSetup {
+            topic: "",
+            offset: Offset(7),
+            ..Default::default()
+        },
+    )
+    .await;
     let image = broker_handle.controller_image_for_test();
     let topic = image.topic(KNOWN_NAME).expect("known topic in the image");
     WireUuid(topic.topic_id.into_bytes())
@@ -411,13 +479,26 @@ async fn seed_topic_reference_group(broker_handle: &crate::broker::BrokerHandle)
 
 /// The request row for `topic`, and the topic row that the response carries
 /// for it at `version` with `partition` as its only partition row.
-fn topic_reference_rows(
-    version: i16,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OffsetFetchVersion(i16);
+
+#[derive(krabka_macros::FieldDefaults)]
+struct TopicReferenceSetup {
+    #[default(OffsetFetchVersion(9))]
+    version: OffsetFetchVersion,
+    #[default(TopicRef::KnownName)]
     topic: TopicRef,
     known_id: WireUuid,
+    #[default(no_offset_row(codes::NONE))]
     partition: OffsetFetchResponsePartitions,
+}
+
+fn topic_reference_rows(
+    setup: TopicReferenceSetup,
 ) -> (OffsetFetchRequestTopics, OffsetFetchResponseTopics) {
-    let (name, topic_id) = topic.wire_reference((KNOWN_NAME, known_id), (UNKNOWN_NAME, UNKNOWN_ID));
+    let (name, topic_id) = setup
+        .topic
+        .wire_reference((KNOWN_NAME, setup.known_id), (UNKNOWN_NAME, UNKNOWN_ID));
     let request = OffsetFetchRequestTopics {
         name: name.to_string(),
         topic_id,
@@ -425,7 +506,7 @@ fn topic_reference_rows(
         ..Default::default()
     };
     // The wire carries the name at v8 and v9, and the id at v10.
-    let id_only = version >= 10;
+    let id_only = setup.version.0 >= 10;
     let response = OffsetFetchResponseTopics {
         name: if id_only {
             String::new()
@@ -433,7 +514,7 @@ fn topic_reference_rows(
             name.to_string()
         },
         topic_id: if id_only { topic_id } else { WireUuid::ZERO },
-        partitions: vec![partition],
+        partitions: vec![setup.partition],
         ..Default::default()
     };
     (request, response)
@@ -490,20 +571,61 @@ fn seeded_row() -> OffsetFetchResponsePartitions {
     }
 }
 
+type TopicReferenceCase = (OffsetFetchVersion, TopicRef, OffsetFetchResponsePartitions);
+
+fn unresolved_topic_reference_cases() -> [TopicReferenceCase; 2] {
+    [
+        (
+            OffsetFetchVersion(10),
+            TopicRef::UnknownId,
+            no_offset_row(codes::UNKNOWN_TOPIC_ID),
+        ),
+        (
+            OffsetFetchVersion(10),
+            TopicRef::ZeroId,
+            no_offset_row(codes::UNKNOWN_TOPIC_ID),
+        ),
+    ]
+}
+
+async fn topic_reference_broker(
+    authorizer: Arc<dyn crate::authorizer::Authorizer>,
+) -> (crate::broker::BrokerHandle, tempfile::TempDir, WireUuid) {
+    let (handle, directory) = crate::test_support::start_group_broker_no_audit(authorizer).await;
+    let topic_id = seed_topic_reference_group(&handle).await;
+    (handle, directory, topic_id)
+}
+
+async fn seed_unresolved_name_offset(broker: &Broker) {
+    seed_committed_offset(
+        broker,
+        CommittedOffsetSetup {
+            topic: UNKNOWN_NAME,
+            offset: Offset(9),
+            ..Default::default()
+        },
+    )
+    .await;
+}
+
 /// Send one single-topic request per case, and compare every whole response
 /// with the one that the case expects.
 async fn run_topic_reference_table(
     authorizer: Arc<dyn crate::authorizer::Authorizer>,
-    cases: Vec<(i16, TopicRef, OffsetFetchResponsePartitions)>,
+    cases: Vec<TopicReferenceCase>,
 ) {
-    let (broker_handle, _dir) = crate::test_support::start_group_broker_no_audit(authorizer).await;
-    let known_id = seed_topic_reference_group(&broker_handle).await;
+    let (broker_handle, _dir, known_id) = topic_reference_broker(authorizer).await;
     let broker = broker_handle.broker_arc_for_test();
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (version, topic, partition) in cases {
-        let (request_row, response_row) = topic_reference_rows(version, topic, known_id, partition);
-        let response = fetch(&broker, version, &groups_request(vec![request_row])).await;
+        let (request_row, response_row) = topic_reference_rows(TopicReferenceSetup {
+            version,
+            topic,
+            known_id,
+            partition,
+        });
+        let response = fetch(&broker, version.0, &groups_request(vec![request_row])).await;
         actual.push((version, topic, response));
         expected.push((version, topic, groups_response(vec![response_row])));
     }
@@ -519,16 +641,17 @@ async fn topic_row_error_follows_version_and_topic_reference() {
     run_topic_reference_table(
         Arc::new(crate::authorizer::AllowAllAuthorizer),
         vec![
-            (9, TopicRef::KnownName, seeded_row()),
-            (9, TopicRef::UnknownName, no_offset_row(codes::NONE)),
-            (10, TopicRef::KnownId, seeded_row()),
+            (OffsetFetchVersion(9), TopicRef::KnownName, seeded_row()),
             (
-                10,
-                TopicRef::UnknownId,
-                no_offset_row(codes::UNKNOWN_TOPIC_ID),
+                OffsetFetchVersion(9),
+                TopicRef::UnknownName,
+                no_offset_row(codes::NONE),
             ),
-            (10, TopicRef::ZeroId, no_offset_row(codes::UNKNOWN_TOPIC_ID)),
-        ],
+            (OffsetFetchVersion(10), TopicRef::KnownId, seeded_row()),
+        ]
+        .into_iter()
+        .chain(unresolved_topic_reference_cases())
+        .collect(),
     )
     .await;
 }
@@ -540,22 +663,19 @@ async fn unresolved_id_answers_before_topic_authorization() {
         Arc::new(DenyTopics),
         vec![
             (
-                9,
+                OffsetFetchVersion(9),
                 TopicRef::KnownName,
                 no_offset_row(codes::TOPIC_AUTHORIZATION_FAILED),
             ),
             (
-                10,
+                OffsetFetchVersion(10),
                 TopicRef::KnownId,
                 no_offset_row(codes::TOPIC_AUTHORIZATION_FAILED),
             ),
-            (
-                10,
-                TopicRef::UnknownId,
-                no_offset_row(codes::UNKNOWN_TOPIC_ID),
-            ),
-            (10, TopicRef::ZeroId, no_offset_row(codes::UNKNOWN_TOPIC_ID)),
-        ],
+        ]
+        .into_iter()
+        .chain(unresolved_topic_reference_cases())
+        .collect(),
     )
     .await;
 }
@@ -566,20 +686,21 @@ async fn unresolved_id_answers_before_topic_authorization() {
 #[tokio::test]
 async fn refused_topics_follow_the_answered_topics() {
     const VERSION: i16 = 10;
-    let (broker_handle, _dir) = crate::test_support::start_group_broker_no_audit(Arc::new(
-        crate::authorizer::AllowAllAuthorizer,
-    ))
-    .await;
-    let known_id = seed_topic_reference_group(&broker_handle).await;
+    let (broker_handle, _dir, known_id) =
+        topic_reference_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
     let broker = broker_handle.broker_arc_for_test();
-    let (zero_request, zero_response) = topic_reference_rows(
-        VERSION,
-        TopicRef::ZeroId,
+    let (zero_request, zero_response) = topic_reference_rows(TopicReferenceSetup {
+        version: OffsetFetchVersion(VERSION),
+        topic: TopicRef::ZeroId,
         known_id,
-        no_offset_row(codes::UNKNOWN_TOPIC_ID),
-    );
-    let (known_request, known_response) =
-        topic_reference_rows(VERSION, TopicRef::KnownId, known_id, seeded_row());
+        partition: no_offset_row(codes::UNKNOWN_TOPIC_ID),
+    });
+    let (known_request, known_response) = topic_reference_rows(TopicReferenceSetup {
+        version: OffsetFetchVersion(VERSION),
+        topic: TopicRef::KnownId,
+        known_id,
+        partition: seeded_row(),
+    });
 
     let actual = fetch(
         &broker,
@@ -722,11 +843,10 @@ async fn run_response_table(
 /// it with `TOPIC_AUTHORIZATION_FAILED`.
 #[tokio::test]
 async fn topics_are_authorized_with_describe_and_fetch_all_hides_refused_topics() {
-    let (broker_handle, _dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(DescribeKnownTopic)).await;
-    seed_topic_reference_group(&broker_handle).await;
+    let (broker_handle, _dir, _known_id) =
+        topic_reference_broker(Arc::new(DescribeKnownTopic)).await;
     let broker = broker_handle.broker_arc_for_test();
-    seed_committed_offset(&broker, "grp", UNKNOWN_NAME, 0, 9).await;
+    seed_unresolved_name_offset(&broker).await;
     let both: &[&str] = &[UNKNOWN_NAME, KNOWN_NAME];
     run_response_table(
         &broker,
@@ -775,13 +895,10 @@ async fn topics_are_authorized_with_describe_and_fetch_all_hides_refused_topics(
 /// topics come in name order.
 #[tokio::test]
 async fn fetch_all_leaves_out_topics_without_an_id_at_v10() {
-    let (broker_handle, _dir) = crate::test_support::start_group_broker_no_audit(Arc::new(
-        crate::authorizer::AllowAllAuthorizer,
-    ))
-    .await;
-    let known_id = seed_topic_reference_group(&broker_handle).await;
+    let (broker_handle, _dir, known_id) =
+        topic_reference_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
     let broker = broker_handle.broker_arc_for_test();
-    seed_committed_offset(&broker, "grp", UNKNOWN_NAME, 0, 9).await;
+    seed_unresolved_name_offset(&broker).await;
     let offset_row = |committed_offset| OffsetFetchResponsePartitions {
         committed_offset,
         ..seeded_row()
@@ -950,7 +1067,7 @@ async fn offset_fetch_creates_no_group_and_checks_the_member_epoch() {
     for row in rows {
         broker_fixture!((broker_handle, _dir, broker), group_allow_all);
         let epoch = join_consumer_group(&broker, "grp", "m1").await;
-        seed_committed_offset(&broker, "grp", "orders", 0, 42).await;
+        seed_committed_offset(&broker, CommittedOffsetSetup::default()).await;
 
         let request = OffsetFetchRequest {
             groups: vec![OffsetFetchRequestGroup {
@@ -1006,14 +1123,22 @@ async fn require_stable<R>(
 ) {
     const PRODUCER_ID: i64 = 91;
     broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-    seed_committed_offset(&broker, "grp", "orders", 0, 42).await;
-    seed_committed_offset(&broker, "grp", "orders", 1, 11).await;
+    seed_committed_offset(&broker, CommittedOffsetSetup::default()).await;
+    seed_committed_offset(
+        &broker,
+        CommittedOffsetSetup {
+            partition: krabka_ids::PartitionIndex(1),
+            offset: Offset(11),
+            ..Default::default()
+        },
+    )
+    .await;
     seed_pending_txn_offsets(
         &broker,
-        "grp",
-        PRODUCER_ID,
-        TXN_RECORDS_AT,
-        vec![("orders".to_string(), 0)],
+        PendingTxnOffsetsSetup {
+            producer: krabka_ids::ProducerId(PRODUCER_ID),
+            ..Default::default()
+        },
     )
     .await;
     let stable_row = |partition_index, offset| row(partition_index, offset, 5, codes::NONE);
@@ -1029,10 +1154,11 @@ async fn require_stable<R>(
     );
     resolve_pending_txn_offsets(
         &broker,
-        "grp",
-        PRODUCER_ID,
-        TXN_MARKER_AT,
-        vec![(("orders".to_string(), 0), committed_entry(77))],
+        ResolvedTxnOffsetsSetup {
+            producer: krabka_ids::ProducerId(PRODUCER_ID),
+            committed: TxnOffsetCommits(vec![(("orders".to_string(), 0), committed_entry(77))]),
+            ..Default::default()
+        },
     )
     .await;
     let resolved = fetch(&broker, version, &request(true)).await;

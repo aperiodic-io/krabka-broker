@@ -36,14 +36,7 @@ impl BreakGlassDenial {
     /// An audit event carries this id, so an operator can join the refusal to
     /// the proposal that nearly authorized it.
     pub(crate) fn proposal_id(&self) -> Option<Uuid> {
-        match self.reason {
-            DenialReason::NoProposal => None,
-            DenialReason::NotEnoughApprovals { proposal_id, .. }
-            | DenialReason::Unsigned { proposal_id }
-            | DenialReason::Expired { proposal_id, .. }
-            | DenialReason::Withdrawn { proposal_id }
-            | DenialReason::Consumed { proposal_id, .. } => Some(proposal_id),
-        }
+        self.reason.proposal_id()
     }
 }
 
@@ -95,6 +88,18 @@ pub(crate) enum DenialReason {
 }
 
 impl DenialReason {
+    /// The covering proposal, absent when none covers the request.
+    fn proposal_id(self) -> Option<Uuid> {
+        match self {
+            DenialReason::NoProposal => None,
+            DenialReason::NotEnoughApprovals { proposal_id, .. }
+            | DenialReason::Unsigned { proposal_id }
+            | DenialReason::Expired { proposal_id, .. }
+            | DenialReason::Withdrawn { proposal_id }
+            | DenialReason::Consumed { proposal_id, .. } => Some(proposal_id),
+        }
+    }
+
     /// How near this proposal came to authorizing the transition. A lower rank
     /// is nearer.
     ///
@@ -116,14 +121,7 @@ impl DenialReason {
     /// [`DenialReason::NoProposal`]. It breaks a tie between two reasons of one
     /// rank, so the answer does not depend on the image iteration order.
     fn tie_break(self) -> Uuid {
-        match self {
-            DenialReason::NoProposal => Uuid::nil(),
-            DenialReason::NotEnoughApprovals { proposal_id, .. }
-            | DenialReason::Unsigned { proposal_id }
-            | DenialReason::Expired { proposal_id, .. }
-            | DenialReason::Withdrawn { proposal_id }
-            | DenialReason::Consumed { proposal_id, .. } => proposal_id,
-        }
+        self.proposal_id().unwrap_or_else(Uuid::nil)
     }
 }
 

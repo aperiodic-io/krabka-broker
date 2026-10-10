@@ -232,9 +232,11 @@ async fn approve(
 async fn reassign_partitions_cancel_reports_the_break_glass_gate_to_the_jvm_tool() {
     let (h1, h2, h3, cfg1, cfg2, cfg3, _d1, _d2, _d3) =
         Box::pin(crate::jvm_acceptance::start_registered_sasl_cluster(
-            ADMIN.0,
-            ADMIN.1,
-            &[PROPOSER, APPROVER_ONE, APPROVER_TWO],
+            crate::jvm_acceptance::SaslClusterSetup {
+                admin: ADMIN.0,
+                admin_pass: ADMIN.1,
+                extra_users: &[PROPOSER, APPROVER_ONE, APPROVER_TWO],
+            },
         ))
         .await;
 
@@ -244,12 +246,12 @@ async fn reassign_partitions_cancel_reports_the_break_glass_gate_to_the_jvm_tool
         bootstrap: &advertised,
     };
 
-    side.create_assigned_topic(
-        TOPIC,
-        "1",
-        CLIENT_PROPS,
-        &[ToolFile::new(CLIENT_PROPS, &props)],
-    );
+    side.create_assigned_topic(crate::oracle::AssignedTopicCommandSetup {
+        topic: TOPIC,
+        props_path: CLIENT_PROPS,
+        files: &[ToolFile::new(CLIENT_PROPS, &props)],
+        ..Default::default()
+    });
     h1.wait_until_partition_present(TOPIC, 0).await;
 
     // Keep one valid target offline so every cancel below observes a real

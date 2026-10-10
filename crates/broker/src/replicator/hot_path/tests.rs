@@ -24,7 +24,7 @@ use assert2::assert;
 use bytes::Bytes;
 use krabka_ids::PartitionIndex;
 use krabka_log::{Log, LogConfig, Offset};
-use krabka_protocol::records::{Record, RecordBatch};
+use krabka_protocol::records::RecordBatch;
 use krabka_units::mebibytes;
 use tempfile::TempDir;
 
@@ -167,24 +167,8 @@ fn production_partition(dir: &TempDir) -> Arc<Partition> {
     )
 }
 
-/// A batch of `records` records, each carrying a `payload`-byte value, as
-/// `benches/perf_deferrals.rs` shapes them.
-fn make_batch(records: i32, payload: usize) -> RecordBatch {
-    let mut batch = RecordBatch {
-        partition_leader_epoch: LEADER_EPOCH,
-        last_offset_delta: records - 1,
-        ..RecordBatch::default()
-    };
-    for i in 0..records {
-        batch.records.push(Record {
-            offset_delta: i,
-            key: Some(Bytes::from(format!("k{i:08}"))),
-            value: Some(Bytes::from(vec![0xAB; payload])),
-            ..Record::default()
-        });
-    }
-    batch
-}
+// Explicit epochs retain the original unclamped last-offset delta.
+krabka_macros::record_batch_fixture!(make_batch, LEADER_EPOCH);
 
 /// The batch shapes the bench measures, scaled down to what a unit test should
 /// write to disk. The shape mix is what matters here, not the magnitude.
@@ -194,6 +178,26 @@ const SHAPES: [(&str, i32, usize); 3] = [
     ("128rec_8B", 128, 8),
 ];
 
+struct ReplicaPair {
+    seam: ReplicaSeam,
+    production: Arc<Partition>,
+    seam_dir: TempDir,
+    _production_dir: TempDir,
+}
+
+fn replica_pair() -> ReplicaPair {
+    let seam_dir = tempfile::tempdir().expect("tempdir");
+    let production_dir = tempfile::tempdir().expect("tempdir");
+    let seam = ReplicaSeam::spawn(seam_dir.path()).expect("open the seam's follower log");
+    let production = production_partition(&production_dir);
+    ReplicaPair {
+        seam,
+        production,
+        seam_dir,
+        _production_dir: production_dir,
+    }
+}
+
 /// Every field the seam's struct literal fills in holds the value the broker's
 /// own constructor puts there.
 ///
@@ -201,19 +205,17 @@ const SHAPES: [(&str, i32, usize); 3] = [
 /// any difference in this comparison is a difference the seam introduced.
 #[tokio::test]
 async fn the_seam_reconstructs_the_partition_the_broker_spawns() {
-    let seam_dir = tempfile::tempdir().expect("tempdir");
-    let production_dir = tempfile::tempdir().expect("tempdir");
-
-    let seam = ReplicaSeam::spawn(seam_dir.path()).expect("open the seam's follower log");
-    let production = production_partition(&production_dir);
+    let pair = replica_pair();
+    let seam = &pair.seam;
+    let production = &pair.production;
 
     let expected = PartitionShape {
         // The two partitions live in different temp directories, and the
         // writer-queue depth is the documented divergence above. Everything
         // else has to match.
-        log_dir: seam_dir.path().to_path_buf(),
+        log_dir: pair.seam_dir.path().to_path_buf(),
         writer_queue_depth: SEAM_WRITER_QUEUE_DEPTH,
-        ..shape(&production).await
+        ..shape(production).await
     };
 
     assert!(shape(&seam.partition).await == expected);
@@ -228,11 +230,9 @@ async fn the_seam_reconstructs_the_partition_the_broker_spawns() {
 #[tokio::test]
 async fn the_seam_replicates_the_bytes_the_broker_partition_replicates() {
     for (name, records, payload) in SHAPES {
-        let seam_dir = tempfile::tempdir().expect("tempdir");
-        let production_dir = tempfile::tempdir().expect("tempdir");
-
-        let seam = ReplicaSeam::spawn(seam_dir.path()).expect("open the seam's follower log");
-        let production = production_partition(&production_dir);
+        let pair = replica_pair();
+        let seam = &pair.seam;
+        let production = &pair.production;
 
         for _ in 0..3 {
             let template = make_batch(records, payload);
@@ -252,7 +252,7 @@ async fn the_seam_replicates_the_bytes_the_broker_partition_replicates() {
         }
 
         assert!(
-            log_image(&seam.partition) == log_image(&production),
+            log_image(&seam.partition) == log_image(production),
             "{}",
             name
         );

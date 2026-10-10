@@ -455,7 +455,7 @@ mod tests {
                     port: 9,
                     protocol: ListenerProtocol::Plaintext,
                 }],
-                ..crate::test_support::broker_registration(2)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
             },
         ));
         let err = send_test_markers(&image, NodeId(2), "INTERNAL")
@@ -485,7 +485,7 @@ mod tests {
                     port: 65000,
                     protocol: ListenerProtocol::Plaintext,
                 }],
-                ..crate::test_support::broker_registration(2)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
             },
         ));
         let err = send_test_markers(&image, NodeId(2), "INTERNAL")
@@ -535,7 +535,7 @@ mod tests {
                     port,
                     protocol: ListenerProtocol::Ssl,
                 }],
-                ..crate::test_support::broker_registration(2)
+                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
             },
         ));
         let tls = ClientConfig::builder()

@@ -27,6 +27,56 @@ pub(super) fn configured_authorizer() -> Arc<dyn Authorizer> {
     ))
 }
 
+/// The matching orders ACL shared by live ACL handler fixtures.
+pub(super) fn alice_orders_acl() -> AclEntry {
+    crate::test_support::allow_acl(crate::test_support::AllowAclSetup::default())
+}
+
+/// Independent wire oracle for a successful deletion of the standard orders ACL.
+pub(super) fn expected_deleted_orders_acl()
+-> krabka_protocol::owned::delete_acls_response::DeleteAclsMatchingAcl {
+    tagged_wire!(
+        krabka_protocol::owned::delete_acls_response::DeleteAclsMatchingAcl {
+            error_code: crate::codes::NONE,
+            error_message: None,
+            resource_type: RESOURCE_TYPE_TOPIC,
+            resource_name: "orders".into(),
+            pattern_type: PATTERN_TYPE_LITERAL,
+            principal: "User:alice".into(),
+            host: "*".into(),
+            operation: OPERATION_READ,
+            permission_type: PERMISSION_ALLOW,
+        }
+    )
+}
+
+/// Retain the broker and directory while the unconfigured authorizer's ACL is seeded.
+macro_rules! security_disabled_acl_fixture {
+    ($bindings:tt) => {
+        seeded_acl_fixture!(
+            $bindings,
+            crate::test_support::start_broker_with_authorizer_no_audit(std::sync::Arc::new(
+                crate::authorizer::AllowAllAuthorizer
+            )),
+            vec![crate::handlers::acl_test_support::alice_orders_acl()],
+            "admin"
+        );
+    };
+}
+
+/// Two independent topic ACLs for matching and deletion fixtures.
+pub(super) fn orders_payments_acls() -> Vec<AclEntry> {
+    vec![
+        alice_orders_acl(),
+        crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+            resource_name: "payments",
+            principal: "User:bob",
+            operation: krabka_metadata::AclOperation::Write,
+            ..Default::default()
+        }),
+    ]
+}
+
 pub(super) async fn seed_acls(handle: &BrokerHandle, entries: Vec<AclEntry>) {
     handle
         .broker_arc_for_test()

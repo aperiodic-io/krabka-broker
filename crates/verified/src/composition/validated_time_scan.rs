@@ -1,7 +1,7 @@
 use creusot_std::prelude::*;
 
 #[cfg(creusot)]
-use super::timestamp::time_archive_valid;
+use super::timestamp::{time_archive_valid, time_cursor_matches};
 use super::{
     indexed_timestamp_scan_finds_first, remote_timestamp_scan_preserves_first,
     validated_remote_and_local_time_starts_agree,
@@ -33,8 +33,7 @@ fn time_scan_input_valid(
 #[ensures(match result {
     Err(()) => !time_scan_input_valid(entries@, offsets@, times@, max_relative@),
     Ok((count, remote, local, selected)) => time_scan_input_valid(entries@, offsets@, times@, max_relative@)
-        && remote == local && count@ <= entries@.len()
-        && remote == if count@ == 0 { 0u32 } else { entries@[count@ - 1].1 }
+        && time_cursor_matches(entries@, (count, remote, local))
         && super::timestamp::timestamp_archive_prefix(entries@, target@, count@)
         && (forall<i: Int> 0 <= i && i < offsets@.len() && offsets@[i]@ < remote@ ==> times@[i]@ < target@)
         && match selected {

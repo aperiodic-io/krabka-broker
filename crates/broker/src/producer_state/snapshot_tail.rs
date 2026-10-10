@@ -1,7 +1,6 @@
 use assert2::assert;
 use krabka_ids::PartitionIndex;
 use krabka_log::{Log, LogConfig, Offset};
-use krabka_protocol::records::{Record, RecordBatch};
 use krabka_units::prelude::bytes;
 
 use super::{Checked, Decision, ProducerState, RetainedBatch, SequenceContext};
@@ -24,41 +23,32 @@ pub(super) async fn check(
         .await
 }
 
-fn batch(pid: i64, sequence: i32, delta: i32) -> RecordBatch {
-    RecordBatch {
-        producer_id: pid,
-        producer_epoch: 7,
-        base_sequence: sequence,
-        last_offset_delta: delta,
-        records: (0..=delta)
-            .map(|offset_delta| Record {
-                offset_delta,
-                ..Record::default()
-            })
-            .collect(),
-        ..RecordBatch::default()
-    }
-}
+use super::test_support::{
+    ProducerBatchSetup, ProducerSequence, SequenceDelta, opened_log, producer_batch as batch,
+};
 
 #[tokio::test]
 async fn reopening_rebuilds_only_the_snapshot_seed_and_uncovered_tail() {
     for count in 0..=7 {
-        let dir = tempfile::tempdir().unwrap();
-        let config = LogConfig::default();
-        let mut log = Log::open(dir.path(), config.clone()).unwrap();
-        log.append(&mut batch(42, 0, 0)).unwrap();
-        log.append(&mut batch(42, 1, 0)).unwrap();
+        let (dir, config, mut log) = opened_log();
+        log.append(&mut batch(ProducerBatchSetup::default()))
+            .unwrap();
+        log.append(&mut batch(ProducerBatchSetup {
+            sequence: ProducerSequence(1),
+            ..Default::default()
+        }))
+        .unwrap();
         log.take_producer_snapshot().unwrap();
         for sequence in 2..2 + count {
-            log.append(&mut batch(42, sequence, 0)).unwrap();
+            log.append(&mut batch(ProducerBatchSetup {
+                sequence: ProducerSequence(sequence),
+                ..Default::default()
+            }))
+            .unwrap();
         }
         drop(log);
         let reopened = Log::open(dir.path(), config).unwrap();
-        let state = ProducerState::new();
-        state
-            .rebuild_from_log("t", PartitionIndex(0), &reopened)
-            .await
-            .unwrap();
+        let state = rebuilt(&reopened).await;
         // The older covered batch still exists, but the snapshot stores only
         // the last batch and replay begins after both covered batches.
         let covered = check(&state, (42, 7), (0, 0)).await;
@@ -116,29 +106,53 @@ async fn a_surviving_snapshot_preserves_a_retry_below_the_local_floor() {
         ..LogConfig::default()
     };
     let mut log = Log::open(dir.path(), config.clone()).unwrap();
-    log.append(&mut batch(42, 0, 1)).unwrap();
-    log.append(&mut batch(99, 0, 0)).unwrap();
+    log.append(&mut batch(ProducerBatchSetup {
+        delta: SequenceDelta(1),
+        ..Default::default()
+    }))
+    .unwrap();
+    log.append(&mut batch(ProducerBatchSetup {
+        producer: krabka_log::ProducerId(99),
+        ..Default::default()
+    }))
+    .unwrap();
     log.take_producer_snapshot().unwrap();
     assert!(log.trim_to_offset(Offset(2)).unwrap() == Offset(2));
     drop(log);
     let reopened = Log::open(dir.path(), config).unwrap();
     assert!(reopened.log_start_offset() == Offset(2));
     assert!(reopened.local_log_start_offset() == Offset(2));
+    let state = rebuilt(&reopened).await;
+    let checked = check(&state, (42, 7), (0, 1)).await;
+    check_duplicate(&checked, (0, 1), (0, 1));
+}
+
+/// Rebuild partition t-0's producer state from the current log.
+pub(super) async fn rebuilt(log: &Log) -> ProducerState {
     let state = ProducerState::new();
     state
-        .rebuild_from_log("t", PartitionIndex(0), &reopened)
+        .rebuild_from_log("t", PartitionIndex(0), log)
         .await
         .unwrap();
-    let checked = check(&state, (42, 7), (0, 1)).await;
-    assert!(checked.decision == Decision::Duplicate { base_offset: 0 });
+    state
+}
+
+/// Assert the complete retained-batch witness for a duplicate retry.
+pub(super) fn check_duplicate(checked: &Checked, sequence: (i32, i32), offsets: (i64, i64)) {
+    assert!(
+        checked.decision
+            == Decision::Duplicate {
+                base_offset: offsets.0
+            }
+    );
     assert!(
         checked.duplicate
             == Some(RetainedBatch {
-                base_sequence: 0,
-                last_sequence: 1,
-                base_offset: 0,
-                last_offset: 1,
-                timestamp: 0
+                base_sequence: sequence.0,
+                last_sequence: sequence.1,
+                base_offset: offsets.0,
+                last_offset: offsets.1,
+                timestamp: 0,
             })
     );
 }

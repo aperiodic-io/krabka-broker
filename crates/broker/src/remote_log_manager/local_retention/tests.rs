@@ -16,6 +16,7 @@ use crate::{
             synth_export, three_exports, tier, tp,
         },
     },
+    test_support::UnixMillis,
     time_util::now_ms,
 };
 
@@ -67,7 +68,7 @@ struct RollCase {
 // 10 000 ms.
 #[test]
 fn the_walk_rolls_a_breached_active_segment_only_where_kafka_would() {
-    let two_sealed = || vec![synth_export(0, 9, 100, 100), synth_export(10, 19, 200, 100)];
+    let two_sealed = || fixtures::two_exports_with_size(bytes(100));
     let cases = [
         RollCase {
             label: "a lone active segment past the window rolls",
@@ -138,8 +139,15 @@ fn the_walk_rolls_a_breached_active_segment_only_where_kafka_would() {
         timed_active_case(
             "a sealed segment inside the window stops the walk",
             vec![
-                synth_export(0, 9, 100, 100),
-                synth_export(10, 19, 9_500, 100),
+                synth_export(fixtures::SegmentExportSetup {
+                    size: bytes(100),
+                    ..Default::default()
+                }),
+                synth_export(fixtures::SegmentExportSetup {
+                    bounds: Offset(10)..=Offset(19),
+                    timestamp: UnixMillis(9_500),
+                    size: bytes(100),
+                }),
             ],
             Some(19),
             LocalRetentionDecision {
@@ -256,7 +264,11 @@ fn a_future_timestamp_is_aged_by_the_file_only_under_the_unstable_flag() {
     ] {
         let exports = vec![SegmentExport {
             last_modified_ms,
-            ..synth_export(0, 9, max_timestamp, 100)
+            ..synth_export(fixtures::SegmentExportSetup {
+                timestamp: UnixMillis(max_timestamp),
+                size: bytes(100),
+                ..Default::default()
+            })
         }];
         let local = LocalSegments {
             sealed: &exports,
@@ -286,7 +298,11 @@ fn a_future_timestamp_is_aged_by_the_file_only_under_the_unstable_flag() {
 
 #[test]
 fn maximum_retention_window_keeps_the_host_time_comparison() {
-    let exports = vec![synth_export(0, 9, 0, 100)];
+    let exports = vec![synth_export(fixtures::SegmentExportSetup {
+        timestamp: UnixMillis(0),
+        size: bytes(100),
+        ..Default::default()
+    })];
 
     check!(
         local_retention_target(
@@ -303,9 +319,17 @@ fn maximum_retention_window_keeps_the_host_time_comparison() {
 #[test]
 fn local_retention_target_time_based_eviction() {
     let exports = vec![
-        synth_export(0, 9, 100, 64),
-        synth_export(10, 19, 200, 64),
-        synth_export(20, 29, 5_000, 64),
+        synth_export(fixtures::SegmentExportSetup::default()),
+        synth_export(fixtures::SegmentExportSetup {
+            bounds: Offset(10)..=Offset(19),
+            timestamp: UnixMillis(200),
+            ..Default::default()
+        }),
+        synth_export(fixtures::SegmentExportSetup {
+            bounds: Offset(20)..=Offset(29),
+            timestamp: UnixMillis(5_000),
+            ..Default::default()
+        }),
     ];
     // now=1000, retention=500ms → segs with max_ts<500 are deletable.
     // Only seg0 (max_ts=100) and seg1 (max_ts=200) qualify; seg2 stops it.
@@ -328,9 +352,20 @@ fn local_retention_target_time_based_eviction() {
 #[test]
 fn local_retention_target_size_based_eviction() {
     let exports = vec![
-        synth_export(0, 9, 100, 100),
-        synth_export(10, 19, 200, 100),
-        synth_export(20, 29, 300, 100),
+        synth_export(fixtures::SegmentExportSetup {
+            size: bytes(100),
+            ..Default::default()
+        }),
+        synth_export(fixtures::SegmentExportSetup {
+            bounds: Offset(10)..=Offset(19),
+            timestamp: UnixMillis(200),
+            size: bytes(100),
+        }),
+        synth_export(fixtures::SegmentExportSetup {
+            bounds: Offset(20)..=Offset(29),
+            timestamp: UnixMillis(300),
+            size: bytes(100),
+        }),
     ];
     let cases = [
         ("200 over deletes two", bytes(150), Some(20)),
@@ -350,7 +385,7 @@ fn local_retention_target_size_based_eviction() {
 
 #[test]
 fn local_retention_target_equal_size_budget_keeps_all_segments() {
-    let exports = vec![synth_export(0, 9, 100, 100), synth_export(10, 19, 200, 100)];
+    let exports = fixtures::two_exports_with_size(bytes(100));
     let target = local_retention_target(
         &exports,
         Some(19),
@@ -455,8 +490,15 @@ fn a_local_segment_the_tier_covers_only_in_part_is_not_droppable() {
     // 100..=199, which no remote segment holds; a failover in that window
     // would lose acknowledged records.
     let exports = vec![
-        synth_export(0, 199, 100, 64),
-        synth_export(200, 399, 200, 64),
+        synth_export(fixtures::SegmentExportSetup {
+            bounds: Offset(0)..=Offset(199),
+            ..Default::default()
+        }),
+        synth_export(fixtures::SegmentExportSetup {
+            bounds: Offset(200)..=Offset(399),
+            timestamp: UnixMillis(200),
+            ..Default::default()
+        }),
     ];
     let covered = remote_covered_through(&[(0, 99)], 0);
     check!(covered == Some(99));
@@ -477,7 +519,10 @@ fn a_local_segment_the_tier_covers_only_in_part_is_not_droppable() {
 
 #[test]
 fn local_retention_target_rejects_exhausted_offset() {
-    let exports = vec![synth_export(0, i64::MAX, 100, 64)];
+    let exports = vec![synth_export(fixtures::SegmentExportSetup {
+        bounds: Offset(0)..=Offset(i64::MAX),
+        ..Default::default()
+    })];
 
     assert!(
         local_retention_target(

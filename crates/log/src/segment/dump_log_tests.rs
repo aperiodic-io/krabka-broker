@@ -131,7 +131,11 @@ const BATCHES: [(i64, i32, i64); 5] = [
 ];
 
 fn encoded(base_offset: i64, records: i32, timestamp: i64) -> (RecordBatch, bytes::Bytes) {
-    let batch = sample_batch(base_offset, records, timestamp);
+    let batch = sample_batch(crate::segment::test_support::SampleBatchSetup {
+        offset: crate::Offset(base_offset),
+        records: crate::segment::test_support::RecordCount(records),
+        timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+    });
     let mut wire = BytesMut::new();
     batch.encode(&mut wire).unwrap();
     (batch, wire.freeze())
@@ -140,7 +144,14 @@ fn encoded(base_offset: i64, records: i32, timestamp: i64) -> (RecordBatch, byte
 fn write_all_encoded(segment: &mut Segment, interval: ByteSize) {
     for (base, records, timestamp) in BATCHES {
         segment
-            .append(&sample_batch(base, records, timestamp), interval)
+            .append(
+                &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                    offset: crate::Offset(base),
+                    records: crate::segment::test_support::RecordCount(records),
+                    timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+                }),
+                interval,
+            )
             .unwrap();
     }
 }
@@ -240,7 +251,9 @@ fn recovery_rebuilds_the_indexes_the_append_wrote() {
 /// offsets that get an entry)`, over five one-record batches of one size.
 #[test]
 fn the_index_takes_an_entry_only_once_more_than_the_interval_was_written() {
-    let size = u64::try_from(sample_batch(0, 1, 100).encoded_len()).unwrap();
+    let size =
+        u64::try_from(sample_batch(crate::segment::test_support::ONE_RECORD_BATCH).encoded_len())
+            .unwrap();
     let cases: [(&str, u64, Vec<u32>); 4] = [
         (
             "an interval of one batch skips a batch exactly that far",
@@ -270,7 +283,14 @@ fn the_index_takes_an_entry_only_once_more_than_the_interval_was_written() {
             let mut segment = Segment::create(dir.path(), Offset(0)).unwrap();
             for offset in 0..5 {
                 segment
-                    .append(&sample_batch(offset, 1, 100 + offset), interval)
+                    .append(
+                        &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                            offset: crate::Offset(offset),
+                            timestamp: crate::segment::test_support::RecordTimestamp(100 + offset),
+                            ..Default::default()
+                        }),
+                        interval,
+                    )
                     .unwrap();
             }
         }
@@ -305,12 +325,26 @@ fn appends_after_a_truncation_keep_the_indexes_verifying() {
 
     // Older than the surviving maximum: no time entry, one offset entry.
     segment
-        .append(&sample_batch(6, 2, 150), DENSE_INDEX)
+        .append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                offset: crate::Offset(6),
+                records: crate::segment::test_support::RecordCount(2),
+                timestamp: crate::segment::test_support::RecordTimestamp(150),
+            }),
+            DENSE_INDEX,
+        )
         .unwrap();
     assert2::assert!(time_entries(dir.path(), 0) == vec![(102, 2), (201, 5)]);
     // Newer: the entry names the new batch's last offset.
     segment
-        .append(&sample_batch(8, 2, 400), DENSE_INDEX)
+        .append(
+            &sample_batch(crate::segment::test_support::SampleBatchSetup {
+                offset: crate::Offset(8),
+                records: crate::segment::test_support::RecordCount(2),
+                timestamp: crate::segment::test_support::RecordTimestamp(400),
+            }),
+            DENSE_INDEX,
+        )
         .unwrap();
     assert2::assert!(time_entries(dir.path(), 0) == vec![(102, 2), (201, 5), (401, 9)]);
     assert2::assert!(dump_log_problems(dir.path(), 0) == Vec::<String>::new());

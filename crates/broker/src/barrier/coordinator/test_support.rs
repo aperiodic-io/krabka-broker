@@ -38,11 +38,23 @@ fn config() -> BarrierConfig {
     }
 }
 
-pub(crate) fn spec(topics: &[&str], interval: Option<Time>, retained_cuts: i32) -> GroupSpec {
+#[derive(Clone, Copy)]
+pub(crate) struct RetainedCutCount(pub i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct GroupSpecSetup<'a> {
+    #[default(&["orders"])]
+    pub(crate) topics: &'a [&'a str],
+    pub(crate) interval: Option<Time>,
+    #[default(RetainedCutCount(4))]
+    pub(crate) retained_cuts: RetainedCutCount,
+}
+
+pub(crate) fn spec(setup: GroupSpecSetup<'_>) -> GroupSpec {
     GroupSpec {
-        topics: topics.iter().map(|t| (*t).to_owned()).collect(),
-        interval,
-        retained_cuts,
+        topics: setup.topics.iter().map(|t| (*t).to_owned()).collect(),
+        interval: setup.interval,
+        retained_cuts: setup.retained_cuts.0,
     }
 }
 
@@ -75,11 +87,27 @@ impl Fixture {
         let dir = tempdir().expect("tempdir");
         let registry = Arc::new(PartitionRegistry::new());
         for p in 0..4 {
-            open_partition(&registry, dir.path(), STATE_TOPIC, p);
+            open_partition(
+                &registry,
+                dir.path(),
+                crate::test_support::StandalonePartitionSetup {
+                    topic: STATE_TOPIC,
+                    partition: krabka_ids::PartitionIndex(p),
+                    ..Default::default()
+                },
+            );
         }
         for (topic, count) in data {
             for p in 0..*count {
-                open_partition(&registry, dir.path(), topic, p);
+                open_partition(
+                    &registry,
+                    dir.path(),
+                    crate::test_support::StandalonePartitionSetup {
+                        topic,
+                        partition: krabka_ids::PartitionIndex(p),
+                        ..Default::default()
+                    },
+                );
             }
         }
         Self {

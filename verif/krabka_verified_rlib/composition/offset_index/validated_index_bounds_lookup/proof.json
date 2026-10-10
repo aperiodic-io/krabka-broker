@@ -12,7 +12,7 @@
         "prover": "alt-ergo",
         "time": 0.019
       },
-      "vc_validated_index_bounds_lookup": { "prover": "z3", "time": 0.03 }
+      "vc_validated_index_bounds_lookup": { "prover": "z3", "time": 0.063 }
     }
   }
 }

@@ -4,6 +4,33 @@ use std::collections::BTreeSet;
 
 use crate::{Action, Epoch, Event, LogEnd, NodeId, QuorumStateMachine, Role, SimInstant};
 
+/// Stop after two timer rounds leave the cluster fingerprint unchanged.
+pub struct StableFingerprint<F> {
+    previous: F,
+    unchanged: u32,
+}
+
+impl<F: PartialEq> StableFingerprint<F> {
+    #[must_use]
+    pub fn new(previous: F) -> Self {
+        Self {
+            previous,
+            unchanged: 0,
+        }
+    }
+
+    /// Observe this round and report whether two consecutive rounds were stable.
+    pub fn observe(&mut self, fingerprint: F) -> bool {
+        if fingerprint == self.previous {
+            self.unchanged = self.unchanged.saturating_add(1);
+        } else {
+            self.unchanged = 0;
+            self.previous = fingerprint;
+        }
+        self.unchanged >= 2
+    }
+}
+
 /// Static simulator voters have no directory identity or network endpoints.
 #[must_use]
 pub fn voter_set(ids: &[NodeId]) -> krabka_voters::VoterSet {

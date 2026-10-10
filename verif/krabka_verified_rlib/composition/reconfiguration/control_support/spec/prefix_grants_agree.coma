@@ -1,18 +1,18 @@
-(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 76 0 86 1 *)
+(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 78 0 88 1 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
-let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 75 10 75 15
-let%span sspec'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 69 11 69 77
-let%span sspec'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 70 11 71 80
-let%span sspec'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 72 11 72 59
-let%span sspec'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 73 10 74 62
+let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 77 10 77 15
+let%span sspec'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 71 11 71 77
+let%span sspec'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 72 11 73 80
+let%span sspec'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 74 11 74 59
+let%span sspec'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 75 10 76 62
 let%span sspec'4 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 149 16 149 113
 let%span sspec'5 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 82 10 82 15
 let%span sspec'6 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 91 16 98 5
-let%span sspec'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 25 10 25 15
-let%span sspec'8 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 35 16 44 5
+let%span sspec'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 27 10 27 15
+let%span sspec'8 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 37 16 46 5
 let%span sspec'9 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 33 16 33 70
 let%span sspec'10 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 63 16 67 5
 
@@ -69,7 +69,7 @@ axiom grant_count_def:
       )
     )
 
-function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 26 0 34 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
+function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 28 0 36 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
 
 axiom prefix_count_def:
   forall old': Seq.seq UInt64.t, reports: Seq.seq tup2_i64_i64, kind: t_VoterChangeKind, node: UInt64.t, end': int, new: bool, count: int [prefix_count old' reports kind node end' new count]. prefix_count old' reports kind node end' new count
@@ -130,7 +130,7 @@ constant new : bool
 
 constant count : int
 
-function prefix_grants_agree [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 76 0 86 1] (old': Seq.seq UInt64.t) (next: Seq.seq UInt64.t) (votes: Seq.seq tup2_bool_bool) (reports: Seq.seq tup2_i64_i64) (kind: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : ()
+function prefix_grants_agree [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 78 0 88 1] (old': Seq.seq UInt64.t) (next: Seq.seq UInt64.t) (votes: Seq.seq tup2_bool_bool) (reports: Seq.seq tup2_i64_i64) (kind: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : ()
 
 goal vc_prefix_grants_agree: ([%#sspec'0] 0 <= count
     /\ count <= Seq.length votes /\ Seq.length votes = Seq.length reports)

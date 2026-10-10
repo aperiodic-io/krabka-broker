@@ -3,16 +3,11 @@
 //! controller implementation because every controller-only operation here is a
 //! deliberate refusal rather than a delegation.
 
-use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
-
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_raft::{
-    AddVoter, DelegationTokenMutation, Node, NodeId, QuorumState, RaftError, ReconfigOutcome,
-    RemoveVoter, SnapshotRange, SubmitChangeResult, UpdateVoter,
+use super::{
+    AddVoter, Arc, BTreeSet, DelegationTokenMutation, MetadataImage, MetadataRecord,
+    MetadataSource, MetadataWriter, Node, NodeId, QuorumState, RaftError, ReconfigOutcome,
+    RemoveVoter, SnapshotRange, SocketAddr, SubmitChangeResult, UpdateVoter, watch,
 };
-use tokio::sync::watch;
-
-use super::{MetadataSource, MetadataWriter};
 use crate::metadata_observer::MetadataObserver;
 
 /// Broker-only metadata source: reads from a [`MetadataObserver`], writes
@@ -141,14 +136,13 @@ impl MetadataSource for ObserverSource {
 mod tests {
     use std::sync::Mutex;
 
-    use krabka_raft::{BootstrapMode, Controller, ControllerConfig};
     use tempfile::TempDir;
     use uuid::Uuid;
 
     use super::*;
     use crate::{
         metadata_observer::test_support::observer_config,
-        metadata_source::test_support::{topic_record, wait_for_controller_leader},
+        metadata_source::test_support::topic_record,
     };
 
     struct RecordingWriter {
@@ -225,13 +219,7 @@ mod tests {
 
     #[tokio::test]
     async fn observer_source_reports_the_replicated_metadata_offset() {
-        let dir = TempDir::new().unwrap();
-        let cfg = ControllerConfig {
-            bootstrap_mode: BootstrapMode::Bootstrap,
-            ..ControllerConfig::for_tests(NodeId(1), dir.path().to_path_buf())
-        };
-        let ctrl = Controller::start(cfg).await.expect("controller");
-        wait_for_controller_leader(&ctrl).await;
+        let (_dir, ctrl) = crate::metadata_source::test_support::start_controller().await;
         ctrl.submit_change(vec![topic_record("observed-through-source")])
             .await
             .expect("submit metadata");

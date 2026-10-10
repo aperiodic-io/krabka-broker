@@ -40,7 +40,6 @@ use support::cluster_lock;
 
 use crate::support::{
     client::connect_client,
-    produce::single_partition_produce,
     records::{batch_from_records, value_record},
     topics::creatable_topic,
 };
@@ -81,12 +80,14 @@ async fn produce_one(
     value: &str,
 ) -> (i16, i32, Vec<NodeEndpoint>) {
     let resp = client
-        .send(single_partition_produce(
-            topic,
-            topic_id,
-            partition,
-            Some(one_record_batch(value).into()),
-            (1, 5_000),
+        .send(crate::support::produce::batch_request(
+            one_record_batch(value),
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: (topic).into(),
+                topic_id,
+                partition: krabka_ids::PartitionIndex(partition),
+                ..Default::default()
+            },
         ))
         .await
         .expect("produce round-trip");
@@ -197,8 +198,16 @@ async fn produce_to_non_leader_is_rejected() {
     let cr = admin
         .send(CreateTopicsRequest {
             topics: vec![
-                creatable_topic("gate-rf3", 1, 3),
-                creatable_topic("gate-rf1", 6, 1),
+                creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+                    name: ("gate-rf3").into(),
+                    replicas: crate::support::topics::TopicReplicationFactor(3),
+                    ..Default::default()
+                }),
+                creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+                    name: ("gate-rf1").into(),
+                    partitions: crate::support::topics::TopicPartitionCount(6),
+                    ..Default::default()
+                }),
             ],
             timeout_ms: 5_000,
             ..Default::default()

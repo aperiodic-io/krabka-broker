@@ -57,40 +57,22 @@ fn main() -> Result<()> {
 
     if let Some(p) = &cli.csv {
         let csv = report::render_csv(&cli.input_dir, cli.strict)?;
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        std::fs::write(p, csv).with_context(|| format!("write csv to {}", p.display()))?;
-        println!("wrote {}", p.display());
+        write_report(p, csv, "csv")?;
     }
 
     if let Some(p) = &cli.timeseries_csv {
         let csv = report::render_timeseries_csv(&cli.input_dir, cli.strict)?;
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        std::fs::write(p, csv)
-            .with_context(|| format!("write timeseries csv to {}", p.display()))?;
-        println!("wrote {}", p.display());
+        write_report(p, csv, "timeseries csv")?;
     }
 
     if let Some(p) = &cli.html {
         let html = report::render_html(&cli.input_dir, cli.strict, &cli.title)?;
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        std::fs::write(p, html).with_context(|| format!("write html to {}", p.display()))?;
-        println!("wrote {}", p.display());
+        write_report(p, html, "html")?;
     }
 
     if let Some(p) = &cli.web_fragment {
         let frag = report::render_web_fragment(&cli.input_dir, cli.strict)?;
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        std::fs::write(p, frag)
-            .with_context(|| format!("write web fragment to {}", p.display()))?;
-        println!("wrote {}", p.display());
+        write_report(p, frag, "web fragment")?;
     }
 
     if cli.failover_gate {
@@ -108,5 +90,14 @@ fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn write_report(path: &std::path::Path, content: impl AsRef<[u8]>, kind: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(path, content).with_context(|| format!("write {kind} to {}", path.display()))?;
+    println!("wrote {}", path.display());
     Ok(())
 }

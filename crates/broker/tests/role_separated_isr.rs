@@ -15,8 +15,6 @@ use assert2::assert;
 use krabka_broker::{BootstrapMode, BrokerConfig, BrokerHandle, config::NodeRole};
 use tempfile::TempDir;
 
-use crate::support::topics::{creatable_topic, create_topic_request};
-
 mod support;
 
 /// A booted role-separated cluster: node 1 is the controller-only voter, and
@@ -44,20 +42,18 @@ impl RoleSeparated {
 /// the two broker-only nodes and waits until both are registered.
 async fn start_role_separated() -> RoleSeparated {
     const NODES: usize = 3;
-    let (client_addrs, controller_addrs, client_listeners, controller_listeners) =
-        support::bind_and_hold_ports(NODES).await;
-    let voters = [(1u64, controller_addrs[0])];
-    let topology = support::RoleTopology::new(&client_addrs, &controller_addrs, &voters);
-    let mut data_listeners = client_listeners.into_iter();
-    let mut ctrl_listeners = controller_listeners.into_iter();
+    let (endpoints, mut data_listeners, mut ctrl_listeners) =
+        support::single_controller_endpoints(NODES).await;
+    let topology = endpoints.topology();
     let mut dirs = Vec::with_capacity(NODES);
 
     let ctrl_dir = TempDir::new().unwrap();
     let ctrl_cfg = topology.config(
-        0,
         ctrl_dir.path(),
-        BootstrapMode::Bootstrap,
-        NodeRole::Controller,
+        crate::support::RoleNodeSetup {
+            role: NodeRole::Controller,
+            ..Default::default()
+        },
     );
     let controller = support::start_held_node(
         ctrl_cfg,
@@ -73,7 +69,14 @@ async fn start_role_separated() -> RoleSeparated {
     let mut broker_configs = Vec::with_capacity(NODES - 1);
     for index in 1..NODES {
         let dir = TempDir::new().unwrap();
-        let cfg = topology.config(index, dir.path(), BootstrapMode::Join, NodeRole::Broker);
+        let cfg = topology.config(
+            dir.path(),
+            crate::support::RoleNodeSetup {
+                index: crate::support::NodeIndex(index),
+                mode: BootstrapMode::Join,
+                ..Default::default()
+            },
+        );
         broker_configs.push(cfg.clone());
         brokers.push(
             support::start_held_node(
@@ -95,22 +98,6 @@ async fn start_role_separated() -> RoleSeparated {
     }
 }
 
-/// Creates `topic` with one partition on both broker-only nodes, through the
-/// client listener of `broker`.
-async fn create_replicated_topic(broker: &BrokerHandle, topic: &str) {
-    let client = crate::support::client::connect_with_context(
-        broker.listen_addr().to_string(),
-        None,
-        "client",
-    )
-    .await;
-    let resp = client
-        .send(create_topic_request(creatable_topic(topic, 1, 2), 5_000))
-        .await
-        .expect("CreateTopics");
-    assert!(resp.topics[0].error_code == 0, "{resp:?}");
-}
-
 /// The ISR of partition 0 of `topic` in the image of the controller, sorted.
 fn sorted_isr(cluster: &RoleSeparated, topic: &str) -> Vec<u64> {
     let mut isr = cluster
@@ -126,7 +113,15 @@ async fn a_restarted_follower_rejoins_the_isr_when_the_controller_is_controller_
     support::init_tracing();
     let topic = "rolesep-isr";
     let mut cluster = start_role_separated().await;
-    create_replicated_topic(&cluster.brokers[0], topic).await;
+    crate::support::client::create_topic_for_broker(
+        &cluster.brokers[0],
+        crate::support::topics::CreateTopicSetup {
+            topic,
+            replication_factor: crate::support::topics::TopicReplicationFactor(2),
+            ..Default::default()
+        },
+    )
+    .await;
     cluster.controller.wait_until_isr_len(topic, 0, 2).await;
     assert!(sorted_isr(&cluster, topic) == vec![2, 3]);
 

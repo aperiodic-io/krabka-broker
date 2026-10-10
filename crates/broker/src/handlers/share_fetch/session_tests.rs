@@ -46,13 +46,28 @@ async fn start(session_max: usize) -> (BrokerHandle, tempfile::TempDir) {
 
 /// Creates `topic` with `partitions` partitions and returns its id.
 async fn create_topic(broker: &BrokerHandle, topic: &str, partitions: i32) -> WireUuid {
-    crate::handlers::test_support::create_topic(broker, "share-session-test", topic, partitions)
-        .await
+    crate::handlers::test_support::create_topic(
+        broker,
+        crate::handlers::test_support::ClientTopicSetup {
+            client_id: "share-session-test",
+            name: topic,
+            partitions: crate::handlers::test_support::TopicPartitionCount(partitions),
+        },
+    )
+    .await
 }
 
 /// Appends three records to `partition` of `topic`.
 async fn produce(broker: &BrokerHandle, topic: &str, partition: i32) {
-    crate::handlers::test_support::produce_records(broker, topic, partition, 3).await;
+    crate::handlers::test_support::produce_records(
+        broker,
+        crate::handlers::test_support::ProduceRecordsSetup {
+            topic,
+            partition_index: krabka_ids::PartitionIndex(partition),
+            ..Default::default()
+        },
+    )
+    .await;
 }
 
 /// Starts `group` at the earliest offset of each partition of `topic_id`.
@@ -123,7 +138,15 @@ async fn share_fetch(broker: &BrokerHandle, fetch: &Fetch<'_>) -> ShareFetchResp
         },
         ..Default::default()
     };
-    crate::handlers::test_support::share_fetch_wire(broker, VERSION, &request).await
+    crate::handlers::test_support::share_fetch_wire(
+        broker,
+        &request,
+        crate::handlers::test_support::ShareWireSetup {
+            version: krabka_ids::ApiVersion(VERSION),
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 async fn states(broker: &BrokerHandle, group: &str, topic_id: WireUuid) -> Vec<RecordState> {
@@ -387,8 +410,15 @@ async fn the_acquire_mode_and_batch_size_shape_the_acquired_rows() {
             }],
             ..Default::default()
         };
-        let response =
-            crate::handlers::test_support::share_fetch_wire(&broker, version, &request).await;
+        let response = crate::handlers::test_support::share_fetch_wire(
+            &broker,
+            &request,
+            crate::handlers::test_support::ShareWireSetup {
+                version: krabka_ids::ApiVersion(version),
+                ..Default::default()
+            },
+        )
+        .await;
         let acquired: Vec<(i64, i64)> = response
             .responses
             .iter()

@@ -638,7 +638,7 @@ fn topic_partition(
 }
 
 #[cfg(test)]
-pub(crate) use copy_segment::{export_epoch_map, export_segment_data};
+pub(crate) use copy_segment::{ProducerSnapshotExport, export_epoch_map, export_segment_data};
 
 #[cfg(test)]
 mod tests {

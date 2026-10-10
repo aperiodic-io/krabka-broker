@@ -24,17 +24,30 @@ pub(super) async fn read_frame(socket: &mut TcpStream) -> std::io::Result<Vec<u8
     Ok(frame)
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) enum ResponseHeaderMode {
+    #[default]
+    Legacy,
+    Flexible,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct ResponseWireSetup {
+    pub version: krabka_ids::ApiVersion,
+    pub header: ResponseHeaderMode,
+}
+
 pub(super) async fn write_response(
     socket: &mut TcpStream,
     request: &[u8],
     response: &impl Encode,
-    version: i16,
-    flexible: bool,
+    setup: ResponseWireSetup,
 ) -> std::io::Result<()> {
     let mut body = bytes::BytesMut::new();
     response
-        .encode(&mut body, version)
+        .encode(&mut body, setup.version.0)
         .expect("encode response");
+    let flexible = matches!(setup.header, ResponseHeaderMode::Flexible);
     let length =
         u32::try_from(4 + usize::from(flexible) + body.len()).expect("response length fits u32");
     let mut frame = Vec::new();
@@ -49,7 +62,7 @@ pub(super) async fn write_response(
 
 pub(super) async fn negotiate_versions(
     socket: &mut TcpStream,
-    apis: &[(i16, i16)],
+    apis: &[(krabka_ids::ApiKey, krabka_ids::ApiVersion)],
 ) -> std::io::Result<()> {
     let request = read_frame(socket).await?;
     let response = ApiVersionsResponse {
@@ -57,15 +70,21 @@ pub(super) async fn negotiate_versions(
         api_keys: apis
             .iter()
             .map(|&(api_key, max_version)| ApiVersion {
-                api_key,
+                api_key: api_key.0,
                 min_version: 0,
-                max_version,
+                max_version: max_version.0,
                 ..Default::default()
             })
             .collect(),
         ..Default::default()
     };
-    write_response(socket, &request, &response, 0, false).await
+    write_response(
+        socket,
+        &request,
+        &response,
+        crate::auto_join::test_support::ResponseWireSetup::default(),
+    )
+    .await
 }
 
 pub(super) fn voter_update_params(addr: SocketAddr, leader: Option<NodeId>) -> AutoJoinParams {

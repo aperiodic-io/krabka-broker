@@ -239,6 +239,13 @@ mod tests {
         test_support::{Archive, PREFIX, VersionedStore, first_break_reason, put_entry, put_raw},
     };
 
+    async fn overwrite_log_body(archive: &Archive) {
+        let segment = &archive.segments[0];
+        let swapped: Vec<u8> = segment.log_body.iter().map(|b| b ^ 0xff).collect();
+        check!(swapped.len() == segment.log_body.len());
+        put_raw(&archive.ops, &segment.log_key, Bytes::from(swapped)).await;
+    }
+
     /// Overwriting a body on a versioned bucket does not remove the bytes the
     /// manifest recorded: it stacks a new current version over a locked one.
     /// The walk must still fail -- a reader gets the current version -- and the
@@ -254,9 +261,7 @@ mod tests {
         );
 
         // Same length, different bytes: the case only a deep run catches.
-        let swapped: Vec<u8> = segment.log_body.iter().map(|b| b ^ 0xff).collect();
-        check!(swapped.len() == segment.log_body.len());
-        put_raw(&archive.ops, &segment.log_key, Bytes::from(swapped)).await;
+        overwrite_log_body(&archive).await;
 
         let request = VerifyRequest {
             depth: VerifyDepth::Deep,
@@ -285,8 +290,7 @@ mod tests {
             "InMemory records no versions, which is the point of this row"
         );
 
-        let swapped: Vec<u8> = segment.log_body.iter().map(|b| b ^ 0xff).collect();
-        put_raw(&archive.ops, &segment.log_key, Bytes::from(swapped)).await;
+        overwrite_log_body(&archive).await;
 
         let request = VerifyRequest {
             depth: VerifyDepth::Deep,

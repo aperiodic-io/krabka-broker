@@ -221,7 +221,7 @@ mod tests {
                         port: 29092,
                         protocol: ListenerProtocol::Plaintext,
                     }],
-                    ..crate::test_support::broker_registration(42)
+                    ..crate::test_support::broker_registration(krabka_raft::NodeId(42))
                 },
             )])
             .await
@@ -410,12 +410,12 @@ mod tests {
             .broker_arc_for_test()
             .controller
             .submit_change(vec![MetadataRecord::V1AccessControlEntry(
-                crate::test_support::allow_acl(
-                    ResourceType::Cluster,
-                    CLUSTER_RESOURCE_NAME,
-                    "User:alice",
-                    AclOperation::AlterConfigs,
-                ),
+                crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+                    resource_type: ResourceType::Cluster,
+                    resource_name: CLUSTER_RESOURCE_NAME,
+                    operation: AclOperation::AlterConfigs,
+                    ..Default::default()
+                }),
             )])
             .await
             .expect("seed ACL");
@@ -483,7 +483,7 @@ mod tests {
                     protocol: ListenerProtocol::Plaintext,
                 })
                 .collect(),
-            ..crate::test_support::broker_registration(node_id)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
         }
     }
 

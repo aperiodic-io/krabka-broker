@@ -4,24 +4,12 @@
 //! A group record is the only record kind whose value carries an interval, so
 //! it is the only one that touches the millisecond conversion for [`Time`].
 
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{
-        array::put_array_len,
-        fixed::{get_i32, get_i64, put_i16, put_i32, put_i64},
-        string_bytes::get_string_owned,
-    },
-};
 use krabka_units::{
     Time,
     convert::wire::{opt_time_from_millis_i64, opt_time_to_millis_i64},
 };
 
-use super::{
-    RECORD_VERSION,
-    primitives::{decode_vec, expect_end, expect_version},
-};
-use crate::{coordinator::unified::persistence::put_string, error::BrokerError};
+use super::primitives as codec;
 
 /// A barrier group definition.
 ///
@@ -43,35 +31,35 @@ pub(crate) struct GroupValue {
 /// Encode a group definition.
 ///
 /// # Errors
-/// Returns [`BrokerError::Protocol`] when a topic name is longer than 32767
+/// Returns [`codec::BrokerError::Protocol`] when a topic name is longer than 32767
 /// bytes, which the `i16` length cannot carry.
-pub(crate) fn encode_group(value: &GroupValue) -> Result<Vec<u8>, BrokerError> {
+pub(crate) fn encode_group(value: &GroupValue) -> Result<Vec<u8>, codec::BrokerError> {
     let mut out = Vec::new();
-    put_i16(&mut out, RECORD_VERSION);
-    put_array_len(&mut out, value.topics.len(), false);
+    codec::put_i16(&mut out, codec::RECORD_VERSION);
+    codec::put_array_len(&mut out, value.topics.len(), false);
     for topic in &value.topics {
-        put_string(&mut out, topic)?;
+        codec::put_string(&mut out, topic)?;
     }
-    put_i64(&mut out, opt_time_to_millis_i64(value.interval));
-    put_i32(&mut out, value.retained_cuts);
-    put_i64(&mut out, value.last_epoch);
+    codec::put_i64(&mut out, opt_time_to_millis_i64(value.interval));
+    codec::put_i32(&mut out, value.retained_cuts);
+    codec::put_i64(&mut out, value.last_epoch);
     Ok(out)
 }
 
 /// Decode a group definition.
 ///
 /// # Errors
-/// Returns a [`ProtocolError`] when the value is truncated, carries a version
-/// other than [`RECORD_VERSION`], holds a negative array length, holds a
+/// Returns a [`codec::ProtocolError`] when the value is truncated, carries a version
+/// other than [`codec::RECORD_VERSION`], holds a negative array length, holds a
 /// non-UTF-8 topic name, or has trailing bytes.
-pub(crate) fn decode_group(bytes: &[u8]) -> Result<GroupValue, ProtocolError> {
+pub(crate) fn decode_group(bytes: &[u8]) -> Result<GroupValue, codec::ProtocolError> {
     let mut cur = bytes;
-    expect_version(&mut cur)?;
-    let topics = decode_vec(&mut cur, |c| get_string_owned(c))?;
-    let interval = opt_time_from_millis_i64(get_i64(&mut cur)?);
-    let retained_cuts = get_i32(&mut cur)?;
-    let last_epoch = get_i64(&mut cur)?;
-    expect_end(cur)?;
+    codec::expect_version(&mut cur)?;
+    let topics = codec::decode_vec(&mut cur, |c| codec::get_string_owned(c))?;
+    let interval = opt_time_from_millis_i64(codec::get_i64(&mut cur)?);
+    let retained_cuts = codec::get_i32(&mut cur)?;
+    let last_epoch = codec::get_i64(&mut cur)?;
+    codec::expect_end(cur)?;
     Ok(GroupValue {
         topics,
         interval,

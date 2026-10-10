@@ -323,15 +323,30 @@ mod tests {
     fn update_indexes_literals_and_resolved_hosts() {
         let names = IpNames::default();
         let image = image_with_quotas(vec![
-            quota_record(
-                vec![("ip", Some("0:0:0:0:0:0:0:1"))],
-                "connection_creation_rate",
-                1.0,
-            ),
-            quota_record(vec![("ip", Some("::1"))], "connection_creation_rate", 2.0),
-            quota_record(vec![("ip", Some("db"))], "connection_creation_rate", 3.0),
-            quota_record(vec![("ip", None)], "connection_creation_rate", 4.0),
-            quota_record(vec![("user", Some("alice"))], "producer_byte_rate", 5.0),
+            quota_record(crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("ip", Some("0:0:0:0:0:0:0:1"))],
+                key: "connection_creation_rate",
+                value: crate::quota::test_support::QuotaValue(1.0),
+            }),
+            quota_record(crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("ip", Some("::1"))],
+                key: "connection_creation_rate",
+                value: crate::quota::test_support::QuotaValue(2.0),
+            }),
+            quota_record(crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("ip", Some("db"))],
+                key: "connection_creation_rate",
+                value: crate::quota::test_support::QuotaValue(3.0),
+            }),
+            quota_record(crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("ip", None)],
+                key: "connection_creation_rate",
+                value: crate::quota::test_support::QuotaValue(4.0),
+            }),
+            quota_record(crate::quota::test_support::QuotaRecordSetup {
+                value: crate::quota::test_support::QuotaValue(5.0),
+                ..Default::default()
+            }),
         ]);
         let localhost = IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]);
         let db = IpAddr::from([10, 0, 0, 9]);
@@ -362,9 +377,16 @@ mod tests {
     #[test]
     fn update_forgets_a_host_whose_entity_is_gone() {
         let names = IpNames::default();
-        let with_host = image_with_quota(vec![("ip", Some("db"))], "connection_creation_rate", 1.0);
-        let without =
-            image_with_quota(vec![("ip", Some("other"))], "connection_creation_rate", 1.0);
+        let with_host = image_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            entity: vec![("ip", Some("db"))],
+            key: "connection_creation_rate",
+            value: crate::quota::test_support::QuotaValue(1.0),
+        });
+        let without = image_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            entity: vec![("ip", Some("other"))],
+            key: "connection_creation_rate",
+            value: crate::quota::test_support::QuotaValue(1.0),
+        });
         let db = IpAddr::from([10, 0, 0, 9]);
 
         names.insert_host("db", db);
@@ -379,11 +401,11 @@ mod tests {
     #[tokio::test]
     async fn resolve_maps_a_host_name_to_an_address_the_resolver_returns() {
         let names = IpNames::default();
-        let image = image_with_quota(
-            vec![("ip", Some("localhost"))],
-            "connection_creation_rate",
-            1.0,
-        );
+        let image = image_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            entity: vec![("ip", Some("localhost"))],
+            key: "connection_creation_rate",
+            value: crate::quota::test_support::QuotaValue(1.0),
+        });
         let unresolved = names.update(&image);
         names
             .resolve(
@@ -408,7 +430,11 @@ mod tests {
     }
 
     fn host_image(name: &str) -> MetadataImage {
-        image_with_quota(vec![("ip", Some(name))], "connection_creation_rate", 1.0)
+        image_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            entity: vec![("ip", Some(name))],
+            key: "connection_creation_rate",
+            value: crate::quota::test_support::QuotaValue(1.0),
+        })
     }
 
     fn db() -> Vec<String> {
@@ -523,8 +549,16 @@ mod tests {
     async fn the_next_retry_is_the_earliest_wait_of_a_name_in_the_image() {
         let names = IpNames::default();
         let both = image_with_quotas(vec![
-            quota_record(vec![("ip", Some("a"))], "connection_creation_rate", 1.0),
-            quota_record(vec![("ip", Some("b"))], "connection_creation_rate", 1.0),
+            quota_record(crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("ip", Some("a"))],
+                key: "connection_creation_rate",
+                value: crate::quota::test_support::QuotaValue(1.0),
+            }),
+            quota_record(crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("ip", Some("b"))],
+                key: "connection_creation_rate",
+                value: crate::quota::test_support::QuotaValue(1.0),
+            }),
         ]);
         let start = Instant::now();
         let none_failed = names.next_retry();

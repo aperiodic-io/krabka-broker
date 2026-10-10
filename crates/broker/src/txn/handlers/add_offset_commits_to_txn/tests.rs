@@ -169,7 +169,13 @@ fn coordinator_with_log(
         1,
         krabka_units::mebibytes(1),
     ));
-    let partition = crate::test_support::open_partition(directory, bootstrap::TOPIC, 0);
+    let partition = crate::test_support::open_partition(
+        directory,
+        crate::test_support::StandalonePartitionSetup {
+            topic: bootstrap::TOPIC,
+            ..Default::default()
+        },
+    );
     coordinator.partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),

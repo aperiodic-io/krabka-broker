@@ -243,7 +243,7 @@ mod tests {
     ) {
         use krabka_metadata::{BrokerConfigRecord, MetadataRecord, NodeId};
         img.apply(&MetadataRecord::V1BrokerRegistration(
-            crate::test_support::broker_registration(node_id),
+            crate::test_support::broker_registration(krabka_raft::NodeId(node_id)),
         ));
         if let Some(value) = witness {
             img.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {

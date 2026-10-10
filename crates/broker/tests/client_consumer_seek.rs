@@ -20,10 +20,12 @@ async fn produce_n(bootstrap: &str, topic: &str, n: u32) {
     for i in 0..n {
         producer
             .send(crate::support::producer::producer_record(
-                topic,
-                Some(0),
-                Some(format!("k{i}").into()),
-                Some(format!("v{i}").into()),
+                crate::support::producer::ProducerRecordSetup {
+                    topic: (topic).into(),
+                    partition: Some(krabka_ids::PartitionIndex(0)),
+                    key: Some(format!("k{i}").into()),
+                    value: Some(format!("v{i}").into()),
+                },
             ))
             .await
             .unwrap();
@@ -33,11 +35,7 @@ async fn produce_n(bootstrap: &str, topic: &str, n: u32) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn seek_before_first_poll_resumes_from_sought_offset() {
-    let (_dir, broker) = crate::support::standalone_broker().await;
-    let bootstrap = broker.listen_addr().to_string();
-
-    let admin = connect_client(&bootstrap, None).await;
-    crate::support::client::create_topic(&admin, "s", 1).await;
+    let (_dir, _broker, bootstrap, _admin) = crate::support::client::standalone_topic("s").await;
 
     // Offsets 0..=4 on partition 0.
     produce_n(&bootstrap, "s", 5).await;
@@ -80,7 +78,12 @@ async fn seek_rejects_negative_offset() {
 
     let admin = connect_client(&bootstrap, None).await;
     admin
-        .send(create_topic_request(creatable_topic("n", 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("n").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .unwrap();
 

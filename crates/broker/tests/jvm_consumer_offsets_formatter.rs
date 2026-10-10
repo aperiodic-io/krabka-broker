@@ -406,18 +406,19 @@ impl Cluster {
     /// Fill the topic with [`RECORDS`] records over the console producer's
     /// stdin.
     fn produce(&self) {
-        let mut child_command = crate::support::jvm_docker_command(
-            KAFKA_IMAGE,
-            &[],
-            &[
-                CONSOLE_PRODUCER,
-                "--bootstrap-server",
-                &self.bootstrap,
-                "--topic",
-                TOPIC,
-            ],
-            true,
-        );
+        let mut child_command =
+            crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+                image: KAFKA_IMAGE,
+                args: &[
+                    CONSOLE_PRODUCER,
+                    "--bootstrap-server",
+                    &self.bootstrap,
+                    "--topic",
+                    TOPIC,
+                ],
+                input: crate::support::ContainerInput::Attached,
+                ..Default::default()
+            });
         // One record per line, and a final newline so the producer sends the
         // last one rather than holding a partial line.
         let lines: Vec<String> = (0..RECORDS).map(|i| format!("record-{i}")).collect();

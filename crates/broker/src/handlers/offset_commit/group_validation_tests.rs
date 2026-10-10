@@ -33,6 +33,7 @@ use crate::{
             TargetAssignmentMemberValue,
         },
     },
+    handlers::test_support::CreateTopicSetup,
     test_support::{dispatch_context, encode_request, peer, principal},
 };
 
@@ -76,13 +77,11 @@ async fn create_topic_with_partitions(broker: &Broker, num_partitions: i32) {
         principal("admin"),
         client_id = "group-validation-admin"
     );
-    let request = crate::handlers::test_support::configured_topic_request(
-        TOPIC,
-        &[],
-        num_partitions,
-        1,
-        5_000,
-    );
+    let request = crate::handlers::test_support::configured_topic_request(CreateTopicSetup {
+        topic: TOPIC,
+        num_partitions: crate::handlers::test_support::TopicPartitionCount(num_partitions),
+        ..Default::default()
+    });
     dispatch_context(
         broker,
         create_topics_request::API_KEY,

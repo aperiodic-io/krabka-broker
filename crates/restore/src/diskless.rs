@@ -113,10 +113,7 @@ pub(super) fn add_partitions(
             segments: Vec::new(),
         });
     }
-    inventory.partitions.sort_by(|a, b| {
-        (a.partition.topic.as_str(), a.partition.partition)
-            .cmp(&(b.partition.topic.as_str(), b.partition.partition))
-    });
+    PartitionInventory::sort_by_topic_and_partition(&mut inventory.partitions);
     for requested in args
         .to_offset
         .iter()

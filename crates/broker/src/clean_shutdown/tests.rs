@@ -2,10 +2,7 @@
 //! and how a controller reads either one.
 
 use assert2::assert;
-use krabka_metadata::{
-    BrokerEndpoint, BrokerRegistrationRecord, MetadataImage, MetadataRecord, NodeId,
-};
-use krabka_security::ListenerProtocol;
+use krabka_metadata::{BrokerRegistrationRecord, MetadataImage, MetadataRecord, NodeId};
 
 use super::{
     FILE_NAME, FORMAT_VERSION, ProofError, UNPROVEN, decode, encode, restart_was_clean, take, write,
@@ -21,14 +18,11 @@ fn image_registering_node_at(broker_epoch: i64) -> MetadataImage {
             broker_epoch,
             incarnation_id: uuid::Uuid::from_u128(7),
             host: "broker-2".into(),
-            endpoints: vec![BrokerEndpoint {
-                name: "PLAINTEXT".into(),
-                host: "broker-2".into(),
-                port: 9092,
-                protocol: ListenerProtocol::Plaintext,
-            }],
+            endpoints: vec![crate::test_support::plaintext_broker_endpoint(
+                "broker-2", 9092,
+            )],
             log_dirs: vec![uuid::Uuid::from_u128(11)],
-            ..crate::test_support::broker_registration(NODE.0)
+            ..crate::test_support::broker_registration(NODE)
         },
     ));
     image

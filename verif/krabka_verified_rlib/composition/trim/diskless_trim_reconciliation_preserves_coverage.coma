@@ -1,21 +1,21 @@
-(* #"/workspace/crates/verified/src/composition/trim.rs" 187 0 194 15 *)
+(* #"/workspace/crates/verified/src/composition/trim.rs" 196 0 203 15 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
-let%span strim = "/workspace/crates/verified/src/composition/trim.rs" 195 15 195 96
-let%span strim'0 = "/workspace/crates/verified/src/composition/trim.rs" 199 4 199 69
-let%span strim'1 = "/workspace/crates/verified/src/composition/trim.rs" 169 11 169 61
-let%span strim'2 = "/workspace/crates/verified/src/composition/trim.rs" 170 11 170 90
-let%span strim'3 = "/workspace/crates/verified/src/composition/trim.rs" 171 10 171 33
-let%span strim'4 = "/workspace/crates/verified/src/composition/trim.rs" 172 10 172 35
-let%span strim'5 = "/workspace/crates/verified/src/composition/trim.rs" 174 4 174 33
-let%span strim'6 = "/workspace/crates/verified/src/composition/trim.rs" 25 11 25 66
-let%span strim'7 = "/workspace/crates/verified/src/composition/trim.rs" 26 10 26 62
-let%span strim'8 = "/workspace/crates/verified/src/composition/trim.rs" 27 10 27 96
-let%span strim'9 = "/workspace/crates/verified/src/composition/trim.rs" 28 10 29 64
-let%span strim'10 = "/workspace/crates/verified/src/composition/trim.rs" 30 10 31 65
-let%span strim'11 = "/workspace/crates/verified/src/composition/trim.rs" 32 10 35 68
-let%span strim'12 = "/workspace/crates/verified/src/composition/trim.rs" 36 10 37 42
+let%span strim = "/workspace/crates/verified/src/composition/trim.rs" 204 15 204 96
+let%span strim'0 = "/workspace/crates/verified/src/composition/trim.rs" 208 4 208 69
+let%span strim'1 = "/workspace/crates/verified/src/composition/trim.rs" 178 11 178 61
+let%span strim'2 = "/workspace/crates/verified/src/composition/trim.rs" 179 11 179 90
+let%span strim'3 = "/workspace/crates/verified/src/composition/trim.rs" 180 10 180 33
+let%span strim'4 = "/workspace/crates/verified/src/composition/trim.rs" 181 10 181 35
+let%span strim'5 = "/workspace/crates/verified/src/composition/trim.rs" 183 4 183 33
+let%span strim'6 = "/workspace/crates/verified/src/composition/trim.rs" 37 11 37 66
+let%span strim'7 = "/workspace/crates/verified/src/composition/trim.rs" 38 10 38 62
+let%span strim'8 = "/workspace/crates/verified/src/composition/trim.rs" 39 10 39 96
+let%span strim'9 = "/workspace/crates/verified/src/composition/trim.rs" 40 10 41 64
+let%span strim'10 = "/workspace/crates/verified/src/composition/trim.rs" 42 10 43 65
+let%span strim'11 = "/workspace/crates/verified/src/composition/trim.rs" 44 10 47 68
+let%span strim'12 = "/workspace/crates/verified/src/composition/trim.rs" 48 10 49 42
 let%span strim_decision = "/workspace/crates/verified/src/diskless/trim_decision.rs" 146 10 152 1
 let%span strim_decision'0 = "/workspace/crates/verified/src/diskless/trim_decision.rs" 153 10 157 1
 let%span strim_decision'1 = "/workspace/crates/verified/src/diskless/trim_decision.rs" 158 10 158 42
@@ -108,7 +108,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let diskless_trim_reconciliation_preserves_coverage [#"/workspace/crates/verified/src/composition/trim.rs" 187 0 194 15]
+let diskless_trim_reconciliation_preserves_coverage [#"/workspace/crates/verified/src/composition/trim.rs" 196 0 203 15]
   (indexed_frontier: Int64.t) (high_watermark: Int64.t) (safety_lag: Int64.t) (wal_start: Int64.t)
   (local_start: Int64.t) (applied: Slice64.slice bool) (return (x: tup2_i64_i64)) =
 {[@stop_split] [@expl:diskless_trim_reconciliation_preserves_coverage requires] ([@stop_split] [@expl:diskless_trim_reconciliation_preserves_coverage requires #0] [%#strim'1] 0

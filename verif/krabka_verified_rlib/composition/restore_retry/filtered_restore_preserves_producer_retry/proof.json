@@ -6,7 +6,7 @@
       "vc_expect_tup2_i64_i64": { "prover": "alt-ergo", "time": 0.014 },
       "vc_expect_tup3_i64_RestoreFilterDecision_Vec_usize_Global": {
         "prover": "alt-ergo",
-        "time": 0.01
+        "time": 0.023
       },
       "vc_expect_tup5_i64_i32_i64_ProducerDecision_ProducerDecision": {
         "prover": "alt-ergo",

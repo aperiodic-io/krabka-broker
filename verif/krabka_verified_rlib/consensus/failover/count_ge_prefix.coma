@@ -46,4 +46,3 @@ goal vc_count_ge_prefix: if limit <= 0 then
     true
   else
     [@expl:variant decreases] well_founded_relation_Int ([%#sfailover] limit) ([%#sfailover] limit - 1)
-

@@ -68,3 +68,18 @@ pub(crate) fn text_batch(values: &[&str]) -> RecordBatch {
         records,
     }
 }
+
+/// Append and sync the fixture groups, retaining their assigned offsets and sealed exports.
+pub(crate) fn append_groups(
+    log: &mut krabka_log::Log,
+    groups: &[&[&str]],
+) -> (Vec<RecordBatch>, Vec<krabka_log::SegmentExport>) {
+    let mut appended = Vec::with_capacity(groups.len());
+    for values in groups {
+        let mut batch = text_batch(values);
+        log.append(&mut batch).expect("append batch");
+        appended.push(batch);
+    }
+    log.sync().unwrap();
+    (appended, log.tierable_segments())
+}

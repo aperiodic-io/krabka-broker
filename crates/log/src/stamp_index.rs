@@ -247,6 +247,11 @@ impl StampIndex {
         Ok(())
     }
 
+    fn entry_position(&self, entry: StampEntry) -> Option<usize> {
+        let (bases, lasts) = Self::coordinates(&self.entries);
+        Self::exact_range_index(&bases, &lasts, entry)
+    }
+
     fn exact_range_index(bases: &[i64], lasts: &[i64], entry: StampEntry) -> Option<usize> {
         krabka_verified::exact_stamp_range_index(
             bases,
@@ -264,8 +269,7 @@ impl StampIndex {
     /// Returns an error for a partial overlap or when rewriting the sidecar
     /// fails.
     pub fn upsert(&mut self, entry: StampEntry) -> Result<(), LogError> {
-        let (bases, lasts) = Self::coordinates(&self.entries);
-        if let Some(position) = Self::exact_range_index(&bases, &lasts, entry) {
+        if let Some(position) = self.entry_position(entry) {
             if self.entries[position] != entry {
                 let mut entries = self.entries.clone();
                 entries[position] = entry;
@@ -283,13 +287,13 @@ impl StampIndex {
     /// # Errors
     /// Returns an error when rewriting or syncing the sidecar fails.
     pub fn truncate_from(&mut self, offset: Offset) -> Result<(), LogError> {
-        let Some(entries) =
-            crate::index::changed_entries(&self.entries, |entry| entry.last_offset < offset)
-        else {
-            return Ok(());
-        };
-        self.rewrite(&entries)?;
-        self.entries = entries;
+        if let Some(entries) = crate::index::rewrite_retained_entries(
+            &self.entries,
+            |entry| entry.last_offset < offset,
+            |entries| self.rewrite(entries),
+        )? {
+            self.entries = entries;
+        }
         Ok(())
     }
 

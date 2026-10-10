@@ -367,7 +367,11 @@ async fn write_matches_kafka_checks_and_record_rules() {
                     "g",
                     TOPIC,
                     partition,
-                    share_write(epochs, progress, vec![batch(progress.0, progress.0 + 9)]),
+                    share_write(
+                        epochs,
+                        progress,
+                        vec![batch(Offset(progress.0)..=Offset(progress.0 + 9))],
+                    ),
                 )
                 .await;
             check!(result == expected, "row {index}, trunk {trunk}");
@@ -550,12 +554,20 @@ async fn writes_append_updates_then_one_snapshot_at_the_threshold() {
         ..ShareCoordinatorConfig::default()
     };
     let (coord, _reg, _clock) = configured_coordinator(dir.path(), config);
-    let image = initialize_led_group(&coord, TOPIC, 1, Offset(0)).await;
+    let image = initialize_led_group(
+        &coord,
+        crate::share_coordinator::coordinator::test_support::StateSeedSetup::default(),
+    )
+    .await;
     let writes = [
-        (0, 1, vec![batch(0, 9), batch(5, 14)]),
-        (10, 2, vec![batch(0, 19)]),
-        (12, 3, vec![batch(20, 29)]),
-        (12, 3, vec![batch(30, 39)]),
+        (
+            0,
+            1,
+            vec![batch(Offset(0)..=Offset(9)), batch(Offset(5)..=Offset(14))],
+        ),
+        (10, 2, vec![batch(Offset(0)..=Offset(19))]),
+        (12, 3, vec![batch(Offset(20)..=Offset(29))]),
+        (12, 3, vec![batch(Offset(30)..=Offset(39))]),
     ];
     for (start, dcc, batches) in writes {
         coord
@@ -586,8 +598,8 @@ async fn writes_append_updates_then_one_snapshot_at_the_threshold() {
             write_timestamp: NOW_MS,
             state_batches: vec![],
         }),
-        update(0, 1, vec![batch(0, 14)]),
-        update(10, 2, vec![batch(10, 19)]),
+        update(0, 1, vec![batch(Offset(0)..=Offset(14))]),
+        update(10, 2, vec![batch(Offset(10)..=Offset(19))]),
         Logged::Snapshot(ShareSnapshotValue {
             snapshot_epoch: 1,
             state_epoch: 1,
@@ -596,19 +608,19 @@ async fn writes_append_updates_then_one_snapshot_at_the_threshold() {
             delivery_complete_count: 3,
             create_timestamp: NOW_MS,
             write_timestamp: NOW_MS,
-            state_batches: vec![batch(12, 29)],
+            state_batches: vec![batch(Offset(12)..=Offset(29))],
         }),
         Logged::Update(ShareUpdateValue {
             snapshot_epoch: 1,
             leader_epoch: 0,
             start_offset: Offset(12),
             delivery_complete_count: 3,
-            state_batches: vec![batch(30, 39)],
+            state_batches: vec![batch(Offset(30)..=Offset(39))],
         }),
     ];
     assert!(logged == expected);
     let state = coord.state_for_test("g", TOPIC, 0).await.unwrap();
-    check!(state.state_batches == vec![batch(12, 39)]);
+    check!(state.state_batches == vec![batch(Offset(12)..=Offset(39))]);
     check!(state.updates_since_snapshot == 1);
 }
 
@@ -669,7 +681,11 @@ async fn an_operation_answers_only_when_its_record_commits_in_the_term() {
                 ..ShareCoordinatorConfig::default()
             };
             let (coord, reg, _clock) = configured_coordinator(dir.path(), config);
-            let image = initialize_led_group(&coord, TOPIC, 1, Offset(0)).await;
+            let image = initialize_led_group(
+                &coord,
+                crate::share_coordinator::coordinator::test_support::StateSeedSetup::default(),
+            )
+            .await;
             let state_partition = coord.state_partition_for("g", &TOPIC, 0);
             let part = reg
                 .get(crate::share_coordinator::bootstrap::TOPIC, state_partition)
@@ -704,7 +720,7 @@ async fn an_operation_answers_only_when_its_record_commits_in_the_term() {
                             "g",
                             TOPIC,
                             0,
-                            share_write((1, 0), (0, 0), vec![batch(0, 9)]),
+                            share_write((1, 0), (0, 0), vec![batch(Offset(0)..=Offset(9))]),
                         )
                         .await
                 }

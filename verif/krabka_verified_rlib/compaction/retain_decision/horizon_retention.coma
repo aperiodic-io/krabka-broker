@@ -1,0 +1,89 @@
+(* #"/workspace/crates/verified/src/compaction/retain_decision.rs" 71 0 75 19 *)
+
+let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
+let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
+let%span sretain_decision = "/workspace/crates/verified/src/compaction/retain_decision.rs" 79 43 79 87
+let%span sretain_decision'0 = "/workspace/crates/verified/src/compaction/retain_decision.rs" 70 10 70 81
+let%span sretain_decision'1 = "/workspace/crates/verified/src/compaction/retain_decision.rs" 54 10 54 71
+let%span sretain_decision'2 = "/workspace/crates/verified/src/compaction/retain_decision.rs" 62 16 66 5
+let%span sretain_decision'3 = "/workspace/crates/verified/src/compaction/retain_decision.rs" 39 8 45 9
+
+use creusot.int.Int64
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_i64 = None | Some Int64.t
+
+let elim_Some (_x: t_Option_i64) (return (f0: Int64.t)) = any
+  [ _k (f0: Int64.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_RetainDecision = Keep | SetHorizon Int64.t | Delete
+
+predicate gt_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other < self
+
+meta "rewrite_def" predicate gt_log_Int
+
+function compute_horizon_model [#"/workspace/crates/verified/src/compaction/retain_decision.rs" 37 0 37 74] (now_ms: Int64.t) (delete_retention_ms: Int64.t) : int
+ = [%#sretain_decision'3] if gt_log_Int (Int64.to_int now_ms
+  + Int64.to_int delete_retention_ms) 9223372036854775807 then
+    9223372036854775807
+  else
+    if Int64.to_int now_ms + Int64.to_int delete_retention_ms < - 9223372036854775807 - 1 then
+      - 9223372036854775807 - 1
+    else
+      Int64.to_int now_ms + Int64.to_int delete_retention_ms
+
+
+
+let compute_horizon (now_ms: Int64.t) (delete_retention_ms: Int64.t) (return (x: Int64.t)) = any
+  [ return (result: Int64.t) ->
+  {[@stop_split] [@expl:compute_horizon ensures] [%#sretain_decision'1] Int64.to_int result
+    = compute_horizon_model now_ms delete_retention_ms}
+    (! return {result}) ]
+
+predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
+
+meta "rewrite_def" predicate ge_log_Int
+
+predicate horizon_decision_matches [#"/workspace/crates/verified/src/compaction/retain_decision.rs" 61 0 61 110] (existing: t_Option_i64) (now: Int64.t) (retention: Int64.t) (decision: t_RetainDecision) =
+  [%#sretain_decision'2] match existing with
+    | None -> exists h: Int64.t. decision = SetHorizon h /\ Int64.to_int h = compute_horizon_model now retention
+    | Some h -> decision = (if ge_log_Int (Int64.to_int now) (Int64.to_int h) then Delete else Keep)
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let horizon_retention [#"/workspace/crates/verified/src/compaction/retain_decision.rs" 71 0 75 19]
+  (existing: t_Option_i64) (now_ms: Int64.t) (delete_retention_ms: Int64.t) (return (x: t_RetainDecision)) = (! bb0
+  [ bb0 = any [ br0 -> {existing = None} (! bb4) | br1 (x0: Int64.t) -> {existing = Some x0} (! bb6) ]
+  | bb6 = s0
+    [ s0 = elim_Some {existing} (fun (r0: Int64.t) -> [ &h'0 <- r0 ] s1)
+    | s1 = [ &_12 <- Int64.ge now_ms h'0 ] s2
+    | s2 = any [ br0 -> {_12 = false} (! bb5) | br1 -> {_12} (! bb7) ] ]
+  | bb7 = s0
+    [ s0 = elim_Some {existing} (fun (r0: Int64.t) -> [ &h <- r0 ] s1)
+    | s1 = [ &_ret <- Delete ] s2
+    | s2 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- Keep ] s1 | s1 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = compute_horizon [%#sretain_decision] {now_ms} {delete_retention_ms} (fun (_x: Int64.t) -> [ &_15 <- _x ] s1)
+    | s1 = [ &_ret <- SetHorizon _15 ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_RetainDecision = Any.any_l ()
+  | & existing: t_Option_i64 = existing
+  | & now_ms: Int64.t = now_ms
+  | & delete_retention_ms: Int64.t = delete_retention_ms
+  | & h: Int64.t = Any.any_l ()
+  | & h'0: Int64.t = Any.any_l ()
+  | & _12: bool = Any.any_l ()
+  | & _15: Int64.t = Any.any_l () ])
+  [ return (result: t_RetainDecision) ->
+  {[@stop_split] [@expl:horizon_retention ensures] [%#sretain_decision'0] horizon_decision_matches existing now_ms delete_retention_ms result}
+    (! return {result}) ]

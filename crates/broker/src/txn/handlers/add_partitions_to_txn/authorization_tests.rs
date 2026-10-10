@@ -167,6 +167,15 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
         TRANSACTIONAL_ID_AUTHORIZATION_FAILED as TID_DENIED, UNKNOWN_TOPIC_OR_PARTITION as UNKNOWN,
     };
 
+    let missing_partition = |name, version, caller| Case {
+        name,
+        version,
+        caller,
+        partitions: &[("a", 0), ("missing", 0)],
+        verify_only: false,
+        expect: Expect::Rows(&[("a", 0, NOT_ATTEMPTED), ("missing", 0, UNKNOWN)]),
+        enlisted: &[],
+    };
     let cases = [
         Case {
             name: "v4, client grants, no ClusterAction",
@@ -195,15 +204,11 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
             expect: Expect::Rows(&[("a", 0, NONE)]),
             enlisted: &[("a", 0), ("b", 0)],
         },
-        Case {
-            name: "v4, ClusterAction only, a partition that does not exist",
-            version: 4,
-            caller: BROKER,
-            partitions: &[("a", 0), ("missing", 0)],
-            verify_only: false,
-            expect: Expect::Rows(&[("a", 0, NOT_ATTEMPTED), ("missing", 0, UNKNOWN)]),
-            enlisted: &[],
-        },
+        missing_partition(
+            "v4, ClusterAction only, a partition that does not exist",
+            4,
+            BROKER,
+        ),
         Case {
             name: "v3, ClusterAction only",
             version: 3,
@@ -222,15 +227,7 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
             expect: Expect::Rows(&[("a", 0, NOT_ATTEMPTED), ("b", 0, TOPIC_DENIED)]),
             enlisted: &[],
         },
-        Case {
-            name: "v3, a partition that does not exist",
-            version: 3,
-            caller: CLIENT,
-            partitions: &[("a", 0), ("missing", 0)],
-            verify_only: false,
-            expect: Expect::Rows(&[("a", 0, NOT_ATTEMPTED), ("missing", 0, UNKNOWN)]),
-            enlisted: &[],
-        },
+        missing_partition("v3, a partition that does not exist", 3, CLIENT),
         Case {
             name: "v3, an internal topic with Write on it",
             version: 3,

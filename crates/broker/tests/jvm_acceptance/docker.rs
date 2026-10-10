@@ -103,7 +103,12 @@ pub(crate) fn produce_console(
         args.extend(["--producer.config", "/client.properties"]);
     }
     crate::support::jvm_stdin_output(
-        &mut crate::support::jvm_docker_command(image, mounts, &args, true),
+        &mut crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+            image,
+            mounts,
+            args: &args,
+            input: crate::support::ContainerInput::Attached,
+        }),
         payload,
     )
 }
@@ -385,9 +390,14 @@ pub(crate) fn consume_console(
     if !mounts.is_empty() {
         args.extend(["--consumer.config", "/client.properties"]);
     }
-    let out = crate::support::jvm_docker_command(image, mounts, &args, false)
-        .output()
-        .expect("console consumer");
+    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image,
+        mounts,
+        args: &args,
+        ..Default::default()
+    })
+    .output()
+    .expect("console consumer");
     if require_success {
         assert!(
             out.status.success(),
@@ -476,10 +486,9 @@ pub(crate) const KAFKA_IMAGE_ELR: &str = "mirror.gcr.io/apache/kafka:4.3.1";
 /// Verify TCP connectivity from inside a bridge-network container with
 /// `--add-host=host.docker.internal:host-gateway`.
 pub(crate) fn nc_check_connectivity() {
-    let out = crate::support::jvm_docker_command(
-        "alpine",
-        &[],
-        &[
+    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: "alpine",
+        args: &[
             "sh",
             "-c",
             &format!(
@@ -488,8 +497,8 @@ pub(crate) fn nc_check_connectivity() {
                 host_port()
             ),
         ],
-        false,
-    )
+        ..Default::default()
+    })
     .output()
     .expect("spawn nc check");
     eprintln!(
@@ -548,21 +557,14 @@ pub(crate) fn tool_output(out: &std::process::Output) -> String {
     crate::support::combined_output(out)
 }
 
-pub(crate) const TRANSACTIONAL_PRODUCER_JAVA: &str = r#"
-import java.util.Properties;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
+pub(crate) const TRANSACTIONAL_PRODUCER_JAVA: &str = krabka_macros::java_string_producer_source!(
+    r#"
 
 public final class TransactionalProducer {
   public static void main(String[] args) throws Exception {
-    Properties config = new Properties();
-    config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, args[0]);
-    config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    config.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "eos-tid");
+"#,
+    "args[0]",
+    r#"    config.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "eos-tid");
 
     try (KafkaProducer<String, String> producer = new KafkaProducer<>(config)) {
       producer.initTransactions();
@@ -591,7 +593,8 @@ public final class TransactionalProducer {
     System.out.println("TXNPROBE OK");
   }
 }
-"#;
+"#
+);
 
 /// A compiled `KafkaStreams` topology, for the suite that runs the real
 /// Streams runtime against krabka (`tests/jvm_streams_app.rs`).
@@ -634,16 +637,13 @@ public final class TransactionalProducer {
 /// It prints `STREAMSPROBE OK` once the topology has emitted every expected
 /// output record, and `STREAMSPROBE TIMEOUT remaining=<n>` (exit 1) if it has
 /// not within the latch budget.
-pub(crate) const STREAMS_APP_JAVA: &str = r#"
+pub(crate) const STREAMS_APP_JAVA: &str = krabka_macros::java_string_producer_source!(
+    r#"
 import java.time.Duration;
 import java.util.List;
-import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KeyValue;
@@ -744,13 +744,9 @@ public final class StreamsApp {
   // the topology starts. `auto.offset.reset` defaults to `earliest` under
   // Streams, so the run sees every one of them.
   private static void seed(String bootstrap, String input) throws Exception {
-    Properties config = new Properties();
-    config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
-    config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    try (KafkaProducer<String, String> producer = new KafkaProducer<>(config)) {
+"#,
+    "bootstrap",
+    r#"    try (KafkaProducer<String, String> producer = new KafkaProducer<>(config)) {
       for (int i = 0; i < WORDS.size(); i++) {
         producer.send(new ProducerRecord<>(
             input, null, BASE_TIMESTAMP + i, "seed-" + i, WORDS.get(i))).get();
@@ -759,7 +755,8 @@ public final class StreamsApp {
     System.out.println("STREAMSPROBE seeded=" + WORDS.size());
   }
 }
-"#;
+"#
+);
 
 /// Write `props` to a `tempfile::NamedTempFile` and chmod it to `0644` on
 /// unix, so the non-root user of the cp-kafka container can read it once it
@@ -973,10 +970,10 @@ pub(crate) fn denied_console_consumer(
     group: &str,
     context: &str,
 ) -> std::process::Output {
-    crate::support::jvm_docker_command(
-        KAFKA_IMAGE_TXN,
-        &[mount],
-        &[
+    crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE_TXN,
+        mounts: &[mount],
+        args: &[
             "kafka-console-consumer",
             "--bootstrap-server",
             super::ports::broker0_advertised(),
@@ -992,8 +989,8 @@ pub(crate) fn denied_console_consumer(
             "--consumer.config",
             "/client.properties",
         ],
-        false,
-    )
+        ..Default::default()
+    })
     .stderr(Stdio::piped())
     .stdout(Stdio::piped())
     .output()

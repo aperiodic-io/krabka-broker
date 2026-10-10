@@ -32,7 +32,7 @@
         "time": 0.02
       },
       "vc_remote_retention_prefix": { "prover": "alt-ergo", "time": 0.009 },
-      "vc_trim_steps_converge": { "prover": "alt-ergo", "time": 0.023 }
+      "vc_trim_steps_converge": { "prover": "alt-ergo", "time": 0.008 }
     }
   }
 }

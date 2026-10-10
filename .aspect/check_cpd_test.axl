@@ -1,20 +1,26 @@
-"""Orchestration tests; CheckCpdTest runs real PMD regression fixtures in the job."""
+"""Tests of complete-source inventory and jscpd enforcement."""
 
-load("./check_cpd.axl", "checksum_matches", "patch_grammar", "rust_paths", "snapshot_sources")
+load("./check_cpd.axl", "MINIMUM_TOKENS", "detector_args", "prepare_detector", "repository_report", "rust_paths", "snapshot_sources")
 load("./testing.axl", "check", "check_eq", "suite", "suite_task", "temp_tree")
 
 def _test_inventory_preserves_hidden_and_unusual_paths(_ctx):
     text = "a.rs\x00.hidden/b.rs\x00space name.rs\x00line\nbreak.rs\x00a.rs\x00README.md\x00"
     check_eq("all Rust files", rust_paths(text), [".hidden/b.rs", "a.rs", "line\nbreak.rs", "space name.rs"])
 
-def _test_checksum_rejects_another_artifact(_ctx):
-    check(checksum_matches("abc  /path with spaces\n", "abc"), "matching checksum")
-    check(not checksum_matches("abc  file\n", "def"), "wrong checksum")
-    check(not checksum_matches("", "abc"), "missing checksum")
+def _test_detector_enforces_zero_without_local_overrides(_ctx):
+    argv = detector_args("config.json", "sources", "reports")
+    check_eq("minimum tokens", argv[argv.index("--min-tokens") + 1], str(MINIMUM_TOKENS))
+    check_eq("minimum lines", argv[argv.index("--min-lines") + 1], "5")
+    check_eq("duplicates fail", argv[argv.index("--exit-code") + 1], "1")
+    check("--fail-on-empty" in argv, "empty scans fail")
+    check("--no-gitignore" in argv, "snapshot cannot hide sources")
+    check_eq("explicit config", argv[argv.index("--config") + 1], "config.json")
 
-def _test_only_the_two_string_rules_change(_ctx):
-    original = 'STRING: ~["];\nBYTE: ~["];\nOTHER: ~[abc];\n'
-    check_eq("escaped strings", patch_grammar(original), 'STRING: ~["\\\\];\nBYTE: ~["\\\\];\nOTHER: ~[abc];\n')
+def _test_report_paths_survive_snapshot_cleanup(_ctx):
+    report = {"duplicates": [{"firstFile": {"name": "/tmp/sources/.hidden/a.rs"}, "secondFile": {"name": "/tmp/sources/b.rs"}}]}
+    actual = repository_report(report, "/tmp/sources", "/repo")
+    check_eq("hidden source", actual["duplicates"][0]["firstFile"]["name"], "/repo/.hidden/a.rs")
+    check_eq("second source", actual["duplicates"][0]["secondFile"]["name"], "/repo/b.rs")
 
 def _git(ctx, root, argv):
     result = ctx.std.process.command("git").args(argv).current_dir(root).stdout("piped").stderr("piped").spawn().wait_with_output()
@@ -30,25 +36,47 @@ def _test_real_git_snapshots_include_moves_deletions_and_new_files(ctx):
     _git(ctx, root, ["init", "--quiet"])
     _git(ctx, root, ["add", "."])
     _git(ctx, root, ["-c", "user.name=CPD Test", "-c", "user.email=cpd@example.invalid", "commit", "--quiet", "-m", "base"])
-    revision = _git(ctx, root, ["rev-parse", "HEAD"])
     _git(ctx, root, ["mv", "old.rs", "moved.rs"])
     _git(ctx, root, ["rm", "--quiet", "line\nbreak.rs"])
     ctx.std.fs.write(root + "/.hidden/new.rs", "fn added() {}\n")
     work = temp_tree(ctx, {})
-    base, head, selected = snapshot_sources(ctx, work, root, revision)
-    check_eq("immutable base", selected, revision)
-    check_eq("base bytes", ctx.std.fs.read_to_string(base + "/old.rs"), "fn old() {}\n")
-    check_eq("hidden baseline", ctx.std.fs.read_to_string(base + "/.hidden/space name.rs"), "fn hidden() {}\n")
-    check(ctx.std.fs.exists(base + "/line\nbreak.rs"), "deleted file remains in baseline")
+    head, paths = snapshot_sources(ctx, work, root)
+    check_eq("complete paths", paths, [".hidden/new.rs", ".hidden/space name.rs", "moved.rs"])
+    check_eq("hidden bytes", ctx.std.fs.read_to_string(head + "/.hidden/space name.rs"), "fn hidden() {}\n")
     check(not ctx.std.fs.exists(head + "/old.rs"), "moved source removed")
     check(not ctx.std.fs.exists(head + "/line\nbreak.rs"), "deleted source removed")
     check_eq("moved bytes", ctx.std.fs.read_to_string(head + "/moved.rs"), "fn old() {}\n")
     check_eq("untracked hidden source", ctx.std.fs.read_to_string(head + "/.hidden/new.rs"), "fn added() {}\n")
 
+def _test_real_detector_finds_commented_hidden_copies_and_rejects_empty(ctx):
+    work = temp_tree(ctx, {})
+    detector, config = prepare_detector(ctx, work, ctx.std.env.bazel_root_dir())
+
+    # Distinct statements prevent within-file repeats; copies differ in comments.
+    body = "\n".join(["    let value_%s = %s;" % (i, i) for i in range(30)])
+    root = temp_tree(ctx, {
+        "one.rs": "fn first() {\n" + body + "\n}\n",
+        ".hidden/two.rs": "fn second() {\n// another comment\n" + body + "\n}\n",
+        ".gitignore": ".hidden/\n",
+    })
+    output = temp_tree(ctx, {})
+    result = ctx.std.process.command(detector[0]).args(detector[1:] + detector_args(config, root, output)).stdout("piped").stderr("piped").spawn().wait_with_output()
+    check_eq("real duplicates fail", result.status.code, 1)
+    report = json.decode(ctx.std.fs.read_to_string(output + "/jscpd-report.json"))
+    check(report["statistics"]["total"]["clones"] > 0, "commented hidden copy detected")
+    check_eq("both sources analyzed", report["statistics"]["total"]["sources"], 2)
+    single = temp_tree(ctx, {"one.rs": "fn only() {\n" + body + "\n}\n"})
+    result = ctx.std.process.command(detector[0]).args(detector[1:] + detector_args(config, single, output)).stdout("piped").stderr("piped").spawn().wait_with_output()
+    check_eq("unique source passes", result.status.code, 0)
+    empty = temp_tree(ctx, {"README.md": "no source"})
+    result = ctx.std.process.command(detector[0]).args(detector[1:] + detector_args(config, empty, output)).stdout("piped").stderr("piped").spawn().wait_with_output()
+    check_eq("empty scan fails", result.status.code, 1)
+
 check_cpd_tests = suite("check-cpd", [
     _test_inventory_preserves_hidden_and_unusual_paths,
-    _test_checksum_rejects_another_artifact,
-    _test_only_the_two_string_rules_change,
+    _test_detector_enforces_zero_without_local_overrides,
+    _test_report_paths_survive_snapshot_cleanup,
     _test_real_git_snapshots_include_moves_deletions_and_new_files,
+    _test_real_detector_finds_commented_hidden_copies_and_rejects_empty,
 ])
 check_cpd_test = suite_task(check_cpd_tests)

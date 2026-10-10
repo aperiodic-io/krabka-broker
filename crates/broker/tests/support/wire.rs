@@ -2,6 +2,7 @@
 
 use std::io;
 
+use krabka_units::ByteSize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Write and flush a frame with the caller's original length diagnostic.
@@ -66,6 +67,23 @@ impl<R: krabka_protocol::ProtocolRequest, const V: i16> krabka_protocol::Protoco
     type Response = R::Response;
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct SocketExchangeSetup {
+    #[default(krabka_ids::ApiKey(18))]
+    pub api_key: krabka_ids::ApiKey,
+    pub version: krabka_ids::ApiVersion,
+    #[default(CorrelationId(1))]
+    pub correlation: CorrelationId,
+    pub header: HeaderEncoding,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct ApiRequestSetup {
+    #[default(krabka_ids::ApiKey(18))]
+    pub api_key: krabka_ids::ApiKey,
+    pub version: krabka_ids::ApiVersion,
+}
+
 /// Bind the shared Kafka exchange to a suite's original client identifier.
 #[macro_export]
 macro_rules! socket_round_trip_fixture {
@@ -73,15 +91,10 @@ macro_rules! socket_round_trip_fixture {
         $(#[$attrs])*
         $vis async fn $name<S: ::tokio::io::AsyncRead + ::tokio::io::AsyncWrite + Unpin>(
             stream: &mut S,
-            api_key: i16,
-            api_version: i16,
-            corr_id: i32,
-            flexible: bool,
+            setup: $crate::support::wire::SocketExchangeSetup,
             body: &[u8],
         ) -> ::std::io::Result<Vec<u8>> {
-            $crate::kafka_wire::round_trip(
-                stream, api_key, api_version, corr_id, $client_id, flexible, body,
-            ).await
+            $crate::kafka_wire::round_trip(stream, $crate::kafka_wire::ExchangeSetup::for_socket(setup, $client_id), body).await
         }
     };
 }
@@ -93,40 +106,86 @@ macro_rules! flexible_round_trip_fixture {
         $(#[$attrs])*
         $vis async fn $name(
             stream: &mut ::tokio::net::TcpStream,
-            api_key: i16,
-            api_version: i16,
+            setup: $crate::support::wire::ApiRequestSetup,
             body: &[u8],
         ) -> ::std::io::Result<Vec<u8>> {
-            $crate::kafka_wire::round_trip(
-                stream, api_key, api_version, $correlation, $client_id, true, body,
-            ).await
+            $crate::kafka_wire::round_trip(stream, $crate::kafka_wire::ExchangeSetup::for_socket($crate::support::wire::SocketExchangeSetup { api_key: setup.api_key, version: setup.version, correlation: $crate::support::wire::CorrelationId($correlation), header: $crate::support::wire::HeaderEncoding::Flexible }, $client_id), body).await
         }
     };
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub struct CorrelationId(pub i32);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HeaderEncoding {
+    #[default]
+    Legacy,
+    Flexible,
+}
+
+impl HeaderEncoding {
+    /// Adapt a protocol version's flexible-header flag at the codec boundary.
+    pub fn from_wire(flexible: bool) -> Self {
+        if flexible {
+            Self::Flexible
+        } else {
+            Self::Legacy
+        }
+    }
+}
+
+/// The manually framed clients reserve a fixed header allowance plus the body.
+pub fn request_body_capacity(body: &[u8]) -> ByteSize {
+    use krabka_units::convert::ByteSizeExt;
+    ByteSize::from_bytes(u64::try_from(16 + body.len()).expect("frame capacity fits u64"))
 }
 
 /// Encode a request header followed by its body, retaining the original allocation policy.
 ///
 /// # Panics
 /// Panics with the caller's diagnostic if its client ID does not fit the header's i16 length.
-pub fn request_frame(
-    (api_key, version, correlation, flexible): (i16, i16, i32, bool),
-    client_id: &str,
-    body: &[u8],
-    capacity: Option<usize>,
-    length_context: Option<&str>,
-) -> bytes::BytesMut {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct WireFrameSetup<'a> {
+    #[default(krabka_ids::ApiKey(18))]
+    pub api_key: krabka_ids::ApiKey,
+    pub version: krabka_ids::ApiVersion,
+    #[default(CorrelationId(1))]
+    pub correlation: CorrelationId,
+    pub header: HeaderEncoding,
+    #[default("test-client")]
+    pub client_id: &'a str,
+    pub body: &'a [u8],
+    pub capacity: Option<ByteSize>,
+    pub length_context: Option<&'a str>,
+}
+
+pub fn request_frame(setup: WireFrameSetup<'_>) -> bytes::BytesMut {
     use bytes::BufMut;
-    let mut frame = capacity.map_or_else(bytes::BytesMut::new, bytes::BytesMut::with_capacity);
-    frame.put_i16(api_key);
-    frame.put_i16(version);
-    frame.put_i32(correlation);
+    use krabka_units::convert::ByteSizeExt;
+    let WireFrameSetup {
+        api_key,
+        version,
+        correlation,
+        header,
+        client_id,
+        body,
+        capacity,
+        length_context,
+    } = setup;
+    let mut frame = capacity.map_or_else(bytes::BytesMut::new, |capacity| {
+        bytes::BytesMut::with_capacity(capacity.bytes_usize())
+    });
+    frame.put_i16(api_key.0);
+    frame.put_i16(version.0);
+    frame.put_i32(correlation.0);
     let length = i16::try_from(client_id.len());
     frame.put_i16(match length_context {
         Some(context) => length.expect(context),
         None => length.unwrap(),
     });
     frame.put_slice(client_id.as_bytes());
-    if flexible {
+    if header == HeaderEncoding::Flexible {
         frame.put_u8(0);
     }
     frame.put_slice(body);
@@ -156,4 +215,31 @@ where
         let _tagged = body.get_u8();
     }
     R::decode(&mut body, version).map_err(|error| io::Error::other(format!("{context}: {error}")))
+}
+
+/// Bind a typed request and response to their wire API and codec diagnostic.
+#[macro_export]
+macro_rules! plain_request_driver_fixture {
+    ($vis:vis $name:ident {
+        request: $request:ty,
+        response: $response:ty,
+        api: $api:expr,
+        operation: $operation:literal $(,)?
+    }) => {
+        $vis async fn $name(
+            addr: ::std::net::SocketAddr,
+            request: $request,
+            authentication: &$crate::kafka_wire::PlainAuthenticationSetup<'_>,
+        ) -> ::std::io::Result<$response> {
+            $crate::kafka_wire::request_as_plain(
+                addr,
+                &request,
+                &$crate::kafka_wire::PlainRequestSetup {
+                    authentication: authentication.clone(),
+                    api: $api,
+                    operation: $operation,
+                },
+            ).await
+        }
+    };
 }

@@ -819,6 +819,16 @@ mod tests {
         )
     }
 
+    fn check_client_id_patterns(cases: &[(&str, &str, bool)]) {
+        for &(pattern, input, expected) in cases {
+            let rules = parse_match_rules(&format!("client_id={pattern}")).unwrap();
+            check!(
+                rules[0].pattern.is_match(input).unwrap() == expected,
+                "{pattern:?} on {input:?}"
+            );
+        }
+    }
+
     #[test]
     fn validate_matches_client_metrics_configs() {
         let request = |m: &str| Err(ConfigError::InvalidRequest(m.to_string()));
@@ -1017,13 +1027,7 @@ mod tests {
             ("a{2}", "aa", true),
             ("a{2}", "a", false),
         ];
-        for (pattern, input, expected) in cases {
-            let rules = parse_match_rules(&format!("client_id={pattern}")).unwrap();
-            check!(
-                rules[0].pattern.is_match(input).unwrap() == expected,
-                "{pattern:?} on {input:?}"
-            );
-        }
+        check_client_id_patterns(&cases);
     }
 
     /// `(?i)` in a selector folds ASCII case only, as `Pattern.CASE_INSENSITIVE`
@@ -1060,13 +1064,7 @@ mod tests {
             ("(?i)(\\d+)-\\1", "12-12", true),
             ("(?i)(\\d+)-\\1", "12-13", false),
         ];
-        for (pattern, input, expected) in cases {
-            let rules = parse_match_rules(&format!("client_id={pattern}")).unwrap();
-            check!(
-                rules[0].pattern.is_match(input).unwrap() == expected,
-                "{pattern:?} on {input:?}"
-            );
-        }
+        check_client_id_patterns(&cases);
     }
 
     /// `(?iu)` in a selector folds Unicode case as Java does, by
@@ -1104,13 +1102,7 @@ mod tests {
             ("(?U)\\p{Alpha}", "\u{e9}", true),
             ("(?U)\\p{Digit}", "\u{663}", true),
         ];
-        for (pattern, input, expected) in cases {
-            let rules = parse_match_rules(&format!("client_id={pattern}")).unwrap();
-            check!(
-                rules[0].pattern.is_match(input).unwrap() == expected,
-                "{pattern:?} on {input:?}"
-            );
-        }
+        check_client_id_patterns(&cases);
     }
 
     /// Java's inline flags, each case checked against `Pattern.compile` and

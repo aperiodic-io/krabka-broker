@@ -535,19 +535,14 @@ fn build_response_all(req: &OffsetCommitRequest, code: i16) -> OffsetCommitRespo
 #[cfg(test)]
 mod tests {
     use assert2::check;
-    use krabka_log::{Log, LogConfig};
     use krabka_metadata::MetadataImage;
     use krabka_protocol::owned::offset_commit_request::OffsetCommitRequestPartition;
-    use krabka_units::convert::TimeExt;
 
     use super::*;
 
     #[test]
     fn offset_commits_roll_only_after_the_segment_age_limit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = LogConfig::default();
-        let roll_ms = config.segment_roll_interval.millis_i64_trunc();
-        let mut log = Log::open(dir.path(), config.clone()).unwrap();
+        let mut fixture = crate::test_support::segment_age_fixture();
         let image = MetadataImage::new(uuid::Uuid::nil());
         let request = OffsetCommitRequest {
             group_id: "group".into(),
@@ -561,17 +556,20 @@ mod tests {
             }],
             ..Default::default()
         };
-        let first_ms = 1_700_000_000_000;
-        for elapsed_ms in [0, 1, 2, 3, roll_ms, roll_ms + 1] {
+        for elapsed_ms in [0, 1, 2, 3, fixture.roll_ms, fixture.roll_ms + 1] {
             let commit = Commit {
-                now_ms: first_ms + elapsed_ms,
+                now_ms: fixture.first_ms + elapsed_ms,
                 expire_timestamp_ms: None,
                 image: &image,
             };
-            log.append(&mut commit_records(&request, commit).unwrap().batch)
+            fixture
+                .log
+                .append(&mut commit_records(&request, commit).unwrap().batch)
                 .unwrap();
-            log.sync().unwrap();
-            check!(log.tierable_segments().len() == usize::from(elapsed_ms > roll_ms));
+            fixture.log.sync().unwrap();
+            check!(
+                fixture.log.tierable_segments().len() == usize::from(elapsed_ms > fixture.roll_ms)
+            );
         }
     }
 

@@ -30,14 +30,11 @@ use krabka_protocol::{
         write_txn_markers_request::WriteTxnMarkersRequest,
     },
     primitives::uuid::Uuid as WireUuid,
-    records::{RecordBatch, RecordsPayload},
+    records::RecordBatch,
 };
 use tempfile::TempDir;
 
-use crate::{
-    support,
-    support::{produce::single_partition_produce, topics::create_topic_request},
-};
+use crate::support;
 
 type Cluster = Vec<(BrokerHandle, BrokerConfig, TempDir)>;
 
@@ -124,12 +121,9 @@ fn produce_request(
 ) -> ProduceRequest {
     ProduceRequest {
         transactional_id: transactional_id.map(Into::into),
-        ..single_partition_produce(
-            TOPIC,
-            topic_id,
-            0,
-            Some(RecordsPayload::V2(vec![batch])),
-            (-1, 30_000),
+        ..crate::support::produce::batch_request(
+            batch,
+            crate::support::produce::SinglePartitionProduceSetup {topic: (TOPIC).into(), topic_id, ..crate::support::produce::SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()},
         )
     }
 }
@@ -165,20 +159,29 @@ async fn produce_transactional(leader: &Connection, batch: RecordBatch) -> i16 {
 async fn end_transaction(
     leader: &Connection,
     (producer_id, producer_epoch): (i64, i16),
-    commit: bool,
+    commit: crate::support::transactions::TransactionOutcome,
     transaction_version: i8,
 ) -> i16 {
     let response = leader
         .send(WriteTxnMarkersRequest {
             markers: vec![crate::support::transactions::transaction_marker(
-                (producer_id, producer_epoch),
-                commit,
-                COORDINATOR_EPOCH,
-                transaction_version,
-                vec![crate::support::transactions::marker_topic(
-                    TOPIC.into(),
-                    vec![0],
-                )],
+                crate::support::transactions::TransactionMarkerSetup {
+                    producer: crate::support::transactions::ProducerIdentity::from_wire((
+                        producer_id,
+                        producer_epoch,
+                    )),
+                    outcome: commit,
+                    coordinator_epoch: crate::support::transactions::CoordinatorEpoch(
+                        COORDINATOR_EPOCH,
+                    ),
+                    transaction_version: crate::support::transactions::TransactionVersion(
+                        transaction_version,
+                    ),
+                    topics: vec![crate::support::transactions::marker_topic(
+                        TOPIC.into(),
+                        vec![0],
+                    )],
+                },
             )],
             ..Default::default()
         })
@@ -248,15 +251,12 @@ async fn every_replica_describes_the_producers_of_its_log() {
         "admin client",
     )
     .await;
-    let created = admin
-        .send(create_topic_request(
-            support::topic_on(TOPIC, &[&[1, 2, 3]]),
-            5_000,
-        ))
-        .await
-        .expect("CreateTopics");
-    assert!(created.topics[0].error_code == codes::NONE);
-    let topic_id = created.topics[0].topic_id;
+    let topic_id = support::client::create_topic_spec(
+        &admin,
+        support::topic_on(TOPIC, &[&[1, 2, 3]]),
+        crate::support::topics::CreateTopicRequestSetup::default(),
+    )
+    .await;
     for (handle, _, _) in &cluster {
         handle.wait_until_partition_present(TOPIC, 0).await;
     }
@@ -271,28 +271,78 @@ async fn every_replica_describes_the_producers_of_its_log() {
         produce(
             &leader,
             topic_id,
-            batch(IDEMPOTENT, 0, 3, BASE_TIMESTAMP, false),
+            batch(ProducerBatchSetup {
+                producer: BatchProducer::from_wire(IDEMPOTENT),
+                records: BatchRecordCount(3),
+                max_timestamp: BatchTimestamp(BASE_TIMESTAMP),
+                ..Default::default()
+            }),
         )
         .await,
         produce(
             &leader,
             topic_id,
-            batch(IDEMPOTENT, 3, 2, BASE_TIMESTAMP + 1, false),
+            batch(ProducerBatchSetup {
+                producer: BatchProducer::from_wire(IDEMPOTENT),
+                base_sequence: BatchSequence(3),
+                records: BatchRecordCount(2),
+                max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 1),
+                ..Default::default()
+            }),
         )
         .await,
     ];
     // Offsets 5 and 6, 8, and 10 and 11: the transactional batches. Offsets 7
     // and 9 are the markers below.
-    let committed =
-        produce_transactional(&leader, batch(COMMITTED, 0, 2, BASE_TIMESTAMP + 2, true)).await;
+    let committed = produce_transactional(
+        &leader,
+        batch(ProducerBatchSetup {
+            producer: BatchProducer::from_wire(COMMITTED),
+            records: BatchRecordCount(2),
+            max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 2),
+            transaction: BatchTransactionMode::Transactional,
+            ..Default::default()
+        }),
+    )
+    .await;
     let before_markers = now_ms();
-    let commit = end_transaction(&leader, COMMITTED, true, 1).await;
-    let aborted =
-        produce_transactional(&leader, batch(ABORTED, 0, 1, BASE_TIMESTAMP + 3, true)).await;
+    let commit = end_transaction(
+        &leader,
+        COMMITTED,
+        crate::support::transactions::TransactionOutcome::Commit,
+        1,
+    )
+    .await;
+    let aborted = produce_transactional(
+        &leader,
+        batch(ProducerBatchSetup {
+            producer: BatchProducer::from_wire(ABORTED),
+            max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 3),
+            transaction: BatchTransactionMode::Transactional,
+            ..Default::default()
+        }),
+    )
+    .await;
     let (aborted_id, aborted_epoch) = ABORTED;
-    let abort = end_transaction(&leader, (aborted_id, aborted_epoch + 1), false, 2).await;
+    let abort = end_transaction(
+        &leader,
+        (aborted_id, aborted_epoch + 1),
+        crate::support::transactions::TransactionOutcome::Abort,
+        2,
+    )
+    .await;
     let after_markers = now_ms();
-    let open = produce_transactional(&leader, batch(OPEN, 0, 2, BASE_TIMESTAMP + 4, true)).await;
+    let open = produce_transactional(
+        &leader,
+        batch(ProducerBatchSetup {
+            producer: BatchProducer::from_wire(OPEN),
+            records: BatchRecordCount(2),
+            max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 4),
+            transaction: BatchTransactionMode::Transactional,
+            ..Default::default()
+        }),
+    )
+    .await;
     assert!(
         (idempotent, committed, commit, aborted, abort, open)
             == (

@@ -7,15 +7,60 @@
 //! membership scenarios.
 
 use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker};
 
 use crate::share_group_harness::{
-    boot, broker_config, connect, create_topic, describe, heartbeat, start, topic_id,
+    boot, connect, create_topic, describe, heartbeat, start, topic_id,
 };
 
 /// Kafka's `PartitionFactory.UNINITIALIZED_START_OFFSET`: the share state
 /// exists but where the partition starts has not been decided yet.
 const UNINITIALIZED_START_OFFSET: i64 = -1;
+
+async fn initialize_share_partitions(
+    broker: &krabka_broker::BrokerHandle,
+    client: &krabka_client_core::Client,
+    group: &str,
+    topic: &str,
+    partitions: i32,
+) {
+    let tid = topic_id(broker, topic);
+    let mut join = heartbeat(group, &uuid::Uuid::new_v4().to_string(), 0);
+    join.subscribed_topic_names = Some(vec![topic.into()]);
+    let response = client.send(join).await.unwrap();
+    assert!(
+        response.error_code == 0,
+        "join failed: {:?}",
+        response.error_code
+    );
+    let member_id = response.member_id.unwrap();
+    // Retry the lifecycle hook until every partition has a summary.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let mut request = heartbeat(group, &member_id, response.member_epoch);
+            request.subscribed_topic_names = Some(vec![topic.into()]);
+            client.send(request).await.unwrap();
+            let mut all_done = true;
+            for partition in 0..partitions {
+                if broker
+                    .share_state_summary_for_test(group, tid, partition)
+                    .await
+                    .is_none()
+                {
+                    all_done = false;
+                    break;
+                }
+            }
+            if all_done {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "lifecycle did not initialize {partitions} partitions within 30s"
+    );
+}
 
 /// KIP-932 group-coordinator lifecycle. When a share group joins a topic with
 /// `P` partitions, the coordinator initializes the per-partition share state in
@@ -33,43 +78,7 @@ async fn lifecycle_initializes_share_state() {
     create_topic(&client, "t5", 3).await;
     let tid = topic_id(&broker, "t5");
 
-    let mut join = heartbeat("g5", &uuid::Uuid::new_v4().to_string(), 0);
-    join.subscribed_topic_names = Some(vec!["t5".into()]);
-    let r = client.send(join).await.unwrap();
-    assert!(r.error_code == 0, "join failed: {:?}", r.error_code);
-    let mid = r.member_id.clone().unwrap();
-
-    // The lifecycle hook initializes assigned partitions best-effort on each
-    // heartbeat (first heartbeat may fail if __share_group_state isn't ready
-    // yet; the hook retries on the next). We interleave heartbeats with a
-    // condition check — no fixed count, no fixed sleep — exiting as soon as
-    // all three partitions have summaries.
-    let res = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        loop {
-            let mut hb = heartbeat("g5", &mid, r.member_epoch);
-            hb.subscribed_topic_names = Some(vec!["t5".into()]);
-            let _ = client.send(hb).await.unwrap();
-            let mut all_done = true;
-            for p in 0..3 {
-                if broker
-                    .share_state_summary_for_test("g5", tid, p)
-                    .await
-                    .is_none()
-                {
-                    all_done = false;
-                    break;
-                }
-            }
-            if all_done {
-                break;
-            }
-        }
-    })
-    .await;
-    assert!(
-        res.is_ok(),
-        "lifecycle did not initialize all 3 partitions within 30s"
-    );
+    initialize_share_partitions(&broker, &client, "g5", "t5", 3).await;
 
     for p in 0..3 {
         let (_se, _le, start_offset, _dcc) = broker
@@ -102,40 +111,7 @@ async fn lifecycle_metadata_survives_restart() {
         create_topic(&client, "t6", 2).await;
         tid = topic_id(&broker, "t6");
 
-        let mut join = heartbeat("g6", &uuid::Uuid::new_v4().to_string(), 0);
-        join.subscribed_topic_names = Some(vec!["t6".into()]);
-        let r = client.send(join).await.unwrap();
-        assert!(r.error_code == 0, "join failed: {:?}", r.error_code);
-        let mid = r.member_id.clone().unwrap();
-
-        // Interleave heartbeats with condition check — no fixed count, no
-        // fixed sleep — exiting as soon as both partitions have summaries.
-        let res = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-            loop {
-                let mut hb = heartbeat("g6", &mid, r.member_epoch);
-                hb.subscribed_topic_names = Some(vec!["t6".into()]);
-                let _ = client.send(hb).await.unwrap();
-                let mut all_done = true;
-                for p in 0..2 {
-                    if broker
-                        .share_state_summary_for_test("g6", tid, p)
-                        .await
-                        .is_none()
-                    {
-                        all_done = false;
-                        break;
-                    }
-                }
-                if all_done {
-                    break;
-                }
-            }
-        })
-        .await;
-        assert!(
-            res.is_ok(),
-            "lifecycle did not initialize both partitions within 30s"
-        );
+        initialize_share_partitions(&broker, &client, "g6", "t6", 2).await;
         // Both partitions are initialized before restart.
         for p in 0..2 {
             assert!(
@@ -150,11 +126,7 @@ async fn lifecycle_metadata_survives_restart() {
     }
 
     {
-        let mut cfg = broker_config(log_dir);
-        cfg.bootstrap_mode = BootstrapMode::Rejoin;
-        let broker = Broker::start(cfg).await.unwrap();
-        let bootstrap = broker.listen_addr().to_string();
-        let client = connect(&bootstrap).await;
+        let (broker, client) = crate::share_group_harness::rejoin(log_dir).await;
 
         // The recovered ShareCoordinator replays __share_group_state, so the
         // summary is present immediately after restart.

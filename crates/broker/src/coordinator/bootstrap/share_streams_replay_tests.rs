@@ -7,6 +7,16 @@ use krabka_protocol::records::RecordBatch;
 use super::replay::{Replayed, apply_record, apply_tombstone};
 use crate::coordinator::persistence;
 
+fn apply_member_tombstones<K: AsRef<[u8]>>(
+    coordinator: &std::sync::Arc<crate::coordinator::GroupCoordinator>,
+    keys: [K; 2],
+) {
+    for bytes in keys {
+        let key = persistence::parse_key(bytes.as_ref()).unwrap();
+        apply_tombstone(coordinator, &mut Replayed::default(), key).unwrap();
+    }
+}
+
 /// A replay of a share-group's records must rebuild the cached seed, so
 /// that a freshly-spawned actor restores the same membership after a
 /// restart.
@@ -64,10 +74,7 @@ async fn share_group_records_replay_into_seed() {
             .encode(),
         ),
     ];
-    super::test_support::replay_stream(
-        &coord,
-        recs.into_iter().map(|(key, value)| (key, Some(value))),
-    );
+    super::test_support::replay_values(&coord, recs);
 
     // Type locked + seed reconstructed.
     assert!(coord.group_type("sg") == Some(crate::coordinator::unified::GroupType::Share));
@@ -79,24 +86,21 @@ async fn share_group_records_replay_into_seed() {
     // Kafka's `shareGroupFenceMember` order removes the member: its current
     // assignment tombstone leaves it at epoch -1, and then its member
     // tombstone removes it.
-    let current_key = persistence::parse_key(
-        &sp::encode_share_key(&sp::ShareGroupKey::CurrentMemberAssignment {
-            group_id: "sg".into(),
-            member_id: "m1".into(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    apply_tombstone(&coord, &mut Replayed::default(), current_key).unwrap();
-    let tomb_key = persistence::parse_key(
-        &sp::encode_share_key(&sp::ShareGroupKey::MemberMetadata {
-            group_id: "sg".into(),
-            member_id: "m1".into(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    apply_tombstone(&coord, &mut Replayed::default(), tomb_key).unwrap();
+    apply_member_tombstones(
+        &coord,
+        [
+            sp::encode_share_key(&sp::ShareGroupKey::CurrentMemberAssignment {
+                group_id: "sg".into(),
+                member_id: "m1".into(),
+            })
+            .unwrap(),
+            sp::encode_share_key(&sp::ShareGroupKey::MemberMetadata {
+                group_id: "sg".into(),
+                member_id: "m1".into(),
+            })
+            .unwrap(),
+        ],
+    );
     let seed = coord.cached_share_seed("sg").expect("seed still present");
     assert!(!seed.members.contains_key("m1"), "tombstone removed member");
 }
@@ -144,18 +148,7 @@ async fn streams_group_records_replay_into_seed() {
                 member_id: "m1".into(),
             })
             .unwrap(),
-            sp::StreamsGroupMemberMetadataValue {
-                instance_id: None,
-                rack_id: None,
-                client_id: "c1".into(),
-                client_host: "/127.0.0.1".into(),
-                process_id: "p1".into(),
-                user_endpoint: None,
-                client_tags: vec![],
-                rebalance_timeout_ms: 60_000,
-                topology_epoch: 2,
-            }
-            .encode(),
+            crate::coordinator::unified::test_support::plain_streams_member(2).encode(),
         ),
         (
             sp::encode_streams_key(&sp::StreamsGroupKey::CurrentMemberAssignment {
@@ -170,10 +163,7 @@ async fn streams_group_records_replay_into_seed() {
             .encode(),
         ),
     ];
-    super::test_support::replay_stream(
-        &coord,
-        recs.into_iter().map(|(key, value)| (key, Some(value))),
-    );
+    super::test_support::replay_values(&coord, recs);
 
     // Type locked to Streams + seed reconstructed.
     assert!(coord.group_type("stg") == Some(crate::coordinator::unified::GroupType::Streams));
@@ -197,24 +187,21 @@ async fn streams_group_records_replay_into_seed() {
     // Kafka's `removeStreamsMember` order removes the member: its current
     // assignment tombstone leaves it at epoch -1, and then its member
     // tombstone removes it.
-    let current_key = persistence::parse_key(
-        &sp::encode_streams_key(&sp::StreamsGroupKey::CurrentMemberAssignment {
-            group_id: "stg".into(),
-            member_id: "m1".into(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    apply_tombstone(&coord, &mut Replayed::default(), current_key).unwrap();
-    let tomb_key = persistence::parse_key(
-        &sp::encode_streams_key(&sp::StreamsGroupKey::MemberMetadata {
-            group_id: "stg".into(),
-            member_id: "m1".into(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    apply_tombstone(&coord, &mut Replayed::default(), tomb_key).unwrap();
+    apply_member_tombstones(
+        &coord,
+        [
+            sp::encode_streams_key(&sp::StreamsGroupKey::CurrentMemberAssignment {
+                group_id: "stg".into(),
+                member_id: "m1".into(),
+            })
+            .unwrap(),
+            sp::encode_streams_key(&sp::StreamsGroupKey::MemberMetadata {
+                group_id: "stg".into(),
+                member_id: "m1".into(),
+            })
+            .unwrap(),
+        ],
+    );
     let seed = coord
         .cached_streams_seed("stg")
         .expect("seed still present");

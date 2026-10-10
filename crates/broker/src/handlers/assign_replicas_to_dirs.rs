@@ -125,6 +125,12 @@ mod tests {
         };
     }
 
+    fn check_partition_directory(broker: &Broker, directory: uuid::Uuid) {
+        let image = broker.controller.current_image();
+        let partition = image.partition("t", 0).expect("partition");
+        assert!(partition.directories == vec![directory]);
+    }
+
     /// The topic reference and the partition that one request row reports.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Report {
@@ -170,7 +176,7 @@ mod tests {
             };
             let resp = handle_allowed(
                 &broker,
-                request(broker_epoch, dir_uuid, topic_id, partition_index),
+                request(crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup { broker_epoch, dir: dir_uuid, topic: topic_id, partitions: &[partition_index], ..Default::default() }),
             )
             .await
             .expect("AssignReplicasToDirs handler");
@@ -193,9 +199,7 @@ mod tests {
             ));
         }
         assert!(actual == expected);
-        let image = broker.controller.current_image();
-        let partition = image.partition("t", 0).expect("partition");
-        assert!(partition.directories == vec![dir_uuid]);
+        check_partition_directory(&broker, dir_uuid);
 
         broker_handle.shutdown().await;
     }
@@ -214,10 +218,12 @@ mod tests {
                 MetadataRecord::V1Partition(PartitionRecord {
                     directories: vec![uuid::Uuid::nil()],
                     ..crate::handlers::test_support::replicated_partition(
-                        "t",
-                        0,
-                        krabka_audit::NodeId(1),
-                        &[krabka_audit::NodeId(1)],
+                        crate::handlers::test_support::ReplicatedPartitionSetup {
+                            topic: "t",
+                            leader: krabka_audit::NodeId(1),
+                            replicas: &[krabka_audit::NodeId(1)],
+                            ..Default::default()
+                        },
                     )
                 }),
             ])
@@ -235,7 +241,14 @@ mod tests {
         let dir_uuid = uuid::Uuid::from_u128(0xAA);
         let topic_uuid = uuid::Uuid::from_u128(0xBB);
         seed_topic(&broker, topic_uuid).await;
-        let req = request(own_broker_epoch(&broker), dir_uuid, topic_uuid, 0);
+        let req = request(
+            crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
+                broker_epoch: own_broker_epoch(&broker),
+                dir: dir_uuid,
+                topic: topic_uuid,
+                ..Default::default()
+            },
+        );
 
         let resp = handle_allowed(&broker, req)
             .await
@@ -243,9 +256,7 @@ mod tests {
 
         assert!(resp.error_code == codes::NONE, "{resp:?}");
         assert!(resp.directories[0].topics[0].partitions[0].error_code == codes::NONE);
-        let image = broker.controller.current_image();
-        let partition = image.partition("t", 0).expect("partition");
-        assert!(partition.directories == vec![dir_uuid]);
+        check_partition_directory(&broker, dir_uuid);
         broker_handle.shutdown().await;
     }
 
@@ -270,10 +281,12 @@ mod tests {
         let resp = handle_allowed(
             &broker,
             request(
-                own_broker_epoch(&broker),
-                uuid::Uuid::from_u128(0xAA),
-                topic_uuid,
-                0,
+                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
+                    broker_epoch: own_broker_epoch(&broker),
+                    dir: uuid::Uuid::from_u128(0xAA),
+                    topic: topic_uuid,
+                    ..Default::default()
+                },
             ),
         )
         .await
@@ -321,7 +334,7 @@ mod tests {
             let ctx = crate::test_support::request_context(&user, &address, "assign-test");
             let resp = handle(
                 &broker,
-                request(broker_epoch, dir_uuid, topic_uuid, 0),
+                request(crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup { broker_epoch, dir: dir_uuid, topic: topic_uuid, ..Default::default() }),
                 VERSION,
                 &ctx,
             )
@@ -352,9 +365,19 @@ mod tests {
         // untouched. `+ 1` rather than `- 1`: a registered epoch of 0 would
         // otherwise turn "stale" into `-1`, which means "not provided" and
         // matches any registration (see `validation::check_broker_epoch`).
-        let stale = handle_allowed(&broker, request(broker_epoch + 1, dir_uuid, topic_uuid, 0))
-            .await
-            .expect("AssignReplicasToDirs handler");
+        let stale = handle_allowed(
+            &broker,
+            request(
+                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
+                    broker_epoch: broker_epoch + 1,
+                    dir: dir_uuid,
+                    topic: topic_uuid,
+                    ..Default::default()
+                },
+            ),
+        )
+        .await
+        .expect("AssignReplicasToDirs handler");
         assert!(stale.error_code == codes::STALE_BROKER_EPOCH, "{stale:?}");
         assert!(
             broker
@@ -367,9 +390,19 @@ mod tests {
         );
 
         // The current epoch succeeds and commits the assignment.
-        let current = handle_allowed(&broker, request(broker_epoch, dir_uuid, topic_uuid, 0))
-            .await
-            .expect("AssignReplicasToDirs handler");
+        let current = handle_allowed(
+            &broker,
+            request(
+                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
+                    broker_epoch,
+                    dir: dir_uuid,
+                    topic: topic_uuid,
+                    ..Default::default()
+                },
+            ),
+        )
+        .await
+        .expect("AssignReplicasToDirs handler");
         assert!(current.error_code == codes::NONE, "{current:?}");
         assert!(
             broker
@@ -384,9 +417,19 @@ mod tests {
         // `-1` ("not provided") also succeeds: it is the epoch
         // `crate::assign_dirs::build_request` sends for this broker's own
         // self-reported directory assignments.
-        let unspecified = handle_allowed(&broker, request(-1, dir_uuid, topic_uuid, 0))
-            .await
-            .expect("AssignReplicasToDirs handler");
+        let unspecified = handle_allowed(
+            &broker,
+            request(
+                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
+                    broker_epoch: -1,
+                    dir: dir_uuid,
+                    topic: topic_uuid,
+                    ..Default::default()
+                },
+            ),
+        )
+        .await
+        .expect("AssignReplicasToDirs handler");
         assert!(unspecified.error_code == codes::NONE, "{unspecified:?}");
 
         broker_handle.shutdown().await;

@@ -351,7 +351,7 @@ async fn share_state_rpcs_need_cluster_action() {
             data_topics.push(krabka_metadata::MetadataRecord::V1Partition(
                 crate::coordinator::test_support::single_replica_partition(
                     &name,
-                    partition,
+                    krabka_ids::PartitionIndex(partition),
                     broker.config.node_id,
                 ),
             ));

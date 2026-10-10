@@ -125,8 +125,16 @@ pub fn replay_control_records(
     state: &mut QuorumState,
     max: MetadataRaftFetchMax,
 ) -> Result<(), RaftError> {
+    replay_control_records_until(log, state, log.hwm(), max)
+}
+
+fn replay_control_records_until(
+    log: &KraftLog,
+    state: &mut QuorumState,
+    target: Offset,
+    max: MetadataRaftFetchMax,
+) -> Result<(), RaftError> {
     let from = log.log_start_offset();
-    let target = log.hwm();
     let mut cursor = from;
     while cursor < target {
         let batches = log.read_decoded(cursor, max.size())?;
@@ -196,39 +204,6 @@ pub fn control_state_at(
     max: MetadataRaftFetchMax,
 ) -> Result<QuorumState, RaftError> {
     let mut state = bootstrap.clone();
-    let from = log.log_start_offset();
-    let mut cursor = from;
-    while cursor < end_offset {
-        let batches = log.read_decoded(cursor, max.size())?;
-        let next = next_batch_offset(&batches);
-        if batches.is_empty() {
-            break;
-        }
-        for batch in &batches {
-            for record in &batch.records {
-                if !matches!(
-                    replay_record_decision(
-                        batch.base_offset,
-                        record.offset_delta,
-                        from.0,
-                        end_offset.0,
-                        batch.attributes.is_control_batch(),
-                        true,
-                    ),
-                    ReplayRecordDecision::Apply(_)
-                ) {
-                    continue;
-                }
-                let offset = batch
-                    .base_offset
-                    .saturating_add(i64::from(record.offset_delta));
-                apply_control_record(&mut state, record, offset)?;
-            }
-        }
-        match replay_cursor_decision(cursor.0, next.map(|offset| offset.0)) {
-            ReplayCursorDecision::Advance(next) => cursor = Offset(next),
-            ReplayCursorDecision::Stop => break,
-        }
-    }
+    replay_control_records_until(log, &mut state, end_offset, max)?;
     Ok(state)
 }

@@ -45,7 +45,7 @@
         "time": 0.021
       },
       "vc_from_i64": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_from_u8": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_from_u8": { "prover": "alt-ergo", "time": 0.009 },
       "vc_min_i64": { "prover": "alt-ergo", "time": 0.015 },
       "vc_transaction_marker_equal_epoch_fenced": {
         "prover": "alt-ergo",

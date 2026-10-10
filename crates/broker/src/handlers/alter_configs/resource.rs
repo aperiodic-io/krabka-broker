@@ -58,10 +58,12 @@ pub(super) async fn process_resource(
         .map(|record| vec![record]),
         RESOURCE_TYPE_BROKER => broker_config_records(
             &resource,
-            image,
-            krabka_metadata::NodeId(broker.config.node_id.0),
-            &broker.config.broker_log_dirs(),
-            broker.config.features.unstable_api_versions,
+            crate::config_keys::broker_dynamic::BrokerConfigContext {
+                image,
+                serving: krabka_metadata::NodeId(broker.config.node_id.0),
+                log_dirs: &broker.config.broker_log_dirs(),
+                unstable: broker.config.features.unstable_api_versions,
+            },
         ),
         RESOURCE_TYPE_GROUP => group_config_record(
             &resource,

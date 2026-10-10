@@ -11,10 +11,11 @@ use std::{
 };
 
 use assert2::assert;
+use krabka_ids::PartitionIndex;
 use krabka_log::LogConfig;
 use krabka_metadata::{
-    BrokerEndpoint, BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord,
-    TopicRecord,
+    BrokerEndpoint, BrokerRegistrationRecord, LeaderEpoch, MetadataImage, MetadataRecord,
+    PartitionRecord, TopicRecord,
 };
 use krabka_protocol::owned::assign_replicas_to_dirs_request::AssignReplicasToDirsRequest;
 use krabka_raft::NodeId;
@@ -27,8 +28,10 @@ use super::{
 };
 pub(super) use crate::test_support::await_until;
 use crate::{
-    config::ReplicationRuntimeConfig, metadata_source::MetadataSource,
-    partition_registry::PartitionRegistry, test_support::FakeMetadataSource,
+    config::ReplicationRuntimeConfig,
+    metadata_source::MetadataSource,
+    partition_registry::PartitionRegistry,
+    test_support::{FakeMetadataSource, PartitionCount, ReplicationFactor},
     throttle::ThrottleState,
 };
 
@@ -40,58 +43,108 @@ pub(super) fn image_with(records: &[MetadataRecord]) -> MetadataImage {
     img
 }
 
-pub(super) fn topic_record(name: &str, partitions: i32) -> MetadataRecord {
-    topic_record_with_id(name, Uuid::new_v4(), partitions, 3)
+#[derive(Clone, Copy, Default)]
+pub(super) enum SupervisorTopicIdentity {
+    #[default]
+    Fresh,
+    Specified(Uuid),
 }
 
-pub(super) fn topic_record_with_id(
-    name: &str,
-    topic_id: Uuid,
-    partitions: i32,
-    replication_factor: i16,
-) -> MetadataRecord {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct SupervisorTopicSetup<'a> {
+    #[default("t")]
+    pub topic: &'a str,
+    pub identity: SupervisorTopicIdentity,
+    pub partitions: PartitionCount,
+    pub replication_factor: ReplicationFactor,
+}
+
+pub(super) fn topic_record(setup: SupervisorTopicSetup<'_>) -> MetadataRecord {
     MetadataRecord::V1Topic(TopicRecord {
-        name: name.into(),
-        topic_id,
-        partitions,
-        replication_factor,
+        name: setup.topic.into(),
+        topic_id: match setup.identity {
+            SupervisorTopicIdentity::Fresh => Uuid::new_v4(),
+            SupervisorTopicIdentity::Specified(id) => id,
+        },
+        partitions: setup.partitions.0,
+        replication_factor: setup.replication_factor.0,
     })
 }
 
 pub(super) fn single_partition_image(topic: &str, topic_id: Uuid, leader: NodeId) -> MetadataImage {
     image_with(&[
-        topic_record_with_id(topic, topic_id, 1, 1),
-        partition_record(topic, 0, leader, vec![leader], 0),
+        topic_record(
+            crate::replicator_supervisor::test_support::SupervisorTopicSetup {
+                topic,
+                identity:
+                    crate::replicator_supervisor::test_support::SupervisorTopicIdentity::Specified(
+                        topic_id,
+                    ),
+                replication_factor: crate::test_support::ReplicationFactor(1),
+                ..Default::default()
+            },
+        ),
+        partition_record(
+            crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                topic,
+                leader,
+                replicas: vec![leader],
+                ..Default::default()
+            },
+        ),
     ])
 }
 
 /// One rf=3 topic and its partition, with the caller's exact replica list and epoch.
-pub(super) fn replicated_partition_image(
-    topic: &str,
-    leader: NodeId,
-    replicas: &[NodeId],
-    epoch: i32,
-) -> MetadataImage {
-    image_with(&[
-        topic_record(topic, 1),
-        partition_record(topic, 0, leader, replicas.to_vec(), epoch),
-    ])
+pub(super) fn topic_partition_records(setup: SupervisorPartitionSetup<'_>) -> [MetadataRecord; 2] {
+    [
+        topic_record(SupervisorTopicSetup {
+            topic: setup.topic,
+            ..Default::default()
+        }),
+        partition_record(setup),
+    ]
+}
+
+pub(super) fn replicated_partition_image(setup: SupervisorPartitionSetup<'_>) -> MetadataImage {
+    image_with(&topic_partition_records(setup))
 }
 
 /// The supervisor tests' rf=3 topic, with all three brokers as replicas.
-pub(super) fn three_replica_image(leader: NodeId, epoch: i32) -> MetadataImage {
-    replicated_partition_image("t", leader, &[NodeId(1), NodeId(2), NodeId(3)], epoch)
+pub(super) fn three_replica_image(leader: NodeId, epoch: LeaderEpoch) -> MetadataImage {
+    replicated_partition_image(SupervisorPartitionSetup {
+        leader,
+        epoch,
+        ..Default::default()
+    })
 }
 
 pub(super) fn follower_promotion_images() -> (MetadataImage, MetadataImage) {
     let replicas = vec![NodeId(1), NodeId(2)];
-    let topic = topic_record("t", 1);
+    let topic =
+        topic_record(crate::replicator_supervisor::test_support::SupervisorTopicSetup::default());
     (
         image_with(&[
             topic.clone(),
-            partition_record("t", 0, NodeId(1), replicas.clone(), 3),
+            partition_record(
+                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                    replicas: replicas.clone(),
+                    epoch: krabka_metadata::LeaderEpoch(3),
+                    ..Default::default()
+                },
+            ),
         ]),
-        image_with(&[topic, partition_record("t", 0, NodeId(2), replicas, 7)]),
+        image_with(&[
+            topic,
+            partition_record(
+                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
+                    leader: NodeId(2),
+                    replicas,
+                    epoch: krabka_metadata::LeaderEpoch(7),
+                    ..Default::default()
+                },
+            ),
+        ]),
     )
 }
 
@@ -101,21 +154,39 @@ pub(super) struct MaterializeFixture {
     producer_state: Arc<crate::producer_state::ProducerState>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct MaterializeSetup<'a> {
+    pub topic: &'a str,
+    pub log_dirs: &'a [PathBuf],
+    pub log_config: &'a LogConfig,
+    pub context: &'a str,
+}
+
+impl Default for MaterializeSetup<'_> {
+    fn default() -> Self {
+        static LOG_CONFIG: std::sync::OnceLock<LogConfig> = std::sync::OnceLock::new();
+        Self {
+            topic: "t",
+            log_dirs: &[],
+            log_config: LOG_CONFIG.get_or_init(LogConfig::default),
+            context: "materialize",
+        }
+    }
+}
+
 impl MaterializeFixture {
     pub(super) fn config<'a>(
         &'a self,
         partitions: &'a PartitionRegistry,
-        topic: &'a str,
-        log_dirs: &'a [PathBuf],
-        log_config: &'a LogConfig,
+        setup: MaterializeSetup<'a>,
     ) -> MaterializePartitionConfig<'a> {
         MaterializePartitionConfig {
             partitions,
-            topic,
+            topic: setup.topic,
             topic_id: None,
             partition: 0,
-            log_dirs,
-            log_config,
+            log_dirs: setup.log_dirs,
+            log_config: setup.log_config,
             log_dir_status: &self.log_dir_status,
             producer_state: &self.producer_state,
             runtime: crate::partition::PartitionRuntimeConfig::new(
@@ -126,49 +197,65 @@ impl MaterializeFixture {
         }
     }
 
-    pub(super) fn materialize(
-        &self,
-        partitions: &PartitionRegistry,
-        topic: &str,
-        log_dirs: &[PathBuf],
-        log_config: &LogConfig,
-        context: &str,
-    ) {
-        super::materialize::materialize_partition(
-            self.config(partitions, topic, log_dirs, log_config),
-        )
-        .expect(context);
+    pub(super) fn materialize(&self, partitions: &PartitionRegistry, setup: MaterializeSetup<'_>) {
+        super::materialize::materialize_partition(self.config(partitions, setup))
+            .expect(setup.context);
     }
 }
 
 /// Materialize `t-0` with the usual config, retaining its directory and registry.
 pub(super) fn materialized_partition() -> (tempfile::TempDir, Arc<PartitionRegistry>) {
+    materialized_partition_with_config(MaterializeSetup::default().log_config)
+}
+
+/// Materialize `t-0` using the caller's log policy and retain its directory guard.
+pub(super) fn materialized_partition_with_config(
+    log_config: &LogConfig,
+) -> (tempfile::TempDir, Arc<PartitionRegistry>) {
     let dir = tempfile::tempdir().expect("tempdir");
     let partitions = Arc::new(PartitionRegistry::new());
     MaterializeFixture::default().materialize(
         &partitions,
-        "t",
-        &[dir.path().to_path_buf()],
-        &LogConfig::default(),
-        "materialize",
+        crate::replicator_supervisor::test_support::MaterializeSetup {
+            log_dirs: &[dir.path().to_path_buf()],
+            log_config,
+            ..Default::default()
+        },
     );
     (dir, partitions)
 }
 
-pub(super) fn partition_record(
-    topic: &str,
-    partition: i32,
-    leader: NodeId,
-    replicas: Vec<NodeId>,
-    leader_epoch: i32,
-) -> MetadataRecord {
+#[derive(krabka_macros::FieldDefaults)]
+pub(super) struct SupervisorPartitionSetup<'a> {
+    #[default("t")]
+    pub topic: &'a str,
+    pub partition: PartitionIndex,
+    #[default(NodeId(1))]
+    pub leader: NodeId,
+    #[default(vec![NodeId(1), NodeId(2), NodeId(3)])]
+    pub replicas: Vec<NodeId>,
+    pub epoch: LeaderEpoch,
+}
+
+impl<'a> SupervisorPartitionSetup<'a> {
+    pub(super) fn single_replica(topic: &'a str, leader: NodeId) -> Self {
+        Self {
+            topic,
+            leader,
+            replicas: vec![leader],
+            ..Default::default()
+        }
+    }
+}
+
+pub(super) fn partition_record(setup: SupervisorPartitionSetup<'_>) -> MetadataRecord {
     MetadataRecord::V1Partition(PartitionRecord {
-        topic: topic.into(),
-        partition,
-        leader,
-        replicas: replicas.clone(),
-        isr: replicas,
-        leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+        topic: setup.topic.into(),
+        partition: setup.partition.0,
+        leader: setup.leader,
+        replicas: setup.replicas.clone(),
+        isr: setup.replicas,
+        leader_epoch: setup.epoch,
         adding_replicas: vec![],
         removing_replicas: vec![],
         directories: vec![],
@@ -186,7 +273,7 @@ pub(super) fn broker_record(node_id: NodeId) -> BrokerRegistrationRecord {
             port: 19092,
             protocol: krabka_security::ListenerProtocol::Plaintext,
         }],
-        ..crate::test_support::broker_registration(node_id.0)
+        ..crate::test_support::broker_registration(node_id)
     }
 }
 

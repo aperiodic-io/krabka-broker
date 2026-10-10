@@ -36,10 +36,6 @@ const RESOURCE_TYPE_TOPIC: i8 = 2;
 /// `IncrementalAlterConfigs` `config_operation` SET.
 const CONFIG_OP_SET: i8 = 0;
 
-/// `config_operation` DELETE, which is how an operator would try to *clear* a
-/// freeze through the config path.
-const CONFIG_OP_DELETE: i8 = 1;
-
 /// The synthesised read-only topic config that reports the freeze.
 const WRITE_FREEZE: &str = "write.freeze";
 
@@ -67,16 +63,6 @@ async fn alter_configs(client: &Client, topic: &str, value: Option<&str>) -> Alt
         .expect("AlterConfigs");
     let row = &response.responses[0];
     (row.error_code, row.error_message.clone())
-}
-
-/// Try to write `write.freeze` through `IncrementalAlterConfigs`.
-async fn incremental_alter_configs(
-    client: &Client,
-    topic: &str,
-    operation: i8,
-    value: Option<&str>,
-) -> AlterOutcome {
-    crate::support::configs::alter_topic_config(client, topic, WRITE_FREEZE, operation, value).await
 }
 
 /// Neither config path can set a freeze, and neither can clear one.
@@ -110,7 +96,17 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs set"
     );
     check!(
-        incremental_alter_configs(&p.client, CONTROL, CONFIG_OP_SET, Some("true")).await == refusal,
+        crate::support::configs::alter_topic_config(
+            &p.client,
+            crate::support::configs::TopicConfigMutationSetup {
+                topic: CONTROL,
+                name: WRITE_FREEZE,
+                value: Some("true"),
+                ..Default::default()
+            }
+        )
+        .await
+            == refusal,
         "IncrementalAlterConfigs set"
     );
     // Clearing the freeze on the topic that has one.
@@ -119,7 +115,16 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs clear"
     );
     check!(
-        incremental_alter_configs(&p.client, "orders", CONFIG_OP_DELETE, None).await == refusal,
+        crate::support::configs::alter_topic_config(
+            &p.client,
+            crate::support::configs::TopicConfigMutationSetup {
+                name: WRITE_FREEZE,
+                operation: crate::support::configs::ConfigOperation::Delete,
+                ..Default::default()
+            }
+        )
+        .await
+            == refusal,
         "IncrementalAlterConfigs delete"
     );
 

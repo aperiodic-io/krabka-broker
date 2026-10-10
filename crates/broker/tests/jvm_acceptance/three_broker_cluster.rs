@@ -6,6 +6,15 @@
 
 use krabka_broker::{Broker, BrokerConfig};
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct SaslClusterSetup<'a> {
+    #[default(super::sasl::ADMIN)]
+    pub admin: &'a str,
+    #[default(super::sasl::ADMIN_PASS)]
+    pub admin_pass: &'a str,
+    pub extra_users: &'a [(&'a str, &'a str)],
+}
+
 pub(crate) type SaslCluster = (
     krabka_broker::BrokerHandle,
     krabka_broker::BrokerHandle,
@@ -19,13 +28,8 @@ pub(crate) type SaslCluster = (
 );
 
 /// Boot and probe all voters before administering a registered SASL cluster.
-pub(crate) async fn start_registered_sasl_cluster(
-    admin: &str,
-    password: &str,
-    users: &[(&str, &str)],
-) -> SaslCluster {
-    let cluster =
-        start_three_broker_sasl_plaintext_jvm_cluster_with_users(admin, password, users).await;
+pub(crate) async fn start_registered_sasl_cluster(setup: SaslClusterSetup<'_>) -> SaslCluster {
+    let cluster = start_three_broker_sasl_plaintext_jvm_cluster_with_users(setup).await;
     super::docker::nc_check_connectivity();
     super::wait::wait_three_brokers_registered(&cluster.0, &cluster.1, &cluster.2, 3).await;
     cluster
@@ -43,10 +47,9 @@ pub(crate) async fn start_registered_sasl_cluster(
 /// A caller needs the `cfg*` values to revive a broker after shutdown.
 /// Pass them with `BootstrapMode::Rejoin`.
 pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster(
-    admin: &str,
-    admin_pass: &str,
+    setup: SaslClusterSetup<'_>,
 ) -> SaslCluster {
-    start_three_broker_sasl_plaintext_jvm_cluster_with_users(admin, admin_pass, &[]).await
+    start_three_broker_sasl_plaintext_jvm_cluster_with_users(setup).await
 }
 
 /// Like [`start_three_broker_sasl_plaintext_jvm_cluster`] but also provisions
@@ -54,19 +57,14 @@ pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster(
 ///
 /// Returns `(h1, h2, h3, cfg1, cfg2, cfg3, dir1, dir2, dir3)`.
 pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster_with_users(
-    admin: &str,
-    admin_pass: &str,
-    extra_users: &[(&str, &str)],
+    setup: SaslClusterSetup<'_>,
 ) -> SaslCluster {
-    start_three_broker_sasl_plaintext_jvm_cluster_configured(admin, admin_pass, extra_users, |_| {})
-        .await
+    start_three_broker_sasl_plaintext_jvm_cluster_configured(setup, |_| {}).await
 }
 
 pub(crate) async fn start_sasl_cluster<const N: usize>(
     listeners: [crate::support::JvmListeners; N],
-    admin: &str,
-    admin_pass: &str,
-    extra_users: &[(&str, &str)],
+    setup: SaslClusterSetup<'_>,
     adjust: impl Fn(&mut BrokerConfig),
 ) -> (
     [krabka_broker::BrokerHandle; N],
@@ -76,6 +74,11 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
     use krabka_broker::config::{InterBrokerCredentials, ListenerSpec};
     use krabka_security::{ListenerProtocol, SaslMechanism};
 
+    let SaslClusterSetup {
+        admin,
+        admin_pass,
+        extra_users,
+    } = setup;
     crate::support::init_jvm_tracing("krabka_broker=info");
     let _ = rustls::crypto::ring::default_provider().install_default();
     let dirs: [tempfile::TempDir; N] =
@@ -93,12 +96,14 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
     let configs: [BrokerConfig; N] = std::array::from_fn(|index| {
         let listener = &listeners[index];
         let mut config = crate::support::jvm_broker_config(
-            voters[index].0,
-            listener.listen.parse().expect("client address"),
-            voters[index].1,
-            &listener.advertised,
             dirs[index].path().to_path_buf(),
-            &voters,
+            crate::support::JvmBrokerSetup {
+                node: krabka_broker::NodeId(voters[index].0),
+                listen: listener.listen.parse().expect("client address"),
+                controller: voters[index].1,
+                advertised: listener.advertised.clone(),
+                voters: crate::support::controller_voters(&voters),
+            },
         );
         config.listeners = vec![ListenerSpec {
             advertised: listener.advertised.clone(),
@@ -148,18 +153,10 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
 }
 
 pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster_configured(
-    admin: &str,
-    admin_pass: &str,
-    extra_users: &[(&str, &str)],
+    setup: SaslClusterSetup<'_>,
     adjust: impl Fn(&mut BrokerConfig),
 ) -> SaslCluster {
-    let ([h0, h1, h2], [cfg0, cfg1, cfg2], [dir0, dir1, dir2]) = start_sasl_cluster(
-        super::ports::cluster_listeners(),
-        admin,
-        admin_pass,
-        extra_users,
-        adjust,
-    )
-    .await;
+    let ([h0, h1, h2], [cfg0, cfg1, cfg2], [dir0, dir1, dir2]) =
+        start_sasl_cluster(super::ports::cluster_listeners(), setup, adjust).await;
     (h0, h1, h2, cfg0, cfg1, cfg2, dir0, dir1, dir2)
 }

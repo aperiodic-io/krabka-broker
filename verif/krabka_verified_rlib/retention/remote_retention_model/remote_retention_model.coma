@@ -61,7 +61,3 @@ goal vc_remote_retention_model: if ge_log_Int i (Seq.length segments) then
 
         else
           true
-
-
-
-

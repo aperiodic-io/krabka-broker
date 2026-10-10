@@ -49,14 +49,7 @@ use crate::{
 /// Kafka's `appendGroupMetadataErrorToResponseError`: the `JoinGroup` error
 /// for a group metadata write that failed.
 pub(crate) fn append_error_code(error: &crate::error::BrokerError) -> i16 {
-    match codes::from_broker_error(error) {
-        codes::UNKNOWN_TOPIC_OR_PARTITION
-        | codes::NOT_ENOUGH_REPLICAS
-        | codes::REQUEST_TIMED_OUT => codes::COORDINATOR_NOT_AVAILABLE,
-        codes::NOT_LEADER_OR_FOLLOWER | codes::KAFKA_STORAGE_ERROR => codes::NOT_COORDINATOR,
-        codes::MESSAGE_TOO_LARGE => codes::UNKNOWN_SERVER_ERROR,
-        other => other,
-    }
+    codes::coordinator_append_error(codes::from_broker_error(error))
 }
 
 #[allow(clippy::too_many_arguments)] // Keeps the actor message boundary explicit.
@@ -680,8 +673,8 @@ mod tests {
             classic_initial_rebalance_delay: std::time::Duration::ZERO,
             ..NextGenConfig::assigning_at_once()
         });
-        let handle = coord.get_or_create_classic("g");
-        coord.mark_classic("g");
+        let handle =
+            crate::coordinator::unified::actor::test_support::marked_classic_handle(&coord, "g");
 
         let assigned = rpc::classic_join(&handle, "", "t").await;
         check!(assigned.error_code == codes::MEMBER_ID_REQUIRED);
@@ -717,8 +710,9 @@ mod tests {
                 classic_initial_rebalance_delay: Duration::ZERO,
                 ..NextGenConfig::assigning_at_once()
             });
-            let handle = coord.get_or_create_classic("g");
-            coord.mark_classic("g");
+            let handle = crate::coordinator::unified::actor::test_support::marked_classic_handle(
+                &coord, "g",
+            );
             let rx = rpc::begin(&handle, |tx| GroupActorMessage::ClassicJoin {
                 req: JoinGroupRequest {
                     group_id: "g".into(),
@@ -868,9 +862,7 @@ mod tests {
                 }
         );
         let view = rpc::classic_inspect(&handle).await;
-        check!(view.state == ClassicGroupState::Stable);
-        check!(view.members.len() == 1);
-        check!(view.members[0].member_id == "m1");
+        rpc::check_stable_classic_member(&view, "m1");
         check!(view.members[0].protocol_metadata == Bytes::from_static(b"subscription"));
         check!(view.members[0].assignment.as_deref() == Some(&b"assignment"[..]));
         check!(log.batches().await.is_empty());
@@ -1160,6 +1152,19 @@ mod tests {
             .collect()
     }
 
+    #[derive(Clone, Copy)]
+    struct PersistedBatchCount(usize);
+
+    /// Exactly one new durable join batch, before the caller checks its scenario-specific keys.
+    async fn new_join_batch_shape(
+        log: &crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog,
+        before: PersistedBatchCount,
+    ) -> Vec<(Option<NextGenKey>, bool)> {
+        let batches = log.batches().await;
+        check!(batches.len() == before.0 + 1);
+        batch_shape(batches.last().expect("the join's batch"))
+    }
+
     /// The records of Kafka's `replaceMember` for `old` replaced by `new`:
     /// the old member's tombstones, then the new member's subscription,
     /// target and current assignment.
@@ -1274,9 +1279,7 @@ mod tests {
         let mut want_members = vec!["native".to_string(), second.member_id.clone()];
         want_members.sort_unstable();
         check!(member_ids(&handle).await == want_members);
-        let batches = log.batches().await;
-        check!(batches.len() == batches_before + 1);
-        let shape = batch_shape(batches.last().expect("the join's batch"));
+        let shape = new_join_batch_shape(&log, PersistedBatchCount(batches_before)).await;
         check!(shape[..6] == replace_member_shape(&first.member_id, &second.member_id)[..]);
     }
 
@@ -1453,9 +1456,7 @@ mod tests {
         check!(
             (view.state, view.generation_id, members) == (ClassicGroupState::Stable, epoch, want)
         );
-        let batches = log.batches().await;
-        check!(batches.len() == batches_before + 1);
-        let shape = batch_shape(batches.last().expect("the join's batch"));
+        let shape = new_join_batch_shape(&log, PersistedBatchCount(batches_before)).await;
         check!(shape[..6] == replace_member_shape("native", &joined.member_id)[..]);
         check!(
             shape[shape.len() - 3..]
@@ -1477,6 +1478,10 @@ mod tests {
         );
     }
 
+    fn fixed_topic_resolver() -> std::sync::Arc<FixedRegexResolver> {
+        std::sync::Arc::new(FixedRegexResolver::new(&[("t.*", &["t"])]))
+    }
+
     /// Kafka's `classicGroupJoinToConsumerGroup` runs
     /// `maybeUpdateRegularExpressions` with the request context of the join:
     /// a classic member's join refreshes the stale resolutions of a group
@@ -1495,7 +1500,7 @@ mod tests {
             },
         );
         let handle = coord.get_or_create_group("g", GroupKindTag::Consumer);
-        let native_resolver = std::sync::Arc::new(FixedRegexResolver::new(&[("t.*", &["t"])]));
+        let native_resolver = fixed_topic_resolver();
         let (tx, rx) = tokio::sync::oneshot::channel();
         handle
             .tx
@@ -1517,7 +1522,7 @@ mod tests {
             .unwrap();
         assert!(rx.await.unwrap().error_code == codes::NONE);
         assert!(native_resolver.calls() == 1);
-        let classic_resolver = std::sync::Arc::new(FixedRegexResolver::new(&[("t.*", &["t"])]));
+        let classic_resolver = fixed_topic_resolver();
 
         let (tx, rx) = tokio::sync::oneshot::channel();
         handle

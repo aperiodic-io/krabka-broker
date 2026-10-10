@@ -102,7 +102,12 @@ async fn describe_transaction(
 async fn create_topic(bootstrap: &str, name: &str) {
     let client = connect_client(bootstrap, None).await;
     let cr = client
-        .send(create_topic_request(creatable_topic(name, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (name).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .unwrap();
     assert!(

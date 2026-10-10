@@ -8,7 +8,6 @@ use assert2::assert;
 use krabka_ids::{LeaderEpoch, Offset, PartitionIndex};
 use krabka_metadata::{MetadataImage, NodeId};
 use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use tokio::sync::Notify;
 
 use super::{LedTerm, OFFSETS_TOPIC, OffsetsLog, ProductionOffsetsLog, await_committed, led_epoch};
 use crate::{
@@ -92,18 +91,19 @@ fn led_epoch_is_the_term_this_broker_leads_the_partition_under() {
 /// leader of the partition never got.
 #[tokio::test]
 async fn a_write_completes_only_when_committed_under_its_term() {
-    use crate::coordinator::test_support::{CommitWaitOutcome, commit_wait_cases};
+    use crate::coordinator::test_support::commit_wait_cases;
     for case in commit_wait_cases() {
-        let expected = match case.expected {
-            CommitWaitOutcome::Committed => Ok(()),
-            CommitWaitOutcome::NotLeader => Err((0, codes::NOT_COORDINATOR)),
-            CommitWaitOutcome::TimedOut => Err((0, codes::COORDINATOR_NOT_AVAILABLE)),
-        };
-        let hw_notify = Arc::new(Notify::new());
-        let (partition, _dir) =
-            crate::partition::test_support::test_partition(Arc::clone(&hw_notify));
-        let partition = Arc::new(partition);
-        partition.replica_state.lock().await.hw = Offset(case.hw_now);
+        let expected = case
+            .expected
+            .kafka_error()
+            .map_or(Ok(()), |code| Err((0, code.0)));
+        let (partition, _dir, hw_notify) = crate::partition::test_support::commit_partition(
+            crate::partition::test_support::CommitPartitionSetup {
+                high_watermark: Offset(case.hw_now),
+                ..Default::default()
+            },
+        )
+        .await;
         let metadata = Arc::new(
             FakeMetadataSource::builder()
                 .image(offsets_image(1, 0))

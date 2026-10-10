@@ -39,7 +39,7 @@ pub fn archive_segment(
     storage
         .copy_log_segment_data(
             &metadata,
-            &export_segment_data(export, true, || {
+            &export_segment_data(export, ProducerSnapshotExport::Include, || {
                 Bytes::from(format!("0\n1\n0 {}\n", export.base_offset.0).into_bytes())
             }),
         )

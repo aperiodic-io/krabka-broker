@@ -322,7 +322,9 @@ mod tests {
         let version = share_acknowledge_response::MAX_VERSION;
         let (broker_handle, _dir) = crate::test_support::start_share_broker(
             std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer),
-            false,
+            crate::test_support::ShareBrokerSetup {
+                support: crate::test_support::ShareApiSupport::Disabled,
+            },
         )
         .await;
         let broker = broker_handle.broker_arc_for_test();
@@ -348,9 +350,11 @@ mod tests {
     async fn create_topic(broker: &crate::broker::BrokerHandle, name: &str) -> ProtoUuid {
         crate::handlers::test_support::create_topic(
             broker,
-            "share-acknowledge-resolution-test",
-            name,
-            1,
+            crate::handlers::test_support::ClientTopicSetup {
+                client_id: "share-acknowledge-resolution-test",
+                name,
+                ..Default::default()
+            },
         )
         .await
     }
@@ -458,7 +462,7 @@ mod tests {
             (broker_handle, _dir, known),
             crate::test_support::start_share_broker(
                 std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer),
-                true,
+                crate::test_support::ShareBrokerSetup::default()
             ),
             "ack-resolution",
             "g1"

@@ -93,11 +93,7 @@ pub(super) fn topology_with_source_topic(topic: &str) -> StreamsGroupTopologyVal
         subtopologies: vec![StoredSubtopology {
             subtopology_id: "0".into(),
             source_topics: vec![topic.into()],
-            source_topic_regex: Vec::new(),
-            repartition_sink_topics: Vec::new(),
-            state_changelog_topics: Vec::new(),
-            repartition_source_topics: Vec::new(),
-            copartition_groups: Vec::new(),
+            ..Default::default()
         }],
     }
 }
@@ -281,7 +277,9 @@ pub(super) async fn create_topic(broker: &Broker, name: &str, partitions: i32) {
     })];
     records.extend((0..partitions).map(|partition| {
         MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
-            name, partition, node_id,
+            name,
+            krabka_ids::PartitionIndex(partition),
+            node_id,
         ))
     }));
     broker

@@ -161,8 +161,7 @@ fn a_member_that_joins_with_a_regex_gets_the_resolved_topics_at_its_next_heartbe
     check!(target_topics(&state, "m1").is_empty());
 
     keepalive(&mut state, &metadata, "m1");
-    check!(target_topics(&state, "m1") == HashSet::from([A1, A2]));
-    assert!(held_topics(&state, "m1") == HashSet::from([A1, A2]));
+    check_assigned_topics(&state, "m1", &HashSet::from([A1, A2]));
 }
 
 /// Members that subscribe to the same regex share the group's resolution: the
@@ -382,8 +381,7 @@ fn a_failover_keeps_the_topics_of_a_regex_without_a_heartbeat_that_carries_the_p
 
     check!(step.step.response.error_code == 0);
     check!(resolver.calls() == 0);
-    check!(target_topics(&state, "m1") == HashSet::from([A1, A2]));
-    assert!(held_topics(&state, "m1") == HashSet::from([A1, A2]));
+    check_assigned_topics(&state, "m1", &HashSet::from([A1, A2]));
 }
 
 /// A member that leaves takes the resolution of the regex only it used, and
@@ -450,4 +448,10 @@ fn a_regex_over_the_record_key_bound_does_not_encode() {
             check!(joined.result.resolved_regexes.is_empty());
         }
     }
+}
+
+/// Both the target and the held assignment must match the caller's independent topic set.
+fn check_assigned_topics(state: &GroupState, member: &str, topics: &HashSet<Uuid>) {
+    check!(&target_topics(state, member) == topics);
+    assert!(&held_topics(state, member) == topics);
 }

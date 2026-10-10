@@ -310,9 +310,11 @@ mod tests {
     #[test]
     fn consume_consumer_quota_tuple_match_overage_throttles() {
         let img = crate::quota::test_support::image_with_quota(
-            vec![("user", Some("alice")), ("client-id", Some("app-x"))],
-            "consumer_byte_rate",
-            1024.0,
+            crate::quota::test_support::QuotaRecordSetup {
+                entity: vec![("user", Some("alice")), ("client-id", Some("app-x"))],
+                key: "consumer_byte_rate",
+                value: crate::quota::test_support::QuotaValue(1024.0),
+            },
         );
         // A one-second window, so 4096 bytes at 1024 B/s is over the burst
         // rather than inside the default 11-second one.
@@ -341,9 +343,10 @@ mod tests {
     #[test]
     fn a_throttled_fetch_gives_the_whole_charge_back() {
         let img = crate::quota::test_support::image_with_quota(
-            vec![("user", Some("alice"))],
-            "consumer_byte_rate",
-            1_000.0,
+            crate::quota::test_support::QuotaRecordSetup {
+                key: "consumer_byte_rate",
+                ..Default::default()
+            },
         );
         let consume = |buckets: &crate::quota::QuotaBuckets, bytes| {
             super::consume_consumer_quota(&img, buckets, "alice", Some("app"), bytes)
@@ -371,22 +374,14 @@ mod tests {
     fn a_fractional_consumer_byte_rate_throttles() {
         // `(consumer_byte_rate, response bytes, expected throttle)`. The
         // one-second window gives the bucket a burst of exactly its rate.
-        let cases = crate::quota::test_support::fractional_bandwidth_cases();
-        let mut actual = Vec::new();
-        let mut expected = Vec::new();
-        for (rate, bytes, delay) in cases {
-            let img = crate::quota::test_support::image_with_quota(
-                vec![("user", Some("alice"))],
-                "consumer_byte_rate",
-                rate,
-            );
-            let buckets = crate::quota::QuotaBuckets::with_window(secs(1));
-            let (throttle, _) =
-                super::consume_consumer_quota(&img, &buckets, "alice", Some("app"), bytes);
-            actual.push((rate.to_string(), bytes, throttle.delay));
-            expected.push((rate.to_string(), bytes, delay));
-        }
-        assert!(actual == expected);
+        crate::quota::test_support::check_fractional_bandwidth(
+            "consumer_byte_rate",
+            |image, buckets, bytes| {
+                super::consume_consumer_quota(image, buckets, "alice", Some("app"), bytes)
+                    .0
+                    .delay
+            },
+        );
     }
 
     /// The image of leader broker 1 with topic `t`, whose partition `i` has
@@ -411,10 +406,12 @@ mod tests {
                     vec![NodeId(1)]
                 },
                 ..crate::handlers::test_support::replicated_partition(
-                    "t",
-                    partition,
-                    NodeId(1),
-                    &[NodeId(1), NodeId(2)],
+                    crate::handlers::test_support::ReplicatedPartitionSetup {
+                        topic: "t",
+                        partition: krabka_ids::PartitionIndex(partition),
+                        leader: NodeId(1),
+                        replicas: &[NodeId(1), NodeId(2)],
+                    },
                 )
             }));
         }

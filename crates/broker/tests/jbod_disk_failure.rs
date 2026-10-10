@@ -16,12 +16,15 @@
 mod kafka_wire;
 
 mod support;
+#[path = "support/two_dir_topic.rs"]
+mod two_dir_topic;
 
 use std::net::SocketAddr;
 
 use assert2::{assert, check};
 use bytes::BytesMut;
 use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -34,8 +37,8 @@ use krabka_protocol::{
 use tokio::net::TcpStream;
 
 use crate::support::{
-    produce::single_partition_produce,
     records::{batch_from_records, value_record},
+    wire::ApiRequestSetup,
 };
 
 krabka_macros::assignment_dirs_fixture!(assignment_dirs_request);
@@ -45,18 +48,6 @@ const PRODUCE_VERSION: i16 = 9; // flexible, acks=1
 
 // Flexible headers and correlation ID 1 for every request in this suite.
 crate::flexible_round_trip_fixture!(round_trip, CLIENT_ID, 1);
-
-async fn create_topic(addr: SocketAddr, topic: &str, partitions: i32) {
-    kafka_wire::create_topic_plaintext(addr, CLIENT_ID, kafka_wire::topic(topic, partitions, 1))
-        .await;
-}
-
-async fn wait_all_partitions(handle: &BrokerHandle, topic: &str, n: i32) {
-    // Wait until every partition of `topic` has materialized in the image.
-    for p in 0..n {
-        handle.wait_until_partition_present(topic, p).await;
-    }
-}
 
 /// Lists the partition indices of `topic` whose data dir lives directly under
 /// `dir`.
@@ -82,19 +73,27 @@ async fn produce_and_get_error(addr: SocketAddr, topic: &str, partition: i32) ->
         0,
         Some(bytes::Bytes::from_static(b"kip-112-test")),
     )]);
-    let req = single_partition_produce(
-        topic.to_string(),
-        krabka_protocol::primitives::uuid::Uuid::default(),
-        partition,
-        Some(batch.into()),
-        (1, 5_000),
+    let req = crate::support::produce::batch_request(
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: topic.to_string(),
+            partition: krabka_ids::PartitionIndex(partition),
+            ..Default::default()
+        },
     );
     let mut body = BytesMut::new();
     req.encode(&mut body, PRODUCE_VERSION).unwrap();
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let resp_bytes = round_trip(&mut stream, 0, PRODUCE_VERSION, &body)
-        .await
-        .unwrap();
+    let resp_bytes = round_trip(
+        &mut stream,
+        ApiRequestSetup {
+            api_key: WireApiKey(0),
+            version: WireApiVersion(PRODUCE_VERSION),
+        },
+        &body,
+    )
+    .await
+    .unwrap();
     let mut cur: &[u8] = &resp_bytes;
     let resp = ProduceResponse::decode(&mut cur, PRODUCE_VERSION).unwrap();
     resp.responses[0].partition_responses[0].error_code
@@ -107,9 +106,13 @@ async fn produce_to_partition_on_offline_dir_returns_storage_error() {
     // both dirs under the least-loaded placement algorithm.
     const N: i32 = 6;
 
-    let (handle, primary, extra, addr) = start_two_dir_broker().await;
-    create_topic(addr, TOPIC, N).await;
-    wait_all_partitions(&handle, TOPIC, N).await;
+    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
+        client_id: CLIENT_ID,
+        topic: TOPIC,
+        partitions: crate::support::topics::TopicPartitionCount(N),
+        ..Default::default()
+    })
+    .await;
 
     // Confirm spread: both dirs must hold at least one partition of the topic.
     let in_extra = partitions_in_dir(extra.path(), TOPIC);
@@ -217,6 +220,14 @@ async fn all_log_dirs_offline_triggers_self_shutdown() {
 ///
 /// This exercises the real async `handle` path: decode, the leader gate,
 /// `plan_assignments`, `submit_change`, and encode.
+async fn single_directory_broker() -> (tempfile::TempDir, BrokerHandle, SocketAddr) {
+    let primary = tempfile::tempdir().unwrap();
+    let config = BrokerConfig::for_tests(primary.path().to_path_buf());
+    let broker = Box::pin(Broker::start(config)).await.expect("broker start");
+    let address = broker.listen_addr();
+    (primary, broker, address)
+}
+
 #[tokio::test]
 async fn assign_replicas_to_dirs_reports_and_echoes() {
     const VERSION: i16 = 0; // AssignReplicasToDirs only has version 0
@@ -224,13 +235,19 @@ async fn assign_replicas_to_dirs_reports_and_echoes() {
     const TOPIC: &str = "kip112-assign";
     const N: i32 = 2;
     // Use a single-dir broker so the broker IS the controller leader.
-    let primary = tempfile::tempdir().unwrap();
-    let cfg = BrokerConfig::for_tests(primary.path().to_path_buf());
-    let handle = Broker::start(cfg).await.expect("broker start");
-    let addr = handle.listen_addr();
+    let (_primary, handle, addr) = single_directory_broker().await;
 
-    create_topic(addr, TOPIC, N).await;
-    wait_all_partitions(&handle, TOPIC, N).await;
+    crate::two_dir_topic::create_and_wait(
+        &handle,
+        addr,
+        crate::two_dir_topic::Setup {
+            client_id: CLIENT_ID,
+            topic: TOPIC,
+            partitions: crate::support::topics::TopicPartitionCount(N),
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Look up the topic UUID from the controller image so we can reference
     // the partition correctly in the request.
@@ -249,13 +266,27 @@ async fn assign_replicas_to_dirs_reports_and_echoes() {
     let dir_uuid = uuid::Uuid::from_u128(0xCAFE_BABE);
 
     // for_tests default broker_id; assign partition 0 to the arbitrary directory.
-    let req = assignment_dirs_request(1, broker_epoch, dir_uuid, topic_uuid, &[0]);
+    let req = assignment_dirs_request(DirectoryAssignmentSetup {
+        broker_epoch,
+        dir: dir_uuid,
+        topic: topic_uuid,
+        ..Default::default()
+    });
 
     let mut body = BytesMut::new();
     req.encode(&mut body, VERSION).unwrap();
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let resp_bytes = round_trip(&mut stream, 73, VERSION, &body).await.unwrap();
+    let resp_bytes = round_trip(
+        &mut stream,
+        ApiRequestSetup {
+            api_key: WireApiKey(73),
+            version: WireApiVersion(VERSION),
+        },
+        &body,
+    )
+    .await
+    .unwrap();
 
     let mut cur: &[u8] = &resp_bytes;
     let resp = AssignReplicasToDirsResponse::decode(&mut cur, VERSION).unwrap();
@@ -288,10 +319,7 @@ async fn assign_replicas_to_dirs_reports_and_echoes() {
 #[tokio::test]
 async fn heartbeat_with_offline_log_dirs_is_accepted() {
     use krabka_protocol::owned::broker_heartbeat_request::MAX_VERSION as HB_MAX_VERSION;
-    let primary = tempfile::tempdir().unwrap();
-    let cfg = BrokerConfig::for_tests(primary.path().to_path_buf());
-    let handle = Broker::start(cfg).await.expect("broker start");
-    let addr = handle.listen_addr();
+    let (_primary, handle, addr) = single_directory_broker().await;
 
     // Wait until the broker has registered itself and elected a raft leader
     // (so the heartbeat handler reaches the leader branch, not NOT_CONTROLLER).
@@ -320,9 +348,16 @@ async fn heartbeat_with_offline_log_dirs_is_accepted() {
     req.encode(&mut body, HB_MAX_VERSION).unwrap();
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let resp_bytes = round_trip(&mut stream, 63, HB_MAX_VERSION, &body)
-        .await
-        .unwrap();
+    let resp_bytes = round_trip(
+        &mut stream,
+        ApiRequestSetup {
+            api_key: WireApiKey(63),
+            version: WireApiVersion(HB_MAX_VERSION),
+        },
+        &body,
+    )
+    .await
+    .unwrap();
 
     let mut cur: &[u8] = &resp_bytes;
     let resp = BrokerHeartbeatResponse::decode(&mut cur, HB_MAX_VERSION).unwrap();
@@ -335,5 +370,3 @@ async fn heartbeat_with_offline_log_dirs_is_accepted() {
 
     handle.shutdown().await;
 }
-
-pub use crate::support::storage::start_two_dir_broker;

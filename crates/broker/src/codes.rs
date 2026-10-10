@@ -721,3 +721,15 @@ pub fn from_broker_error(err: &crate::error::BrokerError) -> i16 {
         | BrokerError::Raft(_) => UNKNOWN_SERVER_ERROR,
     }
 }
+
+/// Kafka coordinator response mapping for a failed metadata append.
+pub(crate) fn coordinator_append_error(code: i16) -> i16 {
+    match code {
+        UNKNOWN_TOPIC_OR_PARTITION | NOT_ENOUGH_REPLICAS | REQUEST_TIMED_OUT => {
+            COORDINATOR_NOT_AVAILABLE
+        }
+        NOT_LEADER_OR_FOLLOWER | KAFKA_STORAGE_ERROR => NOT_COORDINATOR,
+        MESSAGE_TOO_LARGE => UNKNOWN_SERVER_ERROR,
+        other => other,
+    }
+}

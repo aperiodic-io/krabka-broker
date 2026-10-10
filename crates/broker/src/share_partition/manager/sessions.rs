@@ -108,7 +108,9 @@ mod tests {
 
     #[test]
     fn nondefault_unlimited_fallback_bounds_sessions() {
-        let manager = manager_with_unlimited_fallback(2);
+        let manager = manager_with_unlimited_fallback(
+            crate::share_partition::manager::test_support::SessionCapacity(2),
+        );
         let partitions = HashSet::new();
 
         assert!(

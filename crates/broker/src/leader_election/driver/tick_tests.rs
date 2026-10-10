@@ -10,8 +10,8 @@ use super::*;
 use crate::{
     heartbeat::controller_state::TestClock,
     leader_election::test_support::{
-        fake_source, fencing_updates, img_with_partition, one_partition_change, partition_batches,
-        recovery_handle_for_tests, register_brokers,
+        ElectionSetup, fake_source, fencing_updates, img_with_partition, one_partition_change,
+        partition_batches, recovery_handle_for_tests, register_brokers,
     },
 };
 
@@ -43,6 +43,12 @@ impl TickFixture {
         }
     }
 
+    fn registered_partition(leader: u64, was_leader: bool) -> Self {
+        let mut image = img_with_partition(ElectionSetup::default());
+        register_brokers(&mut image, &[1, 2, 3]);
+        Self::new(image, leader, was_leader)
+    }
+
     async fn tick(&mut self) {
         let controller: Arc<dyn crate::metadata_source::MetadataSource> = self.source.clone();
         run_liveness_tick(
@@ -61,9 +67,7 @@ impl TickFixture {
 async fn tick_discovers_registered_broker_that_never_heartbeated_and_fails_it_over() {
     // Broker 1 leads t-0 and dies before its first heartbeat reaches this
     // controller. Brokers 2 and 3 heartbeat as usual.
-    let mut img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
-    register_brokers(&mut img, &[1, 2, 3]);
-    let mut fixture = TickFixture::new(img, 2, true);
+    let mut fixture = TickFixture::registered_partition(2, true);
     fixture.liveness.record_heartbeat(2).await;
     fixture.liveness.record_heartbeat(3).await;
 
@@ -88,8 +92,11 @@ async fn tick_discovers_registered_broker_that_never_heartbeated_and_fails_it_ov
 
     let batches = partition_batches(&fixture.source.submitted());
     assert!(batches.len() == 1, "the edge submits once, got {batches:?}");
-    let expected =
-        crate::leader_election::test_support::expected_clean_election(2, &[2, 3], vec![]);
+    let expected = crate::leader_election::test_support::expected_clean_election(
+        krabka_raft::NodeId(2),
+        &[krabka_raft::NodeId(2), krabka_raft::NodeId(3)],
+        vec![],
+    );
     assert!(*one_partition_change(&batches[0]) == expected);
 
     // The test source never applies the change, so the image still shows
@@ -103,9 +110,7 @@ async fn tick_discovers_registered_broker_that_never_heartbeated_and_fails_it_ov
 
 #[tokio::test]
 async fn tick_on_a_follower_tracks_nothing_and_submits_nothing() {
-    let mut img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
-    register_brokers(&mut img, &[1, 2, 3]);
-    let mut fixture = TickFixture::new(img, 9, false);
+    let mut fixture = TickFixture::registered_partition(9, false);
 
     fixture.tick().await;
     fixture.clock.advance(std::time::Duration::from_millis(11));
@@ -124,9 +129,7 @@ async fn first_tick_of_a_new_term_seeds_before_it_sweeps() {
     // registry expired every session. When it takes the lead, the first
     // tick must seed those brokers alive before any sweep can read the
     // stale dead set and fail over partitions whose leaders are healthy.
-    let mut img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
-    register_brokers(&mut img, &[1, 2, 3]);
-    let mut fixture = TickFixture::new(img, 9, false);
+    let mut fixture = TickFixture::registered_partition(9, false);
 
     // Sessions from the previous term expire while node 2 follows.
     for broker in [1, 2, 3] {
@@ -165,7 +168,9 @@ async fn tick_leaves_the_unfence_of_a_returning_broker_to_its_heartbeat() {
     // Broker 3 is fenced in the image and alive again. Kafka unfences a
     // broker only in `processBrokerHeartbeat`, once the broker has caught up
     // to its registration, so the tick writes nothing for it.
-    let mut img = img_with_partition("t", 0, /*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+    let mut img = img_with_partition(ElectionSetup {
+        ..Default::default()
+    });
     register_brokers(&mut img, &[1, 2, 3]);
     let fence = crate::heartbeat::fencing::registration_change(
         &img,

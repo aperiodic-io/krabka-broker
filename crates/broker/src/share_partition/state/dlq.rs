@@ -156,16 +156,36 @@ mod tests {
 
     use super::*;
     use crate::{
-        share_coordinator::coordinator::test_support::state_batch as batch,
-        share_partition::state::{
-            AckType, AcquiredRange, DS_ARCHIVING,
-            test_support::{LOCK, acquire_window, dlq_range as range, t0},
+        share_coordinator::coordinator::test_support::{
+            DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch as batch,
         },
+        share_partition::state::{
+            AckType, AcquiredRange,
+            test_support::{
+                AcquiredWindowSetup, DeadLetterQueue, DlqRangeSetup, LOCK, acquire_window,
+                dlq_range as range, t0,
+            },
+        },
+        test_support::RecordCount,
     };
 
-    fn state_with_dlq(records: i64) -> AcquisitionState {
+    fn state_with_dlq(end: Offset) -> AcquisitionState {
         let mut s = AcquisitionState::new(Offset(0));
-        acquire_window(&mut s, records, 100, true);
+        acquire_window(
+            &mut s,
+            AcquiredWindowSetup {
+                end,
+                record_limit: RecordCount(100),
+                dead_letter_queue: DeadLetterQueue::Enabled,
+            },
+        );
+        s
+    }
+
+    fn state_with_rejected_prefix() -> AcquisitionState {
+        let mut s = state_with_dlq(Offset(4));
+        s.acknowledge("m1", Offset(0), Offset(1), AckType::Reject, 5)
+            .unwrap();
         s
     }
 
@@ -175,9 +195,7 @@ mod tests {
     /// SPSO.
     #[test]
     fn a_reject_with_a_queue_waits_in_archiving() {
-        let mut s = state_with_dlq(4);
-        s.acknowledge("m1", Offset(0), Offset(1), AckType::Reject, 5)
-            .unwrap();
+        let mut s = state_with_rejected_prefix();
         s.acknowledge("m1", Offset(2), Offset(2), AckType::Gap, 5)
             .unwrap();
         s.acknowledge("m1", Offset(3), Offset(3), AckType::Accept, 5)
@@ -192,7 +210,11 @@ mod tests {
             ) == (
                 Offset(0),
                 2,
-                vec![range(0, 1, 1, Some(DlqCause::ClientReject))],
+                vec![range(DlqRangeSetup {
+                    last: Offset(1),
+                    cause: Some(DlqCause::ClientReject),
+                    ..Default::default()
+                })],
                 vec![
                     (0, RecordState::Archiving),
                     (1, RecordState::Archiving),
@@ -207,7 +229,7 @@ mod tests {
     /// run waits for the queue.
     #[test]
     fn a_reject_without_a_queue_archives_at_once() {
-        let mut s = state_with_dlq(2);
+        let mut s = state_with_dlq(Offset(2));
         s.set_dlq_enabled(false);
         s.acknowledge("m1", Offset(0), Offset(1), AckType::Reject, 5)
             .unwrap();
@@ -243,7 +265,11 @@ mod tests {
                     s.record_states(),
                     s.delivery_complete_count(),
                 ) == (
-                    vec![range(0, 1, 1, Some(DlqCause::DeliveryCountExceeded))],
+                    vec![range(DlqRangeSetup {
+                        last: Offset(1),
+                        cause: Some(DlqCause::DeliveryCountExceeded),
+                        ..Default::default()
+                    })],
                     vec![(0, RecordState::Archiving), (1, RecordState::Archiving)],
                     0,
                 ),
@@ -269,7 +295,10 @@ mod tests {
             (acquired, s.take_pending_dlq(), s.record_states())
                 == (
                     Vec::<AcquiredRange>::new(),
-                    vec![range(0, 0, 1, Some(DlqCause::DeliveryCountExceeded))],
+                    vec![range(DlqRangeSetup {
+                        cause: Some(DlqCause::DeliveryCountExceeded),
+                        ..Default::default()
+                    })],
                     vec![(0, RecordState::Archiving)],
                 )
         );
@@ -279,9 +308,7 @@ mod tests {
     /// SPSO move on, and a state that is not `Archiving` is left alone.
     #[test]
     fn finishing_archives_the_run_and_moves_the_spso() {
-        let mut s = state_with_dlq(4);
-        s.acknowledge("m1", Offset(0), Offset(1), AckType::Reject, 5)
-            .unwrap();
+        let mut s = state_with_rejected_prefix();
         s.acknowledge("m1", Offset(2), Offset(2), AckType::Accept, 5)
             .unwrap();
         s.dirty = false;
@@ -299,7 +326,7 @@ mod tests {
     /// record.
     #[test]
     fn finishing_a_part_of_a_run_leaves_the_rest_archiving() {
-        let mut s = state_with_dlq(3);
+        let mut s = state_with_dlq(Offset(3));
         s.acknowledge("m1", Offset(0), Offset(2), AckType::Reject, 5)
             .unwrap();
         s.dirty = false;
@@ -330,15 +357,23 @@ mod tests {
     /// follows the delivery count.
     #[test]
     fn archiving_persists_as_state_three_and_reloads_pending() {
-        let mut s = state_with_dlq(3);
+        let mut s = state_with_dlq(Offset(3));
         s.acknowledge("m1", Offset(0), Offset(1), AckType::Reject, 5)
             .unwrap();
         let (start, _, batches) = s.to_persist_batches();
         assert!(
             batches
                 == vec![
-                    batch(0, 1, DS_ARCHIVING, 1),
-                    batch(2, 2, crate::share_partition::state::DS_AVAILABLE, 1),
+                    batch(StateBatchSetup {
+                        bounds: Offset(0)..=Offset(1),
+                        delivery: FixtureDeliveryState::Archiving,
+                        ..Default::default()
+                    }),
+                    batch(StateBatchSetup {
+                        bounds: Offset(2)..=Offset(2),
+                        delivery: FixtureDeliveryState::Available,
+                        ..Default::default()
+                    }),
                 ]
         );
 
@@ -351,9 +386,16 @@ mod tests {
         assert!(
             (pending, spso, after)
                 == (
-                    vec![range(0, 1, 1, None)],
+                    vec![range(DlqRangeSetup {
+                        last: Offset(1),
+                        ..Default::default()
+                    })],
                     Offset(2),
-                    vec![batch(2, 2, crate::share_partition::state::DS_AVAILABLE, 1)],
+                    vec![batch(StateBatchSetup {
+                        bounds: Offset(2)..=Offset(2),
+                        delivery: FixtureDeliveryState::Available,
+                        ..Default::default()
+                    })],
                 )
         );
     }
@@ -364,7 +406,16 @@ mod tests {
     #[test]
     fn an_archiving_run_holds_the_spso() {
         let mut s = AcquisitionState::new(Offset(0));
-        s.load_from(Offset(0), 1, 1, &[batch(0, 0, DS_ARCHIVING, 5)]);
+        s.load_from(
+            Offset(0),
+            1,
+            1,
+            &[batch(StateBatchSetup {
+                bounds: Offset(0)..=Offset(0),
+                delivery: FixtureDeliveryState::Archiving,
+                attempts: DeliveryAttemptCount(5),
+            })],
+        );
 
         assert!((s.start_offset, s.delivery_complete_count()) == (Offset(0), 0));
     }

@@ -7,8 +7,6 @@
 //! test in this suite starts here, so the boot lives in its own file rather
 //! than beside any one of them.
 
-use std::time::Duration;
-
 use krabka_broker::{
     BrokerConfig, BrokerHandle, NodeId,
     config::{NodeRole, StretchProfile},
@@ -34,13 +32,10 @@ fn stretch_profile() -> StretchProfile {
 /// `min.insync.replicas=2` (the only value a stretch profile accepts) and the
 /// rack-aware replica selector, which is what makes the KIP-392 redirect check
 /// meaningful.
-///
-/// Retries like `support::start_n_node_with_retry`, which cannot be reused here
-/// because it takes no per-broker customizer.
 pub(crate) async fn start_stretch_cluster() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
-    let mut last_err = None;
-    for attempt in 1..=3 {
-        let started = support::start_n_node_with(3, |i, cfg| {
+    let cluster = support::start_n_node_customized_with_retry(
+        3,
+        |i, cfg| {
             cfg.rack = Some(SITES[i].to_string());
             cfg.stretch = Some(stretch_profile());
             cfg.default_min_insync_replicas = 2;
@@ -49,41 +44,32 @@ pub(crate) async fn start_stretch_cluster() -> Vec<(BrokerHandle, BrokerConfig, 
             if SITES[i] == SITE_C {
                 cfg.roles.push(NodeRole::Witness);
             }
-        })
+        },
+        "stretch cluster",
+    )
+    .await;
+    support::wait_for_all_brokers_registered(&cluster, 3).await;
+    // Placement and the produce / fetch gates read the role and the
+    // preferred site out of the metadata image, so wait until both
+    // records have reached every node before a topic is created.
+    for (handle, _, _) in &cluster {
+        within(
+            "witness role and preferred site in the image",
+            handle.wait_for_image(|img| {
+                img.broker_config(NodeId(3))
+                    .and_then(|configs| configs.get(BROKER_WITNESS))
+                    .map(String::as_str)
+                    == Some("true")
+                    && img
+                        .default_broker_config()
+                        .and_then(|configs| configs.get(STRETCH_PREFERRED_LEADER_SITE))
+                        .map(String::as_str)
+                        == Some(SITE_A)
+            }),
+        )
         .await;
-        match started {
-            Ok(cluster) => {
-                support::wait_for_all_brokers_registered(&cluster, 3).await;
-                // Placement and the produce / fetch gates read the role and the
-                // preferred site out of the metadata image, so wait until both
-                // records have reached every node before a topic is created.
-                for (handle, _, _) in &cluster {
-                    within(
-                        "witness role and preferred site in the image",
-                        handle.wait_for_image(|img| {
-                            img.broker_config(NodeId(3))
-                                .and_then(|configs| configs.get(BROKER_WITNESS))
-                                .map(String::as_str)
-                                == Some("true")
-                                && img
-                                    .default_broker_config()
-                                    .and_then(|configs| configs.get(STRETCH_PREFERRED_LEADER_SITE))
-                                    .map(String::as_str)
-                                    == Some(SITE_A)
-                        }),
-                    )
-                    .await;
-                }
-                return cluster;
-            }
-            Err(error) => {
-                tracing::warn!(attempt, %error, "stretch cluster start failed; retrying");
-                last_err = Some(error);
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-        }
     }
-    panic!("stretch cluster start failed after 3 attempts; last error: {last_err:?}");
+    cluster
 }
 
 pub(crate) async fn client_at(addr: &str) -> Client {

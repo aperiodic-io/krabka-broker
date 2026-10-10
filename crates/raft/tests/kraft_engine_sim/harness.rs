@@ -6,9 +6,9 @@
 //! waiting for agreement, so both halves of that shape are kept here rather
 //! than repeated per test module.
 
-use std::{sync::Arc, time::Duration};
+pub(crate) use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use krabka_raft::{
+pub(crate) use krabka_raft::{
     ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax,
     kraft::{
         KraftConfig, KraftController, KraftLog, NodeId, QuorumState,
@@ -47,26 +47,34 @@ pub(crate) fn topic_record(name: &str, id: u128) -> krabka_metadata::MetadataRec
 }
 
 /// Builds a single engine over a fresh tempdir log, and does not register it.
-pub(crate) fn build_engine(
-    me: NodeId,
-    ids: &[NodeId],
-    cluster_id: uuid::Uuid,
-    election_timeout: Time,
-    net: &SimNet,
-) -> (KraftController, tempfile::TempDir) {
-    build_engine_with_snapshot_interval(me, ids, cluster_id, election_timeout, net, 0)
+/// Start and register every node while retaining its backing directory.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct SimClusterSetup<'a> {
+    #[default(&[NodeId(1), NodeId(2), NodeId(3)])]
+    pub ids: &'a [NodeId],
+    pub cluster_id: uuid::Uuid,
+    #[default(&STAGGERED_TIMEOUTS)]
+    pub timeouts: &'a [Time],
 }
 
-/// Start and register every node while retaining its backing directory.
-pub(crate) fn start_engines(
-    net: &SimNet,
-    ids: &[NodeId],
-    cluster_id: uuid::Uuid,
-    timeouts: &[Time],
-) -> Vec<tempfile::TempDir> {
+pub(crate) fn start_engines(net: &SimNet, setup: SimClusterSetup<'_>) -> Vec<tempfile::TempDir> {
+    let SimClusterSetup {
+        ids,
+        cluster_id,
+        timeouts,
+    } = setup;
     let mut dirs = Vec::new();
     for (i, &id) in ids.iter().enumerate() {
-        let (ctrl, dir) = build_engine(id, ids, cluster_id, timeouts[i], net);
+        let (ctrl, dir) = build_engine(
+            net,
+            crate::harness::SimEngineSetup {
+                me: id,
+                ids,
+                cluster_id,
+                election_timeout: timeouts[i],
+                ..Default::default()
+            },
+        );
         net.register(id, ctrl);
         dirs.push(dir);
     }
@@ -85,18 +93,44 @@ pub(crate) fn metadata_log() -> krabka_raft::MetadataLogConfig {
     }
 }
 
-/// Works like [`build_engine`], but with a caller-chosen
-/// `snapshot_interval_records`, where `0` disables snapshots. The snapshot
-/// catch-up acceptance uses a small interval, so the leader snapshots and prunes
-/// its log after a short burst.
-pub(crate) fn build_engine_with_snapshot_interval(
-    me: NodeId,
-    ids: &[NodeId],
-    cluster_id: uuid::Uuid,
-    election_timeout: Time,
+/// Engine setup with snapshots disabled by default. Snapshot catch-up scenarios
+/// set a small record interval so the leader snapshots and prunes after a burst.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub(crate) struct SnapshotRecordCount(pub u64);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct SimEngineSetup<'a> {
+    #[default(NodeId(1))]
+    pub me: NodeId,
+    #[default(&[NodeId(1), NodeId(2), NodeId(3)])]
+    pub ids: &'a [NodeId],
+    pub cluster_id: uuid::Uuid,
+    #[default(STAGGERED_TIMEOUTS[0])]
+    pub election_timeout: Time,
+    pub snapshot_interval_records: SnapshotRecordCount,
+}
+
+pub(crate) fn build_engine(
     net: &SimNet,
-    snapshot_interval_records: u64,
+    setup: SimEngineSetup<'_>,
 ) -> (KraftController, tempfile::TempDir) {
+    let SimEngineSetup {
+        me,
+        ids,
+        cluster_id,
+        election_timeout,
+        snapshot_interval_records,
+    } = setup;
     let dir = tempfile::tempdir().expect("tempdir");
     let log =
         KraftLog::open(dir.path(), &krabka_raft::MetadataLogConfig::default()).expect("open log");
@@ -112,7 +146,7 @@ pub(crate) fn build_engine_with_snapshot_interval(
             metadata_raft_command_queue_capacity: MetadataRaftCommandQueueCapacity::default(),
             metadata_raft_fetch_max: MetadataRaftFetchMax::default(),
             peers: Arc::new(net.as_peer(me)),
-            snapshot_interval_records,
+            snapshot_interval_records: snapshot_interval_records.0,
             max_bytes_between_snapshots: krabka_units::prelude::bytes(0),
             max_snapshot_interval: millis(0),
             metadata_snapshot_fetch_max: MetadataSnapshotFetchMax::default(),

@@ -18,7 +18,6 @@ use krabka_metadata::{ClientQuotaRecord, EntityKey, MetadataRecord, QuotaEntity}
 use krabka_protocol::{
     Decode, Encode as _,
     owned::{fetch_response::FetchResponse, produce_response::ProduceResponse},
-    primitives::uuid::Uuid,
     records::{Record, RecordBatch},
 };
 use krabka_units::{Time, convert::TimeExt as _, millis};
@@ -26,7 +25,7 @@ use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
 use super::request_frame;
-use crate::network::codec::KafkaCodec;
+use crate::network::{codec::KafkaCodec, test_support::RequestFrameSetup};
 
 /// `Produce` wire `api_key`.
 const PRODUCE_KEY: i16 = 0;
@@ -127,7 +126,13 @@ async fn connect_to_serve_loop(
 }
 
 async fn create_topic(framed: &mut Framed<TcpStream, KafkaCodec>, topic: &str) {
-    let body = encoded(&configured_topic_request(topic, &[], 1, 1, 5_000), 7);
+    let body = encoded(
+        &configured_topic_request(CreateTopicSetup {
+            topic,
+            ..Default::default()
+        }),
+        7,
+    );
     send_request(framed, 19, 7, 1, &body).await;
     let response = response_frame(
         framed,
@@ -141,7 +146,12 @@ async fn create_topic(framed: &mut Framed<TcpStream, KafkaCodec>, topic: &str) {
 /// Writes a v0 `ApiVersions` request, the cheapest frame that still reaches a
 /// real handler through the whole serve loop.
 async fn send_api_versions(framed: &mut Framed<TcpStream, KafkaCodec>, correlation_id: i32) {
-    let frame = request_frame(super::API_VERSIONS_KEY, 0, correlation_id, None, None, &[]).freeze();
+    let frame = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(super::API_VERSIONS_KEY),
+        correlation_id: crate::network::test_support::FrameCorrelationId(correlation_id),
+        ..Default::default()
+    })
+    .freeze();
     framed.send(frame).await.expect("send ApiVersions");
 }
 
@@ -154,7 +164,15 @@ async fn send_request(
     correlation_id: i32,
     body: &BytesMut,
 ) {
-    let frame = request_frame(api_key, version, correlation_id, None, Some(0), body).freeze();
+    let frame = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(api_key),
+        api_version: krabka_ids::ApiVersion(version),
+        correlation_id: crate::network::test_support::FrameCorrelationId(correlation_id),
+        tagged: Some(&[0]),
+        body,
+        ..Default::default()
+    })
+    .freeze();
     framed.send(frame).await.expect("send request");
 }
 
@@ -176,11 +194,9 @@ fn produce_body(topic: &str, acks: i16, record_bytes: usize, count: usize) -> By
             ..Default::default()
         })
         .collect();
-    let request = single_partition_produce(
-        topic,
-        Uuid::default(),
-        0,
-        Some(
+    let request = single_partition_produce(SinglePartitionProduceSetup {
+        topic: (topic).into(),
+        records: Some(
             RecordBatch {
                 last_offset_delta: i32::try_from(count - 1).expect("record count"),
                 records,
@@ -188,8 +204,10 @@ fn produce_body(topic: &str, acks: i16, record_bytes: usize, count: usize) -> By
             }
             .into(),
         ),
-        (acks, 30_000),
-    );
+        acknowledgements: ProduceAcknowledgements::from_wire(WireAcknowledgements(acks)),
+        timeout: ProduceTimeoutMillis(30_000),
+        ..Default::default()
+    });
     let mut body = BytesMut::new();
     request
         .encode(&mut body, PRODUCE_VERSION)
@@ -424,7 +442,14 @@ async fn produce_charges_the_whole_request_frame_once() {
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     let body = produce_body("frame-charge", 1, 256, 8);
-    let frame_len = request_frame(PRODUCE_KEY, PRODUCE_VERSION, 1, None, Some(0), &body).len();
+    let frame_len = request_frame(RequestFrameSetup {
+        api_key: krabka_ids::ApiKey(PRODUCE_KEY),
+        api_version: krabka_ids::ApiVersion(PRODUCE_VERSION),
+        tagged: Some(&[0]),
+        body: &body,
+        ..Default::default()
+    })
+    .len();
     send_request(&mut framed, PRODUCE_KEY, PRODUCE_VERSION, 1, &body).await;
     let response = response_frame(
         &mut framed,
@@ -595,14 +620,13 @@ async fn every_charged_api_reports_its_delay_and_mutes() {
 
     for case in cases {
         let (server, mut framed) = connect_to_serve_loop(&handle).await;
-        let frame = super::request_frame(
-            case.api_key,
-            case.version,
-            1,
-            None,
-            case.flexible.then_some(0),
-            &case.body,
-        )
+        let frame = super::request_frame(RequestFrameSetup {
+            api_key: krabka_ids::ApiKey(case.api_key),
+            api_version: krabka_ids::ApiVersion(case.version),
+            tagged: case.flexible.then_some(&[0][..]),
+            body: &case.body,
+            ..Default::default()
+        })
         .freeze();
         framed.send(frame).await.expect("send request");
         let response = response_frame(
@@ -707,7 +731,10 @@ async fn a_controller_mutation_and_the_request_quota_resolve_in_one_observation(
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     let body = encoded(
-        &configured_topic_request("one-observation", &[], 1, 1, 5_000),
+        &configured_topic_request(CreateTopicSetup {
+            topic: "one-observation",
+            ..Default::default()
+        }),
         VERSION,
     );
     send_request(&mut framed, 19, VERSION, 1, &body).await;

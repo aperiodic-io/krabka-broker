@@ -10,7 +10,7 @@ use fixtures::{local_backends, sweep_counts};
 use krabka_metadata::PatternType;
 
 use super::*;
-use crate::remote_log_manager::test_support as fixtures;
+use crate::{remote_log_manager::test_support as fixtures, test_support::FreezeSetup};
 
 /// The `orders` topic, plus the one live freeze entry `freeze` names.
 /// `None` is the unfrozen control every freeze case runs against.
@@ -18,7 +18,11 @@ fn image_with_orders_freeze(freeze: Option<(&str, PatternType)>) -> MetadataImag
     let mut image = image_with_orders_topic();
     if let Some((scope, pattern_type)) = freeze {
         image.apply(&MetadataRecord::V1TopicFreeze(
-            crate::test_support::topic_freeze_record(scope, pattern_type, true, "DR cutover"),
+            crate::test_support::topic_freeze_record(FreezeSetup {
+                scope,
+                pattern_type,
+                ..Default::default()
+            }),
         ));
     }
     image

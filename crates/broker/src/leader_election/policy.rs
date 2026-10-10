@@ -516,7 +516,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::leader_election::test_support::witnesses;
+    use crate::leader_election::test_support::{ElectionSetup, witnesses};
 
     /// The full failover decision for one partition, with `witnesses` and the
     /// published eligible-leader-replica set given directly. This keeps the
@@ -560,7 +560,12 @@ mod tests {
     }
 
     fn partition_record(leader: u64, replicas: &[u64], isr: &[u64]) -> PartitionRecord {
-        crate::leader_election::test_support::seed_partition("t", 0, leader, replicas, isr, &[])
+        crate::leader_election::test_support::seed_partition(ElectionSetup {
+            leader: krabka_raft::NodeId(leader),
+            replicas: &crate::test_support::replica_nodes(replicas),
+            isr: &crate::test_support::replica_nodes(isr),
+            ..Default::default()
+        })
     }
 
     #[test]
@@ -570,7 +575,7 @@ mod tests {
         // replica behind it, broker 3, must take leadership instead. The
         // whole decision is compared, so the emitted ISR is pinned too: it
         // still carries the witness, which is what keeps `acks=all` writable.
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
         let decision = decide(
             &pr,
             /*dead*/ 1,
@@ -594,7 +599,7 @@ mod tests {
         // Leader 1 and data replica 3 are dead. Only witness 2 is alive, and
         // it holds every committed record. Electing 3 would discard them, so
         // the answer is Unavailable: never Recover, never an unclean Elect.
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
         let cases: [(RecoveryStrategy, bool); 4] = [
             (RecoveryStrategy::None, false),
             (RecoveryStrategy::None, true),
@@ -622,7 +627,7 @@ mod tests {
         // ISR is {1} and broker 1 dies, so the KIP-841 out-of-ISR pick runs.
         // Replica 2 is alive but is the witness; the pick must fall through
         // to data replica 3.
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1]);
+        let pr = partition_record(1, &[1, 2, 3], &[1]);
         let decision = decide(
             &pr,
             /*dead*/ 1,
@@ -644,7 +649,7 @@ mod tests {
     #[test]
     fn unclean_election_is_unavailable_when_every_alive_replica_is_a_witness() {
         // Empty alive ISR and the only alive replica is the witness.
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1]);
+        let pr = partition_record(1, &[1, 2, 3], &[1]);
         let decision = decide(
             &pr,
             /*dead*/ 1,
@@ -660,7 +665,7 @@ mod tests {
     fn isr_shrink_for_a_non_leader_death_keeps_the_witness() {
         // Broker 3 dies and the leader is alive, so this is a plain shrink.
         // The witness stays in the emitted ISR.
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
         let decision = decide(
             &pr,
             /*dead*/ 3,
@@ -703,7 +708,7 @@ mod tests {
     /// broker 2 held that broker 3 does not.
     #[test]
     fn an_eligible_leader_replica_is_elected_cleanly_whatever_the_recovery_policy_says() {
-        let pr = partition_record(/*leader*/ 1, &[1, 3, 2], &[1]);
+        let pr = partition_record(1, &[1, 3, 2], &[1]);
         let elected_two = super::FailoverDecision::Elect {
             leader: NodeId(2),
             isr: vec![NodeId(2)],
@@ -755,7 +760,7 @@ mod tests {
     /// ordinary clean election decides and keeps them both.
     #[test]
     fn a_live_isr_decides_the_election_and_the_published_elr_does_not() {
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
         let decision = decide_with_elr(
             &pr,
             /*dead*/ 1,
@@ -783,7 +788,7 @@ mod tests {
     /// election of the one replica that is left.
     #[test]
     fn an_elr_member_that_cannot_lead_falls_through_to_the_unclean_election() {
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1]);
+        let pr = partition_record(1, &[1, 2, 3], &[1]);
         let cases: [(&str, &[u64], &[u64]); 2] = [
             ("the only ELR member is dead", &[3], &[]),
             ("the only ELR member is a witness", &[2, 3], &[2]),
@@ -844,7 +849,7 @@ mod tests {
     /// leader is healthy to the URM.
     #[test]
     fn an_unclean_restart_removes_only_the_returning_broker_from_the_isr() {
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
 
         let decision = restart_decide(
             &pr,
@@ -878,7 +883,7 @@ mod tests {
     /// is dead as far as liveness is concerned.
     #[test]
     fn an_unclean_restart_of_a_leader_takes_the_failover_policy() {
-        let pr = partition_record(/*leader*/ 3, &[1, 2, 3], &[1, 2, 3]);
+        let pr = partition_record(3, &[1, 2, 3], &[1, 2, 3]);
 
         let decision = restart_decide(
             &pr,
@@ -902,7 +907,7 @@ mod tests {
     /// nothing to withdraw, even when it is still one of the replicas.
     #[test]
     fn an_unclean_restart_leaves_a_partition_it_is_not_in_the_isr_of_alone() {
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2]);
+        let pr = partition_record(1, &[1, 2, 3], &[1, 2]);
 
         let decision = restart_decide(
             &pr,
@@ -940,7 +945,7 @@ mod tests {
         let cases = [
             KafkaCase {
                 label: "follower dies under a down leader with nothing to elect",
-                pr: partition_record(/*leader*/ 2, &[1, 2, 3], &[2, 3]),
+                pr: partition_record(2, &[1, 2, 3], &[2, 3]),
                 dead: 3,
                 alive: &[1],
                 unclean_enabled: false,
@@ -950,7 +955,7 @@ mod tests {
             },
             KafkaCase {
                 label: "follower dies under a down leader: a live ISR member takes over",
-                pr: partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]),
+                pr: partition_record(1, &[1, 2, 3], &[1, 2, 3]),
                 dead: 3,
                 alive: &[2],
                 unclean_enabled: false,
@@ -962,7 +967,7 @@ mod tests {
             },
             KafkaCase {
                 label: "follower dies under a down leader: KIP-841 elects out of the ISR",
-                pr: partition_record(/*leader*/ 2, &[1, 2, 3], &[2, 3]),
+                pr: partition_record(2, &[1, 2, 3], &[2, 3]),
                 dead: 3,
                 alive: &[1],
                 unclean_enabled: true,
@@ -974,7 +979,7 @@ mod tests {
             },
             KafkaCase {
                 label: "leader dies: a down follower keeps its ISR place for its own event",
-                pr: partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]),
+                pr: partition_record(1, &[1, 2, 3], &[1, 2, 3]),
                 dead: 1,
                 alive: &[2],
                 unclean_enabled: false,
@@ -986,7 +991,7 @@ mod tests {
             },
             KafkaCase {
                 label: "the clean pick walks the assignment, not the ISR",
-                pr: partition_record(/*leader*/ 1, &[1, 3, 2], &[1, 2, 3]),
+                pr: partition_record(1, &[1, 3, 2], &[1, 2, 3]),
                 dead: 1,
                 alive: &[2, 3],
                 unclean_enabled: false,
@@ -998,7 +1003,7 @@ mod tests {
             },
             KafkaCase {
                 label: "a replica outside the ISR is not `partitionsWithBrokerInIsr`",
-                pr: partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2]),
+                pr: partition_record(1, &[1, 2, 3], &[1, 2]),
                 dead: 3,
                 alive: &[1],
                 unclean_enabled: false,
@@ -1032,8 +1037,8 @@ mod tests {
     fn an_empty_witness_set_leaves_every_failover_decision_unchanged() {
         // The regression guard for non-stretch clusters: each case is decided
         // with no witnesses, and the expected value is the pre-witness answer.
-        let clean = partition_record(/*leader*/ 1, &[1, 2, 3], &[1, 2, 3]);
-        let empty_isr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1]);
+        let clean = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
+        let empty_isr = partition_record(1, &[1, 2, 3], &[1]);
         let cases = [
             // Clean election picks the first valid replica in assignment order.
             FailoverCase {
@@ -1137,7 +1142,7 @@ mod tests {
     /// names broker 1 as leader and lists it in the ISR, which is how krabka
     /// holds a partition Kafka holds as `leader = -1`.
     fn decide_leaderless(case: &LeaderlessCase<'_>) -> super::FailoverDecision {
-        let pr = partition_record(/*leader*/ 1, case.replicas, case.isr);
+        let pr = partition_record(1, case.replicas, case.isr);
         let alive: std::collections::HashSet<NodeId> =
             case.alive.iter().copied().map(NodeId).collect();
         elect_leaderless_one(
@@ -1370,7 +1375,7 @@ mod tests {
     /// unclean shutdown keeps the broker out of it, and the rung opens.
     #[test]
     fn only_an_unclean_shutdown_keeps_the_dead_broker_out_of_the_target_elr() {
-        let pr = partition_record(/*leader*/ 1, &[1, 2, 3], &[1]);
+        let pr = partition_record(1, &[1, 2, 3], &[1]);
         let state = elr(&[], &[2]);
         let alive: std::collections::HashSet<NodeId> = [NodeId(2), NodeId(3)].into();
 

@@ -31,9 +31,8 @@ mod support;
 use assert2::{assert, check};
 use krabka_broker::{Broker, BrokerConfig, BrokerHandle, NodeId};
 
-/// Kafka 4.3.1 is the compatibility oracle: it is the released tool whose
-/// non-`--all` describe path goes through `DescribeCluster`.
-const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.3.1";
+// Kafka 4.3.1 is the compatibility oracle: it is the released tool whose
+// non-`--all` describe path goes through `DescribeCluster`.
 
 /// The node id the broker runs with, and therefore the only `broker-loggers`
 /// resource name it accepts.
@@ -105,12 +104,11 @@ fn command_config() -> &'static std::path::Path {
 async fn kafka_configs(args: &[&str]) -> std::process::Output {
     let mount = format!("{}:/krabka-config", command_config().display());
     let node = NODE_ID.to_string();
-    let mut full = support::jvm_admin_args(
-        KAFKA_IMAGE,
-        &mount,
-        "/opt/kafka/bin/kafka-configs.sh",
-        &listeners().advertised,
-    );
+    let mut full = support::jvm_admin_args(support::JvmAdminSetup {
+        mount: &mount,
+        bootstrap: &listeners().advertised,
+        ..Default::default()
+    });
     full.extend(
         ["--entity-type", "broker-loggers", "--entity-name", &node]
             .into_iter()

@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/composition/trim.rs" 130 0 135 65 *)
+(* #"/workspace/crates/verified/src/composition/trim.rs" 139 0 144 65 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
@@ -14,36 +14,37 @@ let%span ssnapshot_transaction_valid = "/workspace/crates/verified/src/producer_
 let%span ssnapshot_transaction_valid'0 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 148 10 153 53
 let%span ssnapshot_transaction_valid'1 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 12 16 12 55
 let%span ssnapshot_transaction_valid'2 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 50 8 57 9
-let%span strim = "/workspace/crates/verified/src/composition/trim.rs" 136 23 136 58
-let%span strim'0 = "/workspace/crates/verified/src/composition/trim.rs" 141 77 141 81
-let%span strim'1 = "/workspace/crates/verified/src/composition/trim.rs" 141 83 141 87
-let%span strim'2 = "/workspace/crates/verified/src/composition/trim.rs" 141 23 141 89
-let%span strim'3 = "/workspace/crates/verified/src/composition/trim.rs" 142 17 145 6
-let%span strim'4 = "/workspace/crates/verified/src/composition/trim.rs" 146 23 146 74
-let%span strim'5 = "/workspace/crates/verified/src/composition/trim.rs" 148 8 149 89
-let%span strim'6 = "/workspace/crates/verified/src/composition/trim.rs" 156 19 156 67
-let%span strim'7 = "/workspace/crates/verified/src/composition/trim.rs" 157 19 157 57
-let%span strim'8 = "/workspace/crates/verified/src/composition/trim.rs" 158 17 158 64
-let%span strim'9 = "/workspace/crates/verified/src/composition/trim.rs" 159 16 159 56
-let%span strim'10 = "/workspace/crates/verified/src/composition/trim.rs" 158 17 159 57
-let%span strim'11 = "/workspace/crates/verified/src/composition/trim.rs" 112 11 112 97
-let%span strim'12 = "/workspace/crates/verified/src/composition/trim.rs" 113 11 113 103
-let%span strim'13 = "/workspace/crates/verified/src/composition/trim.rs" 114 11 114 128
-let%span strim'14 = "/workspace/crates/verified/src/composition/trim.rs" 115 10 129 1
-let%span strim'15 = "/workspace/crates/verified/src/composition/trim.rs" 25 11 25 66
-let%span strim'16 = "/workspace/crates/verified/src/composition/trim.rs" 26 10 26 62
-let%span strim'17 = "/workspace/crates/verified/src/composition/trim.rs" 27 10 27 96
-let%span strim'18 = "/workspace/crates/verified/src/composition/trim.rs" 28 10 29 64
-let%span strim'19 = "/workspace/crates/verified/src/composition/trim.rs" 30 10 31 65
-let%span strim'20 = "/workspace/crates/verified/src/composition/trim.rs" 32 10 35 68
-let%span strim'21 = "/workspace/crates/verified/src/composition/trim.rs" 36 10 37 42
-let%span strim'22 = "/workspace/crates/verified/src/composition/trim.rs" 157 40 157 56
-let%span strim'23 = "/workspace/crates/verified/src/composition/trim.rs" 88 8 93 9
-let%span strim'24 = "/workspace/crates/verified/src/composition/trim.rs" 75 16 77 91
-let%span strim'25 = "/workspace/crates/verified/src/composition/trim.rs" 101 8 101 101
-let%span strim'26 = "/workspace/crates/verified/src/composition/trim.rs" 205 16 206 58
-let%span strim'27 = "/workspace/crates/verified/src/composition/trim.rs" 218 16 219 33
-let%span strim'28 = "/workspace/crates/verified/src/composition/trim.rs" 157 32 157 39
+let%span strim = "/workspace/crates/verified/src/composition/trim.rs" 145 23 145 58
+let%span strim'0 = "/workspace/crates/verified/src/composition/trim.rs" 150 77 150 81
+let%span strim'1 = "/workspace/crates/verified/src/composition/trim.rs" 150 83 150 87
+let%span strim'2 = "/workspace/crates/verified/src/composition/trim.rs" 150 23 150 89
+let%span strim'3 = "/workspace/crates/verified/src/composition/trim.rs" 151 17 154 6
+let%span strim'4 = "/workspace/crates/verified/src/composition/trim.rs" 155 23 155 74
+let%span strim'5 = "/workspace/crates/verified/src/composition/trim.rs" 157 8 158 89
+let%span strim'6 = "/workspace/crates/verified/src/composition/trim.rs" 165 19 165 67
+let%span strim'7 = "/workspace/crates/verified/src/composition/trim.rs" 166 19 166 57
+let%span strim'8 = "/workspace/crates/verified/src/composition/trim.rs" 167 17 167 64
+let%span strim'9 = "/workspace/crates/verified/src/composition/trim.rs" 168 16 168 56
+let%span strim'10 = "/workspace/crates/verified/src/composition/trim.rs" 167 17 168 57
+let%span strim'11 = "/workspace/crates/verified/src/composition/trim.rs" 124 11 124 97
+let%span strim'12 = "/workspace/crates/verified/src/composition/trim.rs" 125 11 125 103
+let%span strim'13 = "/workspace/crates/verified/src/composition/trim.rs" 126 11 126 128
+let%span strim'14 = "/workspace/crates/verified/src/composition/trim.rs" 127 10 138 1
+let%span strim'15 = "/workspace/crates/verified/src/composition/trim.rs" 37 11 37 66
+let%span strim'16 = "/workspace/crates/verified/src/composition/trim.rs" 38 10 38 62
+let%span strim'17 = "/workspace/crates/verified/src/composition/trim.rs" 39 10 39 96
+let%span strim'18 = "/workspace/crates/verified/src/composition/trim.rs" 40 10 41 64
+let%span strim'19 = "/workspace/crates/verified/src/composition/trim.rs" 42 10 43 65
+let%span strim'20 = "/workspace/crates/verified/src/composition/trim.rs" 44 10 47 68
+let%span strim'21 = "/workspace/crates/verified/src/composition/trim.rs" 48 10 49 42
+let%span strim'22 = "/workspace/crates/verified/src/composition/trim.rs" 166 40 166 56
+let%span strim'23 = "/workspace/crates/verified/src/composition/trim.rs" 100 8 105 9
+let%span strim'24 = "/workspace/crates/verified/src/composition/trim.rs" 87 16 89 91
+let%span strim'25 = "/workspace/crates/verified/src/composition/trim.rs" 24 8 27 84
+let%span strim'26 = "/workspace/crates/verified/src/composition/trim.rs" 214 16 215 58
+let%span strim'27 = "/workspace/crates/verified/src/composition/trim.rs" 227 16 228 33
+let%span strim'28 = "/workspace/crates/verified/src/composition/trim.rs" 166 32 166 39
+let%span strim'29 = "/workspace/crates/verified/src/composition/trim.rs" 113 8 113 101
 
 use creusot.int.Int64
 use creusot.int.UInt64
@@ -223,7 +224,7 @@ let producer_snapshot_latest_index (offsets: Slice64.slice Int64.t) (range: t_Pr
 
 type closure0 = { c0: Slice64.slice Int64.t }
 
-let closure0 [#"/workspace/crates/verified/src/composition/trim.rs" 157 32 157 39] [@coma:extspec] (self: closure0)
+let closure0 [#"/workspace/crates/verified/src/composition/trim.rs" 166 32 166 39] [@coma:extspec] (self: closure0)
   (index: UInt64.t) (return (x: Int64.t)) = bb0
   [ bb0 = s0
     [ s0 = [ &_3 <- index ] s1
@@ -311,14 +312,14 @@ let expect_i64 (self_: t_Option_i64) (msg: string) (return (x: Int64.t)) =
   [ return (result: Int64.t) -> {[@stop_split] [@expl:expect ensures] [%#soption'2] Some'0 result = self_}
     (! return {result}) ]
 
-predicate trim_well_formed [#"/workspace/crates/verified/src/composition/trim.rs" 74 0 74 62] (facts: t_DeleteRecordsTrimFacts) =
+predicate trim_well_formed [#"/workspace/crates/verified/src/composition/trim.rs" 86 0 86 62] (facts: t_DeleteRecordsTrimFacts) =
   [%#strim'24] ge_log_Int (Int64.to_int facts.requested) (- 1)
   /\ ge_log_Int (Int64.to_int facts.current_start) 0
   /\ Int64.to_int facts.current_start <= Int64.to_int facts.high_watermark
   /\ Int64.to_int facts.high_watermark <= Int64.to_int facts.log_end
   /\ (not facts.has_delivery_watermark \/ Int64.to_int facts.current_start <= Int64.to_int facts.delivery_watermark)
 
-predicate trim_rejection [#"/workspace/crates/verified/src/composition/trim.rs" 83 0 86 9] (facts: t_DeleteRecordsTrimFacts) (error: t_DeleteRecordsTrimDecision) =
+predicate trim_rejection [#"/workspace/crates/verified/src/composition/trim.rs" 95 0 98 9] (facts: t_DeleteRecordsTrimFacts) (error: t_DeleteRecordsTrimDecision) =
   [%#strim'23] match error with
     | RejectMalformed -> not trim_well_formed facts
     | RejectOutOfRange -> trim_well_formed facts
@@ -327,8 +328,10 @@ predicate trim_rejection [#"/workspace/crates/verified/src/composition/trim.rs" 
     | _ -> false
     end
 
-function trim_frontier [#"/workspace/crates/verified/src/composition/trim.rs" 99 0 99 58] (facts: t_DeleteRecordsTrimFacts) : int
- = [%#strim'25] let resolved = if Int64.to_int facts.requested = - 1 then
+type tup2_Int_Int = { f0'1: int; f1'1: int }
+
+function trim_frontier [#"/workspace/crates/verified/src/composition/trim.rs" 111 0 111 58] (facts: t_DeleteRecordsTrimFacts) : int
+ = [%#strim'29] let resolved = if Int64.to_int facts.requested = - 1 then
     Int64.to_int facts.high_watermark
   else
     Int64.to_int facts.requested
@@ -338,13 +341,21 @@ function trim_frontier [#"/workspace/crates/verified/src/composition/trim.rs" 99
     resolved
    in MinMax.max bounded (Int64.to_int facts.current_start)
 
-predicate trim_has_no_snapshot [#"/workspace/crates/verified/src/composition/trim.rs" 204 0 204 98] (snapshots: Seq.seq Int64.t) (floor: Int64.t) (end': Int64.t) (cursor: Int64.t) =
+predicate trim_cursor_bounded [#"/workspace/crates/verified/src/composition/trim.rs" 22 0 22 117] (facts: t_DeleteRecordsTrimFacts) (stores: tup2_Int_Int) (floor: int) (cursor: int) =
+  [%#strim'25] floor = MinMax.max (MinMax.max (trim_frontier facts) stores.f0'1) stores.f1'1
+  /\ 0 <= floor
+  /\ floor <= cursor
+  /\ cursor <= Int64.to_int facts.log_end
+  /\ floor <= Int64.to_int facts.high_watermark
+  /\ (not facts.has_delivery_watermark \/ floor <= Int64.to_int facts.delivery_watermark)
+
+predicate trim_has_no_snapshot [#"/workspace/crates/verified/src/composition/trim.rs" 213 0 213 98] (snapshots: Seq.seq Int64.t) (floor: Int64.t) (end': Int64.t) (cursor: Int64.t) =
   [%#strim'26] cursor = floor
   /\ (forall i: int. 0 <= i /\ i < Seq.length snapshots
     -> not (Int64.to_int floor < Int64.to_int (Seq.get snapshots i)
     /\ Int64.to_int (Seq.get snapshots i) <= Int64.to_int end'))
 
-predicate latest_retained_snapshot [#"/workspace/crates/verified/src/composition/trim.rs" 212 0 217 9] (snapshots: Seq.seq Int64.t) (floor: int) (end': int) (selected: int) =
+predicate latest_retained_snapshot [#"/workspace/crates/verified/src/composition/trim.rs" 221 0 226 9] (snapshots: Seq.seq Int64.t) (floor: int) (end': int) (selected: int) =
   [%#strim'27] forall i: int. 0 <= i
       /\ i < Seq.length snapshots
       /\ floor < Int64.to_int (Seq.get snapshots i) /\ Int64.to_int (Seq.get snapshots i) <= end'
@@ -354,7 +365,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let admitted_trim_bounds_reload_and_retry [#"/workspace/crates/verified/src/composition/trim.rs" 130 0 135 65]
+let admitted_trim_bounds_reload_and_retry [#"/workspace/crates/verified/src/composition/trim.rs" 139 0 144 65]
   (facts: t_DeleteRecordsTrimFacts) (wal_start: Int64.t) (local_start: Int64.t) (snapshots: Slice64.slice Int64.t)
   (return (x: t_Result_tup3_i64_Option_usize_i64_DeleteRecordsTrimDecision)) =
 {[@stop_split] [@expl:admitted_trim_bounds_reload_and_retry requires] ([@stop_split] [@expl:admitted_trim_bounds_reload_and_retry requires #0] [%#strim'11] 0
@@ -447,13 +458,8 @@ let admitted_trim_bounds_reload_and_retry [#"/workspace/crates/verified/src/comp
       | Err error -> trim_rejection facts error
       | Ok {f0 = floor; f1 = selected; f2 = cursor} -> trim_well_formed facts
       /\ (Int64.to_int facts.requested = - 1 \/ Int64.to_int facts.requested <= Int64.to_int facts.high_watermark)
-      /\ Int64.to_int floor
-        = MinMax.max (MinMax.max (trim_frontier facts) (Int64.to_int wal_start)) (Int64.to_int local_start)
-      /\ 0 <= Int64.to_int floor
-      /\ Int64.to_int floor <= Int64.to_int cursor
-      /\ Int64.to_int cursor <= Int64.to_int facts.log_end
-      /\ Int64.to_int floor <= Int64.to_int facts.high_watermark
-      /\ (not facts.has_delivery_watermark \/ Int64.to_int floor <= Int64.to_int facts.delivery_watermark)
+      /\ trim_cursor_bounded facts { f0'1 = Int64.to_int wal_start;
+                                     f1'1 = Int64.to_int local_start } (Int64.to_int floor) (Int64.to_int cursor)
       /\ match selected with
         | None -> trim_has_no_snapshot (Slice64.view snapshots) floor facts.log_end cursor
         | Some index -> UInt64.t'int index < Seq.length (Slice64.view snapshots)

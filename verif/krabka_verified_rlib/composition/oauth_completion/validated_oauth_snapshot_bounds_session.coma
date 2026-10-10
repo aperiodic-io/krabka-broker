@@ -1,19 +1,20 @@
-(* #"/workspace/crates/verified/src/composition/oauth_completion.rs" 70 0 74 25 *)
+(* #"/workspace/crates/verified/src/composition/oauth_completion.rs" 65 0 69 25 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span scompletion = "/workspace/crates/verified/src/oauth/completion.rs" 8 10 16 2
-let%span soauth_completion = "/workspace/crates/verified/src/composition/oauth_completion.rs" 76 20 76 43
-let%span soauth_completion'0 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 87 8 87 77
-let%span soauth_completion'1 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 91 4 91 34
+let%span soauth_completion = "/workspace/crates/verified/src/composition/oauth_completion.rs" 71 20 71 43
+let%span soauth_completion'0 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 82 8 82 77
+let%span soauth_completion'1 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 86 4 86 34
 let%span soauth_completion'2 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 45 11 45 78
-let%span soauth_completion'3 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 46 10 54 1
-let%span soauth_completion'4 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 55 10 69 1
+let%span soauth_completion'3 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 46 10 49 1
+let%span soauth_completion'4 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 50 10 64 1
 let%span soauth_completion'5 = "/workspace/crates/verified/src/composition/oauth_completion.rs" 25 8 34 9
 let%span sjwks = "/workspace/crates/verified/src/jwks.rs" 29 10 38 1
-let%span soauth = "/workspace/crates/verified/src/oauth.rs" 92 10 100 1
-let%span soauth'0 = "/workspace/crates/verified/src/oauth.rs" 64 8 69 67
-let%span soauth'1 = "/workspace/crates/verified/src/oauth.rs" 81 8 81 72
+let%span soauth = "/workspace/crates/verified/src/oauth.rs" 99 10 107 1
+let%span soauth'0 = "/workspace/crates/verified/src/oauth.rs" 58 8 63 67
+let%span soauth'1 = "/workspace/crates/verified/src/oauth.rs" 77 16 77 65
+let%span soauth'2 = "/workspace/crates/verified/src/oauth.rs" 88 8 88 72
 
 use creusot.int.UInt64
 use creusot.int.Int64
@@ -101,15 +102,18 @@ let oauth_validation_admission (started_ms: Int64.t) (completed_ms: Int64.t) (ca
 
 constant const_MAX: Int64.t = (9223372036854775807: Int64.t)
 
-predicate oauth_session_admissible [#"/workspace/crates/verified/src/oauth.rs" 62 0 62 65] (facts: t_OAuthSessionFacts) =
+predicate oauth_session_admissible_at [#"/workspace/crates/verified/src/oauth.rs" 56 0 56 85] (facts: t_OAuthSessionFacts) (now: int) =
   [%#soauth'0] facts.expiry'0 = Present
-  /\ gt_log_Int (Int64.to_int facts.token_expires_at_ms'0) (Int64.to_int facts.now_ms'0)
-  /\ Int64.to_int facts.token_expires_at_ms'0 - Int64.to_int facts.now_ms'0 <= Int64.to_int const_MAX
+  /\ gt_log_Int (Int64.to_int facts.token_expires_at_ms'0) now
+  /\ Int64.to_int facts.token_expires_at_ms'0 - now <= Int64.to_int const_MAX
   /\ (facts.cap'0 = Disabled \/ gt_log_Int (Int64.to_int facts.cap_ms'0) 0)
   /\ (facts.authentication'0 = Initial \/ facts.principal'0 = Matches)
 
-function oauth_session_lifetime [#"/workspace/crates/verified/src/oauth.rs" 79 0 79 62] (facts: t_OAuthSessionFacts) : int
- = [%#soauth'1] let token_lifetime = Int64.to_int facts.token_expires_at_ms'0
+predicate oauth_session_admissible [#"/workspace/crates/verified/src/oauth.rs" 76 0 76 65] (facts: t_OAuthSessionFacts) =
+  [%#soauth'1] oauth_session_admissible_at facts (Int64.to_int facts.now_ms'0)
+
+function oauth_session_lifetime [#"/workspace/crates/verified/src/oauth.rs" 86 0 86 62] (facts: t_OAuthSessionFacts) : int
+ = [%#soauth'2] let token_lifetime = Int64.to_int facts.token_expires_at_ms'0
   - Int64.to_int facts.now_ms'0 in if facts.cap'0 = Enabled /\ Int64.to_int facts.cap_ms'0 < token_lifetime then
     Int64.to_int facts.cap_ms'0
   else
@@ -145,7 +149,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let validated_oauth_snapshot_bounds_session [#"/workspace/crates/verified/src/composition/oauth_completion.rs" 70 0 74 25]
+let validated_oauth_snapshot_bounds_session [#"/workspace/crates/verified/src/composition/oauth_completion.rs" 65 0 69 25]
   (facts: t_OAuthSessionFacts) (cache: t_Option_JwksCacheFacts) (completed: tup2_i64_u64)
   (return (x: t_OAuthSessionDecision)) =
 {[@stop_split] [@expl:validated_oauth_snapshot_bounds_session requires] [%#soauth_completion'2] match cache with
@@ -156,11 +160,11 @@ let validated_oauth_snapshot_bounds_session [#"/workspace/crates/verified/src/co
   [ bb0 = any [ br0 -> {cache = None} (! bb10) | br1 (x0: t_JwksCacheFacts) -> {cache = Some x0} (! bb2) ]
   | bb2 = s0
     [ s0 = elim_Some {cache} (fun (r0: t_JwksCacheFacts) -> [ &c <- r0 ] s1)
-    | s1 = jwks_cache_admission [%#soauth_completion] {c} (fun (_x: t_JwksCacheDecision) -> [ &_30 <- _x ] s2)
-    | s2 = any [ br0 -> {_30 = Reject} (! bb6) | br1 -> {_30 = Admit} (! bb4) ] ]
-  | bb4 = s0 [ s0 = [ &_29 <- false ] s1 | s1 = bb7 ]
-  | bb6 = s0 [ s0 = [ &_29 <- true ] s1 | s1 = bb7 ]
-  | bb7 = any [ br0 -> {_29 = false} (! bb10) | br1 -> {_29} (! bb8) ]
+    | s1 = jwks_cache_admission [%#soauth_completion] {c} (fun (_x: t_JwksCacheDecision) -> [ &_24 <- _x ] s2)
+    | s2 = any [ br0 -> {_24 = Reject} (! bb6) | br1 -> {_24 = Admit} (! bb4) ] ]
+  | bb4 = s0 [ s0 = [ &_23 <- false ] s1 | s1 = bb7 ]
+  | bb6 = s0 [ s0 = [ &_23 <- true ] s1 | s1 = bb7 ]
+  | bb7 = any [ br0 -> {_23 = false} (! bb10) | br1 -> {_23} (! bb8) ]
   | bb8 = s0 [ s0 = [ &_ret <- Reject'0 ] s1 | s1 = return {_ret} ]
   | bb10 = any [ br0 -> {cache = None} (! bb14) | br1 (x0: t_JwksCacheFacts) -> {cache = Some x0} (! bb13) ]
   | bb13 = s0
@@ -171,8 +175,8 @@ let validated_oauth_snapshot_bounds_session [#"/workspace/crates/verified/src/co
   | bb14 = s0 [ s0 = [ &finished_cache <- None ] s1 | s1 = bb15 ]
   | bb15 = s0
     [ s0 = oauth_validation_admission [%#soauth_completion'0] {facts.now_ms'0} {completed.f0} {finished_cache}
-        (fun (_x: bool) -> [ &_40 <- _x ] s1)
-    | s1 = any [ br0 -> {_40 = false} (! bb18) | br1 -> {_40} (! bb17) ] ]
+        (fun (_x: bool) -> [ &_34 <- _x ] s1)
+    | s1 = any [ br0 -> {_34 = false} (! bb18) | br1 -> {_34} (! bb17) ] ]
   | bb17 = s0
     [ s0 = [ &facts <- { facts with now_ms'0 = completed.f0 } ] s1
     | s1 = oauth_session_admission [%#soauth_completion'1] {facts}
@@ -184,20 +188,16 @@ let validated_oauth_snapshot_bounds_session [#"/workspace/crates/verified/src/co
   | & cache: t_Option_JwksCacheFacts = cache
   | & completed: tup2_i64_u64 = completed
   | & c: t_JwksCacheFacts = Any.any_l ()
-  | & _29: bool = Any.any_l ()
-  | & _30: t_JwksCacheDecision = Any.any_l ()
+  | & _23: bool = Any.any_l ()
+  | & _24: t_JwksCacheDecision = Any.any_l ()
   | & finished_cache: t_Option_JwksCacheFacts = Any.any_l ()
   | & c'0: t_JwksCacheFacts = Any.any_l ()
-  | & _40: bool = Any.any_l () ])
+  | & _34: bool = Any.any_l () ])
   [ return (result: t_OAuthSessionDecision) ->
   {[@stop_split] [@expl:validated_oauth_snapshot_bounds_session ensures] ([@stop_split] [@expl:validated_oauth_snapshot_bounds_session ensures #0] [%#soauth_completion'3] (result
         = Reject'0)
       = (not completed_snapshot_admissible cache facts.now_ms'0 completed
-      \/ not (facts.expiry'0 = Present
-      /\ gt_log_Int (Int64.to_int facts.token_expires_at_ms'0) (Int64.to_int completed.f0)
-      /\ Int64.to_int facts.token_expires_at_ms'0 - Int64.to_int completed.f0 <= Int64.to_int const_MAX
-      /\ (facts.cap'0 = Disabled \/ gt_log_Int (Int64.to_int facts.cap_ms'0) 0)
-      /\ (facts.authentication'0 = Initial \/ facts.principal'0 = Matches))))
+      \/ not oauth_session_admissible_at facts (Int64.to_int completed.f0)))
     /\ ([@stop_split] [@expl:validated_oauth_snapshot_bounds_session ensures #1] [%#soauth_completion'4] match result with
       | Reject'0 -> true
       | Admit'0 session_lifetime_ms effective_expires_at_ms -> completed_snapshot_admissible cache facts.now_ms'0 completed

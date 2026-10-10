@@ -92,15 +92,43 @@ fn expected_metadata() -> serde_json::Value {
     })
 }
 
-fn unsigned_privilege(
-    identity: (AuditOutcome, PrivilegedPhase, &str, &str, &str),
-    actors: (AuditPrincipal, Vec<AuditPrincipal>),
-    source: &AuditEndpoint,
-    reason: &str,
-    time_ms: i64,
-) -> AuditEvent {
-    let (outcome, phase, action, target, proposal_id) = identity;
-    let (principal, counterparties) = actors;
+#[derive(Clone, Copy, Default)]
+struct EventTimeMillis(i64);
+
+#[derive(krabka_macros::FieldDefaults)]
+struct UnsignedPrivilegeSetup<'a> {
+    #[default(AuditOutcome::Success)]
+    outcome: AuditOutcome,
+    #[default(PrivilegedPhase::Consumed)]
+    phase: PrivilegedPhase,
+    #[default("unclean_elect_leaders")]
+    action: &'a str,
+    #[default("orders-3")]
+    target: &'a str,
+    #[default("bg-7")]
+    proposal_id: &'a str,
+    #[default(AuditPrincipal { name: "User:alice".into(), auth_method: "MTls".into() })]
+    principal: AuditPrincipal,
+    counterparties: Vec<AuditPrincipal>,
+    #[default(AuditEndpoint { ip: "10.0.0.4".into(), port: 9092 })]
+    source: AuditEndpoint,
+    reason: &'a str,
+    time_ms: EventTimeMillis,
+}
+
+fn unsigned_privilege(setup: UnsignedPrivilegeSetup<'_>) -> AuditEvent {
+    let UnsignedPrivilegeSetup {
+        outcome,
+        phase,
+        action,
+        target,
+        proposal_id,
+        principal,
+        counterparties,
+        source,
+        reason,
+        time_ms,
+    } = setup;
     AuditEvent::PrivilegedAction {
         outcome,
         phase,
@@ -114,9 +142,9 @@ fn unsigned_privilege(
         signature: vec![],
         signature_verified: false,
         signed_at_ms: 0,
-        source: source.clone(),
+        source,
         reason: reason.into(),
-        time_ms,
+        time_ms: time_ms.0,
     }
 }
 
@@ -133,10 +161,6 @@ fn privileged_action_maps_to_6003_with_the_whole_body() {
     let carol = AuditPrincipal {
         name: "User:carol".into(),
         auth_method: "MTls".into(),
-    };
-    let source = AuditEndpoint {
-        ip: "10.0.0.4".into(),
-        port: 9092,
     };
     let cases = [
         (
@@ -173,19 +197,12 @@ fn privileged_action_maps_to_6003_with_the_whole_body() {
         ),
         (
             "unsigned two-person consumption",
-            unsigned_privilege(
-                (
-                    AuditOutcome::Success,
-                    PrivilegedPhase::Consumed,
-                    "unclean_elect_leaders",
-                    "orders-3",
-                    "bg-7",
-                ),
-                (carol.clone(), vec![alice.clone(), bob.clone()]),
-                &source,
-                "",
-                11,
-            ),
+            unsigned_privilege(UnsignedPrivilegeSetup {
+                principal: carol.clone(),
+                counterparties: vec![alice.clone(), bob.clone()],
+                time_ms: EventTimeMillis(11),
+                ..Default::default()
+            }),
             serde_json::json!({
                 "class_uid": 6003,
                 "category_uid": 6,
@@ -220,25 +237,20 @@ fn privileged_action_maps_to_6003_with_the_whole_body() {
         ),
         (
             "bypassed gate reports failure",
-            unsigned_privilege(
-                (
-                    AuditOutcome::Failure,
-                    PrivilegedPhase::Bypassed,
-                    "unclean_recovery",
-                    "orders-9",
-                    "",
-                ),
-                (
-                    AuditPrincipal {
-                        name: "broker".into(),
-                        auth_method: "Internal".into(),
-                    },
-                    vec![],
-                ),
-                &source,
-                "background recovery ran without an approval",
-                12,
-            ),
+            unsigned_privilege(UnsignedPrivilegeSetup {
+                outcome: AuditOutcome::Failure,
+                phase: PrivilegedPhase::Bypassed,
+                action: "unclean_recovery",
+                target: "orders-9",
+                proposal_id: "",
+                principal: AuditPrincipal {
+                    name: "broker".into(),
+                    auth_method: "Internal".into(),
+                },
+                reason: "background recovery ran without an approval",
+                time_ms: EventTimeMillis(12),
+                ..Default::default()
+            }),
             serde_json::json!({
                 "class_uid": 6003,
                 "category_uid": 6,

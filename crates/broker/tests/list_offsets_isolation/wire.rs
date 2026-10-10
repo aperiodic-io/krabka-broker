@@ -93,7 +93,12 @@ pub(super) fn latest_row(offset: i64) -> ListOffsetsPartitionResponse {
 
 pub(super) async fn create_topic(client: &Client, name: &str) {
     let response = client
-        .send(create_topic_request(creatable_topic(name, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (name).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("CreateTopics");
     check!(
@@ -151,12 +156,11 @@ pub(super) async fn wait_for_settled_log(broker: &BrokerHandle, topic: &str, off
 }
 
 fn record(topic: &str, value: &'static str) -> ProducerRecord {
-    crate::support::producer::producer_record(
-        topic,
-        None,
-        None,
-        Some(Bytes::from_static(value.as_bytes())),
-    )
+    crate::support::producer::producer_record(crate::support::producer::ProducerRecordSetup {
+        topic: (topic).into(),
+        value: Some(Bytes::from_static(value.as_bytes())),
+        ..Default::default()
+    })
 }
 
 pub(super) async fn send_ok(producer: &Producer, topic: &str, value: &'static str) {

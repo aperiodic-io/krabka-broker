@@ -100,18 +100,10 @@ pub(crate) struct ControllerLivenessState {
 impl ControllerLivenessState {
     /// Create a new registry with the given heartbeat timeout.
     pub(crate) fn new(timeout: Time) -> Self {
-        Self {
-            timeout: timeout.to_std(),
-            clock: Clock::Real,
-            brokers: Mutex::new(HashMap::new()),
-            registrations: Mutex::new(()),
-            seeded_term: std::sync::atomic::AtomicU64::new(u64::MAX),
-        }
+        Self::with_clock(timeout.to_std(), Clock::Real)
     }
 
-    /// Construct with a test-controlled [`Clock`] so liveness windows are driven
-    /// by explicit `advance` calls instead of wall-clock sleeps.
-    #[cfg(test)]
+    /// Construct with the selected clock for production or controlled liveness windows.
     pub(super) fn with_clock(timeout: Duration, clock: Clock) -> Self {
         Self {
             timeout,

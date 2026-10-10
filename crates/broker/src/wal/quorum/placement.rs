@@ -117,7 +117,7 @@ mod tests {
                 port: 19092,
                 protocol: ListenerProtocol::Plaintext,
             }],
-            ..crate::test_support::broker_registration(id)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(id))
         }
     }
 }

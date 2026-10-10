@@ -192,7 +192,9 @@ async fn create_source_topic(broker: &Broker, name: &str) {
                 replication_factor: 1,
             }),
             MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
-                name, 0, node_id,
+                name,
+                krabka_ids::PartitionIndex(0),
+                node_id,
             )),
         ])
         .await

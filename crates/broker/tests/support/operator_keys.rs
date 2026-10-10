@@ -77,6 +77,18 @@ pub fn mint_operator_key(dir: &std::path::Path, key_id: &str, principal: &str) -
 /// [`start_with_operator_keys_sasl`] instead.
 pub const ANONYMOUS: &str = "User:ANONYMOUS";
 
+#[derive(Clone, Copy, Default)]
+pub struct OperatorKeysSetup<'a> {
+    pub keys: &'a [&'a OperatorKey],
+    pub approvers: &'a [&'a str],
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct OperatorSaslSetup<'a> {
+    pub trust: OperatorKeysSetup<'a>,
+    pub users: &'a [(&'a str, &'a str)],
+}
+
 /// Boot one broker on `dir` that trusts `keys` and takes `approvers` as its
 /// break-glass approver set.
 ///
@@ -92,10 +104,9 @@ pub const ANONYMOUS: &str = "User:ANONYMOUS";
 /// [`start_with_dir`]: super::start_with_dir
 pub async fn start_with_operator_keys(
     dir: &std::path::Path,
-    keys: &[&OperatorKey],
-    approvers: &[&str],
+    setup: OperatorKeysSetup<'_>,
 ) -> (BrokerHandle, Client, BrokerConfig) {
-    let config = operator_config(dir, keys, approvers);
+    let config = operator_config(dir, setup);
 
     let broker = Broker::start(config.clone()).await.expect("broker start");
     let client = connect_owned(
@@ -113,7 +124,14 @@ pub async fn start_with_operator_key(
     dir: &std::path::Path,
     key: &OperatorKey,
 ) -> (BrokerHandle, Client, BrokerConfig) {
-    start_with_operator_keys(dir, &[key], &[ANONYMOUS]).await
+    start_with_operator_keys(
+        dir,
+        OperatorKeysSetup {
+            keys: &[key],
+            approvers: &[ANONYMOUS],
+        },
+    )
+    .await
 }
 
 /// Boot one broker on `dir` behind a `SASL_PLAINTEXT` listener, so a suite can
@@ -129,11 +147,10 @@ pub async fn start_with_operator_key(
 /// `[[operator_keys]]` must use.
 pub async fn start_with_operator_keys_sasl(
     dir: &std::path::Path,
-    keys: &[&OperatorKey],
-    approvers: &[&str],
-    users: &[(&str, &str)],
+    setup: OperatorSaslSetup<'_>,
 ) -> (BrokerHandle, String, BrokerConfig) {
-    let mut config = operator_config(dir, keys, approvers);
+    let OperatorSaslSetup { trust, users } = setup;
+    let mut config = operator_config(dir, trust);
     config.listeners = vec![crate::support::listeners::loopback_listener(
         "SASL_PLAINTEXT",
         krabka_security::ListenerProtocol::SaslPlaintext,
@@ -178,11 +195,8 @@ pub async fn sasl_client(bootstrap: &str, user: &str, pass: &str) -> Client {
         .expect("client build")
 }
 
-fn operator_config(
-    dir: &std::path::Path,
-    keys: &[&OperatorKey],
-    approvers: &[&str],
-) -> BrokerConfig {
+fn operator_config(dir: &std::path::Path, setup: OperatorKeysSetup<'_>) -> BrokerConfig {
+    let OperatorKeysSetup { keys, approvers } = setup;
     let entries: Vec<_> = keys.iter().map(|key| key.entry()).collect();
     let mut config = BrokerConfig::for_tests(dir.to_path_buf());
     config.operator_keys = krabka_broker::operator_keys::OperatorKeys::load(&entries)

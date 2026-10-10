@@ -340,32 +340,16 @@ mod tests {
         drop(listener);
 
         let snapshot_dir = tempdir().unwrap();
-        let kickoff = KafkaSwapKickoff {
-            cfg: crate::config::KafkaRlmmConfig {
-                bootstrap,
-                num_partitions: 1,
-                replication: 1,
-                snapshot_dir: snapshot_dir.path().to_path_buf(),
-                ..crate::config::KafkaRlmmConfig::default()
-            },
-            broker_id: 1,
-            bootstrap_backoff_initial: std::time::Duration::from_millis(10),
-            bootstrap_backoff_max: std::time::Duration::from_secs(1),
-            reconcile_tick: std::time::Duration::from_secs(1),
-        };
-        let (_image_tx, image_rx) = tokio::sync::watch::channel(Arc::new(
-            krabka_metadata::MetadataImage::new(uuid::Uuid::from_u128(1)),
-        ));
+        let kickoff = crate::broker::rlmm::test_kickoff(crate::config::KafkaRlmmConfig {
+            bootstrap,
+            num_partitions: 1,
+            replication: 1,
+            snapshot_dir: snapshot_dir.path().to_path_buf(),
+            ..crate::config::KafkaRlmmConfig::default()
+        });
         let flusher = DisklessFlusherStartup {
-            index_log_slot: Arc::new(arc_swap::ArcSwapOption::empty()),
-            partitions: Arc::new(PartitionRegistry::new()),
-            image_rx,
-            object_store: Arc::new(object_store::memory::InMemory::new()),
-            node_id: krabka_raft::NodeId(7),
-            broker_id: 1,
-            metrics: crate::metrics::BrokerMetrics::new(),
             flush_config: crate::diskless::flusher::FlushConfig::default(),
-            ready: Arc::new(AtomicBool::new(false)),
+            ..test_startup(Arc::new(AtomicBool::new(false)))
         };
         let shutdown = CancellationToken::new();
         let bootstrap = bootstrap_diskless_index_log(

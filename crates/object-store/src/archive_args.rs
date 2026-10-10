@@ -253,6 +253,8 @@ mod tests {
         }
     }
 
+    krabka_macros::s3_archive_config_fixture!(expected_s3_config, crate::S3Config);
+
     #[test]
     fn every_flag_parses_into_its_field() {
         check!(
@@ -422,17 +424,7 @@ mod tests {
         let ObjectStoreConfig::S3(s3) = args.to_config().expect("config") else {
             panic!("the s3 bucket selects the S3 backend");
         };
-        check!(
-            s3 == crate::S3Config {
-                bucket: "backups".into(),
-                region: "eu-west-1".into(),
-                endpoint: Some("http://minio:9000".into()),
-                access_key_id: Some("key".into()),
-                secret_access_key: Some("secret".into()),
-                allow_http: true,
-                ..Default::default()
-            }
-        );
+        check!(s3 == expected_s3_config());
     }
 
     #[test]

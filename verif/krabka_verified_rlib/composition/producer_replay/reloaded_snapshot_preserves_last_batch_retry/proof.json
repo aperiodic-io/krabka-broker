@@ -23,7 +23,7 @@
         "prover": "alt-ergo",
         "time": 0.025
       },
-      "vc_producer_decision": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_producer_decision": { "prover": "alt-ergo", "time": 0.008 },
       "vc_producer_snapshot_entry_valid": {
         "prover": "alt-ergo",
         "time": 0.021

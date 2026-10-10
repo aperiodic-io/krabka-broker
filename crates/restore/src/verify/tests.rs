@@ -87,22 +87,70 @@ fn record(offset_delta: i32, timestamp_delta: i64) -> Record {
     }
 }
 
-fn batch(
-    base_offset: i64,
-    base_timestamp: i64,
-    max_timestamp: i64,
-    record_count: i32,
-) -> RecordBatch {
-    RecordBatch {
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, derive_more::Display, derive_more::From, derive_more::Into,
+)]
+struct RecordTimestamp(i64);
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, derive_more::Display, derive_more::From, derive_more::Into,
+)]
+struct RecordCount(i32);
+
+#[derive(Clone, Copy)]
+struct BatchSetup {
+    base_offset: krabka_ids::Offset,
+    base_timestamp: RecordTimestamp,
+    max_timestamp: RecordTimestamp,
+    record_count: RecordCount,
+}
+
+impl Default for BatchSetup {
+    fn default() -> Self {
+        Self {
+            base_offset: krabka_ids::Offset(100),
+            base_timestamp: RecordTimestamp(1_000),
+            max_timestamp: RecordTimestamp(1_020),
+            record_count: RecordCount(3),
+        }
+    }
+}
+
+fn batch(setup: BatchSetup) -> RecordBatch {
+    let BatchSetup {
         base_offset,
-        last_offset_delta: record_count - 1,
         base_timestamp,
         max_timestamp,
-        records: (0..record_count)
+        record_count,
+    } = setup;
+    RecordBatch {
+        base_offset: base_offset.0,
+        last_offset_delta: record_count.0 - 1,
+        base_timestamp: base_timestamp.0,
+        max_timestamp: max_timestamp.0,
+        records: (0..record_count.0)
             .map(|i| record(i, i64::from(i) * 10))
             .collect(),
         ..RecordBatch::default()
     }
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct SingleRecordSetup {
+    #[default(krabka_ids::Offset(100))]
+    base_offset: krabka_ids::Offset,
+    #[default(RecordTimestamp(1_000))]
+    timestamp: RecordTimestamp,
+}
+
+/// A framed one-record batch for segment-boundary verification cases.
+fn single_record_bytes(setup: SingleRecordSetup) -> Bytes {
+    encode_all(&[batch(BatchSetup {
+        base_offset: setup.base_offset,
+        base_timestamp: setup.timestamp,
+        max_timestamp: setup.timestamp,
+        record_count: RecordCount(1),
+    })])
 }
 
 fn encode_all(batches: &[RecordBatch]) -> Bytes {
@@ -201,8 +249,17 @@ struct SegmentBytes {
 }
 
 fn segment_bytes(batch1_max_ts: i64, batch2_max_ts: i64) -> SegmentBytes {
-    let batch1 = batch(100, 1000, batch1_max_ts, 3);
-    let batch2 = batch(103, 1030, batch2_max_ts, 2);
+    let batch1 = batch(BatchSetup {
+        base_timestamp: RecordTimestamp(1000),
+        max_timestamp: RecordTimestamp(batch1_max_ts),
+        ..Default::default()
+    });
+    let batch2 = batch(BatchSetup {
+        base_offset: krabka_ids::Offset(103),
+        base_timestamp: RecordTimestamp(1030),
+        max_timestamp: RecordTimestamp(batch2_max_ts),
+        record_count: RecordCount(2),
+    });
     let batch1_len = batch1.encoded_len();
     let log = encode_all(&[batch1, batch2]);
     let max_timestamp_ms = [batch1_max_ts, batch2_max_ts]
@@ -396,7 +453,19 @@ async fn a_gap_between_crc_valid_batches_is_accepted() {
 
     // The first batch ends at 102, but the second starts at 104. Both batches
     // are independently well-framed and carry valid CRCs.
-    fixture.log = encode_all(&[batch(100, 1000, 1020, 3), batch(104, 1040, 1040, 1)]);
+    fixture.log = encode_all(&[
+        batch(BatchSetup {
+            base_timestamp: RecordTimestamp(1000),
+            max_timestamp: RecordTimestamp(1020),
+            ..Default::default()
+        }),
+        batch(BatchSetup {
+            base_offset: krabka_ids::Offset(104),
+            base_timestamp: RecordTimestamp(1040),
+            max_timestamp: RecordTimestamp(1040),
+            record_count: RecordCount(1),
+        }),
+    ]);
 
     let segment = write_segment(dir.path(), &fixture, &[]);
     let verified = verify_segment(&store, &partition, &segment)
@@ -410,7 +479,10 @@ async fn first_batch_must_match_the_segment_base_offset() {
     let (dir, store, partition) = verification_context();
     let mut fixture = valid_segment_bytes();
 
-    fixture.log = encode_all(&[batch(101, 1000, 1000, 1)]);
+    fixture.log = single_record_bytes(SingleRecordSetup {
+        base_offset: krabka_ids::Offset(101),
+        ..Default::default()
+    });
 
     let segment = write_segment(dir.path(), &fixture, &[]);
     let error = verify_segment(&store, &partition, &segment)
@@ -425,7 +497,10 @@ async fn a_batch_whose_exclusive_end_overflows_is_rejected() {
     let mut fixture = valid_segment_bytes();
 
     fixture.base_offset = Offset(i64::MAX);
-    fixture.log = encode_all(&[batch(i64::MAX, 1000, 1000, 1)]);
+    fixture.log = single_record_bytes(SingleRecordSetup {
+        base_offset: krabka_ids::Offset(i64::MAX),
+        ..Default::default()
+    });
 
     let segment = write_segment(dir.path(), &fixture, &[]);
     let error = verify_segment(&store, &partition, &segment)

@@ -235,45 +235,75 @@ async fn the_wire_handler_refuses_an_unregistration_that_no_proposal_covers() {
     broker_handle.shutdown().await;
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum BrokerFencing {
+    #[default]
+    Active,
+    Fenced,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct RegistrationSetup {
+    #[default(NodeId(2))]
+    node_id: NodeId,
+    fencing: BrokerFencing,
+}
+
 /// A new registration of broker `node_id`. It carries no epoch (-1), and the
 /// controller stamps it with the offset that it commits at.
-fn registration(node_id: u64, fenced: bool) -> MetadataRecord {
+fn registration(setup: RegistrationSetup) -> MetadataRecord {
+    let RegistrationSetup { node_id, fencing } = setup;
     MetadataRecord::V1BrokerRegistration(krabka_metadata::BrokerRegistrationRecord {
-        fenced,
+        fenced: fencing == BrokerFencing::Fenced,
         broker_epoch: -1,
-        incarnation_id: Uuid::from_u128(u128::from(node_id)),
-        host: format!("broker-{node_id}"),
+        incarnation_id: Uuid::from_u128(u128::from(node_id.0)),
+        host: format!("broker-{}", node_id.0),
         ..crate::test_support::broker_registration(node_id)
     })
 }
 
 /// Partition `index` of topic `t`, replicated on brokers 1 and 2.
-fn replicated_partition(
-    index: i32,
-    leader: u64,
-    isr: &[u64],
-    leader_epoch: i32,
-    partition_epoch: i32,
-) -> krabka_metadata::PartitionRecord {
-    krabka_metadata::PartitionRecord {
-        isr: isr.iter().copied().map(NodeId).collect(),
-        leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct UnregisterPartitionSetup<'a> {
+    index: krabka_ids::PartitionIndex,
+    #[default(NodeId(1))]
+    leader: NodeId,
+    #[default(&[NodeId(1), NodeId(2)])]
+    isr: &'a [NodeId],
+    #[default(krabka_metadata::LeaderEpoch(5))]
+    leader_epoch: krabka_metadata::LeaderEpoch,
+    partition_epoch: crate::test_support::PartitionEpoch,
+}
+
+fn replicated_partition(setup: UnregisterPartitionSetup<'_>) -> krabka_metadata::PartitionRecord {
+    let UnregisterPartitionSetup {
+        index,
+        leader,
+        isr,
+        leader_epoch,
         partition_epoch,
+    } = setup;
+    krabka_metadata::PartitionRecord {
+        isr: isr.to_vec(),
+        leader_epoch,
+        partition_epoch: partition_epoch.0,
         ..crate::handlers::test_support::replicated_partition(
-            "t",
-            index,
-            NodeId(leader),
-            &[NodeId(1), NodeId(2)],
+            crate::handlers::test_support::ReplicatedPartitionSetup {
+                topic: "t",
+                partition: index,
+                leader,
+                replicas: &[NodeId(1), NodeId(2)],
+            },
         )
     }
 }
 
 /// Topic `t`, with `partitions` partitions and a replication factor of 2.
-fn topic(partitions: i32) -> MetadataRecord {
+fn topic(partitions: crate::test_support::PartitionCount) -> MetadataRecord {
     MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
         name: "t".into(),
         topic_id: Uuid::from_u128(0x7),
-        partitions,
+        partitions: partitions.0,
         replication_factor: 2,
     })
 }
@@ -297,11 +327,21 @@ async fn handle_removes_the_broker_from_every_isr_in_the_unregistering_append() 
     broker
         .controller
         .submit_change(vec![
-            registration(2, false),
-            topic(3),
-            MetadataRecord::V1Partition(replicated_partition(0, 1, &[1, 2], 5, 0)),
-            MetadataRecord::V1Partition(replicated_partition(1, 2, &[2, 1], 5, 0)),
-            MetadataRecord::V1Partition(replicated_partition(2, 2, &[2], 5, 0)),
+            registration(RegistrationSetup::default()),
+            topic(crate::test_support::PartitionCount(3)),
+            MetadataRecord::V1Partition(replicated_partition(UnregisterPartitionSetup::default())),
+            MetadataRecord::V1Partition(replicated_partition(UnregisterPartitionSetup {
+                index: krabka_ids::PartitionIndex(1),
+                leader: NodeId(2),
+                isr: &[NodeId(2), NodeId(1)],
+                ..Default::default()
+            })),
+            MetadataRecord::V1Partition(replicated_partition(UnregisterPartitionSetup {
+                index: krabka_ids::PartitionIndex(2),
+                leader: NodeId(2),
+                isr: &[NodeId(2)],
+                ..Default::default()
+            })),
         ])
         .await
         .expect("seed the partitions");
@@ -316,9 +356,26 @@ async fn handle_removes_the_broker_from_every_isr_in_the_unregistering_append() 
     // It only followed partition 1, so the leader stays and the epoch does not
     // move. It was in neither of partition 2's lists, so that one is untouched.
     let expected = [
-        replicated_partition(0, 2, &[2], 6, 1),
-        replicated_partition(1, 2, &[2], 5, 1),
-        replicated_partition(2, 2, &[2], 5, 0),
+        replicated_partition(UnregisterPartitionSetup {
+            leader: NodeId(2),
+            isr: &[NodeId(2)],
+            leader_epoch: krabka_metadata::LeaderEpoch(6),
+            partition_epoch: crate::test_support::PartitionEpoch(1),
+            ..Default::default()
+        }),
+        replicated_partition(UnregisterPartitionSetup {
+            index: krabka_ids::PartitionIndex(1),
+            leader: NodeId(2),
+            isr: &[NodeId(2)],
+            partition_epoch: crate::test_support::PartitionEpoch(1),
+            ..Default::default()
+        }),
+        replicated_partition(UnregisterPartitionSetup {
+            index: krabka_ids::PartitionIndex(2),
+            leader: NodeId(2),
+            isr: &[NodeId(2)],
+            ..Default::default()
+        }),
     ];
     for partition in expected {
         check!(
@@ -419,7 +476,13 @@ fn the_isr_departures_sit_between_the_consume_and_the_unregister_record() {
         node_id: DOOMED,
         broker_epoch: DOOMED_EPOCH,
     });
-    let leave = MetadataRecord::V1Partition(replicated_partition(0, 2, &[2], 6, 1));
+    let leave = MetadataRecord::V1Partition(replicated_partition(UnregisterPartitionSetup {
+        leader: NodeId(2),
+        isr: &[NodeId(2)],
+        leader_epoch: krabka_metadata::LeaderEpoch(6),
+        partition_epoch: crate::test_support::PartitionEpoch(1),
+        ..Default::default()
+    }));
 
     for (case, records, expected) in [
         (

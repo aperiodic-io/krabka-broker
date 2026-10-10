@@ -9,61 +9,106 @@ fn shared_checks_follow_update_feature_order() {
         ..facts
     };
     let cases = [
-        ("upgrade", row(T::Upgrade, 1, 0, MET), D::EmitFeature),
-        ("same level", row(T::Upgrade, 1, 1, MET), D::EmitFeature),
+        ("upgrade", row(FeatureRowSetup::default()), D::EmitFeature),
+        (
+            "same level",
+            row(FeatureRowSetup {
+                current: FeatureLevel(1),
+                ..Default::default()
+            }),
+            D::EmitFeature,
+        ),
         (
             "safe downgrade",
-            row(T::SafeDowngrade, 0, 1, MET),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                requested: FeatureLevel(0),
+                current: FeatureLevel(1),
+                ..Default::default()
+            }),
             D::EmitFeature,
         ),
         (
             "unsafe downgrade",
-            row(T::UnsafeDowngrade, 0, 1, MET),
+            row(FeatureRowSetup {
+                update_type: T::UnsafeDowngrade,
+                requested: FeatureLevel(0),
+                current: FeatureLevel(1),
+                ..Default::default()
+            }),
             D::EmitFeature,
         ),
         // A level-0 downgrade of a feature that is not finalized is a
         // no-op that Kafka still writes.
         (
             "delete unfinalized",
-            row(T::SafeDowngrade, 0, 0, MET),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                requested: FeatureLevel(0),
+                ..Default::default()
+            }),
             D::EmitFeature,
         ),
         (
             "unknown type before everything",
             FeatureUpdateFacts {
                 update_type: None,
-                ..unsupported(row(T::Upgrade, -1, 0, UNMET))
+                ..unsupported(row(FeatureRowSetup {
+                    requested: FeatureLevel(-1),
+                    kind: UNMET,
+                    ..Default::default()
+                }))
             },
             D::UnknownUpdateType,
         ),
         (
             "negative before support",
-            unsupported(row(T::Upgrade, -1, 0, MET)),
+            unsupported(row(FeatureRowSetup {
+                requested: FeatureLevel(-1),
+                ..Default::default()
+            })),
             D::NegativeLevel,
         ),
         (
             "support before direction",
-            unsupported(row(T::SafeDowngrade, 1, 0, MET)),
+            unsupported(row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                ..Default::default()
+            })),
             D::UnsupportedByNode,
         ),
         (
             "downgrade as upgrade",
-            row(T::Upgrade, 0, 1, MET),
+            row(FeatureRowSetup {
+                requested: FeatureLevel(0),
+                current: FeatureLevel(1),
+                ..Default::default()
+            }),
             D::DowngradeWithoutFlag,
         ),
         (
             "downgrade type raises",
-            row(T::SafeDowngrade, 1, 0, MET),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                ..Default::default()
+            }),
             D::DowngradeToNewerLevel,
         ),
         (
             "direction before dependencies",
-            row(T::UnsafeDowngrade, 1, 0, UNMET),
+            row(FeatureRowSetup {
+                update_type: T::UnsafeDowngrade,
+                kind: UNMET,
+                ..Default::default()
+            }),
             D::DowngradeToNewerLevel,
         ),
         (
             "dependency unmet",
-            row(T::Upgrade, 1, 0, UNMET),
+            row(FeatureRowSetup {
+                kind: UNMET,
+                ..Default::default()
+            }),
             D::DependencyUnmet,
         ),
     ];
@@ -77,33 +122,63 @@ fn metadata_version_refuses_every_lossy_downgrade() {
     let cases = [
         (
             "lossless safe",
-            row(T::SafeDowngrade, 24, 25, LOSSLESS),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                requested: FeatureLevel(24),
+                current: FeatureLevel(25),
+                kind: LOSSLESS,
+            }),
             D::EmitFeature,
         ),
         (
             "lossless unsafe",
-            row(T::UnsafeDowngrade, 24, 25, LOSSLESS),
+            row(FeatureRowSetup {
+                update_type: T::UnsafeDowngrade,
+                requested: FeatureLevel(24),
+                current: FeatureLevel(25),
+                kind: LOSSLESS,
+            }),
             D::EmitFeature,
         ),
         (
             "lossy safe",
-            row(T::SafeDowngrade, 22, 25, LOSSY),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                requested: FeatureLevel(22),
+                current: FeatureLevel(25),
+                kind: LOSSY,
+            }),
             D::LossyMetadataDowngrade,
         ),
         (
             "lossy unsafe",
-            row(T::UnsafeDowngrade, 17, 25, LOSSY),
+            row(FeatureRowSetup {
+                update_type: T::UnsafeDowngrade,
+                requested: FeatureLevel(17),
+                current: FeatureLevel(25),
+                kind: LOSSY,
+            }),
             D::UnsafeMetadataDowngrade,
         ),
         // The walk only matters for a downgrade.
         (
             "upgrade across a change",
-            row(T::Upgrade, 30, 25, LOSSY),
+            row(FeatureRowSetup {
+                requested: FeatureLevel(30),
+                current: FeatureLevel(25),
+                kind: LOSSY,
+                ..Default::default()
+            }),
             D::EmitFeature,
         ),
         (
             "upgrade type downgrade",
-            row(T::Upgrade, 24, 25, LOSSLESS),
+            row(FeatureRowSetup {
+                requested: FeatureLevel(24),
+                current: FeatureLevel(25),
+                kind: LOSSLESS,
+                ..Default::default()
+            }),
             D::DowngradeWithoutFlag,
         ),
     ];
@@ -117,32 +192,58 @@ fn kraft_version_upgrades_through_raft_and_never_downgrades() {
     let cases = [
         (
             "upgrade",
-            row(T::Upgrade, 1, 0, K::KRaftVersion),
+            row(FeatureRowSetup {
+                kind: FeatureFixtureKind::KRaftVersion,
+                ..Default::default()
+            }),
             D::UpgradeKRaft,
         ),
         (
             "same level upgrade",
-            row(T::Upgrade, 1, 1, K::KRaftVersion),
+            row(FeatureRowSetup {
+                current: FeatureLevel(1),
+                kind: FeatureFixtureKind::KRaftVersion,
+                ..Default::default()
+            }),
             D::UpgradeKRaft,
         ),
         (
             "downgrade",
-            row(T::SafeDowngrade, 0, 1, K::KRaftVersion),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                requested: FeatureLevel(0),
+                current: FeatureLevel(1),
+                kind: FeatureFixtureKind::KRaftVersion,
+            }),
             D::KRaftDowngrade,
         ),
         (
             "unsafe downgrade",
-            row(T::UnsafeDowngrade, 0, 1, K::KRaftVersion),
+            row(FeatureRowSetup {
+                update_type: T::UnsafeDowngrade,
+                requested: FeatureLevel(0),
+                current: FeatureLevel(1),
+                kind: FeatureFixtureKind::KRaftVersion,
+            }),
             D::KRaftDowngrade,
         ),
         (
             "downgrade type at the current level",
-            row(T::SafeDowngrade, 1, 1, K::KRaftVersion),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                current: FeatureLevel(1),
+                kind: FeatureFixtureKind::KRaftVersion,
+                ..Default::default()
+            }),
             D::NoChange,
         ),
         (
             "downgrade type raises",
-            row(T::SafeDowngrade, 1, 0, K::KRaftVersion),
+            row(FeatureRowSetup {
+                update_type: T::SafeDowngrade,
+                kind: FeatureFixtureKind::KRaftVersion,
+                ..Default::default()
+            }),
             D::DowngradeToNewerLevel,
         ),
     ];

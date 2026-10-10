@@ -121,10 +121,10 @@ async fn a_transaction_that_enlisted_before_the_freeze_still_commits() {
         .expect("begin_transaction");
     producer
         .send(crate::support::producer::producer_record(
-            "orders",
-            None,
-            None,
-            Some(Bytes::from_static(b"in-flight")),
+            crate::support::producer::ProducerRecordSetup {
+                value: Some(Bytes::from_static(b"in-flight")),
+                ..Default::default()
+            },
         ))
         .await
         .expect("the in-flight record is acknowledged");

@@ -116,3 +116,25 @@ pub(crate) fn registration_feature_projection(
         }
     })
 }
+
+/// Independently encode the expected bytes without calling the storage append path.
+pub(crate) fn compression_bytes_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
+    let [name, level]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
+        .try_into()
+        .expect("two arguments");
+    let name = crate::fixtures::name(name)?;
+    let level = crate::fixtures::name(level)?;
+    Ok(moxy::template! {
+        #[derive(Clone, Copy)]
+        struct {{ level }}(i32);
+
+        fn {{ name }}(
+            batch: &::krabka_protocol::records::RecordBatch,
+            level: {{ level }},
+        ) -> ::bytes::Bytes {
+            let mut expected = ::bytes::BytesMut::new();
+            batch.encode_with_compression_level(&mut expected, Some(level.0)).unwrap();
+            expected.freeze()
+        }
+    })
+}

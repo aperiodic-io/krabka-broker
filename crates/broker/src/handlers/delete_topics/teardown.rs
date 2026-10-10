@@ -42,6 +42,7 @@ pub(super) fn remove_local_partitions(
                 name,
                 topic_id,
                 idx,
+                crate::wal::quorum::ShardRemoval::All,
             )
         {
             tracing::warn!(

@@ -13,16 +13,22 @@ use std::time::Duration;
 use assert2::assert;
 use krabka_broker::{BootstrapMode, Broker};
 use krabka_client_core::Client;
+use krabka_ids::ProducerId;
 use krabka_protocol::{
     owned::{init_producer_id_request::InitProducerIdRequest, produce_request::ProduceRequest},
-    records::{Attributes, RecordBatch},
+    records::RecordBatch,
 };
 use tempfile::TempDir;
 
 use crate::{
     support::{
-        records::{batch_from_records, value_record},
-        transactions::end_transaction_request,
+        records::{
+            BatchTransaction, ProbeRecordCount, ProducerSequence, TransactionProbeBatchSetup,
+            transaction_probe_batch,
+        },
+        transactions::{
+            ProducerEpoch, ProducerEpochOffset, ProducerIdentity, end_transaction_request,
+        },
     },
     txnver_harness::{
         admin_client, config, create_topic, downgrade_transaction_version, find_coordinator,
@@ -38,11 +44,16 @@ const CONCURRENT_TRANSACTIONS: i16 = 51;
 enum Setup {
     /// A transactional producer commits one transaction of three records.
     /// `downgrade_to` selects the `transaction.version` level.
-    Transaction { downgrade_to: Option<i16> },
+    Transaction {
+        downgrade_to: Option<TransactionFeatureLevel>,
+    },
     /// An idempotent producer writes three records at epoch 0. The probes use
     /// epoch 1, as the Java client does after a KIP-360 local epoch bump.
     Idempotent,
 }
+
+#[derive(Debug, Clone, Copy)]
+struct TransactionFeatureLevel(i16);
 
 struct Case {
     name: &'static str,
@@ -50,34 +61,16 @@ struct Case {
     setup: Setup,
     /// `(epoch offset from the setup epoch, base sequence)` of the batch Kafka
     /// rejects.
-    rejected: (i16, i32),
+    rejected: (ProducerEpochOffset, ProducerSequence),
     /// `(epoch offset from the setup epoch, base sequence)` of the batch Kafka
     /// accepts.
-    accepted: (i16, i32),
+    accepted: (ProducerEpochOffset, ProducerSequence),
 }
 
 struct Identity {
     transactional_id: Option<&'static str>,
-    producer_id: i64,
-    epoch: i16,
-}
-
-fn batch(producer: &Identity, epoch: i16, base_sequence: i32, records: i32) -> RecordBatch {
-    RecordBatch {
-        attributes: Attributes::default().with_transactional(producer.transactional_id.is_some()),
-        producer_id: producer.producer_id,
-        producer_epoch: epoch,
-        base_sequence,
-        last_offset_delta: records - 1,
-        max_timestamp: 1,
-        ..batch_from_records(
-            (0..records)
-                .map(|offset_delta| {
-                    value_record(offset_delta, Some(bytes::Bytes::from_static(b"v")))
-                })
-                .collect(),
-        )
-    }
+    producer_id: ProducerId,
+    epoch: ProducerEpoch,
 }
 
 /// Send one batch. Retry only while the partition or its leader is not ready
@@ -91,12 +84,13 @@ async fn produce(
     let request = ProduceRequest {
         // A Kafka producer names its transactional id on every request.
         transactional_id: batch_transactional_id.map(str::to_owned),
-        ..crate::support::produce::single_partition_produce(
-            topic,
-            id,
-            0,
-            Some(batch.into()),
-            (-1, 5_000),
+        ..crate::support::produce::batch_request(
+            batch,
+            crate::support::produce::SinglePartitionProduceSetup {
+                topic: (topic).into(),
+                topic_id: id,
+                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            },
         )
     };
     let response =
@@ -123,7 +117,12 @@ where
     .await
 }
 
-async fn add_partition(client: &Client, producer: &Identity, topic: &str, epoch: i16) -> i16 {
+async fn add_partition(
+    client: &Client,
+    producer: &Identity,
+    topic: &str,
+    epoch: ProducerEpoch,
+) -> i16 {
     let transactional_id = producer.transactional_id.expect("transactional producer");
     find_coordinator(client, transactional_id).await;
     until_coordinator_ready(|| async {
@@ -131,7 +130,7 @@ async fn add_partition(client: &Client, producer: &Identity, topic: &str, epoch:
             .send(crate::support::transaction_wire::add_partition_request(
                 transactional_id,
                 topic,
-                (producer.producer_id, epoch),
+                (producer.producer_id.0, epoch.0),
             ))
             .await
             .expect("AddPartitionsToTxn");
@@ -165,7 +164,19 @@ async fn produce_setup(client: &Client, case: &Case, producer: &Identity) {
         case.topic,
         (
             producer.transactional_id,
-            batch(producer, producer.epoch, 0, 3),
+            transaction_probe_batch(TransactionProbeBatchSetup {
+                producer: ProducerIdentity {
+                    id: producer.producer_id,
+                    epoch: producer.epoch,
+                },
+                sequence: ProducerSequence(0),
+                records: ProbeRecordCount(3),
+                transaction: if producer.transactional_id.is_some() {
+                    BatchTransaction::Transactional
+                } else {
+                    BatchTransaction::Ordinary
+                },
+            }),
         ),
     )
     .await;
@@ -187,25 +198,25 @@ async fn set_up(client: &Client, case: &Case) -> Identity {
                 .expect("InitProducerId");
             let producer = Identity {
                 transactional_id: None,
-                producer_id: init.producer_id,
-                epoch: init.producer_epoch,
+                producer_id: ProducerId(init.producer_id),
+                epoch: ProducerEpoch(init.producer_epoch),
             };
             produce_setup(client, case, &producer).await;
             Identity {
-                epoch: producer.epoch + 1,
+                epoch: ProducerEpoch(producer.epoch.0 + 1),
                 ..producer
             }
         }
         Setup::Transaction { downgrade_to } => {
             if let Some(level) = downgrade_to {
-                downgrade_transaction_version(client, level).await;
+                downgrade_transaction_version(client, level.0).await;
             }
             let transactional_id = case.name;
             let init = init_transactional_producer(client, transactional_id).await;
             let producer = Identity {
                 transactional_id: Some(transactional_id),
-                producer_id: init.producer_id,
-                epoch: init.producer_epoch,
+                producer_id: ProducerId(init.producer_id),
+                epoch: ProducerEpoch(init.producer_epoch),
             };
             let added = add_partition(client, &producer, case.topic, producer.epoch).await;
             assert!(added == 0, "{}: AddPartitionsToTxn", case.name);
@@ -213,8 +224,13 @@ async fn set_up(client: &Client, case: &Case) -> Identity {
             let end = client
                 .send(end_transaction_request(
                     transactional_id,
-                    (producer.producer_id, producer.epoch),
-                    true,
+                    crate::support::transactions::EndTransactionSetup {
+                        producer: crate::support::transactions::ProducerIdentity::from_wire((
+                            producer.producer_id.0,
+                            producer.epoch.0,
+                        )),
+                        ..Default::default()
+                    },
                 ))
                 .await
                 .expect("EndTxn");
@@ -222,7 +238,7 @@ async fn set_up(client: &Client, case: &Case) -> Identity {
             // EndTxn v5 carries the bumped epoch at every cluster level, since
             // the request version decides the client transaction version.
             let epoch = if end.producer_id >= 0 {
-                end.producer_epoch
+                ProducerEpoch(end.producer_epoch)
             } else {
                 producer.epoch
             };
@@ -235,9 +251,9 @@ async fn probe(
     client: &Client,
     case: &Case,
     producer: &Identity,
-    (offset, sequence): (i16, i32),
+    (offset, sequence): (ProducerEpochOffset, ProducerSequence),
 ) -> i16 {
-    let epoch = producer.epoch + offset;
+    let epoch = ProducerEpoch(producer.epoch.0 + offset.0);
     if producer.transactional_id.is_some() {
         let added = add_partition(client, producer, case.topic, epoch).await;
         assert!(
@@ -251,7 +267,19 @@ async fn probe(
         case.topic,
         (
             producer.transactional_id,
-            batch(producer, epoch, sequence, 1),
+            transaction_probe_batch(TransactionProbeBatchSetup {
+                producer: ProducerIdentity {
+                    id: producer.producer_id,
+                    epoch,
+                },
+                sequence,
+                transaction: if producer.transactional_id.is_some() {
+                    BatchTransaction::Transactional
+                } else {
+                    BatchTransaction::Ordinary
+                },
+                ..Default::default()
+            }),
         ),
     )
     .await
@@ -267,7 +295,12 @@ async fn codes_across_restart(case: &Case) -> [i16; 3] {
         .await
         .expect("start broker");
     let client = admin_client(&broker.listen_addr().to_string()).await;
-    create_topic(&client, case.topic, 1).await;
+    create_topic(
+        &client,
+        case.topic,
+        crate::support::topics::TopicPartitionCount(1),
+    )
+    .await;
     let producer = set_up(&client, case).await;
     let live_rejected = probe(&client, case, &producer, case.rejected).await;
     broker.shutdown().await;
@@ -290,28 +323,28 @@ async fn first_sequence_at_a_new_epoch_gets_the_same_answer_before_and_after_res
             name: "tv2-commit-bumps-the-epoch",
             topic: "seq-tv2",
             setup: Setup::Transaction { downgrade_to: None },
-            rejected: (0, 3),
-            accepted: (0, 0),
+            rejected: (ProducerEpochOffset(0), ProducerSequence(3)),
+            accepted: (ProducerEpochOffset(0), ProducerSequence(0)),
         },
         Case {
             name: "tv1-cluster-v5-commit-bumps-the-epoch",
             topic: "seq-tv1",
             setup: Setup::Transaction {
-                downgrade_to: Some(1),
+                downgrade_to: Some(TransactionFeatureLevel(1)),
             },
             // The EndTxn v5 request of this client is a TV_2 client whatever
             // `transaction.version` the cluster finalized (Kafka's
             // `transactionVersionForEndTxn`), so the commit bumps the epoch as
             // it does at TV_2.
-            rejected: (0, 3),
-            accepted: (0, 0),
+            rejected: (ProducerEpochOffset(0), ProducerSequence(3)),
+            accepted: (ProducerEpochOffset(0), ProducerSequence(0)),
         },
         Case {
             name: "idempotent-epoch-bump",
             topic: "seq-idempotent",
             setup: Setup::Idempotent,
-            rejected: (0, 3),
-            accepted: (0, 0),
+            rejected: (ProducerEpochOffset(0), ProducerSequence(3)),
+            accepted: (ProducerEpochOffset(0), ProducerSequence(0)),
         },
     ];
     for case in &cases {

@@ -31,14 +31,14 @@ let%span squorum_fetch'9 = "/workspace/crates/verified/src/composition/quorum_fe
 let%span squorum_fetch'10 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 14 28 14 82
 let%span squorum_fetch'11 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 15 28 17 22
 let%span squorum_fetch'12 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 18 28 19 93
-let%span swatermark = "/workspace/crates/verified/src/consensus/watermark.rs" 56 11 56 69
-let%span swatermark'0 = "/workspace/crates/verified/src/consensus/watermark.rs" 57 11 57 64
-let%span swatermark'1 = "/workspace/crates/verified/src/consensus/watermark.rs" 58 11 58 35
-let%span swatermark'2 = "/workspace/crates/verified/src/consensus/watermark.rs" 59 11 60 41
-let%span swatermark'3 = "/workspace/crates/verified/src/consensus/watermark.rs" 61 10 61 33
-let%span swatermark'4 = "/workspace/crates/verified/src/consensus/watermark.rs" 62 10 62 29
-let%span swatermark'5 = "/workspace/crates/verified/src/consensus/watermark.rs" 63 10 65 20
-let%span swatermark'6 = "/workspace/crates/verified/src/consensus/watermark.rs" 66 10 68 85
+let%span swatermark = "/workspace/crates/verified/src/consensus/watermark.rs" 65 11 65 69
+let%span swatermark'0 = "/workspace/crates/verified/src/consensus/watermark.rs" 66 11 66 64
+let%span swatermark'1 = "/workspace/crates/verified/src/consensus/watermark.rs" 67 11 67 78
+let%span swatermark'2 = "/workspace/crates/verified/src/consensus/watermark.rs" 68 10 68 33
+let%span swatermark'3 = "/workspace/crates/verified/src/consensus/watermark.rs" 69 10 69 29
+let%span swatermark'4 = "/workspace/crates/verified/src/consensus/watermark.rs" 70 10 72 20
+let%span swatermark'5 = "/workspace/crates/verified/src/consensus/watermark.rs" 73 10 75 85
+let%span swatermark'6 = "/workspace/crates/verified/src/consensus/watermark.rs" 10 8 10 97
 let%span slog_is_up_to_date = "/workspace/crates/verified/src/consensus/log_is_up_to_date.rs" 14 10 14 15
 let%span slog_is_up_to_date'0 = "/workspace/crates/verified/src/consensus/log_is_up_to_date.rs" 10 11 10 45
 let%span slog_is_up_to_date'1 = "/workspace/crates/verified/src/consensus/log_is_up_to_date.rs" 11 11 11 22
@@ -53,6 +53,10 @@ use int.MinMax
 use int.Int
 
 type t_FetchWatermarks = { log_start: Int64.t; hw: Int64.t; lso: Int64.t; log_end: Int64.t; deliverable: Int64.t }
+
+predicate watermark_inputs_bounded [#"/workspace/crates/verified/src/consensus/watermark.rs" 8 0 8 80] (current': int) (end': int) (followers: Seq.seq Int64.t) =
+  [%#swatermark'6] current' <= end'
+  /\ (forall k: int. 0 <= k /\ k < Seq.length followers -> Int64.to_int (Seq.get followers k) <= end')
 
 predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
 
@@ -89,20 +93,16 @@ let recompute_high_watermark (log_end'0: Int64.t) (follower_offsets: Slice64.sli
     /\ UInt64.t'int majority <= Seq.length (Slice64.view follower_offsets) + 1)
   /\ ([@stop_split] [@expl:recompute_high_watermark requires #1] [%#swatermark'0] leader_counts
     \/ UInt64.t'int majority <= Seq.length (Slice64.view follower_offsets))
-  /\ ([@stop_split] [@expl:recompute_high_watermark requires #2] [%#swatermark'1] Int64.to_int current_hwm
-    <= Int64.to_int log_end'0)
-  /\ ([@stop_split] [@expl:recompute_high_watermark requires #3] [%#swatermark'2] forall k: int. 0 <= k
-      /\ k < Seq.length (Slice64.view follower_offsets)
-    -> Int64.to_int (Seq.get (Slice64.view follower_offsets) k) <= Int64.to_int log_end'0)}
+  /\ ([@stop_split] [@expl:recompute_high_watermark requires #2] [%#swatermark'1] watermark_inputs_bounded (Int64.to_int current_hwm) (Int64.to_int log_end'0) (Slice64.view follower_offsets))}
   any
   [ return (result: Int64.t) ->
-  {[@stop_split] [@expl:recompute_high_watermark ensures] ([@stop_split] [@expl:recompute_high_watermark ensures #0] [%#swatermark'3] ge_log_Int (Int64.to_int result) (Int64.to_int current_hwm))
-    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #1] [%#swatermark'4] Int64.to_int result
+  {[@stop_split] [@expl:recompute_high_watermark ensures] ([@stop_split] [@expl:recompute_high_watermark ensures #0] [%#swatermark'2] ge_log_Int (Int64.to_int result) (Int64.to_int current_hwm))
+    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #1] [%#swatermark'3] Int64.to_int result
       <= Int64.to_int log_end'0)
-    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #2] [%#swatermark'5] forall v: int. gt_log_Int v (Int64.to_int epoch_start_offset)
+    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #2] [%#swatermark'4] forall v: int. gt_log_Int v (Int64.to_int epoch_start_offset)
           /\ ge_log_Int (count_ge (Int64.to_int log_end'0) (Slice64.view follower_offsets) v leader_counts) (UInt64.t'int majority)
         -> v <= Int64.to_int result)
-    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #3] [%#swatermark'6] gt_log_Int (Int64.to_int result) (Int64.to_int current_hwm)
+    /\ ([@stop_split] [@expl:recompute_high_watermark ensures #3] [%#swatermark'5] gt_log_Int (Int64.to_int result) (Int64.to_int current_hwm)
     -> gt_log_Int (Int64.to_int result) (Int64.to_int epoch_start_offset)
     /\ ge_log_Int (count_ge (Int64.to_int log_end'0) (Slice64.view follower_offsets) (Int64.to_int result) leader_counts) (UInt64.t'int majority))}
     (! return {result}) ]

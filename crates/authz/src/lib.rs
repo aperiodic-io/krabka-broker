@@ -258,3 +258,6 @@ topic_authorization_batch! {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod test_support;

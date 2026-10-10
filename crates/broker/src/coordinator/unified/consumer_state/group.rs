@@ -6,11 +6,7 @@
 //! Installing a target assignment and reconciling a member against it live in
 //! the `reconcile` sibling.
 
-use std::{
-    cmp::Ordering,
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::{cmp::Ordering, collections::HashMap, time::Instant};
 
 use krabka_protocol::primitives::uuid::Uuid;
 
@@ -299,19 +295,7 @@ impl GroupState {
         self.metadata_hash = hash;
     }
 
-    /// The members whose session expired at `now`, without removing them:
-    /// each one is fenced on its own, as each of Kafka's session timers fences
-    /// its member (`scheduleConsumerGroupSessionTimeout`).
-    #[must_use]
-    pub fn expired_members(&self, now: Instant, session_timeout: Duration) -> Vec<String> {
-        crate::coordinator::unified::expired_member_ids(
-            self.members
-                .iter()
-                .map(|(id, member)| (id.as_str(), member.last_seen)),
-            now,
-            session_timeout,
-        )
-    }
+    crate::coordinator::unified::member_helpers::expired_members_method!();
 
     crate::coordinator::unified::member_helpers::evict_expired!();
 
@@ -362,6 +346,7 @@ impl GroupState {
         self.rebalance_deadlines.values().min().copied()
     }
 
+    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
     /// Removes every member whose rebalance timeout fired at `now` while the
     /// member still had partitions to revoke. Returns the removed member ids,
     /// sorted.
@@ -376,12 +361,6 @@ impl GroupState {
     /// its join and sync timers, which also use the rebalance timeout. The
     /// pass also cancels the deadlines that no longer apply, so a past
     /// deadline never stays armed.
-    pub fn fence_rebalance_timeouts(&mut self, now: Instant) -> Vec<String> {
-        let fenced = self.rebalance_timeouts_due(now);
-        for member_id in &fenced {
-            self.remove_member(member_id);
-        }
-        fenced
     }
 
     /// The members whose rebalance timeout fired at `now` while they still

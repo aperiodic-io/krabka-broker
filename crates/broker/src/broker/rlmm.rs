@@ -19,6 +19,17 @@ pub(super) struct KafkaSwapKickoff {
     pub(super) reconcile_tick: std::time::Duration,
 }
 
+#[cfg(test)]
+pub(super) fn test_kickoff(cfg: crate::config::KafkaRlmmConfig) -> KafkaSwapKickoff {
+    KafkaSwapKickoff {
+        cfg,
+        broker_id: 1,
+        bootstrap_backoff_initial: std::time::Duration::from_millis(10),
+        bootstrap_backoff_max: std::time::Duration::from_secs(1),
+        reconcile_tick: std::time::Duration::from_secs(1),
+    }
+}
+
 pub(super) fn kafka_swap_kickoff(config: &BrokerConfig) -> Option<KafkaSwapKickoff> {
     config.remote_storage_backend.as_ref()?;
     // The diskless WAL index is always topic-backed, even when tests opt the

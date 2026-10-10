@@ -3,7 +3,7 @@ use creusot_std::prelude::*;
 #[cfg(creusot)]
 use super::time_index::sparse_timestamp_window_valid;
 #[cfg(creusot)]
-use super::trim::{trim_frontier, trim_store_frontiers_valid, trim_well_formed};
+use super::trim::{trim_cursor_bounded, trim_store_frontiers_valid, trim_well_formed};
 #[cfg(creusot)]
 use super::trim::{trim_has_no_snapshot, trim_rejection};
 use super::{
@@ -24,9 +24,7 @@ type TrimTimestampWitness = (i64, Option<usize>, i64, Option<usize>);
     Err(error) => trim_rejection(facts, error),
     Ok((floor, snapshot, cursor, selected)) => trim_well_formed(facts)
         && (facts.requested@ == -1 || facts.requested@ <= facts.high_watermark@)
-        && floor@ == trim_frontier(facts).max(stores.0@).max(stores.1@)
-        && 0 <= floor@ && floor@ <= cursor@ && cursor@ <= facts.log_end@
-        && floor@ <= facts.high_watermark@ && (!facts.has_delivery_watermark || floor@ <= facts.delivery_watermark@)
+        && trim_cursor_bounded(facts, (stores.0@, stores.1@), floor@, cursor@)
         && match snapshot {
             None => trim_has_no_snapshot(snapshots@, floor, facts.log_end, cursor),
             Some(index) => index@ < snapshots@.len() && floor@ < snapshots@[index@]@ && cursor == snapshots@[index@]

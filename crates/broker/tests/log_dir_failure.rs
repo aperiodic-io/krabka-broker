@@ -33,8 +33,6 @@ use krabka_broker::{
 use krabka_client_producer::{Acks, Producer, ProducerRecord};
 use tempfile::TempDir;
 
-use crate::support::topics::{creatable_topic, create_topic_request};
-
 mod support;
 
 /// The topic that takes the first placement on every broker, so the topic
@@ -86,19 +84,17 @@ impl Cluster {
 /// registered.
 async fn start_cluster() -> Cluster {
     const NODES: usize = 4;
-    let (client_addrs, controller_addrs, client_listeners, controller_listeners) =
-        support::bind_and_hold_ports(NODES).await;
-    let voters = [(1u64, controller_addrs[0])];
-    let topology = support::RoleTopology::new(&client_addrs, &controller_addrs, &voters);
-    let mut data_listeners = client_listeners.into_iter();
-    let mut ctrl_listeners = controller_listeners.into_iter();
+    let (endpoints, mut data_listeners, mut ctrl_listeners) =
+        support::single_controller_endpoints(NODES).await;
+    let topology = endpoints.topology();
 
     let controller_dir = TempDir::new().unwrap();
     let ctrl_cfg = topology.config(
-        0,
         controller_dir.path(),
-        BootstrapMode::Bootstrap,
-        NodeRole::Controller,
+        crate::support::RoleNodeSetup {
+            role: NodeRole::Controller,
+            ..Default::default()
+        },
     );
     let controller = support::start_held_node(
         ctrl_cfg,
@@ -113,7 +109,14 @@ async fn start_cluster() -> Cluster {
     for index in 1..NODES {
         let primary = TempDir::new().unwrap();
         let extra = TempDir::new().unwrap();
-        let mut cfg = topology.config(index, primary.path(), BootstrapMode::Join, NodeRole::Broker);
+        let mut cfg = topology.config(
+            primary.path(),
+            crate::support::RoleNodeSetup {
+                index: crate::support::NodeIndex(index),
+                mode: BootstrapMode::Join,
+                ..Default::default()
+            },
+        );
         cfg.extra_log_dirs = vec![extra.path().to_path_buf()];
         cfg.replica_lag_time_max = krabka_units::minutes(10);
         apply_server_properties(&mut cfg);
@@ -147,22 +150,6 @@ fn apply_server_properties(cfg: &mut BrokerConfig) {
     }
     .apply_to(cfg)
     .expect("server properties");
-}
-
-/// Creates `topic` with one partition on all three brokers, through the client
-/// listener of `broker`.
-async fn create_topic(broker: &BrokerHandle, topic: &str) {
-    let client = crate::support::client::connect_with_context(
-        broker.listen_addr().to_string(),
-        None,
-        "client",
-    )
-    .await;
-    let resp = client
-        .send(create_topic_request(creatable_topic(topic, 1, 3), 5_000))
-        .await
-        .expect("CreateTopics");
-    assert!(resp.topics[0].error_code == 0, "{resp:?}");
 }
 
 /// Waits until every broker holds `partition` in one of its log directories.
@@ -240,10 +227,12 @@ async fn produce(producer: &Producer, timestamp_ms: i64) {
         .send(ProducerRecord {
             timestamp_ms: Some(timestamp_ms),
             ..crate::support::producer::producer_record(
-                TOPIC.to_owned(),
-                Some(0),
-                None,
-                Some(Bytes::from_static(b"log-dir-failure")),
+                crate::support::producer::ProducerRecordSetup {
+                    topic: TOPIC.to_owned(),
+                    partition: Some(krabka_ids::PartitionIndex(0)),
+                    value: Some(Bytes::from_static(b"log-dir-failure")),
+                    ..Default::default()
+                },
             )
         })
         .await
@@ -254,9 +243,25 @@ async fn produce(producer: &Producer, timestamp_ms: i64) {
 async fn a_follower_whose_log_directory_fails_leaves_the_isr() {
     support::init_tracing();
     let cluster = start_cluster().await;
-    create_topic(&cluster.brokers[0].handle, FILLER).await;
+    crate::support::client::create_topic_for_broker(
+        &cluster.brokers[0].handle,
+        crate::support::topics::CreateTopicSetup {
+            topic: FILLER,
+            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            ..Default::default()
+        },
+    )
+    .await;
     wait_until_materialized(&cluster.brokers, &format!("{FILLER}-0")).await;
-    create_topic(&cluster.brokers[0].handle, TOPIC).await;
+    crate::support::client::create_topic_for_broker(
+        &cluster.brokers[0].handle,
+        crate::support::topics::CreateTopicSetup {
+            topic: TOPIC,
+            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            ..Default::default()
+        },
+    )
+    .await;
     let target = format!("{TOPIC}-0");
     wait_until_materialized(&cluster.brokers, &target).await;
 

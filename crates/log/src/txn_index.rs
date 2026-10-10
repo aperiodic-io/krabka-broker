@@ -156,18 +156,20 @@ impl TxnIndex {
     /// Returns an I/O error if the transaction-index sidecar cannot be
     /// rewritten or synchronized.
     pub fn truncate_from(&mut self, offset: Offset) -> Result<(), LogError> {
-        let Some(entries) =
-            crate::index::changed_entries(&self.entries, |entry| entry.last_offset < offset)
-        else {
-            return Ok(());
-        };
-        let mut file = crate::index::rewrite_sidecar_file(&self.path)?;
-        for entry in &entries {
-            let raw = AbortedTxnRaw::new(*entry);
-            file.write_all(raw.as_bytes()).map_err(LogError::Io)?;
+        if let Some(entries) = crate::index::rewrite_retained_entries(
+            &self.entries,
+            |entry| entry.last_offset < offset,
+            |entries| {
+                let mut file = crate::index::rewrite_sidecar_file(&self.path)?;
+                for entry in entries {
+                    let raw = AbortedTxnRaw::new(*entry);
+                    file.write_all(raw.as_bytes()).map_err(LogError::Io)?;
+                }
+                file.sync_data().map_err(LogError::Io)
+            },
+        )? {
+            self.entries = entries;
         }
-        file.sync_data().map_err(LogError::Io)?;
-        self.entries = entries;
         Ok(())
     }
 
@@ -218,6 +220,57 @@ mod tests {
         (dir, path, index)
     }
 
+    /// The same three-offset entry seeds retry, mutation and disk-round-trip cases.
+    fn retry_entry() -> AbortedTxn {
+        crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+            bounds: Offset(5)..=Offset(7),
+            stable: Offset(8),
+            ..Default::default()
+        })
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct RangedIndexSetup<'a> {
+        #[default("00.txnindex")]
+        name: &'a str,
+    }
+
+    /// One transaction covers offsets 10 through 20 for fetch-boundary checks.
+    fn ranged_index(setup: RangedIndexSetup<'_>) -> (TempDir, PathBuf, TxnIndex) {
+        populated_index(
+            setup.name,
+            &[crate::test_support::aborted_txn(
+                crate::test_support::AbortedTxnSetup {
+                    producer: crate::ProducerId(1),
+                    bounds: Offset(10)..=Offset(20),
+                    stable: Offset(21),
+                },
+            )],
+        )
+    }
+
+    /// The two independently specified malformed entries are refused both at append and open.
+    fn malformed_entries() -> [(&'static str, AbortedTxn); 2] {
+        [
+            (
+                "inverted",
+                crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+                    producer: crate::ProducerId(1),
+                    bounds: Offset(8)..=Offset(7),
+                    stable: Offset(8),
+                }),
+            ),
+            (
+                "negative-producer",
+                crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+                    producer: crate::ProducerId(-1),
+                    bounds: Offset(7)..=Offset(8),
+                    stable: Offset(9),
+                }),
+            ),
+        ]
+    }
+
     fn write_entry(path: &std::path::Path, entry: AbortedTxn) {
         let raw = AbortedTxnRaw::new(entry);
         std::fs::write(path, raw.as_bytes()).unwrap();
@@ -228,7 +281,11 @@ mod tests {
     /// `last_offset`, and `last_stable_offset`, each a big-endian i64.
     #[test]
     fn append_writes_the_exact_kafka_wire_layout() {
-        let entry = crate::test_support::aborted_txn(1000, 5, 9, 10);
+        let entry = crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+            bounds: crate::Offset(5)..=crate::Offset(9),
+            stable: crate::Offset(10),
+            ..Default::default()
+        });
         let (_dir, path, _index) = populated_index("00.txnindex", &[entry]);
 
         let bytes = std::fs::read(&path).unwrap();
@@ -249,9 +306,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("00.txnindex");
         let entries = [
-            crate::test_support::aborted_txn(1000, 0, 3, 4),
-            crate::test_support::aborted_txn(2000, 4, 6, 7),
-            crate::test_support::aborted_txn(3000, 8, 10, 11),
+            crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup::default()),
+            crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+                producer: crate::ProducerId(2000),
+                bounds: crate::Offset(4)..=crate::Offset(6),
+                stable: crate::Offset(7),
+            }),
+            crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+                producer: crate::ProducerId(3000),
+                bounds: crate::Offset(8)..=crate::Offset(10),
+                stable: crate::Offset(11),
+            }),
         ];
         let mut index = TxnIndex::open(path.clone()).unwrap();
         for entry in entries {
@@ -288,10 +353,9 @@ mod tests {
     /// records it was never sent.
     #[test]
     fn an_aborted_txn_starting_at_the_range_end_is_outside_it() {
-        let (_dir, _path, index) = populated_index(
-            "00000000000000000000.txnindex",
-            &[crate::test_support::aborted_txn(1, 10, 20, 21)],
-        );
+        let (_dir, _path, index) = ranged_index(RangedIndexSetup {
+            name: "00000000000000000000.txnindex",
+        });
 
         let found =
             |start: i64, end: i64| index.aborted_in_range(Offset(start), Offset(end)).count();
@@ -314,10 +378,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("00.txnindex");
         let mut index = TxnIndex::open(path).unwrap();
-        for entry in [
-            crate::test_support::aborted_txn(1, 8, 7, 8),
-            crate::test_support::aborted_txn(-1, 7, 8, 9),
-        ] {
+        for (_, entry) in malformed_entries() {
             assert2::assert!(let LogError::InvalidArgument(_) = index.append(entry).unwrap_err());
         }
         assert2::assert!(index.entries().is_empty());
@@ -326,13 +387,7 @@ mod tests {
         std::fs::write(&partial, [0_u8]).unwrap();
         assert2::assert!(let LogError::Corrupt(_) = TxnIndex::open(partial).unwrap_err());
 
-        for (name, entry) in [
-            ("inverted", crate::test_support::aborted_txn(1, 8, 7, 8)),
-            (
-                "negative-producer",
-                crate::test_support::aborted_txn(-1, 7, 8, 9),
-            ),
-        ] {
+        for (name, entry) in malformed_entries() {
             let path = dir.path().join(format!("{name}.txnindex"));
             write_entry(&path, entry);
             assert2::assert!(let LogError::Corrupt(_) = TxnIndex::open(path).unwrap_err());
@@ -341,7 +396,7 @@ mod tests {
 
     #[test]
     fn exact_aborted_interval_retry_is_idempotent() {
-        let entry = crate::test_support::aborted_txn(1000, 5, 7, 8);
+        let entry = retry_entry();
         let (_dir, path, mut index) = populated_index("00.txnindex", &[entry]);
         index.append(entry).unwrap();
         assert2::assert!(index.entries() == [entry]);
@@ -355,14 +410,14 @@ mod tests {
 
     #[test]
     fn mutation_io_failures_leave_the_in_memory_index_unchanged() {
-        let original = crate::test_support::aborted_txn(1000, 5, 7, 8);
+        let original = retry_entry();
         let (_dir, path, mut index) = populated_index("00.txnindex", &[original]);
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
 
         assert2::assert!(
             let LogError::Io(_) = index
-                .append(crate::test_support::aborted_txn(1000, 10, 12, 13))
+                .append(crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup { bounds: crate::Offset(10)..=crate::Offset(12), stable: crate::Offset(13), ..Default::default() }))
                 .unwrap_err()
         );
         assert2::assert!(index.entries() == [original]);
@@ -372,10 +427,7 @@ mod tests {
 
     #[test]
     fn empty_or_inverted_fetch_range_matches_no_aborted_interval() {
-        let (_dir, _path, index) = populated_index(
-            "00.txnindex",
-            &[crate::test_support::aborted_txn(1, 10, 20, 21)],
-        );
+        let (_dir, _path, index) = ranged_index(RangedIndexSetup::default());
         assert2::assert!(index.aborted_in_range(Offset(10), Offset(10)).count() == 0);
         assert2::assert!(index.aborted_in_range(Offset(20), Offset(10)).count() == 0);
     }
@@ -385,10 +437,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("00.txnindex");
         let mut idx = TxnIndex::open(path.clone()).unwrap();
-        idx.append(crate::test_support::aborted_txn(1000, 5, 7, 8))
-            .unwrap();
-        idx.append(crate::test_support::aborted_txn(1000, 10, 12, 13))
-            .unwrap();
+        idx.append(retry_entry()).unwrap();
+        idx.append(crate::test_support::aborted_txn(
+            crate::test_support::AbortedTxnSetup {
+                bounds: crate::Offset(10)..=crate::Offset(12),
+                stable: crate::Offset(13),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
 
         let idx2 = TxnIndex::open(path).unwrap();
         assert2::assert!(
@@ -443,10 +500,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("00.txnindex");
         let mut idx = TxnIndex::open(path).unwrap();
-        idx.append(crate::test_support::aborted_txn(1, 0, 4, 5))
-            .unwrap();
-        idx.append(crate::test_support::aborted_txn(2, 10, 14, 15))
-            .unwrap();
+        idx.append(crate::test_support::aborted_txn(
+            crate::test_support::AbortedTxnSetup {
+                producer: crate::ProducerId(1),
+                bounds: crate::Offset(0)..=crate::Offset(4),
+                stable: crate::Offset(5),
+            },
+        ))
+        .unwrap();
+        idx.append(crate::test_support::aborted_txn(
+            crate::test_support::AbortedTxnSetup {
+                producer: crate::ProducerId(2),
+                bounds: crate::Offset(10)..=crate::Offset(14),
+                stable: crate::Offset(15),
+            },
+        ))
+        .unwrap();
 
         let in_3_to_12 = idx
             .aborted_in_range(Offset(3), Offset(12))
@@ -459,8 +528,16 @@ mod tests {
         assert2::assert!(
             in_3_to_12
                 == vec![
-                    crate::test_support::aborted_txn(1, 0, 4, 5),
-                    crate::test_support::aborted_txn(2, 10, 14, 15),
+                    crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+                        producer: crate::ProducerId(1),
+                        bounds: crate::Offset(0)..=crate::Offset(4),
+                        stable: crate::Offset(5)
+                    }),
+                    crate::test_support::aborted_txn(crate::test_support::AbortedTxnSetup {
+                        producer: crate::ProducerId(2),
+                        bounds: crate::Offset(10)..=crate::Offset(14),
+                        stable: crate::Offset(15)
+                    }),
                 ]
         );
         assert2::assert!(in_5_to_9 == Vec::new());

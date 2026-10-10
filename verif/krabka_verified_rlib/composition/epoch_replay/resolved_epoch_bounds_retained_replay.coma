@@ -29,7 +29,7 @@ let%span ssnapshot_replay'1 = "/workspace/crates/verified/src/composition/snapsh
 let%span ssnapshot_replay'2 = "/workspace/crates/verified/src/composition/snapshot_replay.rs" 15 10 20 1
 let%span ssnapshot_replay'3 = "/workspace/crates/verified/src/composition/snapshot_replay.rs" 21 10 34 1
 let%span ssnapshot_replay'4 = "/workspace/crates/verified/src/composition/snapshot_replay.rs" 154 16 154 89
-let%span strim = "/workspace/crates/verified/src/composition/trim.rs" 218 16 219 33
+let%span strim = "/workspace/crates/verified/src/composition/trim.rs" 227 16 228 33
 
 use creusot.int.Int64
 use creusot.int.Int32
@@ -365,7 +365,7 @@ let elim_Continue'0 (_x: t_ControlFlow_Result_Infallible_unit_tup2_Option_usize_
       end}
     any) ]
 
-predicate latest_retained_snapshot [#"/workspace/crates/verified/src/composition/trim.rs" 212 0 217 9] (snapshots: Seq.seq Int64.t) (floor: int) (end': int) (selected: int) =
+predicate latest_retained_snapshot [#"/workspace/crates/verified/src/composition/trim.rs" 221 0 226 9] (snapshots: Seq.seq Int64.t) (floor: int) (end': int) (selected: int) =
   [%#strim] forall i: int. 0 <= i
       /\ i < Seq.length snapshots
       /\ floor < Int64.to_int (Seq.get snapshots i) /\ Int64.to_int (Seq.get snapshots i) <= end'

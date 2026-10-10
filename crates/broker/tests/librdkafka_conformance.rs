@@ -69,6 +69,27 @@ fn librdkafka_2x() -> &'static ClientCase {
     &CLIENTS[1]
 }
 
+fn check_client_version(image: &str, program: &str, library: &str, marker: &str) {
+    let version = run_client(image, program, &["-V"], None);
+    let version = format!(
+        "{}{}",
+        String::from_utf8_lossy(&version.stdout),
+        String::from_utf8_lossy(&version.stderr)
+    );
+    assert!(
+        version.contains(marker),
+        "{program} is not linked to {library}: {version}"
+    );
+}
+
+fn check_consumed_payload(output: &Output, expected: &str, program: &str) {
+    assert!(
+        String::from_utf8_lossy(&output.stdout) == expected,
+        "{program} round-trip mismatch: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 fn run_client(image: &str, program: &str, args: &[&str], input: Option<&str>) -> Output {
     let mut child = Command::new("docker")
         .args([
@@ -141,16 +162,7 @@ async fn round_trip_group_join_and_api_versions_with_kcat() {
         },
     ) in CLIENTS.iter().enumerate()
     {
-        let version = run_client(image, program, &["-V"], None);
-        let version = format!(
-            "{}{}",
-            String::from_utf8_lossy(&version.stdout),
-            String::from_utf8_lossy(&version.stderr)
-        );
-        assert!(
-            version.contains(version_marker),
-            "{program} is not linked to {library}: {version}"
-        );
+        check_client_version(image, program, library, version_marker);
 
         let topic = format!("librdkafka-conformance-{index}");
         admin
@@ -216,11 +228,7 @@ async fn round_trip_group_join_and_api_versions_with_kcat() {
             ],
             None,
         );
-        assert!(
-            String::from_utf8_lossy(&consumed.stdout) == payload,
-            "{program} round-trip mismatch: {}",
-            String::from_utf8_lossy(&consumed.stdout)
-        );
+        check_consumed_payload(&consumed, &payload, program);
         let trace = String::from_utf8_lossy(&consumed.stderr);
         assert!(
             trace.contains("JoinGroup"),
@@ -274,16 +282,7 @@ async fn next_gen_group_topic_ids_and_telemetry_with_librdkafka_2x() {
         library,
         version_marker,
     } = librdkafka_2x();
-    let version = run_client(image, program, &["-V"], None);
-    let version = format!(
-        "{}{}",
-        String::from_utf8_lossy(&version.stdout),
-        String::from_utf8_lossy(&version.stderr)
-    );
-    assert!(
-        version.contains(version_marker),
-        "{program} is not linked to {library}: {version}"
-    );
+    check_client_version(image, program, library, version_marker);
 
     let topic = "librdkafka-2x-next-gen";
     admin
@@ -351,11 +350,7 @@ async fn next_gen_group_topic_ids_and_telemetry_with_librdkafka_2x() {
         ],
         None,
     );
-    assert!(
-        String::from_utf8_lossy(&consumed.stdout) == payload,
-        "{program} round-trip mismatch: {}",
-        String::from_utf8_lossy(&consumed.stdout)
-    );
+    check_consumed_payload(&consumed, payload, program);
     let trace = String::from_utf8_lossy(&consumed.stderr);
     assert!(
         trace.contains("Sent ConsumerGroupHeartbeatRequest")

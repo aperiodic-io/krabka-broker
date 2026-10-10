@@ -4,9 +4,10 @@ let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creu
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span scompletion = "/workspace/crates/verified/src/oauth/completion.rs" 8 10 16 2
 let%span sjwks = "/workspace/crates/verified/src/jwks.rs" 29 10 38 1
-let%span soauth = "/workspace/crates/verified/src/oauth.rs" 92 10 100 1
-let%span soauth'0 = "/workspace/crates/verified/src/oauth.rs" 64 8 69 67
-let%span soauth'1 = "/workspace/crates/verified/src/oauth.rs" 81 8 81 72
+let%span soauth = "/workspace/crates/verified/src/oauth.rs" 99 10 107 1
+let%span soauth'0 = "/workspace/crates/verified/src/oauth.rs" 77 16 77 65
+let%span soauth'1 = "/workspace/crates/verified/src/oauth.rs" 88 8 88 72
+let%span soauth'2 = "/workspace/crates/verified/src/oauth.rs" 58 8 63 67
 let%span sjwks_publication = "/workspace/crates/verified/src/composition/jwks_publication.rs" 108 38 108 89
 let%span sjwks_publication'0 = "/workspace/crates/verified/src/composition/jwks_publication.rs" 109 59 109 99
 let%span sjwks_publication'1 = "/workspace/crates/verified/src/composition/jwks_publication.rs" 114 16 114 43
@@ -181,14 +182,17 @@ let oauth_validation_admission (started_ms: Int64.t) (completed_ms: Int64.t) (ca
 
 constant const_MAX'0: Int64.t = (9223372036854775807: Int64.t)
 
-predicate oauth_session_admissible [#"/workspace/crates/verified/src/oauth.rs" 62 0 62 65] (facts: t_OAuthSessionFacts) =
-  [%#soauth'0] facts.expiry'0 = Present
-  /\ gt_log_Int (Int64.to_int facts.token_expires_at_ms'0) (Int64.to_int facts.now_ms'0)
-  /\ Int64.to_int facts.token_expires_at_ms'0 - Int64.to_int facts.now_ms'0 <= Int64.to_int const_MAX'0
+predicate oauth_session_admissible_at [#"/workspace/crates/verified/src/oauth.rs" 56 0 56 85] (facts: t_OAuthSessionFacts) (now: int) =
+  [%#soauth'2] facts.expiry'0 = Present
+  /\ gt_log_Int (Int64.to_int facts.token_expires_at_ms'0) now
+  /\ Int64.to_int facts.token_expires_at_ms'0 - now <= Int64.to_int const_MAX'0
   /\ (facts.cap'0 = Disabled \/ gt_log_Int (Int64.to_int facts.cap_ms'0) 0)
   /\ (facts.authentication'0 = Initial \/ facts.principal'0 = Matches)
 
-function oauth_session_lifetime [#"/workspace/crates/verified/src/oauth.rs" 79 0 79 62] (facts: t_OAuthSessionFacts) : int
+predicate oauth_session_admissible [#"/workspace/crates/verified/src/oauth.rs" 76 0 76 65] (facts: t_OAuthSessionFacts) =
+  [%#soauth'0] oauth_session_admissible_at facts (Int64.to_int facts.now_ms'0)
+
+function oauth_session_lifetime [#"/workspace/crates/verified/src/oauth.rs" 86 0 86 62] (facts: t_OAuthSessionFacts) : int
  = [%#soauth'1] let token_lifetime = Int64.to_int facts.token_expires_at_ms'0
   - Int64.to_int facts.now_ms'0 in if facts.cap'0 = Enabled /\ Int64.to_int facts.cap_ms'0 < token_lifetime then
     Int64.to_int facts.cap_ms'0

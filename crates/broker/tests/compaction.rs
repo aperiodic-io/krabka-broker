@@ -56,13 +56,14 @@ async fn compaction_dedupes_via_native_client() {
     // Create the compacted topic.
     create_topic_with_configs(
         addr,
-        "compacted",
-        1,
-        1,
-        vec![
-            ("cleanup.policy", "compact"),
-            ("internal.segment.bytes", "256"),
-        ],
+        crate::support::topics::CreateTopicSetup {
+            topic: "compacted",
+            configs: &[
+                ("cleanup.policy", "compact"),
+                ("internal.segment.bytes", "256"),
+            ],
+            ..Default::default()
+        },
     )
     .await;
 
@@ -101,10 +102,12 @@ async fn compaction_dedupes_via_native_client() {
             let value = format!("v{round}-{key}");
             produce_record(
                 addr,
-                "compacted",
-                topic_id,
-                key.as_bytes(),
-                value.as_bytes(),
+                crate::compaction_rpc::ProduceRecordSetup {
+                    topic_id,
+                    key: key.as_bytes(),
+                    value: value.as_bytes(),
+                    ..Default::default()
+                },
             )
             .await;
         }
@@ -142,10 +145,12 @@ async fn compaction_dedupes_via_native_client() {
         let value = format!("v10-{key}");
         produce_record(
             addr,
-            "compacted",
-            topic_id,
-            key.as_bytes(),
-            value.as_bytes(),
+            crate::compaction_rpc::ProduceRecordSetup {
+                topic_id,
+                key: key.as_bytes(),
+                value: value.as_bytes(),
+                ..Default::default()
+            },
         )
         .await;
     }
@@ -162,7 +167,16 @@ async fn compaction_dedupes_via_native_client() {
     // segment past `internal.segment.bytes=256`. ~8 small records is more than enough.
     for round in 0..8 {
         let value = format!("padding-{round}");
-        produce_record(addr, "compacted", topic_id, b"__pad__", value.as_bytes()).await;
+        produce_record(
+            addr,
+            crate::compaction_rpc::ProduceRecordSetup {
+                topic_id,
+                key: b"__pad__",
+                value: value.as_bytes(),
+                ..Default::default()
+            },
+        )
+        .await;
     }
 
     // Wait for another compaction pass so the newly-sealed segments (holding

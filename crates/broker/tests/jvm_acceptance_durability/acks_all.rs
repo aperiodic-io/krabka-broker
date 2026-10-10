@@ -51,10 +51,9 @@ async fn acks_all_durability() {
     ]);
 
     // Produce 100 records with --request-required-acks=-1.
-    let producer_out = crate::support::jvm_docker_command(
-        KAFKA_IMAGE,
-        &[],
-        &[
+    let producer_out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE,
+        args: &[
             "bash",
             "-c",
             &format!(
@@ -66,8 +65,9 @@ async fn acks_all_durability() {
                    --request-timeout-ms 10000"
             ),
         ],
-        true,
-    )
+        input: crate::support::ContainerInput::Attached,
+        ..Default::default()
+    })
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped())
     .output()

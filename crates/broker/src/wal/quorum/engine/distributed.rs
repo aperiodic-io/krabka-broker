@@ -223,7 +223,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use assert2::assert;
-    use krabka_log::{Log, LogConfig};
+    use krabka_log::Log;
 
     use super::*;
     use crate::wal::quorum::test_support::{batch, distributed_engine, source_log};
@@ -241,9 +241,8 @@ mod tests {
     #[test]
     fn bounds_verified_watermark_inputs_to_the_leader_end() {
         let dir = tempfile::tempdir().unwrap();
-        let log = Log::open(dir.path().join("source"), LogConfig::default()).unwrap();
-        let engine = WalShardEngine::new_distributed(Arc::new(Mutex::new(log)), 3).unwrap();
-        engine.configure_distributed(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
+        let source = source_log(dir.path());
+        let engine = distributed_engine(&source, 3, &[NodeId(1), NodeId(2), NodeId(3)]);
 
         assert!(!engine.record_durable_offset(NodeId(1), Offset(1), Offset(0), Offset(1)));
         assert!(engine.record_durable_offset(NodeId(2), Offset(2), Offset(0), Offset(1)));

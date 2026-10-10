@@ -59,10 +59,22 @@ fn rewrite_at(
 #[test]
 fn an_aborted_transactions_records_are_dropped_and_the_committed_value_survives() {
     let dir = tempfile::tempdir().unwrap();
-    let committed = transactional_record(5, 1000, b"k", b"committed");
+    let committed = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+        offset: crate::Offset(5),
+        payload: (b"k", b"committed"),
+        ..Default::default()
+    });
     let commit_marker = control_batch(6, 1000, 1 /* COMMIT */);
-    let aborted_k = transactional_record(10, 2000, b"k", b"aborted");
-    let aborted_j = transactional_record(11, 2000, b"j", b"aborted");
+    let aborted_k = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+        offset: crate::Offset(10),
+        producer: crate::ProducerId(2000),
+        payload: (b"k", b"aborted"),
+    });
+    let aborted_j = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+        offset: crate::Offset(11),
+        producer: crate::ProducerId(2000),
+        payload: (b"j", b"aborted"),
+    });
     let abort_marker = control_batch(12, 2000, 0 /* ABORT */);
     let seg = write_sealed_batches(
         dir.path(),
@@ -109,7 +121,11 @@ fn an_aborted_transactions_records_are_dropped_and_the_committed_value_survives(
 #[test]
 fn an_aborted_transaction_spanning_two_groups_keeps_its_marker_and_index_entry() {
     let dir = tempfile::tempdir().unwrap();
-    let aborted = transactional_record(0, 2000, b"k", b"aborted");
+    let aborted = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+        producer: crate::ProducerId(2000),
+        payload: (b"k", b"aborted"),
+        ..Default::default()
+    });
     let abort_marker = control_batch(1, 2000, 0 /* ABORT */);
     let seg_a = write_sealed_batches(dir.path(), std::slice::from_ref(&aborted));
     let seg_b = write_sealed_batches(dir.path(), std::slice::from_ref(&abort_marker));
@@ -171,7 +187,11 @@ fn a_marker_ages_out_once_its_own_transactions_data_is_gone() {
             old_marker.base_timestamp = horizon;
             old_marker.attributes = old_marker.attributes.with_delete_horizon(true);
         }
-        let live = transactional_record(1, 1000, b"k1", b"v2");
+        let live = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+            offset: crate::Offset(1),
+            payload: (b"k1", b"v2"),
+            ..Default::default()
+        });
         let live_marker = control_batch(2, 1000, 1 /* COMMIT */);
         let seg = write_sealed_batches(dir.path(), &[old_marker, live, live_marker]);
         let mut txn = CleanedTransactionMetadata::default();
@@ -192,7 +212,10 @@ fn a_marker_ages_out_once_its_own_transactions_data_is_gone() {
 #[test]
 fn a_marker_is_stamped_the_pass_after_its_data_is_removed() {
     let dir = tempfile::tempdir().unwrap();
-    let superseded = transactional_record(0, 1000, b"k", b"old");
+    let superseded = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+        payload: (b"k", b"old"),
+        ..Default::default()
+    });
     let marker = control_batch(1, 1000, 1 /* COMMIT */);
     let newer = RecordBatch {
         base_offset: 2,

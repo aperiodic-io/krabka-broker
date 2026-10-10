@@ -62,9 +62,7 @@ pub(super) fn sync_replica_blocking(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use bytes::Bytes;
     use krabka_log::{Log, LogConfig};
-    use krabka_protocol::records::{Record, RecordBatch};
 
     use super::*;
 
@@ -105,13 +103,5 @@ mod tests {
         assert2::assert!(error.to_string().contains("diverges"));
     }
 
-    fn batch(value: &'static [u8]) -> RecordBatch {
-        RecordBatch {
-            records: vec![Record {
-                value: Some(Bytes::from_static(value)),
-                ..Record::default()
-            }],
-            ..RecordBatch::default()
-        }
-    }
+    use crate::test_support::single_value_batch as batch;
 }

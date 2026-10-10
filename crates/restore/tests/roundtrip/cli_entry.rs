@@ -11,23 +11,43 @@ use krabka_restore::{EXIT_OK, run_from_args};
 
 use crate::fixture::build_fixture;
 
-/// 1. Full restore round-trip through the CLI-parsing entry point.
-#[tokio::test]
-async fn run_from_args_restores_the_archive_and_returns_exit_ok() {
+struct CliRestore {
+    fixture: crate::fixture::Fixture,
+    _target: tempfile::TempDir,
+    log_dir: std::path::PathBuf,
+}
+
+async fn cli_restore(extra: &[&str]) -> CliRestore {
     let fixture = build_fixture();
     let target = tempfile::tempdir().expect("target parent");
     let log_dir = target.path().join("restored");
-
     let code = run_from_args(crate::args::restore_argv(
         fixture.archive_root.path(),
         &log_dir,
-        "127.0.0.1:9093",
-        &[],
+        crate::args::RestoreOptions {
+            extra,
+            ..Default::default()
+        },
     ))
     .await;
-
     check!(code == EXIT_OK);
-    check!(log_dir.join(krabka_format::META_PROPERTIES).exists());
+    CliRestore {
+        fixture,
+        _target: target,
+        log_dir,
+    }
+}
+
+/// 1. Full restore round-trip through the CLI-parsing entry point.
+#[tokio::test]
+async fn run_from_args_restores_the_archive_and_returns_exit_ok() {
+    let restored = cli_restore(&[]).await;
+    check!(
+        restored
+            .log_dir
+            .join(krabka_format::META_PROPERTIES)
+            .exists()
+    );
 }
 
 /// 4. `--dry-run` reports success but writes no partition data.
@@ -40,21 +60,9 @@ async fn run_from_args_restores_the_archive_and_returns_exit_ok() {
 /// must be absent is each partition's own data directory.
 #[tokio::test]
 async fn dry_run_reports_success_but_writes_no_partition_data() {
-    let fixture = build_fixture();
-    let target = tempfile::tempdir().expect("target parent");
-    let log_dir = target.path().join("restored");
-
-    let code = run_from_args(crate::args::restore_argv(
-        fixture.archive_root.path(),
-        &log_dir,
-        "127.0.0.1:9093",
-        &["--dry-run"],
-    ))
-    .await;
-
-    check!(code == EXIT_OK);
-    for partition in fixture.partitions() {
-        let dir = name::partition_dir(&log_dir, partition.topic, partition.partition);
+    let restored = cli_restore(&["--dry-run"]).await;
+    for partition in restored.fixture.partitions() {
+        let dir = name::partition_dir(&restored.log_dir, partition.topic, partition.partition);
         check!(!dir.exists(), "{}-{}", partition.topic, partition.partition);
     }
 }

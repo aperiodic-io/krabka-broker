@@ -303,8 +303,8 @@ mod tests {
     async fn classic_admin_surface_and_immediate_join() {
         use krabka_protocol::owned::join_group_request::JoinGroupRequest;
         let (coord, log) = make_coordinator();
-        let handle = coord.get_or_create_classic("g");
-        coord.mark_classic("g");
+        let handle =
+            crate::coordinator::unified::actor::test_support::marked_classic_handle(&coord, "g");
 
         // Empty member_id → immediate MEMBER_ID_REQUIRED (no member added).
         let rx = rpc::begin(&handle, |tx| GroupActorMessage::ClassicJoin {

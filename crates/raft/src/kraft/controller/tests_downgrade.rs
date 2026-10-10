@@ -10,7 +10,8 @@ use crate::kraft::controller::{
     checkpoint::{load_latest_checkpoint, write_checkpoint},
     recovery::replay_committed,
     test_support::{
-        build_engine_only, elect_single_voter_engine, open_test_controller, topic_record, voter_set,
+        EngineSetup, build_engine_only, elect_single_voter_engine, open_test_controller,
+        topic_record, voter_set,
     },
 };
 
@@ -26,8 +27,7 @@ fn reopen_single_voter(data_dir: std::path::PathBuf) -> Result<KraftController, 
 }
 
 fn uncheckpointed_downgrade() -> (Engine, tempfile::TempDir) {
-    let (mut engine, dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
-    elect_single_voter_engine(&mut engine);
+    let (mut engine, dir) = super::test_support::single_voter_leader_engine();
 
     let mut rx = super::test_support::submit_on_engine(&mut engine, &metadata_version_update(25));
     assert2::assert!(matches!(rx.try_recv(), Ok(Ok(_))));
@@ -39,7 +39,10 @@ fn uncheckpointed_downgrade() -> (Engine, tempfile::TempDir) {
 
 #[test]
 fn metadata_version_downgrade_retries_mandatory_snapshot_and_prune() {
-    let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     let published_image = engine.image_tx.subscribe();
     elect_single_voter_engine(&mut engine);
     let mut rx =
@@ -146,7 +149,10 @@ fn metadata_version_downgrade_retries_mandatory_snapshot_and_prune() {
 
 #[tokio::test]
 async fn restart_finishes_downgrade_checkpoint_before_exposing_the_image() {
-    let (mut engine, dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     let data_dir = dir.path().to_path_buf();
     elect_single_voter_engine(&mut engine);
 

@@ -7,36 +7,8 @@
 
 use std::net::SocketAddr;
 
-use krabka_protocol::owned::{
-    elect_leaders_request::{ElectLeadersRequest, TopicPartitions},
-    elect_leaders_response::ElectLeadersResponse,
-};
-
-use crate::{
-    kafka_wire,
-    wire::{CLIENT_ID, ELECT_LEADERS_VERSION},
-};
-
-/// Creates a topic with SASL/PLAIN.
-///
-/// The auth-deny test uses this helper, because its listener is
-/// `SASL_PLAINTEXT` and not PLAINTEXT.
-pub async fn create_topic_sasl_plain(
-    addr: SocketAddr,
-    user: &str,
-    password: &[u8],
-    name: &str,
-    partitions: i32,
-    replication_factor: i16,
-) {
-    kafka_wire::create_topic_sasl(
-        addr,
-        CLIENT_ID,
-        (user, password),
-        kafka_wire::topic(name, partitions, replication_factor),
-    )
-    .await;
-}
+pub use crate::kafka_wire::create_configured_topic_sasl as create_topic_sasl_plain;
+use crate::{kafka_wire, kafka_wire::PlainAuthenticationSetup};
 
 /// Drives `ElectLeaders` over a SASL/PLAIN authenticated connection.
 ///
@@ -45,36 +17,16 @@ pub async fn create_topic_sasl_plain(
 /// the caller can examine per-row auth failures.
 pub async fn drive_elect_leaders_sasl_plain(
     addr: SocketAddr,
-    user: &str,
-    password: &[u8],
-    topic: &str,
-    partitions: Vec<i32>,
-    election_type: i8,
+    election: crate::support::admin::ElectionSetup,
+    authentication: &PlainAuthenticationSetup<'_>,
 ) -> Vec<(i32, i16)> {
-    let mut stream = kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, user, password)
+    let mut stream = kafka_wire::sasl_plain_authenticate(addr, authentication)
         .await
         .expect("SASL authenticate for ElectLeaders");
-    let req = ElectLeadersRequest {
-        election_type,
-        topic_partitions: Some(vec![TopicPartitions {
-            topic: topic.to_string(),
-            partitions,
-            ..Default::default()
-        }]),
-        timeout_ms: 30_000,
-        ..Default::default()
-    };
-    let resp: ElectLeadersResponse = kafka_wire::exchange(
-        &mut stream,
-        &req,
-        43,
-        ELECT_LEADERS_VERSION,
-        1,
-        CLIENT_ID,
-        true,
-    )
-    .await
-    .expect("ElectLeaders round-trip");
+    let topic = election.topic.clone();
+    let req = crate::support::admin::election_request(election);
+    let resp =
+        kafka_wire::elect_leaders_response(&mut stream, &req, authentication.client_id).await;
 
-    crate::support::admin::election_partition_errors(resp, topic)
+    crate::support::admin::election_partition_errors(resp, &topic)
 }

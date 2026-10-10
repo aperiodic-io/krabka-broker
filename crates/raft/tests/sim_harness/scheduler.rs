@@ -64,16 +64,7 @@ impl<L: SimNodeLog> Sim<L> {
                 // gone (unreachable / unknown) does the watchdog become a real
                 // `FetchTimeout` that elects. This mirrors `KRaft`, where continuous
                 // polling resets the timer and only sustained silence elects.
-                if let Some(leader_id) = krabka_kraft_core::simulation_support::reachable_leader(
-                    self.nodes[&id].machine.role(),
-                    id,
-                    &self.partitioned,
-                    |leader| {
-                        self.nodes
-                            .get(&leader)
-                            .is_some_and(|node| node.machine.role().is_leader())
-                    },
-                ) {
+                if let Some(leader_id) = self.reachable_leader(id) {
                     let deadline = self.now.saturating_add_ms(election_timeout_ms_of(id));
                     self.nodes.get_mut(&id).unwrap().fetch_deadline = Some(deadline);
                     self.apply_action(id, Action::SendFetch { leader_id });
@@ -89,20 +80,12 @@ impl<L: SimNodeLog> Sim<L> {
         }
     }
 
-    /// A leader's periodic heartbeat. It re-broadcasts `BeginQuorumEpoch` to
-    /// every peer, faithful to the `KRaft` resend to non-fetching voters, and
-    /// re-arms the heartbeat. This is how a stale leader that rejoins after a
-    /// partition learns of the newer epoch from the current leader and steps
-    /// down to follower.
-    fn fire_leader_heartbeat(&mut self, id: NodeId) {
-        if !self.nodes[&id].machine.role().is_leader() {
-            return;
-        }
-        let epoch = self.nodes[&id].machine.quorum_state().leader_epoch;
-        self.apply_action(id, Action::SendBeginQuorumEpoch { epoch });
-        let deadline = self.now.saturating_add_ms(HEARTBEAT_MS);
-        self.nodes.get_mut(&id).unwrap().heartbeat_deadline = Some(deadline);
-    }
+    // A leader's periodic heartbeat. It re-broadcasts `BeginQuorumEpoch` to
+    // every peer, faithful to the `KRaft` resend to non-fetching voters, and
+    // re-arms the heartbeat. This is how a stale leader that rejoins after a
+    // partition learns of the newer epoch from the current leader and steps
+    // down to follower.
+    krabka_macros::simulation_heartbeat!(krabka_kraft_core, HEARTBEAT_MS);
 
     /// Delivers a queued message, and drops it if either endpoint is
     /// partitioned.

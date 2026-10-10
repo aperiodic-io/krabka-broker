@@ -6,7 +6,7 @@
 
 use assert2::{assert, check};
 use krabka_metadata::BreakGlassProposalRecord;
-use ring::signature::{Ed25519KeyPair, KeyPair as _};
+use ring::signature::Ed25519KeyPair;
 use tempfile::TempDir;
 
 use super::{attempt, pending};
@@ -28,11 +28,13 @@ fn operator_key(
     key_id: &str,
     principal: &str,
 ) -> (Ed25519KeyPair, OperatorKeyEntry) {
-    let rng = ring::rand::SystemRandom::new();
-    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).expect("generate pkcs8");
-    let pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("parse pkcs8");
-    let path = dir.path().join(format!("{key_id}.pub"));
-    std::fs::write(&path, pair.public_key().as_ref()).expect("write key file");
+    let (pair, path) = crate::test_support::ed25519_public_key_file(
+        dir.path(),
+        crate::test_support::OperatorKeyFileSetup {
+            name: &format!("{key_id}.pub"),
+            context: "write key file",
+        },
+    );
     (
         pair,
         OperatorKeyEntry {

@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use krabka_metadata::{AclOperation, MetadataRecord, ResourceType};
+use krabka_metadata::MetadataRecord;
 use krabka_protocol::owned::{
     alter_client_quotas_request::AlterClientQuotasRequest,
     alter_client_quotas_response::AlterClientQuotasResponse,
@@ -25,7 +25,6 @@ use self::{
     entries::{Alteration, alter_client_quotas},
     response::{apply_submit_error, err_entry, ok_entry, whole_request_error},
 };
-use super::acl_wire::CLUSTER_RESOURCE_NAME;
 use crate::codes::CLUSTER_AUTHORIZATION_FAILED;
 
 context_handler! {
@@ -37,13 +36,8 @@ context_handler! {
         // `AlterConfigs` on the cluster. `Alter` does not imply it. A denial
         // answers `AlterClientQuotasRequest.getErrorResponse`: every entry
         // carries the error code and the default message of the error.
-        if crate::handlers::acl_denied(
-            broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            ResourceType::Cluster,
-            CLUSTER_RESOURCE_NAME,
-            AclOperation::AlterConfigs,
+        if crate::handlers::cluster_alter_configs_denied(
+            broker.config.authorizer.as_ref(), &image, ctx,
         ) {
             return Ok(whole_request_error(
                 &req,

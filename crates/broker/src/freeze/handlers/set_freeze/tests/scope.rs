@@ -9,11 +9,10 @@ use krabka_protocol::{
     krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED, SetTopicFreezeRequest},
     primitives::uuid::Uuid as ProtocolUuid,
 };
-use tempfile::TempDir;
 
 use super::{
     super::checks::{check_limit, check_scope, live_entry, prepare, record_of},
-    ALICE, ALICE_KEY, PROPOSAL, config_with_alice, freeze_request, image,
+    ALICE, ALICE_KEY, PROPOSAL, alice_key_configuration, freeze_request, image,
 };
 use crate::{
     codes,
@@ -94,8 +93,7 @@ fn the_registry_ceiling_refuses_one_entry_past_it() {
 
 #[test]
 fn a_freeze_that_replaces_a_live_entry_does_not_meet_the_ceiling() {
-    let dir = TempDir::new().expect("tempdir");
-    let (config, _) = config_with_alice(&dir);
+    let (_dir, config, _) = alice_key_configuration();
     let config = BrokerConfig {
         freeze: FreezeConfig {
             max_entries: 1,
@@ -219,8 +217,7 @@ fn an_unsigned_record_takes_the_brokers_clock() {
 
 #[test]
 fn a_pattern_type_byte_that_names_no_scope_kind_is_an_invalid_request() {
-    let dir = TempDir::new().expect("tempdir");
-    let (config, _) = config_with_alice(&dir);
+    let (_dir, config, _) = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
 
     for (label, byte, expected) in [

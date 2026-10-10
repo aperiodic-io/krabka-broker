@@ -1,23 +1,23 @@
-(* #"/workspace/crates/verified/src/stamp.rs" 56 0 61 18 *)
+(* #"/workspace/crates/verified/src/stamp.rs" 55 0 60 18 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span sstamp = "/workspace/crates/verified/src/stamp.rs" 65 20 65 26
-let%span sstamp'0 = "/workspace/crates/verified/src/stamp.rs" 69 14 69 35
-let%span sstamp'1 = "/workspace/crates/verified/src/stamp.rs" 70 18 70 29
-let%span sstamp'2 = "/workspace/crates/verified/src/stamp.rs" 68 16 68 78
-let%span sstamp'3 = "/workspace/crates/verified/src/stamp.rs" 67 16 67 59
-let%span sstamp'4 = "/workspace/crates/verified/src/stamp.rs" 66 16 66 38
-let%span sstamp'5 = "/workspace/crates/verified/src/stamp.rs" 71 22 71 34
-let%span sstamp'6 = "/workspace/crates/verified/src/stamp.rs" 74 23 74 35
-let%span sstamp'7 = "/workspace/crates/verified/src/stamp.rs" 77 17 77 18
-let%span sstamp'8 = "/workspace/crates/verified/src/stamp.rs" 77 8 77 18
-let%span sstamp'9 = "/workspace/crates/verified/src/stamp.rs" 45 11 45 42
-let%span sstamp'10 = "/workspace/crates/verified/src/stamp.rs" 46 10 54 1
-let%span sstamp'11 = "/workspace/crates/verified/src/stamp.rs" 139 16 139 42
-let%span sstamp'12 = "/workspace/crates/verified/src/stamp.rs" 15 8 17 87
+let%span sstamp = "/workspace/crates/verified/src/stamp.rs" 64 20 64 26
+let%span sstamp'0 = "/workspace/crates/verified/src/stamp.rs" 67 14 67 35
+let%span sstamp'1 = "/workspace/crates/verified/src/stamp.rs" 68 18 68 29
+let%span sstamp'2 = "/workspace/crates/verified/src/stamp.rs" 66 16 66 78
+let%span sstamp'3 = "/workspace/crates/verified/src/stamp.rs" 65 16 65 62
+let%span sstamp'4 = "/workspace/crates/verified/src/stamp.rs" 69 22 69 34
+let%span sstamp'5 = "/workspace/crates/verified/src/stamp.rs" 72 23 72 35
+let%span sstamp'6 = "/workspace/crates/verified/src/stamp.rs" 75 17 75 18
+let%span sstamp'7 = "/workspace/crates/verified/src/stamp.rs" 75 8 75 18
+let%span sstamp'8 = "/workspace/crates/verified/src/stamp.rs" 44 11 44 42
+let%span sstamp'9 = "/workspace/crates/verified/src/stamp.rs" 45 10 53 1
+let%span sstamp'10 = "/workspace/crates/verified/src/stamp.rs" 135 16 135 81
+let%span sstamp'11 = "/workspace/crates/verified/src/stamp.rs" 15 8 17 87
+let%span sstamp'12 = "/workspace/crates/verified/src/stamp.rs" 142 16 142 42
 
 use creusot.int.Int64
 use creusot.int.UInt64
@@ -46,11 +46,14 @@ let len_i64 (self_: Slice64.slice Int64.t) (return (x: UInt64.t)) = any
     = UInt64.t'int result}
     (! return {result}) ]
 
-predicate stamp_range_arrays_parallel [#"/workspace/crates/verified/src/stamp.rs" 138 0 138 72] (bases: Seq.seq Int64.t) (lasts: Seq.seq Int64.t) =
-  [%#sstamp'11] Seq.length bases = Seq.length lasts
+predicate stamp_range_arrays_parallel [#"/workspace/crates/verified/src/stamp.rs" 141 0 141 76] (bases: Seq.seq Int64.t) (lasts: Seq.seq Int64.t) =
+  [%#sstamp'12] Seq.length bases = Seq.length lasts
+
+predicate stamp_cursor_in_bounds [#"/workspace/crates/verified/src/stamp.rs" 134 0 134 79] (bases: Seq.seq Int64.t) (lasts: Seq.seq Int64.t) (index: int) =
+  [%#sstamp'10] index <= Seq.length bases /\ stamp_range_arrays_parallel bases lasts
 
 predicate sorted_disjoint [#"/workspace/crates/verified/src/stamp.rs" 13 0 13 64] (bases: Seq.seq Int64.t) (lasts: Seq.seq Int64.t) =
-  [%#sstamp'12] Seq.length bases = Seq.length lasts
+  [%#sstamp'11] Seq.length bases = Seq.length lasts
   /\ (forall i: int. 0 <= i /\ i < Seq.length bases -> Int64.to_int (Seq.get bases i) <= Int64.to_int (Seq.get lasts i))
   /\ (forall i: int. 1 <= i /\ i < Seq.length bases
     -> Int64.to_int (Seq.get lasts (i - 1)) < Int64.to_int (Seq.get bases i))
@@ -59,9 +62,9 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let stamp_range_insertion_index [#"/workspace/crates/verified/src/stamp.rs" 56 0 61 18] (bases: Slice64.slice Int64.t)
+let stamp_range_insertion_index [#"/workspace/crates/verified/src/stamp.rs" 55 0 60 18] (bases: Slice64.slice Int64.t)
   (lasts: Slice64.slice Int64.t) (new_base: Int64.t) (new_last: Int64.t) (return (x: t_Option_usize)) =
-{[@stop_split] [@expl:stamp_range_insertion_index requires] [%#sstamp'9] sorted_disjoint (Slice64.view bases) (Slice64.view lasts)}
+{[@stop_split] [@expl:stamp_range_insertion_index requires] [%#sstamp'8] sorted_disjoint (Slice64.view bases) (Slice64.view lasts)}
   (! bb0
   [ bb0 = s0
     [ s0 = [ &_14 <- Int64.gt new_base new_last ] s1
@@ -73,32 +76,32 @@ let stamp_range_insertion_index [#"/workspace/crates/verified/src/stamp.rs" 56 0
       {[@expl:loop variant] well_founded_relation_Int variant_old_bb3 ([%#sstamp'0] Seq.length (Slice64.view bases)
       - UInt64.t'int index)}
       bb3invariant
-    | bb3invariant = {[@expl:loop invariant #0] [%#sstamp'4] UInt64.t'int index <= Seq.length (Slice64.view bases)}
-      {[@expl:loop invariant #1] [%#sstamp'3] stamp_range_arrays_parallel (Slice64.view bases) (Slice64.view lasts)}
-      {[@expl:loop invariant #2] [%#sstamp'2] forall i: int. 0 <= i /\ i < UInt64.t'int index
+    | bb3invariant =
+      {[@expl:loop invariant #0] [%#sstamp'3] stamp_cursor_in_bounds (Slice64.view bases) (Slice64.view lasts) (UInt64.t'int index)}
+      {[@expl:loop invariant #1] [%#sstamp'2] forall i: int. 0 <= i /\ i < UInt64.t'int index
         -> Int64.to_int (Seq.get (Slice64.view lasts) i) < Int64.to_int new_base}
       (! [ &variant_old_bb3 <- [%#sstamp'0] Seq.length (Slice64.view bases) - UInt64.t'int index ] s0)
-      [ s0 = len_i64 [%#sstamp'1] {bases} (fun (_x: UInt64.t) -> [ &_37 <- _x ] s1)
-      | s1 = [ &_35 <- UInt64.lt index _37 ] s2
-      | s2 = any [ br0 -> {_35 = false} (! bb13) | br1 -> {_35} (! bb6) ] ]
+      [ s0 = len_i64 [%#sstamp'1] {bases} (fun (_x: UInt64.t) -> [ &_35 <- _x ] s1)
+      | s1 = [ &_33 <- UInt64.lt index _35 ] s2
+      | s2 = any [ br0 -> {_33 = false} (! bb13) | br1 -> {_33} (! bb6) ] ]
       [ bb6 = s0
-        [ s0 = [ &_43 <- index ] s1
-        | s1 = [ &_44 <- Slice64.length bases ] s2
-        | s2 = [ &_45 <- UInt64.lt _43 _44 ] s3
-        | s3 = {[@expl:index in bounds] [%#sstamp'5] _45} s4
-        | s4 = Slice64.get [%#sstamp'5] <Int64.t> {bases} {_43} (fun (r: Int64.t) -> [ &_42 <- r ] s5)
-        | s5 = [ &_40 <- Int64.lt new_last _42 ] s6
-        | s6 = any [ br0 -> {_40 = false} (! bb9) | br1 -> {_40} (! bb8) ] ]
+        [ s0 = [ &_41 <- index ] s1
+        | s1 = [ &_42 <- Slice64.length bases ] s2
+        | s2 = [ &_43 <- UInt64.lt _41 _42 ] s3
+        | s3 = {[@expl:index in bounds] [%#sstamp'4] _43} s4
+        | s4 = Slice64.get [%#sstamp'4] <Int64.t> {bases} {_41} (fun (r: Int64.t) -> [ &_40 <- r ] s5)
+        | s5 = [ &_38 <- Int64.lt new_last _40 ] s6
+        | s6 = any [ br0 -> {_38 = false} (! bb9) | br1 -> {_38} (! bb8) ] ]
       | bb9 = s0
-        [ s0 = [ &_52 <- index ] s1
-        | s1 = [ &_53 <- Slice64.length lasts ] s2
-        | s2 = [ &_54 <- UInt64.lt _52 _53 ] s3
-        | s3 = {[@expl:index in bounds] [%#sstamp'6] _54} s4
-        | s4 = Slice64.get [%#sstamp'6] <Int64.t> {lasts} {_52} (fun (r: Int64.t) -> [ &_51 <- r ] s5)
-        | s5 = [ &_49 <- Int64.le new_base _51 ] s6
-        | s6 = any [ br0 -> {_49 = false} (! bb12) | br1 -> {_49} (! bb11) ] ]
+        [ s0 = [ &_50 <- index ] s1
+        | s1 = [ &_51 <- Slice64.length lasts ] s2
+        | s2 = [ &_52 <- UInt64.lt _50 _51 ] s3
+        | s3 = {[@expl:index in bounds] [%#sstamp'5] _52} s4
+        | s4 = Slice64.get [%#sstamp'5] <Int64.t> {lasts} {_50} (fun (r: Int64.t) -> [ &_49 <- r ] s5)
+        | s5 = [ &_47 <- Int64.le new_base _49 ] s6
+        | s6 = any [ br0 -> {_47 = false} (! bb12) | br1 -> {_47} (! bb11) ] ]
       | bb12 = s0
-        [ s0 = UInt64.add [%#sstamp'8] {index} {[%#sstamp'7] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &index <- _x ] s1)
+        [ s0 = UInt64.add [%#sstamp'7] {index} {[%#sstamp'6] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &index <- _x ] s1)
         | s1 = bb3 ] ] ]
   | bb8 = s0 [ s0 = [ &_ret <- Some index ] s1 | s1 = return {_ret} ]
   | bb11 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
@@ -110,21 +113,21 @@ let stamp_range_insertion_index [#"/workspace/crates/verified/src/stamp.rs" 56 0
   | & new_last: Int64.t = new_last
   | & _14: bool = Any.any_l ()
   | & index: UInt64.t = Any.any_l ()
-  | & _35: bool = Any.any_l ()
-  | & _37: UInt64.t = Any.any_l ()
-  | & _40: bool = Any.any_l ()
-  | & _42: Int64.t = Any.any_l ()
-  | & _43: UInt64.t = Any.any_l ()
-  | & _44: UInt64.t = Any.any_l ()
-  | & _45: bool = Any.any_l ()
-  | & _49: bool = Any.any_l ()
-  | & _51: Int64.t = Any.any_l ()
-  | & _52: UInt64.t = Any.any_l ()
-  | & _53: UInt64.t = Any.any_l ()
-  | & _54: bool = Any.any_l ()
+  | & _33: bool = Any.any_l ()
+  | & _35: UInt64.t = Any.any_l ()
+  | & _38: bool = Any.any_l ()
+  | & _40: Int64.t = Any.any_l ()
+  | & _41: UInt64.t = Any.any_l ()
+  | & _42: UInt64.t = Any.any_l ()
+  | & _43: bool = Any.any_l ()
+  | & _47: bool = Any.any_l ()
+  | & _49: Int64.t = Any.any_l ()
+  | & _50: UInt64.t = Any.any_l ()
+  | & _51: UInt64.t = Any.any_l ()
+  | & _52: bool = Any.any_l ()
   | & variant_old_bb3: int = Any.any_l () ])
   [ return (result: t_Option_usize) ->
-  {[@stop_split] [@expl:stamp_range_insertion_index ensures] [%#sstamp'10] match result with
+  {[@stop_split] [@expl:stamp_range_insertion_index ensures] [%#sstamp'9] match result with
       | Some index -> UInt64.t'int index <= Seq.length (Slice64.view bases)
       /\ Int64.to_int new_base <= Int64.to_int new_last
       /\ (forall i: int. 0 <= i /\ i < UInt64.t'int index

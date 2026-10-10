@@ -175,7 +175,6 @@ mod tests {
 
     use krabka_metadata::{KRaftVersionRange, VoterEndpoint};
     use krabka_raft::{Node, NodeId};
-    use krabka_units::{millis, secs};
 
     use super::*;
     use crate::test_support::FakeMetadataSource;
@@ -341,20 +340,9 @@ mod tests {
                 .build(),
         );
         let params = AutoJoinParams {
-            auto_join: true,
-            retry_backoff: millis(10),
-            voter_request_timeout: secs(1),
             node_id: NodeId(u64::MAX),
             directory_id: uuid::Uuid::from_u128(1),
-            cluster_id: None,
-            bootstrap_servers: vec![],
-            advertised_controller: None,
-            listener_protocol: krabka_security::ListenerProtocol::Plaintext,
-            inter_broker_server_name: "broker.internal".to_string(),
-            controller: source,
-            inter_broker_client: Arc::new(crate::network::client::InterBrokerClient::new(
-                None, None,
-            )),
+            ..crate::auto_join::test_support::params(source, vec![])
         };
 
         tokio::time::timeout(Duration::from_millis(100), run_voter_updates(params))
@@ -380,9 +368,15 @@ mod tests {
 
             use crate::auto_join::test_support::{negotiate_versions, read_frame, write_response};
             while let Ok((mut socket, _)) = listener.accept().await {
-                if negotiate_versions(&mut socket, &[(req::API_KEY, req::MAX_VERSION)])
-                    .await
-                    .is_ok()
+                if negotiate_versions(
+                    &mut socket,
+                    &[(
+                        krabka_ids::ApiKey(req::API_KEY),
+                        krabka_ids::ApiVersion(req::MAX_VERSION),
+                    )],
+                )
+                .await
+                .is_ok()
                     && let Ok(frame) = read_frame(&mut socket).await
                     && frame.len() >= 8
                     && i16::from_be_bytes([frame[0], frame[1]]) == req::API_KEY
@@ -392,8 +386,16 @@ mod tests {
                         error_code: response_code,
                         ..Default::default()
                     };
-                    let _ = write_response(&mut socket, &frame, &response, req::MAX_VERSION, true)
-                        .await;
+                    let _ = write_response(
+                        &mut socket,
+                        &frame,
+                        &response,
+                        crate::auto_join::test_support::ResponseWireSetup {
+                            version: krabka_ids::ApiVersion(req::MAX_VERSION),
+                            header: crate::auto_join::test_support::ResponseHeaderMode::Flexible,
+                        },
+                    )
+                    .await;
                 }
             }
         });

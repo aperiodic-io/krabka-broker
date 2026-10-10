@@ -440,6 +440,14 @@ mod tests {
         },
     };
 
+    fn followed_partition(
+        cfg: Config,
+    ) -> BTreeMap<(Arc<str>, krabka_ids::PartitionIndex), Arc<Config>> {
+        [((Arc::clone(&cfg.topic), cfg.partition), Arc::new(cfg))]
+            .into_iter()
+            .collect()
+    }
+
     /// A throttled fetcher whose follower-in bucket is empty, so every
     /// partition it follows wants a fetch this round and none may have one.
     fn throttled_out() -> (Config, tempfile::TempDir) {
@@ -585,8 +593,7 @@ mod tests {
     #[test]
     fn a_partition_whose_target_moved_is_skipped_for_the_round() {
         let (cfg, _log_dir) = test_config(image_with_leader(NODE_ID));
-        let mut followed = BTreeMap::new();
-        followed.insert((Arc::clone(&cfg.topic), cfg.partition), Arc::new(cfg));
+        let followed = followed_partition(cfg);
 
         let round = plan_round(&followed, &DelayedUntil::new());
 
@@ -601,8 +608,7 @@ mod tests {
     #[test]
     fn a_round_the_throttle_emptied_reports_itself_as_throttled() {
         let (cfg, _log_dir) = throttled_out();
-        let mut followed = BTreeMap::new();
-        followed.insert((Arc::clone(&cfg.topic), cfg.partition), Arc::new(cfg));
+        let followed = followed_partition(cfg);
 
         let round = plan_round(&followed, &DelayedUntil::new());
 
@@ -638,8 +644,7 @@ mod tests {
     #[test]
     fn a_partition_with_no_local_log_contributes_no_row() {
         let (cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
-        let mut followed = BTreeMap::new();
-        followed.insert((Arc::clone(&cfg.topic), cfg.partition), Arc::new(cfg));
+        let followed = followed_partition(cfg);
 
         let round = plan_round(&followed, &DelayedUntil::new());
 

@@ -29,6 +29,43 @@ pub(crate) type MemberRecordLists<'a, P> = (
     &'a mut Vec<(String, Option<<P as MemberRecordFamilies>::Current>)>,
 );
 
+/// Member ids whose metadata is being removed, in record order.
+pub(crate) fn removed_member_ids<M>(metadata: &[(String, Option<M>)]) -> Vec<String> {
+    metadata
+        .iter()
+        .filter(|(_, value)| value.is_none())
+        .map(|(member_id, _)| member_id.clone())
+        .collect()
+}
+
+/// The tombstone families, in Kafka's member-removal order.
+pub(crate) enum MemberTombstone {
+    Current,
+    Target,
+    Metadata,
+}
+
+/// Append removed members before the surviving members' updates.
+pub(crate) fn append_removed_members<M, T, C>(
+    batch: &mut super::OffsetRecordBatchBuilder,
+    metadata: &[(String, Option<M>)],
+    targets: &[(String, Option<T>)],
+    current: &[(String, Option<C>)],
+    encode_key: impl Fn(MemberTombstone, &str) -> Result<bytes::Bytes, crate::error::BrokerError>,
+) -> Result<Vec<String>, crate::error::BrokerError> {
+    let removed = removed_member_ids(metadata);
+    for member_id in &removed {
+        if has_member_tombstone(current, member_id) {
+            batch.push(encode_key(MemberTombstone::Current, member_id)?, None);
+        }
+        if has_member_tombstone(targets, member_id) {
+            batch.push(encode_key(MemberTombstone::Target, member_id)?, None);
+        }
+        batch.push(encode_key(MemberTombstone::Metadata, member_id)?, None);
+    }
+    Ok(removed)
+}
+
 /// The member-metadata and current-assignment values of the members that a
 /// transition may change, taken before it. `None` stands for a member that the
 /// group does not hold.
@@ -82,6 +119,27 @@ impl<M: PartialEq, C: PartialEq> MemberValues<M, C> {
             }
         }
     }
+}
+
+/// Queue changed target assignments in the caller's member order.
+pub(crate) fn append_target_records<T: Default, V>(
+    records: &mut Vec<(String, Option<V>)>,
+    changed: &[String],
+    targets: &std::collections::HashMap<String, T>,
+    encode: impl Fn(&T) -> V,
+) {
+    for member_id in changed {
+        let missing = T::default();
+        let target = targets.get(member_id).unwrap_or(&missing);
+        records.push((member_id.clone(), Some(encode(target))));
+    }
+}
+
+/// Whether this transition includes a tombstone for the named member.
+pub(crate) fn has_member_tombstone<V>(records: &[(String, Option<V>)], member_id: &str) -> bool {
+    records
+        .iter()
+        .any(|(id, value)| id == member_id && value.is_none())
 }
 
 #[cfg(test)]

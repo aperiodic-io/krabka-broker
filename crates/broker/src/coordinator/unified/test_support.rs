@@ -17,6 +17,17 @@ use super::{
 };
 use crate::test_support::string_pairs;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct MemberEpoch(pub i32);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct MemberEpochs {
+    #[default(MemberEpoch(6))]
+    pub current: MemberEpoch,
+    #[default(MemberEpoch(5))]
+    pub previous: MemberEpoch,
+}
+
 /// An active-only stable streams seed, with no standby, warmup or revocations.
 pub(crate) fn stable_streams_assignment(
     epochs: (i32, i32),
@@ -25,15 +36,8 @@ pub(crate) fn stable_streams_assignment(
     streams::persistence::StreamsGroupCurrentMemberAssignmentValue {
         member_epoch: epochs.0,
         previous_member_epoch: epochs.1,
-        state: streams::persistence::StreamsMemberWireState::Stable,
         active,
-        standby: BTreeMap::new(),
-        warmup: BTreeMap::new(),
-        active_pending_revocation: BTreeMap::new(),
-        standby_pending_revocation: BTreeMap::new(),
-        warmup_pending_revocation: BTreeMap::new(),
-        active_epochs: BTreeMap::new(),
-        active_pending_revocation_epochs: BTreeMap::new(),
+        ..Default::default()
     }
 }
 
@@ -344,27 +348,67 @@ pub(crate) fn wire_bytes(fields: &[&str]) -> Vec<u8> {
         .collect()
 }
 
+pub(crate) struct HeartbeatWriteFailure {
+    label: &'static str,
+    failure: Option<crate::error::BrokerError>,
+    expected: crate::test_support::KafkaErrorCode,
+}
+
+pub(crate) struct FailedHeartbeatFixture {
+    pub coordinator: std::sync::Arc<super::GroupCoordinator>,
+    pub log: std::sync::Arc<super::offsets_log::fake::InMemoryOffsetsLog>,
+    pub expected: crate::test_support::KafkaErrorCode,
+    pub label: &'static str,
+}
+
+impl FailedHeartbeatFixture {
+    pub async fn check_no_batches(&self) {
+        assert2::check!(self.log.batches().await.is_empty(), "{}", self.label);
+    }
+}
+
+impl HeartbeatWriteFailure {
+    /// Arm the fixture's next durable append without changing its coordinator configuration.
+    pub fn coordinator(
+        self,
+        factory: impl FnOnce() -> (
+            std::sync::Arc<super::GroupCoordinator>,
+            std::sync::Arc<super::offsets_log::fake::InMemoryOffsetsLog>,
+        ),
+    ) -> FailedHeartbeatFixture {
+        let (coordinator, log) = factory();
+        log.fail_next_append(self.failure);
+        FailedHeartbeatFixture {
+            coordinator,
+            log,
+            expected: self.expected,
+            label: self.label,
+        }
+    }
+}
+
 /// The three independent failure expectations for a heartbeat's durable write.
-pub(crate) fn heartbeat_write_failures()
--> [(&'static str, Option<crate::error::BrokerError>, i16); 3] {
+pub(crate) fn heartbeat_write_failures() -> [HeartbeatWriteFailure; 3] {
     let uncommitted =
         |code| Some(crate::error::BrokerError::CoordinatorWriteUncommitted { partition: 0, code });
     [
-        (
-            "the partition writer is gone",
-            None,
-            crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-        ),
-        (
-            "the leadership moved before the write committed",
-            uncommitted(crate::codes::NOT_COORDINATOR),
-            crate::codes::NOT_COORDINATOR,
-        ),
-        (
-            "the write did not commit in time",
-            uncommitted(crate::codes::COORDINATOR_NOT_AVAILABLE),
-            crate::codes::COORDINATOR_NOT_AVAILABLE,
-        ),
+        HeartbeatWriteFailure {
+            label: "the partition writer is gone",
+            failure: None,
+            expected: crate::test_support::KafkaErrorCode(
+                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
+            ),
+        },
+        HeartbeatWriteFailure {
+            label: "the leadership moved before the write committed",
+            failure: uncommitted(crate::codes::NOT_COORDINATOR),
+            expected: crate::test_support::KafkaErrorCode(crate::codes::NOT_COORDINATOR),
+        },
+        HeartbeatWriteFailure {
+            label: "the write did not commit in time",
+            failure: uncommitted(crate::codes::COORDINATOR_NOT_AVAILABLE),
+            expected: crate::test_support::KafkaErrorCode(crate::codes::COORDINATOR_NOT_AVAILABLE),
+        },
     ]
 }
 
@@ -380,4 +424,328 @@ pub(crate) async fn assert_next_tombstone_batch(
         leave_batch.records.iter().any(|r| r.value.is_none()),
         "leave batch must contain at least one tombstone"
     );
+}
+
+pub(crate) type AssignmentIntervalRow = (&'static str, Option<i64>, (i32, bool));
+
+/// Replayed assignment timestamps outside, inside and beyond the assignment interval.
+pub(crate) const ASSIGNMENT_INTERVAL_CASES: [AssignmentIntervalRow; 3] = [
+    ("no stored time", None, (3, true)),
+    ("an assignment a second ago", Some(1_000), (2, false)),
+    ("an assignment two minutes ago", Some(120_000), (3, true)),
+];
+
+/// Fresh independent result rows for the assignment-interval replay scenarios.
+pub(crate) fn assignment_interval_fixture()
+-> ([AssignmentIntervalRow; 3], AssignmentIntervalResults) {
+    (
+        ASSIGNMENT_INTERVAL_CASES,
+        AssignmentIntervalResults::default(),
+    )
+}
+
+/// Both next-generation protocols fence two expired members without changing the target epoch.
+pub(crate) fn check_two_members_expired(actual: (usize, i32, i32)) {
+    assert2::check!(actual == (0, 4, 2));
+}
+
+type AssignmentAnswer = (&'static str, i32, bool);
+
+/// Compare each assignment epoch and its timestamp window with an independent expected row.
+#[derive(Default)]
+pub(crate) struct AssignmentIntervalResults {
+    observed: Vec<AssignmentAnswer>,
+    expected: Vec<AssignmentAnswer>,
+}
+
+impl AssignmentIntervalResults {
+    pub(crate) fn record(
+        &mut self,
+        case: &'static str,
+        epoch: i32,
+        window: (i64, i64),
+        written: i64,
+        expected: (i32, bool),
+    ) {
+        self.observed
+            .push((case, epoch, (window.0..=window.1).contains(&written)));
+        self.expected.push((case, expected.0, expected.1));
+    }
+
+    pub(crate) fn check(&self) {
+        assert2::check!(self.observed == self.expected);
+    }
+}
+
+/// The recovered seed, absence, or failure reported by a replay case.
+pub(crate) type ReplayOutcome<S> = Result<Option<S>, String>;
+
+/// The explicit mutations a case applies to its expected seed.
+pub(crate) type SeedUpdate<'a, S> = &'a dyn Fn(&mut S);
+
+/// Expected successful replay, built only from the fixture's explicitly supplied changes.
+pub(crate) fn expected_seed<S>(
+    seed: impl Fn() -> S,
+) -> impl Fn(SeedUpdate<'_, S>) -> ReplayOutcome<S> {
+    move |update| Ok(Some(updated_seed(seed(), update)))
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) enum AssignmentDeletionProtocol {
+    #[default]
+    Share,
+    Streams,
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct AssignmentDeletionSetup<'a> {
+    #[default("m")]
+    pub member: &'a str,
+    pub protocol: AssignmentDeletionProtocol,
+}
+
+/// Kafka removes current and target assignments before member metadata.
+pub(crate) fn assignment_tombstones<R>(
+    mut tombstone: impl FnMut(&str, &str) -> R,
+    setup: AssignmentDeletionSetup<'_>,
+) -> Vec<R> {
+    let mut records: Vec<R> = [
+        ("current", setup.member),
+        ("target", setup.member),
+        ("target-epoch", ""),
+        ("member", setup.member),
+    ]
+    .into_iter()
+    .map(|(kind, id)| tombstone(kind, id))
+    .collect();
+    let suffix = match setup.protocol {
+        AssignmentDeletionProtocol::Share => ["state", "group"],
+        AssignmentDeletionProtocol::Streams => ["group", "topology"],
+    };
+    records.extend(suffix.iter().map(|kind| tombstone(kind, "")));
+    records
+}
+
+/// The replay oracle and ordered Kafka deletion records for one protocol.
+pub(crate) fn replay_fixtures<S, R>(
+    seed: impl Fn() -> S,
+    tombstone: impl Fn(&str, &str) -> R,
+    setup: AssignmentDeletionSetup<'_>,
+) -> (
+    impl Fn(SeedUpdate<'_, S>) -> ReplayOutcome<S>,
+    impl Fn() -> Vec<R>,
+) {
+    (expected_seed(seed), move || {
+        assignment_tombstones(&tombstone, setup)
+    })
+}
+
+/// A member deletion that leaves its target assignment behind.
+pub(crate) fn undeleted_target_records<R>(
+    member: R,
+    target: R,
+    mut tombstone: impl FnMut(&str, &str) -> R,
+) -> Vec<R> {
+    vec![
+        member,
+        target,
+        tombstone("current", "m"),
+        tombstone("member", "m"),
+    ]
+}
+
+/// Bind protocol-specific keys to a test record without sharing the replay implementation.
+pub(crate) fn replay_tombstone_constructor<K, R>(
+    key: fn(&str, &str) -> K,
+    record: fn(K) -> R,
+) -> impl Fn(&str, &str) -> R + Copy {
+    move |kind, id| record(key(kind, id))
+}
+
+/// Independent rejection case when a member tombstone leaves its target assignment behind.
+pub(crate) fn member_deletion_with_target_case<R, S>(
+    (member, target): (R, R),
+    tombstone: impl FnMut(&str, &str) -> R,
+    error: &str,
+) -> ReplayCase<'static, R, S> {
+    (
+        "a member tombstone while the member has a target",
+        undeleted_target_records(member, target, tombstone),
+        Err(error.into()),
+    )
+}
+
+/// Independent Kafka expectation for deleting a group while its member remains.
+pub(crate) fn group_deletion_with_member_case<R, S>(
+    member: R,
+    mut tombstone: impl FnMut(&str, &str) -> R,
+) -> ReplayCase<'static, R, S> {
+    (
+        "a group tombstone with a member left",
+        vec![
+            member,
+            tombstone("target-epoch", ""),
+            tombstone("group", ""),
+        ],
+        Err(
+            "Received a tombstone record to delete group g but the group still has 1 members."
+                .into(),
+        ),
+    )
+}
+
+/// Build the expected seed after applying a case's changes.
+pub(crate) fn updated_seed<S>(mut seed: S, update: &dyn Fn(&mut S)) -> S {
+    update(&mut seed);
+    seed
+}
+
+/// Replay a complete case, observing the seed only after successful replay.
+pub(crate) fn replay_outcome<R, S>(
+    records: &[R],
+    replay: impl FnMut(&R) -> Result<(), crate::error::BrokerError>,
+    seed: impl FnOnce() -> Option<S>,
+) -> Result<Option<S>, String> {
+    records
+        .iter()
+        .try_for_each(replay)
+        .map(|()| seed())
+        .map_err(|error| match error {
+            crate::error::BrokerError::Startup(message) => message,
+            other => other.to_string(),
+        })
+}
+
+/// Independently supplied records and expected replay results for one protocol.
+pub(crate) type ReplayCase<'a, R, S> = (&'a str, Vec<R>, ReplayOutcome<S>);
+
+/// The independent absence expectations shared by every modern protocol's deletion replay.
+pub(crate) fn deletion_replay_cases<R: Clone, S>(
+    mut full_group: Vec<R>,
+    deletion: Vec<R>,
+) -> [ReplayCase<'static, R, S>; 2] {
+    full_group.extend(deletion.iter().cloned());
+    [
+        (
+            "Kafka's deletion order removes the whole group",
+            full_group,
+            Ok(None),
+        ),
+        (
+            "tombstones of a group the log does not hold are ignored",
+            deletion,
+            Ok(None),
+        ),
+    ]
+}
+
+/// Each protocol checks both its replay result and the cache populated by replay.
+pub(crate) fn check_replay_cases<R, S: PartialEq + std::fmt::Debug>(
+    rows: &[ReplayCase<'_, R, S>],
+    replay: impl Fn(&GroupCoordinator, &R) -> Result<(), crate::error::BrokerError>,
+    seed: impl Fn(&GroupCoordinator) -> Option<S>,
+    cached: impl Fn(&GroupCoordinator) -> Option<S>,
+) {
+    for (case, log, expected) in rows {
+        let coordinator = make_coord();
+        let outcome = replay_outcome(
+            log,
+            |record| replay(&coordinator, record),
+            || seed(&coordinator),
+        );
+        assert2::check!(&outcome == expected, "{case}");
+        if let Ok(seed) = outcome {
+            assert2::check!(cached(&coordinator) == seed, "{case}");
+        }
+    }
+}
+
+/// Streams member without instance/rack/endpoint/tags, for persisted seeds.
+pub(crate) fn plain_streams_member(
+    topology_epoch: i32,
+) -> streams::persistence::StreamsGroupMemberMetadataValue {
+    streams::persistence::StreamsGroupMemberMetadataValue {
+        instance_id: None,
+        rack_id: None,
+        client_id: "c1".into(),
+        client_host: "/127.0.0.1".into(),
+        process_id: "p1".into(),
+        user_endpoint: None,
+        client_tags: vec![],
+        rebalance_timeout_ms: 60_000,
+        topology_epoch,
+    }
+}
+
+/// First consumer heartbeat, with an empty owned assignment and the standard rebalance timeout.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct ConsumerJoinSetup<'a> {
+    #[default("g")]
+    pub group_id: &'a str,
+    #[default("m1")]
+    pub member_id: &'a str,
+    #[default(&["t"])]
+    pub topics: &'a [&'a str],
+}
+
+pub(crate) fn consumer_join_request(
+    setup: ConsumerJoinSetup<'_>,
+) -> krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest {
+    krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest {
+        group_id: setup.group_id.into(),
+        member_id: setup.member_id.into(),
+        member_epoch: 0,
+        subscribed_topic_names: Some(setup.topics.iter().map(|topic| (*topic).into()).collect()),
+        rebalance_timeout_ms: 60_000,
+        topic_partitions: Some(vec![]),
+        ..Default::default()
+    }
+}
+
+/// A session seen fifty milliseconds ago, preserving each expiry fixture's clock read.
+pub(crate) fn expired_session_last_seen() -> std::time::Instant {
+    std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_millis(50))
+        .expect("50ms is always within Instant range")
+}
+
+/// Independent tombstone rows for a fenced member, parameterized by record family.
+pub(crate) fn member_tombstones<T>(member_id: &str) -> Vec<(String, Option<T>)> {
+    vec![(member_id.into(), None)]
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct TargetAssignmentEpoch(pub i32);
+
+/// Independent Kafka bytes for the default and tagged assignment timestamps.
+pub(crate) struct AssignmentMetadataGoldenCase {
+    pub description: &'static str,
+    pub epoch: TargetAssignmentEpoch,
+    pub timestamp: crate::test_support::UnixMillis,
+    pub bytes: &'static [u8],
+}
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct AssignmentMetadataGoldenSetup {
+    #[default("the time is unknown")]
+    pub unknown_time_description: &'static str,
+}
+
+pub(crate) fn assignment_metadata_golden_cases(
+    setup: AssignmentMetadataGoldenSetup,
+) -> [AssignmentMetadataGoldenCase; 2] {
+    [
+        AssignmentMetadataGoldenCase {
+            description: setup.unknown_time_description,
+            epoch: TargetAssignmentEpoch(12),
+            timestamp: crate::test_support::UnixMillis(0),
+            bytes: b"\x00\x00\x00\x00\x00\x0c\x00",
+        },
+        AssignmentMetadataGoldenCase {
+            description: "an assignment that finished at 2026-10-07T00:00:00Z",
+            epoch: TargetAssignmentEpoch(12),
+            timestamp: crate::test_support::UnixMillis(1_791_331_200_000),
+            bytes: b"\x00\x00\x00\x00\x00\x0c\x01\x00\x08\x00\x00\x01\xa1\x13\xa8\xec\x00",
+        },
+    ]
 }

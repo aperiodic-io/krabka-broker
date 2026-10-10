@@ -26,8 +26,8 @@ use krabka_protocol::{
 
 use crate::{
     harness::{
-        ACCEPT, NONE, ShareAck, UNSUPPORTED_VERSION, acquired_count, bootstrap_share_state,
-        broker_config, broker_test_permit, connect, create_topic, fetch_until_acquired, share_ack,
+        NONE, UNSUPPORTED_VERSION, acquired_count, bootstrap_share_state, broker_config,
+        broker_test_permit, connect, create_topic,
     },
     support::configs::feature_update,
 };
@@ -119,28 +119,14 @@ pub async fn describe_until(
 /// reports to `ListOffsets`, is 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_reflects_spso_after_consume() {
-    let (_permit, broker, client, _dir, tid) =
-        crate::support::share::permitted_topic_fixture("t", 1, |_| {}).await;
-    let (member, _epoch) = crate::harness::initialize_consumption(&broker, &client, tid, 3).await;
-
     // Acquire 0..2, Accept all → SPSO advances to 3.
-    let row = fetch_until_acquired(&client, "g1", &member, tid, 0, 0).await;
+    let (_permit, _broker, client, _dir, tid, member, row) = crate::harness::acquired_topic().await;
     assert!(acquired_count(&row) == 3, "must acquire all 3 offsets");
-    let ack = share_ack(
+    crate::support::share::acknowledge_success(
         &client,
-        ShareAck {
-            group: "g1",
-            member: &member,
-            topic_id: tid,
-            partition: 0,
-            epoch: 1,
-            first: 0,
-            last: 2,
-            ack_type: ACCEPT,
-        },
+        crate::support::share::ShareAck::prefix_for(&member, tid, krabka_ids::Offset(2)),
     )
     .await;
-    assert!(ack.error_code == NONE, "accept error: {}", ack.error_code);
 
     // Let the persister land the advanced SPSO durably.
     let group = describe_until(&client, "g1", "t", vec![0], 3).await;
@@ -217,7 +203,12 @@ async fn admin_offsets_rejected_when_share_disabled() {
     let cfg = broker_config(dir.path().to_path_buf());
     let broker = Broker::start(cfg).await.unwrap();
     let client = connect(&broker.listen_addr().to_string()).await;
-    create_topic(&broker, &client, "t", 1).await;
+    create_topic(
+        &broker,
+        &client,
+        crate::support::share::ShareTopicSetup::default(),
+    )
+    .await;
     let enabled = describe_offsets(&client, "g1", "t", vec![0]).await;
     assert!(
         enabled.error_code != UNSUPPORTED_VERSION,

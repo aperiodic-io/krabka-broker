@@ -67,12 +67,8 @@ impl Partition {
             if !holds(self, newest(images.as_deref_mut()).as_deref()) {
                 return Err(Uncommitted::TermEnded);
             }
-            let image_changed = async {
-                match images.as_deref_mut() {
-                    Some(images) => images.changed().await.is_ok(),
-                    None => std::future::pending().await,
-                }
-            };
+            let image_changed =
+                crate::metadata_source::wait_for_image_change(images.as_deref_mut());
             tokio::select! {
                 reached = &mut committed => {
                     reached.map_err(|_| Uncommitted::TimedOut)?;
@@ -96,13 +92,12 @@ impl Partition {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::{Arc, atomic::Ordering},
+        sync::atomic::Ordering,
         time::{Duration, Instant},
     };
 
     use assert2::assert;
     use krabka_log::Offset;
-    use tokio::sync::Notify;
 
     use super::Uncommitted;
     use crate::partition::Partition;
@@ -183,12 +178,14 @@ mod tests {
             },
         ];
         for case in cases {
-            let hw_notify = Arc::new(Notify::new());
-            let (partition, _dir) =
-                crate::partition::test_support::test_partition(Arc::clone(&hw_notify));
-            let partition = Arc::new(partition);
-            partition.install_leader_change(1, 0).await;
-            partition.replica_state.lock().await.hw = Offset(case.hw_now);
+            let (partition, _dir, hw_notify) = crate::partition::test_support::commit_partition(
+                crate::partition::test_support::CommitPartitionSetup {
+                    high_watermark: Offset(case.hw_now),
+                    leader:
+                        crate::partition::test_support::CommitFixtureLeader::BrokerOneAtEpochZero,
+                },
+            )
+            .await;
 
             let changes = crate::coordinator::test_support::schedule_commit_changes!(case, partition;
                 captures {} leader(leader, epoch) {

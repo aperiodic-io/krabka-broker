@@ -6,12 +6,7 @@ use moxy::{
 };
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
-    if let Some(token) = meta.into_iter().next() {
-        return Err(ParseError::new(
-            token.span(),
-            "object_store_config takes no arguments",
-        ));
-    }
+    crate::meta::no_arguments(meta, "object_store_config")?;
     let (mut tokens, body) = crate::meta::named_body(item, "object_store_config")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()

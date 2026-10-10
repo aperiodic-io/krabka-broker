@@ -9,7 +9,8 @@ use crate::kraft::controller::{
     control_state::{voter_set_from_wire, voter_set_to_wire},
     records::leader_change_batch,
     test_support::{
-        build_engine_only, elect_single_voter_engine, one_offset_batch, topic_record, voter_set,
+        EngineSetup, build_engine_only, elect_single_voter_engine, one_offset_batch, topic_record,
+        voter_set,
     },
 };
 
@@ -205,7 +206,7 @@ fn control_history_frontiers_handle_empty_exact_repeated_and_moving_states() {
 
 #[test]
 fn execute_local_only_appends_leader_change_batch_to_log() {
-    let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
+    let (mut engine, _dir) = build_engine_only(EngineSetup::default());
     let start = engine.log.log_end_offset();
 
     engine.execute_local_only(vec![Action::AppendLeaderChange { epoch: 4 }]);
@@ -284,7 +285,10 @@ fn a_reconfiguration_is_refused_with_the_reason_it_was_refused_for() {
 
     // A follower redirects rather than refusing outright: it knows the
     // request is legitimate, just not addressed to it.
-    let (mut follower, _dir) = build_engine_only(NodeId(1), &[NodeId(1), NodeId(2)]);
+    let (mut follower, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    });
     let (reply, mut rx) = oneshot::channel();
     follower.on_reconfigure(add_of(3), reply);
     check!(
@@ -294,7 +298,10 @@ fn a_reconfiguration_is_refused_with_the_reason_it_was_refused_for() {
 
     // A leader whose quorum is still at kraft.version 0 has no mechanism to
     // add a voter with: dynamic membership is what version 1 introduces.
-    let (mut leader, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut leader, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut leader);
     check!(
         leader.controls.committed_version == 0,
@@ -315,7 +322,10 @@ fn a_reconfiguration_is_refused_with_the_reason_it_was_refused_for() {
 fn update_voter_preflight_at_level_0_updates_voter_history() {
     use crate::reconfig::{ReconfigOutcome, UpdateVoter, VoterChange};
 
-    let (mut leader, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut leader, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut leader);
 
     let update = VoterChange::Update(UpdateVoter {
@@ -343,25 +353,13 @@ fn update_voter_preflight_at_level_0_updates_voter_history() {
 
 #[tokio::test]
 async fn reconfiguration_refuses_when_epoch_not_committed_and_admits_when_committed() {
-    use crate::reconfig::{AddVoter, ReconfigOutcome, RemoveVoter, UpdateVoter, VoterChange};
+    use crate::reconfig::{ReconfigOutcome, RemoveVoter, UpdateVoter, VoterChange};
 
     fn add_of(id: u64) -> VoterChange {
-        VoterChange::Add(AddVoter {
-            voter: krabka_metadata::Voter {
-                id: NodeId(id),
-                directory_id: uuid::Uuid::nil(),
-                endpoints: vec![krabka_metadata::voters::VoterEndpoint {
-                    name: "CONTROLLER".into(),
-                    host: "127.0.0.1".into(),
-                    port: 9_093,
-                }],
-                kraft_version: krabka_metadata::KRaftVersionRange { min: 0, max: 1 },
-            },
-            ack_when_committed: true,
-        })
+        VoterChange::Add(add_request(id, 0))
     }
 
-    let (mut leader, _dir) = build_engine_only(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
+    let (mut leader, _dir) = build_engine_only(EngineSetup::default());
     leader.on_event(Event::ElectionTimeout);
     leader.on_event(Event::ReceiveVoteResponse {
         from: NodeId(2),
@@ -483,7 +481,10 @@ async fn reconfiguration_refuses_when_epoch_not_committed_and_admits_when_commit
 
 #[test]
 fn apply_and_restore_control_records_updates_core_voters() {
-    let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut engine, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     let two_voters = voter_set(&[NodeId(1), NodeId(2)]);
     let batch = crate::kraft::controller::records::typed_control_batch(
         1,
@@ -526,7 +527,7 @@ fn apply_and_restore_control_records_updates_core_voters() {
 /// epoch, ready to answer `AddRaftVoter`, with a clock that has been running for
 /// 50 ms so a fetch is stamped with a nonzero time.
 fn kraft_version_one_leader() -> (Engine, tempfile::TempDir) {
-    let (mut leader, dir) = build_engine_only(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
+    let (mut leader, dir) = build_engine_only(EngineSetup::default());
     leader.on_event(Event::ElectionTimeout);
     for epoch in [0, 1] {
         leader.on_event(Event::ReceiveVoteResponse {
@@ -553,6 +554,21 @@ fn kraft_version_one_leader() -> (Engine, tempfile::TempDir) {
 }
 
 /// The `AddRaftVoter` request for node `id` under `directory`.
+fn commit_add_voter(
+    leader: &mut Engine,
+    id: u64,
+    directory: u128,
+) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
+    let (reply, mut rx) = oneshot::channel();
+    leader.on_reconfigure(
+        crate::reconfig::VoterChange::Add(add_request(id, directory)),
+        reply,
+    );
+    let appended = leader.log.log_end_offset();
+    leader.advance_and_apply(appended);
+    rx.try_recv().expect("the add was answered")
+}
+
 fn add_request(id: u64, directory: u128) -> crate::reconfig::AddVoter {
     crate::reconfig::AddVoter {
         voter: krabka_metadata::Voter {
@@ -679,12 +695,9 @@ async fn an_observer_that_dropped_out_of_describe_quorum_can_still_be_added() {
         .map(|observer| observer.id)
         .collect();
     check!(listed == vec![NodeId(9)], "the five minutes hide it");
-    let (reply, mut rx) = oneshot::channel();
-    leader.on_reconfigure(VoterChange::Add(add_request(4, 7)), reply);
-    let appended = leader.log.log_end_offset();
-    leader.advance_and_apply(appended);
+    let outcome = commit_add_voter(&mut leader, 4, 7);
     check!(
-        matches!(rx.try_recv(), Ok(Ok(ReconfigOutcome::Committed))),
+        matches!(outcome, Ok(ReconfigOutcome::Committed)),
         "the hour keeps it caught up"
     );
 }
@@ -748,7 +761,10 @@ async fn a_check_only_add_runs_the_local_admission_checks_in_kafkas_order() {
     leader.pending_reconfig = None;
 
     // Below kraft.version 1 there is nothing to add to.
-    let (mut leader, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut leader, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut leader);
     check!(
         matches!(
@@ -777,11 +793,8 @@ async fn a_replica_keeps_its_progress_across_joining_and_leaving_the_voter_set()
     let as_observer = leader.observers[&key].clone();
     assert2::assert!(as_observer.last_caught_up.0 > 0);
 
-    let (reply, mut rx) = oneshot::channel();
-    leader.on_reconfigure(VoterChange::Add(add_request(4, 7)), reply);
-    let appended = leader.log.log_end_offset();
-    leader.advance_and_apply(appended);
-    check!(matches!(rx.try_recv(), Ok(Ok(ReconfigOutcome::Committed))));
+    let outcome = commit_add_voter(&mut leader, 4, 7);
+    check!(matches!(outcome, Ok(ReconfigOutcome::Committed)));
     check!(leader.observers.is_empty());
     let Role::Leader { replicas, .. } = leader.core.role() else {
         panic!("still the leader");
@@ -817,7 +830,10 @@ fn validating_a_kraft_version_upgrade_runs_its_checks_and_appends_nothing() {
     /// What the request left behind: the reply if it was immediate, and
     /// whether the log grew.
     fn run(elect: bool, change: VoterChange) -> (Option<Result<ReconfigOutcome, RaftError>>, bool) {
-        let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+        let (mut engine, _dir) = build_engine_only(EngineSetup {
+            ids: &[NodeId(1)],
+            ..Default::default()
+        });
         if elect {
             elect_single_voter_engine(&mut engine);
         }
@@ -862,7 +878,7 @@ fn validating_a_kraft_version_upgrade_runs_its_checks_and_appends_nothing() {
 async fn version_finalization_waits_for_the_unchanged_voters_record() {
     use crate::reconfig::{ReconfigOutcome, VoterChange};
 
-    let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
+    let (mut engine, _dir) = build_engine_only(EngineSetup::default());
     engine.on_event(Event::ElectionTimeout);
     for epoch in [0, 1] {
         engine.on_event(Event::ReceiveVoteResponse {
@@ -945,7 +961,10 @@ fn the_first_leader_of_a_dynamic_quorum_writes_the_bootstrap_voters() {
     ];
     let mut written = Vec::new();
     for &(kraft_version, ..) in &cases {
-        let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+        let (mut engine, _dir) = build_engine_only(EngineSetup {
+            ids: &[NodeId(1)],
+            ..Default::default()
+        });
         engine.controls.version_history.insert(-1, kraft_version);
         engine.controls.committed_version = kraft_version;
         engine.core.set_kraft_version(kraft_version);
@@ -967,7 +986,10 @@ fn the_first_leader_of_a_dynamic_quorum_writes_the_bootstrap_voters() {
 /// that `DescribeQuorum` reads.
 #[test]
 fn a_new_observer_is_published_without_a_commit() {
-    let (mut leader, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let (mut leader, _dir) = build_engine_only(EngineSetup {
+        ids: &[NodeId(1)],
+        ..Default::default()
+    });
     elect_single_voter_engine(&mut leader);
     leader.clock_base = Instant::now() - Duration::from_millis(50);
     let published = leader.quorum_tx.subscribe();

@@ -24,9 +24,7 @@ use krabka_protocol::owned::{
     sync_group_request::SyncGroupRequest,
 };
 
-use crate::support::classic::{
-    classic_join_request, classic_sync_request, join_protocol, sync_assignment,
-};
+use crate::support::classic::{classic_join_request, classic_sync_request, sync_assignment};
 
 mod support;
 
@@ -44,13 +42,15 @@ async fn start() -> support::InProcess {
 fn join_request(group_id: &str, member_id: &str, instance_id: Option<&str>) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: instance_id.map(str::to_string),
-        ..classic_join_request(
-            group_id,
-            member_id,
-            (30_000, 1_500),
-            "consumer",
-            vec![join_protocol("range", Bytes::new())],
-        )
+        ..classic_join_request(crate::support::classic::ClassicJoinSetup {
+            group_id: (group_id).into(),
+            member_id: (member_id).into(),
+            timeouts: crate::support::classic::ClassicTimeouts {
+                rebalance: krabka_units::millis(1_500),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
     }
 }
 
@@ -79,14 +79,13 @@ async fn bootstrap_static_member(
     let r3 = client
         .send(SyncGroupRequest {
             group_instance_id: Some(instance_id.into()),
-            ..classic_sync_request(
-                group_id,
-                generation,
-                mid.clone(),
-                Some("consumer".into()),
-                Some("range".into()),
-                vec![sync_assignment(mid.clone(), assignment.clone())],
-            )
+            ..classic_sync_request(crate::support::classic::ClassicSyncSetup {
+                group_id: (group_id).into(),
+                generation_id: crate::support::classic::GenerationId(generation),
+                member_id: mid.clone(),
+                assignments: vec![sync_assignment(mid.clone(), assignment.clone())],
+                ..Default::default()
+            })
         })
         .await
         .expect("SyncGroup");

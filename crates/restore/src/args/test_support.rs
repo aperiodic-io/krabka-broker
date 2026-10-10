@@ -5,7 +5,7 @@ use clap::Parser as _;
 
 use crate::args::{PartitionRef, RestoreArgs};
 
-pub(super) fn partition(topic: &str, index: i32) -> PartitionRef {
+pub(crate) fn partition(topic: &str, index: i32) -> PartitionRef {
     PartitionRef {
         topic: topic.to_owned(),
         partition: index,
@@ -14,7 +14,7 @@ pub(super) fn partition(topic: &str, index: i32) -> PartitionRef {
 
 /// Parses `RestoreArgs` through the real command line, with an archive source
 /// and a target already given, so a test states only the flags it is about.
-pub(super) fn args_from(extra: &[&str]) -> Result<RestoreArgs, clap::Error> {
+pub(crate) fn args_from(extra: &[&str]) -> Result<RestoreArgs, clap::Error> {
     let mut argv = vec![
         "krabka-restore",
         "--archive-local",

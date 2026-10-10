@@ -9,6 +9,15 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// Start an actor over a bounded mailbox and retain its task handle.
+pub(crate) fn spawn_mailbox<M, F: Future<Output = ()> + Send + 'static>(
+    capacity: usize,
+    run: impl FnOnce(mpsc::Receiver<M>) -> F,
+) -> (mpsc::Sender<M>, tokio::task::JoinHandle<()>) {
+    let (tx, rx) = mpsc::channel(capacity);
+    (tx, tokio::spawn(run(rx)))
+}
+
 /// Why an [`ask`] got no reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AskError {

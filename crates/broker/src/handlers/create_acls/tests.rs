@@ -57,12 +57,11 @@ async fn handle_stores_long_resource_names_and_principals() {
     });
     assert!(resp == expected);
     let stored = |resource_name: &str, principal: &str| {
-        crate::test_support::allow_acl(
-            ResourceType::Topic,
+        crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
             resource_name,
             principal,
-            AclOperation::Read,
-        )
+            ..Default::default()
+        })
     };
     let mut acls = all_acls(&broker_handle);
     acls.sort_by_key(|acl| std::cmp::Reverse(acl.resource_name.len()));
@@ -125,10 +124,10 @@ async fn handle_submits_valid_creations_and_reports_invalid_creations_in_order()
 
     let acls = all_acls(&broker_handle);
     let expected_acls = vec![crate::test_support::allow_acl(
-        ResourceType::Topic,
-        "topic-a",
-        "User:alice",
-        AclOperation::Read,
+        crate::test_support::AllowAclSetup {
+            resource_name: "topic-a",
+            ..Default::default()
+        },
     )];
     assert!(acls == expected_acls);
     broker_handle.shutdown().await;
@@ -239,10 +238,7 @@ async fn handle_accepts_cidr_host_at_the_cidr_metadata_version() {
         crate::features::CIDR_ACL_HOST_MIN_LEVEL,
         "seed cidr-supporting metadata.version"
     );
-    test_ctx!(ctx, "admin");
-    let req = cidr_request();
-
-    let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
+    let resp = drive_cidr_request(&broker).await;
 
     let expected = unthrottled_wire!(CreateAclsResponse {
         results: vec![committed()],
@@ -358,10 +354,11 @@ async fn handle_pins_the_cluster_name_and_accepts_other_principal_types() {
     });
     assert!(resp == expected);
     let expected_acls = vec![crate::test_support::allow_acl(
-        ResourceType::Topic,
-        "topic-a",
-        "Group:ops",
-        AclOperation::Read,
+        crate::test_support::AllowAclSetup {
+            resource_name: "topic-a",
+            principal: "Group:ops",
+            ..Default::default()
+        },
     )];
     assert!(all_acls(&broker_handle) == expected_acls);
     broker_handle.shutdown().await;
@@ -459,12 +456,10 @@ async fn handle_rejects_cidr_host_on_a_freshly_bootstrapped_cluster() {
 #[test]
 fn count_new_acls_counts_distinct_new_acls_in_linear_time() {
     let acl = |n: usize| {
-        crate::test_support::allow_acl(
-            ResourceType::Topic,
-            &format!("topic-{n}"),
-            "User:alice",
-            AclOperation::Read,
-        )
+        crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+            resource_name: &format!("topic-{n}"),
+            ..Default::default()
+        })
     };
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
     for n in 0..2_000 {
@@ -482,12 +477,16 @@ fn count_new_acls_counts_distinct_new_acls_in_linear_time() {
     check!(elapsed < std::time::Duration::from_secs(5), "{elapsed:?}");
 }
 
+async fn drive_cidr_request(broker: &crate::broker::Broker) -> CreateAclsResponse {
+    test_ctx!(ctx, "admin");
+    handle(broker, cidr_request(), VERSION, &ctx)
+        .await
+        .expect("handle")
+}
+
 async fn check_cidr_refusal(broker_handle: &crate::broker::BrokerHandle) {
     let broker = broker_handle.broker_arc_for_test();
-    test_ctx!(ctx, "admin");
-    let req = cidr_request();
-
-    let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
+    let resp = drive_cidr_request(&broker).await;
 
     let expected = unthrottled_wire!(CreateAclsResponse {
         results: vec![tagged_wire!(AclCreationResult {

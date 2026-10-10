@@ -13,25 +13,57 @@ use crate::{
 // `base_sequence`, whose max timestamp is `max_timestamp`.
 krabka_macros::producer_batch_fixture!(data, ::bytes::Bytes::from_static(b"v"));
 
-/// A commit (`commit = true`) or abort marker of `producer` that
-/// `coordinator_epoch` wrote at `timestamp`.
-fn marker(
-    (producer_id, producer_epoch): (i64, i16),
-    commit: bool,
-    coordinator_epoch: i32,
-    timestamp: i64,
-) -> RecordBatch {
+#[derive(Clone, Copy, Default)]
+enum MarkerOutcome {
+    #[default]
+    Commit,
+    Abort,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct MarkerCoordinatorEpoch(i32);
+
+/// A commit or abort marker with an explicit producer, coordinator, and timestamp.
+#[derive(Clone, Copy)]
+struct MarkerSetup {
+    producer: BatchProducer,
+    outcome: MarkerOutcome,
+    coordinator_epoch: MarkerCoordinatorEpoch,
+    timestamp: BatchTimestamp,
+}
+
+impl Default for MarkerSetup {
+    fn default() -> Self {
+        Self {
+            producer: BatchProducer::from_wire((7, 0)),
+            outcome: MarkerOutcome::Commit,
+            coordinator_epoch: MarkerCoordinatorEpoch(0),
+            timestamp: BatchTimestamp(1_000),
+        }
+    }
+}
+
+fn marker(setup: MarkerSetup) -> RecordBatch {
+    let MarkerSetup {
+        producer,
+        outcome,
+        coordinator_epoch,
+        timestamp,
+    } = setup;
     RecordBatch {
         attributes: Attributes::default()
             .with_transactional(true)
             .with_control(true),
-        base_timestamp: timestamp,
-        max_timestamp: timestamp,
-        producer_id,
-        producer_epoch,
+        base_timestamp: timestamp.0,
+        max_timestamp: timestamp.0,
+        producer_id: producer.id.0,
+        producer_epoch: producer.epoch.0,
         records: vec![Record {
-            key: Some(control_key(i16::from(commit))),
-            value: Some(control_value(coordinator_epoch)),
+            key: Some(control_key(match outcome {
+                MarkerOutcome::Commit => 1,
+                MarkerOutcome::Abort => 0,
+            })),
+            value: Some(control_value(coordinator_epoch.0)),
             ..Record::default()
         }],
         ..RecordBatch::default()
@@ -51,43 +83,119 @@ enum ProducerHistory {
 /// Identical input histories exercised by both producer-state projections.
 fn producer_history(history: ProducerHistory) -> Vec<RecordBatch> {
     match history {
-        ProducerHistory::MissingId => vec![data((-1, -1), -1, 2, 1_000, false)],
+        ProducerHistory::MissingId => vec![data(ProducerBatchSetup {
+            producer: BatchProducer::from_wire((-1, -1)),
+            base_sequence: BatchSequence(-1),
+            records: BatchRecordCount(2),
+            ..Default::default()
+        })],
         ProducerHistory::Idempotent => vec![
-            data((7, 2), 0, 3, 1_000, false),
-            data((7, 2), 3, 2, 2_000, false),
+            data(ProducerBatchSetup {
+                producer: BatchProducer::from_wire((7, 2)),
+                records: BatchRecordCount(3),
+                ..Default::default()
+            }),
+            data(ProducerBatchSetup {
+                producer: BatchProducer::from_wire((7, 2)),
+                base_sequence: BatchSequence(3),
+                records: BatchRecordCount(2),
+                max_timestamp: BatchTimestamp(2_000),
+                ..Default::default()
+            }),
         ],
         ProducerHistory::Committed => vec![
-            data((9, 1), 0, 2, 1_000, true),
-            marker((9, 1), true, 5, 3_000),
+            data(ProducerBatchSetup {
+                producer: BatchProducer::from_wire((9, 1)),
+                records: BatchRecordCount(2),
+                transaction: BatchTransactionMode::Transactional,
+                ..Default::default()
+            }),
+            marker(MarkerSetup {
+                producer: BatchProducer::from_wire((9, 1)),
+                coordinator_epoch: MarkerCoordinatorEpoch(5),
+                timestamp: BatchTimestamp(3_000),
+                ..Default::default()
+            }),
         ],
         ProducerHistory::Aborted => vec![
-            data((10, 1), 0, 2, 1_000, true),
-            marker((10, 2), false, 6, 4_000),
+            data(ProducerBatchSetup {
+                producer: BatchProducer::from_wire((10, 1)),
+                records: BatchRecordCount(2),
+                transaction: BatchTransactionMode::Transactional,
+                ..Default::default()
+            }),
+            marker(MarkerSetup {
+                producer: BatchProducer::from_wire((10, 2)),
+                outcome: MarkerOutcome::Abort,
+                coordinator_epoch: MarkerCoordinatorEpoch(6),
+                timestamp: BatchTimestamp(4_000),
+            }),
         ],
-        ProducerHistory::MarkerOnly => vec![marker((11, 3), true, 7, 5_000)],
+        ProducerHistory::MarkerOnly => vec![marker(MarkerSetup {
+            producer: BatchProducer::from_wire((11, 3)),
+            coordinator_epoch: MarkerCoordinatorEpoch(7),
+            timestamp: BatchTimestamp(5_000),
+            ..Default::default()
+        })],
         ProducerHistory::SeveralProducers => vec![
-            data((30, 0), 0, 1, 1_000, false),
-            data((20, 0), 0, 1, 2_000, false),
-            data((25, 4), 0, 1, 3_000, true),
+            data(ProducerBatchSetup {
+                producer: BatchProducer::from_wire((30, 0)),
+                ..Default::default()
+            }),
+            data(ProducerBatchSetup {
+                producer: BatchProducer::from_wire((20, 0)),
+                max_timestamp: BatchTimestamp(2_000),
+                ..Default::default()
+            }),
+            data(ProducerBatchSetup {
+                producer: BatchProducer::from_wire((25, 4)),
+                max_timestamp: BatchTimestamp(3_000),
+                transaction: BatchTransactionMode::Transactional,
+                ..Default::default()
+            }),
         ],
     }
 }
 
-fn active(
-    producer_id: i64,
-    producer_epoch: i16,
-    last_sequence: i32,
-    last_timestamp: i64,
-    coordinator_epoch: i32,
-    current_txn_start_offset: Option<i64>,
-) -> ActiveProducer {
-    ActiveProducer {
-        producer_id: ProducerId(producer_id),
+#[derive(Clone, Copy)]
+struct ActiveProducerSetup {
+    producer_id: ProducerId,
+    producer_epoch: BatchProducerEpoch,
+    last_sequence: BatchSequence,
+    last_timestamp: BatchTimestamp,
+    coordinator_epoch: MarkerCoordinatorEpoch,
+    current_txn_start_offset: Option<Offset>,
+}
+
+impl Default for ActiveProducerSetup {
+    fn default() -> Self {
+        Self {
+            producer_id: ProducerId(7),
+            producer_epoch: BatchProducerEpoch(0),
+            last_sequence: BatchSequence(0),
+            last_timestamp: BatchTimestamp(1_000),
+            coordinator_epoch: MarkerCoordinatorEpoch(-1),
+            current_txn_start_offset: None,
+        }
+    }
+}
+
+fn active(setup: ActiveProducerSetup) -> ActiveProducer {
+    let ActiveProducerSetup {
+        producer_id,
         producer_epoch,
         last_sequence,
         last_timestamp,
         coordinator_epoch,
-        current_txn_start_offset: current_txn_start_offset.map(Offset),
+        current_txn_start_offset,
+    } = setup;
+    ActiveProducer {
+        producer_id,
+        producer_epoch: producer_epoch.0,
+        last_sequence: last_sequence.0,
+        last_timestamp: last_timestamp.0,
+        coordinator_epoch: coordinator_epoch.0,
+        current_txn_start_offset,
     }
 }
 
@@ -136,47 +244,125 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
         (
             "idempotent batches",
             producer_history(ProducerHistory::Idempotent),
-            vec![active(7, 2, 4, 2_000, -1, None)],
+            vec![active(ActiveProducerSetup {
+                producer_epoch: BatchProducerEpoch(2),
+                last_sequence: BatchSequence(4),
+                last_timestamp: BatchTimestamp(2_000),
+                ..Default::default()
+            })],
         ),
         (
             "an open transaction",
             vec![
-                data((8, 0), 0, 2, 1_000, true),
-                data((8, 0), 2, 1, 1_500, true),
+                data(ProducerBatchSetup {
+                    producer: BatchProducer::from_wire((8, 0)),
+                    records: BatchRecordCount(2),
+                    transaction: BatchTransactionMode::Transactional,
+                    ..Default::default()
+                }),
+                data(ProducerBatchSetup {
+                    producer: BatchProducer::from_wire((8, 0)),
+                    base_sequence: BatchSequence(2),
+                    max_timestamp: BatchTimestamp(1_500),
+                    transaction: BatchTransactionMode::Transactional,
+                    ..Default::default()
+                }),
             ],
-            vec![active(8, 0, 2, 1_500, -1, Some(0))],
+            vec![active(ActiveProducerSetup {
+                producer_id: ProducerId(8),
+                last_sequence: BatchSequence(2),
+                last_timestamp: BatchTimestamp(1_500),
+                current_txn_start_offset: Some(Offset(0)),
+                ..Default::default()
+            })],
         ),
         (
             "a commit at the same epoch (transaction version 1)",
             producer_history(ProducerHistory::Committed),
-            vec![active(9, 1, 1, 3_000, 5, None)],
+            vec![active(ActiveProducerSetup {
+                producer_id: ProducerId(9),
+                producer_epoch: BatchProducerEpoch(1),
+                last_sequence: BatchSequence(1),
+                last_timestamp: BatchTimestamp(3_000),
+                coordinator_epoch: MarkerCoordinatorEpoch(5),
+                ..Default::default()
+            })],
         ),
         (
             "an abort at a bumped epoch (transaction version 2)",
             producer_history(ProducerHistory::Aborted),
-            vec![active(10, 2, -1, 4_000, 6, None)],
+            vec![active(ActiveProducerSetup {
+                producer_id: ProducerId(10),
+                producer_epoch: BatchProducerEpoch(2),
+                last_sequence: BatchSequence(-1),
+                last_timestamp: BatchTimestamp(4_000),
+                coordinator_epoch: MarkerCoordinatorEpoch(6),
+                ..Default::default()
+            })],
         ),
         (
             "a marker without a data batch",
             producer_history(ProducerHistory::MarkerOnly),
-            vec![active(11, 3, -1, 5_000, 7, None)],
+            vec![active(ActiveProducerSetup {
+                producer_id: ProducerId(11),
+                producer_epoch: BatchProducerEpoch(3),
+                last_sequence: BatchSequence(-1),
+                last_timestamp: BatchTimestamp(5_000),
+                coordinator_epoch: MarkerCoordinatorEpoch(7),
+                ..Default::default()
+            })],
         ),
         (
             "a transaction after a commit",
             vec![
-                data((12, 0), 0, 1, 1_000, true),
-                marker((12, 0), true, 2, 2_000),
-                data((12, 0), 1, 1, 3_000, true),
+                data(ProducerBatchSetup {
+                    producer: BatchProducer::from_wire((12, 0)),
+                    transaction: BatchTransactionMode::Transactional,
+                    ..Default::default()
+                }),
+                marker(MarkerSetup {
+                    producer: BatchProducer::from_wire((12, 0)),
+                    coordinator_epoch: MarkerCoordinatorEpoch(2),
+                    timestamp: BatchTimestamp(2_000),
+                    ..Default::default()
+                }),
+                data(ProducerBatchSetup {
+                    producer: BatchProducer::from_wire((12, 0)),
+                    base_sequence: BatchSequence(1),
+                    max_timestamp: BatchTimestamp(3_000),
+                    transaction: BatchTransactionMode::Transactional,
+                    ..Default::default()
+                }),
             ],
-            vec![active(12, 0, 1, 3_000, 2, Some(2))],
+            vec![active(ActiveProducerSetup {
+                producer_id: ProducerId(12),
+                last_sequence: BatchSequence(1),
+                last_timestamp: BatchTimestamp(3_000),
+                coordinator_epoch: MarkerCoordinatorEpoch(2),
+                current_txn_start_offset: Some(Offset(2)),
+                ..Default::default()
+            })],
         ),
         (
             "several producers, in producer id order",
             producer_history(ProducerHistory::SeveralProducers),
             vec![
-                active(20, 0, 0, 2_000, -1, None),
-                active(25, 4, 0, 3_000, -1, Some(2)),
-                active(30, 0, 0, 1_000, -1, None),
+                active(ActiveProducerSetup {
+                    producer_id: ProducerId(20),
+                    last_timestamp: BatchTimestamp(2_000),
+                    ..Default::default()
+                }),
+                active(ActiveProducerSetup {
+                    producer_id: ProducerId(25),
+                    producer_epoch: BatchProducerEpoch(4),
+                    last_timestamp: BatchTimestamp(3_000),
+                    current_txn_start_offset: Some(Offset(2)),
+                    ..Default::default()
+                }),
+                active(ActiveProducerSetup {
+                    producer_id: ProducerId(30),
+                    ..Default::default()
+                }),
             ],
         ),
     ];
@@ -266,10 +452,31 @@ fn remove_expired_producers_keeps_open_transactions_and_recent_producers() {
     ];
     for (name, now_ms, staying) in cases {
         let (_dir, mut log) = test_log();
-        log.append(&mut data((1, 0), 0, 1, 1_000, false)).unwrap();
-        log.append(&mut data((2, 0), 0, 1, 1_500, true)).unwrap();
-        log.append(&mut marker((2, 0), true, 4, 3_000)).unwrap();
-        log.append(&mut data((3, 0), 0, 1, 1_000, true)).unwrap();
+        log.append(&mut data(ProducerBatchSetup {
+            producer: BatchProducer::from_wire((1, 0)),
+            ..Default::default()
+        }))
+        .unwrap();
+        log.append(&mut data(ProducerBatchSetup {
+            producer: BatchProducer::from_wire((2, 0)),
+            max_timestamp: BatchTimestamp(1_500),
+            transaction: BatchTransactionMode::Transactional,
+            ..Default::default()
+        }))
+        .unwrap();
+        log.append(&mut marker(MarkerSetup {
+            producer: BatchProducer::from_wire((2, 0)),
+            coordinator_epoch: MarkerCoordinatorEpoch(4),
+            timestamp: BatchTimestamp(3_000),
+            ..Default::default()
+        }))
+        .unwrap();
+        log.append(&mut data(ProducerBatchSetup {
+            producer: BatchProducer::from_wire((3, 0)),
+            transaction: BatchTransactionMode::Transactional,
+            ..Default::default()
+        }))
+        .unwrap();
         let before = log.active_producers();
 
         log.remove_expired_producers(now_ms, EXPIRATION_MS);
@@ -297,16 +504,39 @@ fn remove_expired_producers_keeps_open_transactions_and_recent_producers() {
 #[test]
 fn an_expired_producer_starts_again_without_its_retained_batches() {
     let (_dir, mut log) = test_log();
-    log.append(&mut data((5, 0), 0, 1, 1_000, false)).unwrap();
-    log.append(&mut data((5, 0), 1, 1, 1_000, false)).unwrap();
+    log.append(&mut data(ProducerBatchSetup {
+        producer: BatchProducer::from_wire((5, 0)),
+        ..Default::default()
+    }))
+    .unwrap();
+    log.append(&mut data(ProducerBatchSetup {
+        producer: BatchProducer::from_wire((5, 0)),
+        base_sequence: BatchSequence(1),
+        ..Default::default()
+    }))
+    .unwrap();
 
     log.remove_expired_producers(10_000, 1_000);
-    log.append(&mut data((5, 0), 2, 1, 20_000, false)).unwrap();
+    log.append(&mut data(ProducerBatchSetup {
+        producer: BatchProducer::from_wire((5, 0)),
+        base_sequence: BatchSequence(2),
+        max_timestamp: BatchTimestamp(20_000),
+        ..Default::default()
+    }))
+    .unwrap();
 
     let recovered = log.recovered_producers();
     assert!(recovered.len() == 1);
     assert!(recovered[0].earlier.is_empty());
-    assert!(log.active_producers() == vec![active(5, 0, 2, 20_000, -1, None)]);
+    assert!(
+        log.active_producers()
+            == vec![active(ActiveProducerSetup {
+                producer_id: ProducerId(5),
+                last_sequence: BatchSequence(2),
+                last_timestamp: BatchTimestamp(20_000),
+                ..Default::default()
+            })]
+    );
 }
 
 /// Kafka's `removeExpiredProducers` also drops verification state that is

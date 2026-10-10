@@ -43,18 +43,18 @@ async fn jvm_ssl_handshake_succeeds() {
     let props_tmp = write_client_props(props);
     let ts_mount = format!("{}:/truststore.jks:ro", truststore_path.display());
 
-    let out = crate::support::jvm_docker_command(
-        KAFKA_IMAGE,
-        &[&props_tmp.mount_str(), &ts_mount],
-        &[
+    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+        image: KAFKA_IMAGE,
+        mounts: &[&props_tmp.mount_str(), &ts_mount],
+        args: &[
             "kafka-broker-api-versions",
             "--bootstrap-server",
             broker0_advertised(),
             "--command-config",
             "/client.properties",
         ],
-        false,
-    )
+        ..Default::default()
+    })
     .stderr(Stdio::piped())
     .stdout(Stdio::piped())
     .output()

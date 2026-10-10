@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 39 0 47 21 *)
+(* #"/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 38 0 46 21 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
@@ -19,19 +19,20 @@ let%span svec'2 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span svec'3 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/vec.rs" 196 18 196 46
 let%span svec'4 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/vec.rs" 118 18 118 48
 let%span svec'5 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/vec.rs" 202 18 202 34
-let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 115 16 115 83
-let%span sspec'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 101 8 105 9
-let%span sspec'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 8 16 12 5
-let%span sspec'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 58 8 59 113
+let%span sspec = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 117 16 117 83
+let%span sspec'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 145 8 146 86
+let%span sspec'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 10 16 14 5
+let%span sspec'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 60 8 61 113
 let%span sspec'3 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 149 16 149 113
-let%span sspec'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 127 16 129 41
-let%span sspec'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 25 10 25 15
-let%span sspec'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 35 16 44 5
-let%span sspec'7 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 39 16 39 67
-let%span sspec'8 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 50 16 51 85
-let%span sspec'9 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 18 16 19 54
-let%span sspec'10 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 33 16 33 70
-let%span sspec'11 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 63 16 67 5
+let%span sspec'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 129 16 131 41
+let%span sspec'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 27 10 27 15
+let%span sspec'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 37 16 46 5
+let%span sspec'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 103 8 107 9
+let%span sspec'8 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 20 16 21 54
+let%span sspec'9 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 33 16 33 70
+let%span sspec'10 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 63 16 67 5
+let%span sspec'11 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 39 16 39 67
+let%span sspec'12 = "/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 50 16 51 85
 let%span smetadata_record_offset_deltas = "/workspace/crates/verified/src/raft/metadata_record_offset_deltas.rs" 99 28 99 48
 let%span smetadata_record_offset_deltas'0 = "/workspace/crates/verified/src/raft/metadata_record_offset_deltas.rs" 100 28 100 73
 let%span smetadata_record_offset_deltas'1 = "/workspace/crates/verified/src/raft/metadata_record_offset_deltas.rs" 101 28 104 67
@@ -41,50 +42,50 @@ let%span smetadata_record_offset_deltas'4 = "/workspace/crates/verified/src/raft
 let%span smetadata_record_offset_deltas'5 = "/workspace/crates/verified/src/raft/metadata_record_offset_deltas.rs" 138 28 139 68
 let%span smetadata_record_offset_deltas'6 = "/workspace/crates/verified/src/raft/metadata_record_offset_deltas.rs" 127 28 127 60
 let%span smetadata_record_offset_deltas'7 = "/workspace/crates/verified/src/raft/metadata_record_offset_deltas.rs" 120 28 120 73
-let%span scommit = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 50 8 50 96
-let%span scommit'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 50 8 50 97
-let%span scommit'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 52 33 52 43
-let%span scommit'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 54 18 54 19
-let%span scommit'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 57 14 57 66
-let%span scommit'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 58 32 58 42
-let%span scommit'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 59 16 59 22
-let%span scommit'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 62 14 62 32
-let%span scommit'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 63 14 63 26
-let%span scommit'8 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 61 16 61 77
-let%span scommit'9 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 60 16 60 59
-let%span scommit'10 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 64 44 64 47
-let%span scommit'11 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 64 28 64 48
-let%span scommit'12 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 64 21 64 48
-let%span scommit'13 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 64 8 64 49
-let%span scommit'14 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 65 13 65 14
-let%span scommit'15 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 65 8 65 14
-let%span scommit'16 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 67 42 67 50
-let%span scommit'17 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 67 17 67 56
-let%span scommit'18 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 68 18 68 81
-let%span scommit'19 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 69 18 69 60
-let%span scommit'20 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 70 18 70 58
-let%span scommit'21 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 71 16 71 42
-let%span scommit'22 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 72 43 72 53
-let%span scommit'23 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 73 16 73 22
-let%span scommit'24 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 78 14 78 33
-let%span scommit'25 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 79 14 79 27
-let%span scommit'26 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 75 16 77 76
-let%span scommit'27 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 74 16 74 57
-let%span scommit'28 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 80 51 80 54
-let%span scommit'29 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 80 56 80 57
-let%span scommit'30 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 80 24 80 63
-let%span scommit'31 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 81 26 81 29
-let%span scommit'32 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 81 64 81 65
-let%span scommit'33 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 81 31 81 65
-let%span scommit'34 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 81 8 81 78
-let%span scommit'35 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 82 13 82 14
-let%span scommit'36 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 82 8 82 14
+let%span scommit = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 49 8 49 96
+let%span scommit'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 49 8 49 97
+let%span scommit'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 51 33 51 43
+let%span scommit'2 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 53 18 53 19
+let%span scommit'3 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 56 14 56 66
+let%span scommit'4 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 57 32 57 42
+let%span scommit'5 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 58 16 58 22
+let%span scommit'6 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 61 14 61 32
+let%span scommit'7 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 62 14 62 26
+let%span scommit'8 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 60 16 60 77
+let%span scommit'9 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 59 16 59 59
+let%span scommit'10 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 63 44 63 47
+let%span scommit'11 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 63 28 63 48
+let%span scommit'12 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 63 21 63 48
+let%span scommit'13 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 63 8 63 49
+let%span scommit'14 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 64 13 64 14
+let%span scommit'15 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 64 8 64 14
+let%span scommit'16 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 66 42 66 50
+let%span scommit'17 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 66 17 66 56
+let%span scommit'18 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 67 18 67 81
+let%span scommit'19 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 68 18 68 60
+let%span scommit'20 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 69 18 69 58
+let%span scommit'21 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 70 16 70 42
+let%span scommit'22 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 71 43 71 53
+let%span scommit'23 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 72 16 72 22
+let%span scommit'24 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 77 14 77 33
+let%span scommit'25 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 78 14 78 27
+let%span scommit'26 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 74 16 76 76
+let%span scommit'27 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 73 16 73 57
+let%span scommit'28 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 79 51 79 54
+let%span scommit'29 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 79 56 79 57
+let%span scommit'30 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 79 24 79 63
+let%span scommit'31 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 80 26 80 29
+let%span scommit'32 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 80 64 80 65
+let%span scommit'33 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 80 31 80 65
+let%span scommit'34 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 80 8 80 78
+let%span scommit'35 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 81 13 81 14
+let%span scommit'36 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 81 8 81 14
 let%span scommit'37 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 8 11 8 59
-let%span scommit'38 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 9 10 14 91
-let%span scommit'39 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 15 10 38 1
+let%span scommit'38 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 9 10 13 90
+let%span scommit'39 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 14 10 37 1
 let%span sprepare = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 8 11 8 59
-let%span sprepare'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 9 10 13 85
-let%span sprepare'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 14 10 33 1
+let%span sprepare'0 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 9 10 12 84
+let%span sprepare'1 = "/workspace/crates/verified/src/composition/reconfiguration/control_support/prepare.rs" 13 10 32 1
 let%span sadmitted_plan = "/workspace/crates/verified/src/reconfiguration/admitted_plan.rs" 164 8 179 9
 let%span sadmitted_plan'0 = "/workspace/crates/verified/src/reconfiguration/admitted_plan.rs" 89 8 148 9
 let%span sadmitted_plan'1 = "/workspace/crates/verified/src/reconfiguration/admitted_plan.rs" 44 8 44 87
@@ -152,30 +153,32 @@ type t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option
   | None'0
   | Some'0 tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64
 
-predicate control_inputs_coherent [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 110 0 114 9] (old': Seq.seq UInt64.t) (context: t_CurrentVoterSet) (reports: Seq.seq tup2_i64_i64) =
+predicate control_inputs_coherent [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 112 0 116 9] (old': Seq.seq UInt64.t) (context: t_CurrentVoterSet) (reports: Seq.seq tup2_i64_i64) =
   [%#sspec] UInt64.t'int context.voter_count = Seq.length old' /\ Seq.length reports = Seq.length old' + 1
+
+type tup2_u64_TargetVoter = { f0'5: UInt64.t; f1'5: t_TargetVoter }
 
 predicate gt_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other < self
 
 meta "rewrite_def" predicate gt_log_Int
 
-type tup2_u64_u64 = { f0'5: UInt64.t; f1'5: UInt64.t }
+type tup2_u64_u64 = { f0'6: UInt64.t; f1'6: UInt64.t }
 
 predicate pairwise_u64 [#"/workspace/crates/verified/src/sequence.rs" 20 0 20 95] (values: Seq.seq UInt64.t) (relation: Map.map tup2_u64_u64 bool) =
   [%#ssequence'1] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length values
-    -> Map.get relation { f0'5 = Seq.get values i; f1'5 = Seq.get values j }
+    -> Map.get relation { f0'6 = Seq.get values i; f1'6 = Seq.get values j }
 
 predicate distinct_u64 [#"/workspace/crates/verified/src/sequence.rs" 6 0 6 42] (values: Seq.seq UInt64.t) =
-  [%#ssequence] pairwise_u64 values (fun (__0: tup2_u64_u64) -> let {f0'5 = left; f1'5 = right} = __0 in left <> right)
+  [%#ssequence] pairwise_u64 values (fun (__0: tup2_u64_u64) -> let {f0'6 = left; f1'6 = right} = __0 in left <> right)
 
 predicate valid_old [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 38 0 38 41] (nodes: Seq.seq UInt64.t) =
-  [%#sspec'7] gt_log_Int (Seq.length nodes) 0 /\ distinct_u64 nodes
+  [%#sspec'11] gt_log_Int (Seq.length nodes) 0 /\ distinct_u64 nodes
 
 predicate has_node [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 32 0 32 63] (nodes: Seq.seq UInt64.t) (count: int) (node: UInt64.t) =
-  [%#sspec'10] exists i: int. 0 <= i /\ i < count /\ Seq.get nodes i = node
+  [%#sspec'9] exists i: int. 0 <= i /\ i < count /\ Seq.get nodes i = node
 
 predicate membership_coherent [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 44 0 49 9] (nodes: Seq.seq UInt64.t) (node: UInt64.t) (membership'0: t_TargetMembership) (kind'0: t_VoterChangeKind) =
-  [%#sspec'8] kind'0 = FinalizeKraftVersion \/ has_node nodes (Seq.length nodes) node = (membership'0 <> Absent)
+  [%#sspec'12] kind'0 = FinalizeKraftVersion \/ has_node nodes (Seq.length nodes) node = (membership'0 <> Absent)
 
 type t_VoterReconfigurationDecision =
   | NotLeader
@@ -270,20 +273,24 @@ function voter_reconfiguration_rejection [#"/workspace/crates/verified/src/recon
 
 
 
-predicate control_request_admitted [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 93 0 99 9] (old': Seq.seq UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest) (node: UInt64.t) (target: t_TargetVoter) =
-  [%#sspec'0] valid_old old'
+predicate control_request_admitted [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 95 0 101 9] (old': Seq.seq UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest) (node: UInt64.t) (target: t_TargetVoter) =
+  [%#sspec'7] valid_old old'
   /\ membership_coherent old' node target.membership request.kind
   /\ match voter_reconfiguration_rejection state.f0'0 state.f1'0 request target with
     | Some'1 _ -> false
     | None'1 -> true
     end
 
-function control_record_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 7 0 7 71] (version: UInt16.t) (kind'0: t_VoterChangeKind) : int
+function control_record_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 9 0 9 71] (version: UInt16.t) (kind'0: t_VoterChangeKind) : int
  = [%#sspec'1] match kind'0 with
     | FinalizeKraftVersion -> 2
     | Update -> if UInt16.t'int version = 0 then 0 else 1
     | Add | Remove -> 1
     end
+
+predicate control_supported_request [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 137 0 143 9] (old': Seq.seq UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest) (candidate: tup2_u64_TargetVoter) (support: bool) =
+  [%#sspec'0] control_request_admitted old' state request candidate.f0'5 candidate.f1'5
+  /\ (control_record_count state.f1'0.kraft_version request.kind = 0 \/ support)
 
 predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other <= self
 
@@ -292,13 +299,13 @@ meta "rewrite_def" predicate ge_log_Int
 constant const_MAX'0: Int64.t = (9223372036854775807: Int64.t)
 
 predicate expected_member [#"/workspace/crates/verified/src/composition/reconfiguration/spec.rs" 56 0 62 9] (nodes: Seq.seq UInt64.t) (count: int) (kind'0: t_VoterChangeKind) (target: UInt64.t) (node: UInt64.t) =
-  [%#sspec'11] match kind'0 with
+  [%#sspec'10] match kind'0 with
     | Add -> has_node nodes count node \/ node = target
     | Remove -> has_node nodes count node /\ node <> target
     | Update | FinalizeKraftVersion -> has_node nodes count node
     end
 
-function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 26 0 34 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
+function prefix_count [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 28 0 36 8] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) (new: bool) (count: int) : int
 
 axiom prefix_count_def:
   forall old': Seq.seq UInt64.t, reports: Seq.seq tup2_i64_i64, kind'0: t_VoterChangeKind, node: UInt64.t, end': int, new: bool, count: int [prefix_count old' reports kind'0 node end' new count]. prefix_count old' reports kind'0 node end' new count
@@ -328,14 +335,14 @@ axiom prefix_count_def:
       )
     )
 
-function next_size [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 17 0 17 58] (count: int) (kind'0: t_VoterChangeKind) : int
- = [%#sspec'9] match kind'0 with
+function next_size [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 19 0 19 58] (count: int) (kind'0: t_VoterChangeKind) : int
+ = [%#sspec'8] match kind'0 with
     | Add -> count + 1
     | Remove -> count - 1
     | _ -> count
     end
 
-predicate control_prefix_majorities [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 50 0 56 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) =
+predicate control_prefix_majorities [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 52 0 58 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (kind'0: t_VoterChangeKind) (node: UInt64.t) (end': int) =
   [%#sspec'2] ge_log_Int (prefix_count old' reports kind'0 node end' false (Seq.length reports)) (ComputerDivision.div (Seq.length old') 2
     + 1)
   /\ ge_log_Int (prefix_count old' reports kind'0 node end' true (Seq.length reports)) (ComputerDivision.div (next_size (Seq.length old') kind'0) 2
@@ -374,7 +381,7 @@ axiom view_Vec_i32_Global_spec:
   forall self: t_Vec_i32_Global [view_Vec_i32_Global self]. [%#svec'0] Seq.length (view_Vec_i32_Global self)
     <= UInt64.t'int const_MAX
 
-predicate common_prefix_reported [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 120 0 126 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (next: Seq.seq UInt64.t) (common: UInt64.t) (end': int) =
+predicate common_prefix_reported [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/spec.rs" 122 0 128 9] (old': Seq.seq UInt64.t) (reports: Seq.seq tup2_i64_i64) (next: Seq.seq UInt64.t) (common: UInt64.t) (end': int) =
   [%#sspec'4] exists i: int. 0 <= i
     /\ i < Seq.length old'
     /\ Seq.get old' i = common
@@ -391,12 +398,11 @@ let reconfiguration_control_prefix_support (old': Slice64.slice UInt64.t)
     (result: t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64) ->
   {[@stop_split] [@expl:reconfiguration_control_prefix_support ensures] ([@stop_split] [@expl:reconfiguration_control_prefix_support ensures #0] [%#sprepare'0] (result
         <> None'0)
-      = (control_request_admitted (Slice64.view old') state request node target
-      /\ (control_record_count state.f1'0.kraft_version request.kind = 0
-      \/ ge_log_Int (Int64.to_int base) 0
+      = control_supported_request (Slice64.view old') state request { f0'5 = node;
+                                                                      f1'5 = target } (ge_log_Int (Int64.to_int base) 0
       /\ Int64.to_int base + control_record_count state.f1'0.kraft_version request.kind <= Int64.to_int const_MAX'0
       /\ control_prefix_majorities (Slice64.view old') (Slice64.view reports) request.kind node (Int64.to_int base
-      + control_record_count state.f1'0.kraft_version request.kind))))
+      + control_record_count state.f1'0.kraft_version request.kind)))
     /\ ([@stop_split] [@expl:reconfiguration_control_prefix_support ensures #1] [%#sprepare'1] match result with
       | None'0 -> true
       | Some'0 {f0'4 = plan; f1'4 = next; f2'4 = deltas; f3'4 = support} -> admitted_plan state.f1'0 request.kind plan
@@ -444,7 +450,7 @@ predicate inv_Option_Infallible (_1: t_Option_Infallible)
 axiom inv_axiom [@rewrite]: forall x: t_Option_Infallible [inv_Option_Infallible x]. inv_Option_Infallible x
     = match x with
       | None'2 -> true
-      | Some'2 f0'6 -> inv_Infallible f0'6
+      | Some'2 f0'7 -> inv_Infallible f0'7
       end
 
 predicate inv_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64 (_1: t_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64)
@@ -452,8 +458,8 @@ predicate inv_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u6
 axiom inv_axiom'0 [@rewrite]:
   forall x: t_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64 [inv_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64 x]. inv_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64 x
     = match x with
-      | Continue f0'6 -> true
-      | Break f0'6 -> inv_Option_Infallible f0'6
+      | Continue f0'7 -> true
+      | Break f0'7 -> inv_Option_Infallible f0'7
       end
 
 let branch_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64
@@ -471,8 +477,8 @@ any
 
 let elim_Break
   (_x: t_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64)
-  (return (f0'6: t_Option_Infallible)) = any
-  [ _k (f0'6: t_Option_Infallible) -> {Break f0'6 = _x} (! return {f0'6})
+  (return (f0'7: t_Option_Infallible)) = any
+  [ _k (f0'7: t_Option_Infallible) -> {Break f0'7 = _x} (! return {f0'7})
   | _chk -> (! {[@expl:elim Break] match _x with
       | Break _ -> true
       | _ -> false
@@ -481,15 +487,15 @@ let elim_Break
 
 type t_Vec_tup3_i64_bool_bool_Global
 
-type tup5_i64_i64_usize_bool_u64 = { f0'6: Int64.t; f1'6: Int64.t; f2'6: UInt64.t; f3'6: bool; f4'6: UInt64.t }
+type tup5_i64_i64_usize_bool_u64 = { f0'7: Int64.t; f1'7: Int64.t; f2'7: UInt64.t; f3'7: bool; f4'7: UInt64.t }
 
 type t_Option_tup5_i64_i64_usize_bool_u64 = None'3 | Some'3 tup5_i64_i64_usize_bool_u64
 
 type tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_tup3_i64_bool_bool_Global_Option_tup5_i64_i64_usize_bool_u64 = {
-  f0'7: t_VoterReconfigurationPlan;
-  f1'7: t_Vec_u64_Global;
-  f2'7: t_Vec_tup3_i64_bool_bool_Global;
-  f3'7: t_Option_tup5_i64_i64_usize_bool_u64 }
+  f0'8: t_VoterReconfigurationPlan;
+  f1'8: t_Vec_u64_Global;
+  f2'8: t_Vec_tup3_i64_bool_bool_Global;
+  f3'8: t_Option_tup5_i64_i64_usize_bool_u64 }
 
 type t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_tup3_i64_bool_bool_Global_Option_tup5_i64_i64_usize_bool_u64 =
   | None'4
@@ -507,18 +513,18 @@ let from_residual_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_tup3_i
 
 let elim_Continue
   (_x: t_ControlFlow_Option_Infallible_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64)
-  (return (f0'8: tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64)) =
+  (return (f0'9: tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64)) =
 any
-  [ _k (f0'8: tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64) ->
-  {Continue f0'8 = _x}
-    (! return {f0'8})
+  [ _k (f0'9: tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64) ->
+  {Continue f0'9 = _x}
+    (! return {f0'9})
   | _chk -> (! {[@expl:elim Continue] match _x with
       | Continue _ -> true
       | _ -> false
       end}
     any) ]
 
-type tup3_i64_bool_bool = { f0'8: Int64.t; f1'8: bool; f2'8: bool }
+type tup3_i64_bool_bool = { f0'9: Int64.t; f1'9: bool; f2'9: bool }
 
 function view_Vec_tup3_i64_bool_bool_Global (self: t_Vec_tup3_i64_bool_bool_Global) : Seq.seq tup3_i64_bool_bool
 
@@ -531,8 +537,8 @@ let new_tup3_i64_bool_bool (return (x: t_Vec_tup3_i64_bool_bool_Global)) = any
   {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_tup3_i64_bool_bool_Global result) = 0}
     (! return {result}) ]
 
-let elim_Some (_x: t_Option_tup3_i64_tup2_usize_usize_u64) (return (f0'9: tup3_i64_tup2_usize_usize_u64)) = any
-  [ _k (f0'9: tup3_i64_tup2_usize_usize_u64) -> {Some f0'9 = _x} (! return {f0'9})
+let elim_Some (_x: t_Option_tup3_i64_tup2_usize_usize_u64) (return (f0'10: tup3_i64_tup2_usize_usize_u64)) = any
+  [ _k (f0'10: tup3_i64_tup2_usize_usize_u64) -> {Some f0'10 = _x} (! return {f0'10})
   | _chk -> (! {[@expl:elim Some] match _x with
       | Some _ -> true
       | _ -> false
@@ -677,7 +683,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 39 0 47 21]
+let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/composition/reconfiguration/control_support/commit.rs" 38 0 46 21]
   (old': Slice64.slice UInt64.t) (state: tup2_ReconfigurationLeadership_CurrentVoterSet) (request: t_VoterChangeRequest)
   (node: UInt64.t) (target: t_TargetVoter) (reports: Slice64.slice tup2_i64_i64) (progress: tup4_i64_i64_i64_i64)
   (return (x: t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_tup3_i64_bool_bool_Global_Option_tup5_i64_i64_usize_bool_u64)) =
@@ -723,7 +729,7 @@ let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/comp
   | bb11 = s0
     [ s0 = new_tup3_i64_bool_bool [%#scommit'1] (fun (_x: t_Vec_tup3_i64_bool_bool_Global) -> [ &_59 <- _x ] s1)
     | s1 = [ &_60 <- None'3 ] s2
-    | s2 = [ &_56 <- { f0'7 = plan; f1'7 = next; f2'7 = _59; f3'7 = _60 } ] s3
+    | s2 = [ &_56 <- { f0'8 = plan; f1'8 = next; f2'8 = _59; f3'8 = _60 } ] s3
     | s3 = [ &_ret <- Some'4 _56 ] s4
     | s4 = return {_ret} ]
   | bb17 = s0
@@ -792,11 +798,11 @@ let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/comp
         <= Seq.length (view_Vec_i64_Global offsets)
       /\ Seq.length (view_Vec_tup3_i64_bool_bool_Global rows) = UInt64.t'int i'0}
       {[@expl:loop invariant #1] [%#scommit'26] forall j: int. 0 <= j /\ j < UInt64.t'int i'0
-        -> Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f0'8 = Int64.to_int base + j
-        /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f1'8 = (plan.write_kraft_version /\ j = 0)
-        /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f2'8 = (j < UInt64.t'int prefix)
-        /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f2'8
-        = (Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f0'8 < Int64.to_int hwm)}
+        -> Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f0'9 = Int64.to_int base + j
+        /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f1'9 = (plan.write_kraft_version /\ j = 0)
+        /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f2'9 = (j < UInt64.t'int prefix)
+        /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f2'9
+        = (Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) j).f0'9 < Int64.to_int hwm)}
       (! [ &variant_old_bb39 <- [%#scommit'24] Seq.length (view_Vec_i64_Global offsets) - UInt64.t'int i'0 ] s0)
       [ s0 = len_i64 [%#scommit'25] {offsets} (fun (_x: UInt64.t) -> [ &_153 <- _x ] s1)
       | s1 = [ &_151 <- UInt64.lt i'0 _153 ] s2
@@ -810,16 +816,16 @@ let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/comp
       | bb46 = s0 [ s0 = [ &_168 <- i'0 = ([%#scommit'32] (0: UInt64.t)) ] s1 | s1 = bb48 ]
       | bb47 = s0 [ s0 = [ &_168 <- [%#scommit'33] false ] s1 | s1 = bb48 ]
       | bb48 = s0
-        [ s0 = [ &_163 <- { f0'8 = _165; f1'8 = _168; f2'8 = committed } ] s1
+        [ s0 = [ &_163 <- { f0'9 = _165; f1'9 = _168; f2'9 = committed } ] s1
         | s1 = MutBorrow.borrow_mut <t_Vec_tup3_i64_bool_bool_Global> {rows}
             (fun (_bor: MutBorrow.t t_Vec_tup3_i64_bool_bool_Global) -> [ &_162 <- _bor ] [ &rows <- _bor.final ] s2)
         | s2 = push_tup3_i64_bool_bool [%#scommit'34] {_162} {_163} (fun (_x: ()) -> [ &_161 <- _x ] s3)
         | s3 = UInt64.add [%#scommit'36] {i'0} {[%#scommit'35] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i'0 <- _x ] s4)
         | s4 = bb39 ] ] ]
   | bb50 = s0
-    [ s0 = [ &_178 <- { f0'6 = end'; f1'6 = hwm; f2'6 = prefix; f3'6 = ready; f4'6 = common } ] s1
+    [ s0 = [ &_178 <- { f0'7 = end'; f1'7 = hwm; f2'7 = prefix; f3'7 = ready; f4'7 = common } ] s1
     | s1 = [ &_177 <- Some'3 _178 ] s2
-    | s2 = [ &_173 <- { f0'7 = plan; f1'7 = next; f2'7 = rows; f3'7 = _177 } ] s3
+    | s2 = [ &_173 <- { f0'8 = plan; f1'8 = next; f2'8 = rows; f3'8 = _177 } ] s3
     | s3 = [ &_ret <- Some'4 _173 ] s4
     | s4 = return {_ret} ] ]
   [ & _ret: t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_tup3_i64_bool_bool_Global_Option_tup5_i64_i64_usize_bool_u64 = Any.any_l ()
@@ -885,18 +891,17 @@ let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/comp
     (result: t_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_tup3_i64_bool_bool_Global_Option_tup5_i64_i64_usize_bool_u64) ->
   {[@stop_split] [@expl:reconfiguration_control_commit_waiter ensures] ([@stop_split] [@expl:reconfiguration_control_commit_waiter ensures #0] [%#scommit'38] (result
         <> None'4)
-      = (control_request_admitted (Slice64.view old') state request node target
-      /\ (control_record_count state.f1'0.kraft_version request.kind = 0
-      \/ ge_log_Int (Int64.to_int progress.f0) 0
+      = control_supported_request (Slice64.view old') state request { f0'5 = node;
+                                                                      f1'5 = target } (ge_log_Int (Int64.to_int progress.f0) 0
       /\ 0 <= Int64.to_int progress.f1
       /\ Int64.to_int progress.f1 <= Int64.to_int progress.f3
       /\ Int64.to_int progress.f0 + control_record_count state.f1'0.kraft_version request.kind
         <= Int64.to_int progress.f3
       /\ control_prefix_majorities (Slice64.view old') (Slice64.view reports) request.kind node (Int64.to_int progress.f0
-      + control_record_count state.f1'0.kraft_version request.kind))))
+      + control_record_count state.f1'0.kraft_version request.kind)))
     /\ ([@stop_split] [@expl:reconfiguration_control_commit_waiter ensures #1] [%#scommit'39] match result with
       | None'4 -> true
-      | Some'4 {f0'7 = plan; f1'7 = next; f2'7 = rows; f3'7 = frontier} -> admitted_plan state.f1'0 request.kind plan
+      | Some'4 {f0'8 = plan; f1'8 = next; f2'8 = rows; f3'8 = frontier} -> admitted_plan state.f1'0 request.kind plan
       /\ Seq.length (view_Vec_u64_Global next) = UInt64.t'int plan.next_voter_count
       /\ membership_matches_change (Slice64.view old') (view_Vec_u64_Global next) request.kind node
       /\ Seq.length (view_Vec_tup3_i64_bool_bool_Global rows)
@@ -904,7 +909,7 @@ let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/comp
       /\ (frontier = None'3) = plan.preflight_only
       /\ match frontier with
         | None'3 -> Seq.length (view_Vec_tup3_i64_bool_bool_Global rows) = 0
-        | Some'3 {f0'6 = end'; f1'6 = hwm; f2'6 = prefix; f3'6 = ready; f4'6 = common} -> Int64.to_int end'
+        | Some'3 {f0'7 = end'; f1'7 = hwm; f2'7 = prefix; f3'7 = ready; f4'7 = common} -> Int64.to_int end'
           = Int64.to_int progress.f0 + Seq.length (view_Vec_tup3_i64_bool_bool_Global rows)
         /\ Int64.to_int progress.f0 < Int64.to_int end'
         /\ 0 <= Int64.to_int progress.f1
@@ -921,11 +926,11 @@ let reconfiguration_control_commit_waiter [#"/workspace/crates/verified/src/comp
           = (ge_log_Int (Int64.to_int progress.f1) (Int64.to_int end')
           \/ ge_log_Int (Int64.to_int progress.f2) (Int64.to_int end'))
         /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_tup3_i64_bool_bool_Global rows)
-            -> Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f0'8 = Int64.to_int progress.f0 + i
-            /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f1'8 = (plan.write_kraft_version /\ i = 0)
-            /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f2'8 = (i < UInt64.t'int prefix)
-            /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f2'8
-            = (Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f0'8 < Int64.to_int hwm))
+            -> Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f0'9 = Int64.to_int progress.f0 + i
+            /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f1'9 = (plan.write_kraft_version /\ i = 0)
+            /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f2'9 = (i < UInt64.t'int prefix)
+            /\ (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f2'9
+            = (Int64.to_int (Seq.get (view_Vec_tup3_i64_bool_bool_Global rows) i).f0'9 < Int64.to_int hwm))
         /\ common_prefix_reported (Slice64.view old') (Slice64.view reports) (view_Vec_u64_Global next) common (Int64.to_int end')
         end
       end)}

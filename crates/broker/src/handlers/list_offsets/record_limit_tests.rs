@@ -160,8 +160,7 @@ async fn a_trunk_broker_refuses_a_lookup_that_reads_an_oversized_record() {
 
     // The record body is 1007 bytes, so a limit of exactly that admits it.
     set_cluster_limit(&broker, "1007", 2).await;
-    assert!(list_one(&client, TOPIC, 1_500).await == found(1, 2_000));
-    assert!(list_one(&client, TOPIC, MAX_TIMESTAMP).await == found(1, 2_000));
+    check_large_record_lookups(&client).await;
 
     drop(client);
     broker.shutdown().await;
@@ -176,8 +175,7 @@ async fn a_default_broker_ignores_the_limit_on_a_lookup() {
 
     set_cluster_limit(&broker, "100", 1).await;
 
-    assert!(list_one(&client, TOPIC, 1_500).await == found(1, 2_000));
-    assert!(list_one(&client, TOPIC, MAX_TIMESTAMP).await == found(1, 2_000));
+    check_large_record_lookups(&client).await;
     assert!(
         broker
             .partition_log_config_for_test(TOPIC, 0)
@@ -188,4 +186,10 @@ async fn a_default_broker_ignores_the_limit_on_a_lookup() {
 
     drop(client);
     broker.shutdown().await;
+}
+
+async fn check_large_record_lookups(client: &krabka_client_core::Client) {
+    for timestamp in [1_500, MAX_TIMESTAMP] {
+        assert!(list_one(client, TOPIC, timestamp).await == found(1, 2_000));
+    }
 }

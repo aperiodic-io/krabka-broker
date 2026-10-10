@@ -5,7 +5,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
-use krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord, TopicConfigRecord};
+use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
 use krabka_protocol::records::RecordBatch;
 
 use crate::config_keys::MIN_INSYNC_REPLICAS;
@@ -19,6 +19,13 @@ pub(super) struct PipelineFixture {
     pub(super) log_dir_status: crate::log_dir_status::LogDirRegistry,
     pub(super) metrics: crate::metrics::BrokerMetrics,
     phases: crate::metrics::RequestPhases,
+}
+
+#[derive(krabka_macros::FieldDefaults)]
+pub(super) struct PipelinePartitionSetup<'a> {
+    #[default("orders")]
+    pub topic: &'a str,
+    pub log_config: krabka_log::LogConfig,
 }
 
 impl PipelineFixture {
@@ -43,27 +50,33 @@ impl PipelineFixture {
         topic: &str,
         image: &MetadataImage,
     ) -> Arc<crate::partition::Partition> {
-        self.partition_with_config(root, topic, image, krabka_log::LogConfig::default())
-            .await
+        self.partition_with_config(
+            root,
+            image,
+            PipelinePartitionSetup {
+                topic,
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     pub(super) async fn partition_with_config(
         &self,
         root: &std::path::Path,
-        topic: &str,
         image: &MetadataImage,
-        log_config: krabka_log::LogConfig,
+        setup: PipelinePartitionSetup<'_>,
     ) -> Arc<crate::partition::Partition> {
+        let PipelinePartitionSetup { topic, log_config } = setup;
         let partition = crate::handlers::test_support::spawn_partition(
             root,
-            topic,
-            0,
-            (
-                self.log_dir_status.clone(),
-                Arc::clone(&self.producer_state),
-            ),
-            false,
-            log_config,
+            crate::handlers::test_support::PartitionSpawnSetup {
+                topic,
+                log_dir_status: self.log_dir_status.clone(),
+                producer_state: Arc::clone(&self.producer_state),
+                log_config,
+                ..Default::default()
+            },
         );
         let record = image.partition(topic, 0).expect("partition");
         let topic_id = image.topic(topic).expect("topic").topic_id;
@@ -76,10 +89,10 @@ impl PipelineFixture {
         partition
     }
 
-    pub(super) fn new(node_id: u64) -> Self {
+    pub(super) fn new(node_id: krabka_ids::NodeId) -> Self {
         let partitions = Arc::new(crate::partition_registry::PartitionRegistry::new());
         let txn_coordinator = Arc::new(crate::txn::coordinator::TxnCoordinator::new(
-            krabka_audit::NodeId(node_id),
+            node_id,
             Arc::clone(&partitions),
             Arc::new(crate::producer_id_manager::ProducerIdManager::new()),
             50,
@@ -148,17 +161,15 @@ pub(crate) fn image_with_topic(topic: &str, isr: &[u64]) -> MetadataImage {
     crate::test_support::topic_partition_image(
         topic,
         i16::try_from(isr.len().max(1)).unwrap(),
-        || PartitionRecord {
-            topic: topic.into(),
-            partition: 0,
-            leader: krabka_audit::NodeId(*isr.first().unwrap_or(&1)),
-            replicas: isr.iter().copied().map(krabka_audit::NodeId).collect(),
-            isr: isr.iter().copied().map(krabka_audit::NodeId).collect(),
-            leader_epoch: krabka_metadata::LeaderEpoch(0),
-            adding_replicas: vec![],
-            removing_replicas: vec![],
-            directories: vec![],
-            partition_epoch: 0,
+        || {
+            crate::handlers::test_support::replicated_partition(
+                crate::handlers::test_support::ReplicatedPartitionSetup {
+                    topic,
+                    leader: krabka_audit::NodeId(*isr.first().unwrap_or(&1)),
+                    replicas: &crate::test_support::replica_nodes(isr),
+                    ..Default::default()
+                },
+            )
         },
     )
 }

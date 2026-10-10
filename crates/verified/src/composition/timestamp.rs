@@ -16,6 +16,16 @@ pub(super) fn record_offsets_ordered(offsets: Seq<u32>) -> bool {
 }
 }
 
+open_logic! {
+/// Validated archive cursors agree on the preceding indexed offset.
+pub(super) fn time_cursor_matches(entries: Seq<(i64, u32)>, cursor: (usize, u32, u32)) -> bool {
+    pearlite! {
+        cursor.1 == cursor.2 && cursor.0@ <= entries.len()
+            && cursor.1 == if cursor.0@ == 0 { 0u32 } else { entries[cursor.0@ - 1].1 }
+    }
+}
+}
+
 /// Construct a sparse row from the actual prefix maximum. The indexed record
 /// can be a batch base while `through` includes the batch's remaining records.
 #[requires(offsets@.len() == timestamps@.len())]
@@ -137,15 +147,15 @@ pub fn time_archive_valid(entries: Seq<(i64, u32)>, max_relative: Int) -> bool {
 }
 }
 
+krabka_macros::validate_archive_rows! {
 /// Archive row validation makes the remote prefix floor and local binary
 /// scan start agree. Raw trailing padding must be excluded before validation;
 /// the separate remote scan theorem admits its zero-offset rows directly.
 /// Reject exactly invalid rows; successful validation returns actual cursors.
-#[ensures(match result {
+#[ensures(|result| match result {
     Err(()) => !time_archive_valid(entries@, max_relative@),
     Ok((count, remote, local)) => time_archive_valid(entries@, max_relative@)
-        && remote == local && count@ <= entries@.len()
-        && remote == if count@ == 0 { 0u32 } else { entries@[count@ - 1].1 }
+        && time_cursor_matches(entries@, (count, remote, local))
         && (entries@.len() == 0 || remote@ <= max_relative@)
         && timestamp_archive_prefix(entries@, target@, count@),
 })]
@@ -153,23 +163,13 @@ pub(super) fn validated_remote_and_local_time_starts_agree(
     entries: &[(i64, u32)],
     max_relative: i64,
     target: i64,
-) -> Result<(usize, u32, u32), ()> {
-    let mut i = 0usize;
-    let mut previous = None;
-    #[invariant(i@ <= entries@.len())]
-    #[invariant(previous == if i@ == 0 { None } else { Some(entries@[i@ - 1]) })]
+) -> Result<(usize, u32, u32), ()>;
+    entries, i, previous, timestamp, relative;
     #[invariant(forall<j: Int> 0 <= j && j < i@ ==> entries@[j].1@ <= max_relative@)]
     #[invariant(forall<j: Int, k: Int> 0 <= j && j < k && k < i@
         ==> entries@[j].0@ <= entries@[k].0@ && entries@[j].1@ < entries@[k].1@)]
-    #[variant(entries@.len() - i@)]
-    while i < entries.len() {
-        let (timestamp, relative) = entries[i];
-        if !restore_time_index_entry_valid(previous, timestamp, relative, max_relative) {
-            return Err(());
-        }
-        previous = Some((timestamp, relative));
-        i += 1;
-    }
+    ;
+        restore_time_index_entry_valid(previous, timestamp, relative, max_relative);
     let count = remote_time_index_candidate_count(entries, target);
     let remote = if count == 0 { 0 } else { entries[count - 1].1 };
     let local = time_index_scan_start(entries, target);

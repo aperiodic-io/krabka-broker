@@ -9,6 +9,7 @@ use std::{io, net::SocketAddr};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use krabka_broker::{Broker, BrokerHandle};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::owned::{
     api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
     sasl_authenticate_request::SaslAuthenticateRequest,
@@ -18,7 +19,13 @@ use krabka_protocol::owned::{
 use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
-use crate::harness::round_trip;
+use crate::{
+    harness::round_trip,
+    support::wire::{
+        CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+        SocketExchangeSetup,
+    },
+};
 
 /// Build an unsecured JWS (`alg:none`) bearer token with a `sub` principal and
 /// an `exp` in Unix seconds.
@@ -87,7 +94,15 @@ pub async fn oauthbearer_handshake(
 ) -> Result<(), io::Error> {
     let av_req = ApiVersionsRequest::default();
     let av_body = crate::kafka_wire::encode_named(&av_req, 0, "ApiVersions")?;
-    let av = round_trip(stream, 18, 0, *corr, false, &av_body).await?;
+    let av = round_trip(
+        stream,
+        SocketExchangeSetup {
+            correlation: WireCorrelationId(*corr),
+            ..Default::default()
+        },
+        &av_body,
+    )
+    .await?;
     *corr += 1;
     crate::kafka_wire::decode_named::<ApiVersionsResponse>(&av, 0, "ApiVersions")?;
 
@@ -96,7 +111,17 @@ pub async fn oauthbearer_handshake(
         ..Default::default()
     };
     let sh_body = crate::kafka_wire::encode_named(&sh_req, 1, "SaslHandshake")?;
-    let sh = round_trip(stream, 17, 1, *corr, false, &sh_body).await?;
+    let sh = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            correlation: WireCorrelationId(*corr),
+            ..Default::default()
+        },
+        &sh_body,
+    )
+    .await?;
     *corr += 1;
     let sh_resp =
         crate::kafka_wire::decode_named::<SaslHandshakeResponse>(&sh, 1, "SaslHandshake")?;
@@ -124,7 +149,17 @@ pub async fn oauthbearer_authenticate(
         ..Default::default()
     };
     let body = crate::kafka_wire::encode_named(&req, 2, "SaslAuthenticate")?;
-    let resp_bytes = round_trip(stream, 36, 2, *corr, true, &body).await?;
+    let resp_bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(36),
+            version: WireApiVersion(2),
+            correlation: WireCorrelationId(*corr),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &body,
+    )
+    .await?;
     *corr += 1;
     crate::kafka_wire::decode_named::<SaslAuthenticateResponse>(&resp_bytes, 2, "SaslAuthenticate")
 }
@@ -187,7 +222,17 @@ pub async fn drive_inband_reauth(stream: &mut TcpStream, new_token: &str) -> Res
         ..Default::default()
     };
     let handshake_body = crate::kafka_wire::encode_named(&handshake_request, 1, "SaslHandshake")?;
-    let handshake_response_bytes = round_trip(stream, 17, 1, 100, false, &handshake_body).await?;
+    let handshake_response_bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(17),
+            version: WireApiVersion(1),
+            correlation: WireCorrelationId(100),
+            ..Default::default()
+        },
+        &handshake_body,
+    )
+    .await?;
     let handshake_response = crate::kafka_wire::decode_named::<SaslHandshakeResponse>(
         &handshake_response_bytes,
         1,
@@ -206,8 +251,17 @@ pub async fn drive_inband_reauth(stream: &mut TcpStream, new_token: &str) -> Res
     };
     let authenticate_body =
         crate::kafka_wire::encode_named(&authenticate_request, 2, "SaslAuthenticate")?;
-    let authenticate_response_bytes =
-        round_trip(stream, 36, 2, 101, true, &authenticate_body).await?;
+    let authenticate_response_bytes = round_trip(
+        stream,
+        SocketExchangeSetup {
+            api_key: WireApiKey(36),
+            version: WireApiVersion(2),
+            correlation: WireCorrelationId(101),
+            header: RequestHeaderEncoding::Flexible,
+        },
+        &authenticate_body,
+    )
+    .await?;
     let authenticate_response = crate::kafka_wire::decode_named::<SaslAuthenticateResponse>(
         &authenticate_response_bytes,
         2,

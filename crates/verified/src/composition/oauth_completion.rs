@@ -2,7 +2,7 @@ use creusot_std::prelude::*;
 
 #[cfg(creusot)]
 use crate::oauth::{
-    OAuthAuthenticationKind, OAuthExpiryPresence, OAuthPrincipalMatch, OAuthSessionCap,
+    OAuthAuthenticationKind, OAuthPrincipalMatch, OAuthSessionCap, oauth_session_admissible_at,
 };
 use crate::{
     jwks::{JwksCacheDecision, JwksCacheFacts, jwks_cache_admission},
@@ -45,12 +45,7 @@ fn completed_snapshot_admissible(
 #[requires(match cache { None => true, Some(c) => c.now_ms@ == facts.now_ms@ })]
 #[ensures((result == OAuthSessionDecision::Reject) == (
     !completed_snapshot_admissible(cache, facts.now_ms, completed)
-        || !(facts.expiry == OAuthExpiryPresence::Present
-            && facts.token_expires_at_ms@ > completed.0@
-            && facts.token_expires_at_ms@ - completed.0@ <= i64::MAX@
-            && (facts.cap == OAuthSessionCap::Disabled || facts.cap_ms@ > 0)
-            && (facts.authentication == OAuthAuthenticationKind::Initial
-                || facts.principal == OAuthPrincipalMatch::Matches))
+        || !oauth_session_admissible_at(facts, completed.0@)
 ))]
 #[ensures(match result {
     OAuthSessionDecision::Reject => true,

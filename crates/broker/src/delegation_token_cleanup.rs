@@ -136,6 +136,13 @@ mod tests {
         })
     }
 
+    fn mock_controller(image: MetadataImage) -> Arc<MockController> {
+        Arc::new(MockController {
+            image: Mutex::new(Arc::new(image)),
+            submitted: Mutex::new(Vec::new()),
+        })
+    }
+
     #[tokio::test]
     async fn sweep_emits_tombstones_for_expired_tokens_only() {
         let mut img = MetadataImage::new(Uuid::nil());
@@ -146,10 +153,7 @@ mod tests {
         img.apply(&dt_record("expired-2", 2_000));
         img.apply(&dt_record("fresh", i64::MAX));
 
-        let mock = Arc::new(MockController {
-            image: Mutex::new(Arc::new(img)),
-            submitted: Mutex::new(Vec::new()),
-        });
+        let mock = mock_controller(img);
 
         sweep(&*mock).await;
 
@@ -185,10 +189,7 @@ mod tests {
         let mut img = MetadataImage::new(Uuid::nil());
         img.apply(&dt_record("fresh", i64::MAX));
 
-        let mock = Arc::new(MockController {
-            image: Mutex::new(Arc::new(img)),
-            submitted: Mutex::new(Vec::new()),
-        });
+        let mock = mock_controller(img);
 
         sweep(&*mock).await;
 
@@ -201,10 +202,7 @@ mod tests {
         let mut img = MetadataImage::new(Uuid::nil());
         img.apply(&dt_record("expired", 1_000));
 
-        let mock = Arc::new(MockController {
-            image: Mutex::new(Arc::new(img)),
-            submitted: Mutex::new(Vec::new()),
-        });
+        let mock = mock_controller(img);
         let shutdown = CancellationToken::new();
         let mut task = tokio::spawn(run(mock.clone(), hours(1), shutdown.clone()));
 

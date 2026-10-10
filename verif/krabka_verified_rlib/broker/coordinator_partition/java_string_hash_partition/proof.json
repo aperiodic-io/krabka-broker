@@ -6,7 +6,7 @@
       "vc_java_string_hash_partition": { "prover": "cvc4", "time": 0.246 },
       "vc_len_u16": { "prover": "alt-ergo", "time": 0.014 },
       "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_wrapping_mul": { "prover": "alt-ergo", "time": 0.021 }
+      "vc_wrapping_mul": { "prover": "alt-ergo", "time": 0.01 }
     }
   }
 }

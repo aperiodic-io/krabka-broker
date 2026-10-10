@@ -622,6 +622,7 @@ mod tests {
 
     use assert2::assert;
     use bytes::Bytes;
+    use krabka_ids::ProducerId;
     use krabka_log::{DeliveryPolicy, Log, LogConfig, LogError, Offset};
     use krabka_protocol::{
         owned::fetch_response::{AbortedTransaction, PartitionData},
@@ -640,11 +641,25 @@ mod tests {
     /// `read_committed` case reads back.
     const PID: i64 = 1000;
 
+    fn empty_log() -> (tempfile::TempDir, Log) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = Log::open(dir.path(), LogConfig::default()).expect("open log");
+        (dir, log)
+    }
+
+    fn aborted_transaction_log() -> (tempfile::TempDir, Log) {
+        let (dir, mut log) = empty_log();
+        log.append(&mut transactional_batch(ProducerId(PID)))
+            .expect("append the transaction's one data batch");
+        log.append(&mut abort_marker(ProducerId(PID)))
+            .expect("append the abort marker that closes it");
+        (dir, log)
+    }
+
     /// One batch of two records in a fresh log directory. The directory is
     /// returned because dropping it deletes the segments underneath the log.
     fn two_record_log() -> (tempfile::TempDir, Log) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut log = Log::open(dir.path(), LogConfig::default()).expect("open log");
+        let (dir, mut log) = empty_log();
         log.append(&mut crate::handlers::test_support::default_records_batch(
             &[b"first", b"second"],
         ))
@@ -773,12 +788,7 @@ mod tests {
     /// read without the flag reports none, and neither answer moves a byte.
     #[test]
     fn read_committed_reports_the_aborted_ranges_beside_the_same_bytes() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut log = Log::open(dir.path(), LogConfig::default()).expect("open log");
-        log.append(&mut transactional_batch(PID))
-            .expect("append the transaction's one data batch");
-        log.append(&mut abort_marker(PID))
-            .expect("append the abort marker that closes it");
+        let (_dir, log) = aborted_transaction_log();
         let limit = log.log_end_offset();
         let raw = log
             .read_raw(Offset(0), limit, UNBOUNDED)
@@ -819,16 +829,11 @@ mod tests {
     fn read_committed_aborted_scan_stops_at_the_bytes_actually_served() {
         const OTHER_PID: i64 = PID + 1;
 
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut log = Log::open(dir.path(), LogConfig::default()).expect("open log");
-        log.append(&mut transactional_batch(PID))
-            .expect("append the first transaction's data");
-        log.append(&mut abort_marker(PID))
-            .expect("append the first transaction's abort marker");
+        let (_dir, mut log) = aborted_transaction_log();
         let clip_at = log.log_end_offset();
-        log.append(&mut transactional_batch(OTHER_PID))
+        log.append(&mut transactional_batch(ProducerId(OTHER_PID)))
             .expect("append the second transaction's data");
-        log.append(&mut abort_marker(OTHER_PID))
+        log.append(&mut abort_marker(ProducerId(OTHER_PID)))
             .expect("append the second transaction's abort marker");
         let full_end = log.log_end_offset();
 
@@ -872,9 +877,9 @@ mod tests {
 
     /// One transactional data record from `pid`, the batch that opens the
     /// transaction on this partition. `Log::append` rewrites the offsets.
-    fn transactional_batch(pid: i64) -> RecordBatch {
+    fn transactional_batch(pid: ProducerId) -> RecordBatch {
         RecordBatch {
-            producer_id: pid,
+            producer_id: pid.0,
             attributes: Attributes::default().with_transactional(true),
             records: vec![Record {
                 offset_delta: 0,
@@ -889,13 +894,13 @@ mod tests {
     /// (version=0: i16, `marker_type`=0: i16) big-endian, with the
     /// coordinator epoch in its value. Appending it writes the transaction's
     /// offset range into the partition's `.txnindex`.
-    fn abort_marker(pid: i64) -> RecordBatch {
+    fn abort_marker(pid: ProducerId) -> RecordBatch {
         let mut key = [0u8; 4];
         key[2..4].copy_from_slice(&0i16.to_be_bytes());
         let mut value = [0u8; 6];
         value[2..6].copy_from_slice(&17i32.to_be_bytes());
         RecordBatch {
-            producer_id: pid,
+            producer_id: pid.0,
             attributes: Attributes::default()
                 .with_transactional(true)
                 .with_control(true),
@@ -999,7 +1004,7 @@ mod tests {
                 &[b"before"],
             ))
             .expect("append the record before the transaction"); // offset 0
-            $log.append(&mut transactional_batch(PID))
+            $log.append(&mut transactional_batch(ProducerId(PID)))
                 .expect($transaction_label); // offset 1
         };
     }
@@ -1015,7 +1020,7 @@ mod tests {
             crate::partition::test_support::test_partition(Arc::new(tokio::sync::Notify::new()));
         let transaction = {
             before_and_transaction!(log, partition, "append the transaction's data");
-            let mut commit = abort_marker(PID);
+            let mut commit = abort_marker(ProducerId(PID));
             commit.records[0].key = Some(Bytes::from_static(&[0, 0, 0, 1]));
             log.append(&mut commit).expect("append the commit marker"); // offset 2
             log.read_raw(Offset(1), Offset(3), UNBOUNDED)

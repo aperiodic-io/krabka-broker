@@ -31,9 +31,6 @@ use tracing_subscriber::{Layer, layer::SubscriberExt as _};
 /// Kafka resource type id for `BROKER_LOGGER`.
 const RESOURCE_TYPE_BROKER_LOGGER: i8 = 8;
 
-/// `config_operation` SET = 0 in the `IncrementalAlterConfigs` wire protocol.
-const CONFIG_OP_SET: i8 = 0;
-
 /// `config_source` `DYNAMIC_BROKER_LOGGER_CONFIG` = 6.
 const CONFIG_SOURCE_DYNAMIC_BROKER_LOGGER: i8 = 6;
 
@@ -132,16 +129,18 @@ async fn broker_logger_alter_moves_the_live_filter_and_the_describe_agrees() {
     // ── Step 2: IncrementalAlterConfigs ──────────────────────────────────────
     let alter_resp: IncrementalAlterConfigsResponse = client
         .send(incremental_request(
-            vec![incremental_resource(
-                RESOURCE_TYPE_BROKER_LOGGER,
-                node.clone(),
-                vec![incremental_config(
-                    "krabka_broker".to_owned(),
-                    Some("DEBUG".to_owned()),
-                    CONFIG_OP_SET,
+            crate::support::configs::IncrementalConfigsSetup {
+                resources: vec![incremental_resource(
+                    RESOURCE_TYPE_BROKER_LOGGER,
+                    node.clone(),
+                    vec![incremental_config(
+                        "krabka_broker".to_owned(),
+                        Some("DEBUG".to_owned()),
+                        crate::support::configs::ConfigOperation::Set,
+                    )],
                 )],
-            )],
-            false,
+                ..Default::default()
+            },
         ))
         .await
         .expect("IncrementalAlterConfigs");

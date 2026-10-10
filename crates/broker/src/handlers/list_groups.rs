@@ -321,10 +321,12 @@ mod tests {
 
     fn acl(resource_type: ResourceType, name: &str, user: &str) -> MetadataRecord {
         MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-            resource_type,
-            name,
-            &format!("User:{user}"),
-            AclOperation::Describe,
+            crate::test_support::AllowAclSetup {
+                resource_type,
+                resource_name: name,
+                principal: &format!("User:{user}"),
+                operation: AclOperation::Describe,
+            },
         ))
     }
 

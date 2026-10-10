@@ -137,10 +137,12 @@ async fn producer_routes_to_non_bootstrap_leaders() {
         let v = format!("p{p}");
         let rx = producer
             .enqueue(crate::support::producer::producer_record(
-                topic,
-                Some(p),
-                None,
-                Some(Bytes::from(v.clone())),
+                crate::support::producer::ProducerRecordSetup {
+                    topic: (topic).into(),
+                    partition: Some(krabka_ids::PartitionIndex(p)),
+                    value: Some(Bytes::from(v.clone())),
+                    ..Default::default()
+                },
             ))
             .await
             .expect("enqueue record");

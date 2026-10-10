@@ -93,3 +93,11 @@ pub fn host_directory_user(path: &std::path::Path) -> String {
     let metadata = std::fs::metadata(path).expect("stat the host data directory");
     format!("{}:{}", metadata.uid(), metadata.gid())
 }
+
+/// The readiness a storage scenario requires before it reads partition state.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum PartitionReadiness {
+    #[default]
+    MetadataPublished,
+    LocalWriterPresent,
+}

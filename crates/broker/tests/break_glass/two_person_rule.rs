@@ -98,6 +98,18 @@ async fn a_proposal_two_approvals_and_the_transition_they_authorize() {
     cluster.broker.shutdown().await;
 }
 
+async fn proposed_delete_fixture() -> (
+    crate::cluster::Cluster,
+    krabka_client_core::Client,
+    krabka_client_core::Client,
+    krabka_protocol::primitives::uuid::Uuid,
+) {
+    crate::cluster::client_fixture!(cluster = boot();
+        alice => ALICE, bob => BOB; topic(alice, "doomed", 1));
+    let id = open(&alice, ACTION_DELETE_TOPIC, "doomed").await;
+    (cluster, alice, bob, id)
+}
+
 /// A second approval from one principal is not a second person.
 ///
 /// `required_approvals = 2` is a rule about people, not about rows. A handler
@@ -107,10 +119,7 @@ async fn a_proposal_two_approvals_and_the_transition_they_authorize() {
 /// the consequence: the transition still refuses afterwards.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_principal_cannot_stand_in_for_two() {
-    crate::cluster::client_fixture!(cluster = boot();
-        alice => ALICE, bob => BOB; topic(alice, "doomed", 1));
-
-    let id = open(&alice, ACTION_DELETE_TOPIC, "doomed").await;
+    let (cluster, alice, bob, id) = proposed_delete_fixture().await;
     check!(approve(&bob, id).await.error_code == codes::NONE);
 
     let again = approve(&bob, id).await;
@@ -211,10 +220,7 @@ async fn a_principal_outside_the_approver_set_is_refused() {
 /// off the audit topic and then finds its login.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_approval_joins_to_the_login_that_made_it() {
-    crate::cluster::client_fixture!(cluster = boot();
-        alice => ALICE, bob => BOB; topic(alice, "doomed", 1));
-
-    let id = open(&alice, ACTION_DELETE_TOPIC, "doomed").await;
+    let (_cluster, alice, bob, id) = proposed_delete_fixture().await;
     check!(approve(&bob, id).await.approvals_held == 1);
 
     let records = support::wait_for_audit_record(&alice, "delete_topic.approved", |j| {

@@ -366,16 +366,9 @@ async fn keep_prepared_txn_without_enable_2pc_preserves_finite_timeout() {
     );
     let tid = "txn-recover-finite";
 
-    let find_version = krabka_protocol::owned::find_coordinator_response::MAX_VERSION;
-    let find_request = krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest {
-        key_type: 1,
-        coordinator_keys: vec![tid.to_string()],
-        ..Default::default()
-    };
-    let response =
-        crate::handlers::find_coordinator::handle(&broker, find_request, find_version, &context)
-            .await
-            .expect("find transaction coordinator");
+    let response = find_transaction_coordinator(&broker, &context, tid)
+        .await
+        .expect("find transaction coordinator");
     assert!(response.coordinators[0].error_code == codes::NONE);
 
     let version = krabka_protocol::owned::init_producer_id_response::MAX_VERSION;
@@ -488,16 +481,9 @@ async fn half_an_identity_is_invalid_and_an_old_client_gets_invalid_producer_epo
     );
     let tid = "txn-half-identity";
     let max = krabka_protocol::owned::init_producer_id_response::MAX_VERSION;
-    let find_version = krabka_protocol::owned::find_coordinator_response::MAX_VERSION;
-    let find_request = krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest {
-        key_type: 1,
-        coordinator_keys: vec![tid.to_string()],
-        ..Default::default()
-    };
-    let found =
-        crate::handlers::find_coordinator::handle(&broker, find_request, find_version, &context)
-            .await
-            .expect("find the transaction coordinator");
+    let found = find_transaction_coordinator(&broker, &context, tid)
+        .await
+        .expect("find the transaction coordinator");
     assert!(found.coordinators[0].error_code == codes::NONE);
     // An entry to be fenced against.
     let created = handle(
@@ -847,21 +833,9 @@ async fn two_phase_commit_gate_is_scoped_to_enable_2pc_not_keep_prepared_txn() {
             client_id = "txn-client"
         );
 
-        let find_version = krabka_protocol::owned::find_coordinator_response::MAX_VERSION;
-        let find_request =
-            krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest {
-                key_type: 1,
-                coordinator_keys: vec![case.tid.to_string()],
-                ..Default::default()
-            };
-        let find_response = crate::handlers::find_coordinator::handle(
-            &broker,
-            find_request,
-            find_version,
-            &context,
-        )
-        .await
-        .expect("find transaction coordinator");
+        let find_response = find_transaction_coordinator(&broker, &context, case.tid)
+            .await
+            .expect("find transaction coordinator");
         assert!(
             find_response.coordinators[0].error_code == codes::NONE,
             "{}",
@@ -913,16 +887,9 @@ async fn a_failed_block_allocation_answers_coordinator_load_in_progress() {
     );
     let tid = "txn-no-block";
 
-    let find_version = krabka_protocol::owned::find_coordinator_response::MAX_VERSION;
-    let find_request = krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest {
-        key_type: 1,
-        coordinator_keys: vec![tid.to_string()],
-        ..Default::default()
-    };
-    let find_response =
-        crate::handlers::find_coordinator::handle(&broker, find_request, find_version, &context)
-            .await
-            .expect("find transaction coordinator");
+    let find_response = find_transaction_coordinator(&broker, &context, tid)
+        .await
+        .expect("find transaction coordinator");
     assert!(
         find_response
             .coordinators
@@ -977,4 +944,26 @@ async fn a_failed_block_allocation_answers_coordinator_load_in_progress() {
         );
     }
     broker_handle.shutdown().await;
+}
+
+/// Route one transaction id through the real coordinator handler at its latest version.
+async fn find_transaction_coordinator(
+    broker: &crate::broker::Broker,
+    context: &crate::handlers::context::RequestContext<'_>,
+    tid: &str,
+) -> Result<
+    krabka_protocol::owned::find_coordinator_response::FindCoordinatorResponse,
+    crate::error::BrokerError,
+> {
+    crate::handlers::find_coordinator::handle(
+        broker,
+        krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest {
+            key_type: 1,
+            coordinator_keys: vec![tid.to_owned()],
+            ..Default::default()
+        },
+        krabka_protocol::owned::find_coordinator_response::MAX_VERSION,
+        context,
+    )
+    .await
 }

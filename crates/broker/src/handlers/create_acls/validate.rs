@@ -304,15 +304,12 @@ mod tests {
                     c.resource_name = "User:bob".into();
                     c.operation = 13;
                 },
-                AclEntry {
+                crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
                     resource_type: ResourceType::User,
-                    resource_name: "User:bob".into(),
-                    pattern_type: PatternType::Literal,
-                    principal: "User:alice".into(),
-                    host: "*".into(),
+                    resource_name: "User:bob",
                     operation: AclOperation::CreateTokens,
-                    permission_type: PermissionType::Allow,
-                },
+                    ..Default::default()
+                }),
             ),
         ];
         for (shape, expected) in cases {

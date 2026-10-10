@@ -65,15 +65,7 @@ pub(super) async fn seed_topic_a(broker: &crate::broker::Broker) {
 /// Starts a broker that grants what the principal name says, waits until its
 /// group and transaction coordinators serve, and seeds topic `a`.
 async fn start_seeded_broker() -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-    let (handle, dir) = start_broker_no_audit_with(|cfg| {
-        crate::test_support::configure_single_partition_transactions(
-            cfg,
-            Arc::new(crate::test_support::ControllerPeerAllowed(
-                GrantsInPrincipalName,
-            )),
-        );
-    })
-    .await;
+    let (handle, dir) = crate::test_support::start_transaction_grant_broker().await;
     wait_for_coordinators(&handle).await;
     seed_topic_a(&handle.broker_arc_for_test()).await;
     (handle, dir)
@@ -89,46 +81,33 @@ pub(super) async fn wait_for_coordinators(handle: &crate::broker::BrokerHandle) 
     handle.wait_until_group_coordinator_ready().await;
 }
 
-/// Gives `transactional_id` an ongoing transaction at `(producer_id,
-/// producer_epoch)` that already holds `group_id`'s `__consumer_offsets`
-/// partition, the state `AddOffsetsToTxn` leaves. KIP-890 verifies a
-/// `TxnOffsetCommit` against it before any offset is written.
-pub(super) async fn open_transaction_for_group(
-    broker: &crate::broker::Broker,
-    transactional_id: &str,
-    (producer_id, producer_epoch): (i64, i16),
-    group_id: &str,
-) {
-    seed_transaction(
-        broker,
-        transactional_id,
-        (producer_id, producer_epoch),
-        (crate::txn::state::TxnState::Ongoing, Some(group_id)),
-    )
-    .await;
+/// A transaction identity, state and optional held offsets partition.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(super) struct TransactionSeedSetup<'a> {
+    #[default("tid")]
+    pub transactional_id: &'a str,
+    pub producer: super::test_support::TxnCommitProducer,
+    #[default(crate::txn::state::TxnState::Ongoing)]
+    pub state: crate::txn::state::TxnState,
+    pub group_id: Option<&'a str>,
 }
 
-/// Gives `transactional_id` an entry in `state` at `(producer_id,
-/// producer_epoch)`, holding `group_id`'s `__consumer_offsets` partition when
-/// a group is named.
-async fn seed_transaction(
+pub(super) async fn seed_transaction(
     broker: &crate::broker::Broker,
-    transactional_id: &str,
-    (producer_id, producer_epoch): (i64, i16),
-    (state, group_id): (crate::txn::state::TxnState, Option<&str>),
+    setup: TransactionSeedSetup<'_>,
 ) {
     let image = broker.controller.current_image();
     let now_ms = crate::txn::util::now_millis();
     let mut entry = crate::txn::state::TxnEntry::new_empty(
-        transactional_id.to_owned(),
-        krabka_log::ProducerId(producer_id),
-        producer_epoch,
+        setup.transactional_id.to_owned(),
+        setup.producer.id,
+        setup.producer.epoch.0,
         60_000,
         now_ms,
     );
-    entry.state = state;
+    entry.state = setup.state;
     entry.start_ms = now_ms;
-    if let Some(group_id) = group_id {
+    if let Some(group_id) = setup.group_id {
         entry.partitions.insert(crate::txn::state::TopicPartition {
             topic: OFFSETS_TOPIC.to_owned(),
             partition: PartitionIndex(partition_for_group(&image, group_id)),
@@ -138,7 +117,27 @@ async fn seed_transaction(
         .txn_coordinator
         .put(entry, crate::txn::version::resolve_txn_version(&image))
         .await
-        .unwrap_or_else(|error| panic!("seed a transaction for {transactional_id}: {error}"));
+        .unwrap_or_else(|error| {
+            panic!("seed a transaction for {}: {error}", setup.transactional_id)
+        });
+}
+
+/// Seed the open transaction and its held group partition before building its commit.
+async fn open_commit_request(
+    broker: &crate::broker::Broker,
+    setup: super::test_support::TxnCommitSetup<'_>,
+) -> TxnOffsetCommitRequest {
+    seed_transaction(
+        broker,
+        TransactionSeedSetup {
+            transactional_id: &setup.transactional_id,
+            producer: setup.producer,
+            group_id: Some(setup.group_id),
+            ..Default::default()
+        },
+    )
+    .await;
+    super::test_support::request_for(setup)
 }
 
 pub(super) fn topic(name: &str, partitions: &[i32]) -> TxnOffsetCommitRequestTopic {
@@ -155,6 +154,14 @@ pub(super) fn topic(name: &str, partitions: &[i32]) -> TxnOffsetCommitRequestTop
             })
             .collect(),
         ..Default::default()
+    }
+}
+
+/// Topic `a`'s first partition, addressed by its published topic id.
+fn topic_a_by_id(topic_id: krabka_protocol::primitives::uuid::Uuid) -> TxnOffsetCommitRequestTopic {
+    TxnOffsetCommitRequestTopic {
+        topic_id,
+        ..topic("a", &[0])
     }
 }
 
@@ -176,6 +183,17 @@ fn with_offsets_log<T>(
     Some(inspect(&read))
 }
 
+/// Matching records in physical log order, including tombstones and malformed values.
+fn records_with_key(
+    read: &krabka_log::ReadOutput,
+    wanted: bytes::Bytes,
+) -> impl Iterator<Item = &krabka_protocol::records::Record> {
+    read.batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .filter(move |record| record.key.as_ref() == Some(&wanted))
+}
+
 /// Whether `group_id`'s `__consumer_offsets` partition holds a record keyed
 /// to `(group_id, topic, partition)`. Reads the real log the handler wrote
 /// to, rather than trusting the response alone, so the test also catches a
@@ -188,10 +206,7 @@ pub(super) fn log_holds_key(
 ) -> bool {
     with_offsets_log(broker, group_id, |read| {
         let wanted = OffsetCommitValue::encode_key(group_id, topic, partition).unwrap();
-        read.batches
-            .iter()
-            .flat_map(|batch| batch.records.iter())
-            .any(|record| record.key.as_ref() == Some(&wanted))
+        records_with_key(read, wanted).next().is_some()
     })
     .unwrap_or(false)
 }
@@ -261,15 +276,20 @@ async fn txn_offset_commit_runs_the_existence_check_after_the_topic_read_gate() 
         let group_id = format!("group-{case_index}");
         let user = principal(case.grants);
         let ctx = request_context(&user, &address, "txn-offset-commit-existence");
-        let producer_id = 42 + i64::try_from(case_index).expect("small");
+        let producer = super::test_support::TxnCommitProducer::initial(krabka_ids::ProducerId(
+            42 + i64::try_from(case_index).expect("small"),
+        ));
         let transactional_id = format!("tid-{case_index}");
-        open_transaction_for_group(&broker, &transactional_id, (producer_id, 0), &group_id).await;
-        let request = super::test_support::request_for(
-            transactional_id,
-            &group_id,
-            (producer_id, 0),
-            case.topics.clone(),
-        );
+        let request = open_commit_request(
+            &broker,
+            super::test_support::TxnCommitSetup {
+                transactional_id,
+                group_id: &group_id,
+                producer,
+                topics: case.topics.clone(),
+            },
+        )
+        .await;
         let response = commit_response(&broker, &request, version, &ctx).await;
 
         let got = response_rows(&response);
@@ -311,16 +331,24 @@ async fn unknown_rows_survive_a_group_fencing_failure() {
     let group_id = "group-fencing";
     let user = principal(READ_ON_STAR);
     let ctx = request_context(&user, &address, "txn-offset-commit-fencing");
-    open_transaction_for_group(&broker, "tid-fencing", (42, 0), group_id).await;
+    seed_transaction(
+        &broker,
+        TransactionSeedSetup {
+            transactional_id: "tid-fencing",
+            group_id: Some(group_id),
+            ..Default::default()
+        },
+    )
+    .await;
     let request = TxnOffsetCommitRequest {
         member_id: "never-registered-member".to_string(),
         generation_id_or_member_epoch: 0,
-        ..super::test_support::request_for(
-            "tid-fencing".to_string(),
+        ..super::test_support::request_for(super::test_support::TxnCommitSetup {
+            transactional_id: "tid-fencing".to_string(),
             group_id,
-            (42, 0),
-            vec![topic("a", &[0]), topic("missing", &[0])],
-        )
+            topics: vec![topic("a", &[0]), topic("missing", &[0])],
+            ..Default::default()
+        })
     };
     let response = commit_response(&broker, &request, version, &ctx).await;
 
@@ -346,10 +374,7 @@ fn logged_value(
 ) -> Option<OffsetCommitValue> {
     with_offsets_log(broker, group_id, |read| {
         let wanted = OffsetCommitValue::encode_key(group_id, topic, partition).unwrap();
-        read.batches
-            .iter()
-            .flat_map(|batch| batch.records.iter())
-            .filter(|record| record.key.as_ref() == Some(&wanted))
+        records_with_key(read, wanted)
             .find_map(|record| OffsetCommitValue::decode_value(record.value.as_ref()?).ok())
     })
     .flatten()
@@ -512,25 +537,31 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
     for (row, case) in cases.into_iter().enumerate() {
         let group_id = format!("group-v6-{row}");
         let transactional_id = format!("tid-v6-{row}");
-        let producer_id = 42 + i64::try_from(row).expect("small");
-        open_transaction_for_group(&broker, &transactional_id, (producer_id, 0), &group_id).await;
+        let producer = super::test_support::TxnCommitProducer::initial(krabka_ids::ProducerId(
+            42 + i64::try_from(row).expect("small"),
+        ));
         let request = TxnOffsetCommitRequest {
             generation_id_or_member_epoch: -1,
-            ..super::test_support::request_for(
-                transactional_id,
-                &group_id,
-                (producer_id, 0),
-                case.topics
-                    .iter()
-                    .map(|&(topic_ref, partitions)| {
-                        let (name, topic_id) = request_key(topic_ref);
-                        TxnOffsetCommitRequestTopic {
-                            topic_id,
-                            ..topic(&name, partitions)
-                        }
-                    })
-                    .collect(),
+            ..open_commit_request(
+                &broker,
+                super::test_support::TxnCommitSetup {
+                    transactional_id,
+                    group_id: &group_id,
+                    producer,
+                    topics: case
+                        .topics
+                        .iter()
+                        .map(|&(topic_ref, partitions)| {
+                            let (name, topic_id) = request_key(topic_ref);
+                            TxnOffsetCommitRequestTopic {
+                                topic_id,
+                                ..topic(&name, partitions)
+                            }
+                        })
+                        .collect(),
+                },
             )
+            .await
         };
         let response = commit_response(&broker, &request, case.version, &ctx).await;
 
@@ -605,20 +636,24 @@ async fn v6_answers_group_id_not_found_where_older_versions_answer_illegal_gener
     ] {
         let group_id = format!("missing-group-v{version}");
         let transactional_id = format!("tid-missing-{version}");
-        let producer_id = 42 + i64::from(version);
-        open_transaction_for_group(&broker, &transactional_id, (producer_id, 0), &group_id).await;
+        let producer = super::test_support::TxnCommitProducer::initial(krabka_ids::ProducerId(
+            42 + i64::from(version),
+        ));
         let request = TxnOffsetCommitRequest {
             member_id: "member".into(),
             generation_id_or_member_epoch: 3,
-            ..super::test_support::request_for(
-                transactional_id,
-                &group_id,
-                (producer_id, 0),
-                vec![TxnOffsetCommitRequestTopic {
-                    topic_id: krabka_protocol::primitives::uuid::Uuid(a_id.into_bytes()),
-                    ..topic("a", &[0])
-                }],
+            ..open_commit_request(
+                &broker,
+                super::test_support::TxnCommitSetup {
+                    transactional_id,
+                    group_id: &group_id,
+                    producer,
+                    topics: vec![topic_a_by_id(krabka_protocol::primitives::uuid::Uuid(
+                        a_id.into_bytes(),
+                    ))],
+                },
             )
+            .await
         };
         let response = commit_response(&broker, &request, version, &ctx).await;
         check!(
@@ -722,20 +757,22 @@ async fn an_older_member_epoch_commits_a_partition_assigned_before_it() {
             .await
             .expect("seed");
         let transactional_id = format!("tid-kip-1251-{i}");
-        let producer_id = 42 + i64::try_from(i).expect("small");
-        open_transaction_for_group(&broker, &transactional_id, (producer_id, 0), &group_id).await;
+        let producer = super::test_support::TxnCommitProducer::initial(krabka_ids::ProducerId(
+            42 + i64::try_from(i).expect("small"),
+        ));
         let request = TxnOffsetCommitRequest {
             member_id: "m".into(),
             generation_id_or_member_epoch: epoch,
-            ..super::test_support::request_for(
-                transactional_id,
-                &group_id,
-                (producer_id, 0),
-                vec![TxnOffsetCommitRequestTopic {
-                    topic_id: a_id,
-                    ..topic("a", &[0])
-                }],
+            ..open_commit_request(
+                &broker,
+                super::test_support::TxnCommitSetup {
+                    transactional_id,
+                    group_id: &group_id,
+                    producer,
+                    topics: vec![topic_a_by_id(a_id)],
+                },
             )
+            .await
         };
         let response = commit_response(&broker, &request, version, &ctx).await;
         actual.push((version, epoch, response.topics[0].partitions[0].error_code));
@@ -846,20 +883,29 @@ async fn txn_offset_commit_verifies_the_producer_with_the_transaction_coordinato
         if let Some((state, epoch, holds_offsets)) = case.held {
             seed_transaction(
                 &broker,
-                &transactional_id,
-                (producer_id, epoch),
-                (state, holds_offsets.then_some(group_id.as_str())),
+                TransactionSeedSetup {
+                    transactional_id: &transactional_id,
+                    producer: super::test_support::TxnCommitProducer {
+                        id: krabka_ids::ProducerId(producer_id),
+                        epoch: super::test_support::ProducerEpoch(epoch),
+                    },
+                    state,
+                    group_id: holds_offsets.then_some(group_id.as_str()),
+                },
             )
             .await;
         }
         let request = TxnOffsetCommitRequest {
             generation_id_or_member_epoch: -1,
-            ..super::test_support::request_for(
+            ..super::test_support::request_for(super::test_support::TxnCommitSetup {
                 transactional_id,
-                &group_id,
-                (producer_id, case.request_epoch),
-                vec![topic("a", &[0])],
-            )
+                group_id: &group_id,
+                producer: super::test_support::TxnCommitProducer {
+                    id: krabka_ids::ProducerId(producer_id),
+                    epoch: super::test_support::ProducerEpoch(case.request_epoch),
+                },
+                topics: vec![topic("a", &[0])],
+            })
         };
         let response = commit_response(&broker, &request, case.version, &ctx).await;
         check!(
@@ -900,21 +946,18 @@ async fn a_v5_commit_adds_the_offsets_partition_on_a_transaction_version_1_clust
     let group_id = "group-tv1";
     seed_transaction(
         &broker,
-        "tid-tv1",
-        (700, 5),
-        (crate::txn::state::TxnState::Ongoing, None),
+        TransactionSeedSetup {
+            transactional_id: "tid-tv1",
+            producer: super::test_support::TxnCommitProducer {
+                id: krabka_ids::ProducerId(700),
+                epoch: super::test_support::ProducerEpoch(5),
+            },
+            ..Default::default()
+        },
     )
     .await;
-    let request = TxnOffsetCommitRequest {
-        generation_id_or_member_epoch: -1,
-        ..super::test_support::request_for(
-            "tid-tv1".to_string(),
-            group_id,
-            (700, 5),
-            vec![topic("a", &[0])],
-        )
-    };
-    let response = commit_response(&broker, &request, 5, &ctx).await;
+    let response =
+        commit_topic_a_without_membership(&broker, "tid-tv1", group_id, (700, 5), &ctx).await;
     check!(response.topics[0].partitions[0].error_code == codes::NONE);
     check!(log_holds_key(&broker, group_id, "a", 0));
 
@@ -966,17 +1009,22 @@ async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
         read_context!(address, user, ctx; "txn-offset-commit-topic-id");
 
         let group_id = "group-topic-id";
-        open_transaction_for_group(&broker, "tid-topic-id", (800, 0), group_id).await;
-        let request = TxnOffsetCommitRequest {
-            generation_id_or_member_epoch: -1,
-            ..super::test_support::request_for(
-                "tid-topic-id".to_string(),
-                group_id,
-                (800, 0),
-                vec![topic("a", &[0])],
-            )
-        };
-        let response = commit_response(&broker, &request, 5, &ctx).await;
+        seed_transaction(
+            &broker,
+            TransactionSeedSetup {
+                transactional_id: "tid-topic-id",
+                producer: super::test_support::TxnCommitProducer {
+                    id: krabka_ids::ProducerId(800),
+                    ..Default::default()
+                },
+                group_id: Some(group_id),
+                ..Default::default()
+            },
+        )
+        .await;
+        let response =
+            commit_topic_a_without_membership(&broker, "tid-topic-id", group_id, (800, 0), &ctx)
+                .await;
         check!(
             response.topics[0].partitions[0].error_code == codes::NONE,
             "unstable={unstable}"
@@ -996,6 +1044,25 @@ async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
 
         handle.shutdown().await;
     }
+}
+
+async fn commit_topic_a_without_membership(
+    broker: &crate::broker::Broker,
+    transactional_id: &str,
+    group_id: &str,
+    producer: (i64, i16),
+    context: &crate::handlers::RequestContext<'_>,
+) -> TxnOffsetCommitResponse {
+    let request = TxnOffsetCommitRequest {
+        generation_id_or_member_epoch: -1,
+        ..super::test_support::request_for(super::test_support::TxnCommitSetup {
+            transactional_id: transactional_id.to_owned(),
+            group_id,
+            producer: super::test_support::TxnCommitProducer::from_wire(producer),
+            topics: vec![topic("a", &[0])],
+        })
+    };
+    commit_response(broker, &request, 5, context).await
 }
 
 async fn commit_response(

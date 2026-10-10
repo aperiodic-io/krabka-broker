@@ -4,6 +4,15 @@ use tokio_rustls::rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
+pub const DEV_CERT: &str = include_str!("../fixtures/security/dev_cert.pem");
+pub const DEV_KEY: &str = include_str!("../fixtures/security/dev_key.pem");
+pub const DEV_CLIENT_CA: &str = include_str!("../fixtures/security/dev_client_ca.pem");
+pub const DEV_CLIENT_CERT: &str = include_str!("../fixtures/security/dev_client_cert.pem");
+pub const DEV_CLIENT_KEY: &str = include_str!("../fixtures/security/dev_client_key.pem");
+
+/// RFC 2253 Subject DN of the client fixture, as Kafka's DEFAULT mapping preserves it.
+pub const CLIENT_PRINCIPAL: &str = r"CN=test-client\,OU\=integration\,O\=krabka";
+
 #[derive(Debug)]
 pub struct PinnedCertVerifier {
     pub pinned: CertificateDer<'static>,

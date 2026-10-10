@@ -9,7 +9,6 @@
 use assert2::check;
 use krabka_ids::{Offset, ProducerId};
 use krabka_log::LogConfig;
-use krabka_protocol::records::RecordBatch;
 
 use crate::{
     archive::build_archive,
@@ -36,13 +35,7 @@ async fn exclude_producer_id_drops_only_that_producers_batch() {
     let (_target, target_dir) =
         run_restore(archive.path(), &["--exclude-producer-id", "101"]).await;
 
-    let expected = vec![
-        RecordBatch {
-            records: Vec::new(),
-            ..fixture[0].clone()
-        },
-        fixture[1].clone(),
-    ];
+    let expected = crate::harness::empty_first_batch(&fixture);
     crate::harness::check_batches(&target_dir, 3, &expected);
 }
 
@@ -69,12 +62,6 @@ async fn exclude_producer_id_never_drops_a_control_batch() {
         .expect("read back");
     // Desired: the producer's ordinary data is excluded (a bare header),
     // but its commit marker survives intact at its own original offset.
-    let expected = vec![
-        RecordBatch {
-            records: Vec::new(),
-            ..fixture[0].clone()
-        },
-        fixture[1].clone(),
-    ];
+    let expected = crate::harness::empty_first_batch(&fixture);
     check!(read.batches == expected);
 }

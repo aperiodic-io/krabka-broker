@@ -12,8 +12,8 @@ use krabka_broker::Broker;
 use krabka_client_producer::Producer;
 
 use crate::{
-    harness::{count_topic_dirs, wait_all_partitions, wait_for_move_complete},
-    wire::{create_topic, describe_log_dirs},
+    harness::{count_topic_dirs, wait_for_move_complete},
+    wire::describe_log_dirs,
 };
 
 /// Boot a broker, create a topic, produce records, shut down, then
@@ -33,8 +33,15 @@ async fn startup_resumes_move_for_existing_partition() {
     let cfg = crate::support::storage::two_dir_config(primary.path(), extra.path());
     let handle = Broker::start(cfg).await.expect("first boot");
     let addr = handle.listen_addr();
-    create_topic(addr, "t", 1).await;
-    wait_all_partitions(&handle, "t", 1).await;
+    crate::two_dir_topic::create_and_wait(
+        &handle,
+        addr,
+        crate::two_dir_topic::Setup {
+            client_id: crate::wire::CLIENT_ID,
+            ..Default::default()
+        },
+    )
+    .await;
 
     let producer = Producer::builder()
         .bootstrap(addr.to_string())

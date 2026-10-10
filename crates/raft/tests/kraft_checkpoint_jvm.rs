@@ -13,7 +13,7 @@
 //! cargo test -p krabka-raft --test kraft_checkpoint_jvm -- --ignored --nocapture
 //! ```
 
-use std::{io::Write as _, process::Command};
+use std::process::Command;
 
 use assert2::check;
 use krabka_ids::Offset;
@@ -25,6 +25,8 @@ use krabka_metadata::{
 use krabka_protocol::records::{Record, RecordBatch};
 use krabka_raft::{kraft::KraftLog, serialize_metadata_snapshot};
 use uuid::Uuid;
+
+krabka_macros::jvm_checkpoint_dump_fixture!(dump_checkpoint);
 
 krabka_macros::snapshot_topic_fixture!(append_snapshot_topic);
 
@@ -139,28 +141,12 @@ fn jvm_dump_log_parses_engine_snapshot() {
     let bytes = serialize_metadata_snapshot(&image, last_contained_log_timestamp).unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     // kafka-dump-log infers the snapshot base offset from the file name.
-    let path = dir
-        .path()
-        .join("00000000000000000000-0000000000.checkpoint");
-    std::fs::File::create(&path)
-        .unwrap()
-        .write_all(&bytes)
-        .unwrap();
-
-    let out = Command::new("docker")
-        .args([
-            "run",
-            "--rm",
-            "-v",
-            &format!("{}:/work", dir.path().display()),
-            "mirror.gcr.io/apache/kafka:4.0.0",
-            "/opt/kafka/bin/kafka-dump-log.sh",
-            "--cluster-metadata-decoder",
-            "--files",
-            "/work/00000000000000000000-0000000000.checkpoint",
-        ])
-        .output()
-        .expect("docker run kafka-dump-log");
+    let out = dump_checkpoint(
+        dir.path(),
+        "00000000000000000000-0000000000.checkpoint",
+        &bytes,
+        "mirror.gcr.io/apache/kafka:4.0.0",
+    );
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),

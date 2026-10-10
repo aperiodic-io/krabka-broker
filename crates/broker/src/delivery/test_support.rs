@@ -77,35 +77,87 @@ pub(crate) fn batch_at(activation_ms: i64) -> RecordBatch {
 /// `policy` decides whether the topic schedules delivery. The partition's
 /// [`DeliveryHandles`] read `clock`, so an append and the scheduler agree on
 /// one timeline.
+#[derive(Clone)]
+pub(crate) struct ScheduleSetup<'a> {
+    pub topic: &'a str,
+    pub policy: DeliveryPolicy,
+    pub activations: Vec<crate::test_support::UnixMillis>,
+    pub leader: krabka_ids::NodeId,
+}
+
+impl Default for ScheduleSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "scheduled",
+            policy: DeliveryPolicy::Scheduled,
+            activations: vec![],
+            leader: krabka_ids::NodeId(7),
+        }
+    }
+}
+
 pub(crate) fn scheduled_partition(
     dir: &tempfile::TempDir,
-    topic: &str,
-    policy: DeliveryPolicy,
-    activations: &[i64],
-    leader: u64,
     clock: &Arc<dyn WallClock>,
+    setup: ScheduleSetup<'_>,
 ) -> Arc<Partition> {
+    let ScheduleSetup {
+        topic,
+        policy,
+        activations,
+        leader,
+    } = setup;
     let config = LogConfig {
         delivery_policy: policy,
         ..LogConfig::default()
     };
     let batches = activations
         .iter()
-        .map(|activation_ms| batch_at(*activation_ms));
-    partition_with_batches(dir, topic, config, batches, leader, clock)
+        .map(|activation_ms| batch_at(activation_ms.0));
+    partition_with_batches(
+        dir,
+        clock,
+        DeliveryPartitionSetup {
+            topic,
+            config,
+            batches: batches.collect(),
+            leader,
+        },
+    )
 }
 
 /// A partition over a log with `config` that holds `batches`, registered
 /// under `topic` with this broker as its leader. The high watermark is the
 /// log end offset.
+pub(crate) struct DeliveryPartitionSetup<'a> {
+    pub topic: &'a str,
+    pub config: LogConfig,
+    pub batches: Vec<RecordBatch>,
+    pub leader: krabka_ids::NodeId,
+}
+
+impl Default for DeliveryPartitionSetup<'_> {
+    fn default() -> Self {
+        Self {
+            topic: "orders",
+            config: LogConfig::default(),
+            batches: vec![],
+            leader: krabka_ids::NodeId(7),
+        }
+    }
+}
+
 pub(crate) fn partition_with_batches(
     dir: &tempfile::TempDir,
-    topic: &str,
-    config: LogConfig,
-    batches: impl IntoIterator<Item = RecordBatch>,
-    leader: u64,
     clock: &Arc<dyn WallClock>,
+    setup: DeliveryPartitionSetup<'_>,
 ) -> Arc<Partition> {
+    let DeliveryPartitionSetup {
+        topic,
+        config,
+        batches,
+        leader,
+    } = setup;
     let partition_dir = crate::log_dir::partition_dir(dir.path(), topic, 0);
     std::fs::create_dir_all(&partition_dir).expect("create the partition directory");
     let mut log = Log::open(&partition_dir, config).expect("open the log");
@@ -142,7 +194,7 @@ pub(crate) fn partition_with_batches(
         replica_state: Arc::new(tokio::sync::Mutex::new(replica_state)),
         hw_advance_notify: Arc::new(Notify::new()),
         delivery,
-        current_leader: Arc::new(AtomicU64::new(leader)),
+        current_leader: Arc::new(AtomicU64::new(leader.0)),
         current_leader_epoch: Arc::new(AtomicI32::new(0)),
         replication_target: initial_replication_target(None),
         diskless: false,

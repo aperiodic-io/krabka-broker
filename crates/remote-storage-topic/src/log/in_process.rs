@@ -455,16 +455,8 @@ mod tests {
 
         // Assign partition 0 from offset 1 and partition 1 from offset 0;
         // partition 2 is NOT assigned.
-        let (mut stream, _h) = log.subscribe(vec![
-            PartitionStart {
-                partition: 0,
-                start_offset: 1,
-            },
-            PartitionStart {
-                partition: 1,
-                start_offset: 0,
-            },
-        ]);
+        let (mut stream, _h) =
+            log.subscribe(vec![PartitionStart::new(0, 1), PartitionStart::new(1, 0)]);
 
         let mut got: Vec<(i32, i64, Vec<u8>)> = Vec::new();
         for _ in 0..3 {

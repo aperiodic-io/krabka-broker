@@ -9,12 +9,9 @@ use assert2::assert;
 use crate::support::topics::{creatable_topic, create_topic_request};
 mod support;
 
-use krabka_protocol::{
-    owned::{
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::{PartitionProduceResponse, ProduceResponse, TopicProduceResponse},
-    },
-    primitives::uuid::Uuid as WireUuid,
+use krabka_protocol::owned::{
+    produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+    produce_response::{PartitionProduceResponse, ProduceResponse, TopicProduceResponse},
 };
 
 /// Kafka's `UNKNOWN_TOPIC_ID` error code.
@@ -24,20 +21,16 @@ const UNKNOWN_TOPIC_ID: i16 = 100;
 async fn produce_unresolved_topic_id_returns_unknown_topic_id() {
     let p = support::start().await;
     p.client
-        .send(create_topic_request(
-            creatable_topic("p_known", 1, 1),
-            5_000,
-        ))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("p_known").into(),
+                ..Default::default()
+            },
+        )))
         .await
         .expect("create topic");
 
-    let cases = [
-        (
-            "non-zero id",
-            WireUuid(uuid::Uuid::from_u128(0x0bad_f00d).into_bytes()),
-        ),
-        ("zero id", WireUuid::ZERO),
-    ];
+    let cases = support::topics::unresolved_topic_ids(0x0bad_f00d);
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (label, topic_id) in cases {

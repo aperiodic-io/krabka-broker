@@ -19,7 +19,13 @@ use crate::{
 async fn create_then_delete_topic_round_trip() {
     let p = support::start().await;
 
-    let create = create_topic_request(creatable_topic("alpha", 2, 1), 5_000);
+    let create = create_topic_request(creatable_topic(
+        crate::support::topics::ConfiguredTopicSetup {
+            name: ("alpha").into(),
+            partitions: crate::support::topics::TopicPartitionCount(2),
+            ..Default::default()
+        },
+    ));
     let resp = p.client.send(create).await.expect("CreateTopics");
     assert!(resp.topics.len() == 1);
     check!(resp.topics[0].error_code == 0);
@@ -44,7 +50,13 @@ async fn create_then_delete_topic_round_trip() {
 #[tokio::test]
 async fn create_topic_with_zero_partitions_errors() {
     let p = support::start().await;
-    let create = create_topic_request(creatable_topic("zero", 0, 1), 5_000);
+    let create = create_topic_request(creatable_topic(
+        crate::support::topics::ConfiguredTopicSetup {
+            name: ("zero").into(),
+            partitions: crate::support::topics::TopicPartitionCount(0),
+            ..Default::default()
+        },
+    ));
     let resp = p.client.send(create).await.expect("CreateTopics");
     assert!(resp.topics[0].error_code == 37); // INVALID_PARTITIONS
     p.broker.shutdown().await;
@@ -53,7 +65,14 @@ async fn create_topic_with_zero_partitions_errors() {
 #[tokio::test]
 async fn duplicate_create_returns_topic_already_exists() {
     let p = support::start().await;
-    let req = || create_topic_request(creatable_topic("dup", 1, 1), 5_000);
+    let req = || {
+        create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: ("dup").into(),
+                ..Default::default()
+            },
+        ))
+    };
     let r1 = p.client.send(req()).await.expect("CreateTopics 1");
     assert!(r1.topics[0].error_code == 0);
     let r2 = p.client.send(req()).await.expect("CreateTopics 2");

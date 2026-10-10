@@ -45,26 +45,35 @@ async fn connect_client(bootstrap: &str, client_id: &str) -> Client {
 /// with `protocol_type` and `member_id`. `session_timeout` and
 /// `rebalance_timeout` are short, so a stuck rebalance fails the test quickly
 /// instead of holding the runtime.
-fn join_group_request(
-    group_id: &str,
-    member_id: &str,
-    protocol_type: &str,
-    protocols: &[(&str, &[u8])],
-) -> JoinGroupRequest {
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct ProtocolJoinSetup<'a> {
+    #[default("g")]
+    group_id: &'a str,
+    member_id: &'a str,
+    #[default("consumer")]
+    protocol_type: &'a str,
+    protocols: &'a [(&'a str, &'a [u8])],
+}
+
+fn join_group_request(setup: ProtocolJoinSetup<'_>) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: None,
-        ..classic_join_request(
-            group_id.to_string(),
-            member_id.to_string(),
-            (30_000, 60_000),
-            protocol_type.to_string(),
-            protocols
+        ..classic_join_request(crate::support::classic::ClassicJoinSetup {
+            group_id: setup.group_id.to_string(),
+            member_id: setup.member_id.to_string(),
+            timeouts: crate::support::classic::ClassicTimeouts {
+                rebalance: krabka_units::millis(60_000),
+                ..Default::default()
+            },
+            protocol_type: setup.protocol_type.to_string(),
+            protocols: setup
+                .protocols
                 .iter()
                 .map(|(name, meta)| {
                     join_protocol((*name).to_string(), Bytes::copy_from_slice(meta))
                 })
                 .collect(),
-        )
+        })
     }
 }
 
@@ -78,7 +87,12 @@ async fn bootstrap_member_id(
     protocol_type: &str,
     protocols: &[(&str, &[u8])],
 ) -> String {
-    let req = join_group_request(group_id, "", protocol_type, protocols);
+    let req = join_group_request(ProtocolJoinSetup {
+        group_id,
+        protocol_type,
+        protocols,
+        ..Default::default()
+    });
     let resp = client
         .send(req)
         .await
@@ -104,7 +118,12 @@ async fn second_join(
     protocol_type: &str,
     protocols: &[(&str, &[u8])],
 ) -> JoinGroupResponse {
-    let req = join_group_request(group_id, member_id, protocol_type, protocols);
+    let req = join_group_request(ProtocolJoinSetup {
+        group_id,
+        member_id,
+        protocol_type,
+        protocols,
+    });
     client
         .send(req)
         .await
@@ -299,12 +318,12 @@ async fn protocol_type_mismatch_rejected() {
     // `supportsProtocols` gate runs before a member id is handed out, so
     // the first join already fails, under the unknown member id.
     let resp_b = client_b
-        .send(join_group_request(
+        .send(join_group_request(ProtocolJoinSetup {
             group_id,
-            "",
-            "stream",
-            &[("range", b"")],
-        ))
+            protocol_type: "stream",
+            protocols: &[("range", b"")],
+            ..Default::default()
+        }))
         .await
         .expect("JoinGroup must round-trip");
     handle.shutdown().await;

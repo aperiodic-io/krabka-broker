@@ -94,10 +94,7 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
         ),
         (
             "a topic configuration changes",
-            vec![MetadataRecord::V1TopicConfig(TopicConfigRecord {
-                topic: "orders".into(),
-                overrides: BTreeMap::from([("retention.ms".into(), "1000".into())]),
-            })],
+            vec![orders_retention_config()],
             vec![],
         ),
         (
@@ -108,7 +105,7 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
                     incarnation_id: Uuid::from_u128(3),
                     host: "broker-3".into(),
                     rack: Some("rack-c".into()),
-                    ..crate::test_support::broker_registration(3)
+                    ..crate::test_support::broker_registration(krabka_raft::NodeId(3))
                 },
             )],
             vec![],
@@ -127,10 +124,11 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
 
 fn describe_acl(topic: &str) -> MetadataRecord {
     MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-        krabka_metadata::ResourceType::Topic,
-        topic,
-        "User:alice",
-        krabka_metadata::AclOperation::Describe,
+        crate::test_support::AllowAclSetup {
+            resource_name: topic,
+            operation: krabka_metadata::AclOperation::Describe,
+            ..Default::default()
+        },
     ))
 }
 
@@ -193,10 +191,7 @@ fn a_new_topic_or_a_changed_acl_can_change_a_resolution() {
         ),
         (
             "a topic configuration changes",
-            vec![MetadataRecord::V1TopicConfig(TopicConfigRecord {
-                topic: "orders".into(),
-                overrides: BTreeMap::from([("retention.ms".into(), "1000".into())]),
-            })],
+            vec![orders_retention_config()],
             false,
         ),
     ];
@@ -224,15 +219,13 @@ async fn a_metadata_update_refreshes_the_groups_this_broker_coordinates() {
         let handle = coordinator.get_or_create_consumer(group_id);
         let joined = heartbeat(
             &handle,
-            ConsumerGroupHeartbeatRequest {
-                group_id: group_id.into(),
-                member_id: "m1".into(),
-                member_epoch: 0,
-                rebalance_timeout_ms: 60_000,
-                subscribed_topic_names: Some(vec!["orders".into()]),
-                topic_partitions: Some(vec![]),
-                ..Default::default()
-            },
+            crate::coordinator::unified::test_support::consumer_join_request(
+                crate::coordinator::unified::test_support::ConsumerJoinSetup {
+                    group_id,
+                    topics: &["orders"],
+                    ..Default::default()
+                },
+            ),
         )
         .await;
         check!(joined.member_epoch == 2, "{group_id}");
@@ -285,4 +278,11 @@ async fn a_metadata_update_refreshes_the_groups_this_broker_coordinates() {
                 ("not-owned", answer(2, None)),
             ]
     );
+}
+
+fn orders_retention_config() -> MetadataRecord {
+    MetadataRecord::V1TopicConfig(TopicConfigRecord {
+        topic: "orders".into(),
+        overrides: BTreeMap::from([("retention.ms".into(), "1000".into())]),
+    })
 }

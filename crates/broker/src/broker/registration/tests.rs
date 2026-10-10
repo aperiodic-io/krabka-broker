@@ -11,74 +11,15 @@ use super::*;
 /// controller-registration record; this fixture reproduces the same gap for
 /// the broker-registration record `register_broker` submits.
 mod publish_race {
-    use std::{collections::BTreeSet, net::SocketAddr, sync::Arc, time::Duration};
+    use std::{sync::Arc, time::Duration};
 
     use assert2::assert;
     use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
-    use krabka_raft::{
-        AddVoter, Node, QuorumState, RaftError, ReconfigOutcome, RemoveVoter, SnapshotRange,
-        SubmitChangeResult, UpdateVoter,
-    };
     use tempfile::tempdir;
     use tokio::sync::watch;
 
     use super::{super::register_broker, self_registration_record};
-    use crate::{config::BrokerConfig, error::BrokerError, metadata_source::MetadataSource};
-
-    /// A `MetadataSource` whose `submit_change` always succeeds immediately,
-    /// but whose published image is driven by the test alone through
-    /// `image_tx`, standing in for the scheduling gap between a leader's
-    /// commit-and-apply and the moment that state reaches `current_image()`.
-    struct DelayedPublishSource {
-        image_tx: watch::Sender<Arc<MetadataImage>>,
-    }
-
-    #[async_trait::async_trait]
-    impl MetadataSource for DelayedPublishSource {
-        fn current_image(&self) -> Arc<MetadataImage> {
-            self.image_tx.borrow().clone()
-        }
-        fn watch_image(&self) -> watch::Receiver<Arc<MetadataImage>> {
-            self.image_tx.subscribe()
-        }
-        fn watch_leader(&self) -> watch::Receiver<Option<NodeId>> {
-            watch::channel(None).1
-        }
-        fn quorum_state(&self) -> QuorumState {
-            unimplemented!("not exercised by register_broker")
-        }
-        async fn submit_change(
-            &self,
-            _records: Vec<MetadataRecord>,
-        ) -> Result<SubmitChangeResult, RaftError> {
-            Ok(SubmitChangeResult::default())
-        }
-        async fn change_membership(&self, _new_voters: BTreeSet<NodeId>) -> Result<(), RaftError> {
-            unimplemented!("not exercised by register_broker")
-        }
-        async fn add_learner(&self, _node_id: NodeId, _node: Node) -> Result<(), RaftError> {
-            unimplemented!("not exercised by register_broker")
-        }
-        fn controller_bound_addr(&self) -> SocketAddr {
-            "127.0.0.1:0".parse().expect("static")
-        }
-        fn read_snapshot_range(&self, _position: i64, _max_bytes: i32) -> SnapshotRange {
-            unimplemented!("not exercised by register_broker")
-        }
-        async fn trigger_snapshot(&self) -> Result<(), RaftError> {
-            unimplemented!("not exercised by register_broker")
-        }
-        async fn add_voter(&self, _req: AddVoter) -> Result<ReconfigOutcome, RaftError> {
-            unimplemented!("not exercised by register_broker")
-        }
-        async fn remove_voter(&self, _req: RemoveVoter) -> Result<ReconfigOutcome, RaftError> {
-            unimplemented!("not exercised by register_broker")
-        }
-        async fn update_voter(&self, _req: UpdateVoter) -> Result<ReconfigOutcome, RaftError> {
-            unimplemented!("not exercised by register_broker")
-        }
-        async fn cancel(&self) {}
-    }
+    use crate::{config::BrokerConfig, error::BrokerError, test_support::FakeMetadataSource};
 
     fn registration_config(log_dir: &std::path::Path) -> BrokerConfig {
         BrokerConfig {
@@ -91,9 +32,7 @@ mod publish_race {
         config: BrokerConfig,
         image_tx: &watch::Sender<Arc<MetadataImage>>,
     ) -> tokio::task::JoinHandle<Result<Option<i64>, BrokerError>> {
-        let source = DelayedPublishSource {
-            image_tx: image_tx.clone(),
-        };
+        let source = FakeMetadataSource::published_image_channel(image_tx.clone());
         tokio::spawn(async move { register_broker(&config, &source).await })
     }
 
@@ -215,7 +154,7 @@ mod publish_race {
         let config = registration_config(log_dir.path());
         let (image_tx, _keep_alive) =
             watch::channel(Arc::new(MetadataImage::new(uuid::Uuid::nil())));
-        let source = DelayedPublishSource { image_tx };
+        let source = FakeMetadataSource::published_image_channel(image_tx);
 
         let err = register_broker(&config, &source)
             .await
@@ -309,48 +248,24 @@ fn broker_witness_record(node_id: u64, value: Option<&str>) -> krabka_metadata::
 }
 
 #[test]
-fn a_witness_registration_batch_publishes_the_witness_role() {
-    let log_dir = tempdir().expect("temp log dir");
-    let config = node_with_roles(
-        log_dir.path(),
-        vec![
-            crate::config::NodeRole::Controller,
-            crate::config::NodeRole::Broker,
-            crate::config::NodeRole::Witness,
-        ],
-    );
-
-    assert!(
-        broker_registration_batch(&config)
-            == vec![
-                krabka_metadata::MetadataRecord::V1BrokerRegistration(self_registration_record(
-                    &config
-                )),
-                broker_witness_record(4, Some("true")),
-            ]
-    );
-}
-
-#[test]
-fn a_plain_broker_registration_batch_clears_the_witness_role() {
-    let log_dir = tempdir().expect("temp log dir");
-    let config = node_with_roles(
-        log_dir.path(),
-        vec![
-            crate::config::NodeRole::Controller,
-            crate::config::NodeRole::Broker,
-        ],
-    );
-
-    assert!(
-        broker_registration_batch(&config)
-            == vec![
-                krabka_metadata::MetadataRecord::V1BrokerRegistration(self_registration_record(
-                    &config
-                )),
-                broker_witness_record(4, None),
-            ]
-    );
+fn registration_batch_publishes_or_clears_the_witness_role() {
+    use crate::config::NodeRole::{Broker, Controller, Witness};
+    for (roles, expected_witness) in [
+        (vec![Controller, Broker, Witness], Some("true")),
+        (vec![Controller, Broker], None),
+    ] {
+        let log_dir = tempdir().expect("temp log dir");
+        let config = node_with_roles(log_dir.path(), roles);
+        assert!(
+            broker_registration_batch(&config)
+                == vec![
+                    krabka_metadata::MetadataRecord::V1BrokerRegistration(
+                        self_registration_record(&config)
+                    ),
+                    broker_witness_record(4, expected_witness),
+                ]
+        );
+    }
 }
 
 #[test]
@@ -547,15 +462,11 @@ mod unclean_restart {
     use std::sync::Arc;
 
     use assert2::assert;
-    use krabka_metadata::{
-        LeaderEpoch, MetadataRecord, NodeId, PartitionRecord, TopicConfigRecord, TopicRecord,
-    };
+    use krabka_metadata::{LeaderEpoch, MetadataRecord, NodeId, PartitionRecord};
 
     use crate::{
         broker::{Broker, registration::register_broker},
-        codes,
         config::BrokerConfig,
-        config_keys::MIN_INSYNC_REPLICAS,
         elr::{TopicElr, state::PartitionElr},
         test_support::start_broker_with_authorizer,
     };
@@ -566,7 +477,6 @@ mod unclean_restart {
     /// `AlterPartition` v2, whose `new_isr` is a plain broker-id list, for the
     /// reason [`crate::elr::tests`] gives: v3 drags the KIP-903 broker-epoch
     /// eligibility check into a fixture that is not about it.
-    const ALTER_VERSION: i16 = 2;
     /// The restarting broker. Node 1 is the controller and stays up.
     const RESTARTING: NodeId = NodeId(2);
 
@@ -577,21 +487,8 @@ mod unclean_restart {
     /// One RF=3 partition with a full ISR, and a `min.insync.replicas` of 2,
     /// which is what gives the partition an ELR to fall below.
     fn seed_records() -> Vec<MetadataRecord> {
-        vec![
-            // KIP-966 ELR maintenance is gated on the feature, whose release
-            // default is 0, so the seed finalizes it the way an operator's
-            // `kafka-features upgrade` would.
-            MetadataRecord::V1FeatureLevel(krabka_metadata::FeatureLevelRecord {
-                name: crate::features::ELR_VERSION.into(),
-                level: 1,
-            }),
-            MetadataRecord::V1Topic(TopicRecord {
-                name: TOPIC.into(),
-                topic_id: uuid::Uuid::from_bytes(TOPIC_ID_BYTES),
-                partitions: 1,
-                replication_factor: 3,
-            }),
-            MetadataRecord::V1Partition(PartitionRecord {
+        crate::test_support::elr_topic_records(
+            PartitionRecord {
                 topic: TOPIC.into(),
                 partition: 0,
                 leader: NodeId(1),
@@ -602,34 +499,10 @@ mod unclean_restart {
                 removing_replicas: vec![],
                 directories: vec![uuid::Uuid::nil(); 3],
                 partition_epoch: 4,
-            }),
-            MetadataRecord::V1TopicConfig(TopicConfigRecord {
-                topic: TOPIC.into(),
-                overrides: [(MIN_INSYNC_REPLICAS.to_string(), "2".to_string())]
-                    .into_iter()
-                    .collect(),
-            }),
-        ]
-    }
-
-    /// Shrink the ISR to `new_isr` through the real `AlterPartition` handler,
-    /// which is how a real partition's ELR comes to exist at all.
-    async fn alter_isr(broker: &Arc<Broker>, new_isr: &[i32]) {
-        let response = crate::test_support::propose_isr(
-            broker,
-            TOPIC,
-            (
-                krabka_protocol::primitives::uuid::Uuid(TOPIC_ID_BYTES),
-                LEADER_EPOCH,
-                ALTER_VERSION,
-            ),
-            new_isr,
+            },
+            uuid::Uuid::from_bytes(TOPIC_ID_BYTES),
+            "2",
         )
-        .await;
-        assert!(
-            response.topics[0].partitions[0].error_code == codes::NONE,
-            "AlterPartition refused the proposal: {response:?}"
-        );
     }
 
     /// The published ELR of partition 0.
@@ -668,7 +541,12 @@ mod unclean_restart {
         config.node_id = RESTARTING;
         boot(broker, &mut config).await;
 
-        alter_isr(broker, &[1]).await;
+        crate::test_support::accepted_isr_proposal(
+            broker,
+            crate::test_support::LiveIsrSetup::default(),
+            crate::test_support::IsrResponseCheck::PartitionOnly,
+        )
+        .await;
         assert!(
             published_elr(broker)
                 == PartitionElr {
@@ -717,10 +595,7 @@ mod unclean_restart {
     /// one says the broker really does write it on the way down.
     #[tokio::test]
     async fn a_graceful_stop_leaves_the_proof_its_own_restart_spends() {
-        let (handle, dir) =
-            start_broker_with_authorizer(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
-        let broker = handle.broker_arc_for_test();
-        crate::test_support::wait_for_controller_leader(&broker).await;
+        let (handle, dir, broker) = crate::test_support::started_controller_broker().await;
         let node_id = broker.config.node_id;
         let log_dir = broker.config.log_dir.clone();
         let epoch = broker

@@ -23,16 +23,10 @@ use krabka_client_core::{Connection, ConnectionOptions};
 use krabka_protocol::{
     owned::create_topics_request::CreatableTopicConfig,
     primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch, RecordsPayload},
+    records::{Record, RecordBatch},
 };
 
-use crate::{
-    support,
-    support::{
-        produce::single_partition_produce, records::batch_from_records,
-        topics::create_topic_request,
-    },
-};
+use crate::{support, support::records::batch_from_records};
 
 const TOPIC: &str = "compaction-replicas";
 
@@ -106,16 +100,12 @@ fn record(
 /// Send `batch` to the leader with `acks=-1`, and return the error code of
 /// the partition row.
 async fn produce(leader: &Connection, topic_id: WireUuid, batch: RecordBatch) -> i16 {
-    let response = leader
-        .send(single_partition_produce(
-            TOPIC,
-            topic_id,
-            0,
-            Some(RecordsPayload::V2(vec![batch])),
-            (-1, 30_000),
-        ))
-        .await
-        .expect("Produce");
+    let response = crate::support::produce::send_batch(
+        &leader,
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {topic: (TOPIC).into(), topic_id, ..crate::support::produce::SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()},
+    )
+    .await;
     response.responses[0].partition_responses[0].error_code
 }
 
@@ -165,12 +155,12 @@ async fn every_replica_keeps_the_last_batch_of_an_active_producer() {
         ..Default::default()
     })
     .collect();
-    let created = admin
-        .send(create_topic_request(topic, 5_000))
-        .await
-        .expect("CreateTopics");
-    assert!(created.topics[0].error_code == codes::NONE);
-    let topic_id = created.topics[0].topic_id;
+    let topic_id = support::client::create_topic_spec(
+        &admin,
+        topic,
+        crate::support::topics::CreateTopicRequestSetup::default(),
+    )
+    .await;
     for (handle, _, _) in &cluster {
         handle.wait_until_partition_present(TOPIC, 0).await;
         wait_for_the_topic_config(handle).await;

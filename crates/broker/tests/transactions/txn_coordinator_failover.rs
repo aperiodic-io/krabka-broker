@@ -20,7 +20,8 @@ use crate::support::{
     client::connect_owned,
     discovery::{coordinator_lookup_request, topic_metadata_request},
     topics::metadata_topic,
-    transactions::end_transaction_request,
+    transaction_wire::{TransactionProduceSetup, produce_fixture},
+    transactions::{ProducerIdentity, end_transaction_request},
 };
 
 const TID: &str = "txn-coordinator-failover";
@@ -66,23 +67,6 @@ async fn data_leader_client(cluster: &Cluster) -> Client {
         .wait_until_local_partition_leader(TOPIC, 0, NodeId(leader))
         .await;
     client(&handle.listen_addr().to_string()).await
-}
-
-/// Create the data topic with `leader` leading its one partition on all three
-/// brokers. The test stops the broker that coordinates the transaction and
-/// expects the data partition to change leaders with it, so the two must
-/// share a broker: an automatic placement starts at a random broker.
-async fn create_topic(client: &Client, leader: u64) {
-    let leader = i32::try_from(leader).expect("node id fits an i32");
-    let mut replicas = vec![leader];
-    replicas.extend((1..=3).filter(|node| *node != leader));
-    crate::support::transaction_wire::create_assigned_topic(
-        client,
-        TOPIC,
-        &replicas,
-        Some("CreateTopics"),
-    )
-    .await;
 }
 
 /// Create `__transaction_state` with `FindCoordinator`.
@@ -140,9 +124,16 @@ async fn produce(client: &Client, producer: Option<(i64, i16)>, values: &[&'stat
         .find(|row| row.name.as_deref() == Some(TOPIC))
         .map(|row| row.topic_id)
         .expect("topic in metadata");
-    crate::support::transaction_wire::produce_succeeds(client.send(
-        crate::support::transaction_wire::produce_request(TID, TOPIC, topic_id, producer, values),
-    ))
+    produce_fixture(
+        TransactionProduceSetup {
+            transactional_id: TID,
+            topic: TOPIC,
+            topic_id,
+            producer: producer.map(ProducerIdentity::from_wire),
+            values,
+        },
+        |request| client.send(request),
+    )
     .await;
 }
 
@@ -150,7 +141,16 @@ async fn end_txn(client: &Client, (producer_id, epoch): (i64, i16)) -> EndTxnRes
     crate::support::transaction_wire::retry_coordinator(
         || async {
             client
-                .send(end_transaction_request(TID, (producer_id, epoch), true))
+                .send(end_transaction_request(
+                    TID,
+                    crate::support::transactions::EndTransactionSetup {
+                        producer: crate::support::transactions::ProducerIdentity::from_wire((
+                            producer_id,
+                            epoch,
+                        )),
+                        ..Default::default()
+                    },
+                ))
                 .await
                 .expect("EndTxn")
         },
@@ -175,7 +175,17 @@ async fn a_transaction_commits_through_the_next_coordinator() {
     let admin = client(&cluster[0].0.listen_addr().to_string()).await;
     find_coordinator(&admin).await;
     let coordinator = leader_of(&cluster[0].0, STATE_TOPIC).await;
-    create_topic(&admin, coordinator).await;
+    crate::support::transaction_wire::create_assigned_topic(
+        &admin,
+        crate::support::transaction_wire::AssignedTransactionTopicSetup {
+            topic: crate::support::topics::AssignedTopicSetup::leader_first(
+                TOPIC,
+                krabka_metadata::NodeId(coordinator),
+            ),
+            context: Some("CreateTopics"),
+        },
+    )
+    .await;
     cluster[0].0.wait_until_isr_len(STATE_TOPIC, 0, 3).await;
     cluster[0].0.wait_until_isr_len(TOPIC, 0, 3).await;
 

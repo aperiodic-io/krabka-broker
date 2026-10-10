@@ -20,6 +20,7 @@ use std::time::Duration;
 use assert2::{assert, check};
 use bytes::BytesMut;
 use krabka_broker::{Broker, BrokerConfig, metrics::PartitionLabel};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -30,10 +31,14 @@ use krabka_protocol::{
 };
 use tokio::net::TcpStream;
 
-use crate::support::{
-    fetch::{fetch_partition, single_partition_fetch},
-    records::{batch_from_records, value_record},
-    topics::{creatable_topic, create_topic_request},
+use crate::{
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    support::{
+        fetch::single_partition_fetch,
+        records::{batch_from_records, value_record},
+        topics::{creatable_topic, create_topic_request},
+        wire::HeaderEncoding as RequestHeaderEncoding,
+    },
 };
 
 const TOPIC: &str = "metrics-it";
@@ -49,17 +54,24 @@ async fn create_topic(addr: std::net::SocketAddr) {
 }
 
 async fn create_topic_named(addr: std::net::SocketAddr, topic: &str) {
-    let req = create_topic_request(creatable_topic(topic, 1, 1), 5_000);
+    let req = create_topic_request(creatable_topic(
+        crate::support::topics::ConfiguredTopicSetup {
+            name: (topic).into(),
+            ..Default::default()
+        },
+    ));
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let mut body = BytesMut::new();
     req.encode(&mut body, CREATE_TOPICS_VERSION).unwrap();
     let resp = kafka_wire::round_trip(
         &mut stream,
-        19,
-        CREATE_TOPICS_VERSION,
-        1,
-        CLIENT_ID,
-        true,
+        WireExchangeSetup {
+            api_key: WireApiKey(19),
+            version: WireApiVersion(CREATE_TOPICS_VERSION),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
         &body,
     )
     .await
@@ -108,12 +120,11 @@ async fn produce_to(addr: std::net::SocketAddr, topic: &str, partition: i32) -> 
 
 async fn fetch_one(addr: std::net::SocketAddr) {
     use krabka_protocol::owned::fetch_response::FetchResponse;
-    let req = single_partition_fetch(
-        TOPIC,
-        krabka_protocol::primitives::uuid::Uuid::default(),
-        fetch_partition(0, 0, 1024 * 1024),
-        (500, 1, 1024 * 1024),
-    );
+    let req = single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+        topic: TOPIC.into(),
+        topic_id: krabka_protocol::primitives::uuid::Uuid::default(),
+        ..Default::default()
+    });
     let (_, r): (usize, FetchResponse) =
         kafka_wire::request_once(addr, &req, (1, FETCH_VERSION), CLIENT_ID, (1, true)).await;
     assert!(r.error_code == 0, "fetch top-level: {r:?}");

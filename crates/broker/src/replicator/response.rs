@@ -15,7 +15,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use bytes::Buf as _;
-use krabka_ids::{LeaderEpoch, PartitionIndex, ProducerId};
+use krabka_ids::PartitionIndex;
 use krabka_log::{Offset, VerbatimBatch};
 use krabka_protocol::{
     owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
@@ -382,16 +382,7 @@ async fn replicate_raw_batches(
                 }
             }
         } else {
-            let batch = VerbatimBatch {
-                bytes: batch_bytes,
-                last_offset_delta: header.last_offset_delta.get(),
-                max_timestamp: header.max_timestamp.get(),
-                leader_epoch: LeaderEpoch(header.partition_leader_epoch.get()),
-                producer_id: ProducerId(header.producer_id.get()),
-                producer_epoch: header.producer_epoch.get(),
-                base_sequence: header.base_sequence.get(),
-                is_transactional: attributes.is_transactional(),
-            };
+            let batch = VerbatimBatch::from_header(header, batch_bytes);
             part.replicate_verbatim(batch, base_offset).await
         };
         if let Err(error) = result {

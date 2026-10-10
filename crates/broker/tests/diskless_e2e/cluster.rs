@@ -22,10 +22,10 @@ use krabka_broker::{
     BootstrapMode, Broker, BrokerConfig, BrokerHandle, KafkaRlmmConfig, NodeId,
     RemoteStorageBackend, RlmmKind,
 };
-use krabka_security::{ListenerProtocol, SaslMechanism};
+use krabka_security::ListenerProtocol;
 use tempfile::TempDir;
 
-use crate::{CLIENT_PRINCIPAL, PASSWORD, VOTERS, broker_principal, support};
+use crate::{CLIENT_PRINCIPAL, PASSWORD, VOTERS, support};
 
 /// Name of the one data-plane listener every broker binds. It carries both the
 /// suite's client traffic and the inter-broker traffic, including the
@@ -50,6 +50,18 @@ impl DisklessCluster {
     /// The live handle for the broker whose node id is `node`, if it is up.
     pub(crate) fn handle_for_node(&self, node: NodeId) -> Option<&BrokerHandle> {
         self.brokers[Self::index_of(node)].as_ref()
+    }
+
+    /// Wait on the selected surviving voter for the departure's promoted leader.
+    pub(crate) async fn promoted_leader(&self, survivor: NodeId, former: NodeId) -> NodeId {
+        let broker = self.handle_for_node(survivor).expect("the survivor is up");
+        broker
+            .wait_until_partition_leader_changed(crate::TOPIC, 0, former)
+            .await;
+        broker
+            .partition_leader_for_test(crate::TOPIC, 0)
+            .map(NodeId)
+            .expect("a promoted leader")
     }
 
     /// The `host:port` a client bootstraps against to talk to `node`. This
@@ -163,15 +175,17 @@ pub(crate) async fn start_diskless_cluster(
         })
         .collect();
 
+    let topology = support::RoleTopology::new(&client_addrs, &controller_addrs, &voters);
+
     let configs: Vec<BrokerConfig> = (0..VOTERS)
         .map(|index| {
             let mut config = broker_config(
-                index,
-                &client_addrs,
-                &controller_addrs,
-                &voters,
                 log_dirs[index].path(),
                 remote_dir.path(),
+                topology.node_setup(crate::support::ClusterBootstrapSetup {
+                    index: crate::support::NodeIndex(index),
+                    ..Default::default()
+                }),
             );
             customize(&mut config);
             config
@@ -213,21 +227,16 @@ pub(crate) async fn start_diskless_cluster(
 /// placement policy requires, the shared object store, and the topic-backed
 /// metadata log the diskless flush index rides on.
 fn broker_config(
-    index: usize,
-    client_addrs: &[SocketAddr],
-    controller_addrs: &[SocketAddr],
-    voters: &[(u64, SocketAddr)],
     log_dir: &Path,
     remote_dir: &Path,
+    setup: crate::support::ClusterNodeSetup<'_>,
 ) -> BrokerConfig {
-    let mut config = BrokerConfig::for_tests(log_dir.to_path_buf());
-    config.broker_id = i32::try_from(index + 1).expect("small cluster");
-    config.node_id = NodeId(u64::try_from(index + 1).expect("small cluster"));
+    let index = setup.index.0;
+    let client = setup.client_addrs[index];
+    let rlmm_bootstrap = setup.client_addrs[0].to_string();
+    let node = NodeId(u64::try_from(index + 1).expect("small cluster"));
+    let mut config = support::broker_config(log_dir, setup);
     config.directory_id = uuid::Uuid::from_u128(u128::try_from(index + 1).expect("small cluster"));
-    config.listen_addr = client_addrs[index];
-    config.advertised_listener = client_addrs[index].to_string();
-    config.controller_listen_addr = controller_addrs[index];
-    config.controller_quorum_voters = crate::support::controller_voters(voters);
     config.bootstrap_mode = BootstrapMode::Bootstrap;
     config.auto_join = false;
     config.bootstrap_servers = vec![];
@@ -237,29 +246,23 @@ fn broker_config(
     // leader can tie an incoming shard fetch to a voter. Every broker holds
     // every principal, because any of them can end up leading the shard and
     // having to authenticate the other two.
-    let node = u64::try_from(index + 1).expect("small cluster");
     config.listeners = vec![crate::support::listeners::listener(
         LISTENER,
-        client_addrs[index],
+        client,
         ListenerProtocol::SaslPlaintext,
     )];
-    LISTENER.clone_into(&mut config.inter_broker_listener_name);
-    config.enabled_sasl_mechanisms = vec![SaslMechanism::Plain];
-    config.plain_credentials =
-        support::diskless::peer_credentials(VOTERS, PASSWORD, broker_principal)
-            .chain(std::iter::once((
-                CLIENT_PRINCIPAL.to_owned(),
-                PASSWORD.to_owned(),
-            )))
-            .collect();
-    // Distinct racks preserve the three-voter WAL placement's AZ-loss budget.
-    support::diskless::configure_identity(
+    support::diskless::configure_authentication(
         &mut config,
-        index,
-        node,
-        VOTERS,
-        PASSWORD,
-        broker_principal,
+        support::diskless::DisklessAuthenticationSetup {
+            listener: LISTENER,
+            identity: support::diskless::DisklessIdentitySetup {
+                index: crate::support::NodeIndex(index),
+                node,
+                voters: support::diskless::WalVoterCount(VOTERS),
+                password: PASSWORD,
+            },
+            additional_credentials: vec![(CLIENT_PRINCIPAL.to_owned(), PASSWORD.to_owned())],
+        },
     );
     // One shared object store for all three brokers: a flush written by the
     // leader has to be readable by whichever broker serves the cold read.
@@ -271,7 +274,7 @@ fn broker_config(
     // brokers keeps the index cheap and survives the leader loss the failover
     // case injects. Every broker bootstraps that client against broker 1.
     config.remote_log_metadata = RlmmKind::TopicBacked(KafkaRlmmConfig {
-        bootstrap: client_addrs[0].to_string(),
+        bootstrap: rlmm_bootstrap,
         num_partitions: 1,
         replication: i32::try_from(VOTERS).expect("small cluster"),
         snapshot_interval: krabka_units::hours(1),

@@ -49,11 +49,8 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::coordinator::unified::{
-        share::persistence::{
-            KEY_SHARE_MEMBER_METADATA, ShareGroupKey, encode_share_key, parse_share_key,
-        },
-        test_support::peek_version,
+    use crate::coordinator::unified::share::persistence::{
+        KEY_SHARE_MEMBER_METADATA, ShareGroupKey,
     };
 
     #[test]
@@ -62,10 +59,10 @@ mod tests {
             group_id: "g1".into(),
             member_id: "m1".into(),
         };
-        let b = encode_share_key(&key).unwrap();
-        let (ver, body) = peek_version(&b);
-        assert!(ver == KEY_SHARE_MEMBER_METADATA);
-        assert!(parse_share_key(ver, body).unwrap() == key);
+        super::super::check_key_round_trip(
+            &key,
+            super::super::ShareKeyVersion(KEY_SHARE_MEMBER_METADATA),
+        );
 
         let v = ShareGroupMemberMetadataValue {
             rack_id: Some("us-east-1a".into()),

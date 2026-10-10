@@ -73,7 +73,7 @@ async fn reaper_never_retries_a_prepared_two_phase_transaction() {
 
 #[test]
 fn apply_prepare_abort_flips_state_and_stamps_time() {
-    let mut e = entry(1000, -1);
+    let mut e = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     e.state = TxnState::Ongoing;
     e.last_update_ms = 1;
     apply_prepare_abort(&mut e, 999);
@@ -84,7 +84,7 @@ fn apply_prepare_abort_flips_state_and_stamps_time() {
 #[test]
 fn apply_complete_abort_records_prev_only_on_a_pid_roll() {
     // No roll: same pid, epoch bumped → prev untouched.
-    let mut e = entry(1000, -1);
+    let mut e = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     e.state = TxnState::PrepareAbort;
     e.producer_epoch = 4;
     e.partitions.insert(crate::txn::state::TopicPartition {
@@ -100,7 +100,7 @@ fn apply_complete_abort_records_prev_only_on_a_pid_roll() {
     check!(e.last_update_ms == 42);
 
     // Roll: fresh pid at epoch 0 → prior pid recorded as prev.
-    let mut rolled = entry(1000, -1);
+    let mut rolled = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     rolled.state = TxnState::PrepareAbort;
     apply_complete_abort(&mut rolled, ProducerId(2000), 0, 43);
     check!(rolled.producer_id == 2000);
@@ -113,7 +113,7 @@ fn apply_complete_abort_records_prev_only_on_a_pid_roll() {
 
 #[test]
 fn complete_abort_decision_rejects_any_prepared_snapshot_drift() {
-    let mut prepared = entry(1000, -1);
+    let mut prepared = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     prepared.producer_epoch = 7;
     prepared.state = TxnState::PrepareAbort;
 
@@ -180,7 +180,7 @@ fn complete_abort_decision_rejects_any_prepared_snapshot_drift() {
 #[tokio::test]
 async fn failed_prepare_persistence_leaves_the_live_entry_ongoing() {
     let coordinator = test_coordinator();
-    let mut ongoing = entry(1000, -1);
+    let mut ongoing = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     ongoing.state = TxnState::Ongoing;
     ongoing.txn_timeout_ms = 1;
     ongoing.start_ms = 0;
@@ -200,7 +200,7 @@ async fn failed_prepare_persistence_leaves_the_live_entry_ongoing() {
 #[tokio::test]
 async fn failed_completion_persistence_leaves_the_live_entry_prepared() {
     let coordinator = test_coordinator();
-    let mut prepared = entry(1000, -1);
+    let mut prepared = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     prepared.state = TxnState::PrepareAbort;
     let tid = prepared.transactional_id.clone();
     coordinator
@@ -218,7 +218,7 @@ async fn failed_completion_persistence_leaves_the_live_entry_prepared() {
 #[tokio::test]
 async fn completed_retry_is_at_most_once_without_persistence() {
     let coordinator = test_coordinator();
-    let mut prepared = entry(1000, -1);
+    let mut prepared = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     prepared.state = TxnState::PrepareAbort;
     let mut completed = prepared.clone();
     completed.state = TxnState::CompleteAbort;
@@ -237,7 +237,7 @@ async fn completed_retry_is_at_most_once_without_persistence() {
 #[tokio::test]
 async fn replaced_entry_handle_is_rejected_as_stale() {
     let coordinator = test_coordinator();
-    let current = entry(1000, -1);
+    let current = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
     let tid = current.transactional_id.clone();
     let stale = Arc::new(Mutex::new(current.clone()));
     coordinator.state.insert(tid.clone(), stale.clone());

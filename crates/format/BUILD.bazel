@@ -3,7 +3,10 @@ load("//bazel:defs.bzl", "crate_binary", "crate_library", "crate_tests")
 package(default_visibility = ["//visibility:public"])
 
 # Consumed by `crate.from_cargo` (see //MODULE.bazel).
-exports_files(["Cargo.toml"])
+exports_files([
+    "Cargo.toml",
+    "tests/fixtures/bootstrap.records.bin",
+])
 
 crate_library(name = "format")
 
@@ -15,6 +18,7 @@ crate_binary(
 )
 
 crate_tests(
+    compile_data = ["tests/fixtures/bootstrap.records.bin"],
     # `format_smoke` runs the binary and reads back what it wrote.
     data = [":krabka-format"],
     env = {"CARGO_BIN_EXE_krabka-format": "$(rootpath :krabka-format)"},

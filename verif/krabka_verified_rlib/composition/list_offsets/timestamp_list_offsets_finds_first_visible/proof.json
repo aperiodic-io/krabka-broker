@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_elim_Bound": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Bound": { "prover": "alt-ergo", "time": 0.009 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.015 },
       "vc_expect_i64": { "prover": "alt-ergo", "time": 0.009 },
       "vc_first_unstable_offset": { "prover": "alt-ergo", "time": 0.016 },
@@ -13,7 +13,7 @@
       },
       "vc_list_offsets_bound_decision": {
         "prover": "alt-ergo",
-        "time": 0.027
+        "time": 0.009
       },
       "vc_list_offsets_kind": { "prover": "alt-ergo", "time": 0.016 },
       "vc_list_offsets_selection_decision": {

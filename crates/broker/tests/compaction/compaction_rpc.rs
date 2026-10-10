@@ -10,12 +10,11 @@ use std::net::SocketAddr;
 
 use assert2::assert;
 use bytes::{Bytes, BytesMut};
+use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
     owned::{
-        create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
-        create_topics_response::CreateTopicsResponse,
-        metadata_response::MetadataResponse,
+        create_topics_response::CreateTopicsResponse, metadata_response::MetadataResponse,
         produce_response::ProduceResponse,
     },
     primitives::uuid::Uuid,
@@ -25,45 +24,38 @@ use tokio::net::TcpStream;
 
 use crate::{
     CLIENT_ID, kafka_wire,
+    kafka_wire::ExchangeSetup as WireExchangeSetup,
     support::{
-        produce::single_partition_produce,
         records::{batch_from_records, value_record},
+        wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
 
 /// Create a topic with config overrides, on PLAINTEXT and with no SASL.
 pub(crate) async fn create_topic_with_configs(
     addr: SocketAddr,
-    topic: &str,
-    partitions: i32,
-    rf: i16,
-    configs: Vec<(&str, &str)>,
+    setup: crate::support::topics::CreateTopicSetup<'_>,
 ) {
-    let req = CreateTopicsRequest {
-        topics: vec![crate::support::topics::creatable_topic_with_configs(
-            topic.to_string(),
-            partitions,
-            rf,
-            configs
-                .into_iter()
-                .map(|(name, value)| CreatableTopicConfig {
-                    name: name.to_string(),
-                    value: Some(value.to_string()),
-                    ..Default::default()
-                })
-                .collect(),
-        )],
-        timeout_ms: 5_000,
-        ..Default::default()
-    };
+    let topic = setup.topic;
+    let req = crate::support::topics::configured_topic_request(setup);
 
     let version: i16 = 7; // flexible
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let mut body = BytesMut::new();
     req.encode(&mut body, version).expect("encode CreateTopics");
-    let resp_bytes = kafka_wire::round_trip(&mut stream, 19, version, 1, CLIENT_ID, true, &body)
-        .await
-        .expect("CreateTopics round-trip");
+    let resp_bytes = kafka_wire::round_trip(
+        &mut stream,
+        WireExchangeSetup {
+            api_key: WireApiKey(19),
+            version: WireApiVersion(version),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+        &body,
+    )
+    .await
+    .expect("CreateTopics round-trip");
     let mut cur: &[u8] = &resp_bytes;
     let resp =
         CreateTopicsResponse::decode(&mut cur, version).expect("decode CreateTopicsResponse");
@@ -80,10 +72,19 @@ pub(crate) async fn get_topic_id(addr: SocketAddr, topic: &str) -> Uuid {
     let req = crate::support::discovery::named_topic_metadata(topic.to_string());
     let version: i16 = 12; // flexible
     let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let resp: MetadataResponse =
-        kafka_wire::exchange(&mut stream, &req, 3, version, 1, CLIENT_ID, true)
-            .await
-            .expect("Metadata round-trip");
+    let resp: MetadataResponse = kafka_wire::exchange(
+        &mut stream,
+        &req,
+        WireExchangeSetup {
+            api_key: WireApiKey(3),
+            version: WireApiVersion(version),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("Metadata round-trip");
     resp.topics
         .iter()
         .find(|t| t.name.as_deref() == Some(topic))
@@ -91,14 +92,26 @@ pub(crate) async fn get_topic_id(addr: SocketAddr, topic: &str) -> Uuid {
         .unwrap_or_default()
 }
 
+/// One keyed record for the compacted single-partition topic.
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub(crate) struct ProduceRecordSetup<'a> {
+    #[default("compacted")]
+    pub topic: &'a str,
+    pub topic_id: Uuid,
+    #[default(b"k")]
+    pub key: &'a [u8],
+    #[default(b"v")]
+    pub value: &'a [u8],
+}
+
 /// Produce one record with an explicit key and value to (topic, partition 0).
-pub(crate) async fn produce_record(
-    addr: SocketAddr,
-    topic: &str,
-    topic_id: Uuid,
-    key: &[u8],
-    value: &[u8],
-) {
+pub(crate) async fn produce_record(addr: SocketAddr, setup: ProduceRecordSetup<'_>) {
+    let ProduceRecordSetup {
+        topic,
+        topic_id,
+        key,
+        value,
+    } = setup;
     let record = Record {
         key: Some(Bytes::copy_from_slice(key)),
         ..value_record(0, Some(Bytes::copy_from_slice(value)))
@@ -108,20 +121,30 @@ pub(crate) async fn produce_record(
         ..batch_from_records(vec![record])
     };
 
-    let req = single_partition_produce(
-        topic.to_string(),
-        topic_id,
-        0,
-        Some(batch.into()),
-        (1, 5_000),
+    let req = crate::support::produce::batch_request(
+        batch,
+        crate::support::produce::SinglePartitionProduceSetup {
+            topic: topic.to_string(),
+            topic_id,
+            ..Default::default()
+        },
     );
 
     let version: i16 = 9; // flexible, pre-KIP-516 (no topic_id required on the wire at v9)
     let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let resp: ProduceResponse =
-        kafka_wire::exchange(&mut stream, &req, 0, version, 1, CLIENT_ID, true)
-            .await
-            .expect("Produce round-trip");
+    let resp: ProduceResponse = kafka_wire::exchange(
+        &mut stream,
+        &req,
+        WireExchangeSetup {
+            api_key: WireApiKey(0),
+            version: WireApiVersion(version),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("Produce round-trip");
     let part = &resp.responses[0].partition_responses[0];
     assert!(
         part.error_code == 0,

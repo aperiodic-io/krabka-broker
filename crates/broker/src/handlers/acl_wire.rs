@@ -10,6 +10,17 @@ use krabka_metadata::{AclOperation, PatternType, PermissionType, ResourceType};
 
 pub mod binding_filter;
 
+/// Topic patterns shared by the filter and handler matching fixtures.
+#[cfg(test)]
+pub(crate) const PATTERN_MATCHING_FIXTURE: [(&str, PatternType); 6] = [
+    ("foo", PatternType::Literal),
+    ("*", PatternType::Literal),
+    ("f", PatternType::Prefixed),
+    ("fo", PatternType::Prefixed),
+    ("bar", PatternType::Prefixed),
+    ("food", PatternType::Literal),
+];
+
 /// Kafka's singleton cluster resource name (`Resource.CLUSTER_NAME`).
 /// Every cluster-scoped ACL and authorization check targets this name.
 pub const CLUSTER_RESOURCE_NAME: &str = "kafka-cluster";

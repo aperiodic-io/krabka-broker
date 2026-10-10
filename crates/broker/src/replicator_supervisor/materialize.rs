@@ -173,10 +173,12 @@ mod tests {
     ) {
         MaterializeFixture::default().materialize(
             partitions,
-            topic,
-            &[log_dir.to_path_buf()],
-            &LogConfig::default(),
-            "materialize partition",
+            crate::replicator_supervisor::test_support::MaterializeSetup {
+                topic,
+                log_dirs: &[log_dir.to_path_buf()],
+                context: "materialize partition",
+                ..Default::default()
+            },
         );
     }
 
@@ -221,9 +223,11 @@ mod tests {
             let partitions = Arc::new(PartitionRegistry::new());
             let result = materialize_partition(MaterializeFixture::default().config(
                 &partitions,
-                topic,
-                std::slice::from_ref(&log_dir),
-                &LogConfig::default(),
+                crate::replicator_supervisor::test_support::MaterializeSetup {
+                    topic,
+                    log_dirs: std::slice::from_ref(&log_dir),
+                    ..Default::default()
+                },
             ));
             assert!(
                 result
@@ -264,9 +268,10 @@ mod tests {
             topic_id: Some(topic_id),
             ..MaterializeFixture::default().config(
                 &partitions,
-                "t",
-                &[first.path().to_path_buf(), preferred.path().to_path_buf()],
-                &LogConfig::default(),
+                crate::replicator_supervisor::test_support::MaterializeSetup {
+                    log_dirs: &[first.path().to_path_buf(), preferred.path().to_path_buf()],
+                    ..Default::default()
+                },
             )
         })
         .expect("materialize");
@@ -340,7 +345,6 @@ mod tests {
 
     #[tokio::test]
     async fn materialize_diskless_partition_registers_wal_shard() {
-        use krabka_log::LogConfig;
         use tempfile::tempdir;
 
         let dir = tempdir().expect("tempdir");
@@ -360,9 +364,11 @@ mod tests {
             ),
             ..MaterializeFixture::default().config(
                 &partitions,
-                "diskless",
-                &[dir.path().to_path_buf()],
-                &LogConfig::default(),
+                crate::replicator_supervisor::test_support::MaterializeSetup {
+                    topic: "diskless",
+                    log_dirs: &[dir.path().to_path_buf()],
+                    ..Default::default()
+                },
             )
         })
         .expect("materialize");

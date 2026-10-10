@@ -8,7 +8,7 @@
 //! nearly as many lines as the module they check.
 
 use assert2::check;
-use krabka_ids::LeaderEpoch;
+use krabka_ids::{LeaderEpoch, Offset, PartitionIndex};
 use proptest::prelude::*;
 
 use super::*;
@@ -16,16 +16,32 @@ use crate::metadata::{
     RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentState, TopicIdPartition,
 };
 
-fn metadata(
-    topic: &str,
-    partition: i32,
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct StorageMetadataSetup<'a> {
+    #[default("orders")]
+    topic: &'a str,
+    #[default(PartitionIndex(0))]
+    partition: PartitionIndex,
+    #[default(Uuid::from_u128(1))]
     topic_id: Uuid,
+    #[default(Uuid::from_u128(30))]
     segment_id: Uuid,
-    base_offset: i64,
-) -> RemoteLogSegmentMetadata {
+    #[default(Offset(0))]
+    base_offset: Offset,
+}
+
+fn metadata(setup: StorageMetadataSetup<'_>) -> RemoteLogSegmentMetadata {
+    let StorageMetadataSetup {
+        topic,
+        partition,
+        topic_id,
+        segment_id,
+        base_offset,
+    } = setup;
+    let base_offset = base_offset.0;
     RemoteLogSegmentMetadata::new(
         RemoteLogSegmentId::new(
-            TopicIdPartition::new(topic_id, topic, partition),
+            TopicIdPartition::new(topic_id, topic, partition.0),
             segment_id,
         ),
         base_offset,
@@ -43,7 +59,12 @@ fn metadata(
 }
 
 fn sample() -> RemoteLogSegmentMetadata {
-    metadata("orders", 7, Uuid::from_u128(1), Uuid::from_u128(0xfe), 11)
+    metadata(StorageMetadataSetup {
+        partition: PartitionIndex(7),
+        segment_id: Uuid::from_u128(0xfe),
+        base_offset: Offset(11),
+        ..Default::default()
+    })
 }
 
 #[test]
@@ -82,7 +103,7 @@ fn local_tiered_storage_names_match_kafka() {
 #[test]
 fn object_store_key_components_match_kafka() {
     // The two halves of the S3 key that the object-store backend writes.
-    let metadata = metadata("orders", 0, Uuid::from_u128(1), Uuid::from_u128(30), 0);
+    let metadata = metadata(StorageMetadataSetup::default());
 
     check!(partition_dir_name(&metadata) == "orders-0-AAAAAAAAAAAAAAAAAAAAAQ");
     check!(
@@ -197,7 +218,7 @@ proptest! {
         topic_id in any::<u128>(),
     ) {
         let topic_id = Uuid::from_u128(topic_id);
-        let metadata = metadata(&topic, partition, topic_id, Uuid::nil(), 0);
+        let metadata = metadata(StorageMetadataSetup { topic: &topic, partition: PartitionIndex(partition), topic_id, segment_id: Uuid::nil(), ..Default::default() });
         let name = partition_dir_name(&metadata);
         prop_assert!(
             parse_partition_dir_name(&name)
@@ -221,7 +242,7 @@ proptest! {
     ) {
         let segment_id = Uuid::from_u128(segment_id);
         let suffix = index_type.map_or(LOG_FILE_SUFFIX, IndexType::suffix);
-        let metadata = metadata("orders", 0, Uuid::nil(), segment_id, base_offset);
+        let metadata = metadata(StorageMetadataSetup { topic_id: Uuid::nil(), segment_id, base_offset: Offset(base_offset), ..Default::default() });
         let name = segment_file_name(&metadata, suffix);
         let parsed = parse_segment_file_name(&name);
         prop_assert!(

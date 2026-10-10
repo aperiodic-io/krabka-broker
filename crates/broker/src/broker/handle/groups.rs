@@ -5,6 +5,25 @@
 use crate::broker::{BrokerHandle, TEST_AWAITER_TIMEOUT};
 
 impl BrokerHandle {
+    async fn inspect_group_actor<T>(
+        &self,
+        group_id: &str,
+        message: impl FnOnce(
+            tokio::sync::oneshot::Sender<T>,
+        ) -> crate::coordinator::unified::actor::GroupActorMessage,
+    ) -> Option<T> {
+        let handle = self
+            .broker
+            .group_coordinator
+            .groups
+            .get(group_id)?
+            .value()
+            .clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        handle.tx.send(message(tx)).await.ok()?;
+        rx.await.ok()
+    }
+
     // ── consumer/streams/share group awaiters ─────────────────────────────────
 
     /// Test-only: describe a consumer/share/streams group via its actor.
@@ -15,20 +34,10 @@ impl BrokerHandle {
         &self,
         group_id: &str,
     ) -> Option<crate::coordinator::unified::actor::DescribeView> {
-        let handle = self
-            .broker
-            .group_coordinator
-            .groups
-            .get(group_id)?
-            .value()
-            .clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        handle
-            .tx
-            .send(crate::coordinator::unified::actor::GroupActorMessage::Describe { reply: tx })
-            .await
-            .ok()?;
-        rx.await.ok()
+        self.inspect_group_actor(group_id, |reply| {
+            crate::coordinator::unified::actor::GroupActorMessage::Describe { reply }
+        })
+        .await
     }
 
     /// Test-only: await until the group has exactly `n` members.
@@ -63,22 +72,10 @@ impl BrokerHandle {
         &self,
         group_id: &str,
     ) -> Option<crate::coordinator::unified::actor::ClassicView> {
-        let handle = self
-            .broker
-            .group_coordinator
-            .groups
-            .get(group_id)?
-            .value()
-            .clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        handle
-            .tx
-            .send(
-                crate::coordinator::unified::actor::GroupActorMessage::ClassicInspect { reply: tx },
-            )
-            .await
-            .ok()?;
-        rx.await.ok()
+        self.inspect_group_actor(group_id, |reply| {
+            crate::coordinator::unified::actor::GroupActorMessage::ClassicInspect { reply }
+        })
+        .await
     }
 
     /// Test-only: await until the classic group has exactly `n` live members

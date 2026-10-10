@@ -44,6 +44,32 @@ async fn set_isolation_level(broker: &BrokerHandle, group: &str, level: &str) {
         .expect("set share.isolation.level");
 }
 
+/// Prepare a transaction-ready empty share group with its exact isolation override.
+async fn isolation_fixture(
+    level: Option<&str>,
+) -> (
+    tokio::sync::OwnedSemaphorePermit,
+    BrokerHandle,
+    std::sync::Arc<krabka_client_core::Client>,
+    tempfile::TempDir,
+    uuid::Uuid,
+    String,
+) {
+    let (permit, broker, client, dir, tid) =
+        Box::pin(crate::support::share::permitted_topic_fixture(
+            crate::support::share::ShareTopicSetup::default(),
+            |_| {},
+        ))
+        .await;
+    let bootstrap = broker.listen_addr().to_string();
+    bootstrap_share_state(&broker, &client, "g1").await;
+    if let Some(level) = level {
+        set_isolation_level(&broker, "g1", level).await;
+    }
+    broker.wait_until_transaction_coordinator_ready().await;
+    (permit, broker, client, dir, tid, bootstrap)
+}
+
 /// F2 (`read_committed`): with `share.isolation.level = read_committed`, a
 /// share fetch never surfaces records from an OPEN transaction (offsets past
 /// the LSO).
@@ -56,15 +82,8 @@ async fn set_isolation_level(broker: &BrokerHandle, group: &str, level: &str) {
 /// that the broker merely deferred the records and did not lose them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn read_committed_skips_open_txn_then_sees_committed() {
-    let (_permit, broker, client, _dir, tid) =
-        crate::support::share::permitted_topic_fixture("t", 1, |_| {}).await;
-    let bootstrap = broker.listen_addr().to_string();
-    bootstrap_share_state(&broker, &client, "g1").await;
-    set_isolation_level(&broker, "g1", READ_COMMITTED).await;
-    // The krabka producer does not retry a `FindCoordinator` that answers
-    // `COORDINATOR_NOT_AVAILABLE`, so the transaction coordinator must serve
-    // before `init_transactions`.
-    broker.wait_until_transaction_coordinator_ready().await;
+    let (_permit, broker, client, _dir, tid, bootstrap) =
+        isolation_fixture(Some(READ_COMMITTED)).await;
 
     // Open a transaction and send 3 records WITHOUT committing: HWM=3, LSO=0.
     let producer =
@@ -80,12 +99,15 @@ async fn read_committed_skips_open_txn_then_sees_committed() {
     // A read_committed share fetch must acquire NOTHING: every record is past
     // the LSO (still 0). Poll a few times to be sure it never spuriously acquires.
     for epoch in 0..6 {
-        let row = share_fetch(&client, "g1", &member, tid, 0, epoch, 0).await;
-        assert!(
-            acquired_count(&row) == 0,
-            "read_committed must not surface open-txn records, got {:?}",
-            row.acquired_records
-        );
+        crate::share_rpc::fetch_empty(
+            &client,
+            crate::support::share::ShareFetchSetup::at_epoch(
+                &member,
+                tid,
+                crate::support::share::ShareSessionEpoch(epoch),
+            ),
+        )
+        .await;
         // intentional: deliberately observe that nothing is acquired across a
         // window while the txn stays open (behavior under test, not a
         // state-settle guess).
@@ -100,7 +122,15 @@ async fn read_committed_skips_open_txn_then_sees_committed() {
     txn.commit().await.unwrap();
     let mut values: Vec<String> = Vec::new();
     for epoch in 6..30 {
-        let row = share_fetch(&client, "g1", &member, tid, 0, epoch, 0).await;
+        let row = share_fetch(
+            &client,
+            crate::support::share::ShareFetchSetup::at_epoch(
+                &member,
+                tid,
+                crate::support::share::ShareSessionEpoch(epoch),
+            ),
+        )
+        .await;
         if acquired_count(&row) > 0
             && let Some(batches) = row.records.as_ref().and_then(|r| r.as_v2())
         {
@@ -193,14 +223,7 @@ async fn aborted_transaction_data_is_archived_under_read_committed() {
 /// `isolation_level` is the group's `share.isolation.level`, or `None` for a
 /// group with no override.
 async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) -> Seen {
-    let (_permit, broker, client, _dir, tid) =
-        crate::support::share::permitted_topic_fixture("t", 1, |_| {}).await;
-    let bootstrap = broker.listen_addr().to_string();
-    bootstrap_share_state(&broker, &client, "g1").await;
-    if let Some(level) = isolation_level {
-        set_isolation_level(&broker, "g1", level).await;
-    }
-    broker.wait_until_transaction_coordinator_ready().await;
+    let (_permit, broker, client, _dir, tid, bootstrap) = isolation_fixture(isolation_level).await;
 
     let producer =
         crate::support::producer::transactional_producer(bootstrap.clone(), "share-aborted-tid")
@@ -213,7 +236,14 @@ async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) ->
     } else {
         txn.abort().await.unwrap();
     }
-    produce_n(&client, "t", tid, 0, 1).await;
+    produce_n(
+        &client,
+        crate::support::share::ShareRecordsSetup {
+            topic_id: tid,
+            ..Default::default()
+        },
+    )
+    .await;
 
     let (member, _member_epoch) =
         crate::support::share::join_consume_member(&broker, &client, tid).await;
@@ -225,7 +255,15 @@ async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) ->
         values: BTreeSet::new(),
     };
     for epoch in 0..30 {
-        let row = share_fetch(&client, "g1", &member, tid, 0, epoch, 0).await;
+        let row = share_fetch(
+            &client,
+            crate::support::share::ShareFetchSetup::at_epoch(
+                &member,
+                tid,
+                crate::support::share::ShareSessionEpoch(epoch),
+            ),
+        )
+        .await;
         let row_acquired: BTreeSet<i64> = row
             .acquired_records
             .iter()
@@ -263,10 +301,11 @@ async fn enqueue_transaction_values(producer: &Producer) {
         drop(
             producer
                 .enqueue(crate::support::producer::producer_record(
-                    "t",
-                    None,
-                    None,
-                    Some(bytes::Bytes::from(v.to_string())),
+                    crate::support::producer::ProducerRecordSetup {
+                        topic: ("t").into(),
+                        value: Some(bytes::Bytes::from(v.to_string())),
+                        ..Default::default()
+                    },
                 ))
                 .await
                 .expect("record is queued"),

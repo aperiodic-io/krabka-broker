@@ -258,7 +258,7 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
                 vec![member("A", &[], &[]), member("B", &[], &[])],
             ),
             topics: metadata(&[(t1, 3)]),
-            expected: assignment(&[("A", &[]), ("B", &[])]),
+            expected: empty_two_member_assignment(),
         },
         Scenario {
             // Kafka throws PartitionAssignorException; missing topics are
@@ -269,7 +269,7 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
                 vec![member("A", &[t3], &[]), member("B", &[t2], &[])],
             ),
             topics: metadata(&[(t1, 3)]),
-            expected: assignment(&[("A", &[]), ("B", &[])]),
+            expected: empty_two_member_assignment(),
         },
         Scenario {
             name: "testFirstAssignmentTwoMembersTwoTopics",
@@ -645,4 +645,9 @@ proptest! {
             prop_assert!(from_kernel == from_balancer);
         }
     }
+}
+
+/// Kafka's independent expected mapping when neither fixture member gets a partition.
+fn empty_two_member_assignment() -> Assignment {
+    assignment(&[("A", &[]), ("B", &[])])
 }

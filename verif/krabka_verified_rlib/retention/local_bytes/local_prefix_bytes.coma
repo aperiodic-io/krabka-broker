@@ -38,4 +38,3 @@ goal vc_local_prefix_bytes: if count <= 0 then
     true
   else
     [@expl:variant decreases] well_founded_relation_Int ([%#slocal_bytes] count) ([%#slocal_bytes] count - 1)
-

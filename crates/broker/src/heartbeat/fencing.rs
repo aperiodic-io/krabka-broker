@@ -169,7 +169,7 @@ mod tests {
             broker_epoch: i64::try_from(node).expect("small id") * 10,
             incarnation_id: uuid::Uuid::from_u128(u128::from(node)),
             log_dirs: vec![uuid::Uuid::from_u128(0x600d)],
-            ..crate::test_support::broker_registration(node)
+            ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
         }
     }
 

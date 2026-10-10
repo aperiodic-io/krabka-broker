@@ -12,7 +12,10 @@ use super::seed::snapshot_seed;
 use crate::{
     coordinator::unified::{
         OffsetRecordBatchBuilder,
-        member_records::{MemberRecordFamilies, MemberRecordLists, MemberValues},
+        member_records::{
+            MemberRecordFamilies, MemberRecordLists, MemberTombstone, MemberValues,
+            append_removed_members,
+        },
         share::{
             persistence::{
                 DeletingTopic, ShareGroupCurrentMemberAssignmentValue, ShareGroupKey,
@@ -82,47 +85,28 @@ impl PendingShareRecords {
         let mut batch = OffsetRecordBatchBuilder::default();
         let key = |key: ShareGroupKey| encode_share_key(&key);
         let group = || group_id.to_owned();
-        let removed: Vec<String> = self
-            .member_metadata
-            .iter()
-            .filter(|(_, value)| value.is_none())
-            .map(|(member_id, _)| member_id.clone())
-            .collect();
-        for member_id in &removed {
-            if self
-                .current_per_member
-                .iter()
-                .any(|(id, value)| id == member_id && value.is_none())
-            {
-                batch.push(
-                    key(ShareGroupKey::CurrentMemberAssignment {
+        let removed = append_removed_members(
+            &mut batch,
+            &self.member_metadata,
+            &self.target_per_member,
+            &self.current_per_member,
+            |family, member_id| {
+                key(match family {
+                    MemberTombstone::Current => ShareGroupKey::CurrentMemberAssignment {
                         group_id: group(),
-                        member_id: member_id.clone(),
-                    })?,
-                    None,
-                );
-            }
-            if self
-                .target_per_member
-                .iter()
-                .any(|(id, value)| id == member_id && value.is_none())
-            {
-                batch.push(
-                    key(ShareGroupKey::TargetAssignmentMember {
+                        member_id: member_id.to_owned(),
+                    },
+                    MemberTombstone::Target => ShareGroupKey::TargetAssignmentMember {
                         group_id: group(),
-                        member_id: member_id.clone(),
-                    })?,
-                    None,
-                );
-            }
-            batch.push(
-                key(ShareGroupKey::MemberMetadata {
-                    group_id: group(),
-                    member_id: member_id.clone(),
-                })?,
-                None,
-            );
-        }
+                        member_id: member_id.to_owned(),
+                    },
+                    MemberTombstone::Metadata => ShareGroupKey::MemberMetadata {
+                        group_id: group(),
+                        member_id: member_id.to_owned(),
+                    },
+                })
+            },
+        )?;
         for (member_id, v) in self.member_metadata {
             if let Some(v) = v {
                 batch.push(
@@ -183,21 +167,7 @@ impl PendingShareRecords {
     }
 }
 
-/// The topics in id order and the partitions ascending, so that two equal
-/// assignments give equal records.
-fn sorted_partitions(partitions: &HashMap<Uuid, Vec<i32>>) -> Vec<(Uuid, Vec<i32>)> {
-    let mut topics: Vec<(Uuid, Vec<i32>)> = partitions
-        .iter()
-        .filter(|(_, partitions)| !partitions.is_empty())
-        .map(|(topic_id, partitions)| {
-            let mut partitions = partitions.clone();
-            partitions.sort_unstable();
-            (*topic_id, partitions)
-        })
-        .collect();
-    topics.sort_by_key(|(topic_id, _)| topic_id.0);
-    topics
-}
+use crate::coordinator::unified::persistence::sorted_partitions;
 
 /// The records of one share-group transition, as Kafka's
 /// `GroupMetadataManager` writes them: a record only where the transition
@@ -262,17 +232,12 @@ impl ShareRecorder {
                 assignment_epoch: state.target.epoch,
                 assignment_timestamp_ms: state.assignment_timestamp_ms,
             });
-            for member_id in changed {
-                let target = state
-                    .target
-                    .per_member
-                    .get(member_id)
-                    .cloned()
-                    .unwrap_or_default();
-                pending
-                    .target_per_member
-                    .push((member_id.clone(), Some(target_assignment_value(&target))));
-            }
+            crate::coordinator::unified::member_records::append_target_records(
+                &mut pending.target_per_member,
+                changed,
+                &state.target.per_member,
+                target_assignment_value,
+            );
         }
         pending
     }

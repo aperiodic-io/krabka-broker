@@ -167,6 +167,14 @@ mod tests {
     use super::*;
     use crate::file_config::{FileConfig, FileConfigError};
 
+    fn configured_s3(source: &str) -> krabka_remote_storage::S3Config {
+        let config = crate::file_config::test_support::configured_unwrap_parse(source).unwrap();
+        match config.remote_storage_backend {
+            Some(crate::config::RemoteStorageBackend::S3(s3)) => s3,
+            other => panic!("expected S3 backend, got {other:?}"),
+        }
+    }
+
     #[test]
     fn s3_config_debug_redacts_credentials() {
         let cfg = FileRemoteStorageS3Config {
@@ -209,27 +217,18 @@ prefix = "cluster-a"
 endpoint = "http://minio:9000"
 allow_http = true
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
-        match cfg.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::S3(s3)) => {
-                // Credentials default to None and the multipart knobs default
-                // when the TOML omits them.
-                check!(s3.bucket.as_str() == "krabka-prod");
-                check!(s3.region.as_str() == "us-east-1");
-                check!(s3.prefix.as_deref() == Some("cluster-a"));
-                check!(s3.endpoint.as_deref() == Some("http://minio:9000"));
-                check!(s3.allow_http);
-                check!(s3.access_key_id.is_none());
-                check!(s3.secret_access_key.is_none());
-                check!(
-                    s3.multipart_threshold == krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD
-                );
-                check!(
-                    s3.multipart_chunk_size == krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE
-                );
-            }
-            other => panic!("expected S3 backend, got {other:?}"),
-        }
+        let s3 = configured_s3(toml);
+        // Credentials default to None and the multipart knobs default
+        // when the TOML omits them.
+        check!(s3.bucket.as_str() == "krabka-prod");
+        check!(s3.region.as_str() == "us-east-1");
+        check!(s3.prefix.as_deref() == Some("cluster-a"));
+        check!(s3.endpoint.as_deref() == Some("http://minio:9000"));
+        check!(s3.allow_http);
+        check!(s3.access_key_id.is_none());
+        check!(s3.secret_access_key.is_none());
+        check!(s3.multipart_threshold == krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD);
+        check!(s3.multipart_chunk_size == krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE);
     }
     #[test]
     fn remote_storage_s3_section_round_trips_multipart_overrides() {
@@ -240,14 +239,9 @@ region = "us-east-1"
 multipart_threshold = 8192
 multipart_chunk_size = 5242880
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
-        match cfg.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::S3(s3)) => {
-                assert!(s3.multipart_threshold == 8192);
-                assert!(s3.multipart_chunk_size == 5_242_880);
-            }
-            other => panic!("expected S3 backend, got {other:?}"),
-        }
+        let s3 = configured_s3(toml);
+        assert!(s3.multipart_threshold == 8192);
+        assert!(s3.multipart_chunk_size == 5_242_880);
     }
     #[test]
     fn remote_storage_gcs_section_parses() {
@@ -499,12 +493,7 @@ bucket = "b"
 region = "us-east-1"
 max_retries = 0
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
-        match cfg.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::S3(s3)) => {
-                check!(s3.max_retries == 0);
-            }
-            other => panic!("expected S3 backend, got {other:?}"),
-        }
+        let s3 = configured_s3(toml);
+        check!(s3.max_retries == 0);
     }
 }

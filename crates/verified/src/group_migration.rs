@@ -25,14 +25,19 @@ model_types! {
     }
 }
 
+open_logic! {
+fn migration_epoch_matches(input: Int, output: Int) -> bool {
+    pearlite! { output >= 0 &&
+        ((input >= 0 && output == input) || (input < 0 && output == 0)) }
+}
+}
+
 /// Admit a classic-to-consumer upgrade exactly when the protocol and every
 /// member subscription have a consumer representation. The returned epoch is
 /// the classic generation clamped to the first valid consumer epoch.
 #[ensures((result != None) == (consumer_protocol && every_subscription_decodable))]
-#[ensures(forall<epoch: i32> result == Some(epoch) ==> epoch@ >= 0)]
 #[ensures(forall<epoch: i32> result == Some(epoch) ==>
-    (generation@ >= 0 && epoch@ == generation@)
-        || (generation@ < 0 && epoch@ == 0))]
+    migration_epoch_matches(generation@, epoch@))]
 #[must_use]
 pub fn classic_upgrade_epoch(
     consumer_protocol: bool,
@@ -49,10 +54,8 @@ pub fn classic_upgrade_epoch(
 /// classic facade. The returned classic generation is nonnegative and keeps
 /// every already-valid consumer epoch unchanged.
 #[ensures((result != None) == every_member_hosted_classic)]
-#[ensures(forall<epoch: i32> result == Some(epoch) ==> epoch@ >= 0)]
 #[ensures(forall<epoch: i32> result == Some(epoch) ==>
-    (group_epoch@ >= 0 && epoch@ == group_epoch@)
-        || (group_epoch@ < 0 && epoch@ == 0))]
+    migration_epoch_matches(group_epoch@, epoch@))]
 #[must_use]
 pub fn consumer_downgrade_epoch(
     every_member_hosted_classic: bool,

@@ -45,19 +45,7 @@ pub(super) fn sample_cut() -> CutValue {
         completed_at: 1_724_500_000_042,
         status: CutStatus::Partial,
         topics: vec![
-            TopicOffsets {
-                topic: "orders".to_owned(),
-                partitions: vec![
-                    PartitionOffset {
-                        partition: PartitionIndex(0),
-                        offset: Offset(1024),
-                    },
-                    PartitionOffset {
-                        partition: PartitionIndex(1),
-                        offset: Offset(2048),
-                    },
-                ],
-            },
+            orders_offsets(),
             TopicOffsets {
                 topic: "payments".to_owned(),
                 partitions: vec![PartitionOffset {
@@ -70,5 +58,21 @@ pub(super) fn sample_cut() -> CutValue {
             topic: "orders".to_owned(),
             partition: PartitionIndex(2),
         }],
+    }
+}
+
+pub(super) fn orders_offsets() -> TopicOffsets {
+    TopicOffsets {
+        topic: "orders".to_owned(),
+        partitions: vec![
+            PartitionOffset {
+                partition: PartitionIndex(0),
+                offset: Offset(1024),
+            },
+            PartitionOffset {
+                partition: PartitionIndex(1),
+                offset: Offset(2048),
+            },
+        ],
     }
 }

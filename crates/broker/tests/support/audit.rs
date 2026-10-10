@@ -10,7 +10,7 @@
 use krabka_broker::coordinator::AUDIT_TOPIC;
 use krabka_protocol::{owned::fetch_response::FetchResponse, records::Record};
 
-use crate::support::fetch::{fetch_partition, single_partition_fetch};
+use crate::support::fetch::single_partition_fetch;
 
 /// Fetch the audit topic and return the `seq` header value (parsed as `u64`)
 /// from each non-checkpoint record, in order.
@@ -61,10 +61,11 @@ async fn fetch_audit(
     let topic_id = super::topic_id_for(client, AUDIT_TOPIC).await;
     client
         .send(single_partition_fetch(
-            AUDIT_TOPIC,
-            topic_id,
-            fetch_partition(0, 0, 1 << 20),
-            (500, 1, 1 << 20),
+            crate::support::fetch::SinglePartitionFetchSetup {
+                topic: AUDIT_TOPIC.into(),
+                topic_id,
+                ..Default::default()
+            },
         ))
         .await
         .expect("FetchRequest for audit topic")

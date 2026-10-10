@@ -6,41 +6,54 @@ use krabka_protocol::owned::{
     txn_offset_commit_request::{TxnOffsetCommitRequestPartition, TxnOffsetCommitRequestTopic},
 };
 
-pub fn init_producer_request(
-    transactional_id: Option<String>,
-    transaction_timeout_ms: i32,
-    (producer_id, producer_epoch): (i64, i16),
-) -> InitProducerIdRequest {
+#[derive(Clone, Copy)]
+pub struct TransactionTimeoutMillis(pub i32);
+
+#[derive(krabka_macros::FieldDefaults)]
+pub struct InitProducerSetup {
+    pub transactional_id: Option<String>,
+    #[default(TransactionTimeoutMillis(60_000))]
+    pub timeout: TransactionTimeoutMillis,
+    #[default(ProducerIdentity::from_wire((InitProducerIdRequest::default().producer_id, InitProducerIdRequest::default().producer_epoch)))]
+    pub producer: ProducerIdentity,
+}
+
+pub fn init_producer_request(setup: InitProducerSetup) -> InitProducerIdRequest {
     InitProducerIdRequest {
-        transactional_id,
-        transaction_timeout_ms,
-        producer_id,
-        producer_epoch,
+        transactional_id: setup.transactional_id,
+        transaction_timeout_ms: setup.timeout.0,
+        producer_id: setup.producer.id.0,
+        producer_epoch: setup.producer.epoch.0,
         ..Default::default()
     }
 }
 
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+pub struct EndTransactionSetup {
+    pub producer: ProducerIdentity,
+    pub outcome: TransactionOutcome,
+}
+
 pub fn end_transaction_request(
     transactional_id: impl Into<String>,
-    (producer_id, producer_epoch): (i64, i16),
-    committed: bool,
+    setup: EndTransactionSetup,
 ) -> EndTxnRequest {
     EndTxnRequest {
         transactional_id: transactional_id.into(),
-        producer_id,
-        producer_epoch,
-        committed,
+        producer_id: setup.producer.id.0,
+        producer_epoch: setup.producer.epoch.0,
+        committed: setup.outcome == TransactionOutcome::Commit,
         ..Default::default()
     }
 }
 
 pub fn txn_offset_partition(
-    partition_index: i32,
-    committed_offset: i64,
+    partition_index: krabka_ids::PartitionIndex,
+    committed_offset: krabka_ids::Offset,
 ) -> TxnOffsetCommitRequestPartition {
     TxnOffsetCommitRequestPartition {
-        partition_index,
-        committed_offset,
+        partition_index: partition_index.0,
+        committed_offset: committed_offset.0,
         ..Default::default()
     }
 }
@@ -59,18 +72,8 @@ pub fn txn_offset_topic(
 }
 
 /// New producer identity with the protocol's exact default id and epoch fields.
-pub fn new_producer_request(
-    transactional_id: Option<String>,
-    timeout_ms: i32,
-) -> InitProducerIdRequest {
-    init_producer_request(
-        transactional_id,
-        timeout_ms,
-        (
-            InitProducerIdRequest::default().producer_id,
-            InitProducerIdRequest::default().producer_epoch,
-        ),
-    )
+pub fn new_producer_request(setup: InitProducerSetup) -> InitProducerIdRequest {
+    init_producer_request(setup)
 }
 
 /// Return the complete idempotent allocation response without replacing caller assertions.
@@ -101,21 +104,87 @@ pub fn marker_topic(
     }
 }
 
-/// A complete transaction marker with caller-selected identity, result and fencing fields.
+use krabka_protocol::owned::write_txn_markers_request::WritableTxnMarkerTopic;
+
+/// Producer identity and fencing versions have distinct types at fixture boundaries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub struct ProducerEpoch(pub i16);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub struct CoordinatorEpoch(pub i32);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, derive_more::From, derive_more::Into)]
+pub struct TransactionVersion(pub i8);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProducerIdentity {
+    pub id: krabka_ids::ProducerId,
+    pub epoch: ProducerEpoch,
+}
+
+impl Default for ProducerIdentity {
+    fn default() -> Self {
+        Self {
+            id: krabka_ids::ProducerId(7),
+            epoch: ProducerEpoch::default(),
+        }
+    }
+}
+
+impl ProducerIdentity {
+    /// Wrap an identity returned by the Kafka codec.
+    pub fn from_wire((id, epoch): (i64, i16)) -> Self {
+        Self {
+            id: krabka_ids::ProducerId(id),
+            epoch: ProducerEpoch(epoch),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TransactionOutcome {
+    #[default]
+    Commit,
+    Abort,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PartitionRegistration {
+    #[default]
+    Add,
+    VerifyOnly,
+}
+
+/// Transaction marker identity, result and fencing fields.
+#[derive(krabka_macros::FieldDefaults)]
+pub struct TransactionMarkerSetup {
+    pub producer: ProducerIdentity,
+    pub outcome: TransactionOutcome,
+    pub coordinator_epoch: CoordinatorEpoch,
+    pub transaction_version: TransactionVersion,
+    pub topics: Vec<WritableTxnMarkerTopic>,
+}
+
 pub fn transaction_marker(
-    (producer_id, producer_epoch): (i64, i16),
-    transaction_result: bool,
-    coordinator_epoch: i32,
-    transaction_version: i8,
-    topics: Vec<krabka_protocol::owned::write_txn_markers_request::WritableTxnMarkerTopic>,
+    setup: TransactionMarkerSetup,
 ) -> krabka_protocol::owned::write_txn_markers_request::WritableTxnMarker {
-    krabka_protocol::owned::write_txn_markers_request::WritableTxnMarker {
-        producer_id,
-        producer_epoch,
-        transaction_result,
+    let TransactionMarkerSetup {
+        producer,
+        outcome,
         coordinator_epoch,
         transaction_version,
+        topics,
+    } = setup;
+    krabka_protocol::owned::write_txn_markers_request::WritableTxnMarker {
+        producer_id: producer.id.0,
+        producer_epoch: producer.epoch.0,
+        transaction_result: outcome == TransactionOutcome::Commit,
+        coordinator_epoch: coordinator_epoch.0,
+        transaction_version: transaction_version.0,
         topics,
         ..Default::default()
     }
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProducerEpochOffset(pub i16);

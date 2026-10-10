@@ -566,6 +566,8 @@ mod tests {
         }
     }
 
+    krabka_macros::benchmark_latency_fixture!(sample_latency);
+
     fn run_output() -> RunOutput {
         RunOutput {
             scenario: scenario(),
@@ -585,15 +587,7 @@ mod tests {
                 producer_rate: per_sec(10_000),
                 consumer_rate: per_sec(9_983),
             },
-            producer_latency: LatencyPercentiles {
-                p50: micros(1500),
-                p95: micros(3200),
-                p99: micros(4250),
-                p999: millis(9),
-                max: millis(42),
-                mean: micros(1800),
-                count: 600_000,
-            },
+            producer_latency: sample_latency(),
             consumer_e2e_latency: LatencyPercentiles::default(),
             resource: Resource {
                 broker_cpu: millis(123_456),
@@ -694,12 +688,16 @@ warmup: 10s
         check!(s.name.as_str() == "small-msg-saturate");
         check!(s.partitions == 6);
         check!(s.msg_size == bytes(100));
+        check_default_batch_timing(&s);
+        check!(matches!(s.mode, LoadMode::Saturate));
+    }
+
+    fn check_default_batch_timing(s: &Scenario) {
         check!(s.key_size == ByteSize::ZERO);
         check!(s.linger == millis(5));
         check!(s.batch_size == kibibytes(16));
         check!(s.duration == secs(60));
         check!(s.warmup == secs(10));
-        check!(matches!(s.mode, LoadMode::Saturate));
     }
 
     #[test]
@@ -711,11 +709,7 @@ mode:
 ";
         let s: Scenario = serde_yaml::from_str(y).expect("parse");
         check!(s.msg_size == kibibytes(1));
-        check!(s.key_size == ByteSize::ZERO);
-        check!(s.linger == millis(5));
-        check!(s.batch_size == kibibytes(16));
-        check!(s.duration == secs(60));
-        check!(s.warmup == secs(10));
+        check_default_batch_timing(&s);
         check!(s.failover == None);
     }
 
@@ -861,5 +855,96 @@ failover:
         check!(!json.contains("startup"));
         let back: RunOutput = serde_json::from_str(&json).expect("decode");
         check!(back == out);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod fixture {
+    use super::*;
+    krabka_macros::benchmark_scenario_fixture!(default_scenario);
+
+    pub(crate) fn scenario(name: &str) -> Scenario {
+        default_scenario(name, krabka_units::bytes(100))
+    }
+
+    pub(crate) struct RunSetup<'a> {
+        pub scenario: &'a str,
+        pub stack: Stack,
+        pub topology: Topology,
+        pub producer_rate: Frequency,
+        pub samples: Vec<Sample>,
+        pub broker_samples: Vec<BrokerSample>,
+        pub p99: Time,
+    }
+
+    impl Default for RunSetup<'_> {
+        fn default() -> Self {
+            Self {
+                scenario: "small-msg",
+                stack: Stack::Krabka,
+                topology: Topology {
+                    partitions: 100,
+                    replication_factor: 3,
+                    broker_count: 6,
+                },
+                producer_rate: krabka_units::per_sec(1000),
+                samples: vec![],
+                broker_samples: vec![],
+                p99: Time::ZERO,
+            }
+        }
+    }
+
+    pub(crate) fn empty_run(setup: RunSetup<'_>) -> RunOutput {
+        let RunSetup {
+            scenario: name,
+            stack,
+            topology,
+            producer_rate,
+            samples,
+            broker_samples,
+            p99,
+        } = setup;
+        let scenario = Scenario {
+            mode_tag: ModeTag::Cluster,
+            partitions: topology.partitions,
+            replication_factor: topology.replication_factor,
+            ..scenario(name)
+        };
+        RunOutput {
+            scenario,
+            stack,
+            topology,
+            wallclock_start_unix_ms: WallclockMs(0),
+            wallclock_end_unix_ms: WallclockMs(60_000),
+            throughput: Throughput {
+                producer_rate,
+                ..Throughput::default()
+            },
+            producer_latency: LatencyPercentiles {
+                p99,
+                ..LatencyPercentiles::default()
+            },
+            consumer_e2e_latency: LatencyPercentiles::default(),
+            resource: Resource::default(),
+            disturbance: None,
+            startup: None,
+            first_ack: Time::ZERO,
+            errors: vec![],
+            notes: vec![],
+            samples,
+            broker_samples,
+        }
+    }
+
+    pub(crate) fn short_scenario(replication_factor: i16) -> Scenario {
+        Scenario {
+            partitions: 1,
+            replication_factor,
+            linger: krabka_units::Time::ZERO,
+            duration: krabka_units::secs(1),
+            warmup: krabka_units::Time::ZERO,
+            ..scenario("x")
+        }
     }
 }

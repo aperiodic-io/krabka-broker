@@ -101,3 +101,27 @@ pub(super) async fn append_source(
     .unwrap();
     (results, leo)
 }
+
+/// A three-replica partition with a fresh source log under the caller's root.
+pub(super) fn fresh_partition_store(root: &Path) -> QuorumWalStore {
+    partition_store(root, source_log(root), 3)
+}
+
+/// Append two independently acknowledged source batches for frontier tests.
+pub(super) async fn append_two(store: &QuorumWalStore) -> (Offset, Offset) {
+    let (_, first) = append_source(store, 1).await;
+    let (_, second) = append_source(store, 1).await;
+    (first, second)
+}
+
+/// A distributed three-voter store with a fresh log and cluster identity.
+pub(super) fn fresh_distributed_store(root: &Path) -> QuorumWalStore {
+    distributed_store(source_log(root), Uuid::new_v4(), 3)
+}
+
+/// Source directory and open handle for tests that close and reopen a quorum.
+pub(super) fn reopenable_source(root: &Path) -> (std::path::PathBuf, Arc<Mutex<Log>>) {
+    let dir = root.join("source");
+    let log = open_log(&dir);
+    (dir, log)
+}

@@ -163,7 +163,14 @@ async fn offline_partition_with_diverged_logs(
     let [h1, h2, h3] = handles;
     // ── Create the RF=3 topic. Partition 0's replica assignment is
     //    [1, 2, 3]; broker 1 is the preferred/first. ──
-    create_topic_plaintext(addr, CLIENT_ID, topic, &[1, 2, 3]).await;
+    create_topic_plaintext(
+        addr,
+        crate::kafka_wire::AssignedTopicExchangeSetup {
+            client_id: CLIENT_ID,
+            topic: crate::support::topics::AssignedTopicSetup::three_replicas(topic),
+        },
+    )
+    .await;
     wait_partition_hosted(h1, topic, 0).await;
     wait_partition_hosted(h2, topic, 0).await;
     wait_partition_hosted(h3, topic, 0).await;
@@ -271,9 +278,7 @@ async fn offline_partition_with_diverged_logs(
 /// published as partition 0's eligible-leader-replica set, and asserts that
 /// `expected_leader` wins the `ElectLeaders(UNCLEAN)` that follows.
 async fn run_unclean_recovery(elr: Option<&str>, witness: Option<u64>, expected_leader: u64) {
-    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let lock = LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
-    let _g = lock.lock().await;
+    let _g = support::cluster_lock().lock().await;
 
     let cluster = crate::support::registered_cluster(3).await;
 
@@ -348,7 +353,18 @@ async fn run_unclean_recovery(elr: Option<&str>, witness: Option<u64>, expected_
     eprintln!("sending ElectLeaders UNCLEAN to raft leader at {elect_addr}");
 
     // ── Trigger offset-aware recovery (election_type = 1 = UNCLEAN). ──
-    let result = drive_elect_leaders(elect_addr, CLIENT_ID, topic, vec![0], 1).await;
+    let result = drive_elect_leaders(
+        elect_addr,
+        crate::kafka_wire::ElectionExchangeSetup {
+            client_id: CLIENT_ID,
+            election: crate::support::admin::ElectionSetup {
+                topic: (topic).to_string(),
+                kind: crate::support::admin::ElectionKind::Unclean,
+                ..Default::default()
+            },
+        },
+    )
+    .await;
     assert!(
         result == vec![(0, 0)],
         "expected error_code=0 for UNCLEAN election; got {result:?}"

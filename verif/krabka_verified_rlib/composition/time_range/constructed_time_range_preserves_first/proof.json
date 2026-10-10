@@ -20,7 +20,7 @@
         "time": 0.025
       },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.01 },
       "vc_first_timestamp_index": { "prover": "alt-ergo", "time": 0.015 },
       "vc_from_i64": { "prover": "alt-ergo", "time": 0.005 },
       "vc_from_i64'0": { "prover": "alt-ergo", "time": 0.019 },
@@ -30,7 +30,7 @@
       },
       "vc_from_unit": { "prover": "alt-ergo", "time": 0.019 },
       "vc_len_u32": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_new_i64": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_new_i64": { "prover": "alt-ergo", "time": 0.009 },
       "vc_push_i64": { "prover": "alt-ergo", "time": 0.019 },
       "vc_validated_time_cursors_are_monotone": {
         "prover": "alt-ergo",

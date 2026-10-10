@@ -44,21 +44,14 @@ use crate::jvm_acceptance::{KAFKA_IMAGE_TXN, TRANSACTIONAL_PRODUCER_JAVA, docker
 ///
 /// The probe prints `ZOMBIEPROBE fenced=<exception simple name>`, or
 /// `ZOMBIEPROBE fenced=none` when nothing fenced it at all.
-const ZOMBIE_PRODUCER_JAVA: &str = r#"
-import java.util.Properties;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
+const ZOMBIE_PRODUCER_JAVA: &str = krabka_macros::java_string_producer_source!(
+    r#"
 
 public final class ZombieProducer {
   public static void main(String[] args) throws Exception {
-    Properties config = new Properties();
-    config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, args[0]);
-    config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-        "org.apache.kafka.common.serialization.StringSerializer");
-    config.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "zombie-tid");
+"#,
+    "args[0]",
+    r#"    config.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "zombie-tid");
 
     // The first instance acquires the id and stops there: it writes nothing
     // before the takeover, so the only thing that can move its epoch is the
@@ -97,7 +90,8 @@ public final class ZombieProducer {
     }
   }
 }
-"#;
+"#
+);
 
 // Transactional EOS smoke: stand up a 3-broker Krabka cluster, compile and
 // run a small official JVM KafkaProducer client that commits 6 records and
@@ -189,14 +183,16 @@ async fn transactional_console_producer_eos() {
             ],
             inter_broker_listener_name: "INTERNAL".to_string(),
             ..crate::support::jvm_broker_config(
-                u64::try_from(i + 1).unwrap(),
-                listen_addr,
-                format!("0.0.0.0:{}", controller_ports[i])
-                    .parse()
-                    .expect("static addr"),
-                &advertised_listener,
                 dir.path().to_path_buf(),
-                &voters,
+                crate::support::JvmBrokerSetup {
+                    node: krabka_broker::NodeId(u64::try_from(i + 1).unwrap()),
+                    listen: listen_addr,
+                    controller: format!("0.0.0.0:{}", controller_ports[i])
+                        .parse()
+                        .expect("static addr"),
+                    advertised: advertised_listener.clone(),
+                    voters: crate::support::controller_voters(&voters),
+                },
             )
         };
         tempdirs.push(dir);
@@ -233,7 +229,7 @@ async fn transactional_console_producer_eos() {
     // 2. Compile the small Java helper against the image's Kafka client jars.
     //    It writes one committed transaction, one aborted transaction, and a
     //    later record that seals the abort marker's transaction index.
-    let mut producer = crate::support::jvm_docker_command("--entrypoint", &[], &["bash",
+    let mut producer = crate::support::jvm_docker_command(crate::support::JvmDockerSetup { image: "--entrypoint", args: &["bash",
             KAFKA_IMAGE_TXN,
             "-c",
             r#"set -e; cat >/tmp/TransactionalProducer.java; \
@@ -243,7 +239,7 @@ async fn transactional_console_producer_eos() {
             "--",
             &bootstrap_1,
             TOPIC,
-        ], true)
+        ], input: crate::support::ContainerInput::Attached, ..Default::default() })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -368,7 +364,7 @@ async fn transactional_console_producer_eos() {
         "--bootstrap-server",
         &bootstrap_1,
     ]);
-    let mut zombie = crate::support::jvm_docker_command("--entrypoint", &[], &["bash",
+    let mut zombie = crate::support::jvm_docker_command(crate::support::JvmDockerSetup { image: "--entrypoint", args: &["bash",
             KAFKA_IMAGE_TXN,
             "-c",
             r#"set -e; cat >/tmp/ZombieProducer.java; \
@@ -378,7 +374,7 @@ async fn transactional_console_producer_eos() {
             "--",
             &bootstrap_1,
             ZOMBIE_TOPIC,
-        ], true)
+        ], input: crate::support::ContainerInput::Attached, ..Default::default() })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -55,19 +55,24 @@ pub(super) async fn handle_session_tick(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::time::Duration;
 
     use assert2::check;
 
     use super::*;
     use crate::coordinator::unified::{
         config::NextGenConfig,
-        offsets_log::fake::InMemoryOffsetsLog,
         share::{
-            actor::{records::PendingShareRecords, test_support::metadata_with_topic},
+            actor::{
+                records::PendingShareRecords,
+                test_support::{
+                    TopicMetadataSetup, make_coordinator_with_config, metadata_with_topic,
+                },
+            },
             persistence::ShareGroupMetadataValue,
             state::ShareMemberState,
         },
+        test_support::check_two_members_expired,
     };
 
     /// Kafka runs a session timer per member, and each one that fires runs
@@ -76,25 +81,20 @@ mod tests {
     /// and an epoch bump, and no target is computed.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn each_expired_member_is_fenced_in_a_batch_of_its_own() {
-        let (metadata, _id) = metadata_with_topic("t", 4);
+        let (metadata, _id) = metadata_with_topic(TopicMetadataSetup::four_partitions());
         let config = ShareGroupConfig {
             session_timeout: Duration::from_millis(1),
             ..ShareGroupConfig::default()
         };
-        let log = Arc::new(InMemoryOffsetsLog::default());
-        let coord = Arc::new(GroupCoordinator::new(
+        let (coord, log) = make_coordinator_with_config(
+            metadata.clone(),
             NextGenConfig::default(),
             config.clone(),
-            metadata.clone(),
-            log.clone(),
-            crate::coordinator::unified::streams::config::StreamsGroupConfig::default(),
-        ));
+        );
         let mut state = ShareGroupState::new("g");
         for member_id in ["m1", "m2"] {
             let mut m = ShareMemberState::joining(member_id, "c", "h", ["t".to_owned()].into());
-            m.last_seen = Instant::now()
-                .checked_sub(Duration::from_millis(50))
-                .expect("50ms is always within Instant range");
+            m.last_seen = crate::coordinator::unified::test_support::expired_session_last_seen();
             state.add_or_update_member(m);
         }
         state.group_epoch = 2;
@@ -107,10 +107,11 @@ mod tests {
         // The first fence leaves the other member subscribed to `t`.
         let t_hash = metadata.snapshot().metadata_hash(["t"]);
         let fence = |member_id: &str, epoch, metadata_hash| {
+            use crate::coordinator::unified::test_support::member_tombstones;
             PendingShareRecords {
-                member_metadata: vec![(member_id.into(), None)],
-                target_per_member: vec![(member_id.into(), None)],
-                current_per_member: vec![(member_id.into(), None)],
+                member_metadata: member_tombstones(member_id),
+                target_per_member: member_tombstones(member_id),
+                current_per_member: member_tombstones(member_id),
                 group_metadata: Some(ShareGroupMetadataValue {
                     epoch,
                     metadata_hash,
@@ -121,19 +122,14 @@ mod tests {
             .unwrap()
             .records
         };
-        let written: Vec<_> = log
-            .batches()
-            .await
-            .into_iter()
-            .map(|batch| batch.records)
-            .collect();
+        let written: Vec<_> = log.record_batches().await;
         let mut expected = vec![fence("m1", 3, t_hash), fence("m2", 4, 0)];
         if written.first().is_some_and(|batch| batch != &expected[0]) {
             // The members expire together: either may be fenced first.
             expected = vec![fence("m2", 3, t_hash), fence("m1", 4, 0)];
         }
         check!(written == expected);
-        check!((state.members.len(), state.group_epoch, state.target.epoch) == (0, 4, 2));
+        check_two_members_expired((state.members.len(), state.group_epoch, state.target.epoch));
     }
 
     /// Kafka's `maybeCleanupShareGroupState` reaches an empty group too: a
@@ -146,16 +142,16 @@ mod tests {
             ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
         };
 
-        let (metadata, topic_id) = metadata_with_topic("t", 2);
+        let (metadata, topic_id) = metadata_with_topic(TopicMetadataSetup {
+            partitions: crate::test_support::PartitionCount(2),
+            ..Default::default()
+        });
         let config = ShareGroupConfig::default();
-        let log = Arc::new(InMemoryOffsetsLog::default());
-        let coord = Arc::new(GroupCoordinator::new(
+        let (coord, log) = make_coordinator_with_config(
+            metadata.clone(),
             NextGenConfig::default(),
             config.clone(),
-            metadata.clone(),
-            log.clone(),
-            crate::coordinator::unified::streams::config::StreamsGroupConfig::default(),
-        ));
+        );
         let gone = krabka_protocol::primitives::uuid::Uuid([9; 16]);
         let mut state = ShareGroupState::new("g");
         state.initialized.extend([(topic_id, 0), (gone, 0)]);
@@ -184,12 +180,7 @@ mod tests {
         .into_batch("g", 0)
         .unwrap()
         .records;
-        let written: Vec<_> = log
-            .batches()
-            .await
-            .into_iter()
-            .map(|batch| batch.records)
-            .collect();
+        let written: Vec<_> = log.record_batches().await;
         check!(written == vec![expected]);
     }
 }

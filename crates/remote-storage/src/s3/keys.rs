@@ -58,7 +58,7 @@ mod tests {
         // construction at the unit level (no cross-cluster fixture
         // available without sharing the InMemory backend, which we don't
         // because each cluster gets its own bucket in practice).
-        let md = sample_metadata(30);
+        let md = sample_metadata(uuid::Uuid::from_u128(30));
         let store = S3RemoteStorage::with_store(Arc::new(InMemory::new()), Some("c".to_string()));
         let key = store.log_key(&md);
         let expected = concat!(

@@ -19,10 +19,11 @@ async fn lists_groups_and_committed_offsets() {
     let producer = crate::support::producer::default_producer(&bootstrap).await;
     producer
         .send(crate::support::producer::producer_record(
-            "t1",
-            None,
-            None,
-            Some("v".into()),
+            crate::support::producer::ProducerRecordSetup {
+                topic: ("t1").into(),
+                value: Some("v".into()),
+                ..Default::default()
+            },
         ))
         .await
         .unwrap();

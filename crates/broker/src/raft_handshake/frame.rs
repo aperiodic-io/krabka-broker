@@ -143,7 +143,10 @@ mod tests {
     use super::*;
     use crate::raft_handshake::{
         API_KEY_SASL_HANDSHAKE,
-        test_support::{read_request_from_frame, read_response_frame, request_frame},
+        test_support::{
+            HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
+            RequestFrameSetup, read_request_from_frame, read_response_frame, request_frame,
+        },
     };
 
     struct FixedResp(&'static [u8]);
@@ -163,53 +166,94 @@ mod tests {
         }
     }
 
+    const SASL_HEADER_CASES: [(HandshakeApiKey, HandshakeApiVersion, HandshakeHeader); 4] = [
+        (
+            HandshakeApiKey(API_KEY_SASL_HANDSHAKE),
+            HandshakeApiVersion(0),
+            HandshakeHeader::Legacy,
+        ),
+        (
+            HandshakeApiKey(API_KEY_SASL_HANDSHAKE),
+            HandshakeApiVersion(1),
+            HandshakeHeader::Legacy,
+        ),
+        (
+            HandshakeApiKey(API_KEY_SASL_AUTHENTICATE),
+            HandshakeApiVersion(1),
+            HandshakeHeader::Legacy,
+        ),
+        (
+            HandshakeApiKey(API_KEY_SASL_AUTHENTICATE),
+            HandshakeApiVersion(2),
+            HandshakeHeader::Flexible,
+        ),
+    ];
+
     #[test]
     fn header_flexibility_table_matches_outbound_encoder() {
-        // SaslHandshake — never flexible (v0/v1). SaslAuthenticate —
-        // flexible from v2.
-        let request_cases = [
-            (API_KEY_SASL_HANDSHAKE, 0, false),
-            (API_KEY_SASL_HANDSHAKE, 1, false),
-            (API_KEY_SASL_AUTHENTICATE, 1, false),
-            (API_KEY_SASL_AUTHENTICATE, 2, true),
-            (API_KEY_API_VERSIONS, 2, false),
-            (API_KEY_API_VERSIONS, 3, true),
-        ];
-        for (api_key, version, want) in request_cases {
+        // SASL request and response headers share the version rules above.
+        for (api_key, version, want) in SASL_HEADER_CASES.into_iter().chain([
+            (
+                HandshakeApiKey(API_KEY_API_VERSIONS),
+                HandshakeApiVersion(2),
+                HandshakeHeader::Legacy,
+            ),
+            (
+                HandshakeApiKey(API_KEY_API_VERSIONS),
+                HandshakeApiVersion(3),
+                HandshakeHeader::Flexible,
+            ),
+        ]) {
             assert!(
-                is_request_header_flexible(api_key, version) == want,
-                "request api_key {api_key} v{version}"
+                is_request_header_flexible(api_key.0, version.0) == want.is_flexible(),
+                "request api_key {} v{}",
+                api_key.0,
+                version.0
             );
         }
-
-        // Response headers mirror the request rules for SaslHandshake /
-        // SaslAuthenticate; ApiVersions — response header always v0 per
-        // Kafka spec.
-        let response_cases = [
-            (API_KEY_SASL_HANDSHAKE, 0, false),
-            (API_KEY_SASL_HANDSHAKE, 1, false),
-            (API_KEY_SASL_AUTHENTICATE, 1, false),
-            (API_KEY_SASL_AUTHENTICATE, 2, true),
-            (API_KEY_API_VERSIONS, 0, false),
-            (API_KEY_API_VERSIONS, 3, false),
-        ];
-        for (api_key, version, want) in response_cases {
+        // ApiVersions responses always use header v0, including request v3.
+        for (api_key, version, want) in SASL_HEADER_CASES.into_iter().chain([
+            (
+                HandshakeApiKey(API_KEY_API_VERSIONS),
+                HandshakeApiVersion(0),
+                HandshakeHeader::Legacy,
+            ),
+            (
+                HandshakeApiKey(API_KEY_API_VERSIONS),
+                HandshakeApiVersion(3),
+                HandshakeHeader::Legacy,
+            ),
+        ]) {
             assert!(
-                is_response_header_flexible(api_key, version) == want,
-                "response api_key {api_key} v{version}"
+                is_response_header_flexible(api_key.0, version.0) == want.is_flexible(),
+                "response api_key {} v{}",
+                api_key.0,
+                version.0
             );
         }
     }
 
     #[tokio::test]
     async fn read_kafka_request_decodes_nonflex_and_flexible_headers() {
-        let nonflex = request_frame(17, 1, 42, None, false, b"plain-body");
+        let nonflex = request_frame(RequestFrameSetup {
+            correlation: HandshakeCorrelationId(42),
+            client_id: None,
+            body: b"plain-body",
+            ..Default::default()
+        });
         let decoded = read_request_from_frame(nonflex)
             .await
             .expect("nonflex request");
         assert!(decoded == (17, 1, 42, b"plain-body".to_vec()));
 
-        let flex = request_frame(36, 2, 43, Some(b"c"), true, b"auth-body");
+        let flex = request_frame(RequestFrameSetup {
+            api_key: HandshakeApiKey(36),
+            api_version: HandshakeApiVersion(2),
+            correlation: HandshakeCorrelationId(43),
+            header: HandshakeHeader::Flexible,
+            body: b"auth-body",
+            ..Default::default()
+        });
         let decoded = read_request_from_frame(flex).await.expect("flex request");
         assert!(decoded == (36, 2, 43, b"auth-body".to_vec()));
 
@@ -267,7 +311,12 @@ mod tests {
         truncated_client.extend_from_slice(&3i16.to_be_bytes());
         truncated_client.extend_from_slice(b"xy");
 
-        let missing_tag = request_frame(36, 2, 44, Some(b"c"), false, b"");
+        let missing_tag = request_frame(RequestFrameSetup {
+            api_key: HandshakeApiKey(36),
+            api_version: HandshakeApiVersion(2),
+            correlation: HandshakeCorrelationId(44),
+            ..Default::default()
+        });
 
         for frame in [short, truncated_client, missing_tag] {
             let got = read_request_from_frame(frame).await;
@@ -309,7 +358,11 @@ mod tests {
 
     #[tokio::test]
     async fn read_kafka_request_accepts_exact_client_id_end_boundary() {
-        let frame = request_frame(17, 1, 45, Some(b"client"), false, b"");
+        let frame = request_frame(RequestFrameSetup {
+            correlation: HandshakeCorrelationId(45),
+            client_id: Some(b"client"),
+            ..Default::default()
+        });
         let decoded = read_request_from_frame(frame).await.expect("exact header");
         assert!(decoded == (17, 1, 45, Vec::new()));
     }
@@ -318,7 +371,11 @@ mod tests {
     async fn read_kafka_request_accepts_exact_header_prefix_frame() {
         // A null client id and empty body make the frame exactly 10 bytes,
         // the minimum legal v1 request header.
-        let frame = request_frame(17, 1, 46, None, false, b"");
+        let frame = request_frame(RequestFrameSetup {
+            correlation: HandshakeCorrelationId(46),
+            client_id: None,
+            ..Default::default()
+        });
         let decoded = read_request_from_frame(frame).await.expect("exact prefix");
         assert!(decoded == (17, 1, 46, Vec::new()));
     }

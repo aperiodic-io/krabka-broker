@@ -4,6 +4,7 @@
 
 use std::{
     collections::BTreeMap,
+    ops::RangeInclusive,
     sync::{Arc, Mutex, atomic::Ordering},
 };
 
@@ -17,14 +18,14 @@ use krabka_remote_storage::{
     RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState,
     RemoteStorageError, RemoteStorageManager, Sha256Digest, TopicIdPartition, WormArchiver,
 };
-use krabka_units::bytes;
+use krabka_units::{ByteSize, bytes};
 use uuid::Uuid;
 
 use crate::{
     metrics::BrokerMetrics,
     partition::Partition,
     remote_log_manager::{ArchiveMode, RemoteTier},
-    test_support::FakeMetadataSource,
+    test_support::{FakeMetadataSource, UnixMillis},
 };
 
 /// A `BrokerMetrics` shared by every tier a unit test builds.
@@ -56,25 +57,52 @@ pub(crate) fn tier<'a>(
     rsm: &'a Arc<dyn RemoteStorageManager>,
     rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
 ) -> RemoteTier<'a> {
-    tier_with_copy_timeout(archive, rsm, rlmm, TEST_COPY_TIMEOUT)
-}
-
-/// The same tier under a chosen copy deadline, for the suites that drive a
-/// store slow enough to reach it.
-pub(crate) fn tier_with_copy_timeout<'a>(
-    archive: ArchiveMode,
-    rsm: &'a Arc<dyn RemoteStorageManager>,
-    rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
-    copy_timeout: krabka_units::Time,
-) -> RemoteTier<'a> {
-    RemoteTier {
-        archive,
+    configured_tier(
         rsm,
         rlmm,
-        metrics: shared_test_metrics(),
-        index_cache: shared_test_index_cache(),
-        unstable_api_versions: crate::api_catalog::UnstableApiVersions::Disabled,
-        copy_timeout,
+        TierSetup {
+            archive,
+            ..Default::default()
+        },
+    )
+}
+
+/// Policies and resources for a test tier. Counter assertions override the shared metrics.
+#[derive(Clone, Copy)]
+pub struct TierSetup<'a> {
+    pub archive: ArchiveMode,
+    pub copy_timeout: krabka_units::Time,
+    pub unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    pub metrics: &'a BrokerMetrics,
+    pub index_cache: &'a Arc<krabka_remote_storage::RemoteIndexCache>,
+}
+
+impl Default for TierSetup<'_> {
+    fn default() -> Self {
+        Self {
+            archive: ArchiveMode::Mutable,
+            copy_timeout: TEST_COPY_TIMEOUT,
+            unstable_api_versions: crate::api_catalog::UnstableApiVersions::Disabled,
+            metrics: shared_test_metrics(),
+            index_cache: shared_test_index_cache(),
+        }
+    }
+}
+
+/// A tier borrowing its backends and the selected test resources.
+pub fn configured_tier<'a>(
+    rsm: &'a Arc<dyn RemoteStorageManager>,
+    rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
+    setup: TierSetup<'a>,
+) -> RemoteTier<'a> {
+    RemoteTier {
+        archive: setup.archive,
+        rsm,
+        rlmm,
+        metrics: setup.metrics,
+        index_cache: setup.index_cache,
+        unstable_api_versions: setup.unstable_api_versions,
+        copy_timeout: setup.copy_timeout,
     }
 }
 
@@ -126,20 +154,6 @@ macro_rules! missing_remote_reads {
     };
 }
 pub(crate) use missing_remote_reads;
-
-/// A mutable tier with counters owned by the test that asserts on them.
-pub(crate) fn tier_with_metrics<'a>(
-    rsm: &'a Arc<dyn RemoteStorageManager>,
-    rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
-    metrics: &'a BrokerMetrics,
-    unstable_api_versions: crate::api_catalog::UnstableApiVersions,
-) -> RemoteTier<'a> {
-    RemoteTier {
-        metrics,
-        unstable_api_versions,
-        ..tier(ArchiveMode::Mutable, rsm, rlmm)
-    }
-}
 
 /// Copy every supplied fixture segment as broker 1 in leader epoch 0.
 /// The assertion stays at the copy checkpoint, before a retention pass runs.
@@ -277,7 +291,10 @@ pub fn tp() -> TopicIdPartition {
 }
 
 pub fn batch(n: i32) -> RecordBatch {
-    crate::test_support::keyed_records_batch(n, 64)
+    crate::test_support::keyed_records_batch(crate::test_support::KeyedBatchSetup {
+        records: crate::test_support::KeyedRecordCount(n),
+        ..Default::default()
+    })
 }
 
 /// Build a log rolled into several sealed segments under `dir`.
@@ -351,13 +368,29 @@ pub fn leading_partition_over(
 
 /// A sealed-segment export with no files behind it, whose file was last
 /// modified at its newest record's timestamp.
-pub fn synth_export(base: i64, last: i64, max_ts: i64, size: u32) -> SegmentExport {
+#[derive(krabka_macros::FieldDefaults)]
+pub struct SegmentExportSetup {
+    #[default(Offset(0)..=Offset(9))]
+    pub bounds: RangeInclusive<Offset>,
+    #[default(UnixMillis(100))]
+    pub timestamp: UnixMillis,
+    #[default(bytes(64))]
+    pub size: ByteSize,
+}
+
+pub fn synth_export(setup: SegmentExportSetup) -> SegmentExport {
+    let SegmentExportSetup {
+        bounds,
+        timestamp,
+        size,
+    } = setup;
+    let (base_offset, last_offset) = bounds.into_inner();
     SegmentExport {
-        base_offset: Offset(base),
-        last_offset: Offset(last),
-        max_timestamp: max_ts,
-        last_modified_ms: max_ts,
-        size: bytes(size),
+        base_offset,
+        last_offset,
+        max_timestamp: timestamp.0,
+        last_modified_ms: timestamp.0,
+        size,
         log_path: std::path::PathBuf::new(),
         offset_index_path: std::path::PathBuf::new(),
         time_index_path: std::path::PathBuf::new(),
@@ -446,9 +479,17 @@ pub async fn copy_exports(tier: &RemoteTier<'_>, exports: Vec<SegmentExport>) ->
 /// Three consecutive ten-offset fixture segments, each with 64 bytes of data.
 pub fn three_exports() -> Vec<SegmentExport> {
     vec![
-        synth_export(0, 9, 100, 64),
-        synth_export(10, 19, 200, 64),
-        synth_export(20, 29, 300, 64),
+        synth_export(SegmentExportSetup::default()),
+        synth_export(SegmentExportSetup {
+            bounds: Offset(10)..=Offset(19),
+            timestamp: UnixMillis(200),
+            ..Default::default()
+        }),
+        synth_export(SegmentExportSetup {
+            bounds: Offset(20)..=Offset(29),
+            timestamp: UnixMillis(300),
+            ..Default::default()
+        }),
     ]
 }
 
@@ -495,24 +536,6 @@ macro_rules! owned_tier_resources {
     };
 }
 pub(crate) use owned_tier_resources;
-
-/// Construct a tier over explicitly owned metrics and cache while retaining caller policies.
-pub fn tier_with_resources<'a>(
-    rsm: &'a Arc<dyn RemoteStorageManager>,
-    rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
-    (metrics, index_cache): (
-        &'a BrokerMetrics,
-        &'a Arc<krabka_remote_storage::RemoteIndexCache>,
-    ),
-    archive: ArchiveMode,
-    copy_timeout: krabka_units::Time,
-) -> RemoteTier<'a> {
-    RemoteTier {
-        metrics,
-        index_cache,
-        ..tier_with_copy_timeout(archive, rsm, rlmm, copy_timeout)
-    }
-}
 
 /// The local and remote guards, declared in the same order as the fixture call sites.
 pub fn temporary_dirs() -> (tempfile::TempDir, tempfile::TempDir) {
@@ -619,7 +642,22 @@ pub fn write_once_backends() -> (
 }
 
 pub fn two_exports() -> Vec<SegmentExport> {
-    vec![synth_export(0, 9, 100, 64), synth_export(10, 19, 200, 64)]
+    two_exports_with_size(bytes(64))
+}
+
+/// Consecutive ten-offset exports sharing the caller's segment size.
+pub fn two_exports_with_size(size: ByteSize) -> Vec<SegmentExport> {
+    vec![
+        synth_export(SegmentExportSetup {
+            size,
+            ..Default::default()
+        }),
+        synth_export(SegmentExportSetup {
+            bounds: Offset(10)..=Offset(19),
+            timestamp: UnixMillis(200),
+            size,
+        }),
+    ]
 }
 
 pub fn partition_segments(

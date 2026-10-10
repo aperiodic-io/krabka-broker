@@ -340,12 +340,17 @@ async fn quorum_state_file_round_trips() {
     assert2::assert!(!json.contains("votedDirectoryId"));
 }
 
-#[test]
-fn quorum_state_level_one_uses_voted_directory_and_omits_static_voters() {
-    let dir = tempfile::tempdir().expect("tempdir");
+fn level_one_state() -> (krabka_metadata::voters::VoterSet, QuorumState) {
     let voters = voter_set(&[NodeId(1), NodeId(2)]);
     let mut state = QuorumState::bootstrap(uuid::Uuid::from_u128(9), voters.clone());
     state.kraft_version = 1;
+    (voters, state)
+}
+
+#[test]
+fn quorum_state_level_one_uses_voted_directory_and_omits_static_voters() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (voters, mut state) = level_one_state();
     state.voted_key = Some(ReplicaKey {
         id: NodeId(2),
         directory_id: uuid::Uuid::from_u128(0x0102_0304),
@@ -529,9 +534,7 @@ const QUORUM_STATE_V1_FIXTURE: &str = "{\"leaderId\":-1,\"leaderEpoch\":5,\"vote
 #[test]
 fn quorum_state_v1_matches_the_fixture_and_decodes_back() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let voters = voter_set(&[NodeId(1), NodeId(2)]);
-    let mut state = QuorumState::bootstrap(uuid::Uuid::from_u128(9), voters.clone());
-    state.kraft_version = 1;
+    let (voters, mut state) = level_one_state();
     state.leader_epoch = 5;
     state.voted_key = Some(ReplicaKey {
         id: NodeId(2),

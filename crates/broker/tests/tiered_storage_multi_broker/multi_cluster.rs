@@ -79,7 +79,8 @@ pub(crate) async fn start_three_tiered_brokers_with_segment_sizes(
     // Build a config for broker `i` (1-indexed broker_id/node_id).
     let broker_configs: Vec<BrokerConfig> = (0..3)
         .map(|i| {
-            let mut cfg = crate::support::node_config(i, log_dirs[i].path());
+            let mut cfg =
+                crate::support::node_config(crate::support::NodeIndex(i), log_dirs[i].path());
             cfg.log_config.segment_size = segment_sizes[i];
             cfg.directory_id = uuid::Uuid::from_u128(u128::try_from(i + 1).unwrap());
             cfg.listen_addr = client_addrs[i];
@@ -178,4 +179,16 @@ pub(crate) async fn await_all_rlmm_active(b1: &BrokerHandle, b2: &BrokerHandle, 
         m.tiered_storage_rlmm_topic_backed.get() == 1
     })
     .await;
+}
+
+/// Connect the admin only once registration and the topic-backed RLMM are ready.
+pub(crate) async fn ready_admin(
+    brokers: [&BrokerHandle; 3],
+    client_id: &str,
+) -> krabka_client_core::Client {
+    let [b1, b2, b3] = brokers;
+    await_all_brokers_registered(b1, b2, b3).await;
+    await_all_rlmm_active(b1, b2, b3).await;
+    let bootstrap = format!("127.0.0.1:{}", b1.listen_addr().port());
+    support::client::connect_owned(&bootstrap, client_id, "admin client").await
 }

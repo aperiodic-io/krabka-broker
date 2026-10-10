@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
+use krabka_ids::PartitionIndex;
 use krabka_protocol::owned::{
-    common::streams_group_heartbeat_response::task_ids::TaskIds,
+    common::streams_group_heartbeat_response::{status::Status, task_ids::TaskIds},
     streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
 };
 
@@ -103,20 +104,33 @@ pub(super) fn response_tasks(partitions: Vec<i32>) -> Vec<TaskIds> {
 }
 
 /// Independent expected response fields for a single subtopology's active assignment.
+#[derive(krabka_macros::FieldDefaults)]
+pub(super) struct ActiveResponseSetup<'a> {
+    #[default("m1")]
+    pub member_id: &'a str,
+    #[default(crate::coordinator::unified::test_support::MemberEpoch(1))]
+    pub epoch: crate::coordinator::unified::test_support::MemberEpoch,
+    pub status: Option<Vec<Status>>,
+    pub active: Option<Vec<PartitionIndex>>,
+}
+
 pub(super) fn expected_active_response(
-    member_id: &str,
-    member_epoch: i32,
-    status: Option<
-        Vec<krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status>,
-    >,
-    active: Option<Vec<i32>>,
+    setup: ActiveResponseSetup<'_>,
 ) -> krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse {
+    let ActiveResponseSetup {
+        member_id,
+        epoch,
+        status,
+        active,
+    } = setup;
     krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse {
         member_id: member_id.into(),
         status,
         standby_tasks: active.as_ref().map(|_| vec![]),
         warmup_tasks: active.as_ref().map(|_| vec![]),
-        active_tasks: active.map(response_tasks),
-        ..super::response::base_resp(crate::codes::NONE, member_epoch, &undelayed())
+        active_tasks: active.map(|partitions| {
+            response_tasks(partitions.into_iter().map(|index| index.0).collect())
+        }),
+        ..super::response::base_resp(crate::codes::NONE, epoch.0, &undelayed())
     }
 }

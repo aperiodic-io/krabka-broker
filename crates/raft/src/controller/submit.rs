@@ -512,22 +512,34 @@ mod tests {
     ];
 
     /// A `DelegationTokenMutation` v0 request body that carries one `Delete`.
-    const DELEGATION_TOKEN_MUTATION_V0_GOLDEN: &[u8] = &[
-        0, 0, 0, 130, // frame length
-        1, 0, 0, 0, 0, 0, 0, 0, // one mutation
-        2, 0, 0, 0, // Delete
-        3, 0, 0, 0, 0, 0, 0, 0, b't', b'o', b'k', // token id
-        4, 0, 0, 0, 0, 0, 0, 0, b'U', b's', b'e', b'r', // owner type
-        5, 0, 0, 0, 0, 0, 0, 0, b'a', b'l', b'i', b'c', b'e', // owner name
-        4, 0, 0, 0, 0, 0, 0, 0, b'U', b's', b'e', b'r', // requester type
-        5, 0, 0, 0, 0, 0, 0, 0, b'a', b'l', b'i', b'c', b'e', // requester name
-        1, 0, 0, 0, 0, 0, 0, 0, // issue timestamp
-        2, 0, 0, 0, 0, 0, 0, 0, // expiry timestamp
-        3, 0, 0, 0, 0, 0, 0, 0, // max timestamp
-        1, 0, 0, 0, 0, 0, 0, 0, // one renewer
-        4, 0, 0, 0, 0, 0, 0, 0, b'U', b's', b'e', b'r', // renewer type
-        5, 0, 0, 0, 0, 0, 0, 0, b'a', b'l', b'i', b'c', b'e', // renewer name
-    ];
+    fn delegation_token_mutation_v0_golden() -> Vec<u8> {
+        // Captured wincode principal, shared by owner, requester and renewer.
+        // These chunks are literal oracle bytes, independent of serialization.
+        const USER_ALICE: &[u8] = &[
+            4, 0, 0, 0, 0, 0, 0, 0, b'U', b's', b'e', b'r', 5, 0, 0, 0, 0, 0, 0, 0, b'a', b'l',
+            b'i', b'c', b'e',
+        ];
+        let prefix: &[u8] = &[
+            0, 0, 0, 130, // frame length
+            1, 0, 0, 0, 0, 0, 0, 0, // one mutation
+            2, 0, 0, 0, // Delete
+            3, 0, 0, 0, 0, 0, 0, 0, b't', b'o', b'k', // token id
+        ];
+        let timestamps_and_renewer_count: &[u8] = &[
+            1, 0, 0, 0, 0, 0, 0, 0, // issue timestamp
+            2, 0, 0, 0, 0, 0, 0, 0, // expiry timestamp
+            3, 0, 0, 0, 0, 0, 0, 0, // max timestamp
+            1, 0, 0, 0, 0, 0, 0, 0, // one renewer
+        ];
+        [
+            prefix,
+            USER_ALICE,
+            USER_ALICE,
+            timestamps_and_renewer_count,
+            USER_ALICE,
+        ]
+        .concat()
+    }
 
     /// The wincode `SubmitChangeResult` of a `SubmitChange` v0 response with
     /// one offset reservation.
@@ -565,6 +577,7 @@ mod tests {
     /// 1.x contract and takes a new api version.
     #[test]
     fn v0_payloads_match_their_golden_bytes() {
+        let delegation_golden = delegation_token_mutation_v0_golden();
         let records = vec![krabka_metadata::MetadataRecord::V1Topic(
             krabka_metadata::TopicRecord {
                 name: "t".into(),
@@ -592,10 +605,7 @@ mod tests {
             .expect("wincode");
 
         check!(encode_submit_change_body(&records).unwrap() == SUBMIT_CHANGE_V0_GOLDEN);
-        check!(
-            encode_delegation_token_mutation_body(&mutations).unwrap()
-                == DELEGATION_TOKEN_MUTATION_V0_GOLDEN
-        );
+        check!(encode_delegation_token_mutation_body(&mutations).unwrap() == delegation_golden);
         check!(result_bytes == SUBMIT_CHANGE_RESULT_V0_GOLDEN);
 
         // Each golden body decodes back to the value it was made from.
@@ -605,7 +615,7 @@ mod tests {
             <serde_wincode::SerdeCompat<Vec<krabka_metadata::MetadataRecord>> as wincode::Deserialize>::deserialize(&frame.records).unwrap()
                 == records
         );
-        let mut cur: &[u8] = DELEGATION_TOKEN_MUTATION_V0_GOLDEN;
+        let mut cur: &[u8] = &delegation_golden;
         let frame = crate::wire::KrabkaSubmitChangeRequest::decode_v0(&mut cur).unwrap();
         check!(
             <serde_wincode::SerdeCompat<Vec<crate::DelegationTokenMutation>> as wincode::Deserialize>::deserialize(&frame.records).unwrap()

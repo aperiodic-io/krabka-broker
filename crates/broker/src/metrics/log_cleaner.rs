@@ -87,3 +87,13 @@ impl BrokerMetrics {
             .set(i64::try_from(count).unwrap_or(i64::MAX));
     }
 }
+
+/// Compaction and retention classify failures identically for operator metrics.
+pub(crate) fn failure_reason(error: &crate::error::BrokerError) -> CleanerFailureReason {
+    use crate::error::BrokerError;
+    match error {
+        BrokerError::Log(krabka_log::LogError::Io(_)) => CleanerFailureReason::Io,
+        BrokerError::Replication(_) => CleanerFailureReason::Writer,
+        _ => CleanerFailureReason::Other,
+    }
+}

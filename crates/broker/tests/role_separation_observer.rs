@@ -102,10 +102,11 @@ async fn start_role_separated_with(
 
     let ctrl_dir = TempDir::new().unwrap();
     let mut ctrl_cfg = topology.config(
-        0,
         ctrl_dir.path(),
-        BootstrapMode::Bootstrap,
-        NodeRole::Controller,
+        crate::support::RoleNodeSetup {
+            role: NodeRole::Controller,
+            ..Default::default()
+        },
     );
     customize(0, &mut ctrl_cfg);
     let controller_metadata_dir = ctrl_cfg.metadata_dir().to_path_buf();
@@ -127,7 +128,14 @@ async fn start_role_separated_with(
     let mut broker_configs = Vec::with_capacity(brokers);
     for index in 1..nodes {
         let dir = TempDir::new().unwrap();
-        let mut cfg = topology.config(index, dir.path(), BootstrapMode::Join, NodeRole::Broker);
+        let mut cfg = topology.config(
+            dir.path(),
+            crate::support::RoleNodeSetup {
+                index: crate::support::NodeIndex(index),
+                mode: BootstrapMode::Join,
+                ..Default::default()
+            },
+        );
         customize(index, &mut cfg);
         broker_configs.push(cfg.clone());
         observers.push(
@@ -207,7 +215,12 @@ async fn broker_only_node_observes_and_forwards() {
     let topic = "rolesep-observed";
     let client = connect_client(broker_only.listen_addr().to_string(), None).await;
     let resp = client
-        .send(create_topic_request(creatable_topic(topic, 1, 1), 5_000))
+        .send(create_topic_request(creatable_topic(
+            crate::support::topics::ConfiguredTopicSetup {
+                name: (topic).into(),
+                ..Default::default()
+            },
+        )))
         .await
         .unwrap();
     assert!(
@@ -512,10 +525,6 @@ async fn controller_only_node_opens_no_client_listener() {
 /// leader, and voter set.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn broker_only_node_forwards_describe_quorum_to_controller() {
-    use krabka_protocol::owned::describe_quorum_request::{
-        DescribeQuorumRequest, PartitionData as ReqPartitionData, TopicData as ReqTopicData,
-    };
-
     support::init_tracing();
 
     let cluster = start_role_separated(1).await;
@@ -524,17 +533,7 @@ async fn broker_only_node_forwards_describe_quorum_to_controller() {
     let broker = &cluster.brokers[0];
     let client = connect_client(broker.listen_addr().to_string(), None).await;
 
-    let req = DescribeQuorumRequest {
-        topics: vec![ReqTopicData {
-            topic_name: "__cluster_metadata".into(),
-            partitions: vec![ReqPartitionData {
-                partition_index: 0,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    let req = crate::support::quorum::metadata_quorum_request();
 
     let resp = client.send(req).await.unwrap();
     assert!(resp.error_code == 0, "top-level error_code must be NONE");
@@ -565,10 +564,6 @@ async fn broker_only_node_forwards_describe_quorum_to_controller() {
 /// `Observer`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn broker_only_nodes_are_described_as_quorum_observers() {
-    use krabka_protocol::owned::describe_quorum_request::{
-        DescribeQuorumRequest, PartitionData as ReqPartitionData, TopicData as ReqTopicData,
-    };
-
     support::init_tracing();
 
     let cluster = start_role_separated(2).await;
@@ -578,17 +573,7 @@ async fn broker_only_nodes_are_described_as_quorum_observers() {
         .map(|broker| i32::try_from(broker.node_id()).expect("small node id"))
         .collect();
     let client = connect_client(cluster.brokers[0].listen_addr().to_string(), None).await;
-    let request = || DescribeQuorumRequest {
-        topics: vec![ReqTopicData {
-            topic_name: "__cluster_metadata".into(),
-            partitions: vec![ReqPartitionData {
-                partition_index: 0,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    let request = crate::support::quorum::metadata_quorum_request;
 
     // The observers appear once each has completed a fetch, and their caught-up
     // time is set once each has fetched to the end of a log that nothing is

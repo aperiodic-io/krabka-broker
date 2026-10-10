@@ -13,63 +13,83 @@ fn image_without_topic() -> MetadataImage {
     MetadataImage::new(Uuid::nil())
 }
 
-fn image(topic_id: u128, leader: NodeId, leader_epoch: i32) -> MetadataImage {
-    crate::txn::coordinator::test_support::state_image_with_id(
-        topic_id,
-        leader,
-        leader_epoch,
-        &[leader],
+fn image(topic_id: Uuid, leader: NodeId, leader_epoch: LeaderEpoch) -> MetadataImage {
+    crate::txn::coordinator::test_support::state_image(
+        crate::txn::coordinator::test_support::StateImageSetup {
+            topic_id,
+            leader,
+            leader_epoch,
+            replicas: &[leader],
+        },
     )
 }
 
+#[derive(Clone, Copy)]
+struct LoadGeneration(u64);
+
+#[derive(Clone, Copy, Default)]
+enum LocalLog {
+    #[default]
+    Open,
+    Unopened,
+}
+
 fn leadership(
-    topic_id: u128,
-    leader_epoch: i32,
-    term: Option<(u64, LoadStatus)>,
+    topic_id: Uuid,
+    leader_epoch: LeaderEpoch,
+    term: Option<(LoadGeneration, LoadStatus)>,
 ) -> StatePartitionLeadership {
     StatePartitionLeadership {
-        topic_id: Uuid::from_u128(topic_id),
-        leader_epoch: LeaderEpoch(leader_epoch),
-        term: term.map(|(generation, status)| LeaderTerm { generation, status }),
+        topic_id,
+        leader_epoch,
+        term: term.map(|(generation, status)| LeaderTerm {
+            generation: generation.0,
+            status,
+        }),
     }
 }
 
 /// One step: the image applied, whether the log is local, the changes it asks
 /// for, and the leadership of partition 0 afterwards.
+#[derive(krabka_macros::FieldDefaults)]
 struct Step {
+    #[default("leadership step")]
     name: &'static str,
+    #[default(image_without_topic())]
     image: MetadataImage,
-    local: bool,
+    #[default(LocalLog::Open)]
+    local: LocalLog,
+    #[default(changes(&[], &[]))]
     changes: LeadershipChanges,
     after: Option<StatePartitionLeadership>,
     /// A load that ends before the next step, with its result.
     load_ends: Option<LoadStatus>,
 }
 
-fn step(
-    name: &'static str,
-    image: MetadataImage,
-    local: bool,
-    changes: LeadershipChanges,
-    after: Option<StatePartitionLeadership>,
-    load_ends: Option<LoadStatus>,
-) -> Step {
+/// Election is known, but the local log cannot be replayed until it opens.
+fn unopened_step(name: &'static str) -> Step {
     Step {
         name,
-        image,
-        local,
-        changes,
-        after,
-        load_ends,
+        image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(0)),
+        local: LocalLog::Unopened,
+        after: Some(leadership(
+            Uuid::from_u128(1),
+            LeaderEpoch(0),
+            Some((LoadGeneration(1), LoadStatus::Pending)),
+        )),
+        ..Default::default()
     }
 }
 
-fn changes(unload: &[i32], load: &[(i32, u64)]) -> LeadershipChanges {
+fn changes(
+    unload: &[PartitionIndex],
+    load: &[(PartitionIndex, LoadGeneration)],
+) -> LeadershipChanges {
     LeadershipChanges {
-        unload: unload.iter().copied().map(PartitionIndex).collect(),
+        unload: unload.to_vec(),
         load: load
             .iter()
-            .map(|&(partition, generation)| (PartitionIndex(partition), generation))
+            .map(|&(partition, generation)| (partition, generation.0))
             .collect(),
     }
 }
@@ -82,7 +102,7 @@ fn run(steps: Vec<Step>) {
             &mut known,
             THIS_BROKER,
             &step.image,
-            |_| step.local,
+            |_| matches!(step.local, LocalLog::Open),
             || {
                 generation += 1;
                 generation
@@ -105,148 +125,156 @@ fn run(steps: Vec<Step>) {
 #[test]
 fn an_election_loads_and_a_resignation_unloads() {
     run(vec![
-        step(
-            "an image before the topic exists",
-            image_without_topic(),
-            true,
-            changes(&[], &[]),
-            None,
-            None,
-        ),
-        step(
-            "this broker is elected at epoch 0",
-            image(1, THIS_BROKER, 0),
-            true,
-            changes(&[], &[(0, 1)]),
-            Some(leadership(1, 0, Some((1, LoadStatus::Loading)))),
-            Some(LoadStatus::Loaded),
-        ),
-        step(
-            "the same image again changes nothing",
-            image(1, THIS_BROKER, 0),
-            true,
-            changes(&[], &[]),
-            Some(leadership(1, 0, Some((1, LoadStatus::Loaded)))),
-            None,
-        ),
-        step(
-            "a stale image from before the topic existed (#975)",
-            image_without_topic(),
-            true,
-            changes(&[], &[]),
-            Some(leadership(1, 0, Some((1, LoadStatus::Loaded)))),
-            None,
-        ),
-        step(
-            "another broker is elected at epoch 1",
-            image(1, OTHER_BROKER, 1),
-            true,
-            changes(&[0], &[]),
-            Some(leadership(1, 1, None)),
-            None,
-        ),
-        step(
-            "a stale image of epoch 0",
-            image(1, THIS_BROKER, 0),
-            true,
-            changes(&[], &[]),
-            Some(leadership(1, 1, None)),
-            None,
-        ),
-        step(
-            "this broker is elected again at epoch 2",
-            image(1, THIS_BROKER, 2),
-            true,
-            changes(&[], &[(0, 2)]),
-            Some(leadership(1, 2, Some((2, LoadStatus::Loading)))),
-            None,
-        ),
-        step(
-            "a new term during a load drops the load and starts another",
-            image(1, THIS_BROKER, 3),
-            true,
-            changes(&[0], &[(0, 3)]),
-            Some(leadership(1, 3, Some((3, LoadStatus::Loading)))),
-            Some(LoadStatus::Failed),
-        ),
-        step(
-            "a failed load waits for the next election",
-            image(1, THIS_BROKER, 3),
-            true,
-            changes(&[], &[]),
-            Some(leadership(1, 3, Some((3, LoadStatus::Failed)))),
-            None,
-        ),
-        step(
-            "the next election loads again",
-            image(1, THIS_BROKER, 4),
-            true,
-            changes(&[0], &[(0, 4)]),
-            Some(leadership(1, 4, Some((4, LoadStatus::Loading)))),
-            Some(LoadStatus::Loaded),
-        ),
-        step(
-            "a stale image from before the topic existed, while the log is open",
-            image_without_topic(),
-            true,
-            changes(&[], &[]),
-            Some(leadership(1, 4, Some((4, LoadStatus::Loaded)))),
-            None,
-        ),
-        step(
-            "the topic is deleted and its log is removed",
-            image_without_topic(),
-            false,
-            changes(&[0], &[]),
-            None,
-            None,
-        ),
-        step(
-            "the topic is created again and another broker leads it at epoch 0",
-            image(2, OTHER_BROKER, 0),
-            true,
-            changes(&[], &[]),
-            Some(leadership(2, 0, None)),
-            None,
-        ),
-        step(
-            "the topic is created a third time and this broker leads it at epoch 0",
-            image(3, THIS_BROKER, 0),
-            true,
-            changes(&[], &[(0, 5)]),
-            Some(leadership(3, 0, Some((5, LoadStatus::Loading)))),
-            None,
-        ),
+        Step {
+            name: "an image before the topic exists",
+            ..Default::default()
+        },
+        Step {
+            name: "this broker is elected at epoch 0",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(0)),
+            changes: changes(&[], &[(PartitionIndex(0), LoadGeneration(1))]),
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(0),
+                Some((LoadGeneration(1), LoadStatus::Loading)),
+            )),
+            load_ends: Some(LoadStatus::Loaded),
+            ..Default::default()
+        },
+        Step {
+            name: "the same image again changes nothing",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(0)),
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(0),
+                Some((LoadGeneration(1), LoadStatus::Loaded)),
+            )),
+            ..Default::default()
+        },
+        Step {
+            name: "a stale image from before the topic existed (#975)",
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(0),
+                Some((LoadGeneration(1), LoadStatus::Loaded)),
+            )),
+            ..Default::default()
+        },
+        Step {
+            name: "another broker is elected at epoch 1",
+            image: image(Uuid::from_u128(1), OTHER_BROKER, LeaderEpoch(1)),
+            changes: changes(&[PartitionIndex(0)], &[]),
+            after: Some(leadership(Uuid::from_u128(1), LeaderEpoch(1), None)),
+            ..Default::default()
+        },
+        Step {
+            name: "a stale image of epoch 0",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(0)),
+            after: Some(leadership(Uuid::from_u128(1), LeaderEpoch(1), None)),
+            ..Default::default()
+        },
+        Step {
+            name: "this broker is elected again at epoch 2",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(2)),
+            changes: changes(&[], &[(PartitionIndex(0), LoadGeneration(2))]),
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(2),
+                Some((LoadGeneration(2), LoadStatus::Loading)),
+            )),
+            ..Default::default()
+        },
+        Step {
+            name: "a new term during a load drops the load and starts another",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(3)),
+            changes: changes(
+                &[PartitionIndex(0)],
+                &[(PartitionIndex(0), LoadGeneration(3))],
+            ),
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(3),
+                Some((LoadGeneration(3), LoadStatus::Loading)),
+            )),
+            load_ends: Some(LoadStatus::Failed),
+            ..Default::default()
+        },
+        Step {
+            name: "a failed load waits for the next election",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(3)),
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(3),
+                Some((LoadGeneration(3), LoadStatus::Failed)),
+            )),
+            ..Default::default()
+        },
+        Step {
+            name: "the next election loads again",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(4)),
+            changes: changes(
+                &[PartitionIndex(0)],
+                &[(PartitionIndex(0), LoadGeneration(4))],
+            ),
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(4),
+                Some((LoadGeneration(4), LoadStatus::Loading)),
+            )),
+            load_ends: Some(LoadStatus::Loaded),
+            ..Default::default()
+        },
+        Step {
+            name: "a stale image from before the topic existed, while the log is open",
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(4),
+                Some((LoadGeneration(4), LoadStatus::Loaded)),
+            )),
+            ..Default::default()
+        },
+        Step {
+            name: "the topic is deleted and its log is removed",
+            local: LocalLog::Unopened,
+            changes: changes(&[PartitionIndex(0)], &[]),
+            ..Default::default()
+        },
+        Step {
+            name: "the topic is created again and another broker leads it at epoch 0",
+            image: image(Uuid::from_u128(2), OTHER_BROKER, LeaderEpoch(0)),
+            after: Some(leadership(Uuid::from_u128(2), LeaderEpoch(0), None)),
+            ..Default::default()
+        },
+        Step {
+            name: "the topic is created a third time and this broker leads it at epoch 0",
+            image: image(Uuid::from_u128(3), THIS_BROKER, LeaderEpoch(0)),
+            changes: changes(&[], &[(PartitionIndex(0), LoadGeneration(5))]),
+            after: Some(leadership(
+                Uuid::from_u128(3),
+                LeaderEpoch(0),
+                Some((LoadGeneration(5), LoadStatus::Loading)),
+            )),
+            ..Default::default()
+        },
     ]);
 }
 
 #[test]
 fn an_election_before_the_log_opens_loads_once_it_opens() {
     run(vec![
-        step(
-            "elected, the log is not open",
-            image(1, THIS_BROKER, 0),
-            false,
-            changes(&[], &[]),
-            Some(leadership(1, 0, Some((1, LoadStatus::Pending)))),
-            None,
-        ),
-        step(
-            "still not open",
-            image(1, THIS_BROKER, 0),
-            false,
-            changes(&[], &[]),
-            Some(leadership(1, 0, Some((1, LoadStatus::Pending)))),
-            None,
-        ),
-        step(
-            "the log opened",
-            image(1, THIS_BROKER, 0),
-            true,
-            changes(&[], &[(0, 2)]),
-            Some(leadership(1, 0, Some((2, LoadStatus::Loading)))),
-            None,
-        ),
+        unopened_step("elected, the log is not open"),
+        unopened_step("still not open"),
+        Step {
+            name: "the log opened",
+            image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(0)),
+            changes: changes(&[], &[(PartitionIndex(0), LoadGeneration(2))]),
+            after: Some(leadership(
+                Uuid::from_u128(1),
+                LeaderEpoch(0),
+                Some((LoadGeneration(2), LoadStatus::Loading)),
+            )),
+            ..Default::default()
+        },
     ]);
 }
 

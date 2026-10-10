@@ -14,13 +14,12 @@ use crate::broker::{Broker, BrokerHandle};
 pub(crate) fn open_partition(
     broker: &Broker,
     log_dir: &Path,
-    topic: &str,
-    partition: i32,
+    setup: crate::test_support::StandalonePartitionSetup<'_>,
 ) -> Arc<crate::partition::Partition> {
-    let part = crate::test_support::open_partition(log_dir, topic, partition);
+    let part = crate::test_support::open_partition(log_dir, setup);
     broker
         .partitions
-        .insert(topic.into(), PartitionIndex(partition), Arc::clone(&part));
+        .insert(setup.topic.into(), setup.partition, Arc::clone(&part));
     part
 }
 

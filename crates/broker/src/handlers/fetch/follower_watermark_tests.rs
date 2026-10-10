@@ -27,7 +27,7 @@ use krabka_protocol::{
         fetch_request::{FetchPartition, FetchRequest, FetchTopic},
         fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
     },
-    records::{Record, RecordBatch, RecordsPayload},
+    records::{RecordBatch, RecordsPayload},
 };
 use krabka_units::prelude::mebibytes;
 
@@ -95,20 +95,20 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 }
 
 /// A batch of one record with `value`.
-fn batch(value: &'static [u8]) -> RecordBatch {
-    RecordBatch {
-        records: vec![Record {
-            value: Some(Bytes::from_static(value)),
-            ..Record::default()
-        }],
-        ..RecordBatch::default()
-    }
-}
+use crate::test_support::single_value_batch as batch;
 
 /// Create `topic` with replicas 1 and 2, led by this broker, wait until node
 /// 2 is in the ISR, and append two batches.
 async fn partition(broker: &BrokerHandle, topic: &str, topic_id: u128) -> Arc<Partition> {
-    crate::handlers::test_support::seed_replicated_topic(broker, topic, topic_id, 1).await;
+    crate::handlers::test_support::seed_partition_replicas(
+        broker,
+        crate::handlers::test_support::ReplicatedTopicSetup {
+            topic,
+            topic_id: uuid::Uuid::from_u128(topic_id),
+            ..Default::default()
+        },
+    )
+    .await;
 
     wait_for_local_partition!(
         (shared, partition),

@@ -23,12 +23,13 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
 
     let controller_dir = TempDir::new().unwrap();
     let mut controller_config = support::broker_config(
-        0,
-        &client_addrs,
-        &controller_addrs,
-        &voters,
         controller_dir.path(),
-        BootstrapMode::Bootstrap,
+        crate::support::ClusterNodeSetup {
+            client_addrs: &client_addrs,
+            controller_addrs: &controller_addrs,
+            voters: crate::support::controller_voters(&voters),
+            ..Default::default()
+        },
     );
     controller_config.roles = vec![NodeRole::Controller];
     let controller = Broker::start_with_listeners(
@@ -46,12 +47,14 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
 
     let broker_dir = TempDir::new().unwrap();
     let mut broker_config = support::broker_config(
-        1,
-        &client_addrs,
-        &controller_addrs,
-        &voters,
         broker_dir.path(),
-        BootstrapMode::Join,
+        crate::support::ClusterNodeSetup {
+            index: crate::support::NodeIndex(1),
+            client_addrs: &client_addrs,
+            controller_addrs: &controller_addrs,
+            voters: crate::support::controller_voters(&voters),
+            mode: BootstrapMode::Join,
+        },
     );
     broker_config.roles = vec![NodeRole::Broker];
     let broker = Broker::start_with_listeners(

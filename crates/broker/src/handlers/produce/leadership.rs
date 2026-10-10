@@ -330,8 +330,14 @@ mod tests {
             krabka_log::LogConfig::default(),
         )
         .unwrap();
-        let partition =
-            crate::test_support::spawn_standalone_partition(dir.path(), "orders", 0, log, true);
+        let partition = crate::test_support::spawn_standalone_partition(
+            dir.path(),
+            log,
+            crate::test_support::StandalonePartitionSetup {
+                storage: crate::test_support::StorageMode::Diskless,
+                ..Default::default()
+            },
+        );
 
         assert!(!diskless_role_ready(&partition, record));
         partition
@@ -380,7 +386,14 @@ mod tests {
         partitions.insert(
             "orders".into(),
             krabka_ids::PartitionIndex(0),
-            crate::test_support::spawn_standalone_partition(dir.path(), "orders", 0, log, diskless),
+            crate::test_support::spawn_standalone_partition(
+                dir.path(),
+                log,
+                crate::test_support::StandalonePartitionSetup {
+                    storage: crate::test_support::StorageMode::from_wire(diskless),
+                    ..Default::default()
+                },
+            ),
         );
         validate_partition_gate(
             "orders",
@@ -416,14 +429,15 @@ mod tests {
                 isr: vec![krabka_audit::NodeId(1)],
                 partition_epoch: 1,
                 ..crate::handlers::test_support::replicated_partition(
-                    "orders",
-                    0,
-                    krabka_audit::NodeId(1),
-                    &[
-                        krabka_audit::NodeId(1),
-                        krabka_audit::NodeId(2),
-                        krabka_audit::NodeId(3),
-                    ],
+                    crate::handlers::test_support::ReplicatedPartitionSetup {
+                        leader: krabka_audit::NodeId(1),
+                        replicas: &[
+                            krabka_audit::NodeId(1),
+                            krabka_audit::NodeId(2),
+                            krabka_audit::NodeId(3),
+                        ],
+                        ..Default::default()
+                    },
                 )
             },
         ));

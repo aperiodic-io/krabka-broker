@@ -62,24 +62,11 @@ mod tests {
     async fn describe_quorum_answers_only_for_the_metadata_partition() {
         use krabka_protocol::{
             Encode as _,
-            owned::{
-                describe_quorum_request::{self, DescribeQuorumRequest, PartitionData, TopicData},
-                describe_quorum_response::DescribeQuorumResponse,
-            },
+            owned::{describe_quorum_request, describe_quorum_response::DescribeQuorumResponse},
         };
 
         fn body(version: i16, topic: &str, partition: i32) -> Bytes {
-            let request = DescribeQuorumRequest {
-                topics: vec![TopicData {
-                    topic_name: topic.to_owned(),
-                    partitions: vec![PartitionData {
-                        partition_index: partition,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            };
+            let request = crate::server::test_support::quorum_request(topic, partition);
             let mut buf = BytesMut::new();
             request.encode(&mut buf, version).expect("encode request");
             buf.freeze()
@@ -134,10 +121,6 @@ mod tests {
             owned::{
                 add_raft_voter_request::AddRaftVoterRequest,
                 add_raft_voter_response::AddRaftVoterResponse,
-                describe_quorum_request::{
-                    DescribeQuorumRequest, PartitionData as RequestPartition,
-                    TopicData as RequestTopic,
-                },
                 describe_quorum_response::DescribeQuorumResponse,
                 remove_raft_voter_request::RemoveRaftVoterRequest,
                 remove_raft_voter_response::RemoveRaftVoterResponse,
@@ -150,17 +133,7 @@ mod tests {
         wait_for_leader(&engine).await;
         activate_dynamic_membership(&engine).await;
 
-        let describe = DescribeQuorumRequest {
-            topics: vec![RequestTopic {
-                topic_name: "__cluster_metadata".into(),
-                partitions: vec![RequestPartition {
-                    partition_index: 0,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let describe = crate::server::test_support::quorum_request("__cluster_metadata", 0);
         let mut request_body = bytes::BytesMut::new();
         describe.encode(&mut request_body, 2).unwrap();
         let response_body =
@@ -291,30 +264,11 @@ mod tests {
     /// snapshot; this test only checks the glue that reads the real engine.
     #[tokio::test]
     async fn describe_quorum_response_answers_the_elected_leader() {
-        use krabka_protocol::{
-            Encode,
-            owned::{
-                describe_quorum_request::{
-                    DescribeQuorumRequest, PartitionData as RequestPartition,
-                    TopicData as RequestTopic,
-                },
-                describe_quorum_response::DescribeQuorumResponse,
-            },
-        };
+        use krabka_protocol::{Encode, owned::describe_quorum_response::DescribeQuorumResponse};
 
         use crate::server::test_support::topic_record;
 
-        let describe = DescribeQuorumRequest {
-            topics: vec![RequestTopic {
-                topic_name: "__cluster_metadata".into(),
-                partitions: vec![RequestPartition {
-                    partition_index: 0,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let describe = crate::server::test_support::quorum_request("__cluster_metadata", 0);
 
         let (engine, _dir) = single_voter_engine();
         wait_for_leader(&engine).await;

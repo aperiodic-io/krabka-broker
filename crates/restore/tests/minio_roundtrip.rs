@@ -29,7 +29,7 @@ use krabka_remote_storage::{S3Config, S3RemoteStorage, TopicIdPartition};
 use krabka_restore::{Cli, restore};
 use uuid::Uuid;
 
-use crate::batches::{text_batch, tiny_segment_config};
+use crate::batches::{append_groups, tiny_segment_config};
 
 /// The `MinIO` server image, built by the same `//bazel/images` targets the
 /// broker's container suites load from. `MinIO` discontinued distribution of
@@ -150,15 +150,7 @@ fn archive_partition(
     let local = tempfile::tempdir().expect("local log tempdir");
     let mut log = Log::open(local.path(), tiny_segment_config()).expect("open local log");
 
-    let mut appended: Vec<RecordBatch> = Vec::with_capacity(groups.len());
-    for values in groups {
-        let mut batch = text_batch(values);
-        log.append(&mut batch).expect("append batch");
-        appended.push(batch);
-    }
-
-    log.sync().unwrap();
-    let exports = log.tierable_segments();
+    let (appended, exports) = append_groups(&mut log, groups);
     assert!(
         exports.len() == groups.len() - 1,
         "every append after the first should roll exactly one segment",

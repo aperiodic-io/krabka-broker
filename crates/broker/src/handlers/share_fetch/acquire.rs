@@ -718,11 +718,13 @@ mod tests {
             let dir = tempfile::tempdir().expect("a log root");
             let partition = partition_with_batches(
                 &dir,
-                "txn",
-                krabka_log::LogConfig::default(),
-                transaction_then_record(commit),
-                0,
                 &clock,
+                crate::delivery::test_support::DeliveryPartitionSetup {
+                    topic: "txn",
+                    batches: transaction_then_record(commit),
+                    leader: krabka_ids::NodeId(0),
+                    ..Default::default()
+                },
             );
             let mut state = crate::share_partition::state::AcquisitionState::new(Offset(0));
 

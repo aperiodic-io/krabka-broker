@@ -60,6 +60,20 @@ macro_rules! request_fixture {
     };
 }
 
+fn check_alice_authorization(auth: &OpaAuthorizer, expected: AuthorizationResult) {
+    request_fixture!(image, p, h, "alice");
+    assert!(auth.authorize(&image, &req(&p, &h, "t")) == expected);
+}
+
+async fn failing_registry() -> MockServer {
+    let mock = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&mock)
+        .await;
+    mock
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn super_user_bypasses_opa_call() {
     let mock = MockServer::start().await;
@@ -161,29 +175,19 @@ async fn nonpositive_cache_ttl_is_rejected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn http_error_with_allow_on_error_true_returns_allow() {
-    let mock = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(500))
-        .mount(&mock)
-        .await;
+    let mock = failing_registry().await;
 
     // allow_on_error=true → 500 maps to Allow.
     let auth = authorizer(HashSet::new(), opa_url(&mock), true);
-    request_fixture!(image, p, h, "alice");
-    assert!(auth.authorize(&image, &req(&p, &h, "t")) == AuthorizationResult::Allow);
+    check_alice_authorization(&auth, AuthorizationResult::Allow);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn http_error_with_allow_on_error_false_returns_deny() {
-    let mock = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(500))
-        .mount(&mock)
-        .await;
+    let mock = failing_registry().await;
 
     let auth = authorizer(HashSet::new(), opa_url(&mock), false);
-    request_fixture!(image, p, h, "alice");
-    assert!(auth.authorize(&image, &req(&p, &h, "t")) == AuthorizationResult::Deny);
+    check_alice_authorization(&auth, AuthorizationResult::Deny);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -207,9 +211,7 @@ async fn configured_http_timeout_fails_closed() {
         millis(25),
     )
     .unwrap();
-    request_fixture!(image, p, h, "alice");
-
-    assert!(auth.authorize(&image, &req(&p, &h, "t")) == AuthorizationResult::Deny);
+    check_alice_authorization(&auth, AuthorizationResult::Deny);
 }
 
 #[tokio::test(flavor = "multi_thread")]

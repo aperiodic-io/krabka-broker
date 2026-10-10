@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 /// `create_topic_sasl_plain` in `elect_leaders.rs`.
 pub use crate::kafka_wire::create_topic_as_admin;
 pub use crate::support::sasl::start_sasl_plaintext_with_acl_users as start_single_broker_sasl_plaintext_with_users;
-use crate::{kafka_wire, plaintext_wire::CLIENT_ID};
+use crate::{kafka_wire, kafka_wire::PlainAuthenticationSetup, plaintext_wire::CLIENT_ID};
 
 /// Drives `AlterPartitionReassignments` over a SASL/PLAIN authenticated
 /// connection. It returns `(topic_name, [(partition_index, error_code)])`
@@ -22,8 +22,15 @@ pub async fn drive_alter_reassignments_sasl_plain(
     pass: &str,
     rows: Vec<(&str, i32, Option<Vec<i32>>)>,
 ) -> Vec<(String, Vec<(i32, i16)>)> {
-    let mut stream = kafka_wire::sasl_plain_authenticate(addr, CLIENT_ID, user, pass.as_bytes())
-        .await
-        .expect("SASL authenticate for AlterPartitionReassignments");
+    let mut stream = kafka_wire::sasl_plain_authenticate(
+        addr,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            user,
+            password: (pass.as_bytes()).to_vec(),
+        },
+    )
+    .await
+    .expect("SASL authenticate for AlterPartitionReassignments");
     crate::reassign_rpc::alter_reassignments_on(&mut stream, rows).await
 }

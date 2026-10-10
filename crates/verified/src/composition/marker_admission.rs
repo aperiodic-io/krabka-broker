@@ -28,6 +28,15 @@ mod progress;
 #[cfg(creusot)]
 use progress::lemma_maximal_prefix_advances;
 
+open_logic! {
+fn marker_prefix_maximal(bounds: (i64, i64), marker_end: Int, starts: Seq<i64>, limit: Int) -> bool {
+    pearlite! { forall<v: Int> v <= bounds.0@ && v <= bounds.1@
+        && v <= marker_end + 1
+        && (forall<i: Int> 0 <= i && i < starts.len() ==> v <= starts[i]@)
+        ==> v <= limit }
+}
+}
+
 type AdmittedMarkerFetch = (Decision, i64, i64, Option<(i64, i64)>);
 
 /// Connect both marker-generation fences to log closure and consumer visibility.
@@ -63,10 +72,7 @@ type AdmittedMarkerFetch = (Decision, i64, i64, Option<(i64, i64)>);
 })]
 #[ensures(pending_marker_admitted(version, request, current)
     && bounds.0@ > span.0@ + span.1@ ==>
-    (forall<v: Int> v <= bounds.0@ && v <= bounds.1@
-        && v <= span.0@ + span.1@ + 1
-        && (forall<i: Int> 0 <= i && i < other_starts@.len() ==> v <= other_starts@[i]@)
-        ==> v <= result.2@))]
+    marker_prefix_maximal(bounds, span.0@ + span.1@, other_starts@, result.2@))]
 #[ensures(pending_marker_admitted(version, request, current)
     && bounds.0@ > span.0@ + span.1@ && bounds.1@ > pending_start@
     && (forall<i: Int> 0 <= i && i < other_starts@.len() ==> other_starts@[i]@ > pending_start@)
@@ -129,11 +135,7 @@ pub(super) fn admitted_marker_bounds_committed_fetch(
         proof_assert!(after == before);
     }
     proof_assert!(bounds.0@ > span.0@ + span.1@ ==>
-        (forall<v: Int> v <= bounds.0@ && v <= bounds.1@
-            && v <= span.0@ + span.1@ + 1
-            && (forall<j: Int> 0 <= j && j < other_starts@.len()
-                ==> v <= other_starts@[j]@)
-            ==> v <= after@));
+        marker_prefix_maximal(bounds, span.0@ + span.1@, other_starts@, after@));
     proof_assert!({
         let advances = bounds.0@ > span.0@ + span.1@ && bounds.1@ > pending_start@
             && (forall<j: Int> 0 <= j && j < other_starts@.len()

@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/consensus/watermark.rs" 8 0 14 9 *)
+(* #"/workspace/crates/verified/src/consensus/watermark.rs" 17 0 23 9 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
@@ -9,22 +9,22 @@ let%span sfailover'0 = "/workspace/crates/verified/src/consensus/failover.rs" 18
 let%span sfailover'1 = "/workspace/crates/verified/src/consensus/failover.rs" 196 10 196 17
 let%span sfailover'2 = "/workspace/crates/verified/src/consensus/failover.rs" 198 16 198 74
 let%span sfailover'3 = "/workspace/crates/verified/src/consensus/failover.rs" 175 8 175 48
-let%span swatermark = "/workspace/crates/verified/src/consensus/watermark.rs" 15 27 15 28
-let%span swatermark'0 = "/workspace/crates/verified/src/consensus/watermark.rs" 17 17 17 18
-let%span swatermark'1 = "/workspace/crates/verified/src/consensus/watermark.rs" 17 8 17 18
-let%span swatermark'2 = "/workspace/crates/verified/src/consensus/watermark.rs" 20 12 20 34
-let%span swatermark'3 = "/workspace/crates/verified/src/consensus/watermark.rs" 21 16 21 17
-let%span swatermark'4 = "/workspace/crates/verified/src/consensus/watermark.rs" 28 14 28 21
-let%span swatermark'5 = "/workspace/crates/verified/src/consensus/watermark.rs" 27 16 27 35
-let%span swatermark'6 = "/workspace/crates/verified/src/consensus/watermark.rs" 24 8 24 94
-let%span swatermark'7 = "/workspace/crates/verified/src/consensus/watermark.rs" 22 16 22 24
-let%span swatermark'8 = "/workspace/crates/verified/src/consensus/watermark.rs" 30 16 30 35
-let%span swatermark'9 = "/workspace/crates/verified/src/consensus/watermark.rs" 32 21 32 22
-let%span swatermark'10 = "/workspace/crates/verified/src/consensus/watermark.rs" 32 12 32 22
-let%span swatermark'11 = "/workspace/crates/verified/src/consensus/watermark.rs" 34 13 34 14
-let%span swatermark'12 = "/workspace/crates/verified/src/consensus/watermark.rs" 34 8 34 14
-let%span swatermark'13 = "/workspace/crates/verified/src/consensus/watermark.rs" 6 11 6 69
-let%span swatermark'14 = "/workspace/crates/verified/src/consensus/watermark.rs" 7 10 7 94
+let%span swatermark = "/workspace/crates/verified/src/consensus/watermark.rs" 24 27 24 28
+let%span swatermark'0 = "/workspace/crates/verified/src/consensus/watermark.rs" 26 17 26 18
+let%span swatermark'1 = "/workspace/crates/verified/src/consensus/watermark.rs" 26 8 26 18
+let%span swatermark'2 = "/workspace/crates/verified/src/consensus/watermark.rs" 29 12 29 34
+let%span swatermark'3 = "/workspace/crates/verified/src/consensus/watermark.rs" 30 16 30 17
+let%span swatermark'4 = "/workspace/crates/verified/src/consensus/watermark.rs" 37 14 37 21
+let%span swatermark'5 = "/workspace/crates/verified/src/consensus/watermark.rs" 36 16 36 35
+let%span swatermark'6 = "/workspace/crates/verified/src/consensus/watermark.rs" 33 8 33 94
+let%span swatermark'7 = "/workspace/crates/verified/src/consensus/watermark.rs" 31 16 31 24
+let%span swatermark'8 = "/workspace/crates/verified/src/consensus/watermark.rs" 39 16 39 35
+let%span swatermark'9 = "/workspace/crates/verified/src/consensus/watermark.rs" 41 21 41 22
+let%span swatermark'10 = "/workspace/crates/verified/src/consensus/watermark.rs" 41 12 41 22
+let%span swatermark'11 = "/workspace/crates/verified/src/consensus/watermark.rs" 43 13 43 14
+let%span swatermark'12 = "/workspace/crates/verified/src/consensus/watermark.rs" 43 8 43 14
+let%span swatermark'13 = "/workspace/crates/verified/src/consensus/watermark.rs" 15 11 15 69
+let%span swatermark'14 = "/workspace/crates/verified/src/consensus/watermark.rs" 16 10 16 94
 
 use creusot.int.UInt64
 use creusot.int.Int64
@@ -75,7 +75,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let candidate_has_majority [#"/workspace/crates/verified/src/consensus/watermark.rs" 8 0 14 9] (log_end: Int64.t)
+let candidate_has_majority [#"/workspace/crates/verified/src/consensus/watermark.rs" 17 0 23 9] (log_end: Int64.t)
   (follower_offsets: Slice64.slice Int64.t) (cand: Int64.t) (majority: UInt64.t) (leader_counts: bool)
   (return (x: bool)) = {[@stop_split] [@expl:candidate_has_majority requires] [%#swatermark'13] 1
     <= UInt64.t'int majority

@@ -141,16 +141,17 @@ impl GroupActorHandle {
         offsets_log: Arc<dyn OffsetsLog>,
         coordinator: Arc<GroupCoordinator>,
     ) -> Self {
-        let (tx, rx) = mpsc::channel(config.actor_mailbox_capacity);
-        let task = tokio::spawn(actor_loop(
-            group_id,
-            kind,
-            config,
-            metadata_provider,
-            offsets_log,
-            coordinator,
-            rx,
-        ));
+        let (tx, task) = crate::task_util::spawn_mailbox(config.actor_mailbox_capacity, |rx| {
+            actor_loop(
+                group_id,
+                kind,
+                config,
+                metadata_provider,
+                offsets_log,
+                coordinator,
+                rx,
+            )
+        });
         Self {
             tx,
             kind,

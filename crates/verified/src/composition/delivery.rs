@@ -9,7 +9,7 @@ use crate::broker::FetchVisibility;
 use crate::broker::committed_fetch_response;
 
 open_logic! {
-pub(super) fn scheduled_activation_due(activation: Int, uncertainty: Int, now: Int) -> bool {
+pub fn scheduled_activation_due(activation: Int, uncertainty: Int, now: Int) -> bool {
     pearlite! { uncertainty >= 0 && activation + uncertainty <= i64::MAX@
     && activation + uncertainty <= now }
 }
@@ -24,6 +24,16 @@ pub(super) fn scheduled_batches_valid(batches: Seq<(i64, i32)>, start: Int, end:
         && if batches.len() == 0 { start == end }
             else { batches[batches.len() - 1].0@ + batches[batches.len() - 1].1@ + 1 == end }
     }
+}
+}
+
+open_logic! {
+pub(super) fn scheduled_prefix_covers_pending(
+    batches: Seq<(i64, i32)>, activations: Seq<i64>, clock: (Int, Int), frontier: Int,
+) -> bool {
+    pearlite! { forall<i: Int> 0 <= i && i < batches.len()
+        && !scheduled_activation_due(activations[i]@, clock.0, clock.1)
+        ==> frontier <= batches[i].0@ }
 }
 }
 
@@ -55,9 +65,7 @@ type ScheduledPrefix = (i64, FetchVisibility, FetchVisibility);
     None => !scheduled_batches_valid(batches@, w.log_start@, w.log_end@),
     Some((frontier, consumer, follower)) => scheduled_batches_valid(batches@, w.log_start@, w.log_end@)
         && w.log_start@ <= frontier@ && frontier@ <= w.log_end@
-        && (forall<i: Int> 0 <= i && i < batches@.len()
-            && !scheduled_activation_due(activations@[i]@, uncertainty@, now@)
-            ==> frontier@ <= batches@[i].0@)
+        && scheduled_prefix_covers_pending(batches@, activations@, (uncertainty@, now@), frontier@)
         && (frontier@ == w.log_end@ || exists<i: Int> 0 <= i && i < batches@.len()
             && frontier@ == batches@[i].0@
             && !scheduled_activation_due(activations@[i]@, uncertainty@, now@))

@@ -135,11 +135,8 @@ mod tests {
 
     use super::*;
     use crate::coordinator::unified::{
-        share::persistence::{
-            KEY_SHARE_GROUP_STATE_PARTITION_METADATA, ShareGroupKey, encode_share_key,
-            parse_share_key,
-        },
-        test_support::{peek_version, wire_bytes},
+        share::persistence::{KEY_SHARE_GROUP_STATE_PARTITION_METADATA, ShareGroupKey},
+        test_support::wire_bytes,
     };
 
     fn initialized(id: u8, name: &str, partitions: Vec<i32>) -> TopicPartitionsInfo {
@@ -189,10 +186,10 @@ mod tests {
         let key = ShareGroupKey::StatePartitionMetadata {
             group_id: "g1".into(),
         };
-        let b = encode_share_key(&key).unwrap();
-        let (ver, body) = peek_version(&b);
-        assert!(ver == KEY_SHARE_GROUP_STATE_PARTITION_METADATA);
-        assert!(parse_share_key(ver, body).unwrap() == key);
+        super::super::check_key_round_trip(
+            &key,
+            super::super::ShareKeyVersion(KEY_SHARE_GROUP_STATE_PARTITION_METADATA),
+        );
 
         let cases = [
             ShareGroupStatePartitionMetadataValue::default(),

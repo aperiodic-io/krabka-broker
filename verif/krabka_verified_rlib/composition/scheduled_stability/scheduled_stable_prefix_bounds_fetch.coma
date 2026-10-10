@@ -21,11 +21,12 @@ let%span stransaction'1 = "/workspace/crates/verified/src/transaction.rs" 252 16
 let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 14 10 25 1
 let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 26 10 29 1
 let%span sbroker = "/workspace/crates/verified/src/broker.rs" 33 8 35 83
-let%span sdelivery = "/workspace/crates/verified/src/composition/delivery.rs" 53 11 53 86
-let%span sdelivery'0 = "/workspace/crates/verified/src/composition/delivery.rs" 54 10 70 1
-let%span sdelivery'1 = "/workspace/crates/verified/src/composition/delivery.rs" 130 16 130 91
+let%span sdelivery = "/workspace/crates/verified/src/composition/delivery.rs" 63 11 63 86
+let%span sdelivery'0 = "/workspace/crates/verified/src/composition/delivery.rs" 64 10 78 1
+let%span sdelivery'1 = "/workspace/crates/verified/src/composition/delivery.rs" 138 16 138 91
 let%span sdelivery'2 = "/workspace/crates/verified/src/composition/delivery.rs" 21 8 25 93
-let%span sdelivery'3 = "/workspace/crates/verified/src/composition/delivery.rs" 13 16 14 38
+let%span sdelivery'3 = "/workspace/crates/verified/src/composition/delivery.rs" 34 16 36 37
+let%span sdelivery'4 = "/workspace/crates/verified/src/composition/delivery.rs" 13 16 14 38
 let%span scomposition = "/workspace/crates/verified/src/composition.rs" 309 16 309 42
 let%span sscheduled_stability = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 61 8 61 80
 let%span sscheduled_stability'0 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 61 8 61 81
@@ -34,8 +35,8 @@ let%span sscheduled_stability'2 = "/workspace/crates/verified/src/composition/sc
 let%span sscheduled_stability'3 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 70 8 70 12
 let%span sscheduled_stability'4 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 71 8 71 12
 let%span sscheduled_stability'5 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 69 19 78 5
-let%span sscheduled_stability'6 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 21 11 21 86
-let%span sscheduled_stability'7 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 22 10 42 1
+let%span sscheduled_stability'6 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 22 11 22 86
+let%span sscheduled_stability'7 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 23 10 42 1
 let%span sscheduled_stability'8 = "/workspace/crates/verified/src/composition/scheduled_stability.rs" 43 10 51 1
 
 use creusot.slice.Slice64
@@ -66,7 +67,7 @@ type t_Option_tup3_i64_FetchVisibility_FetchVisibility = None | Some tup3_i64_Fe
 predicate offset_range_valid [#"/workspace/crates/verified/src/composition.rs" 308 0 308 55] (start: int) (end': int) =
   [%#scomposition] 0 <= start /\ start <= end'
 
-predicate scheduled_inputs_coherent [#"/workspace/crates/verified/src/composition/delivery.rs" 124 0 129 9] (batches: Seq.seq tup2_i64_i32) (activations: Seq.seq Int64.t) (start: int) (end': int) =
+predicate scheduled_inputs_coherent [#"/workspace/crates/verified/src/composition/delivery.rs" 132 0 137 9] (batches: Seq.seq tup2_i64_i32) (activations: Seq.seq Int64.t) (start: int) (end': int) =
   [%#sdelivery'1] Seq.length batches = Seq.length activations /\ offset_range_valid start end'
 
 predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other <= self
@@ -94,11 +95,19 @@ predicate scheduled_batches_valid [#"/workspace/crates/verified/src/composition/
     = end'
   )
 
+type tup2_Int_Int = { f0'1: int; f1'1: int }
+
 constant const_MAX: Int64.t = (9223372036854775807: Int64.t)
 
-predicate scheduled_activation_due [#"/workspace/crates/verified/src/composition/delivery.rs" 12 0 12 91] (activation: int) (uncertainty: int) (now: int) =
-  [%#sdelivery'3] ge_log_Int uncertainty 0
+predicate scheduled_activation_due [#"/workspace/crates/verified/src/composition/delivery.rs" 12 0 12 84] (activation: int) (uncertainty: int) (now: int) =
+  [%#sdelivery'4] ge_log_Int uncertainty 0
   /\ activation + uncertainty <= Int64.to_int const_MAX /\ activation + uncertainty <= now
+
+predicate scheduled_prefix_covers_pending [#"/workspace/crates/verified/src/composition/delivery.rs" 31 0 33 9] (batches: Seq.seq tup2_i64_i32) (activations: Seq.seq Int64.t) (clock: tup2_Int_Int) (frontier: int) =
+  [%#sdelivery'3] forall i: int. 0 <= i
+      /\ i < Seq.length batches
+      /\ not scheduled_activation_due (Int64.to_int (Seq.get activations i)) clock.f0'1 clock.f1'1
+    -> frontier <= Int64.to_int (Seq.get batches i).f0
 
 predicate committed_fetch_response [#"/workspace/crates/verified/src/broker.rs" 25 0 31 9] (view: t_FetchVisibility) (hw'0: Int64.t) (lso'0: Int64.t) (deliverable'0: Int64.t) (floor: int) =
   [%#sbroker] view.response_hw = hw'0
@@ -119,10 +128,8 @@ let scheduled_prefix_bounds_fetch (batches: Slice64.slice tup2_i64_i32) (activat
       | Some {f0'0 = frontier; f1'0 = consumer; f2'0 = follower} -> scheduled_batches_valid (Slice64.view batches) (Int64.to_int w.log_start) (Int64.to_int w.log_end)
       /\ Int64.to_int w.log_start <= Int64.to_int frontier
       /\ Int64.to_int frontier <= Int64.to_int w.log_end
-      /\ (forall i: int. 0 <= i
-            /\ i < Seq.length (Slice64.view batches)
-            /\ not scheduled_activation_due (Int64.to_int (Seq.get (Slice64.view activations) i)) (Int64.to_int uncertainty) (Int64.to_int now)
-          -> Int64.to_int frontier <= Int64.to_int (Seq.get (Slice64.view batches) i).f0)
+      /\ scheduled_prefix_covers_pending (Slice64.view batches) (Slice64.view activations) { f0'1 = Int64.to_int uncertainty;
+                                                                                             f1'1 = Int64.to_int now } (Int64.to_int frontier)
       /\ (Int64.to_int frontier = Int64.to_int w.log_end
         \/ (exists i: int. 0 <= i
           /\ i < Seq.length (Slice64.view batches)
@@ -154,7 +161,7 @@ predicate inv_Option_Infallible (_1: t_Option_Infallible)
 axiom inv_axiom [@rewrite]: forall x: t_Option_Infallible [inv_Option_Infallible x]. inv_Option_Infallible x
     = match x with
       | None'0 -> true
-      | Some'0 f0'1 -> inv_Infallible f0'1
+      | Some'0 f0'2 -> inv_Infallible f0'2
       end
 
 predicate inv_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibility (_1: t_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibility)
@@ -162,8 +169,8 @@ predicate inv_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibi
 axiom inv_axiom'0 [@rewrite]:
   forall x: t_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibility [inv_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibility x]. inv_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibility x
     = match x with
-      | Continue f0'1 -> true
-      | Break f0'1 -> inv_Option_Infallible f0'1
+      | Continue f0'2 -> true
+      | Break f0'2 -> inv_Option_Infallible f0'2
       end
 
 let branch_Option_tup3_i64_FetchVisibility_FetchVisibility (self_: t_Option_tup3_i64_FetchVisibility_FetchVisibility)
@@ -177,8 +184,8 @@ let branch_Option_tup3_i64_FetchVisibility_FetchVisibility (self_: t_Option_tup3
     (! return {result}) ]
 
 let elim_Break (_x: t_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibility)
-  (return (f0'1: t_Option_Infallible)) = any
-  [ _k (f0'1: t_Option_Infallible) -> {Break f0'1 = _x} (! return {f0'1})
+  (return (f0'2: t_Option_Infallible)) = any
+  [ _k (f0'2: t_Option_Infallible) -> {Break f0'2 = _x} (! return {f0'2})
   | _chk -> (! {[@expl:elim Break] match _x with
       | Break _ -> true
       | _ -> false
@@ -186,10 +193,10 @@ let elim_Break (_x: t_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_Fet
     any) ]
 
 type tup4_i64_i64_FetchVisibility_FetchVisibility = {
-  f0'1: Int64.t;
-  f1'1: Int64.t;
-  f2'1: t_FetchVisibility;
-  f3'1: t_FetchVisibility }
+  f0'2: Int64.t;
+  f1'2: Int64.t;
+  f2'2: t_FetchVisibility;
+  f3'2: t_FetchVisibility }
 
 type t_Option_tup4_i64_i64_FetchVisibility_FetchVisibility =
   | None'1
@@ -204,15 +211,15 @@ let from_residual_Option_tup4_i64_i64_FetchVisibility_FetchVisibility (residual:
     (! return {result}) ]
 
 let elim_Continue (_x: t_ControlFlow_Option_Infallible_tup3_i64_FetchVisibility_FetchVisibility)
-  (return (f0'2: tup3_i64_FetchVisibility_FetchVisibility)) = any
-  [ _k (f0'2: tup3_i64_FetchVisibility_FetchVisibility) -> {Continue f0'2 = _x} (! return {f0'2})
+  (return (f0'3: tup3_i64_FetchVisibility_FetchVisibility)) = any
+  [ _k (f0'3: tup3_i64_FetchVisibility_FetchVisibility) -> {Continue f0'3 = _x} (! return {f0'3})
   | _chk -> (! {[@expl:elim Continue] match _x with
       | Continue _ -> true
       | _ -> false
       end}
     any) ]
 
-type tup2_i64_FetchVisibility = { f0'2: Int64.t; f1'2: t_FetchVisibility }
+type tup2_i64_FetchVisibility = { f0'3: Int64.t; f1'3: t_FetchVisibility }
 
 type t_Option_tup2_i64_FetchVisibility = None'2 | Some'2 tup2_i64_FetchVisibility
 
@@ -237,7 +244,7 @@ let committed_fetch_excludes_unstable (starts: Slice64.slice Int64.t) (w: t_Fetc
         | None'2 -> exists i: int. 0 <= i
           /\ i < Seq.length (Slice64.view starts)
           /\ gt_log_Int (Int64.to_int (Seq.get (Slice64.view starts) i)) (Int64.to_int w.log_end)
-        | Some'2 {f0'2 = lso'0; f1'2 = visibility} -> first_unstable_frontier (Slice64.view starts) (Int64.to_int w.log_end) (Int64.to_int lso'0)
+        | Some'2 {f0'3 = lso'0; f1'3 = visibility} -> first_unstable_frontier (Slice64.view starts) (Int64.to_int w.log_end) (Int64.to_int lso'0)
         /\ Int64.to_int visibility.limit_offset
           = MinMax.min (MinMax.min (Int64.to_int lso'0) (Int64.to_int w.hw)) (Int64.to_int w.deliverable)
         /\ Int64.to_int visibility.effective_lso = MinMax.min (Int64.to_int lso'0) (Int64.to_int w.hw)
@@ -252,7 +259,7 @@ let committed_fetch_excludes_unstable (starts: Slice64.slice Int64.t) (w: t_Fetc
         end)
     /\ ([@stop_split] [@expl:committed_fetch_excludes_unstable ensures #1] [%#stransaction_fetch'0] match result with
       | None'2 -> true
-      | Some'2 {f1'2 = visibility} -> unstable_fetch_limit_maximal (Slice64.view starts) (Int64.to_int w.log_end) (Int64.to_int w.hw) (Int64.to_int w.deliverable) (Int64.to_int visibility.limit_offset)
+      | Some'2 {f1'3 = visibility} -> unstable_fetch_limit_maximal (Slice64.view starts) (Int64.to_int w.log_end) (Int64.to_int w.hw) (Int64.to_int w.deliverable) (Int64.to_int visibility.limit_offset)
       end)}
     (! return {result}) ]
 
@@ -265,8 +272,8 @@ predicate inv_ControlFlow_Option_Infallible_tup2_i64_FetchVisibility (_1: t_Cont
 axiom inv_axiom'1 [@rewrite]:
   forall x: t_ControlFlow_Option_Infallible_tup2_i64_FetchVisibility [inv_ControlFlow_Option_Infallible_tup2_i64_FetchVisibility x]. inv_ControlFlow_Option_Infallible_tup2_i64_FetchVisibility x
     = match x with
-      | Continue'0 f0'3 -> true
-      | Break'0 f0'3 -> inv_Option_Infallible f0'3
+      | Continue'0 f0'4 -> true
+      | Break'0 f0'4 -> inv_Option_Infallible f0'4
       end
 
 let branch_Option_tup2_i64_FetchVisibility (self_: t_Option_tup2_i64_FetchVisibility)
@@ -279,9 +286,9 @@ let branch_Option_tup2_i64_FetchVisibility (self_: t_Option_tup2_i64_FetchVisibi
       end)}
     (! return {result}) ]
 
-let elim_Break'0 (_x: t_ControlFlow_Option_Infallible_tup2_i64_FetchVisibility) (return (f0'3: t_Option_Infallible)) =
+let elim_Break'0 (_x: t_ControlFlow_Option_Infallible_tup2_i64_FetchVisibility) (return (f0'4: t_Option_Infallible)) =
 any
-  [ _k (f0'3: t_Option_Infallible) -> {Break'0 f0'3 = _x} (! return {f0'3})
+  [ _k (f0'4: t_Option_Infallible) -> {Break'0 f0'4 = _x} (! return {f0'4})
   | _chk -> (! {[@expl:elim Break] match _x with
       | Break'0 _ -> true
       | _ -> false
@@ -289,8 +296,8 @@ any
     any) ]
 
 let elim_Continue'0 (_x: t_ControlFlow_Option_Infallible_tup2_i64_FetchVisibility)
-  (return (f0'3: tup2_i64_FetchVisibility)) = any
-  [ _k (f0'3: tup2_i64_FetchVisibility) -> {Continue'0 f0'3 = _x} (! return {f0'3})
+  (return (f0'4: tup2_i64_FetchVisibility)) = any
+  [ _k (f0'4: tup2_i64_FetchVisibility) -> {Continue'0 f0'4 = _x} (! return {f0'4})
   | _chk -> (! {[@expl:elim Continue] match _x with
       | Continue'0 _ -> true
       | _ -> false
@@ -391,13 +398,13 @@ let scheduled_stable_prefix_bounds_fetch [#"/workspace/crates/verified/src/compo
   | bb12 = s0
     [ s0 = elim_Continue'0 {_46} (fun (r0: tup2_i64_FetchVisibility) -> [ &val''0 <- r0 ] s1)
     | s1 = [ &_45 <- val''0 ] s2
-    | s2 = [ &lso'0 <- _45.f0'2 ] s3
-    | s3 = [ &consumer <- _45.f1'2 ] s4
+    | s2 = [ &lso'0 <- _45.f0'3 ] s3
+    | s3 = [ &consumer <- _45.f1'3 ] s4
     | s4 = [ &_57 <- { log_start = w.log_start; hw = w.hw; lso = lso'0; log_end = w.log_end; deliverable = delivery } ]
       s5
     | s5 = fetch_visibility [%#sscheduled_stability'5] {[%#sscheduled_stability'3] true}
         {[%#sscheduled_stability'4] true} {_57} {w.log_start} (fun (_x: t_FetchVisibility) -> [ &follower <- _x ] s6)
-    | s6 = [ &_61 <- { f0'1 = delivery; f1'1 = lso'0; f2'1 = consumer; f3'1 = follower } ] s7
+    | s6 = [ &_61 <- { f0'2 = delivery; f1'2 = lso'0; f2'2 = consumer; f3'2 = follower } ] s7
     | s7 = [ &_ret <- Some'1 _61 ] s8
     | s8 = return {_ret} ] ]
   [ & _ret: t_Option_tup4_i64_i64_FetchVisibility_FetchVisibility = Any.any_l ()
@@ -430,15 +437,14 @@ let scheduled_stable_prefix_bounds_fetch [#"/workspace/crates/verified/src/compo
         \/ (exists i: int. 0 <= i
           /\ i < Seq.length (Slice64.view starts)
           /\ gt_log_Int (Int64.to_int (Seq.get (Slice64.view starts) i)) (Int64.to_int w.log_end))
-        | Some'1 {f0'1 = delivery; f1'1 = lso'0; f2'1 = consumer; f3'1 = follower} -> scheduled_batches_valid (Slice64.view batches) (Int64.to_int w.log_start) (Int64.to_int w.log_end)
+        | Some'1 {f0'2 = delivery; f1'2 = lso'0; f2'2 = consumer; f3'2 = follower} -> scheduled_batches_valid (Slice64.view batches) (Int64.to_int w.log_start) (Int64.to_int w.log_end)
         /\ Int64.to_int w.log_start <= Int64.to_int delivery
         /\ Int64.to_int delivery <= Int64.to_int w.log_end
         /\ Int64.to_int lso'0 <= Int64.to_int w.log_end
-        /\ (forall i: int. 0 <= i
-              /\ i < Seq.length (Slice64.view batches)
-              /\ not scheduled_activation_due (Int64.to_int (Seq.get (Slice64.view activations) i)) (Int64.to_int uncertainty) (Int64.to_int now)
-            -> Int64.to_int delivery <= Int64.to_int (Seq.get (Slice64.view batches) i).f0
-            /\ Int64.to_int consumer.limit_offset <= Int64.to_int (Seq.get (Slice64.view batches) i).f0)
+        /\ scheduled_prefix_covers_pending (Slice64.view batches) (Slice64.view activations) { f0'1 = Int64.to_int uncertainty;
+                                                                                               f1'1 = Int64.to_int now } (Int64.to_int delivery)
+        /\ scheduled_prefix_covers_pending (Slice64.view batches) (Slice64.view activations) { f0'1 = Int64.to_int uncertainty;
+                                                                                               f1'1 = Int64.to_int now } (Int64.to_int consumer.limit_offset)
         /\ (Int64.to_int delivery = Int64.to_int w.log_end
           \/ (exists i: int. 0 <= i
             /\ i < Seq.length (Slice64.view batches)
@@ -460,7 +466,7 @@ let scheduled_stable_prefix_bounds_fetch [#"/workspace/crates/verified/src/compo
         end)
     /\ ([@stop_split] [@expl:scheduled_stable_prefix_bounds_fetch ensures #1] [%#sscheduled_stability'8] match result with
       | None'1 -> true
-      | Some'1 {f2'1 = consumer} -> forall v: int. v <= Int64.to_int w.log_end
+      | Some'1 {f2'2 = consumer} -> forall v: int. v <= Int64.to_int w.log_end
           /\ v <= Int64.to_int w.hw
           /\ (forall i: int. 0 <= i /\ i < Seq.length (Slice64.view starts)
               -> v <= Int64.to_int (Seq.get (Slice64.view starts) i))

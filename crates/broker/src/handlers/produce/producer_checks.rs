@@ -422,7 +422,8 @@ mod tests {
         (($directory:ident, $image:ident, $fixture:ident)) => {
             let $directory = tempfile::tempdir().unwrap();
             let $image = Arc::new(image_with_topic("orders", &[1]));
-            let $fixture = crate::handlers::produce::test_support::PipelineFixture::new(1);
+            let $fixture =
+                crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(1));
         };
     }
 
@@ -431,11 +432,9 @@ mod tests {
         let directory = tempfile::tempdir().expect("tempdir");
         let partition = crate::test_support::spawn_standalone_partition(
             directory.path(),
-            "orders",
-            0,
             krabka_log::Log::open(directory.path(), krabka_log::LogConfig::default())
                 .expect("open log"),
-            false,
+            crate::test_support::StandalonePartitionSetup::default(),
         );
 
         for producer_id in [-1, i64::MIN] {
@@ -634,7 +633,12 @@ mod tests {
         let part = fixture.partition(dir.path(), "orders", &image).await;
         // Push LEO to 3 so the HW can be clamped to 2 (one below the target).
         {
-            let mut batch = crate::test_support::repeated_records_batch(3, 0);
+            let mut batch = crate::test_support::repeated_records_batch(
+                crate::test_support::RepeatedRecordsSetup {
+                    count: crate::test_support::RecordCount(3),
+                    ..Default::default()
+                },
+            );
             part.log
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -667,7 +671,12 @@ mod tests {
             producer_id: pid,
             producer_epoch: 0,
             base_sequence: 0,
-            ..crate::test_support::repeated_records_batch(3, 0)
+            ..crate::test_support::repeated_records_batch(
+                crate::test_support::RepeatedRecordsSetup {
+                    count: crate::test_support::RecordCount(3),
+                    ..Default::default()
+                },
+            )
         });
 
         let outcome = process_partition(
@@ -897,7 +906,9 @@ mod tests {
                     producer_id: PRODUCER_ID,
                     producer_epoch: 0,
                     base_sequence,
-                    ..crate::test_support::repeated_records_batch(1, 0)
+                    ..crate::test_support::repeated_records_batch(
+                        crate::test_support::RepeatedRecordsSetup::default(),
+                    )
                 });
                 let fixture = &fixture;
                 let image = &image;
@@ -921,7 +932,12 @@ mod tests {
             match history {
                 History::NeverAppended => {}
                 History::HasRecords => {
-                    let mut batch = crate::test_support::repeated_records_batch(3, 0);
+                    let mut batch = crate::test_support::repeated_records_batch(
+                        crate::test_support::RepeatedRecordsSetup {
+                            count: crate::test_support::RecordCount(3),
+                            ..Default::default()
+                        },
+                    );
                     part_handle
                         .log
                         .lock()

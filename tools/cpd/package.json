@@ -1,0 +1,7 @@
+{
+  "name": "krabka-duplicate-check",
+  "private": true,
+  "dependencies": {
+    "jscpd": "5.4.1"
+  }
+}

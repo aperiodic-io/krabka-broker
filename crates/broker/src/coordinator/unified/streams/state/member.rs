@@ -9,6 +9,8 @@ use std::{collections::BTreeMap, time::Instant};
 
 use krabka_log::Offset;
 
+use super::TaskMap;
+
 /// The reconciliation state of one streams-group member, Kafka's
 /// `org.apache.kafka.coordinator.group.streams.MemberState`. It covers the
 /// active, standby and warmup tasks.
@@ -88,17 +90,17 @@ pub struct StreamsMemberState {
     // --- assignment ---
     pub assignment_state: StreamsMemberAssignmentState,
     /// Assigned active tasks: `subtopology_id` -> sorted, deduped partitions.
-    pub active: BTreeMap<String, Vec<i32>>,
+    pub active: TaskMap,
     /// Assigned standby tasks.
-    pub standby: BTreeMap<String, Vec<i32>>,
+    pub standby: TaskMap,
     /// Assigned warmup tasks.
-    pub warmup: BTreeMap<String, Vec<i32>>,
+    pub warmup: TaskMap,
     /// Active tasks the member must revoke before it advances.
-    pub active_pending_revocation: BTreeMap<String, Vec<i32>>,
+    pub active_pending_revocation: TaskMap,
     /// Standby tasks the member must revoke before it advances.
-    pub standby_pending_revocation: BTreeMap<String, Vec<i32>>,
+    pub standby_pending_revocation: TaskMap,
     /// Warmup tasks the member must revoke before it advances.
-    pub warmup_pending_revocation: BTreeMap<String, Vec<i32>>,
+    pub warmup_pending_revocation: TaskMap,
     /// The epoch at which each active task, assigned or pending revocation,
     /// was assigned to the member: Kafka's
     /// `TasksTupleWithEpochs.activeTasksWithEpochs` (KIP-1251), which the
@@ -107,7 +109,7 @@ pub struct StreamsMemberState {
     /// The active, standby and warmup tasks that the last heartbeat response
     /// sent to the member. A response sends the task lists again only when
     /// the assignment differs from them.
-    pub sent_tasks: [BTreeMap<String, Vec<i32>>; 3],
+    pub sent_tasks: [TaskMap; 3],
 
     // --- reported catch-up progress (for warmup -> active promotion) ---
     /// `(subtopology, partition)` -> the changelog position the member last

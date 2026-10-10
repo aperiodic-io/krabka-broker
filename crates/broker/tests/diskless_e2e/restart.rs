@@ -40,17 +40,12 @@ use crate::{
 async fn a_broker_crashed_mid_flush_loses_no_acknowledged_offset() {
     // Flush on a tight cadence so the crash below lands inside a flush cycle
     // rather than between two idle ticks.
-    let mut cluster = crate::cluster::start_flushing_cluster(krabka_units::millis(50)).await;
-    cluster.await_ready().await;
-
-    let (admin, topic_id, leader, _values, producer) = crate::topic::seed_workload(&cluster).await;
+    let (mut cluster, admin, topic_id, leader, _values, producer) =
+        crate::topic::flushing_workload(krabka_units::millis(50)).await;
 
     // Wait until the flusher has actually started moving objects, so the crash
     // interrupts a running pipeline instead of one that never began.
-    let leader_broker = cluster
-        .handle_for_node(leader)
-        .expect("the diskless leader is up");
-    let committed = i64::try_from(RECORDS).expect("small count");
+    let (leader_broker, committed) = crate::topic::seeded_leader(&cluster, leader);
     wait_for(
         "the diskless flusher to reach the committed prefix",
         Duration::from_secs(90),
@@ -112,17 +107,7 @@ async fn a_broker_crashed_mid_flush_loses_no_acknowledged_offset() {
         .into_iter()
         .find(|node| *node != leader)
         .expect("a surviving voter");
-    cluster
-        .handle_for_node(survivor)
-        .expect("the survivor is up")
-        .wait_until_partition_leader_changed(TOPIC, 0, leader)
-        .await;
-    let promoted = cluster
-        .handle_for_node(survivor)
-        .expect("the survivor is up")
-        .partition_leader_for_test(TOPIC, 0)
-        .map(krabka_broker::NodeId)
-        .expect("a promoted leader");
+    let promoted = cluster.promoted_leader(survivor, leader).await;
     let after_crash = fetch_log(
         &cluster.bootstrap_for_node(promoted),
         topic_id,

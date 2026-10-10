@@ -149,7 +149,7 @@ mod tests {
     use std::sync::Arc;
 
     use assert2::{assert, check};
-    use krabka_metadata::{AclOperation, PatternType, ResourceType};
+    use krabka_metadata::AclOperation;
 
     use super::*;
     use crate::{
@@ -166,9 +166,7 @@ mod tests {
     /// (resource name, pattern type) pairs the listing must hold.
     type PatternRow<'a> = (i8, Option<&'a str>, &'a [(&'a str, i8)]);
 
-    fn acl(resource_name: &str, principal: &str, operation: AclOperation) -> AclEntry {
-        crate::test_support::allow_acl(ResourceType::Topic, resource_name, principal, operation)
-    }
+    use crate::test_support::{AllowAclSetup, allow_acl as acl};
 
     fn request(
         resource_name: Option<&str>,
@@ -240,7 +238,7 @@ mod tests {
         });
         assert!(err == expected_err);
 
-        let desc = acl_description(&acl("orders", "User:alice", AclOperation::Read));
+        let desc = acl_description(&acl(AllowAclSetup::default()));
         let expected_desc = tagged_wire!(AclDescription {
             principal: "User:alice".into(),
             host: "*".into(),
@@ -272,6 +270,19 @@ mod tests {
         assert!(resp == expected_resp);
     }
 
+    fn describe_alice_orders(
+        broker: &crate::broker::Broker,
+        ctx: &crate::handlers::RequestContext<'_>,
+    ) -> DescribeAclsResponse {
+        handle(
+            broker,
+            &request(Some("orders"), Some("User:alice"), OPERATION_READ),
+            VERSION,
+            ctx,
+        )
+        .expect("handle")
+    }
+
     #[tokio::test]
     async fn handle_denies_cluster_describe() {
         broker_fixture!(
@@ -280,13 +291,7 @@ mod tests {
             context(ctx, "alice")
         );
 
-        let resp = handle(
-            &broker,
-            &request(Some("orders"), Some("User:alice"), OPERATION_READ),
-            VERSION,
-            &ctx,
-        )
-        .expect("handle");
+        let resp = describe_alice_orders(&broker, &ctx);
 
         let expected = unthrottled_wire!(DescribeAclsResponse {
             error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
@@ -299,20 +304,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_answers_security_disabled_when_no_authorizer_is_configured() {
-        seeded_acl_fixture!(
-            (broker_handle, _dir, broker, ctx),
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)),
-            vec![acl("orders", "User:alice", AclOperation::Read)],
-            "admin"
-        );
+        security_disabled_acl_fixture!((broker_handle, _dir, broker, ctx));
 
-        let resp = handle(
-            &broker,
-            &request(Some("orders"), Some("User:alice"), OPERATION_READ),
-            VERSION,
-            &ctx,
-        )
-        .expect("handle");
+        let resp = describe_alice_orders(&broker, &ctx);
 
         let expected = unthrottled_wire!(DescribeAclsResponse {
             error_code: codes::SECURITY_DISABLED,
@@ -357,7 +351,7 @@ mod tests {
         seeded_acl_fixture!(
             (broker_handle, _dir, broker, ctx),
             start_broker(configured_authorizer()),
-            vec![acl("orders", "User:alice", AclOperation::Read)],
+            vec![crate::handlers::acl_test_support::alice_orders_acl()],
             "admin"
         );
         let any = DescribeAclsRequest {
@@ -398,21 +392,17 @@ mod tests {
     #[tokio::test]
     async fn handle_matches_patterns_the_way_kafka_does() {
         let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-        let seeded = [
-            ("foo", PatternType::Literal),
-            ("*", PatternType::Literal),
-            ("f", PatternType::Prefixed),
-            ("fo", PatternType::Prefixed),
-            ("bar", PatternType::Prefixed),
-            ("food", PatternType::Literal),
-        ];
+        let seeded = crate::handlers::acl_wire::PATTERN_MATCHING_FIXTURE;
         seed_acls(
             &broker_handle,
             seeded
                 .iter()
                 .map(|(name, pattern_type)| AclEntry {
                     pattern_type: *pattern_type,
-                    ..acl(name, "User:alice", AclOperation::Read)
+                    ..acl(AllowAclSetup {
+                        resource_name: name,
+                        ..Default::default()
+                    })
                 })
                 .collect(),
         )
@@ -522,7 +512,7 @@ mod tests {
         seeded_acl_fixture!(
             (broker_handle, _dir, broker, ctx),
             start_broker(configured_authorizer()),
-            vec![acl("orders", "User:alice", AclOperation::Read)],
+            vec![crate::handlers::acl_test_support::alice_orders_acl()],
             "admin"
         );
 
@@ -557,20 +547,11 @@ mod tests {
         seeded_acl_fixture!(
             (broker_handle, _dir, broker, ctx),
             start_broker(configured_authorizer()),
-            vec![
-                acl("orders", "User:alice", AclOperation::Read),
-                acl("payments", "User:bob", AclOperation::Write),
-            ],
+            crate::handlers::acl_test_support::orders_payments_acls(),
             "admin"
         );
 
-        let resp = handle(
-            &broker,
-            &request(Some("orders"), Some("User:alice"), OPERATION_READ),
-            VERSION,
-            &ctx,
-        )
-        .expect("handle");
+        let resp = describe_alice_orders(&broker, &ctx);
 
         let expected = unthrottled_wire!(DescribeAclsResponse {
             error_code: codes::NONE,
@@ -593,7 +574,12 @@ mod tests {
 
     #[test]
     fn acl_description_preserves_non_read_operations() {
-        let desc = acl_description(&acl("payments", "User:bob", AclOperation::Write));
+        let desc = acl_description(&acl(AllowAclSetup {
+            resource_name: "payments",
+            principal: "User:bob",
+            operation: AclOperation::Write,
+            ..Default::default()
+        }));
 
         assert!(desc.principal == "User:bob");
         assert!(desc.operation == OPERATION_WRITE);

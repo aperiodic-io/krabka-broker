@@ -214,7 +214,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::future_log::test_support::{append_records, fixture_partition, test_policy};
+    use crate::future_log::test_support::{fixture_partition, test_policy};
 
     // Move t-0 using the common log config and policy, with caller-owned registries/status.
     macro_rules! move_with_defaults {
@@ -444,18 +444,7 @@ mod tests {
         // Plant a registry entry as if a prior ARLD already kicked off
         // a move — exercises the "already moving, same target" branch
         // without racing the replicator's swap-and-remove.
-        let (future_path, future_log) =
-            crate::future_log::test_support::open_future_log(extra.path());
-        future_logs.insert(
-            ("t".to_string(), PartitionIndex(0)),
-            Arc::new(FutureLogState {
-                target_log_dir: extra.path().to_path_buf(),
-                future_path: future_path.clone(),
-                future_log,
-                cancel: CancellationToken::new(),
-                task: std::sync::Mutex::new(None),
-            }),
-        );
+        crate::future_log::test_support::plant_future_log(&future_logs, extra.path());
 
         move_with_defaults!(
             &partitions,
@@ -482,30 +471,20 @@ mod tests {
             extra.path().to_path_buf(),
             third.path().to_path_buf(),
         ];
-        let partitions = Arc::new(PartitionRegistry::new());
-        let future_logs = Arc::new(DashMap::new());
-        let part = fixture_partition(primary.path(), "t", PartitionIndex(0));
-        append_records(&part, 3);
-        partitions.insert("t".into(), PartitionIndex(0), part.clone());
-
-        // Plant a registry entry pointing at `extra`.
-        let (future_path, future_log) =
-            crate::future_log::test_support::open_future_log(extra.path());
-        let old_cancel = CancellationToken::new();
-        future_logs.insert(
-            ("t".to_string(), PartitionIndex(0)),
-            Arc::new(FutureLogState {
-                target_log_dir: extra.path().to_path_buf(),
-                future_path: future_path.clone(),
-                future_log,
-                cancel: old_cancel.clone(),
-                task: std::sync::Mutex::new(None),
-            }),
+        let source = crate::future_log::test_support::registered_source_fixture(
+            primary.path(),
+            crate::future_log::test_support::FutureSourceSetup::default(),
         );
 
+        // Plant a registry entry pointing at `extra`.
+        let crate::future_log::test_support::PlantedFutureLog {
+            path: future_path,
+            cancel: old_cancel,
+        } = crate::future_log::test_support::plant_future_log(&source.future_logs, extra.path());
+
         move_with_defaults!(
-            &partitions,
-            &future_logs,
+            &source.partitions,
+            &source.future_logs,
             &log_dirs,
             &crate::log_dir_status::LogDirRegistry::default(),
             None,
@@ -516,9 +495,9 @@ mod tests {
 
         tokio::time::timeout(Duration::from_millis(500), async {
             loop {
-                let moved = canonicalize_or_self(&part.log_dir.load_full())
+                let moved = canonicalize_or_self(&source.partition.log_dir.load_full())
                     == canonicalize_or_self(third.path());
-                if moved && future_logs.is_empty() {
+                if moved && source.future_logs.is_empty() {
                     break;
                 }
                 tokio::task::yield_now().await;
@@ -529,6 +508,6 @@ mod tests {
 
         assert!(old_cancel.is_cancelled());
         assert!(!future_path.exists());
-        assert!(part.log_end_offset() == 3);
+        assert!(source.partition.log_end_offset() == 3);
     }
 }

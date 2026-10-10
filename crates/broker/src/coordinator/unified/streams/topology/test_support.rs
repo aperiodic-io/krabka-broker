@@ -33,7 +33,7 @@ pub fn image_with(topics: &[(&str, u8, i32)]) -> MetadataImage {
         for p in 0..partitions {
             image.apply(&MetadataRecord::V1Partition(partition_record(
                 name,
-                p,
+                krabka_ids::PartitionIndex(p),
                 krabka_audit::NodeId(1),
             )));
         }
@@ -53,11 +53,16 @@ pub fn sub(id: &str) -> StoredSubtopology {
     }
 }
 
+/// The two named sources used by the independent wire and persisted topology fixtures.
+pub fn example_source_topics() -> Vec<String> {
+    vec!["in-a".into(), "in-b".into()]
+}
+
 /// A persisted topology fixture, independent of the wire-to-stored mapper.
 pub fn example_subtopology() -> StoredSubtopology {
     StoredSubtopology {
         subtopology_id: "0".into(),
-        source_topics: vec!["in-a".into(), "in-b".into()],
+        source_topics: example_source_topics(),
         source_topic_regex: vec!["^orders-.*".into()],
         repartition_sink_topics: vec!["rp-1".into()],
         state_changelog_topics: vec![StoredTopicInfo {

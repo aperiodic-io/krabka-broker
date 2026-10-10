@@ -16,9 +16,7 @@ mod verify;
 
 // A fresh Ed25519 key pair plus its raw public key bytes.
 fn fresh_key() -> (Ed25519KeyPair, Vec<u8>) {
-    let rng = ring::rand::SystemRandom::new();
-    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).expect("generate pkcs8");
-    let pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("parse pkcs8");
+    let pair = crate::test_support::fresh_ed25519_key();
     let public = pair.public_key().as_ref().to_vec();
     (pair, public)
 }

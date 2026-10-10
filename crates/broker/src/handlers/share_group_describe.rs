@@ -161,8 +161,11 @@ mod tests {
     #[tokio::test]
     async fn handle_denied_groups_preserve_group_ids_and_error_codes() {
         let version = share_group_describe_response::MAX_VERSION;
-        let (broker_handle, _dir) =
-            crate::test_support::start_share_broker(Arc::new(DenyAll), true).await;
+        let (broker_handle, _dir) = crate::test_support::start_share_broker(
+            Arc::new(DenyAll),
+            crate::test_support::ShareBrokerSetup::default(),
+        )
+        .await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "alice");
         let resp = handle(&broker, request(&["g1", "g2"]), version, &ctx)
@@ -188,8 +191,13 @@ mod tests {
     #[tokio::test]
     async fn handle_disabled_feature_wins_even_when_share_actor_exists() {
         let version = share_group_describe_response::MAX_VERSION;
-        let (broker_handle, _dir) =
-            crate::test_support::start_share_broker(Arc::new(DenyAll), false).await;
+        let (broker_handle, _dir) = crate::test_support::start_share_broker(
+            Arc::new(DenyAll),
+            crate::test_support::ShareBrokerSetup {
+                support: crate::test_support::ShareApiSupport::Disabled,
+            },
+        )
+        .await;
         let broker = broker_handle.broker_arc_for_test();
         broker.group_coordinator.mark_share("g1");
         let _actor = broker.group_coordinator.get_or_create_share("g1");
@@ -218,12 +226,18 @@ mod tests {
         )
     }
 
-    fn topic(name: &str, topic_id: uuid::Uuid, node: u64) -> Vec<krabka_metadata::MetadataRecord> {
+    fn topic(
+        name: &str,
+        topic_id: uuid::Uuid,
+        node: krabka_raft::NodeId,
+    ) -> Vec<krabka_metadata::MetadataRecord> {
         crate::handlers::group_heartbeat_test_support::topic_with_partitions(
-            name,
-            topic_id,
-            1,
-            krabka_raft::NodeId(node),
+            crate::handlers::group_heartbeat_test_support::GroupTopicSetup {
+                name,
+                topic_id,
+                partitions: crate::test_support::PartitionCount(1),
+                node,
+            },
         )
     }
 
@@ -300,7 +314,7 @@ mod tests {
             Arc::new(crate::authorizer::SimpleAclAuthorizer::new(
                 std::collections::HashSet::new(),
             )),
-            true,
+            crate::test_support::ShareBrokerSetup::default(),
         )
         .await;
         let broker = broker_handle.broker_arc_for_test();
@@ -313,8 +327,8 @@ mod tests {
             acl(ResourceType::Group, "missing"),
             acl(ResourceType::Topic, "t"),
         ];
-        records.extend(topic("t", visible, node));
-        records.extend(topic("secret", hidden, node));
+        records.extend(topic("t", visible, krabka_raft::NodeId(node)));
+        records.extend(topic("secret", hidden, krabka_raft::NodeId(node)));
         broker
             .controller
             .submit_change(records)

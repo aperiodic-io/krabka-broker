@@ -482,6 +482,27 @@ mod tests {
     /// so a read returns everything written.
     const TEST_READ_BUDGET: ByteSize = mebibytes(1);
 
+    #[derive(Clone, Copy)]
+    struct KraftSeedCount(usize);
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct KraftLogSeedSetup {
+        #[default(KraftSeedCount(5))]
+        records: KraftSeedCount,
+    }
+
+    fn append_seeded_records(log: &mut KraftLog, setup: KraftLogSeedSetup) {
+        for _ in 0..setup.records.0 {
+            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
+        }
+    }
+
+    fn seeded_log(setup: KraftLogSeedSetup) -> (KraftLog, tempfile::TempDir) {
+        let (mut log, dir) = open_tmp();
+        append_seeded_records(&mut log, setup);
+        (log, dir)
+    }
+
     fn open_tmp() -> (KraftLog, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open");
@@ -602,10 +623,9 @@ mod tests {
 
     #[test]
     fn public_hwm_accessor_tracks_committed_offset_after_advance_and_snapshot() {
-        let (mut log, _dir) = open_tmp();
-        for _ in 0..3 {
-            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-        }
+        let (mut log, _dir) = seeded_log(KraftLogSeedSetup {
+            records: KraftSeedCount(3),
+        });
         log.advance_hwm(Offset(2));
         assert2::assert!(log.hwm() == 2);
 
@@ -664,10 +684,7 @@ mod tests {
 
     #[test]
     fn read_committed_never_returns_bytes_past_hwm() {
-        let (mut log, _dir) = open_tmp();
-        for _ in 0..5 {
-            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-        } // offsets 0..5
+        let (mut log, _dir) = seeded_log(KraftLogSeedSetup::default()); // offsets 0..5
         log.advance_hwm(Offset(3));
         let r = log.read_committed(Offset(0), TEST_READ_BUDGET).unwrap();
         // bytes contain only batches with base_offset < 3 (offsets 0,1,2)
@@ -690,10 +707,7 @@ mod tests {
 
     #[test]
     fn prune_to_advances_log_start_and_is_noop_when_behind() {
-        let (mut log, _dir) = open_tmp();
-        for _ in 0..5 {
-            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-        }
+        let (mut log, _dir) = seeded_log(KraftLogSeedSetup::default());
         log.advance_hwm(log.log_end_offset());
         assert2::assert!(log.log_start_offset() == 0);
         log.prune_to(Offset(3)).unwrap();
@@ -704,10 +718,7 @@ mod tests {
 
     #[test]
     fn timestamp_below_returns_none_for_out_of_bounds() {
-        let (mut log, _dir) = open_tmp();
-        for _ in 0..5 {
-            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-        }
+        let (mut log, _dir) = seeded_log(KraftLogSeedSetup::default());
         log.advance_hwm(log.log_end_offset());
         log.prune_to(Offset(3)).unwrap();
 
@@ -723,9 +734,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         {
             let mut log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open");
-            for _ in 0..5 {
-                log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-            }
+            append_seeded_records(&mut log, KraftLogSeedSetup::default());
             log.advance_hwm(log.log_end_offset());
             // Every record is in one segment, so no segment name records the
             // prune: `krabka_log::Log`'s checkpoint is what carries it.
@@ -739,10 +748,9 @@ mod tests {
 
     #[test]
     fn install_snapshot_resets_log_to_empty_at_offset() {
-        let (mut log, _dir) = open_tmp();
-        for _ in 0..4 {
-            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-        }
+        let (mut log, _dir) = seeded_log(KraftLogSeedSetup {
+            records: KraftSeedCount(4),
+        });
         log.install_snapshot(Offset(100)).unwrap();
         check!(
             (
@@ -757,10 +765,7 @@ mod tests {
 
     #[test]
     fn truncate_to_drops_log_end_and_hwm() {
-        let (mut log, _dir) = open_tmp();
-        for _ in 0..5 {
-            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-        }
+        let (mut log, _dir) = seeded_log(KraftLogSeedSetup::default());
         log.advance_hwm(Offset(5));
         log.truncate_to(Offset(2)).unwrap();
         assert2::assert!(log.log_end_offset().0 == 2);
@@ -796,10 +801,9 @@ mod tests {
     /// start: it truncates and moves the start down onto the target.
     #[test]
     fn truncate_below_log_start_lowers_the_log_start() {
-        let (mut log, _dir) = open_tmp();
-        for _ in 0..4 {
-            log.append(&mut batch(0, 1, b"x"), 0).unwrap();
-        }
+        let (mut log, _dir) = seeded_log(KraftLogSeedSetup {
+            records: KraftSeedCount(4),
+        });
         log.prune_to(Offset(2)).unwrap();
 
         log.truncate_to(Offset(1)).unwrap();

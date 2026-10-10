@@ -111,7 +111,6 @@ mod tests {
 
     #[test]
     fn ingest_then_encode_contains_series() {
-        use prometheus_client::registry::Registry;
         let sink = ClientMetricsCollector::new(Duration::from_mins(1));
         sink.ingest(&[DataPoint {
             metric: "org.apache.kafka.consumer.fetch.size".into(),
@@ -121,10 +120,7 @@ mod tests {
             value: PointValue::Gauge(42.0),
             delta_start: None,
         }]);
-        let mut reg = Registry::default();
-        reg.register_collector(Box::new(sink));
-        let mut buf = String::new();
-        prometheus_client::encoding::text::encode(&mut buf, &reg).unwrap();
+        let buf = encode_collector(sink);
         assert2::assert!(
             buf.contains("client_instance_id=\"11111111-1111-1111-1111-111111111111\""),
             "got:\n{buf}"
@@ -142,7 +138,6 @@ mod tests {
 
     #[test]
     fn counter_and_histogram_keep_their_prometheus_types() {
-        use prometheus_client::registry::Registry;
         let sink = ClientMetricsCollector::new(Duration::from_mins(1));
         sink.ingest(&[
             DataPoint {
@@ -166,10 +161,7 @@ mod tests {
                 delta_start: None,
             },
         ]);
-        let mut registry = Registry::default();
-        registry.register_collector(Box::new(sink));
-        let mut output = String::new();
-        prometheus_client::encoding::text::encode(&mut output, &registry).unwrap();
+        let output = encode_collector(sink);
 
         assert2::assert!(
             output.contains("# TYPE krabka_client_requests counter"),
@@ -186,7 +178,6 @@ mod tests {
 
     #[test]
     fn multiple_series_same_metric_encode_once() {
-        use prometheus_client::registry::Registry;
         let sink = ClientMetricsCollector::new(std::time::Duration::from_mins(1));
         sink.ingest(&[
             DataPoint {
@@ -206,11 +197,8 @@ mod tests {
                 delta_start: None,
             },
         ]);
-        let mut reg = Registry::default();
-        reg.register_collector(Box::new(sink));
-        let mut buf = String::new();
-        // Must succeed (no duplicate-descriptor parse error) ...
-        prometheus_client::encoding::text::encode(&mut buf, &reg).expect("encode");
+        // Encoding must succeed without a duplicate-descriptor parse error.
+        let buf = encode_collector(sink);
         // ... and emit exactly ONE HELP line for the metric name.
         let help_count = buf
             .matches("# HELP krabka_client_org_apache_kafka_consumer_fetch_size")

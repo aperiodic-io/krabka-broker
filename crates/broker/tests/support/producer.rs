@@ -2,16 +2,28 @@
 
 use bytes::Bytes;
 use krabka_client_producer::{Producer, ProducerRecord};
+use krabka_ids::PartitionIndex;
 
-pub fn producer_record(
-    topic: impl Into<String>,
-    partition: Option<i32>,
-    key: Option<Bytes>,
-    value: Option<Bytes>,
-) -> ProducerRecord {
-    ProducerRecord {
-        topic: topic.into(),
+#[derive(krabka_macros::FieldDefaults)]
+pub struct ProducerRecordSetup {
+    #[default("orders".into())]
+    pub topic: String,
+    pub partition: Option<PartitionIndex>,
+    pub key: Option<Bytes>,
+    #[default(Some(Bytes::from_static(b"v")))]
+    pub value: Option<Bytes>,
+}
+
+pub fn producer_record(setup: ProducerRecordSetup) -> ProducerRecord {
+    let ProducerRecordSetup {
+        topic,
         partition,
+        key,
+        value,
+    } = setup;
+    ProducerRecord {
+        topic,
+        partition: partition.map(|partition| partition.0),
         key,
         value,
         ..Default::default()
@@ -53,7 +65,11 @@ pub async fn no_retry_acks_all_producer(
 
 /// A value-only record with the transaction fixtures' original owned string bytes.
 pub fn string_record(topic: &str, value: &str) -> ProducerRecord {
-    producer_record(topic, None, None, Some(Bytes::from(value.to_string())))
+    producer_record(crate::support::producer::ProducerRecordSetup {
+        topic: (topic).into(),
+        value: Some(Bytes::from(value.to_string())),
+        ..Default::default()
+    })
 }
 
 /// Build and initialize a transactional producer with otherwise default settings.
@@ -87,7 +103,13 @@ pub async fn enqueue_unkeyed_values(
     for value in values {
         drop(
             producer
-                .enqueue(producer_record(topic, None, None, Some(value)))
+                .enqueue(producer_record(
+                    crate::support::producer::ProducerRecordSetup {
+                        topic: (topic).into(),
+                        value: Some(value),
+                        ..Default::default()
+                    },
+                ))
                 .await
                 .expect("record is queued"),
         );

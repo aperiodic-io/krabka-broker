@@ -19,7 +19,7 @@ fn leadership_and_single_flight_gate_every_operation_first() {
     };
     let uncommitted = CurrentVoterSet {
         latest_controls_committed: false,
-        ..voters(3, 1)
+        ..voters(VoterCount(3), KraftFeatureLevel(1))
     };
     for (kind, membership) in [
         (VoterChangeKind::Add, Absent),
@@ -36,14 +36,22 @@ fn leadership_and_single_flight_gate_every_operation_first() {
                     epoch_committed: false,
                     ..pending
                 },
-                voters(3, 1),
+                voters(VoterCount(3), KraftFeatureLevel(1)),
                 D::InProgress,
             ),
             (fresh_epoch, uncommitted, D::EpochUncommitted),
             // A VotersRecord from the previous leader has not committed.
             (LEADING, uncommitted, D::InProgress),
-            (LEADING, voters(0, 1), D::EmptyCurrentVoterSet),
-            (LEADING, voters(3, 2), D::InvalidVersionTransition),
+            (
+                LEADING,
+                voters(VoterCount(0), KraftFeatureLevel(1)),
+                D::EmptyCurrentVoterSet,
+            ),
+            (
+                LEADING,
+                voters(VoterCount(3), KraftFeatureLevel(2)),
+                D::InvalidVersionTransition,
+            ),
         ];
         for (leadership, current, expected) in cases {
             let got = voter_reconfiguration_decision(
@@ -76,47 +84,55 @@ fn add_voter_follows_add_voter_handler_order() {
         // kraft.version 0 answers UNSUPPORTED_VERSION before the duplicate check.
         (
             "static quorum",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             target(PresentSameDirectory),
             D::UnsupportedKraftVersion,
         ),
         (
             "same key",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentSameDirectory),
             D::DuplicateVoter,
         ),
         // DUPLICATE_VOTER compares voter ids only.
         (
             "same id",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentOtherDirectory),
             D::DuplicateVoter,
         ),
         (
             "legacy id",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentUnknownDirectory),
             D::DuplicateVoter,
         ),
         (
             "old range",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             incompatible,
             D::IncompatibleVoter,
         ),
-        ("lagging", voters(3, 1), lagging, D::VoterNotCaughtUp),
+        (
+            "lagging",
+            voters(VoterCount(3), KraftFeatureLevel(1)),
+            lagging,
+            D::VoterNotCaughtUp,
+        ),
         (
             "full",
-            voters(usize::MAX, 1),
+            voters(VoterCount(usize::MAX), KraftFeatureLevel(1)),
             target(Absent),
             D::InvalidVersionTransition,
         ),
         (
             "admitted",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             target(Absent),
-            plan(4, 1, true, false),
+            plan(ReconfigurationPlanSetup {
+                count: VoterCount(4),
+                ..Default::default()
+            }),
         ),
     ];
     for (case, current, voter, expected) in cases {
@@ -136,42 +152,50 @@ fn remove_voter_answers_voter_not_found_unless_voter_set_removes() {
     let cases = [
         (
             "static quorum",
-            voters(3, 0),
+            voters(VoterCount(3), KraftFeatureLevel(0)),
             PresentSameDirectory,
             D::UnsupportedKraftVersion,
         ),
         // `VoterSet.removeVoter` is empty for each of these, and
         // `RemoveVoterHandler` answers VOTER_NOT_FOUND.
-        ("unknown id", voters(3, 1), Absent, D::VoterNotFound),
+        (
+            "unknown id",
+            voters(VoterCount(3), KraftFeatureLevel(1)),
+            Absent,
+            D::VoterNotFound,
+        ),
         (
             "other directory",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             PresentOtherDirectory,
             D::VoterNotFound,
         ),
         (
             "legacy directory",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             PresentUnknownDirectory,
             D::VoterNotFound,
         ),
         (
             "last voter",
-            voters(1, 1),
+            voters(VoterCount(1), KraftFeatureLevel(1)),
             PresentSameDirectory,
             D::VoterNotFound,
         ),
         (
             "last voter under another key",
-            voters(1, 1),
+            voters(VoterCount(1), KraftFeatureLevel(1)),
             PresentOtherDirectory,
             D::VoterNotFound,
         ),
         (
             "admitted",
-            voters(3, 1),
+            voters(VoterCount(3), KraftFeatureLevel(1)),
             PresentSameDirectory,
-            plan(2, 1, true, false),
+            plan(ReconfigurationPlanSetup {
+                count: VoterCount(2),
+                ..Default::default()
+            }),
         ),
     ];
     for (case, current, membership, expected) in cases {

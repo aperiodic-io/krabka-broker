@@ -10,7 +10,7 @@ use krabka_broker::BrokerConfig;
 use krabka_client_core::Client;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
-use crate::harness::{INVALID_RECORD, KNOWN_ID, VALIDATED, boot, create_topic, framed};
+use crate::harness::{INVALID_RECORD, KNOWN_ID, boot, create_topic, framed};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_broker_with_no_registry_rejects_a_topic_that_asks_for_validation() {
@@ -54,7 +54,12 @@ async fn fail_open_admits_a_record_the_registry_could_not_answer_for() {
     );
 
     let (broker, client) = crate::harness::boot_config(config).await;
-    let id = create_topic(&broker, &client, "validated", VALIDATED).await;
+    let id = create_topic(
+        &broker,
+        &client,
+        crate::harness::SchemaTopicSetup::default(),
+    )
+    .await;
 
     crate::harness::check_value_append(
         &broker,
@@ -70,7 +75,7 @@ async fn fail_open_admits_a_record_the_registry_could_not_answer_for() {
 }
 
 async fn expect_fail_closed(broker: &krabka_broker::BrokerHandle, client: &Client) {
-    let id = create_topic(broker, client, "validated", VALIDATED).await;
+    let id = create_topic(broker, client, crate::harness::SchemaTopicSetup::default()).await;
 
     crate::harness::check_value_append(
         broker,

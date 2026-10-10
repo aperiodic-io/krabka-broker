@@ -85,8 +85,8 @@ impl<L: SimNodeLog> Sim<L> {
     /// replication advance always changes the fingerprint and resets the
     /// counter.
     pub fn run_until_stable(&mut self, max_ticks: usize) {
-        let mut last_fingerprint = self.fingerprint();
-        let mut stable_rounds = 0u32;
+        let mut stability =
+            krabka_kraft_core::simulation_support::StableFingerprint::new(self.fingerprint());
         for _ in 0..max_ticks {
             if let Some(msg) = self.queue.pop_front() {
                 self.deliver(msg);
@@ -95,15 +95,8 @@ impl<L: SimNodeLog> Sim<L> {
             // Queue drained: fire the next timer (if any), then check for a fixed
             // point. Two consecutive no-change rounds means converged.
             let fired = self.fire_next_timer();
-            let fp = self.fingerprint();
-            if fp == last_fingerprint {
-                stable_rounds += 1;
-                if stable_rounds >= 2 {
-                    return;
-                }
-            } else {
-                stable_rounds = 0;
-                last_fingerprint = fp;
+            if stability.observe(self.fingerprint()) {
+                return;
             }
             if !fired && self.queue.is_empty() {
                 // Nothing queued and no timer armed: fully quiescent.
@@ -155,9 +148,10 @@ impl<L: SimNodeLog> Sim<L> {
     /// This models a produce. The records must then be replicated to a majority
     /// through the fetch loop before the HWM can advance past them.
     pub fn leader_append(&mut self, leader: NodeId, n: usize) {
-        let epoch = self.nodes[&leader].machine.quorum_state().leader_epoch;
-        let node = self.nodes.get_mut(&leader).unwrap();
-        node.log.append_in_epoch(epoch, n);
+        self.nodes
+            .get_mut(&leader)
+            .expect("no entry found for key")
+            .append_in_current_epoch(n);
     }
 
     /// Injects a conflicting-epoch tail straight into the log of `follower` and

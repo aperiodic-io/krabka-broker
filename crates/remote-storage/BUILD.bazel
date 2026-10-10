@@ -15,6 +15,7 @@ crate_binary(
 )
 
 crate_tests(
+    compile_data = glob(["tests/fixtures/*.bin"]),
     # `worm_verify_cli` runs the binary against an archive it writes.
     data = [":krabka-worm-verify"],
     # `gcs_emulator` drives the native GCS backend's read, delete and

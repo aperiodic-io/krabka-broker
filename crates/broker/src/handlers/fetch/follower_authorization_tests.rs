@@ -24,7 +24,7 @@ use krabka_log::Offset;
 use krabka_metadata::{AclOperation, ResourceType};
 use krabka_protocol::{
     owned::{
-        fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+        fetch_request::{FetchRequest, FetchTopic},
         fetch_response::{FetchResponse, PartitionData},
     },
     primitives::uuid::Uuid as WireUuid,
@@ -104,6 +104,22 @@ enum Sender {
     RackAwareConsumer,
 }
 
+use crate::test_support::KafkaErrorCode;
+
+#[derive(Debug, Clone, Copy)]
+struct FetchApiVersion(i16);
+
+#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+struct FetchRequestSetup<'a> {
+    #[default(FetchApiVersion(12))]
+    version: FetchApiVersion,
+    #[default(Sender::Follower)]
+    sender: Sender,
+    #[default(("replicated", WireUuid::ZERO))]
+    topic: (&'a str, WireUuid),
+    offset: Offset,
+}
+
 /// What a case expects the fetches to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expect {
@@ -111,14 +127,14 @@ enum Expect {
     /// watermark that follows the follower.
     FollowerRead,
     /// Kafka refuses every partition row with this error code.
-    Refused(i16),
+    Refused(KafkaErrorCode),
     /// Kafka reads as a consumer: nothing past the high watermark of 0.
     ConsumerRead,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct Case {
-    version: i16,
+    version: FetchApiVersion,
     caller: Caller,
     sender: Sender,
     expect: Expect,
@@ -152,9 +168,17 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 async fn replicated_partition(
     broker: &BrokerHandle,
     topic: &str,
-    topic_id: u128,
+    topic_id: uuid::Uuid,
 ) -> (Arc<Partition>, RecordBatch) {
-    crate::handlers::test_support::seed_replicated_topic(broker, topic, topic_id, 1).await;
+    crate::handlers::test_support::seed_partition_replicas(
+        broker,
+        crate::handlers::test_support::ReplicatedTopicSetup {
+            topic,
+            topic_id,
+            ..Default::default()
+        },
+    )
+    .await;
 
     let shared = broker.broker_arc_for_test();
     let follower = krabka_raft::NodeId(2);
@@ -167,23 +191,18 @@ async fn replicated_partition(
     );
 
     let mut batch = crate::handlers::test_support::default_records_batch(&RECORDS);
-    partition
-        .log
-        .lock()
-        .expect("partition log lock")
-        .append(&mut batch)
-        .expect("append the records");
+    crate::test_support::append_partition_batch(&partition, &mut batch);
     (partition, batch)
 }
 
 /// A sessionless one-row fetch of partition 0 of `topic`, from `fetch_offset`.
-fn request(
-    version: i16,
-    sender: Sender,
-    topic: (&str, WireUuid),
-    fetch_offset: i64,
-) -> FetchRequest {
-    let (name, topic_id) = topic;
+fn request(setup: FetchRequestSetup<'_>) -> FetchRequest {
+    let FetchRequestSetup {
+        version,
+        sender,
+        topic: (name, topic_id),
+        offset,
+    } = setup;
     let replica_id = match sender {
         Sender::Follower => FOLLOWER,
         Sender::RackAwareConsumer => CONSUMER,
@@ -195,62 +214,61 @@ fn request(
             String::new()
         },
         topics: vec![FetchTopic {
-            topic: if version >= FIRST_TOPIC_ID_VERSION {
+            topic: if version.0 >= FIRST_TOPIC_ID_VERSION {
                 String::new()
             } else {
                 name.to_owned()
             },
-            topic_id: if version >= FIRST_TOPIC_ID_VERSION {
+            topic_id: if version.0 >= FIRST_TOPIC_ID_VERSION {
                 topic_id
             } else {
                 WireUuid::ZERO
             },
-            partitions: vec![FetchPartition {
-                partition: 0,
-                fetch_offset,
-                partition_max_bytes: 1_048_576,
-                ..Default::default()
-            }],
+            partitions: vec![super::test_support::request_partition(Offset(offset.0))],
             ..Default::default()
         }],
-        ..super::test_support::sessionless_request(version, replica_id)
+        ..super::test_support::sessionless_request(super::test_support::SessionlessFetchSetup {
+            version: krabka_ids::ApiVersion(version.0),
+            replica: super::test_support::FetchReplicaId(replica_id),
+        })
     }
 }
 
 /// Send one fetch as `caller` and return the response as a client decodes it.
 async fn fetch(
     broker: &BrokerHandle,
-    version: i16,
+    version: FetchApiVersion,
     caller: Caller,
     request: &FetchRequest,
 ) -> FetchResponse {
-    super::test_support::fetch_wire(broker, version, caller.name(), "fetch-client", request).await
+    super::test_support::fetch_wire(
+        broker,
+        request,
+        super::test_support::FetchWireSetup {
+            version: krabka_ids::ApiVersion(version.0),
+            user: caller.name(),
+            client_id: "fetch-client",
+        },
+    )
+    .await
 }
 
 /// The one-row response of `case` for partition 0 of `topic`.
-fn response(version: i16, topic: (&str, WireUuid), partition: PartitionData) -> FetchResponse {
-    super::test_support::expected_single_topic(version >= FIRST_TOPIC_ID_VERSION, topic, partition)
+fn response(
+    version: FetchApiVersion,
+    topic: (&str, WireUuid),
+    partition: PartitionData,
+) -> FetchResponse {
+    super::test_support::expected_single_topic(
+        super::test_support::TopicRepresentation::for_version(krabka_ids::ApiVersion(version.0)),
+        topic,
+        partition,
+    )
 }
 
 /// The partition row of Kafka's `FetchResponse.partitionResponse`.
-fn refused(error_code: i16) -> PartitionData {
-    super::test_support::expected_refused_partition(0, error_code)
-}
-
-/// A partition row that the fetch read, with `watermark` as its high watermark
-/// and last stable offset.
-fn read(watermark: i64, records: RecordsPayload) -> PartitionData {
-    PartitionData {
-        partition_index: 0,
-        error_code: codes::NONE,
-        high_watermark: watermark,
-        last_stable_offset: watermark,
-        log_start_offset: 0,
-        aborted_transactions: None,
-        preferred_read_replica: -1,
-        records: Some(records),
-        ..Default::default()
-    }
+fn refused(error_code: KafkaErrorCode) -> PartitionData {
+    super::test_support::expected_refused_partition(krabka_ids::PartitionIndex(0), error_code)
 }
 
 /// The record set of a row that carries nothing, as a client decodes it.
@@ -267,12 +285,28 @@ fn expected(case: Case, label: String, topic: (&str, WireUuid), batch: RecordBat
         // records that position, so the second answer still carries 0, and
         // only the partition's high watermark moves to the log end.
         Expect::FollowerRead => (
-            read(0, RecordsPayload::V2(vec![batch])),
-            read(0, no_records()),
+            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
+                watermark: Offset(0),
+                records: RecordsPayload::V2(vec![batch]),
+            }),
+            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
+                watermark: Offset(0),
+                records: no_records(),
+            }),
             Offset(LOG_END),
         ),
         Expect::Refused(error_code) => (refused(error_code), refused(error_code), Offset(0)),
-        Expect::ConsumerRead => (read(0, no_records()), read(0, no_records()), Offset(0)),
+        Expect::ConsumerRead => (
+            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
+                watermark: Offset(0),
+                records: no_records(),
+            }),
+            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
+                watermark: Offset(0),
+                records: no_records(),
+            }),
+            Offset(0),
+        ),
     };
     Outcome {
         case: label,
@@ -286,19 +320,19 @@ fn expected(case: Case, label: String, topic: (&str, WireUuid), batch: RecordBat
 async fn follower_fetch_needs_cluster_action() {
     let max_version = krabka_protocol::owned::fetch_request::MAX_VERSION;
     let mut cases = Vec::new();
-    for version in [12, max_version] {
+    for version in [FetchApiVersion(12), FetchApiVersion(max_version)] {
         cases.extend([
             Case {
                 version,
                 caller: Caller::TopicReader,
                 sender: Sender::Follower,
-                expect: Expect::Refused(codes::TOPIC_AUTHORIZATION_FAILED),
+                expect: Expect::Refused(KafkaErrorCode(codes::TOPIC_AUTHORIZATION_FAILED)),
             },
             Case {
                 version,
                 caller: Caller::Stranger,
                 sender: Sender::Follower,
-                expect: Expect::Refused(codes::TOPIC_AUTHORIZATION_FAILED),
+                expect: Expect::Refused(KafkaErrorCode(codes::TOPIC_AUTHORIZATION_FAILED)),
             },
             Case {
                 version,
@@ -316,7 +350,7 @@ async fn follower_fetch_needs_cluster_action() {
                 version,
                 caller: Caller::Replicator,
                 sender: Sender::RackAwareConsumer,
-                expect: Expect::Refused(codes::TOPIC_AUTHORIZATION_FAILED),
+                expect: Expect::Refused(KafkaErrorCode(codes::TOPIC_AUTHORIZATION_FAILED)),
             },
         ]);
     }
@@ -328,23 +362,26 @@ async fn follower_fetch_needs_cluster_action() {
         "replicated",
         cases,
         {
-            let topic_id = index + 1;
-            let wire_id = WireUuid(uuid::Uuid::from_u128(topic_id).into_bytes());
+            let topic_id = uuid::Uuid::from_u128(index + 1);
+            let wire_id = WireUuid(topic_id.into_bytes());
             let (partition, batch) = replicated_partition(&broker, &name, topic_id).await;
             let topic = (name.as_str(), wire_id);
+            let fetch_setup = FetchRequestSetup {
+                version: case.version,
+                sender: case.sender,
+                topic,
+                ..Default::default()
+            };
 
-            let from_start = fetch(
-                &broker,
-                case.version,
-                case.caller,
-                &request(case.version, case.sender, topic, 0),
-            )
-            .await;
+            let from_start = fetch(&broker, case.version, case.caller, &request(fetch_setup)).await;
             let from_log_end = fetch(
                 &broker,
                 case.version,
                 case.caller,
-                &request(case.version, case.sender, topic, LOG_END),
+                &request(FetchRequestSetup {
+                    offset: Offset(LOG_END),
+                    ..fetch_setup
+                }),
             )
             .await;
             actual.push(Outcome {

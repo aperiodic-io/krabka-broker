@@ -158,12 +158,12 @@ async fn one_member_is_asked_and_its_push_is_described() {
     );
     for member in [&first, &second] {
         let again = client
-            .send(follow_up(
-                GROUP,
-                &member.member_id,
-                member.member_epoch,
-                None,
-            ))
+            .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+                group: GROUP,
+                member_id: &member.member_id,
+                epoch: crate::support::streams::StreamsMemberEpoch(member.member_epoch),
+                ..Default::default()
+            }))
             .await
             .expect("heartbeat");
         assert!(again.error_code == 0, "{again:?}");
@@ -196,7 +196,12 @@ async fn a_deleted_and_recreated_group_is_asked_again() {
         .expect("StreamsGroupTopologyDescriptionUpdate");
     assert!(pushed.error_code == 0, "{pushed:?}");
     let left = client
-        .send(follow_up(GROUP, &member.member_id, -1, None))
+        .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            group: GROUP,
+            member_id: &member.member_id,
+            epoch: crate::support::streams::StreamsMemberEpoch(-1),
+            ..Default::default()
+        }))
         .await
         .expect("leave");
     assert!(left.error_code == 0, "{left:?}");

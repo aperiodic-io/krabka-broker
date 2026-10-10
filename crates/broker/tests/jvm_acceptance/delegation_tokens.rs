@@ -36,9 +36,11 @@ pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster_with_delegatio
     use krabka_security::{SaslMechanism, SecretBytes};
 
     super::three_broker_cluster::start_three_broker_sasl_plaintext_jvm_cluster_configured(
-        admin,
-        admin_pass,
-        &[],
+        crate::jvm_acceptance::SaslClusterSetup {
+            admin,
+            admin_pass,
+            ..Default::default()
+        },
         |config| {
             config
                 .enabled_sasl_mechanisms
