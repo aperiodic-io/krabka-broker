@@ -52,11 +52,15 @@ pub fn initial_quorum_snapshot(
     core: &QuorumStateMachine,
     log: &KraftLog,
     high_watermark: i64,
+    last_snapshot_timestamp_ms: i64,
 ) -> QuorumStateSnapshot {
     QuorumStateSnapshot {
         leader_id: core.quorum_state().leader_id,
         leader_epoch: core.quorum_state().leader_epoch,
         high_watermark,
+        last_applied_record_timestamp_ms: last_snapshot_timestamp_ms,
+        pending_record_processing_time_us_avg: 0,
+        pending_record_processing_time_us_max: 0,
         quorum_high_watermark: high_watermark,
         log_end_offset: log.log_end_offset().0,
         log_start_offset: log.log_start_offset().0,
@@ -168,6 +172,19 @@ impl Engine {
             leader_id: qs.leader_id,
             leader_epoch: qs.leader_epoch,
             high_watermark: self.log.hwm().0,
+            last_applied_record_timestamp_ms: self.last_applied_record_timestamp_ms,
+            pending_record_processing_time_us_avg: if self.pending_record_processing_time_samples
+                == 0
+            {
+                0
+            } else {
+                u64::try_from(
+                    self.pending_record_processing_time_us_total
+                        / u128::from(self.pending_record_processing_time_samples),
+                )
+                .unwrap_or(u64::MAX)
+            },
+            pending_record_processing_time_us_max: self.pending_record_processing_time_us_max,
             quorum_high_watermark: self.quorum_high_watermark(),
             log_end_offset: self.log.log_end_offset().0,
             log_start_offset: self.log.log_start_offset().0,

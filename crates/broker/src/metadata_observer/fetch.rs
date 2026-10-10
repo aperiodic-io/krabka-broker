@@ -44,6 +44,12 @@ pub(super) struct FetchOutcome {
     /// An invalid `KRaft` control record this round trip met, which stops the
     /// broker.
     pub(super) fatal: Option<String>,
+    /// Time spent decoding and applying newly returned committed records, in
+    /// microseconds. `None` for a snapshot install or a fetch that did not
+    /// advance.
+    pub(super) pending_record_processing_time_us: Option<u64>,
+    /// Append timestamp of the latest batch applied by this fetch, if any.
+    pub(super) last_applied_record_timestamp_ms: Option<i64>,
 }
 
 /// Runs one iteration: it fetches from `addr` at `fetch_offset`, decodes and
@@ -138,21 +144,33 @@ async fn fetch_over(
         return None;
     }
 
-    let applied = match resp.snapshot_id {
-        Some(snapshot_id) => Applied {
-            next_offset: install_snapshot(
-                config,
-                conn,
-                (target, resp.leader_epoch),
-                snapshot_id,
-                image_tx,
-                store,
-            )
-            .await?,
-            load_errors: 0,
-            fatal: None,
-        },
-        None => apply_fetch_records(fetch_offset, &resp.records, image_tx),
+    let (applied, pending_record_processing_time_us) = if let Some(snapshot_id) = resp.snapshot_id {
+        (
+            Applied {
+                next_offset: install_snapshot(
+                    config,
+                    conn,
+                    (target, resp.leader_epoch),
+                    snapshot_id,
+                    image_tx,
+                    store,
+                )
+                .await?,
+                load_errors: 0,
+                fatal: None,
+                last_applied_record_timestamp_ms: Some(store.last_applied_record_timestamp_ms()),
+            },
+            None,
+        )
+    } else {
+        let started = std::time::Instant::now();
+        let applied = apply_fetch_records(fetch_offset, &resp.records, image_tx);
+        let processing_us = if applied.next_offset > fetch_offset {
+            Some(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX))
+        } else {
+            None
+        };
+        (applied, processing_us)
     };
     Some(FetchOutcome {
         next_fetch_offset: applied.next_offset,
@@ -161,6 +179,8 @@ async fn fetch_over(
         leader_hint: u64::try_from(resp.leader_hint).ok().map(NodeId),
         load_errors: applied.load_errors,
         fatal: applied.fatal,
+        pending_record_processing_time_us,
+        last_applied_record_timestamp_ms: applied.last_applied_record_timestamp_ms,
     })
 }
 
@@ -176,6 +196,8 @@ pub(super) struct Applied {
     pub(super) load_errors: u64,
     /// An invalid `KRaft` control record, which stops the broker.
     pub(super) fatal: Option<String>,
+    /// Append timestamp of the latest fully applied record batch.
+    pub(super) last_applied_record_timestamp_ms: Option<i64>,
 }
 
 /// The batches of one fetch response, each with its header, after the checks
@@ -264,6 +286,7 @@ fn apply_fetch_records(
             next_offset: fetch_offset,
             load_errors: 0,
             fatal: None,
+            last_applied_record_timestamp_ms: None,
         };
     }
 
@@ -284,6 +307,7 @@ fn apply_fetch_records(
                 next_offset: fetch_offset,
                 load_errors: 0,
                 fatal: None,
+                last_applied_record_timestamp_ms: None,
             };
         }
     };
@@ -292,6 +316,7 @@ fn apply_fetch_records(
     let mut new_offset = fetch_offset;
     let mut load_errors = 0;
     let mut fatal = None;
+    let mut last_applied_record_timestamp_ms = None;
     for (header, mut bytes) in framed {
         let index = u64::try_from(header.base_offset.get().max(0)).unwrap_or(0);
         let next_offset = index
@@ -329,7 +354,12 @@ fn apply_fetch_records(
         // endpoint of each voter.
         if batch.attributes.is_control_batch() {
             match krabka_raft::control_batch_image_records(&batch) {
-                Ok(controls) => controls.iter().for_each(|control| next.apply(control)),
+                Ok(controls) => {
+                    for control in &controls {
+                        next.apply(control);
+                    }
+                    last_applied_record_timestamp_ms = Some(batch.max_timestamp);
+                }
                 Err(fault) => {
                     error!(%fault, "observer met an invalid KRaft control record; stopping the broker");
                     fatal = Some(fault.to_string());
@@ -367,6 +397,9 @@ fn apply_fetch_records(
                 }
             }
         }
+        if load_errors == 0 {
+            last_applied_record_timestamp_ms = Some(batch.max_timestamp);
+        }
         new_offset = next_offset;
     }
     if new_offset != fetch_offset {
@@ -376,6 +409,7 @@ fn apply_fetch_records(
         next_offset: new_offset.max(fetch_offset),
         load_errors,
         fatal,
+        last_applied_record_timestamp_ms,
     }
 }
 
@@ -547,11 +581,14 @@ mod tests {
     #[test]
     fn apply_fetch_records_advances_data_batch_offset_and_publishes() {
         let image_tx = image_channel(Uuid::new_v4());
-        let records = encode_batches(&[metadata_batch(4, &topic_record("offset-topic"))]);
+        let mut batch = metadata_batch(4, &topic_record("offset-topic"));
+        batch.max_timestamp = 1_700_000_000_123;
+        let records = encode_batches(&[batch]);
 
-        let new_offset = apply_fetch_records(4, &records, &image_tx).next_offset;
+        let applied = apply_fetch_records(4, &records, &image_tx);
 
-        assert!(new_offset == 5);
+        assert!(applied.next_offset == 5);
+        assert!(applied.last_applied_record_timestamp_ms == Some(1_700_000_000_123));
         assert!(image_tx.borrow().topic("offset-topic").is_some());
     }
 
@@ -744,6 +781,7 @@ mod tests {
                         next_offset: 4,
                         load_errors: u64::from(load_error),
                         fatal: None,
+                        last_applied_record_timestamp_ms: Some(0),
                     },
                     true,
                     !load_error,
@@ -796,6 +834,7 @@ mod tests {
                         next_offset: 1,
                         load_errors: 0,
                         fatal: Some(fault),
+                        last_applied_record_timestamp_ms: Some(0),
                     },
                     true,
                     false,
@@ -860,6 +899,7 @@ mod tests {
             next_offset: 0,
             load_errors: 0,
             fatal: None,
+            last_applied_record_timestamp_ms: None,
         };
         let cases = [
             (
@@ -891,6 +931,7 @@ mod tests {
                     next_offset: 1,
                     load_errors: 0,
                     fatal: None,
+                    last_applied_record_timestamp_ms: Some(0),
                 },
                 [true, false, false],
             ),
@@ -902,6 +943,7 @@ mod tests {
                     next_offset: 1,
                     load_errors: 0,
                     fatal: None,
+                    last_applied_record_timestamp_ms: Some(0),
                 },
                 [true, false, false],
             ),
@@ -913,6 +955,7 @@ mod tests {
                     next_offset: 3,
                     load_errors: 1,
                     fatal: None,
+                    last_applied_record_timestamp_ms: Some(0),
                 },
                 [true, false, false],
             ),

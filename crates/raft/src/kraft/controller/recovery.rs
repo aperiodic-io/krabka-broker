@@ -33,9 +33,21 @@ pub fn replay_committed(
     from: Offset,
     max: MetadataRaftFetchMax,
 ) -> Result<Option<PendingDowngradeSnapshot>, RaftError> {
+    replay_committed_with_timestamp(log, image, from, max).map(|(pending, _)| pending)
+}
+
+/// Replay committed log batches and return the timestamp of the last batch
+/// covered by the replay, matching the controller's live apply timestamp.
+pub fn replay_committed_with_timestamp(
+    log: &KraftLog,
+    image: &mut MetadataImage,
+    from: Offset,
+    max: MetadataRaftFetchMax,
+) -> Result<(Option<PendingDowngradeSnapshot>, Option<i64>), RaftError> {
     let mut cursor = from;
     let target = log.hwm();
     let mut pending = None;
+    let mut last_applied_timestamp_ms = None;
     while cursor < target {
         let batches = log.read_decoded(cursor, max.size())?;
         let next = next_batch_offset(&batches);
@@ -43,6 +55,9 @@ pub fn replay_committed(
             break;
         }
         for batch in &batches {
+            if batch.base_offset >= from.0 && batch.base_offset < target.0 {
+                last_applied_timestamp_ms = Some(batch.max_timestamp);
+            }
             for rec in &batch.records {
                 let ReplayRecordDecision::Apply(record_offset) = replay_record_decision(
                     batch.base_offset,
@@ -92,7 +107,7 @@ pub fn replay_committed(
             ReplayCursorDecision::Stop => break,
         }
     }
-    Ok(pending)
+    Ok((pending, last_applied_timestamp_ms))
 }
 
 /// Replays the KIP-853 control records of the committed log into `state`.

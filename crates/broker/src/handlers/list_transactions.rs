@@ -75,7 +75,10 @@ context_handler! {
                 Ok(pattern) => pattern,
                 Err(error) => {
                     tracing::debug!(
-                        pattern = req.transactional_id_pattern.as_deref().unwrap_or_default(),
+                        pattern_bytes = req
+                            .transactional_id_pattern
+                            .as_deref()
+                            .map_or(0, str::len),
                         %error,
                         "invalid ListTransactions transactional-id pattern"
                     );

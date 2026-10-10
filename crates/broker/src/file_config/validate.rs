@@ -523,6 +523,7 @@ mod tests {
         for (field, value) in [
             ("client_metrics_telemetry_max", "1.5B"),
             ("replication_fetch_max", "2147483648B"),
+            ("fetch_max_bytes", "2147483648B"),
             ("observer_fetch_max", "4294967296B"),
             ("socket_request_max", "4294967296B"),
             ("sasl_server_max_receive", "4294967296B"),

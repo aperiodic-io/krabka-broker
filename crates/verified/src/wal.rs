@@ -21,9 +21,6 @@ pub use batch_equal::{
 };
 
 mod select_wal_voters;
-#[cfg(creusot)]
-#[cfg(creusot)]
-use select_wal_voters::contains;
 pub use select_wal_voters::{
     select_wal_voter_index, select_wal_voters, wal_fetch_admission, wal_voter_set_valid,
 };

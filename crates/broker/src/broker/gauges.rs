@@ -10,6 +10,23 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{config::BrokerConfig, partition_registry::PartitionRegistry};
 
+/// Epoch milliseconds for the KIP-835 time-since-last-applied-record gauge.
+fn epoch_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+fn metadata_applied_lag_ms(applied_timestamp_ms: i64, is_leader: bool, now_ms: i64) -> i64 {
+    if is_leader || applied_timestamp_ms <= 0 {
+        0
+    } else {
+        now_ms.saturating_sub(applied_timestamp_ms)
+    }
+}
+
 /// Counts the partitions `node_id` leads from a site other than the stretch
 /// cluster's preferred leader site.
 ///
@@ -34,6 +51,52 @@ fn leader_site_drift_partitions(
         .all_partitions()
         .filter(|partition| partition.leader == node_id)
         .count()
+}
+
+fn update_metadata_health_metrics(
+    metrics: &crate::metrics::BrokerMetrics,
+    controller: &dyn crate::metadata_source::MetadataSource,
+) {
+    let quorum_snapshot = controller.quorum_snapshot();
+    if let Some(snap) = &quorum_snapshot {
+        for state_label in crate::metrics::RaftStateLabel::ALL {
+            let is_active = i64::from(state_label.state == snap.current_state);
+            metrics
+                .raft_current_state
+                .get_or_create(&state_label)
+                .set(is_active);
+        }
+        metrics.raft_current_epoch.set(i64::from(snap.leader_epoch));
+        metrics.raft_high_watermark.set(snap.high_watermark);
+        metrics.raft_log_end_offset.set(snap.log_end_offset);
+        metrics
+            .raft_voters
+            .set(i64::try_from(snap.voters.len()).unwrap_or(i64::MAX));
+        metrics
+            .raft_observers
+            .set(i64::try_from(snap.observers.len()).unwrap_or(i64::MAX));
+    }
+    let applied_timestamp_ms = controller.last_applied_record_timestamp_ms();
+    metrics
+        .metadata_last_applied_timestamp_ms
+        .set(applied_timestamp_ms);
+    let is_leader = quorum_snapshot.as_ref().is_some_and(|snap| snap.is_leader);
+    let applied_lag_ms = metadata_applied_lag_ms(applied_timestamp_ms, is_leader, epoch_now_ms());
+    metrics.metadata_last_applied_lag_ms.set(applied_lag_ms);
+    let (processing_avg_us, processing_max_us) = controller.pending_record_processing_time_us();
+    metrics
+        .pending_record_processing_time_us_avg
+        .set(i64::try_from(processing_avg_us).unwrap_or(i64::MAX));
+    metrics
+        .pending_record_processing_time_us_max
+        .set(i64::try_from(processing_max_us).unwrap_or(i64::MAX));
+
+    let applied_offset = controller.current_metadata_offset();
+    let committed_offset = controller.quorum_committed_offset();
+    metrics.metadata_last_applied_offset.set(applied_offset);
+    let metadata_lag = committed_offset.saturating_sub(applied_offset).max(0);
+    metrics.metadata_lag_records.set(metadata_lag);
+    metrics.set_metadata_load_error_count(controller.metadata_load_error_count());
 }
 
 /// Spawns the timer that samples the broker's cluster gauges.
@@ -211,33 +274,7 @@ pub(super) fn spawn_broker_gauge_updater(
                 metrics.preferred_replica_imbalance.set(0);
             }
 
-            // KRaft consensus metrics (#390)
-            if let Some(snap) = controller.quorum_snapshot() {
-                for state_label in crate::metrics::RaftStateLabel::ALL {
-                    let is_active = i64::from(state_label.state == snap.current_state);
-                    metrics
-                        .raft_current_state
-                        .get_or_create(&state_label)
-                        .set(is_active);
-                }
-                metrics.raft_current_epoch.set(i64::from(snap.leader_epoch));
-                metrics.raft_high_watermark.set(snap.high_watermark);
-                metrics.raft_log_end_offset.set(snap.log_end_offset);
-                metrics
-                    .raft_voters
-                    .set(i64::try_from(snap.voters.len()).unwrap_or(i64::MAX));
-                metrics
-                    .raft_observers
-                    .set(i64::try_from(snap.observers.len()).unwrap_or(i64::MAX));
-            }
-
-            // Metadata applied offset and lag (#390)
-            let applied_offset = controller.current_metadata_offset();
-            let committed_offset = controller.quorum_committed_offset();
-            metrics.metadata_last_applied_offset.set(applied_offset);
-            let metadata_lag = committed_offset.saturating_sub(applied_offset).max(0);
-            metrics.metadata_lag_records.set(metadata_lag);
-            metrics.set_metadata_load_error_count(controller.metadata_load_error_count());
+            update_metadata_health_metrics(&metrics, controller.as_ref());
 
             // Broker lifecycle state (#390)
             if let Some(h) = &health {
@@ -280,6 +317,12 @@ mod tests {
 
     use super::*;
     use crate::broker::test_support::fake_source;
+
+    #[test]
+    fn active_controller_applied_timestamp_lag_stays_zero() {
+        assert!(metadata_applied_lag_ms(1_700_000_000_000, true, 1_700_000_100_000) == 0);
+        assert!(metadata_applied_lag_ms(1_700_000_000_000, false, 1_700_000_100_000) == 100_000);
+    }
 
     #[tokio::test]
     async fn broker_gauge_uses_configured_default_min_isr() {

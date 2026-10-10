@@ -66,6 +66,11 @@ pub fn lemma_sum_prefix_nonnegative(s: Seq<i64>, limit: Int) {
 #[ensures(exists<k: Int> 0 <= k && k < voters_per_site@.len()
     && 2 * (sum_all(voters_per_site@) - voters_per_site@[k]@) <= sum_all(voters_per_site@))]
 pub fn lemma_two_sites_never_survive(voters_per_site: &[i64]) {
+    #[cfg(creusot)]
+    proof_assert!({
+        lemma_sum_prefix_nonnegative(voters_per_site@, voters_per_site@.len());
+        sum_all(voters_per_site@) >= 0
+    });
     proof_assert!(sum_prefix(voters_per_site@, 1) == voters_per_site@[0]@);
     proof_assert!(sum_all(voters_per_site@) == voters_per_site@[0]@ + voters_per_site@[1]@);
     proof_assert!(voters_per_site@[0]@ >= voters_per_site@[1]@

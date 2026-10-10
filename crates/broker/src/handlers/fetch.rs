@@ -25,6 +25,7 @@ use krabka_protocol::{
     Decode, Encode,
     owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
 };
+use krabka_units::convert::ByteSizeExt as _;
 
 mod node_endpoints;
 mod plan;
@@ -39,9 +40,13 @@ mod test_support;
 mod throttle;
 
 #[cfg(test)]
+mod broker_limit_tests;
+#[cfg(test)]
 mod follower_authorization_tests;
 #[cfg(test)]
 mod follower_watermark_tests;
+#[cfg(test)]
+mod response_budget_tests;
 
 #[cfg(test)]
 mod leader_read_tests;
@@ -84,6 +89,24 @@ const KIP_951_FETCH_VERSION: i16 = 16;
 /// (KIP-516). The request schema carries `Topic` at versions 0-12 and
 /// `TopicId` from this version on.
 const FIRST_TOPIC_ID_VERSION: i16 = 13;
+
+/// The whole-response byte budget for one Fetch read. Follower reads use the
+/// request budget; consumers also honor the broker and client-quota ceilings.
+fn fetch_response_byte_budget(
+    request_max_bytes: i32,
+    broker_max_bytes: usize,
+    quota_window_bytes: usize,
+    is_follower_fetch: bool,
+) -> usize {
+    let request_max_bytes = usize::try_from(request_max_bytes.max(0)).unwrap_or(usize::MAX);
+    if is_follower_fetch {
+        request_max_bytes
+    } else {
+        request_max_bytes
+            .min(broker_max_bytes)
+            .min(quota_window_bytes)
+    }
+}
 
 /// Handle a `Fetch` request and return the not-yet-encoded response
 /// **struct** with the negotiated `version`.
@@ -194,26 +217,20 @@ pub(crate) async fn handle(
     };
     let pending = build_pending_reads(&plan_context, &effective_topics).await;
 
-    // Kafka's `KafkaApis.handleFetchRequest`:
-    // `fetchMaxBytes = min(request.maxBytes, config.fetchMaxBytes)`. The
-    // request field defaults to `i32::MAX` when the client sets nothing, so
-    // an unbounded fetch keeps behaving exactly as before.
-    //
-    // TODO(#869): there is no broker-side `fetch.max.bytes` floor yet, so a
-    // client that sets a very large `max_bytes` is capped only by its own
-    // request.
-    //
-    // A consumer fetch is also capped at what its `consumer_byte_rate` lets
-    // it take in one quota window (`maxQuotaWindowBytes`), so one fetch
-    // cannot return more than the quota allows in the whole window.
-    let quota_window_bytes = if is_follower_fetch {
-        usize::MAX
-    } else {
-        consumer_quota_window_bytes(broker, &image, ctx)
-    };
-    let response_max_bytes = usize::try_from(req.max_bytes.max(0))
-        .unwrap_or(usize::MAX)
-        .min(quota_window_bytes);
+    // Kafka's `KafkaApis.handleFetchRequest`: consumer responses use
+    // `min(request.maxBytes, config.fetchMaxBytes, quota window bytes)`.
+    // Follower fetches retain their replication/request budget and do not use
+    // the consumer broker cap or client quota.
+    let response_max_bytes = fetch_response_byte_budget(
+        req.max_bytes,
+        broker.config.fetch_max_bytes.bytes_usize(),
+        if is_follower_fetch {
+            usize::MAX
+        } else {
+            consumer_quota_window_bytes(broker, &image, ctx)
+        },
+        is_follower_fetch,
+    );
     // A read that fails answers its own partition's row and never fails the
     // fetch (see `do_read`), so this call has no error to return.
     let (mut responses, cpu_micros_by_idx) = execute_pending_reads(

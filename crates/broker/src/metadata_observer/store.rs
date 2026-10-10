@@ -71,6 +71,8 @@ pub(super) struct ObserverStore {
     interval: u64,
     /// Id of the checkpoint currently on disk, if any.
     persisted: Option<(i64, i32)>,
+    /// Timestamp of the last applied batch represented by the current image.
+    last_applied_record_timestamp_ms: i64,
 }
 
 impl ObserverStore {
@@ -84,6 +86,7 @@ impl ObserverStore {
             dir,
             interval,
             persisted,
+            last_applied_record_timestamp_ms: 0,
         }
     }
 
@@ -107,6 +110,15 @@ impl ObserverStore {
                 return None;
             }
         };
+        self.last_applied_record_timestamp_ms =
+            match krabka_raft::metadata_snapshot_last_contained_log_timestamp(&bytes) {
+                Ok(timestamp_ms) => timestamp_ms,
+                Err(error) => {
+                    warn!(%error, end_offset, epoch, "discarding an unreadable observer checkpoint");
+                    self.discard();
+                    return None;
+                }
+            };
         let fetch_offset = u64::try_from(end_offset).ok()?;
         info!(
             end_offset,
@@ -123,7 +135,21 @@ impl ObserverStore {
     /// Persist the exact checkpoint bytes fetched from a controller under the
     /// id the controller named them by.
     pub(super) fn save_fetched_snapshot(&mut self, id: (i64, i32), bytes: &[u8]) {
+        if let Ok(timestamp_ms) = krabka_raft::metadata_snapshot_last_contained_log_timestamp(bytes)
+        {
+            self.last_applied_record_timestamp_ms = timestamp_ms;
+        }
         self.write(id, bytes);
+    }
+
+    /// Track the timestamp of a later fetched batch before a self-checkpoint.
+    pub(super) fn record_applied_timestamp(&mut self, timestamp_ms: i64) {
+        self.last_applied_record_timestamp_ms = timestamp_ms;
+    }
+
+    /// Timestamp of the last applied metadata batch in the current image.
+    pub(super) fn last_applied_record_timestamp_ms(&self) -> i64 {
+        self.last_applied_record_timestamp_ms
     }
 
     /// Serialize `image` as this observer's own checkpoint once it has applied
@@ -143,7 +169,8 @@ impl ObserverStore {
         if u64::try_from(advanced).unwrap_or(0) < self.interval {
             return;
         }
-        match krabka_raft::serialize_metadata_snapshot(image, 0) {
+        match krabka_raft::serialize_metadata_snapshot(image, self.last_applied_record_timestamp_ms)
+        {
             Ok(bytes) => self.write((end_offset, OBSERVER_EPOCH), &bytes),
             Err(error) => warn!(%error, end_offset, "observer failed to serialize its checkpoint"),
         }
@@ -213,11 +240,13 @@ mod tests {
         assert!(store.resume(Uuid::nil()).is_none());
 
         let image = image_with(&["resumed"]);
+        store.record_applied_timestamp(1_700_000_000_123);
         store.maybe_checkpoint(&image, 9);
 
         let mut reopened = ObserverStore::open(dir.path(), 4);
         let (restored, fetch_offset) = reopened.resume(Uuid::nil()).expect("a checkpoint exists");
         assert!(fetch_offset == 9);
+        assert!(reopened.last_applied_record_timestamp_ms() == 1_700_000_000_123);
         assert!(restored.topic("resumed").is_some());
     }
 

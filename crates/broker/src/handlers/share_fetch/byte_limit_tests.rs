@@ -54,6 +54,14 @@ async fn start_with_delivery_attempts(attempts: i16) -> (BrokerHandle, tempfile:
     .await
 }
 
+async fn start_with_fetch_cap(cap: i32) -> (BrokerHandle, tempfile::TempDir) {
+    start_broker_no_audit_with(|cfg| {
+        cfg.authorizer = Arc::new(AllowAllAuthorizer);
+        cfg.fetch_max_bytes = ByteSize::from_bytes(u64::try_from(cap).expect("positive cap"));
+    })
+    .await
+}
+
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
     create_topic_with_partitions(broker, name, 1).await
 }
@@ -357,6 +365,32 @@ async fn every_acquired_offset_has_its_record_in_the_response() {
     }
 
     assert!(actual == expected);
+    broker.shutdown().await;
+}
+
+/// The broker cap applies to `ShareFetch`'s whole-response budget, and the
+/// first complete batch can exceed it so the member still makes progress.
+#[tokio::test]
+async fn broker_fetch_cap_limits_share_fetch_and_keeps_first_batch_progress() {
+    let (broker, _dir) = start_with_fetch_cap(1).await;
+    let topic = "broker-fetch-cap";
+    let group = "broker-fetch-cap-group";
+    let topic_id = create_topic(&broker, topic).await;
+    crate::test_support::initialize_share_state(
+        &broker,
+        group,
+        uuid::Uuid::from_bytes(topic_id.0),
+        0,
+    )
+    .await;
+    let opened = share_fetch(&broker, group, "member", 0, topic_id, (500, 1 << 20), &[]).await;
+    assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");
+    produce_batches(&broker, topic).await;
+
+    let response = share_fetch(&broker, group, "member", 1, topic_id, (500, 1 << 20), &[]).await;
+    let row = partition(&response);
+    assert!(acquired(&row) == vec![(0, 1)]);
+    assert!(record_offsets(&row) == vec![0, 1]);
     broker.shutdown().await;
 }
 

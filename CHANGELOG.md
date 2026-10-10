@@ -25,6 +25,10 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ### Fixed
 
+- Kafka 4.3.1 compatibility gaps in Fetch and ShareFetch byte limits,
+  replication-quota progress, KIP-835 metadata health metrics, RE2J regex
+  syntax and size handling, Java regex backreference documentation, and
+  feature/config reporting.
 - The previously inert topic settings `compression.gzip.level`,
   `compression.lz4.level`, `compression.zstd.level`, `segment.jitter.ms`,
   `file.delete.delay.ms`, `flush.messages`, and `flush.ms` now control log

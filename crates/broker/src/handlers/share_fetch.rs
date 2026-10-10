@@ -34,6 +34,7 @@ use krabka_protocol::owned::{
     share_fetch_request::{FetchPartition, ShareFetchRequest},
     share_fetch_response::{LeaderIdAndEpoch, ShareFetchResponse},
 };
+use krabka_units::convert::ByteSizeExt as _;
 
 mod acknowledge;
 mod acquire;
@@ -230,10 +231,10 @@ context_handler! {
             group: &group,
             member: &member,
             max_records: req.max_records,
-            // Kafka's `fetchMaxBytes = min(MaxBytes, fetch.max.bytes, quota
-            // window bytes)`. The broker has neither cap yet (#869), so the
-            // request value stands.
-            max_bytes: req.max_bytes,
+            // Kafka's broker-wide `fetch.max.bytes` and request limit both
+            // bound the acquire passes. `acquire_pass` retains the first
+            // batch progress exception if that batch itself exceeds this cap.
+            max_bytes: req.max_bytes.min(broker.config.fetch_max_bytes.bytes_i32()),
             min_bytes: req.min_bytes,
             mode: AcquireMode::of(
                 if version >= 2 {

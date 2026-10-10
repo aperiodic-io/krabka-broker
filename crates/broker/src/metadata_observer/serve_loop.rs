@@ -159,6 +159,9 @@ fn resume(config: &ObserverConfig, store: &mut ObserverStore, observer: &Metadat
         i64::try_from(fetch_offset).unwrap_or(i64::MAX) - 1,
         Ordering::Release,
     );
+    observer
+        .last_applied_record_timestamp_ms
+        .store(store.last_applied_record_timestamp_ms(), Ordering::Release);
     fetch_offset
 }
 
@@ -205,6 +208,17 @@ pub(super) async fn run_loop(
                 return;
             }
             let new_offset = outcome.next_fetch_offset;
+            if let Some(timestamp_ms) = outcome.last_applied_record_timestamp_ms {
+                observer
+                    .last_applied_record_timestamp_ms
+                    .store(timestamp_ms, Ordering::Release);
+                store.record_applied_timestamp(timestamp_ms);
+            }
+            if new_offset > fetch_offset
+                && let Some(processing_us) = outcome.pending_record_processing_time_us
+            {
+                observer.record_pending_record_processing_time_us(processing_us);
+            }
             observer.metadata_offset.store(
                 i64::try_from(new_offset).unwrap_or(i64::MAX) - 1,
                 Ordering::Release,

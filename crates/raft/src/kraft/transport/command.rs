@@ -274,6 +274,17 @@ pub struct QuorumStateSnapshot {
     pub leader_id: Option<NodeId>,
     pub leader_epoch: Epoch,
     pub high_watermark: i64,
+    /// Append timestamp, in Unix epoch milliseconds, of the record at
+    /// `high_watermark - 1` when it is still available in the local log (or
+    /// the installed snapshot's last contained record timestamp). `0` means
+    /// no applied record has a known timestamp.
+    pub last_applied_record_timestamp_ms: i64,
+    /// Lifetime average elapsed microseconds of completed controller apply
+    /// passes that processed newly committed records.
+    pub pending_record_processing_time_us_avg: u64,
+    /// Lifetime maximum elapsed microseconds of completed controller apply
+    /// passes that processed newly committed records.
+    pub pending_record_processing_time_us_max: u64,
     /// Highest offset the quorum has committed, as this node last heard it:
     /// this node's own high watermark on a leader, and the leader-reported
     /// high watermark on a follower that is still replaying the log.

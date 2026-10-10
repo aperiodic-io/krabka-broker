@@ -9,7 +9,7 @@ use krabka_raft::{
     BootstrapMode, ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity,
     MetadataRaftFetchMax, NodeId,
 };
-use krabka_units::{hours, kibibytes, mebibytes, millis, minutes, secs};
+use krabka_units::{bytes, hours, kibibytes, mebibytes, millis, minutes, secs};
 
 use crate::{
     config::{
@@ -91,6 +91,7 @@ impl Default for BrokerConfig {
             controller_mutation_quota_window: DEFAULT_QUOTA_WINDOW,
             self_registration_max_attempts: 8,
             observer_fetch_max: mebibytes(1),
+            fetch_max_bytes: bytes(57_671_680),
             audit_event_queue_capacity: 8_192,
             audit_tail_window_offsets: 4_096,
             audit_tail_read_max: mebibytes(1),

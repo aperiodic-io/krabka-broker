@@ -80,6 +80,7 @@ pub(crate) const KAFKA_STATIC_KEYS: &[KafkaStaticKey] = keys! {
         |c| ms(c.next_gen_consumer_group.max_session_timeout);
     "group.consumer.min.heartbeat.interval.ms", Some("consumer_group_min_heartbeat_interval"),
         |c| ms(c.next_gen_consumer_group.min_heartbeat_interval);
+    "fetch.max.bytes", Some("fetch_max_bytes"), |c| size(c.fetch_max_bytes);
     "group.consumer.max.heartbeat.interval.ms", Some("consumer_group_max_heartbeat_interval"),
         |c| ms(c.next_gen_consumer_group.max_heartbeat_interval);
     "group.consumer.max.size", Some("consumer_group_max_size"),
@@ -94,7 +95,6 @@ pub(crate) const KAFKA_STATIC_KEYS: &[KafkaStaticKey] = keys! {
         |c| ms(c.next_gen_consumer_group.classic_max_session_timeout);
     "group.max.size", Some("classic_group_max_size"),
         |c| int(c.next_gen_consumer_group.classic_max_size);
-
     "group.share.session.timeout.ms", Some("share_group_session_timeout"),
         |c| ms(c.share_group.session_timeout);
     "group.share.heartbeat.interval.ms", Some("share_group_heartbeat_interval"),
@@ -330,6 +330,15 @@ impl KafkaStaticKey {
     /// operator named the key, or the node runs another value than Kafka's
     /// default. `None` is a key `DescribeConfigs` reports at its default.
     pub(crate) fn static_value(&self, config: &BrokerConfig) -> Option<String> {
+        // Kafka 4.3.1 has no `group.streams.assignors` broker key. Krabka's
+        // Streams assignor setting is part of trunk's GroupConfig surface and
+        // is only visible when Kafka's unstable API versions are enabled.
+        if self.name == "group.streams.assignors"
+            && config.features.unstable_api_versions
+                == crate::api_catalog::UnstableApiVersions::Disabled
+        {
+            return None;
+        }
         let value = (self.value)(config);
         let supplied = config
             .static_config_origins
@@ -346,13 +355,11 @@ mod tests {
     use super::*;
 
     /// The keys whose value a default `BrokerConfig` runs differently from
-    /// Kafka's default, with the value it runs: the streams assignor of
-    /// krabka, which picks `highly_available` for a stateful topology and
-    /// `sticky` for the rest, the 1 MiB socket buffers that the network layer
+    /// Kafka 4.3.1's default: the 1 MiB socket buffers that the network layer
     /// is tuned with, the 5 s follower fetch watchdog of the metadata quorum,
-    /// and the 3 s broker heartbeat.
+    /// and the 3 s broker heartbeat. The Streams assignor is trunk-only and
+    /// has its own unstable-mode test below.
     const KRABKA_OWN_DEFAULTS: &[(&str, &str)] = &[
-        ("group.streams.assignors", "auto"),
         ("socket.send.buffer.bytes", "1048576"),
         ("socket.receive.buffer.bytes", "1048576"),
         ("controller.quorum.fetch.timeout.ms", "5000"),
@@ -416,6 +423,19 @@ mod tests {
             .collect();
 
         check!(stated == expected);
+    }
+
+    #[test]
+    fn streams_assignors_is_disclosed_only_with_unstable_api_versions() {
+        let mut config = BrokerConfig::default();
+        let key = KAFKA_STATIC_KEYS
+            .iter()
+            .find(|key| key.name == "group.streams.assignors")
+            .expect("Streams assignor key");
+
+        check!(key.static_value(&config).is_none());
+        config.features.unstable_api_versions = crate::api_catalog::UnstableApiVersions::Enabled;
+        check!(key.static_value(&config).as_deref() == Some("auto"));
     }
 
     /// The five `MetadataLogConfig` keys state the value the metadata log

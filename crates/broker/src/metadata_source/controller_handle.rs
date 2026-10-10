@@ -39,6 +39,16 @@ impl MetadataSource for ControllerHandle {
     fn quorum_snapshot(&self) -> Option<krabka_raft::QuorumStateSnapshot> {
         Some(ControllerHandle::quorum_snapshot(self))
     }
+    fn last_applied_record_timestamp_ms(&self) -> i64 {
+        ControllerHandle::quorum_snapshot(self).last_applied_record_timestamp_ms
+    }
+    fn pending_record_processing_time_us(&self) -> (u64, u64) {
+        let snapshot = ControllerHandle::quorum_snapshot(self);
+        (
+            snapshot.pending_record_processing_time_us_avg,
+            snapshot.pending_record_processing_time_us_max,
+        )
+    }
     async fn submit_change(
         &self,
         records: Vec<MetadataRecord>,

@@ -1,6 +1,7 @@
 //! The KIP-584 feature rows that an `ApiVersions` response carries: the
 //! `supported_features` range this broker compiles in, and the
-//! `finalized_features` levels it reads out of the live metadata image.
+//! `finalized_features` levels it reads out of the live metadata image, with
+//! Kafka's minimum `metadata.version` before the first feature delta.
 //!
 //! The rules are Kafka 4.3.1's, and the controller listener answers with the
 //! same ones: both call `krabka_raft`'s shared helpers, which hold the Kafka
@@ -70,11 +71,18 @@ mod tests {
         }
     }
 
-    /// A fresh image finalizes nothing, and `kraft.version` 0 is no row.
+    /// A fresh image follows Kafka's initial `FeaturesPublisher` state: the
+    /// minimum metadata version is finalized, while `kraft.version` 0 is no row.
     #[test]
-    fn a_fresh_image_has_no_finalized_rows() {
+    fn a_fresh_image_advertises_kafkas_minimum_metadata_version() {
         let image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-        check!(finalized_feature_keys(&image) == vec![]);
+        check!(
+            finalized_feature_keys(&image)
+                == vec![finalized(
+                    "metadata.version",
+                    crate::features::METADATA_VERSION_MIN
+                )]
+        );
     }
 
     #[test]

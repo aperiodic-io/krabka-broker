@@ -423,10 +423,8 @@ fn a_leaving_member_tombstones_the_resolution_only_it_used() {
 
 /// `ConsumerGroupRegularExpressionKey` carries the pattern as a string with an
 /// `i16` length prefix. A pattern of 32767 bytes still fits and its record
-/// encodes, and a longer one does not: the encoder refuses it rather than
-/// panic. Kafka's request reader closes the connection on such a pattern
-/// before the coordinator sees it, and `decode_group_request` does the same,
-/// so this is the backstop for a pattern that reaches the actor another way.
+/// encodes. A longer one is rejected before it reaches persistence, just as
+/// Kafka's request reader rejects it before the coordinator sees it.
 #[test]
 fn a_regex_over_the_record_key_bound_does_not_encode() {
     let longest = "a".repeat(usize::from(i16::MAX.unsigned_abs()));
@@ -443,12 +441,13 @@ fn a_regex_over_the_record_key_bound_does_not_encode() {
             &request("m1", 0, Some(pattern)),
             &regexes,
         );
-        check!(joined.step.response.error_code == codes::NONE);
-        check!(joined.result.resolved_regexes.len() == 1);
-        check!(
-            joined.result.to_batch("g", 0).is_ok() == encodes,
-            "{} bytes",
-            pattern.len()
-        );
+        if encodes {
+            check!(joined.step.response.error_code == codes::NONE);
+            check!(joined.result.resolved_regexes.len() == 1);
+            check!(joined.result.to_batch("g", 0).is_ok());
+        } else {
+            check!(joined.step.response.error_code != codes::NONE);
+            check!(joined.result.resolved_regexes.is_empty());
+        }
     }
 }

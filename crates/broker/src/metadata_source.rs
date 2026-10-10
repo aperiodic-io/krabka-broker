@@ -49,6 +49,11 @@ pub trait MetadataSource: Send + Sync {
     fn metadata_load_error_count(&self) -> u64 {
         0
     }
+    /// Process-lifetime average and maximum microseconds spent applying a
+    /// completed set of pending committed metadata records.
+    fn pending_record_processing_time_us(&self) -> (u64, u64) {
+        (0, 0)
+    }
     fn quorum_state(&self) -> QuorumState;
     /// Current controller epoch when this source owns a quorum view.
     /// Broker-only observers return `None` because they track the leader id but
@@ -62,6 +67,11 @@ pub trait MetadataSource: Send + Sync {
         i64::try_from(self.quorum_state().last_applied_index)
             .unwrap_or(i64::MAX)
             .saturating_sub(1)
+    }
+    /// Unix epoch milliseconds of the latest metadata batch applied by this
+    /// source, or zero before it has applied one.
+    fn last_applied_record_timestamp_ms(&self) -> i64 {
+        0
     }
     /// Highest `__cluster_metadata` offset the metadata quorum has committed,
     /// as this node last heard it, or `-1` before it has heard anything.

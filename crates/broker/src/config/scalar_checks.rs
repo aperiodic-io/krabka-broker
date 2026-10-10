@@ -292,6 +292,15 @@ impl BrokerConfig {
             self.classic_group_initial_rebalance_delay,
         )?;
         require_positive_size("observer_fetch_max", self.observer_fetch_max)?;
+        let fetch_max_bytes = self.fetch_max_bytes.bytes_u64();
+        if !self.fetch_max_bytes.bytes_f64().is_finite()
+            || ByteSize::from_bytes(fetch_max_bytes) != self.fetch_max_bytes
+            || fetch_max_bytes > u64::try_from(i32::MAX).expect("i32::MAX fits u64")
+        {
+            return Err(BrokerError::InvalidRuntimeConfig(
+                "fetch_max_bytes must be a whole number of bytes from 0 to 2147483647".into(),
+            ));
+        }
         if let Some(bytes) = self.queued_max_request_bytes {
             require_positive_size("queued_max_request_bytes", bytes)?;
         }

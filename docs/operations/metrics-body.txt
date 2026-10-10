@@ -455,6 +455,18 @@ krabka_broker_raft_observers 0
 # HELP krabka_broker_metadata_last_applied_offset Highest metadata record offset applied to the active metadata image.
 # TYPE krabka_broker_metadata_last_applied_offset gauge
 krabka_broker_metadata_last_applied_offset 0
+# HELP krabka_broker_metadata_last_applied_timestamp_ms Append timestamp in Unix epoch milliseconds of the last applied metadata record.
+# TYPE krabka_broker_metadata_last_applied_timestamp_ms gauge
+krabka_broker_metadata_last_applied_timestamp_ms 0
+# HELP krabka_broker_metadata_last_applied_lag_ms Milliseconds since the last applied metadata record was appended.
+# TYPE krabka_broker_metadata_last_applied_lag_ms gauge
+krabka_broker_metadata_last_applied_lag_ms 0
+# HELP krabka_broker_pending_record_processing_time_us_avg Lifetime average microseconds to apply a completed set of pending committed metadata records.
+# TYPE krabka_broker_pending_record_processing_time_us_avg gauge
+krabka_broker_pending_record_processing_time_us_avg 0
+# HELP krabka_broker_pending_record_processing_time_us_max Lifetime maximum microseconds to apply a completed set of pending committed metadata records.
+# TYPE krabka_broker_pending_record_processing_time_us_max gauge
+krabka_broker_pending_record_processing_time_us_max 0
 # HELP krabka_broker_metadata_lag_records Lag in records between the quorum committed high watermark and this node's applied metadata offset.
 # TYPE krabka_broker_metadata_lag_records gauge
 krabka_broker_metadata_lag_records 0

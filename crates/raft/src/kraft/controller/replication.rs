@@ -422,6 +422,7 @@ impl Engine {
         // header is the only source for the create-time of the last one a
         // checkpoint rewritten at the same boundary would contain.
         self.last_snapshot_timestamp_ms = contents.last_contained_log_timestamp;
+        self.last_applied_record_timestamp_ms = contents.last_contained_log_timestamp;
         self.installed_snapshot_epoch = Some(
             u32::try_from(epoch).expect("snapshot install admission requires a nonnegative epoch"),
         );

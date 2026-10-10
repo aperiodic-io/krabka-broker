@@ -32,6 +32,9 @@ pub struct RuntimeFileConfig {
     /// and closes a connection that sends an older version, as a 4.3.1 broker
     /// does. `true` keeps a pre-0.11 client working.
     pub legacy_request_versions_enable: Option<bool>,
+    /// Maximum bytes returned by one consumer `Fetch` or `ShareFetch`,
+    /// Kafka's `fetch.max.bytes`. Kafka's default is 57,671,680 bytes.
+    pub fetch_max_bytes: Option<ByteSize>,
     /// Timeout for one schema-registry request.
     pub schema_registry_http_timeout: Option<Time>,
     /// Timeout for one OAuth JWKS fetch.

@@ -26,7 +26,11 @@ use crate::{
 /// when `follower_in_isr` says so.
 ///
 /// `list` gets the broker id of the leader, the one the topic lists it by.
-async fn replica_fetch_bytes(list: impl FnOnce(u64) -> String, follower_in_isr: bool) -> usize {
+async fn replica_fetch_bytes(
+    list: impl FnOnce(u64) -> String,
+    follower_in_isr: bool,
+    fetch_again_after_append: bool,
+) -> (usize, Option<usize>) {
     let (handle, _dir, addr) = start_single_broker_plaintext().await;
     let node_id = handle.node_id();
 
@@ -92,8 +96,16 @@ async fn replica_fetch_bytes(list: impl FnOnce(u64) -> String, follower_in_isr: 
 
     // Fetch with replica_id=2 (inter-broker follower path → leader throttle applies).
     let resp_bytes = fetch_plaintext_replica(addr, "bar", 2).await;
+    let followup_bytes = if fetch_again_after_append {
+        // The first over-burst partition payload is allowed to make progress;
+        // append another payload so the next fetch tests the debt it incurred.
+        produce_plaintext(addr, "bar", 1024, 8).await;
+        Some(fetch_plaintext_replica(addr, "bar", 2).await)
+    } else {
+        None
+    };
     handle.shutdown().await;
-    resp_bytes
+    (resp_bytes, followup_bytes)
 }
 
 /// Test 3: After setting a very low leader throttle rate (512 bytes/sec) and
@@ -107,14 +119,20 @@ async fn replica_fetch_bytes(list: impl FnOnce(u64) -> String, follower_in_isr: 
 /// replicas that leader holds (#1210).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn throttle_rate_caps_fetch_response_size() {
-    let resp_bytes = replica_fetch_bytes(|leader| format!("0:{leader}"), false).await;
+    let (first_bytes, followup_bytes) =
+        replica_fetch_bytes(|leader| format!("0:{leader}"), false, true).await;
 
-    // The throttled response must be much smaller than the 8 KB we produced.
-    // We allow up to 2 KB as the upper bound to give headroom for framing
-    // overhead (batch headers, response wrapper).
+    // A single indivisible partition payload larger than the burst progresses
+    // once; its bounded debt throttles the next fetch, which must return no
+    // records (up to protocol framing overhead).
     assert!(
-        resp_bytes <= 2048,
-        "expected throttled fetch response <= 2048 bytes, got {resp_bytes} bytes"
+        first_bytes >= 4096,
+        "expected the over-burst payload to make progress, got {first_bytes} bytes"
+    );
+    let followup_bytes = followup_bytes.expect("requested a follow-up fetch");
+    assert!(
+        followup_bytes <= 2048,
+        "expected the debt-throttled fetch response <= 2048 bytes, got {followup_bytes} bytes"
     );
 }
 
@@ -151,7 +169,7 @@ async fn unthrottled_partition_unaffected() {
 /// (#1210).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_list_naming_only_the_follower_throttles_nothing_on_the_leader() {
-    let resp_bytes = replica_fetch_bytes(|_| "0:2".to_owned(), false).await;
+    let (resp_bytes, _) = replica_fetch_bytes(|_| "0:2".to_owned(), false, false).await;
 
     assert!(
         resp_bytes >= 4096,
@@ -164,7 +182,7 @@ async fn a_list_naming_only_the_follower_throttles_nothing_on_the_leader() {
 /// the replicas that keep the partition available (#1211).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_follower_in_the_isr_is_not_throttled() {
-    let resp_bytes = replica_fetch_bytes(|_| "*".to_owned(), true).await;
+    let (resp_bytes, _) = replica_fetch_bytes(|_| "*".to_owned(), true, false).await;
 
     assert!(
         resp_bytes >= 4096,

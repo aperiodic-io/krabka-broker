@@ -1216,6 +1216,20 @@ pub struct BrokerMetrics {
     #[metric(help = "Highest metadata record offset applied to the active metadata image")]
     pub metadata_last_applied_offset: Gauge,
     #[metric(
+        help = "Append timestamp in Unix epoch milliseconds of the last applied metadata record"
+    )]
+    pub metadata_last_applied_timestamp_ms: Gauge,
+    #[metric(help = "Milliseconds since the last applied metadata record was appended")]
+    pub metadata_last_applied_lag_ms: Gauge,
+    #[metric(
+        help = "Lifetime average microseconds to apply a completed set of pending committed metadata records"
+    )]
+    pub pending_record_processing_time_us_avg: Gauge,
+    #[metric(
+        help = "Lifetime maximum microseconds to apply a completed set of pending committed metadata records"
+    )]
+    pub pending_record_processing_time_us_max: Gauge,
+    #[metric(
         help = "Lag in records between the quorum committed high watermark and this node's applied metadata offset"
     )]
     pub metadata_lag_records: Gauge,

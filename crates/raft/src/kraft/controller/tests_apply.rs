@@ -7,7 +7,7 @@ use assert2::{assert, check};
 use super::*;
 use crate::kraft::controller::{
     records::{decode_batches, metadata_record_batch},
-    recovery::replay_committed,
+    recovery::replay_committed_with_timestamp,
     test_support::{
         build_engine_only, build_engine_only_with_policy, one_offset_batch, topic_record,
         topic_record_named,
@@ -34,7 +34,10 @@ fn tiny_fetch_budget_does_not_skip_apply_or_replay_records() {
             scratch.apply(record);
         }
         let mut batch = metadata_record_batch(1, &blobs).expect("metadata batch");
-        engine.log.append(&mut batch, 0).expect("append metadata");
+        engine
+            .log
+            .append(&mut batch, 1_700_000_000_123)
+            .expect("append metadata");
     }
     check!(
         engine
@@ -58,9 +61,12 @@ fn tiny_fetch_budget_does_not_skip_apply_or_replay_records() {
     assert2::assert!(engine.image.topic("second").is_some());
 
     let mut recovered = MetadataImage::new(uuid::Uuid::nil());
-    replay_committed(&engine.log, &mut recovered, Offset(0), tiny).expect("replay");
+    let (_, recovered_timestamp) =
+        replay_committed_with_timestamp(&engine.log, &mut recovered, Offset(0), tiny)
+            .expect("replay");
     assert2::assert!(recovered.topic("first").is_some());
     assert2::assert!(recovered.topic("second").is_some());
+    assert2::assert!(recovered_timestamp == Some(1_700_000_000_123));
 }
 
 #[test]
@@ -82,6 +88,32 @@ fn publish_leader_updates_leader_and_quorum_watchers() {
             engine.log.log_end_offset().0,
         )
     );
+}
+
+#[test]
+fn quorum_snapshot_timestamp_tracks_applied_not_newer_committed_records() {
+    let (mut engine, _dir) = build_engine_only(NodeId(1), &[NodeId(1)]);
+    let noop = super::records::noop_record_value().expect("no-op record");
+    let mut batch = metadata_record_batch(1, &[noop]).expect("metadata batch");
+    engine
+        .log
+        .append(&mut batch, 1_700_000_000_123)
+        .expect("append");
+    engine.advance_and_apply(Offset(1));
+    let noop = super::records::noop_record_value().expect("no-op record");
+    let mut later_batch = metadata_record_batch(1, &[noop]).expect("metadata batch");
+    engine
+        .log
+        .append(&mut later_batch, 1_700_000_111_222)
+        .expect("append later batch");
+    // The quorum commits the later batch, but the metadata image has not
+    // applied it yet.
+    engine.log.advance_hwm(Offset(2));
+    engine.leader_reported_hwm = 4;
+
+    let snapshot = engine.quorum_state_snapshot();
+    assert2::assert!(snapshot.last_applied_record_timestamp_ms == 1_700_000_000_123);
+    assert2::assert!(engine.pending_record_processing_time_samples == 1);
 }
 
 #[test]

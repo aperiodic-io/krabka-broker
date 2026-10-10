@@ -1243,7 +1243,9 @@ fn every_key_a_group_or_a_subscription_answers_with_is_typed_and_disclosed() {
     let image = MetadataImage::new(Uuid::nil());
     // A running broker states the streams assignor it runs, which Kafka's
     // `GroupConfig` has no default for.
-    let settings = static_settings(&crate::config::BrokerConfig::default());
+    let mut config = crate::config::BrokerConfig::default();
+    config.features.unstable_api_versions = crate::api_catalog::UnstableApiVersions::Enabled;
+    let settings = static_settings(&config);
     let group = describe_at(
         settings_for((RESOURCE_TYPE_GROUP, "streams-1"), &settings),
         &image,

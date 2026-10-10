@@ -101,6 +101,9 @@ macro_rules! tuning_fields {
             pub self_registration_max_attempts: u32,
             /// Maximum bytes fetched by a metadata observer request.
             pub observer_fetch_max: ByteSize,
+            /// Broker-wide maximum bytes returned by consumer `Fetch` and
+            /// `ShareFetch` requests, Kafka's `fetch.max.bytes`.
+            pub fetch_max_bytes: ByteSize,
             /// Capacity of the asynchronous audit event queue.
             pub audit_event_queue_capacity: usize,
             /// Number of offsets included in an audit tail request.

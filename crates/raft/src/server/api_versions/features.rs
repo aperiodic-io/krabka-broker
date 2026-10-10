@@ -64,10 +64,17 @@ pub fn supported_feature_keys(
 }
 
 /// The finalized-feature rows of `image`, in name order: every finalized
-/// level above 0, and `kraft.version` when its level is above 0.
+/// level above 0, `metadata.version` at Kafka's minimum before the first
+/// feature delta, and `kraft.version` when its level is above 0.
 #[must_use]
 pub fn finalized_feature_keys(image: &krabka_metadata::MetadataImage) -> Vec<FinalizedFeatureKey> {
     let mut levels = image.finalized_features().clone();
+    // Kafka's FeaturesPublisher starts with FinalizedFeatures.fromKRaftVersion
+    // (MetadataVersion.MINIMUM_VERSION) and keeps that until a feature delta
+    // arrives. An empty Krabka image represents that same startup state.
+    levels
+        .entry(krabka_metadata::metadata_version::METADATA_VERSION_FEATURE.to_owned())
+        .or_insert(krabka_metadata::metadata_version::METADATA_VERSION_MIN);
     levels.insert(
         krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE.to_owned(),
         i16::try_from(image.kraft_version()).unwrap_or(i16::MAX),
@@ -153,7 +160,11 @@ mod tests {
     #[test]
     fn finalized_features_omit_level_zero() {
         for (kraft_version, levels, expected) in [
-            (0, vec![], vec![]),
+            (
+                0,
+                vec![],
+                vec![finalized("metadata.version", METADATA_VERSION_MIN)],
+            ),
             (
                 0,
                 vec![("metadata.version", 25), ("group.version", 1)],

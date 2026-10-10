@@ -252,6 +252,14 @@ struct Engine {
     /// the checkpoint that already named it, and a snapshot rewritten at an
     /// unchanged boundary contains exactly the same last record.
     last_snapshot_timestamp_ms: i64,
+    /// Timestamp of the last record the metadata image has applied. This can
+    /// lag the quorum high watermark when replay has not caught up yet.
+    last_applied_record_timestamp_ms: i64,
+    /// Aggregate durations of completed applies that consumed newly
+    /// committed records. The average/max are lifetime values for this process.
+    pending_record_processing_time_us_total: u128,
+    pending_record_processing_time_samples: u64,
+    pending_record_processing_time_us_max: u64,
     /// `self.now()` (ms) at which the last checkpoint was written. Seeded to
     /// `0` on construction, which is `clock_base`'s own instant, so a
     /// restarted node measures the time-based cap from its own start rather

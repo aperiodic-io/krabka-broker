@@ -23,6 +23,20 @@ const NEITHER: EntryOptions = EntryOptions {
     include_documentation: false,
 };
 
+#[test]
+fn trunk_only_streams_assignors_are_hidden_from_default_static_settings() {
+    let mut config = crate::config::BrokerConfig::default();
+    check!(!static_settings(&config).contains_key("group.streams.assignors"));
+
+    config.features.unstable_api_versions = crate::api_catalog::UnstableApiVersions::Enabled;
+    check!(
+        static_settings(&config)
+            .get("group.streams.assignors")
+            .map(String::as_str)
+            == Some("auto")
+    );
+}
+
 /// Both KIP-98 keys wanted. The module's subject is that pair, so the cases
 /// below ask for it and leave the KIP-211 pair `static_broker_entries` also
 /// reports to [`super::super::tests`].

@@ -22,6 +22,7 @@ fn runtime_file_config_applies_representative_values() {
 cleaner_interval = "7s"
 isr_scan_interval = "800ms"
 opa_http_timeout = "2500ms"
+fetch_max_bytes = "2MiB"
 replication_fetch_max = "2MiB"
 replication_fetch_max_wait = "750ms"
 replication_fetch_min = "2B"
@@ -52,13 +53,15 @@ streams_group_max_size = 19
             cfg.replication.fetch_max,
             cfg.replication.fetch_max_wait,
             cfg.replication.fetch_min,
+            cfg.fetch_max_bytes,
         ) == (
             secs(7),
             millis(800),
             millis(2_500),
             mebibytes(2),
             millis(750),
-            bytes(2)
+            bytes(2),
+            mebibytes(2),
         )
     );
     assert!(cfg.controller_heartbeat_interval_explicit);
@@ -97,6 +100,7 @@ delegation_token_max_lifetime = "7d"
 socket_request_max = "100MiB"
 client_metrics_telemetry_max = "1MiB"
 observer_fetch_max = "1MiB"
+fetch_max_bytes = "56MiB"
 replication_fetch_max_wait = "500ms"
 replication_fetch_max = "1MiB"
 replication_fetch_min = "1B"
@@ -116,6 +120,7 @@ replication_fetch_min = "1B"
     assert!(cfg.socket_request_max == mebibytes(100));
     assert!(cfg.client_metrics_telemetry_max == mebibytes(1));
     assert!(cfg.observer_fetch_max == mebibytes(1));
+    assert!(cfg.fetch_max_bytes == mebibytes(56));
     assert!(cfg.replication.fetch_max_wait == millis(500));
     assert!(cfg.replication.fetch_max == mebibytes(1));
     assert!(cfg.replication.fetch_min == bytes(1));
@@ -164,13 +169,17 @@ replication_fetch_min = "1B"
                 ("replication_fetch_max_wait", 500),
             ]
     );
-    let sizes: [(&str, i64); 5] = [
+    let sizes: [(&str, i64); 6] = [
         ("socket_request_max", cfg.socket_request_max.bytes_i64()),
         (
             "client_metrics_telemetry_max",
             i64::from(cfg.client_metrics_telemetry_max.bytes_i32()),
         ),
         ("observer_fetch_max", cfg.observer_fetch_max.bytes_i64()),
+        (
+            "fetch_max_bytes",
+            i64::from(cfg.fetch_max_bytes.bytes_i32()),
+        ),
         (
             "replication_fetch_max",
             i64::from(cfg.replication.fetch_max.bytes_i32()),
@@ -186,6 +195,7 @@ replication_fetch_min = "1B"
                 ("socket_request_max", 104_857_600),
                 ("client_metrics_telemetry_max", 1_048_576),
                 ("observer_fetch_max", 1_048_576),
+                ("fetch_max_bytes", 58_720_256),
                 ("replication_fetch_max", 1_048_576),
                 ("replication_fetch_min", 1),
             ]

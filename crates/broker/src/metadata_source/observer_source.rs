@@ -46,11 +46,17 @@ impl MetadataSource for ObserverSource {
     fn quorum_committed_offset(&self) -> i64 {
         self.observer.quorum_committed_offset()
     }
+    fn last_applied_record_timestamp_ms(&self) -> i64 {
+        self.observer.last_applied_record_timestamp_ms()
+    }
     fn watch_fatal(&self) -> watch::Receiver<Option<String>> {
         self.observer.watch_fatal()
     }
     fn metadata_load_error_count(&self) -> u64 {
         self.observer.metadata_load_error_count()
+    }
+    fn pending_record_processing_time_us(&self) -> (u64, u64) {
+        self.observer.pending_record_processing_time_us()
     }
     fn quorum_state(&self) -> QuorumState {
         // A broker-only node is not a voter and has no openraft state of its

@@ -8,7 +8,7 @@
 use super::{
     FileConfigError, RuntimeFileConfig,
     validate::{
-        invalid_runtime_value, positive_time, voter_request_time, whole_bytes_i32,
+        invalid_runtime_value, kafka_int_bytes, positive_time, voter_request_time, whole_bytes_i32,
         whole_millis_i32_time,
     },
 };
@@ -35,6 +35,7 @@ impl RuntimeFileConfig {
         }
         set_runtime! {
             runtime => cfg;
+            kafka_int_bytes: fetch_max_bytes;
             positive_time: client_metrics_eviction_tick, client_metrics_stale_floor;
             whole_millis_i32_time: client_metrics_default_interval;
             whole_bytes_i32: client_metrics_telemetry_max;

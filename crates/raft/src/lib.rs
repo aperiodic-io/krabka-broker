@@ -194,6 +194,15 @@ pub fn deserialize_metadata_snapshot_image(
     });
     Ok(controls.chain(snapshot.metadata_records).collect())
 }
+
+/// Read the append timestamp of the last record batch contained in a KIP-630
+/// metadata snapshot.
+///
+/// # Errors
+/// Returns an error when the snapshot header is missing or malformed.
+pub fn metadata_snapshot_last_contained_log_timestamp(bytes: &[u8]) -> Result<i64, RaftError> {
+    snapshot::SnapshotReader::last_contained_log_timestamp(bytes)
+}
 pub use wire::{
     API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
     KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest,

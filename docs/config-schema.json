@@ -1302,7 +1302,7 @@
           "default": [
             "DEFAULT"
           ],
-          "description": "KIP-371 `ssl.principal.mapping.rules`: how the Subject DN of an mTLS\npeer certificate becomes the principal name ACLs and `super_users` are\nwritten against. Each entry is either `DEFAULT`, which uses the DN\nitself, or `RULE:pattern/replacement/[L|U]`, where `pattern` has to\nmatch the whole DN, `replacement` may reference capture groups as `$1`,\nand a trailing `L` or `U` lowercases or uppercases the result. The\nrules are tried in order and the first match wins. Defaults to\n`[\"DEFAULT\"]`, so a listener that says nothing keeps Kafka's behaviour\nof using the full DN. A malformed entry is rejected at startup.",
+          "description": "KIP-371 `ssl.principal.mapping.rules`: how the Subject DN of an mTLS\npeer certificate becomes the principal name ACLs and `super_users` are\nwritten against. Each entry is either `DEFAULT`, which uses the DN\nitself, or `RULE:pattern/replacement/[L|U]`, where `pattern` has to\nmatch the whole DN, `replacement` may reference capture groups as `$1`,\nand a trailing `L` or `U` lowercases or uppercases the result. The\nrules are tried in order and the first match wins. Defaults to\n`[\"DEFAULT\"]`, so a listener that says nothing keeps Kafka's behaviour\nof using the full DN. A malformed entry is rejected at startup.\nCase-insensitive backreferences have a Unicode compatibility edge:\nunder `(?i)`, non-ASCII case pairs may match here when Java rejects\nthem (for example `é` and `É`); under `(?iu)`, pairs Java accepts may\nfail here (for example `i` and `İ`, or `s` and `ſ`). Ordinary ASCII\nDNs are unaffected. Keep both captured and referenced text ASCII, or\navoid case-insensitive backreferences when exact Java behavior matters.",
           "items": {
             "type": "string"
           },
@@ -1909,6 +1909,15 @@
           "format": "int64",
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "fetch_max_bytes": {
+          "default": null,
+          "description": "Maximum bytes returned by one consumer `Fetch` or `ShareFetch`,\nKafka's `fetch.max.bytes`. Kafka's default is 57,671,680 bytes.",
+          "format": "byte-size",
+          "type": [
+            "string",
             "null"
           ]
         },

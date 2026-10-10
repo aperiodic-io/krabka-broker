@@ -101,10 +101,14 @@ pub struct MetadataObserver {
     /// reached a controller. A catching-up observer trails it by the records it
     /// has yet to fetch, which is the gap the readiness probe bounds.
     quorum_committed_offset: AtomicI64,
+    last_applied_record_timestamp_ms: AtomicI64,
     /// Committed records the observer could not decode and skipped, with the
     /// rest of the response that carried each: Kafka's
     /// `metadata-load-error-count`.
     load_errors: AtomicU64,
+    pending_processing_samples: AtomicU64,
+    pending_processing_total_us: AtomicU64,
+    pending_processing_max_us: AtomicU64,
     /// The fatal fault that stopped the observer, and `None` until there is
     /// one: an invalid `KRaft` control record, on which Kafka halts every role.
     fatal: watch::Sender<Option<String>>,
@@ -127,7 +131,11 @@ impl MetadataObserver {
             leader: leader_tx,
             metadata_offset: AtomicI64::new(-1),
             quorum_committed_offset: AtomicI64::new(-1),
+            last_applied_record_timestamp_ms: AtomicI64::new(0),
             load_errors: AtomicU64::new(0),
+            pending_processing_samples: AtomicU64::new(0),
+            pending_processing_total_us: AtomicU64::new(0),
+            pending_processing_max_us: AtomicU64::new(0),
             fatal: watch::channel(None).0,
             shutdown,
             task: tokio::sync::Mutex::new(None),
@@ -175,11 +183,48 @@ impl MetadataObserver {
         self.quorum_committed_offset.load(Ordering::Acquire)
     }
 
+    /// Append timestamp of the most recently applied metadata record batch,
+    /// in Unix epoch milliseconds, or zero before any batch is applied.
+    #[must_use]
+    pub fn last_applied_record_timestamp_ms(&self) -> i64 {
+        self.last_applied_record_timestamp_ms
+            .load(Ordering::Acquire)
+    }
+
     /// Committed metadata records this observer could not decode and
     /// skipped since it started: Kafka's `metadata-load-error-count`.
     #[must_use]
     pub fn metadata_load_error_count(&self) -> u64 {
         self.load_errors.load(Ordering::Acquire)
+    }
+
+    /// Record one completed pass over committed metadata records. The pair
+    /// returned by [`Self::pending_record_processing_time_us`] is a
+    /// process-lifetime average and maximum in microseconds.
+    pub fn record_pending_record_processing_time_us(&self, elapsed_us: u64) {
+        let _ = self.pending_processing_total_us.try_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |old| Some(old.saturating_add(elapsed_us)),
+        );
+        let _ = self.pending_processing_samples.try_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |old| Some(old.saturating_add(1)),
+        );
+        self.pending_processing_max_us
+            .fetch_max(elapsed_us, Ordering::AcqRel);
+    }
+
+    /// Lifetime average and maximum elapsed processing times, in microseconds.
+    pub fn pending_record_processing_time_us(&self) -> (u64, u64) {
+        let samples = self.pending_processing_samples.load(Ordering::Acquire);
+        let total = self.pending_processing_total_us.load(Ordering::Acquire);
+        let average = total.checked_div(samples).unwrap_or_default();
+        (
+            average,
+            self.pending_processing_max_us.load(Ordering::Acquire),
+        )
     }
 
     /// A receiver of the fatal fault that stopped this observer: an invalid
@@ -217,6 +262,15 @@ mod tests {
 
     use super::{test_support::observer_config, *};
     use crate::test_support::RecordingDialer;
+
+    #[test]
+    fn pending_record_processing_time_tracks_average_and_max() {
+        let observer = MetadataObserver::new(Uuid::nil(), CancellationToken::new());
+        observer.record_pending_record_processing_time_us(20);
+        observer.record_pending_record_processing_time_us(40);
+
+        assert!(observer.pending_record_processing_time_us() == (30, 40));
+    }
 
     #[tokio::test]
     async fn cancel_drains_background_task() {

@@ -53,6 +53,7 @@ impl Engine {
             self.maybe_snapshot();
             return;
         }
+        let processing_started = std::time::Instant::now();
         let mut cursor = prev_hwm;
         let mut changed = false;
         let mut metadata_version_downgraded = false;
@@ -80,6 +81,7 @@ impl Engine {
                         // The LeaderChange control batch carries no metadata records;
                         // never feed it to the metadata decoder.
                         if batch.attributes.is_control_batch() {
+                            self.last_applied_record_timestamp_ms = batch.max_timestamp;
                             continue;
                         }
                         for rec in &batch.records {
@@ -157,6 +159,10 @@ impl Engine {
                                 }
                             }
                         }
+                        // The batch has been consumed completely by this
+                        // apply pass. Track its timestamp separately from the
+                        // quorum high watermark, which may already be ahead.
+                        self.last_applied_record_timestamp_ms = batch.max_timestamp;
                     }
                     let Some(next) = next.filter(|next| *next > cursor) else {
                         break;
@@ -171,6 +177,22 @@ impl Engine {
         }
         if changed && !metadata_version_downgraded && self.downgrade_snapshot_pending.is_none() {
             let _ = self.image_tx.send(Arc::new(self.image.clone()));
+        }
+        // KIP-835 measures the time to consume a set of pending committed
+        // records, not the age of the records (reported separately by the
+        // applied-record lag metric). Only count a pass that reached the
+        // committed boundary; a read failure leaves pending work behind.
+        if cursor >= applied_hwm {
+            let elapsed_us =
+                u64::try_from(processing_started.elapsed().as_micros()).unwrap_or(u64::MAX);
+            self.pending_record_processing_time_us_total = self
+                .pending_record_processing_time_us_total
+                .saturating_add(u128::from(elapsed_us));
+            self.pending_record_processing_time_samples = self
+                .pending_record_processing_time_samples
+                .saturating_add(1);
+            self.pending_record_processing_time_us_max =
+                self.pending_record_processing_time_us_max.max(elapsed_us);
         }
         // KIP-1155: every quorum member that replays a metadata.version
         // downgrade immediately checkpoints the lower-version image and
