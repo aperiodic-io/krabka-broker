@@ -19,8 +19,11 @@ use super::{
 };
 use crate::{config::DEFAULT_READ_AHEAD_MAX, error::LogError};
 
-/// Maximum bytes prefetched by the descriptor header scanner.
-const HEADER_SCAN_WINDOW: usize = 64 * 1024;
+/// The first header scan stays small until it identifies the first batch size.
+const INITIAL_HEADER_SCAN_WINDOW: usize = 16 * 1024;
+
+/// Maximum bytes prefetched after the scanner identifies a small batch.
+const HEADER_SCAN_WINDOW: usize = 256 * 1024;
 
 impl Segment {
     /// Descriptor variant of [`Segment::read_raw`] for the zero-copy
@@ -80,21 +83,22 @@ impl Segment {
             return Ok(RawSegmentDesc::empty());
         }
 
-        // Use the buffered reader's initial window, without reading payloads.
+        // Scan bounded windows to find headers; keep the selected payload file-backed.
         let max_bytes = max_size.bytes_usize();
         let window =
             (max_bytes.max(HEADER_LEN) as u64).min(self.log_size.saturating_sub(start_pos));
         self.advise_read(start_pos, window, read_ahead_max);
         let window = usize::try_from(window)
             .map_err(|_| LogError::Corrupt("read_raw_desc window too large".into()))?;
-        let mut header_buf = Vec::with_capacity(HEADER_SCAN_WINDOW.min(window));
+        let mut header_buf = Vec::with_capacity(INITIAL_HEADER_SCAN_WINDOW.min(window));
         let mut header_buf_start = 0usize;
         let mut header_buf_end = 0usize;
+        let mut scan_window = INITIAL_HEADER_SCAN_WINDOW;
         let Some(range) = select_raw_range(fetch_offset, limit_offset, max_bytes, window, |pos| {
             if pos < header_buf_start || pos + HEADER_LEN > header_buf_end {
                 header_buf.clear();
                 header_buf_start = pos;
-                let read_len = (window - pos).min(HEADER_SCAN_WINDOW);
+                let read_len = (window - pos).min(scan_window);
                 self.read_log_range(start_pos + pos as u64, &mut header_buf, read_len)?;
                 header_buf_end = header_buf_start + header_buf.len();
             }
@@ -102,7 +106,13 @@ impl Segment {
                 return Ok(None);
             }
             let start = pos - header_buf_start;
-            RawBatch::decode(&header_buf[start..start + HEADER_LEN]).map(Some)
+            let batch = RawBatch::decode(&header_buf[start..start + HEADER_LEN])?;
+            scan_window = if batch.len <= INITIAL_HEADER_SCAN_WINDOW {
+                HEADER_SCAN_WINDOW
+            } else {
+                INITIAL_HEADER_SCAN_WINDOW
+            };
+            Ok(Some(batch))
         })?
         else {
             return Ok(RawSegmentDesc::empty());

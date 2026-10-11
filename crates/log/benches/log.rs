@@ -320,6 +320,41 @@ fn bench_read(c: &mut Criterion) {
         });
     });
 
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "tvos",
+        target_os = "watchos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+    ))]
+    let (_large_batch_dir, large_batch_log, large_batch_end) = {
+        let (dir, mut large_batch_log) = open_log(LogConfig::default());
+        let mut batch = make_batch(1, 1024 * 1024);
+        large_batch_log.append(&mut batch).unwrap();
+        let end = large_batch_log.log_end_offset();
+        (dir, large_batch_log, end)
+    };
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "tvos",
+        target_os = "watchos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+    ))]
+    group.bench_function("descriptor_large_batch", |b| {
+        b.iter(|| {
+            let out = large_batch_log
+                .read_raw_desc(black_box(Offset(0)), large_batch_end, UNBOUNDED)
+                .unwrap();
+            black_box(out);
+        });
+    });
+
     group.finish();
 }
 

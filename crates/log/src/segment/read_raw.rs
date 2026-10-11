@@ -24,7 +24,7 @@ use crate::{
 pub(super) struct RawBatch {
     start_offset: Offset,
     last_offset: Offset,
-    len: usize,
+    pub(super) len: usize,
 }
 
 impl RawBatch {
