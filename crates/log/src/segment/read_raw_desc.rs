@@ -20,7 +20,7 @@ use super::{
 use crate::{config::DEFAULT_READ_AHEAD_MAX, error::LogError};
 
 /// Maximum bytes prefetched by the descriptor header scanner.
-const HEADER_SCAN_WINDOW: usize = 4 * 1024;
+const HEADER_SCAN_WINDOW: usize = 16 * 1024;
 
 impl Segment {
     /// Descriptor variant of [`Segment::read_raw`] for the zero-copy
