@@ -21,14 +21,14 @@ categories = ["development-tools::profiling"]
 unsafe_op_in_unsafe_fn = "warn"
 
 [dependencies]
-krabka-log = { version = "1.0.1", path = "../log" }
+krabka-log = { version = "1.0.2", path = "../log" }
 krabka-protocol = { version = "0.6.0", default-features = false }
 krabka-units = { workspace = true }
 bytes = { workspace = true }
 memmap2 = "0.9"
 
 [dev-dependencies]
-krabka-macros = { version = "1.0.1", path = "../macros" }
+krabka-macros = { version = "1.0.2", path = "../macros" }
 assert2 = { workspace = true }
 tempfile = { workspace = true }
 criterion = { version = "5.0.2", package = "codspeed-criterion-compat" }

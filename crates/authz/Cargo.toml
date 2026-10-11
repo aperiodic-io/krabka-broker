@@ -20,7 +20,7 @@ workspace = true
 assert2 = { workspace = true }
 krabka-metadata = { version = "0.6.0" }
 krabka-security = { version = "0.6.0" }
-krabka-verified = { version = "1.0.1", path = "../verified" }
+krabka-verified = { version = "1.0.2", path = "../verified" }
 tracing = { workspace = true }
 
 [dev-dependencies]

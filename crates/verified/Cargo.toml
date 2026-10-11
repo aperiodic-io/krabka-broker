@@ -26,7 +26,7 @@ creusot-std = "0.13.0"
 derive_more = { workspace = true }
 krabka-ids = { version = "0.6.0" }
 
-krabka-macros = { version = "1.0.1", path = "../macros" }
+krabka-macros = { version = "1.0.2", path = "../macros" }
 
 [dev-dependencies]
 proptest = { workspace = true }

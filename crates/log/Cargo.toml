@@ -30,10 +30,10 @@ test-helpers = []
 maplit = { workspace = true }
 assert2 = { workspace = true }
 krabka-ids = { version = "0.6.0" }
-krabka-macros = { version = "1.0.1", path = "../macros" }
+krabka-macros = { version = "1.0.2", path = "../macros" }
 krabka-protocol = { version = "0.6.0", default-features = false }
 krabka-compression = { version = "0.6.0", default-features = false }
-krabka-verified = { version = "1.0.1", path = "../verified" }
+krabka-verified = { version = "1.0.2", path = "../verified" }
 krabka-units = { workspace = true }
 bytes = { workspace = true }
 crc32c = { workspace = true }

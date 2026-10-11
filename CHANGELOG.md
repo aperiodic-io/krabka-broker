@@ -23,12 +23,31 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
-### Fixed
+## [1.0.2] - 2026-10-10
 
-- Kafka 4.3.1 compatibility gaps in Fetch and ShareFetch byte limits,
-  replication-quota progress, KIP-835 metadata health metrics, RE2J regex
-  syntax and size handling, Java regex backreference documentation, and
-  feature/config reporting.
+1.0.2 changes no on-disk format, so it upgrades from 1.0.1 in place and
+rolls back to it the same way. Before a rollback, remove `log_tail_cache_size`
+and the `--log-tail-cache-size` flag from a configuration or service invocation
+that sets it, because 1.0.1 refuses a `[runtime]` key and argument it does
+not know. If `preallocate=true` was active during an unclean shutdown, the tail
+recovery of 1.0.1 and 1.0.0 cuts the remaining zero padding as normal.
+
+### Added
+
+- The topic setting `preallocate` and the broker default `log.preallocate`
+  reserve `segment.bytes` of disk blocks with `fallocate(FALLOC_FL_KEEP_SIZE)`
+  when an active segment is opened, avoiding allocations during appends and
+  releasing unused reserved blocks when the segment is sealed. On filesystems
+  or platforms without block reservation support, the segment grows as it is
+  written.
+- On Linux 6.1+ where the underlying filesystem reports direct-I/O alignment,
+  active segments under `preallocate=true` write through `O_DIRECT` to bypass
+  the page cache, keeping the newest appends in memory to serve reads. Where
+  unsupported, appends remain page-cache-backed.
+- The `[runtime]` key `log_tail_cache_size`, with the `--log-tail-cache-size`
+  flag and the `KRABKA_LOG_TAIL_CACHE_SIZE` variable, sets how much of the
+  newest data a partition with `preallocate=true` keeps in memory to serve
+  reads with. The default is 1 MiB, and `0` keeps only the newest batch.
 - The previously inert topic settings `compression.gzip.level`,
   `compression.lz4.level`, `compression.zstd.level`, `segment.jitter.ms`,
   `file.delete.delay.ms`, `flush.messages`, and `flush.ms` now control log
@@ -38,6 +57,17 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
   configured delay, and message or time thresholds flush pending writes,
   including idle partitions. Topic overrides and broker defaults take effect
   through live configuration updates.
+
+### Fixed
+
+- Kafka 4.3.1 compatibility gaps in Fetch and ShareFetch byte limits,
+  replication-quota progress, KIP-835 metadata health metrics, RE2J regex
+  syntax and size handling, Java regex backreference documentation, and
+  feature/config reporting.
+- Zero-copy (`sendfile`) fetch descriptor planning adapts header scan
+  buffers from 16 KiB up to 256 KiB based on batch size, eliminating
+  repeated positioned read syscalls across small batches while preserving
+  file-backed payloads for large batches.
 
 ## [1.0.1] - 2026-10-09
 
@@ -1378,7 +1408,8 @@ robot-head/crabka.
 - An audit stamp carries the value that its freeze signature covers.
 - The release publishes the image digest that cosign signed.
 
-[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.2
 [1.0.1]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.1
 [1.0.0]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.0
 [0.7.0]: https://github.com/krabka-io/krabka-broker/releases/tag/v0.7.0
