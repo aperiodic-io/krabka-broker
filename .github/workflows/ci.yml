@@ -43,7 +43,7 @@ jobs:
           repository-cache: true
       - name: reject Rust duplicates with jscpd
         run: aspect check-cpd --output "${RUNNER_TEMP}/cpd-reports"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cpd
@@ -164,7 +164,7 @@ jobs:
           bazel query 'kind("rust_doc rule", //crates/...)' > "${targets}"
           test -s "${targets}"
           bazel build --target_pattern_file="${targets}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rustdoc
           path: bazel-bin/crates/**/*.rustdoc
@@ -1210,7 +1210,7 @@ jobs:
 
       - name: upload raw samples and verdict
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: benchmark-regression-evidence
           path: benchmark-artifacts/
@@ -1281,7 +1281,7 @@ jobs:
           aspect check-delivery-image --expected delivery-image.digest \
             --image "ghcr.io/krabka-io/krabka-broker:${GITHUB_SHA}"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: delivery-image
           path: delivery-image.digest
