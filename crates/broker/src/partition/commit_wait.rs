@@ -19,6 +19,7 @@ use krabka_metadata::MetadataImage;
 use tokio::sync::watch;
 
 use super::Partition;
+use crate::metadata_source::wait_for_image_change;
 
 /// Why an append did not commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,8 +68,7 @@ impl Partition {
             if !holds(self, newest(images.as_deref_mut()).as_deref()) {
                 return Err(Uncommitted::TermEnded);
             }
-            let image_changed =
-                crate::metadata_source::wait_for_image_change(images.as_deref_mut());
+            let image_changed = wait_for_image_change(images.as_deref_mut());
             tokio::select! {
                 reached = &mut committed => {
                     reached.map_err(|_| Uncommitted::TimedOut)?;
@@ -100,7 +100,10 @@ mod tests {
     use krabka_log::Offset;
 
     use super::Uncommitted;
-    use crate::partition::Partition;
+    use crate::partition::{
+        Partition,
+        test_support::{CommitFixtureLeader, CommitPartitionSetup, commit_partition},
+    };
 
     /// Whether `partition` still has the leader and leader epoch it had when
     /// the case appended: node 1 at epoch 0.
@@ -178,13 +181,10 @@ mod tests {
             },
         ];
         for case in cases {
-            let (partition, _dir, hw_notify) = crate::partition::test_support::commit_partition(
-                crate::partition::test_support::CommitPartitionSetup {
-                    high_watermark: Offset(case.hw_now),
-                    leader:
-                        crate::partition::test_support::CommitFixtureLeader::BrokerOneAtEpochZero,
-                },
-            )
+            let (partition, _dir, hw_notify) = commit_partition(CommitPartitionSetup {
+                high_watermark: Offset(case.hw_now),
+                leader: CommitFixtureLeader::BrokerOneAtEpochZero,
+            })
             .await;
 
             let changes = crate::coordinator::test_support::schedule_commit_changes!(case, partition;

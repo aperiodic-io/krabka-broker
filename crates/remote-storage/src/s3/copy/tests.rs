@@ -14,11 +14,13 @@ use crate::{
     s3::{
         S3RemoteStorage,
         test_support::{
-            WORM_KEY_ID, rsm, sample_data, sample_metadata, seeded_blocking, stamped_metadata,
-            worm_epoch, worm_rsm, write_file,
+            SeededCopySetup, StampedMetadataSetup, WORM_KEY_ID, WormAccess, memory_worm_archive,
+            rsm, sample_data, sample_metadata, seeded_blocking, stamped_metadata, worm_epoch,
+            worm_rsm, write_file,
         },
     },
     storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
+    test_support::TransactionIndex,
     worm::{
         ChainHead, MANIFEST_FORMAT_VERSION, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry,
         SegmentIdentity, SegmentManifest, Sha256Digest, WormChainRecord, WormError, manifest_head,
@@ -32,7 +34,7 @@ async fn copy_then_fetch_full_segment() {
     let md = sample_metadata(uuid::Uuid::from_u128(10));
     seeded_blocking(
         store,
-        crate::s3::test_support::SeededCopySetup {
+        SeededCopySetup {
             metadata: md,
             ..Default::default()
         },
@@ -211,14 +213,14 @@ fn multipart_manifest_entry_requires_a_version() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_copy_writes_a_manifest_next_to_the_segment() {
-    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
-    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+    let (_keys, store) = memory_worm_archive();
+    let md = stamped_metadata(StampedMetadataSetup {
         segment_id: uuid::Uuid::from_u128(50),
         ..Default::default()
     });
     seeded_blocking(
         store,
-        crate::s3::test_support::SeededCopySetup {
+        SeededCopySetup {
             metadata: md,
             ..Default::default()
         },
@@ -248,14 +250,14 @@ async fn worm_copy_writes_a_manifest_next_to_the_segment() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_manifest_lists_every_object_with_its_digest() {
-    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
-    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+    let (_keys, store) = memory_worm_archive();
+    let md = stamped_metadata(StampedMetadataSetup {
         segment_id: uuid::Uuid::from_u128(51),
         ..Default::default()
     });
     seeded_blocking(
         store,
-        crate::s3::test_support::SeededCopySetup {
+        SeededCopySetup {
             metadata: md,
             ..Default::default()
         },
@@ -318,8 +320,8 @@ async fn worm_manifest_lists_every_object_with_its_digest() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_manifest_omits_objects_the_copy_did_not_write() {
     let src = TempDir::new().unwrap();
-    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
-    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup::default());
+    let (_keys, store) = memory_worm_archive();
+    let md = stamped_metadata(StampedMetadataSetup::default());
     let data = LogSegmentData {
         log_segment: write_file(src.path(), "00.log", b"0123456789"),
         offset_index: write_file(src.path(), "00.index", b"OFFSET-IDX"),
@@ -345,11 +347,11 @@ async fn worm_manifest_omits_objects_the_copy_did_not_write() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_copy_returns_a_receipt_with_the_new_head() {
     let src = TempDir::new().unwrap();
-    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
+    let (_keys, store) = memory_worm_archive();
     let prev_head = ChainHead([1u8; 32]);
-    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+    let md = stamped_metadata(StampedMetadataSetup {
         segment_id: uuid::Uuid::from_u128(53),
-        sequence: crate::worm::ManifestSeq(3),
+        sequence: ManifestSeq(3),
         previous_head: prev_head,
     });
     tokio::task::spawn_blocking(move || {
@@ -379,18 +381,14 @@ async fn worm_copy_returns_a_receipt_with_the_new_head() {
 async fn worm_multipart_copy_refuses_replay() {
     let src = TempDir::new().unwrap();
     let keys = TempDir::new().unwrap();
-    let store = worm_rsm(
-        Arc::new(InMemory::new()),
-        &keys,
-        crate::s3::test_support::WormAccess::ReadWrite,
-    )
-    .with_multipart_tuning(krabka_units::bytes(8), krabka_units::bytes(4));
-    let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+    let store = worm_rsm(Arc::new(InMemory::new()), &keys, WormAccess::ReadWrite)
+        .with_multipart_tuning(krabka_units::bytes(8), krabka_units::bytes(4));
+    let md = stamped_metadata(StampedMetadataSetup {
         segment_id: uuid::Uuid::from_u128(54),
         ..Default::default()
     });
     tokio::task::spawn_blocking(move || {
-        let data = sample_data(src.path(), crate::test_support::TransactionIndex::Present);
+        let data = sample_data(src.path(), TransactionIndex::Present);
         store.copy_log_segment_data(&md, &data).unwrap();
         let first = read_manifest(&store, &md);
         check!(!first.body.objects[0].create_precondition);
@@ -431,7 +429,7 @@ async fn non_worm_copy_writes_no_manifest_and_returns_none() {
     let src = TempDir::new().unwrap();
     let md = sample_metadata(uuid::Uuid::from_u128(57));
     tokio::task::spawn_blocking(move || {
-        let data = sample_data(src.path(), crate::test_support::TransactionIndex::Present);
+        let data = sample_data(src.path(), TransactionIndex::Present);
         check!(store.copy_log_segment_data(&md, &data).unwrap().is_none());
         check!(matches!(
             S3RemoteStorage::block_os(store.ops.get(&store.segment_key(&md, MANIFEST_SUFFIX))),
@@ -447,7 +445,7 @@ async fn non_worm_copy_writes_no_manifest_and_returns_none() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worm_copy_without_a_chain_stamp_is_refused() {
     let src = TempDir::new().unwrap();
-    let (_keys, store) = crate::s3::test_support::memory_worm_archive();
+    let (_keys, store) = memory_worm_archive();
     // No `with_custom_metadata`: the broker did not stamp this segment.
     let md = sample_metadata(uuid::Uuid::from_u128(58));
     tokio::task::spawn_blocking(move || {

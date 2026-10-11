@@ -14,11 +14,12 @@ use super::{
         whole_bytes_u64, whole_bytes_usize,
     },
 };
+use crate::config::BrokerConfig;
 
 impl RuntimeFileConfig {
     pub(super) fn apply_recovery_and_queues(
         &mut self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
         set_runtime! {
@@ -71,7 +72,7 @@ impl RuntimeFileConfig {
 
     pub(super) fn apply_network_limits(
         &mut self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
         set_runtime! { runtime => cfg; whole_bytes_u32: socket_request_max; }
@@ -111,21 +112,27 @@ mod tests {
         mebibytes, millis,
     };
 
-    use crate::file_config::FileConfig;
+    use crate::{
+        config::BrokerConfig,
+        file_config::{
+            FileConfig,
+            test_support::{configured, optional_configured_feature},
+        },
+    };
 
     #[test]
     fn runtime_file_config_rejects_negative_diskless_wal_trim_lag() {
         let file: FileConfig = toml::from_str("[runtime]\ndiskless_wal_trim_safety_lag = -1\n")
             .expect("parse runtime config");
         let error = file
-            .apply_to(&mut crate::config::BrokerConfig::default())
+            .apply_to(&mut BrokerConfig::default())
             .expect_err("reject negative trim lag");
 
         assert!(error.to_string().contains("diskless_wal_trim_safety_lag"));
     }
     #[test]
     fn runtime_file_config_accepts_positive_diskless_wal_trim_lag() {
-        let config = crate::file_config::test_support::configured(
+        let config = configured(
             "[runtime]\ndiskless_wal_trim_safety_lag = 7\n",
             "parse runtime config",
         )
@@ -137,7 +144,7 @@ mod tests {
     fn log_delivery_clock_uncertainty_round_trips_into_the_log_config() {
         // KFC-1's clock bound reaches every partition through
         // `BrokerConfig::log_config`, and it is a TOML-only key.
-        let cfg = crate::file_config::test_support::configured(
+        let cfg = configured(
             "[runtime]\nlog_delivery_clock_uncertainty = \"750ms\"\n",
             "parse runtime config",
         )
@@ -151,7 +158,7 @@ mod tests {
         // Kafka's broker-wide `message.max.bytes` is the default behind every
         // topic's `max.message.bytes`, and in krabka that default is the base
         // `LogConfig` the produce gate reads when a topic sets none.
-        let cfg = crate::file_config::test_support::configured(
+        let cfg = configured(
             "[runtime]\nmessage_max_bytes = \"2KiB\"\n",
             "parse runtime config",
         )
@@ -169,7 +176,7 @@ mod tests {
             ("0B", Some(0)),
             ("1.5B", None),
         ] {
-            let applied = crate::file_config::test_support::optional_configured_feature(
+            let applied = optional_configured_feature(
                 &format!("[runtime]\nlog_read_ahead_max = \"{value}\"\n"),
                 |config| config.log_config.read_ahead_max.bytes_u64(),
             );
@@ -191,7 +198,7 @@ mod tests {
             let applied = toml::from_str::<FileConfig>(&format!("[runtime]\n{line}"))
                 .ok()
                 .and_then(|file| {
-                    let mut cfg = crate::config::BrokerConfig::default();
+                    let mut cfg = BrokerConfig::default();
                     file.apply_to(&mut cfg)
                         .ok()
                         .map(|()| cfg.log_config.tail_cache_size)
@@ -202,9 +209,7 @@ mod tests {
 
     #[test]
     fn omitted_log_read_ahead_max_keeps_the_log_default() {
-        let cfg =
-            crate::file_config::test_support::configured("[runtime]\n", "parse runtime config")
-                .expect("apply runtime config");
+        let cfg = configured("[runtime]\n", "parse runtime config").expect("apply runtime config");
 
         assert!(cfg.log_config.read_ahead_max == krabka_log::DEFAULT_READ_AHEAD_MAX);
     }
@@ -230,7 +235,7 @@ mod tests {
             ("2GiB", None),
             ("1.5B", None),
         ] {
-            let applied = crate::file_config::test_support::optional_configured_feature(
+            let applied = optional_configured_feature(
                 &format!("[runtime]\nmessage_max_bytes = \"{value}\"\n"),
                 |config| config.log_config.max_message_size.bytes_u64(),
             );
@@ -240,18 +245,14 @@ mod tests {
 
     #[test]
     fn omitted_message_max_bytes_keeps_kafkas_1048588() {
-        let cfg =
-            crate::file_config::test_support::configured("[runtime]\n", "parse runtime config")
-                .expect("apply runtime config");
+        let cfg = configured("[runtime]\n", "parse runtime config").expect("apply runtime config");
 
         assert!(cfg.log_config.max_message_size.bytes_u64() == 1_048_588);
     }
 
     #[test]
     fn omitted_log_delivery_clock_uncertainty_keeps_the_quarter_second_default() {
-        let cfg =
-            crate::file_config::test_support::configured("[runtime]\n", "parse runtime config")
-                .expect("apply runtime config");
+        let cfg = configured("[runtime]\n", "parse runtime config").expect("apply runtime config");
 
         assert!(cfg.log_config.delivery_clock_uncertainty == millis(250));
     }
@@ -262,7 +263,7 @@ mod tests {
                 .expect("parse runtime config");
 
         let error = file
-            .apply_to(&mut crate::config::BrokerConfig::default())
+            .apply_to(&mut BrokerConfig::default())
             .expect_err("reject a zero clock bound");
 
         assert!(
@@ -278,8 +279,7 @@ record_decompression_max_ratio = "50"
 record_decompression_output_floor = "8MiB"
 record_decompression_output_ceiling = "512MiB"
 "#;
-        let cfg = crate::file_config::test_support::configured(source, "parse runtime config")
-            .expect("apply runtime config");
+        let cfg = configured(source, "parse runtime config").expect("apply runtime config");
 
         let policy = cfg
             .record_decompression_policy()
@@ -300,7 +300,7 @@ record_decompression_output_ceiling = "512MiB"
             let source = format!("[runtime]\n{body}");
             let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
             let error = file
-                .apply_to(&mut crate::config::BrokerConfig::default())
+                .apply_to(&mut BrokerConfig::default())
                 .expect_err("invalid record decompression policy must fail");
             assert!(error.to_string().contains("record_decompression"));
         }

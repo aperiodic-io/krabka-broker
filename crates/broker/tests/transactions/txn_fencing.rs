@@ -11,12 +11,17 @@ use krabka_client_consumer::{AutoOffsetReset, Consumer};
 use krabka_client_producer::ProducerError;
 
 use crate::{
-    support,
     support::{
+        self,
         client::connect_client,
-        transactions::{init_producer_request, txn_offset_partition, txn_offset_topic},
+        consumer_groups::joining_consumer,
+        producer::transactional_producer,
+        transactions::{
+            InitProducerSetup, ProducerIdentity, init_producer_request, txn_offset_partition,
+            txn_offset_topic,
+        },
     },
-    txn_harness::{boot_single, create_topic, init_transaction, rec, send_ok},
+    txn_harness::{boot_single, boot_single_trunk, create_topic, init_transaction, rec, send_ok},
 };
 
 /// Producer B with the same `transactional_id` fences Producer A. Every
@@ -47,8 +52,7 @@ async fn fenced_producer_cannot_commit() {
     let (broker, bootstrap, _dir) = boot_single().await;
     create_topic(&bootstrap, "tf").await;
 
-    let producer_a =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "shared-tid").await;
+    let producer_a = transactional_producer(bootstrap.clone(), "shared-tid").await;
     let txn_a = producer_a.begin_transaction().await.unwrap();
     // Acknowledged, not just sent: the commit below must have nothing left to
     // flush, so it detects the fencing through EndTxn and nothing else.
@@ -56,8 +60,7 @@ async fn fenced_producer_cannot_commit() {
 
     // Producer B initializes with the same transactional_id — bumps epoch,
     // fences A.
-    let _producer_b =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "shared-tid").await;
+    let _producer_b = transactional_producer(bootstrap.clone(), "shared-tid").await;
 
     // Still-live path: the first commit after the fencing learns of it from
     // the coordinator's own EndTxn answer.
@@ -143,16 +146,11 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
             // recorded last epoch, so the probe below tests staleness
             // against that epoch instead of colliding with the sentinel.
             let bump = client
-                .send(init_producer_request(
-                    crate::support::transactions::InitProducerSetup {
-                        transactional_id: Some(tid.clone()),
-                        producer: crate::support::transactions::ProducerIdentity::from_wire((
-                            producer_id,
-                            producer_epoch,
-                        )),
-                        ..Default::default()
-                    },
-                ))
+                .send(init_producer_request(InitProducerSetup {
+                    transactional_id: Some(tid.clone()),
+                    producer: ProducerIdentity::from_wire((producer_id, producer_epoch)),
+                    ..Default::default()
+                }))
                 .await
                 .unwrap();
             assert!(bump.error_code == 0, "priming bump for {name}: {bump:?}");
@@ -166,16 +164,11 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
         };
 
         let response = client
-            .send(init_producer_request(
-                crate::support::transactions::InitProducerSetup {
-                    transactional_id: Some(tid.clone()),
-                    producer: crate::support::transactions::ProducerIdentity::from_wire((
-                        request_id,
-                        request_epoch,
-                    )),
-                    ..Default::default()
-                },
-            ))
+            .send(init_producer_request(InitProducerSetup {
+                transactional_id: Some(tid.clone()),
+                producer: ProducerIdentity::from_wire((request_id, request_epoch)),
+                ..Default::default()
+            }))
             .await
             .unwrap();
 
@@ -293,7 +286,7 @@ async fn txn_offset_commit_fences_classic_generation_and_member() {
 async fn txn_offset_commit_fences_next_gen_member_epoch() {
     use krabka_protocol::owned::txn_offset_commit_request::TxnOffsetCommitRequest;
 
-    let (broker, bootstrap, _dir) = crate::txn_harness::boot_single_trunk().await;
+    let (broker, bootstrap, _dir) = boot_single_trunk().await;
     create_topic(&bootstrap, "ng-in").await;
 
     let client = connect_client(bootstrap.clone(), None).await;
@@ -302,11 +295,7 @@ async fn txn_offset_commit_fences_next_gen_member_epoch() {
 
     // Establish a next-gen group member; after the first heartbeat the member
     // is at epoch 1.
-    let mut hb = crate::support::consumer_groups::joining_consumer(
-        "ng-g",
-        uuid::Uuid::new_v4().to_string(),
-        60_000,
-    );
+    let mut hb = joining_consumer("ng-g", uuid::Uuid::new_v4().to_string(), 60_000);
     hb.subscribed_topic_names = Some(vec!["ng-in".into()]);
     let hb_resp = client.send(hb).await.unwrap();
     assert!(hb_resp.error_code == 0, "heartbeat failed: {hb_resp:?}");

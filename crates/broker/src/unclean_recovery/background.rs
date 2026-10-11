@@ -16,8 +16,9 @@ use krabka_raft::NodeId;
 
 use super::{Election, RecoveryJob};
 use crate::{
-    break_glass::{action_name, metrics as break_glass_metrics},
+    break_glass::{action_name, gate::is_gated, metrics as break_glass_metrics},
     config::{BackgroundUncleanRecovery, BreakGlassConfig},
+    metrics::BrokerMetrics,
     operator_keys::approver_set_fingerprint,
     time_util::now_ms,
 };
@@ -68,7 +69,7 @@ impl BackgroundRecovery {
     /// Read the rule out of `[break_glass]`.
     pub(crate) fn new(config: &BreakGlassConfig, audit_log: Arc<AuditLog>) -> Self {
         Self {
-            enabled: crate::break_glass::gate::is_gated(config),
+            enabled: is_gated(config),
             mode: config.background_unclean_recovery,
             audit_log,
             approver_set_fingerprint: approver_set_fingerprint(&config.approvers),
@@ -141,7 +142,7 @@ impl BackgroundRecovery {
         job: &RecoveryJob,
         node_id: NodeId,
         election: Election,
-        metrics: &crate::metrics::BrokerMetrics,
+        metrics: &BrokerMetrics,
     ) {
         if !self.enabled || self.mode == BackgroundUncleanRecovery::Off {
             return;

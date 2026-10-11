@@ -16,6 +16,8 @@ use std::path::PathBuf;
 use krabka_ids::{LeaderEpoch, Offset};
 pub use krabka_verified::{EpochEntry, epoch_and_offset_for_entries};
 
+use crate::io::LogIo;
+
 mod file;
 mod lookup;
 mod mutation;
@@ -28,7 +30,7 @@ mod test_support;
 #[derive(Debug)]
 pub struct LeaderEpochCheckpoint {
     path: PathBuf,
-    io: std::sync::Arc<dyn crate::io::LogIo>,
+    io: std::sync::Arc<dyn LogIo>,
     entries: Vec<EpochEntry>,
 }
 
@@ -44,7 +46,7 @@ impl LeaderEpochCheckpoint {
     /// Only [`crate::Log::test_set_io`] calls this: the checkpoint is opened
     /// with the real filesystem and stays there unless a test replaces it.
     #[cfg(any(test, feature = "test-helpers"))]
-    pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn crate::io::LogIo>) {
+    pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn LogIo>) {
         self.io = io;
     }
 

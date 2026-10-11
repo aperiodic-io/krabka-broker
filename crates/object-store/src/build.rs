@@ -10,6 +10,8 @@ use super::{error::ObjectStoreError, object_store_api as object_store};
 use crate::config::ObjectStoreConfig;
 #[cfg(not(target_family = "wasm"))]
 use crate::config::{GcsConfig, S3Config};
+#[cfg(target_family = "wasm")]
+use crate::unavailable::unavailable;
 
 /// The retry budget `cfg` asks for.
 ///
@@ -83,11 +85,11 @@ pub fn build_object_store(
             Ok(Arc::new(store))
         }
         #[cfg(target_family = "wasm")]
-        ObjectStoreConfig::S3(_) => Err(crate::unavailable::unavailable("S3")),
+        ObjectStoreConfig::S3(_) => Err(unavailable("S3")),
         #[cfg(target_family = "wasm")]
-        ObjectStoreConfig::Gcs(_) => Err(crate::unavailable::unavailable("GCS")),
+        ObjectStoreConfig::Gcs(_) => Err(unavailable("GCS")),
         #[cfg(target_family = "wasm")]
-        ObjectStoreConfig::Local { .. } => Err(crate::unavailable::unavailable("local filesystem")),
+        ObjectStoreConfig::Local { .. } => Err(unavailable("local filesystem")),
         ObjectStoreConfig::InMemory => Ok(Arc::new(object_store::memory::InMemory::new())),
     }
 }
@@ -156,7 +158,10 @@ mod tests {
     use object_store::ObjectStoreExt as _;
 
     use super::{object_store, *};
-    use crate::config::{GcsConfig, ObjectStoreConfig, S3Config};
+    use crate::{
+        config::{GcsConfig, ObjectStoreConfig, S3Config},
+        test_support::{http_listener, round_trip, s3_config},
+    };
 
     #[test]
     fn inmemory_builds() {
@@ -167,7 +172,7 @@ mod tests {
     async fn inmemory_round_trips() {
         let store = build_object_store(&ObjectStoreConfig::InMemory).unwrap();
         let path = object_store::path::Path::from("t/x");
-        let got = crate::test_support::round_trip(&*store, &path, b"hi").await;
+        let got = round_trip(&*store, &path, b"hi").await;
         assert!(&got[..] == b"hi");
     }
 
@@ -247,7 +252,7 @@ mod tests {
     /// who set it.
     #[tokio::test]
     async fn s3_request_timeout_bounds_a_stalled_store() {
-        let (listener, endpoint) = crate::test_support::http_listener().await;
+        let (listener, endpoint) = http_listener().await;
         // Hold the accepted sockets open for the length of the test: dropping
         // them would answer the request with a reset, which is not a stall.
         let server = tokio::spawn(async move {
@@ -263,7 +268,7 @@ mod tests {
         let store = build_object_store(&ObjectStoreConfig::S3(S3Config {
             max_retries: 0,
             request_timeout: std::time::Duration::from_millis(200),
-            ..crate::test_support::s3_config("b", endpoint)
+            ..s3_config("b", endpoint)
         }))
         .unwrap();
 
@@ -286,7 +291,7 @@ mod tests {
     async fn s3_max_retries_bounds_the_attempts_against_a_throttling_store() {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-        let (listener, endpoint) = crate::test_support::http_listener().await;
+        let (listener, endpoint) = http_listener().await;
         let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = Arc::clone(&attempts);
         let server = tokio::spawn(async move {
@@ -322,7 +327,7 @@ mod tests {
             max_retries: 2,
             retry_timeout: std::time::Duration::from_secs(30),
             request_timeout: std::time::Duration::from_secs(5),
-            ..crate::test_support::s3_config("b", endpoint)
+            ..s3_config("b", endpoint)
         }))
         .unwrap();
 

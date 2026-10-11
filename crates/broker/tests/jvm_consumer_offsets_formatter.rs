@@ -70,6 +70,8 @@ use std::process::Command;
 use assert2::assert;
 use krabka_broker::BrokerHandle;
 
+use crate::support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output};
+
 /// The pinned release whose tools decode the topic.
 const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.3.1";
 
@@ -406,24 +408,23 @@ impl Cluster {
     /// Fill the topic with [`RECORDS`] records over the console producer's
     /// stdin.
     fn produce(&self) {
-        let mut child_command =
-            crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
-                image: KAFKA_IMAGE,
-                args: &[
-                    CONSOLE_PRODUCER,
-                    "--bootstrap-server",
-                    &self.bootstrap,
-                    "--topic",
-                    TOPIC,
-                ],
-                input: crate::support::ContainerInput::Attached,
-                ..Default::default()
-            });
+        let mut child_command = jvm_docker_command(JvmDockerSetup {
+            image: KAFKA_IMAGE,
+            args: &[
+                CONSOLE_PRODUCER,
+                "--bootstrap-server",
+                &self.bootstrap,
+                "--topic",
+                TOPIC,
+            ],
+            input: ContainerInput::Attached,
+            ..Default::default()
+        });
         // One record per line, and a final newline so the producer sends the
         // last one rather than holding a partial line.
         let lines: Vec<String> = (0..RECORDS).map(|i| format!("record-{i}")).collect();
         let body = format!("{}\n", lines.join("\n"));
-        let out = crate::support::jvm_stdin_output(&mut child_command, body.as_bytes());
+        let out = jvm_stdin_output(&mut child_command, body.as_bytes());
         assert!(
             out.status.success(),
             "console producer failed: {}",

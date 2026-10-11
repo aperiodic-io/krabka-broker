@@ -5,7 +5,10 @@
 //! the up-converted v2 `RecordBatch` on disk is well formed, and a 0.10.1
 //! consumer proves the down-converted v0/v1 `MessageSet` is.
 
-use crate::jvm_acceptance::{KAFKA_IMAGE, KAFKA_IMAGE_LEGACY};
+use crate::{
+    jvm_acceptance::{KAFKA_IMAGE, KAFKA_IMAGE_LEGACY},
+    legacy_round_trip::run_round_trip,
+};
 
 /// Test 2: legacy producer, modern consumer.
 ///
@@ -17,7 +20,7 @@ use crate::jvm_acceptance::{KAFKA_IMAGE, KAFKA_IMAGE_LEGACY};
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn jvm_legacy_010_produce_modern_consume() {
-    crate::legacy_round_trip::run_round_trip(
+    run_round_trip(
         "legacy-010-produce-modern-consume",
         KAFKA_IMAGE_LEGACY,
         KAFKA_IMAGE,
@@ -36,7 +39,7 @@ async fn jvm_legacy_010_produce_modern_consume() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn jvm_modern_produce_legacy_010_consume() {
-    crate::legacy_round_trip::run_round_trip(
+    run_round_trip(
         "modern-produce-legacy-010-consume",
         KAFKA_IMAGE,
         KAFKA_IMAGE_LEGACY,

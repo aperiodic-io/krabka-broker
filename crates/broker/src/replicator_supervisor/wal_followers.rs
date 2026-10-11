@@ -11,24 +11,28 @@ use krabka_raft::NodeId;
 use tracing::warn;
 
 use super::{ReplicatorSupervisor, WalFollowerSpec, WalFollowerTask, resolve_leader_endpoint};
+use crate::{
+    config_keys::resolve_diskless,
+    wal::quorum::{
+        ShardRemoval,
+        follower::{Config, run},
+        registry::{ShardId, WalPlacement},
+        remove_shard,
+    },
+};
 
 impl ReplicatorSupervisor {
     pub(super) fn desired_wal_followers(
         &self,
         image: &MetadataImage,
-        placements: &HashMap<
-            crate::wal::quorum::registry::ShardId,
-            crate::wal::quorum::registry::WalPlacement,
-        >,
-    ) -> HashMap<crate::wal::quorum::registry::ShardId, WalFollowerSpec> {
+        placements: &HashMap<ShardId, WalPlacement>,
+    ) -> HashMap<ShardId, WalFollowerSpec> {
         image
             .all_partitions()
-            .filter(|partition| {
-                crate::config_keys::resolve_diskless(image.topic_config(&partition.topic))
-            })
+            .filter(|partition| resolve_diskless(image.topic_config(&partition.topic)))
             .filter_map(|partition| {
                 let topic = image.topic(&partition.topic)?;
-                let shard = crate::wal::quorum::registry::ShardId {
+                let shard = ShardId {
                     topic_id: topic.topic_id,
                     partition: PartitionIndex(partition.partition),
                 };
@@ -53,7 +57,7 @@ impl ReplicatorSupervisor {
 
     pub(super) async fn stop_obsolete_wal_followers(
         &self,
-        desired: &HashMap<crate::wal::quorum::registry::ShardId, WalFollowerSpec>,
+        desired: &HashMap<ShardId, WalFollowerSpec>,
     ) {
         let current = self
             .wal_tasks
@@ -87,13 +91,13 @@ impl ReplicatorSupervisor {
                 && let Some(target) = target
             {
                 for log_dir in &self.log_dirs {
-                    if let Err(error) = crate::wal::quorum::remove_shard(
+                    if let Err(error) = remove_shard(
                         self.wal_shards.as_ref(),
                         log_dir,
                         &target.topic,
                         shard.topic_id,
                         shard.partition,
-                        crate::wal::quorum::ShardRemoval::All,
+                        ShardRemoval::All,
                     ) {
                         warn!(
                             topic = %target.topic,
@@ -111,7 +115,7 @@ impl ReplicatorSupervisor {
     pub(super) fn spawn_wal_followers(
         &self,
         image: &MetadataImage,
-        desired: HashMap<crate::wal::quorum::registry::ShardId, WalFollowerSpec>,
+        desired: HashMap<ShardId, WalFollowerSpec>,
     ) {
         for (shard, spec) in desired {
             if self.wal_tasks.contains_key(&shard) {
@@ -130,22 +134,20 @@ impl ReplicatorSupervisor {
                 resolve_leader_endpoint(broker, &self.inter_broker_listener_name);
             let token = self.shutdown.child_token();
             self.wal_task_targets.insert(shard, spec.clone());
-            let handle = tokio::spawn(crate::wal::quorum::follower::run(
-                crate::wal::quorum::follower::Config {
-                    node_id: self.node_id,
-                    topic: spec.topic,
-                    shard,
-                    leader_node_id: spec.leader,
-                    leader_epoch: spec.leader_epoch.0,
-                    leader_host,
-                    leader_port,
-                    log_dirs: self.log_dirs.clone(),
-                    storage: self.log_config.clone(),
-                    client_id: self.client_id.clone(),
-                    shutdown: token.clone(),
-                    connection: self.connection_config(),
-                },
-            ));
+            let handle = tokio::spawn(run(Config {
+                node_id: self.node_id,
+                topic: spec.topic,
+                shard,
+                leader_node_id: spec.leader,
+                leader_epoch: spec.leader_epoch.0,
+                leader_host,
+                leader_port,
+                log_dirs: self.log_dirs.clone(),
+                storage: self.log_config.clone(),
+                client_id: self.client_id.clone(),
+                shutdown: token.clone(),
+                connection: self.connection_config(),
+            }));
             self.wal_tasks.insert(
                 shard,
                 WalFollowerTask {
@@ -167,9 +169,14 @@ mod tests {
     use super::*;
     use crate::{
         replicator_supervisor::test_support::{
-            broker_record, image_with, partition_record, supervisor_fixture,
+            SupervisorPartitionSetup, broker_record, image_with, partition_record,
+            supervisor_fixture,
         },
-        wal::quorum::registry::{ShardId, WalPlacement},
+        test_support::single_partition_topic,
+        wal::quorum::{
+            registry::{ShardId, WalPlacement},
+            shard_dir,
+        },
     };
 
     /// A three-voter epoch-seven placement, retaining the original discarded fixture guards.
@@ -201,17 +208,13 @@ mod tests {
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(1))),
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(2))),
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(3))),
-            MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-                "diskless", topic_id,
-            )),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "diskless",
-                    replicas: vec![NodeId(1)],
-                    epoch: krabka_metadata::LeaderEpoch(7),
-                    ..Default::default()
-                },
-            ),
+            MetadataRecord::V1Topic(single_partition_topic("diskless", topic_id)),
+            partition_record(SupervisorPartitionSetup {
+                topic: "diskless",
+                replicas: vec![NodeId(1)],
+                epoch: krabka_metadata::LeaderEpoch(7),
+                ..Default::default()
+            }),
             MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                 topic: "diskless".into(),
                 overrides,
@@ -245,17 +248,13 @@ mod tests {
             let mut overrides = BTreeMap::new();
             overrides.insert("krabka.diskless".into(), "true".into());
             image_with(&[
-                MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-                    "diskless", topic_id,
-                )),
-                partition_record(
-                    crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                        topic: "diskless",
-                        replicas: vec![NodeId(1)],
-                        epoch: krabka_metadata::LeaderEpoch(leader_epoch),
-                        ..Default::default()
-                    },
-                ),
+                MetadataRecord::V1Topic(single_partition_topic("diskless", topic_id)),
+                partition_record(SupervisorPartitionSetup {
+                    topic: "diskless",
+                    replicas: vec![NodeId(1)],
+                    epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+                    ..Default::default()
+                }),
                 MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                     topic: "diskless".into(),
                     overrides,
@@ -314,7 +313,7 @@ mod tests {
                 leader_epoch: krabka_metadata::LeaderEpoch(8),
             },
         );
-        let follower_shard = crate::wal::quorum::shard_dir(
+        let follower_shard = shard_dir(
             &supervisor.log_dirs[0],
             "diskless",
             Some(topic_id),

@@ -15,8 +15,18 @@ use krabka_protocol::{
 };
 
 use crate::support::{
-    client::connect_owned, fetch::single_partition_fetch, records::batch_from_records,
-    topics::creatable_topic,
+    client::connect_owned,
+    discovery::named_topic_metadata,
+    fetch::{
+        FetchByteLimit, FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup,
+        single_partition_fetch,
+    },
+    produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, send_batch},
+    records::batch_from_records,
+    topics::{
+        ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis, creatable_topic,
+        create_topic_request_with_setup,
+    },
 };
 
 /// The floor the fetch asks for. 64 KiB is orders of magnitude above the one
@@ -68,16 +78,16 @@ async fn connect(bootstrap: &str) -> Client {
 /// Append one small record -- small enough that `MIN_BYTES` stays out of reach
 /// whatever the batch overhead of the broker on the other end is.
 async fn produce_one(client: &Client, topic: &str, topic_id: WireUuid, value: &'static [u8]) {
-    let produced = crate::support::produce::send_batch(
+    let produced = send_batch(
         &client,
         batch_from_records(vec![Record {
             value: Some(bytes::Bytes::from_static(value)),
             ..Default::default()
         }]),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: (topic).into(),
             topic_id,
-            timeout: crate::support::produce::ProduceTimeoutMillis(10_000),
+            timeout: ProduceTimeoutMillis(10_000),
             ..Default::default()
         },
     )
@@ -92,13 +102,13 @@ async fn produce_one(client: &Client, topic: &str, topic_id: WireUuid, value: &'
 /// behind.
 async fn create_topic(client: &Client, topic: &str) {
     let response = client
-        .send(crate::support::topics::create_topic_request_with_setup(
-            creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+        .send(create_topic_request_with_setup(
+            creatable_topic(ConfiguredTopicSetup {
                 name: (topic).into(),
                 ..Default::default()
             }),
-            crate::support::topics::CreateTopicRequestSetup {
-                timeout: crate::support::topics::CreateTopicsTimeoutMillis(10_000),
+            CreateTopicRequestSetup {
+                timeout: CreateTopicsTimeoutMillis(10_000),
             },
         ))
         .await
@@ -115,7 +125,7 @@ async fn topic_id(client: &Client, topic: &str) -> WireUuid {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let response = client
-            .send(crate::support::discovery::named_topic_metadata(topic))
+            .send(named_topic_metadata(topic))
             .await
             .expect("Metadata");
         if let Some(found) = response
@@ -176,18 +186,16 @@ pub(crate) async fn min_bytes_exchange(bootstrap: &str, topic: &str) -> (Duratio
 
     let started = Instant::now();
     let fetched = client
-        .send(single_partition_fetch(
-            crate::support::fetch::SinglePartitionFetchSetup {
-                topic: topic.into(),
-                topic_id,
-                limits: crate::support::fetch::FetchLimits {
-                    wait: crate::support::fetch::RequestWaitMillis(MAX_WAIT_MS),
-                    minimum: crate::support::fetch::FetchByteLimit(MIN_BYTES),
-                    ..Default::default()
-                },
+        .send(single_partition_fetch(SinglePartitionFetchSetup {
+            topic: topic.into(),
+            topic_id,
+            limits: FetchLimits {
+                wait: RequestWaitMillis(MAX_WAIT_MS),
+                minimum: FetchByteLimit(MIN_BYTES),
                 ..Default::default()
             },
-        ))
+            ..Default::default()
+        }))
         .await
         .expect("Fetch");
     let held = started.elapsed();

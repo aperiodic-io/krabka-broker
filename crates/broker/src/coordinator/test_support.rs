@@ -16,17 +16,23 @@ use krabka_protocol::{
 
 use crate::{
     broker::Broker,
-    coordinator::unified::{
-        GroupCoordinator,
-        actor::MetadataProvider,
-        classic_state::OffsetEntry,
-        config::NextGenConfig,
-        offsets_log::OffsetsLog,
-        persistence::{Key, parse_key},
-        share::config::ShareGroupConfig,
-        streams::config::StreamsGroupConfig,
+    codes::{COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR},
+    coordinator::{
+        bootstrap::OFFSETS_TOPIC,
+        persistence::{Key, OffsetCommitValue},
+        unified::{
+            GroupCoordinator,
+            actor::MetadataProvider,
+            classic_state::OffsetEntry,
+            config::NextGenConfig,
+            offsets_log::OffsetsLog,
+            persistence::{Key as NextGenKey, parse_key},
+            share::config::ShareGroupConfig,
+            streams::config::StreamsGroupConfig,
+        },
     },
-    test_support::{peer, principal, request_context},
+    handlers::offset_fetch::handle,
+    test_support::{KafkaErrorCode, peer, principal, request_context},
 };
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
@@ -59,13 +65,13 @@ pub(crate) fn offsets_partition_image(
         uuid::Uuid::nil(),
         &[
             krabka_metadata::MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
-                name: crate::coordinator::bootstrap::OFFSETS_TOPIC.into(),
+                name: OFFSETS_TOPIC.into(),
                 topic_id: uuid::Uuid::from_u128(7),
                 partitions: partition + 1,
                 replication_factor: i16::try_from(replicas.len()).unwrap(),
             }),
             krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
-                topic: crate::coordinator::bootstrap::OFFSETS_TOPIC.into(),
+                topic: OFFSETS_TOPIC.into(),
                 partition,
                 leader,
                 leader_epoch: krabka_metadata::LeaderEpoch(epoch),
@@ -111,7 +117,7 @@ pub(crate) fn replay_offset_batch(producer_id: Option<i64>, records: Vec<Record>
 }
 
 /// Read the keys and values actually persisted in the test log, in record order.
-pub(crate) fn parsed_offset_records(batches: &[RecordBatch]) -> Vec<(Key, Option<Bytes>)> {
+pub(crate) fn parsed_offset_records(batches: &[RecordBatch]) -> Vec<(NextGenKey, Option<Bytes>)> {
     batches
         .iter()
         .flat_map(|batch| &batch.records)
@@ -205,7 +211,7 @@ pub(crate) struct DeletionTombstonesSetup<'a> {
 
 pub(crate) fn deletion_tombstones(
     setup: DeletionTombstonesSetup<'_>,
-) -> Vec<(crate::coordinator::persistence::Key, Option<bytes::Bytes>)> {
+) -> Vec<(Key, Option<bytes::Bytes>)> {
     use crate::coordinator::persistence::Key;
     let mut records: Vec<_> = setup
         .offsets
@@ -245,7 +251,7 @@ pub(crate) struct TopicDeletionTombstonesSetup<'a> {
 
 pub(crate) fn topic_deletion_tombstones(
     setup: TopicDeletionTombstonesSetup<'_>,
-) -> Vec<(crate::coordinator::persistence::Key, Option<bytes::Bytes>)> {
+) -> Vec<(Key, Option<bytes::Bytes>)> {
     let offsets: Vec<_> = setup
         .partitions
         .iter()
@@ -265,7 +271,7 @@ pub(crate) fn offset_record(setup: OffsetRecordSetup<'_>) -> krabka_protocol::re
         partition,
         offset,
     } = setup;
-    let value = crate::coordinator::persistence::OffsetCommitValue {
+    let value = OffsetCommitValue {
         offset,
         leader_epoch: -1,
         metadata: String::new(),
@@ -274,14 +280,7 @@ pub(crate) fn offset_record(setup: OffsetRecordSetup<'_>) -> krabka_protocol::re
         topic_id: None,
     };
     krabka_protocol::records::Record {
-        key: Some(
-            crate::coordinator::persistence::OffsetCommitValue::encode_key(
-                group,
-                topic,
-                partition.0,
-            )
-            .unwrap(),
-        ),
+        key: Some(OffsetCommitValue::encode_key(group, topic, partition.0).unwrap()),
         value: Some(value.encode_value()),
         ..Default::default()
     }
@@ -318,7 +317,7 @@ pub(crate) async fn fetch_offset(broker: &Broker, group: &str, topic: &str, vers
     let principal = principal("admin");
     let peer = peer();
     let context = request_context(&principal, &peer, "consumer");
-    let response = crate::handlers::offset_fetch::handle(broker, request, version, &context)
+    let response = handle(broker, request, version, &context)
         .await
         .expect("OffsetFetch");
     response.topics[0].partitions[0].committed_offset
@@ -368,15 +367,11 @@ pub(crate) enum CommitWaitOutcome {
 
 impl CommitWaitOutcome {
     /// Independent Kafka error expectation for the commit-wait matrix.
-    pub(crate) fn kafka_error(self) -> Option<crate::test_support::KafkaErrorCode> {
+    pub(crate) fn kafka_error(self) -> Option<KafkaErrorCode> {
         match self {
             Self::Committed => None,
-            Self::NotLeader => Some(crate::test_support::KafkaErrorCode(
-                crate::codes::NOT_COORDINATOR,
-            )),
-            Self::TimedOut => Some(crate::test_support::KafkaErrorCode(
-                crate::codes::COORDINATOR_NOT_AVAILABLE,
-            )),
+            Self::NotLeader => Some(KafkaErrorCode(NOT_COORDINATOR)),
+            Self::TimedOut => Some(KafkaErrorCode(COORDINATOR_NOT_AVAILABLE)),
         }
     }
 }

@@ -32,7 +32,9 @@ use crate::{
             configured_authorizer, filter, named_filters, request, test_context,
         },
     },
-    test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx},
+    test_support::{
+        AllowAclSetup, DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+    },
 };
 
 #[tokio::test]
@@ -144,7 +146,7 @@ fn topic_acl(setup: TopicAclSetup<'_>) -> AclEntry {
     AclEntry {
         pattern_type,
         permission_type,
-        ..acl(crate::test_support::AllowAclSetup {
+        ..acl(AllowAclSetup {
             resource_name: name,
             principal,
             ..Default::default()
@@ -319,8 +321,8 @@ async fn handle_deletes_exactly_what_kafka_matches() {
 #[tokio::test]
 async fn handle_lists_an_acl_under_every_filter_that_matches_it() {
     let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-    let shared = acl(crate::test_support::AllowAclSetup::default());
-    let other = acl(crate::test_support::AllowAclSetup {
+    let shared = acl(AllowAclSetup::default());
+    let other = acl(AllowAclSetup {
         resource_name: "payments",
         principal: "User:bob",
         ..Default::default()
@@ -357,7 +359,7 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
     type Edit = fn(&mut DeleteAclsFilter);
 
     let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-    let doomed = acl(crate::test_support::AllowAclSetup::default());
+    let doomed = acl(AllowAclSetup::default());
     seed_acls(&broker_handle, vec![doomed.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
     test_ctx!(ctx, "admin");
@@ -451,7 +453,7 @@ async fn seed_many_acls(handle: &BrokerHandle, count: usize) {
         handle,
         (0..count)
             .map(|n| {
-                acl(crate::test_support::AllowAclSetup {
+                acl(AllowAclSetup {
                     resource_name: &format!("topic-{n}"),
                     ..Default::default()
                 })
@@ -514,7 +516,7 @@ async fn handle_bounds_a_request_to_ten_thousand_removals() {
 fn match_filter_bounds_the_removals_of_a_request() {
     let image_acls: Vec<AclEntry> = (0..5)
         .map(|n| {
-            acl(crate::test_support::AllowAclSetup {
+            acl(AllowAclSetup {
                 resource_name: &format!("topic-{n}"),
                 ..Default::default()
             })

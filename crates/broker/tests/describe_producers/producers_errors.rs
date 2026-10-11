@@ -7,7 +7,13 @@
 
 use assert2::{assert, check};
 
-use crate::{producers_harness::create_topic, support};
+use crate::{
+    producers_harness::create_topic,
+    support::{
+        self, admin::describe_producers_request, client::connect_with_context, registered_cluster,
+        shutdown_cluster, topics::CreateTopicSetup,
+    },
+};
 
 #[tokio::test]
 async fn unknown_topic_returns_unknown_topic_or_partition() {
@@ -15,10 +21,7 @@ async fn unknown_topic_returns_unknown_topic_or_partition() {
 
     let resp = p
         .client
-        .send(crate::support::admin::describe_producers_request(
-            "ghost".into(),
-            vec![0, 1],
-        ))
+        .send(describe_producers_request("ghost".into(), vec![0, 1]))
         .await
         .expect("DescribeProducers");
 
@@ -40,7 +43,7 @@ async fn out_of_range_partition_returns_unknown_topic_or_partition() {
     let p = support::start().await;
     create_topic(
         &p.client,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "small",
             ..Default::default()
         },
@@ -50,10 +53,7 @@ async fn out_of_range_partition_returns_unknown_topic_or_partition() {
     // Partition 5 doesn't exist (topic was created with 1 partition).
     let resp = p
         .client
-        .send(crate::support::admin::describe_producers_request(
-            "small".into(),
-            vec![0, 5],
-        ))
+        .send(describe_producers_request("small".into(), vec![0, 5]))
         .await
         .expect("DescribeProducers");
 
@@ -78,17 +78,13 @@ async fn out_of_range_partition_returns_unknown_topic_or_partition() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn metadata_known_partition_not_hosted_locally_returns_not_leader() {
-    let cluster = crate::support::registered_cluster(2).await;
+    let cluster = registered_cluster(2).await;
 
-    let admin = crate::support::client::connect_with_context(
-        cluster[0].0.listen_addr().to_string(),
-        None,
-        "admin client",
-    )
-    .await;
+    let admin =
+        connect_with_context(cluster[0].0.listen_addr().to_string(), None, "admin client").await;
     create_topic(
         &admin,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "remote",
             ..Default::default()
         },
@@ -110,7 +106,7 @@ async fn metadata_known_partition_not_hosted_locally_returns_not_leader() {
         "rf=1 nonleader must not host remote-0"
     );
 
-    let client = crate::support::client::connect_with_context(
+    let client = connect_with_context(
         nonleader.0.listen_addr().to_string(),
         None,
         "nonleader client",
@@ -118,10 +114,7 @@ async fn metadata_known_partition_not_hosted_locally_returns_not_leader() {
     .await;
 
     let resp = client
-        .send(crate::support::admin::describe_producers_request(
-            "remote".into(),
-            vec![0],
-        ))
+        .send(describe_producers_request("remote".into(), vec![0]))
         .await
         .expect("DescribeProducers");
 
@@ -130,5 +123,5 @@ async fn metadata_known_partition_not_hosted_locally_returns_not_leader() {
     check!(partition.error_code == 6, "expected NOT_LEADER_OR_FOLLOWER");
     check!(partition.active_producers.is_empty());
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

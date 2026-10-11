@@ -31,6 +31,7 @@ use tokio::{task::JoinSet, time::Instant};
 use tracing::{info, warn};
 
 use crate::{
+    failover::{kill_broker_pod, partition0_leader_from_metadata, try_client},
     hist,
     ids::{MessageCount, TimeOffsetMs, WallclockMs},
     numeric::{
@@ -40,8 +41,8 @@ use crate::{
     prom::PromClient,
     rate::Pacer,
     scenario::{
-        BrokerSample, Disturbance, LoadMode, ModeTag, Resource, RunOutput, Sample, Scenario, Stack,
-        Throughput, Topology,
+        BrokerSample, Disturbance, LatencyPercentiles, LoadMode, ModeTag, Resource, RunOutput,
+        Sample, Scenario, Stack, Throughput, Topology,
     },
 };
 
@@ -806,7 +807,7 @@ fn spawn_failover(
     let frame_max = cfg.client_frame_max;
     tokio::spawn(async move {
         tokio::time::sleep_until(started_at + spec.kill_after.to_std()).await;
-        let client = match crate::failover::try_client().await {
+        let client = match try_client().await {
             Ok(client) => client,
             Err(error) => {
                 warn!(%error, "failover: in-cluster client unavailable");
@@ -814,7 +815,7 @@ fn spawn_failover(
             }
         };
         let leader_id = if spec.target == "partition0_leader" {
-            match crate::failover::partition0_leader_from_metadata(
+            match partition0_leader_from_metadata(
                 &bootstrap,
                 &topic,
                 security,
@@ -832,7 +833,7 @@ fn spawn_failover(
         } else {
             None
         };
-        match crate::failover::kill_broker_pod(&client, stack, &namespace, leader_id).await {
+        match kill_broker_pod(&client, stack, &namespace, leader_id).await {
             Ok(name) => {
                 // The marker goes up only now. Everything above it -- client
                 // discovery, the leader lookup, the delete itself -- can fail,
@@ -896,8 +897,8 @@ fn empty_output(
         wallclock_start_unix_ms: WallclockMs(start),
         wallclock_end_unix_ms: WallclockMs(start),
         throughput: Throughput::default(),
-        producer_latency: crate::scenario::LatencyPercentiles::default(),
-        consumer_e2e_latency: crate::scenario::LatencyPercentiles::default(),
+        producer_latency: LatencyPercentiles::default(),
+        consumer_e2e_latency: LatencyPercentiles::default(),
         resource: Resource::default(),
         disturbance: None,
         startup: None,
@@ -1375,7 +1376,10 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::scenario::{FailoverSpec, ModeTag};
+    use crate::{
+        prom::DEFAULT_PROMETHEUS_REQUEST_TIMEOUT,
+        scenario::{FailoverSpec, ModeTag, fixture::short_scenario},
+    };
 
     fn cfg(broker_count: u32) -> DriverConfig {
         DriverConfig {
@@ -1386,7 +1390,7 @@ mod tests {
             stack: Stack::Krabka,
             namespace: "default".into(),
             prometheus_url: None,
-            prometheus_request_timeout: crate::prom::DEFAULT_PROMETHEUS_REQUEST_TIMEOUT,
+            prometheus_request_timeout: DEFAULT_PROMETHEUS_REQUEST_TIMEOUT,
             producer_request_timeout: default_producer_request_timeout(),
             producer_final_drain_timeout: DEFAULT_PRODUCER_FINAL_DRAIN_TIMEOUT,
             sample_interval: DEFAULT_SAMPLE_INTERVAL,
@@ -1401,7 +1405,7 @@ mod tests {
     }
 
     fn scenario(rf: i16) -> Scenario {
-        crate::scenario::fixture::short_scenario(rf)
+        short_scenario(rf)
     }
 
     async fn producer_broker(

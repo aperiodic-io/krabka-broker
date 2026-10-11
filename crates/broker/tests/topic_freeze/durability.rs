@@ -11,7 +11,7 @@ use krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL;
 use crate::{
     control_plane::wait_for_registry_len,
     support,
-    wire::{CONTROL, accepted, refused},
+    wire::{CONTROL, accepted, frozen_topic_with_record, refused, wait_controlled_partitions},
 };
 
 /// A freeze survives a controller restart.
@@ -28,12 +28,12 @@ async fn a_freeze_survives_a_controller_restart() {
     {
         let (broker, client) = support::start_with_dir(dir.path()).await;
         let (_frozen, _control) =
-            crate::wire::frozen_topic_with_record(&broker, &client, "orders", "cutover").await;
+            frozen_topic_with_record(&broker, &client, "orders", "cutover").await;
         broker.shutdown().await;
     }
 
     let (broker, client) = support::start_with_dir(dir.path()).await;
-    crate::wire::wait_controlled_partitions(&broker, "orders").await;
+    wait_controlled_partitions(&broker, "orders").await;
 
     let entries = wait_for_registry_len(&client, 1).await;
     check!(entries[0].scope == "orders");

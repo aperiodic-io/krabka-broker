@@ -14,6 +14,8 @@ use krabka_remote_storage::{LocalTieredStorage, TopicIdPartition};
 use tempfile::TempDir;
 use uuid::Uuid;
 
+use crate::archive_fixture::archive_segment;
+
 /// A `LogConfig` that rolls the active segment on every append past the
 /// first, so [`build_archive`] can seal each fixture batch into its own
 /// segment.
@@ -81,7 +83,7 @@ pub(crate) fn build_archive(topic: &str, partition: i32, batches: &mut [RecordBa
     let archive_root = tempfile::tempdir().expect("archive root tempdir");
     let storage = LocalTieredStorage::new(archive_root.path());
     for export in sealed {
-        crate::archive_fixture::archive_segment(
+        archive_segment(
             &storage,
             TopicIdPartition::new(topic_id, topic, partition),
             Uuid::new_v4(),

@@ -129,7 +129,13 @@ mod tests {
     use krabka_units::prelude::{hours, mebibytes};
 
     use super::*;
-    use crate::break_glass::handlers::tests::{audit_channel, context, peer, principal};
+    use crate::{
+        break_glass::{
+            ALL_ACTIONS,
+            handlers::tests::{audit_channel, context, peer, principal},
+        },
+        broker::Broker,
+    };
 
     const PROPOSAL: Uuid = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
 
@@ -167,7 +173,7 @@ mod tests {
                 node_id: 1,
                 time_ms: 1,
             },
-            &crate::broker::Broker::audit_product(),
+            &Broker::audit_product(),
         );
         let probe = tempfile::tempdir().expect("probe tempdir");
         let one = {
@@ -190,7 +196,7 @@ mod tests {
             receiver,
             AuditWriterParams {
                 sink: Arc::new(FailingSink),
-                product: crate::broker::Broker::audit_product(),
+                product: Broker::audit_product(),
                 signer: None,
                 checkpoint_every_n: 0,
                 checkpoint_every: hours(1),
@@ -336,7 +342,7 @@ mod tests {
         let principal = principal("alice");
         let peer = peer();
 
-        for action in crate::break_glass::ALL_ACTIONS {
+        for action in ALL_ACTIONS {
             audit_transition(
                 &audit_log,
                 &gated_config(),

@@ -8,6 +8,7 @@ use krabka_protocol::owned::create_topics_request::CreatableTopic;
 use crate::{
     codes,
     config_keys::resolve_broker_witness,
+    cordoned_log_dirs::fully_cordoned_brokers,
     site_placement::{PlacementRng, SiteBrokerView, placement_failure_reason, stretch_replicas},
 };
 
@@ -269,7 +270,7 @@ pub(crate) fn automatic_placement_exclusions(
     image: &krabka_metadata::MetadataImage,
     unavailable: &std::collections::HashSet<u64>,
 ) -> std::collections::HashSet<u64> {
-    let mut excluded = crate::cordoned_log_dirs::fully_cordoned_brokers(image);
+    let mut excluded = fully_cordoned_brokers(image);
     excluded.extend(
         controlled_shutdown_brokers(image).filter(|node_id| !unavailable.contains(node_id)),
     );

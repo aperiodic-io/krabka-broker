@@ -32,7 +32,13 @@ use krabka_client_consumer::AutoOffsetReset;
 use krabka_client_producer::{Acks, Producer};
 use support::cluster_lock;
 
-use crate::support::client::connect_client;
+use crate::support::{
+    client::{connect_client, create_topic},
+    consumer_groups::{collect_routing_values, routing_consumer},
+    partitions::require_non_bootstrap_partitions,
+    producer::{ProducerRecordSetup, producer_record},
+    registered_cluster, shutdown_cluster,
+};
 
 mod support;
 
@@ -50,7 +56,7 @@ use crate::support::partitions::wait_for_local_replica;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn producer_routes_to_non_bootstrap_leaders() {
     let _g = cluster_lock().lock().await;
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
 
     // Bootstrap everything (admin, producer, consumer) at node 1.
     let bootstrap = cluster[0].1.listen_addr.to_string();
@@ -65,7 +71,7 @@ async fn producer_routes_to_non_bootstrap_leaders() {
     // Create the topic with replication_factor=1. Each partition lives on
     // exactly ONE broker; the bootstrap broker has NO replica for partitions
     // placed on the other two nodes.
-    crate::support::client::create_topic(&admin, topic, n_partitions).await;
+    create_topic(&admin, topic, n_partitions).await;
 
     // Wait for all partitions to materialize in the cluster metadata. Partition
     // records are raft-replicated into every broker's controller image, so once
@@ -105,11 +111,8 @@ async fn producer_routes_to_non_bootstrap_leaders() {
     // non-bootstrap broker, otherwise the test exercises no cross-broker
     // routing and is vacuous. With 6 partitions on 3 brokers at rf=1 this is
     // virtually guaranteed, but we verify explicitly.
-    let non_bootstrap_partitions = crate::support::partitions::require_non_bootstrap_partitions(
-        &cluster[0].0,
-        topic,
-        n_partitions,
-    );
+    let non_bootstrap_partitions =
+        require_non_bootstrap_partitions(&cluster[0].0, topic, n_partitions);
 
     // Build ONE idempotent producer bootstrapped at node 1. It must route each
     // partition's Produce to that partition's leader. For partitions led by
@@ -136,14 +139,12 @@ async fn producer_routes_to_non_bootstrap_leaders() {
     for p in 0..n_partitions {
         let v = format!("p{p}");
         let rx = producer
-            .enqueue(crate::support::producer::producer_record(
-                crate::support::producer::ProducerRecordSetup {
-                    topic: (topic).into(),
-                    partition: Some(krabka_ids::PartitionIndex(p)),
-                    value: Some(Bytes::from(v.clone())),
-                    ..Default::default()
-                },
-            ))
+            .enqueue(producer_record(ProducerRecordSetup {
+                topic: (topic).into(),
+                partition: Some(krabka_ids::PartitionIndex(p)),
+                value: Some(Bytes::from(v.clone())),
+                ..Default::default()
+            }))
             .await
             .expect("enqueue record");
         futs.push((p, rx));
@@ -165,7 +166,7 @@ async fn producer_routes_to_non_bootstrap_leaders() {
     // Durability check: consume every record back through a native consumer
     // (which routes per-leader). For partitions on non-bootstrap leaders the
     // records can only be present if the producer actually stored them there.
-    let mut consumer = crate::support::consumer_groups::routing_consumer(
+    let mut consumer = routing_consumer(
         &bootstrap,
         "routing-consumer-rf1",
         "routing-producer-grp-rf1",
@@ -177,13 +178,9 @@ async fn producer_routes_to_non_bootstrap_leaders() {
     // Track which partition each consumed record came from so we can prove the
     // non-bootstrap partitions are durably stored on their leaders.
     let mut seen_partitions: HashMap<i32, String> = HashMap::new();
-    let seen = crate::support::consumer_groups::collect_routing_values(
-        &mut consumer,
-        expected.len(),
-        |partition, value| {
-            seen_partitions.insert(partition, value);
-        },
-    )
+    let seen = collect_routing_values(&mut consumer, expected.len(), |partition, value| {
+        seen_partitions.insert(partition, value);
+    })
     .await;
     assert!(
         seen == expected,
@@ -206,5 +203,5 @@ async fn producer_routes_to_non_bootstrap_leaders() {
 
     consumer.close().await.unwrap();
     producer.close().await.unwrap();
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

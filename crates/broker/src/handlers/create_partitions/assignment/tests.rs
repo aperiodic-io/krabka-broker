@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use assert2::assert;
 
 use super::*;
-use crate::handlers::create_partitions::test_support::assn;
+use crate::handlers::{create_partitions::test_support::assn, test_support::sorted_replica_sites};
 
 /// The seeds that a test runs the placement with.
 const SEEDS: std::ops::Range<u64> = 0..64;
@@ -51,7 +51,7 @@ fn site_of(brokers: &[(u64, &str)], node_id: NodeId) -> String {
 /// The sites of one replica list, sorted, so the caller can compare the
 /// spread without depending on the replica order.
 fn sites_of(brokers: &[(u64, &str)], replicas: &[NodeId]) -> Vec<String> {
-    crate::handlers::test_support::sorted_replica_sites(replicas, |node| site_of(brokers, node))
+    sorted_replica_sites(replicas, |node| site_of(brokers, node))
 }
 
 /// The automatic placement of `new_partitions` partitions that `seed` gives.

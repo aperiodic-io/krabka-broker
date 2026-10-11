@@ -45,6 +45,7 @@ use crate::{
         },
         partition_materialization::PartitionMaterialization,
     },
+    quota::ControllerMutationQuota,
     site_placement::PlacementRng,
 };
 
@@ -279,7 +280,7 @@ context_handler! {
 fn admit_growth(
     topic: &krabka_protocol::owned::create_partitions_request::CreatePartitionsTopic,
     image: &krabka_metadata::MetadataImage,
-    quota: &mut crate::quota::ControllerMutationQuota,
+    quota: &mut ControllerMutationQuota,
 ) -> Result<krabka_metadata::TopicRecord, (i16, Option<String>)> {
     // Kafka's `UnknownTopicOrPartitionException()` carries no message.
     let topic_rec = image

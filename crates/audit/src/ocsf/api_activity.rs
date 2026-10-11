@@ -12,15 +12,15 @@ use super::{
 };
 use crate::{
     chain::to_hex,
-    event::{AuditEndpoint, AuditOutcome, AuditPrincipal, PrivilegedPhase},
+    event::{AuditEndpoint, AuditOutcome, AuditPrincipal, AuditResource, PrivilegedPhase},
 };
 
 pub(super) fn ocsf_admin_operation(
     outcome: AuditOutcome,
-    principal: &crate::event::AuditPrincipal,
-    source: &crate::event::AuditEndpoint,
+    principal: &AuditPrincipal,
+    source: &AuditEndpoint,
     operation: &str,
-    resources: &[crate::event::AuditResource],
+    resources: &[AuditResource],
     time_ms: i64,
     product: &ProductInfo,
 ) -> serde_json::Value {

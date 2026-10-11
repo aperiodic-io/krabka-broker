@@ -86,6 +86,7 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
+    use crate::test_support::{dispatch_wire, peer, principal, request_context};
 
     /// Serves a request as a principal that the default `AllowAllAuthorizer`
     /// allows.
@@ -244,11 +245,11 @@ mod tests {
             ),
         ];
 
-        let address = crate::test_support::peer();
+        let address = peer();
         for (grants, expected, next_producer_id) in cases {
-            let user = crate::test_support::principal(grants);
-            let ctx = crate::test_support::request_context(&user, &address, "allocate-test");
-            let answered: AllocateProducerIdsResponse = crate::test_support::dispatch_wire(
+            let user = principal(grants);
+            let ctx = request_context(&user, &address, "allocate-test");
+            let answered: AllocateProducerIdsResponse = dispatch_wire(
                 &broker,
                 krabka_protocol::owned::allocate_producer_ids_request::API_KEY,
                 0,

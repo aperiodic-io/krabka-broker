@@ -189,7 +189,7 @@ pub(super) fn handle_broker_scoped(
 ) {
     match broker_records(
         resource,
-        crate::config_keys::broker_dynamic::BrokerConfigContext {
+        BrokerConfigContext {
             image,
             serving,
             log_dirs,
@@ -210,11 +210,17 @@ mod tests {
     use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
 
     use super::*;
-    use crate::handlers::{
-        incremental_alter_configs::test_support::{
-            make_del_cfg, make_image_with_broker, make_resource, make_set_cfg,
+    use crate::{
+        cordoned_log_dirs::CORDONED_LOG_DIRS,
+        features::{ELR_VERSION, METADATA_VERSION},
+        handlers::{
+            incremental_alter_configs::test_support::{
+                make_del_cfg, make_image_with_broker, make_resource, make_set_cfg,
+            },
+            test_support::{BrokerConfigMutationSetup, broker_config_context},
         },
-        test_support::{BrokerConfigMutationSetup, broker_config_context},
+        test_support::broker_registration,
+        throttle::LEADER_THROTTLED_RATE_KEY,
     };
 
     const SERVING: NodeId = NodeId(1);
@@ -241,7 +247,7 @@ mod tests {
         image.apply(&MetadataRecord::V1BrokerRegistration(
             krabka_metadata::BrokerRegistrationRecord {
                 port: 9093,
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
+                ..broker_registration(krabka_raft::NodeId(2))
             },
         ));
         for (node, key, value) in configs {
@@ -250,7 +256,7 @@ mod tests {
         if elr {
             image.apply(&MetadataRecord::V1FeatureLevel(
                 krabka_metadata::FeatureLevelRecord {
-                    name: crate::features::ELR_VERSION.into(),
+                    name: ELR_VERSION.into(),
                     level: 1,
                 },
             ));
@@ -280,7 +286,7 @@ mod tests {
     #[test]
     fn broker_resources_follow_kafkas_dynamic_config_rules() {
         let cluster = krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID;
-        let rate = crate::throttle::LEADER_THROTTLED_RATE_KEY;
+        let rate = LEADER_THROTTLED_RATE_KEY;
         let min_isr = config_keys::MIN_INSYNC_REPLICAS;
         let cases: Vec<Case<'_>> = vec![
             (
@@ -533,7 +539,7 @@ mod tests {
     /// write the controller refuses below `metadata.version` `4.3-IV0`.
     #[test]
     fn cordoned_log_dirs_follows_kafkas_dynamic_config_rules() {
-        const KEY: &str = crate::cordoned_log_dirs::CORDONED_LOG_DIRS;
+        const KEY: &str = CORDONED_LOG_DIRS;
         let log_dirs = [
             std::path::PathBuf::from("/tmp/d1"),
             std::path::PathBuf::from("/tmp/d2"),
@@ -542,7 +548,7 @@ mod tests {
             let mut image = image_with(configs, false);
             image.apply(&MetadataRecord::V1FeatureLevel(
                 krabka_metadata::FeatureLevelRecord {
-                    name: crate::features::METADATA_VERSION.into(),
+                    name: METADATA_VERSION.into(),
                     level,
                 },
             ));

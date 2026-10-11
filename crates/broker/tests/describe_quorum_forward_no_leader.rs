@@ -13,7 +13,7 @@ mod support;
 
 use assert2::{assert, check};
 
-use crate::support::{client::connect_owned, start_n_node_with_retry};
+use crate::support::{client::connect_owned, shutdown_cluster, start_n_node_with_retry};
 
 /// Kafka's `NOT_LEADER_OR_FOLLOWER`.
 const NOT_LEADER_OR_FOLLOWER: i16 = 6;
@@ -77,5 +77,5 @@ async fn a_follower_whose_leader_just_died_answers_not_leader_instead_of_closing
          hint is dead, not a dropped connection; got {follower_resp:?}"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

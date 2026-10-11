@@ -11,7 +11,7 @@ use crate::{
     args::RestoreArgs,
     backend::open_archive,
     discover::{
-        inventory,
+        ArchiveInventory, PartitionInventory, inventory,
         test_support::{
             PartitionKey, SegmentSetup, SnapshotSegmentSetup, args_from, single_segment_archive,
             snapshot_segment, write_full_segment, write_snapshot,
@@ -153,7 +153,7 @@ fn authenticated_snapshot(
 async fn snapshot_inventory(
     archive: &std::path::Path,
     snapshot: &std::path::Path,
-) -> Result<crate::discover::ArchiveInventory, RestoreError> {
+) -> Result<ArchiveInventory, RestoreError> {
     let args = args_from(
         archive,
         &["--rlmm-snapshot", &snapshot.display().to_string()],
@@ -170,7 +170,7 @@ async fn expect_metadata_disagreement(archive: &std::path::Path, snapshot: &std:
 async fn sole_partition_inventory(
     archive: &std::path::Path,
     snapshot: &std::path::Path,
-) -> crate::discover::PartitionInventory {
+) -> PartitionInventory {
     let mut result = snapshot_inventory(archive, snapshot)
         .await
         .expect("inventory");

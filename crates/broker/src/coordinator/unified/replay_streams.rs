@@ -352,7 +352,10 @@ mod tests {
             StreamsGroupTargetAssignmentMetadataValue, StreamsGroupTopologyValue,
             StreamsMemberWireState,
         },
-        test_support::{replay_tombstone_constructor, streams_member},
+        test_support::{
+            AssignmentDeletionProtocol, AssignmentDeletionSetup, check_replay_cases,
+            deletion_replay_cases, replay_fixtures, replay_tombstone_constructor, streams_member,
+        },
     };
 
     /// What a log leaves: the group that replay holds, or the message of
@@ -475,12 +478,11 @@ mod tests {
         let tombstone = replay_tombstone_constructor(key, Record::Tombstone);
         // Kafka's `StreamsGroup.createGroupTombstoneRecords` for member `m`:
         // the topology tombstone comes after the group's, and is ignored.
-        let (group, kafka_deletion) = crate::coordinator::unified::test_support::replay_fixtures(
+        let (group, kafka_deletion) = replay_fixtures(
             StreamsGroupSeed::new_group,
             tombstone,
-            crate::coordinator::unified::test_support::AssignmentDeletionSetup {
-                protocol:
-                    crate::coordinator::unified::test_support::AssignmentDeletionProtocol::Streams,
+            AssignmentDeletionSetup {
+                protocol: AssignmentDeletionProtocol::Streams,
                 ..Default::default()
             },
         );
@@ -592,12 +594,9 @@ mod tests {
         ];
         rows.splice(
             3..3,
-            crate::coordinator::unified::test_support::deletion_replay_cases(
-                every_record(),
-                kafka_deletion(),
-            ),
+            deletion_replay_cases(every_record(), kafka_deletion()),
         );
-        crate::coordinator::unified::test_support::check_replay_cases(
+        check_replay_cases(
             &rows,
             replay,
             |coord| {

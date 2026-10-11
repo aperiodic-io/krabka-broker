@@ -9,12 +9,12 @@ use crate::{
     divergence::DivergenceReport,
     oracle::{ORACLE_IMAGE, OracleBroker, krabka_api_versions, start_krabka},
     parse::{advertised, parse_single_broker},
-    support::JvmListeners,
+    support::{JvmListeners, manifest_dir},
 };
 
 /// Where the checked-in report lives.
 fn expectation_path() -> PathBuf {
-    crate::support::manifest_dir()
+    manifest_dir()
         .join("tests")
         .join("fixtures")
         .join("api_versions")

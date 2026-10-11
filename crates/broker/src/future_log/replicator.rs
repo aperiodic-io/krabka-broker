@@ -23,6 +23,8 @@ use super::{
     catch_up::catch_up,
     truncation::{cut_future_log, truncate_to_current_epochs},
 };
+#[cfg(test)]
+use crate::test_support::PartitionRecordsSetup;
 use crate::{
     partition::{Partition, SwapOutcome, WriterMessage},
     partition_registry::PartitionRegistry,
@@ -206,8 +208,9 @@ mod tests {
         future_log::{
             canonicalize_or_self, resume_move,
             test_support::{
-                TestStampSource, append_epoch_batch, append_records, append_value_batch,
-                fixture_partition, test_policy,
+                FutureRecordSetup, FutureSourceSetup, RecordValueBytes, TestStampSource,
+                append_epoch_batch, append_records, append_value_batch, fixture_partition,
+                open_future_log, registered_source_fixture, test_policy,
             },
         },
         log_dir,
@@ -279,9 +282,9 @@ mod tests {
         let target = tempdir().unwrap();
         let stamp_source: Arc<dyn krabka_log::StampSource> =
             Arc::new(TestStampSource(AtomicU64::new(100)));
-        let source = crate::future_log::test_support::registered_source_fixture(
+        let source = registered_source_fixture(
             primary.path(),
-            crate::future_log::test_support::FutureSourceSetup {
+            FutureSourceSetup {
                 stamp_source: Some(stamp_source),
                 ..Default::default()
             },
@@ -303,10 +306,7 @@ mod tests {
                 == canonicalize_or_self(target.path())
         );
         assert!(source.partition.stamp_for_offset(Offset(0)) == Some(101));
-        append_records(
-            &source.partition,
-            crate::test_support::PartitionRecordsSetup::default(),
-        );
+        append_records(&source.partition, PartitionRecordsSetup::default());
         assert!(source.partition.stamp_for_offset(Offset(3)) == Some(102));
     }
 
@@ -320,8 +320,8 @@ mod tests {
         for _ in 0..4 {
             append_value_batch(
                 &part,
-                crate::future_log::test_support::FutureRecordSetup {
-                    value_size: crate::future_log::test_support::RecordValueBytes(400 * 1024),
+                FutureRecordSetup {
+                    value_size: RecordValueBytes(400 * 1024),
                     ..Default::default()
                 },
             );
@@ -351,13 +351,13 @@ mod tests {
         for _ in 0..5 {
             append_value_batch(
                 &part,
-                crate::future_log::test_support::FutureRecordSetup {
-                    value_size: crate::future_log::test_support::RecordValueBytes(10),
+                FutureRecordSetup {
+                    value_size: RecordValueBytes(10),
                     ..Default::default()
                 },
             );
         }
-        let (future_path, future_log) = crate::future_log::test_support::open_future_log(target);
+        let (future_path, future_log) = open_future_log(target);
         let policy = test_policy();
         while !catch_up(&part, &future_log, mebibytes(1), &policy.throttle)
             .unwrap()
@@ -423,10 +423,7 @@ mod tests {
         let fixture = truncated_copied_future().await;
         let part = fixture.part;
         for _ in 0..2 {
-            append_value_batch(
-                &part,
-                crate::future_log::test_support::FutureRecordSetup::default(),
-            );
+            append_value_batch(&part, FutureRecordSetup::default());
         }
         assert!(part.log_end_offset() == Offset(5));
         assert!(value_sizes(&part.log) == [10, 10, 10, 20, 20]);
@@ -455,7 +452,7 @@ mod tests {
         for _ in 0..2 {
             append_epoch_batch(
                 &part,
-                crate::future_log::test_support::FutureRecordSetup {
+                FutureRecordSetup {
                     leader_epoch: krabka_ids::LeaderEpoch(2),
                     ..Default::default()
                 },
@@ -484,10 +481,7 @@ mod tests {
         part.truncate_to(Offset(4)).await.unwrap();
         part.truncate_to(Offset(2)).await.unwrap();
         for _ in 0..3 {
-            append_value_batch(
-                &part,
-                crate::future_log::test_support::FutureRecordSetup::default(),
-            );
+            append_value_batch(&part, FutureRecordSetup::default());
         }
         assert!(part.log_end_offset() == Offset(5));
         let (ack, outcome) = oneshot::channel();

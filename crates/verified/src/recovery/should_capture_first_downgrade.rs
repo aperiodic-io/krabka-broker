@@ -1,6 +1,7 @@
 use creusot_std::prelude::*;
 
 use super::ReplayCursorDecision;
+use crate::restore::restore_batch_step;
 
 /// Validate one decoded replay batch and compute its exclusive next cursor.
 ///
@@ -38,7 +39,7 @@ pub fn replay_batch_cursor_decision(
     let Some((base, last_delta)) = batch else {
         return ReplayCursorDecision::Stop;
     };
-    let Some(next) = crate::restore::restore_batch_step(cursor, base, last_delta) else {
+    let Some(next) = restore_batch_step(cursor, base, last_delta) else {
         return ReplayCursorDecision::Stop;
     };
     if next > end {

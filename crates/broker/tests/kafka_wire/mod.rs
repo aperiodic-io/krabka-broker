@@ -46,7 +46,12 @@ use tokio::{
 };
 pub use topics::creatable_topic as topic;
 
-use crate::support::{topics, wire as frames};
+use crate::support::{
+    admin::{ElectionSetup, election_partition_errors, election_request},
+    produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, batch_request},
+    topics::{self, AssignedTopicSetup, ConfiguredTopicSetup, assigned_topic},
+    wire::{self as frames, ApiRequestSetup, CorrelationId},
+};
 
 /// The `ApiVersions` API key, whose response header is v0 at every version.
 const API_VERSIONS_KEY: i16 = 18;
@@ -235,7 +240,7 @@ pub async fn drive_produce_as_plain(
         &req,
         &PlainRequestSetup {
             authentication: authentication.clone(),
-            api: crate::support::wire::ApiRequestSetup {
+            api: ApiRequestSetup {
                 api_key: krabka_ids::ApiKey(0),
                 version: krabka_ids::ApiVersion(11),
             },
@@ -256,9 +261,9 @@ pub async fn create_topic_as_super_user(addr: SocketAddr, setup: AutomaticTopicS
         request_as_plain(
             addr,
             &request,
-            &crate::kafka_wire::PlainRequestSetup {
-                authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(setup.client_id),
-                api: crate::support::wire::ApiRequestSetup {
+            &PlainRequestSetup {
+                authentication: PlainAuthenticationSetup::admin(setup.client_id),
+                api: ApiRequestSetup {
                     api_key: krabka_ids::ApiKey(19),
                     version: krabka_ids::ApiVersion(7),
                 },
@@ -336,7 +341,7 @@ where
         )));
     }
 
-    let payload = crate::kafka_wire::plain_payload(user, password);
+    let payload = plain_payload(user, password);
     let auth_body = encode_named(
         &SaslAuthenticateRequest {
             auth_bytes: payload,
@@ -614,7 +619,7 @@ pub async fn sasl_scram_authenticate_on(
         Bytes::from(client_final),
         SaslAuthenticateSetup {
             client_id,
-            correlation: crate::support::wire::CorrelationId(4),
+            correlation: CorrelationId(4),
         },
     )
     .await?;
@@ -781,15 +786,15 @@ pub fn produce_records(
         })
         .collect();
 
-    crate::support::produce::batch_request(
+    batch_request(
         RecordBatch {
             last_offset_delta: i32::try_from(setup.count.0 - 1).unwrap(),
             records,
             ..Default::default()
         },
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: setup.topic,
-            timeout: crate::support::produce::ProduceTimeoutMillis(30_000),
+            timeout: ProduceTimeoutMillis(30_000),
             ..Default::default()
         },
     )
@@ -797,7 +802,7 @@ pub fn produce_records(
 
 /// Build an all-ISR Produce request with one record.
 pub fn single_record_produce_request(topic: &str, partition: i32, value: &[u8]) -> ProduceRequest {
-    crate::support::produce::batch_request(
+    batch_request(
         RecordBatch {
             last_offset_delta: 0,
             records: vec![Record {
@@ -807,10 +812,10 @@ pub fn single_record_produce_request(topic: &str, partition: i32, value: &[u8]) 
             }],
             ..Default::default()
         },
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: topic.to_string(),
             partition: krabka_ids::PartitionIndex(partition),
-            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            ..SinglePartitionProduceSetup::replicated()
         },
     )
 }
@@ -843,7 +848,7 @@ pub async fn elect_leaders_response(
 pub struct ElectionExchangeSetup<'a> {
     #[default("krabka-broker-test")]
     pub client_id: &'a str,
-    pub election: crate::support::admin::ElectionSetup,
+    pub election: ElectionSetup,
 }
 
 pub async fn elect_leaders(
@@ -851,7 +856,7 @@ pub async fn elect_leaders(
     setup: ElectionExchangeSetup<'_>,
 ) -> Vec<(i32, i16)> {
     let topic = setup.election.topic.clone();
-    let req = crate::support::admin::election_request(setup.election);
+    let req = election_request(setup.election);
     let resp = elect_leaders_response(stream, &req, setup.client_id).await;
 
     assert!(
@@ -860,7 +865,7 @@ pub async fn elect_leaders(
         resp.error_code
     );
 
-    crate::support::admin::election_partition_errors(resp, &topic)
+    election_partition_errors(resp, &topic)
 }
 
 pub async fn create_topic_plaintext(
@@ -877,7 +882,7 @@ pub async fn create_topic_plaintext(
 pub struct AutomaticTopicSetup<'a> {
     #[default("krabka-broker-test")]
     pub client_id: &'a str,
-    pub topic: crate::support::topics::ConfiguredTopicSetup,
+    pub topic: ConfiguredTopicSetup,
 }
 
 /// SASL/PLAIN topic creation defaults to the admin fixture's credentials.
@@ -889,7 +894,7 @@ pub struct SaslTopicSetup<'a> {
     pub user: &'a str,
     #[default(b"admin-secret")]
     pub password: &'a [u8],
-    pub topic: crate::support::topics::ConfiguredTopicSetup,
+    pub topic: ConfiguredTopicSetup,
 }
 
 pub async fn create_configured_topic_sasl(addr: SocketAddr, setup: SaslTopicSetup<'_>) {
@@ -940,7 +945,7 @@ pub async fn create_automatic_topic_plaintext(addr: SocketAddr, setup: Automatic
 pub struct AssignedTopicExchangeSetup<'a> {
     #[default("krabka-broker-test")]
     pub client_id: &'a str,
-    pub topic: crate::support::topics::AssignedTopicSetup,
+    pub topic: AssignedTopicSetup,
 }
 
 /// Create one partition with an explicit ordered assignment over plaintext.
@@ -948,12 +953,7 @@ pub async fn create_assigned_topic_plaintext(
     addr: SocketAddr,
     setup: AssignedTopicExchangeSetup<'_>,
 ) {
-    create_topic_on_fresh_connection(
-        addr,
-        setup.client_id,
-        crate::support::topics::assigned_topic(setup.topic),
-    )
-    .await;
+    create_topic_on_fresh_connection(addr, setup.client_id, assigned_topic(setup.topic)).await;
 }
 
 /// Elect named partitions over a new plaintext connection and retain the top-level oracle.

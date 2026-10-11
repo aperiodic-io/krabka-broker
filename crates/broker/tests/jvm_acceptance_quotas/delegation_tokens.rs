@@ -8,10 +8,10 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
+    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised, create_console_topic,
     docker_run_kafka_tool_with_image_and_mount, extract_jvm_kv, nc_check_connectivity,
-    start_three_broker_sasl_plaintext_jvm_cluster_with_delegation_tokens,
-    wait_three_brokers_registered, write_client_props,
+    produce_console, start_three_broker_sasl_plaintext_jvm_cluster_with_delegation_tokens,
+    wait_three_brokers_registered, write_client_props, write_plain_props,
 };
 
 /// JVM acceptance: KIP-48 delegation-token round-trip through the official
@@ -51,7 +51,7 @@ async fn jvm_kafka_delegation_tokens_end_to_end() {
     wait_three_brokers_registered(&h1, &h2, &h3, 3).await;
 
     // Admin properties: PLAIN, super-user — used for create/describe/expire.
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     let admin_mount = admin_props.mount_str();
 
     // 1. Create the token. `--max-life-time-period -1` ⇒ use the broker's
@@ -96,17 +96,11 @@ async fn jvm_kafka_delegation_tokens_end_to_end() {
     let token_mount = token_props.mount_str();
 
     // 3. Create the topic as admin so the token producer can target it.
-    crate::jvm_acceptance::create_console_topic(KAFKA_IMAGE_TXN, &[&admin_mount], TOPIC, 1, 1);
+    create_console_topic(KAFKA_IMAGE_TXN, &[&admin_mount], TOPIC, 1, 1);
 
     // 4. Produce one message authenticated as the delegation token.
 
-    let producer_out = crate::jvm_acceptance::produce_console(
-        KAFKA_IMAGE_TXN,
-        &[&token_mount],
-        TOPIC,
-        false,
-        b"hello\n",
-    );
+    let producer_out = produce_console(KAFKA_IMAGE_TXN, &[&token_mount], TOPIC, false, b"hello\n");
     assert!(
         producer_out.status.success(),
         "token producer failed: stdout={} stderr={}",

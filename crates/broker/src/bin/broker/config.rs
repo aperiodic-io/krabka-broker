@@ -144,6 +144,7 @@ mod tests {
     use clap::Parser as _;
 
     use super::*;
+    use crate::test_support::env_guard;
 
     #[test]
     fn parse_roles_arg_maps_strings() {
@@ -206,7 +207,7 @@ mod tests {
 
     #[test]
     fn the_controller_listener_defaults_to_port_9093_and_yields_to_its_flag() {
-        let _guard = crate::test_support::env_guard();
+        let _guard = env_guard();
         let cases: [(&str, &[&str], &str); 5] = [
             ("default", &[], "127.0.0.1:9093"),
             (

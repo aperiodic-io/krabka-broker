@@ -5,10 +5,10 @@ use assert2::{assert, check};
 use krabka_protocol::records::RecordBatch;
 
 use super::replay::{Replayed, apply_record, apply_tombstone};
-use crate::coordinator::persistence;
+use crate::coordinator::{GroupCoordinator, persistence};
 
 fn apply_member_tombstones<K: AsRef<[u8]>>(
-    coordinator: &std::sync::Arc<crate::coordinator::GroupCoordinator>,
+    coordinator: &std::sync::Arc<GroupCoordinator>,
     keys: [K; 2],
 ) {
     for bytes in keys {

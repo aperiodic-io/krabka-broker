@@ -20,7 +20,7 @@ pub fn start_two_dir_broker()
 -> impl std::future::Future<Output = (BrokerHandle, TempDir, TempDir, SocketAddr)> {
     let primary = tempfile::tempdir().unwrap();
     let extra = tempfile::tempdir().unwrap();
-    let cfg = crate::support::storage::two_dir_config(primary.path(), extra.path());
+    let cfg = two_dir_config(primary.path(), extra.path());
     Box::pin(async move {
         let handle = Broker::start(cfg).await.expect("broker start");
         let addr = handle.listen_addr();

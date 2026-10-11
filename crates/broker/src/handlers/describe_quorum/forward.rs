@@ -27,7 +27,7 @@ use krabka_protocol::{
     },
 };
 
-use crate::{broker::Broker, codes, envelope, error::BrokerError};
+use crate::{broker::Broker, codes, envelope, error::BrokerError, handlers::encode_response};
 
 /// `Envelope`'s api key (58, KIP-590): what `DescribeQuorum` forwarding sends
 /// on the wire, in place of the bare `DescribeQuorum` api key (55).
@@ -72,10 +72,7 @@ pub(super) fn unwrap_response(
         } else {
             codes::NOT_LEADER_OR_FOLLOWER
         };
-        return crate::handlers::encode_response(
-            &super::top_level_error_response(error_code),
-            version,
-        );
+        return encode_response(&super::top_level_error_response(error_code), version);
     }
 
     // A served envelope's `response_data` is the embedded `ResponseHeader`

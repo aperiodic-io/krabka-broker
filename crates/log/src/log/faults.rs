@@ -27,10 +27,10 @@ use super::Log;
 use crate::{
     config::LogConfig,
     error::LogError,
-    io::{IoTarget, LogIo},
+    io::{IoTarget, LogIo, file_io},
     log::test_support::{
         append_keyed_samples, compacting_segments, compaction_ctx, sample_batch,
-        sample_batch_with_epoch, tiny_segments, write_with_budget,
+        sample_batch_with_epoch, synced_sample_log, tiny_segments, write_with_budget,
     },
     name,
 };
@@ -166,7 +166,7 @@ const PREFIXES: [(&str, usize); 2] = [("outright StorageFull", 0), ("after a sho
 
 fn durable_sample_log(config: &LogConfig) -> (tempfile::TempDir, Log, Offset) {
     let dir = tempdir().unwrap();
-    let log = crate::log::test_support::synced_sample_log(dir.path(), config.clone(), 1, 2);
+    let log = synced_sample_log(dir.path(), config.clone(), 1, 2);
     let durable = log.log_end_offset();
     (dir, log, durable)
 }
@@ -362,7 +362,7 @@ fn a_failed_segment_deletion_keeps_the_bytes_accounted_for_and_the_next_tick_ret
             file_delete_delay: krabka_units::millis(0),
             ..tiny_segments()
         };
-        let mut log = crate::log::test_support::synced_sample_log(dir.path(), config, 4, 2);
+        let mut log = synced_sample_log(dir.path(), config, 4, 2);
 
         let fault = FailSegmentDeletionOnce::new(
             &format!("{}.log", name::format_base_offset(0)),
@@ -382,7 +382,7 @@ fn a_failed_segment_deletion_keeps_the_bytes_accounted_for_and_the_next_tick_ret
         );
 
         // The fault fires once, so the retry is what a healthy disk gives.
-        log.test_set_io(crate::io::file_io());
+        log.test_set_io(file_io());
         log.tick(SystemTime::now(), krabka_ids::Offset(i64::MAX))
             .expect("the retry finishes the deletion");
         check!(
@@ -412,7 +412,7 @@ fn a_failed_segment_deletion_keeps_the_bytes_accounted_for_and_the_next_tick_ret
 fn log_open_reclaims_what_an_interrupted_segment_deletion_left_behind() {
     let dir = tempdir().unwrap();
     let config = tiny_segments();
-    let log = crate::log::test_support::synced_sample_log(dir.path(), config.clone(), 4, 2);
+    let log = synced_sample_log(dir.path(), config.clone(), 4, 2);
     let end = log.log_end_offset();
     drop(log);
 

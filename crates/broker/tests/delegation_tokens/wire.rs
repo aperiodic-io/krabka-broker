@@ -20,10 +20,11 @@ use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
 use crate::{
-    kafka_wire,
     kafka_wire::{
-        ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, SaslAuthenticateSetup,
+        self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, SaslAuthenticateSetup,
+        exchange,
     },
+    rpc::send_create_delegation_token,
     support::wire::CorrelationId as WireCorrelationId,
 };
 
@@ -74,7 +75,7 @@ pub(crate) async fn sasl_scram_sha256_authenticate(
 ) -> Result<TcpStream, io::Error> {
     let mut stream = TcpStream::connect(addr).await?;
 
-    let _av_resp: ApiVersionsResponse = crate::kafka_wire::exchange(
+    let _av_resp: ApiVersionsResponse = exchange(
         &mut stream,
         &ApiVersionsRequest::default(),
         WireExchangeSetup {
@@ -84,7 +85,7 @@ pub(crate) async fn sasl_scram_sha256_authenticate(
     )
     .await?;
 
-    let sh_resp: SaslHandshakeResponse = crate::kafka_wire::exchange(
+    let sh_resp: SaslHandshakeResponse = exchange(
         &mut stream,
         &SaslHandshakeRequest {
             mechanism: "SCRAM-SHA-256".to_string(),
@@ -131,7 +132,7 @@ pub(crate) async fn sasl_scram_sha256_authenticate(
         bytes::Bytes::from(client_final),
         SaslAuthenticateSetup {
             client_id: CLIENT_ID,
-            correlation: crate::support::wire::CorrelationId(4),
+            correlation: WireCorrelationId(4),
         },
     )
     .await?;
@@ -217,7 +218,7 @@ pub(crate) async fn token_session(
     let mut session = sasl_scram_sha256_authenticate(addr, token_id, &password)
         .await
         .map_err(|e| format!("token SCRAM auth: {e}"))?;
-    let create = crate::rpc::send_create_delegation_token(
+    let create = send_create_delegation_token(
         &mut session,
         200,
         &krabka_protocol::owned::create_delegation_token_request::CreateDelegationTokenRequest {

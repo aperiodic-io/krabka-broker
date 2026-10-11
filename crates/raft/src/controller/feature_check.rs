@@ -38,7 +38,7 @@
 
 use krabka_metadata::MetadataImage;
 
-use crate::config::UnstableFeatureVersions;
+use crate::{config::UnstableFeatureVersions, supported_feature_range};
 
 /// Kafka's `VersionRange.toString()`: a single level as itself, and a span as
 /// `min-max`.
@@ -65,7 +65,7 @@ pub(super) fn unsupported_feature_level(
         // `QuorumFeatures.localSupportedFeature`: a feature this controller
         // does not know is `DISABLED`, supported at level 0 only.
         let (min, max) = krabka_metadata::feature(name).map_or(UNKNOWN_FEATURE_RANGE, |feature| {
-            crate::supported_feature_range(feature, unstable)
+            supported_feature_range(feature, unstable)
         });
         (!(min..=max).contains(level)).then(|| {
             format!(

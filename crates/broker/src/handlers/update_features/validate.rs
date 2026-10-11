@@ -22,7 +22,9 @@ use super::{
     preconditions::{LocalController, dependency_error, reason_not_supported},
     upgrade_type::update_type,
 };
-use crate::codes;
+use crate::{
+    codes, config_keys::MIN_INSYNC_REPLICAS, elr::clear_published_elr, features::ELR_VERSION,
+};
 
 /// Kafka's `MetadataVersion.MINIMUM_VERSION` name, which
 /// `Feature.validateVersion` quotes.
@@ -117,7 +119,7 @@ pub(super) fn plan_updates(
     };
     for update in updates {
         plan_update(update, image, local_controller, &proposed, &mut plan)?;
-        if update.feature == crate::features::ELR_VERSION && update.max_version_level > 0 {
+        if update.feature == ELR_VERSION && update.max_version_level > 0 {
             plan.enables_elr = true;
         }
     }
@@ -209,8 +211,8 @@ fn plan_update(
             // stops between them and the feature record has already forgotten
             // the memberships rather than kept them under a feature that is
             // still on.
-            if name == crate::features::ELR_VERSION && level == 0 && current >= 1 {
-                plan.records.extend(crate::elr::clear_published_elr(image));
+            if name == ELR_VERSION && level == 0 && current >= 1 {
+                plan.records.extend(clear_published_elr(image));
             }
             plan.records
                 .push(MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
@@ -256,7 +258,7 @@ pub(super) fn elr_safety_records(
     image: &krabka_metadata::MetadataImage,
     static_min_insync_replicas: i32,
 ) -> Vec<MetadataRecord> {
-    let key = crate::config_keys::MIN_INSYNC_REPLICAS;
+    let key = MIN_INSYNC_REPLICAS;
     let mut records = Vec::new();
     if !image
         .default_broker_config()

@@ -7,9 +7,12 @@
 //! asserts that the second boot carried the sequence numbers on rather than
 //! resetting them to zero.
 
-use crate::{
-    support,
-    support::topics::{creatable_topic, create_topic_request},
+use crate::support::{
+    self,
+    topics::{
+        ConfiguredTopicSetup, CreateTopicSetup, configured_topic_request, creatable_topic,
+        create_topic_request,
+    },
 };
 
 /// Verifies the checkpoint path. The broker is configured with an audit
@@ -35,7 +38,7 @@ async fn signed_checkpoints_appear_on_audit_topic() {
     let _ = p
         .client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("cp-topic").into(),
                 ..Default::default()
             },
@@ -75,7 +78,7 @@ async fn audit_chain_continues_across_restart() {
     {
         let (broker, _client) = boot_with_audited_topic(
             dir.path(),
-            crate::support::topics::CreateTopicSetup {
+            CreateTopicSetup {
                 topic: "r1",
                 ..Default::default()
             },
@@ -87,7 +90,7 @@ async fn audit_chain_continues_across_restart() {
     // Second boot on the SAME data dir: more events.
     let (broker, client) = boot_with_audited_topic(
         dir.path(),
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "r2",
             ..Default::default()
         },
@@ -110,14 +113,11 @@ async fn audit_chain_continues_across_restart() {
 /// Await the exact topic-creation audit event on each boot before shutdown or consumption.
 async fn boot_with_audited_topic(
     directory: &std::path::Path,
-    setup: crate::support::topics::CreateTopicSetup<'_>,
+    setup: CreateTopicSetup<'_>,
 ) -> (krabka_broker::BrokerHandle, krabka_client_core::Client) {
     let (broker, client) = support::start_with_dir(directory).await;
     let audit_before = broker.metrics().audit_events.get();
-    let _ = client
-        .send(crate::support::topics::configured_topic_request(setup))
-        .await
-        .unwrap();
+    let _ = client.send(configured_topic_request(setup)).await.unwrap();
     broker
         .wait_for_metrics("audit event written", |metrics| {
             metrics.audit_events.get() > audit_before

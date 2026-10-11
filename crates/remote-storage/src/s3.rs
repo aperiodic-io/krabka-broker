@@ -124,6 +124,7 @@ mod tests {
         S3RemoteStorage, size_from_usize,
         test_support::{rsm, worm_config},
     };
+    use crate::s3::test_support::WormAccess;
 
     /// `usize::MAX` has no `u64` image on a hypothetical 128-bit target. The
     /// lift saturates and does not wrap to a tiny chunk size.
@@ -144,7 +145,7 @@ mod tests {
     #[test]
     fn worm_debug_reports_mode_without_leaking_the_key() {
         let keys = TempDir::new().unwrap();
-        let cfg = worm_config(keys.path(), crate::s3::test_support::WormAccess::WriteOnly);
+        let cfg = worm_config(keys.path(), WormAccess::WriteOnly);
         let key_path = cfg.signing_key_path.clone().unwrap();
         let store = S3RemoteStorage::with_store(Arc::new(InMemory::new()), None)
             .with_worm_unchecked(&cfg)

@@ -11,7 +11,8 @@
 use assert2::{assert, check};
 
 use crate::support::classic::{
-    classic_join_request, classic_sync_request, join_protocol, sync_assignment,
+    ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
+    classic_sync_request, join_protocol, sync_assignment,
 };
 mod support;
 
@@ -31,10 +32,10 @@ async fn start() -> support::InProcess {
     p
 }
 
-fn join_setup() -> crate::support::classic::ClassicJoinSetup {
-    crate::support::classic::ClassicJoinSetup {
+fn join_setup() -> ClassicJoinSetup {
+    ClassicJoinSetup {
         group_id: GROUP.into(),
-        timeouts: crate::support::classic::ClassicTimeouts {
+        timeouts: ClassicTimeouts {
             rebalance: krabka_units::millis(1_500),
             ..Default::default()
         },
@@ -60,12 +61,10 @@ async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
     // Step 2: re-join with the assigned member_id, falls out as leader.
     let r2 = p
         .client
-        .send(classic_join_request(
-            crate::support::classic::ClassicJoinSetup {
-                member_id: mid.clone(),
-                ..join_setup()
-            },
-        ))
+        .send(classic_join_request(ClassicJoinSetup {
+            member_id: mid.clone(),
+            ..join_setup()
+        }))
         .await
         .expect("JoinGroup");
     check!(r2.error_code == 0, "JoinGroup must succeed: {r2:?}");
@@ -98,19 +97,17 @@ async fn sync_group_response_carries_protocol_type_and_name_on_success() {
 
     let r3 = p
         .client
-        .send(classic_sync_request(
-            crate::support::classic::ClassicSyncSetup {
-                group_id: (GROUP).into(),
-                generation_id: crate::support::classic::GenerationId(generation),
-                member_id: mid.clone(),
-                protocol_type: Some(PROTOCOL_TYPE.into()),
-                protocol_name: Some(PROTOCOL_NAME.into()),
-                assignments: vec![sync_assignment(
-                    mid.clone(),
-                    bytes::Bytes::from_static(b"asgn"),
-                )],
-            },
-        ))
+        .send(classic_sync_request(ClassicSyncSetup {
+            group_id: (GROUP).into(),
+            generation_id: GenerationId(generation),
+            member_id: mid.clone(),
+            protocol_type: Some(PROTOCOL_TYPE.into()),
+            protocol_name: Some(PROTOCOL_NAME.into()),
+            assignments: vec![sync_assignment(
+                mid.clone(),
+                bytes::Bytes::from_static(b"asgn"),
+            )],
+        }))
         .await
         .expect("SyncGroup");
     check!(r3.error_code == 0, "SyncGroup must succeed: {r3:?}");
@@ -140,13 +137,11 @@ async fn join_group_inconsistent_protocol_error_carries_no_protocol_fields() {
     // fields stay null, as in every `JoinGroup` error Kafka sends.
     let r = p
         .client
-        .send(classic_join_request(
-            crate::support::classic::ClassicJoinSetup {
-                protocol_type: ("stream").into(),
-                protocols: vec![join_protocol("doesnt-matter", bytes::Bytes::new())],
-                ..join_setup()
-            },
-        ))
+        .send(classic_join_request(ClassicJoinSetup {
+            protocol_type: ("stream").into(),
+            protocols: vec![join_protocol("doesnt-matter", bytes::Bytes::new())],
+            ..join_setup()
+        }))
         .await
         .expect("JoinGroup");
     assert!(
@@ -171,16 +166,14 @@ async fn sync_group_error_carries_no_protocol_fields() {
 
     let r = p
         .client
-        .send(classic_sync_request(
-            crate::support::classic::ClassicSyncSetup {
-                group_id: (GROUP).into(),
-                generation_id: crate::support::classic::GenerationId(generation),
-                member_id: ("ghost-member").into(),
-                protocol_type: Some(PROTOCOL_TYPE.into()),
-                protocol_name: Some(PROTOCOL_NAME.into()),
-                ..Default::default()
-            },
-        ))
+        .send(classic_sync_request(ClassicSyncSetup {
+            group_id: (GROUP).into(),
+            generation_id: GenerationId(generation),
+            member_id: ("ghost-member").into(),
+            protocol_type: Some(PROTOCOL_TYPE.into()),
+            protocol_name: Some(PROTOCOL_NAME.into()),
+            ..Default::default()
+        }))
         .await
         .expect("SyncGroup");
     check!(

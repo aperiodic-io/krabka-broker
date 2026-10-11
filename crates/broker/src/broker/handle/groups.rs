@@ -2,15 +2,22 @@
 //! consumer, classic, and streams group views, the group-type marker, and the
 //! awaiters that block until an actor settles at an expected membership.
 
-use crate::broker::{BrokerHandle, TEST_AWAITER_TIMEOUT};
+#[cfg(any(test, feature = "test-helpers"))]
+use crate::coordinator::unified::{
+    GroupType,
+    actor::{ClassicView, DescribeView},
+    streams::actor::StreamsDescribeView,
+};
+use crate::{
+    broker::{BrokerHandle, TEST_AWAITER_TIMEOUT},
+    coordinator::unified::actor::GroupActorMessage,
+};
 
 impl BrokerHandle {
     async fn inspect_group_actor<T>(
         &self,
         group_id: &str,
-        message: impl FnOnce(
-            tokio::sync::oneshot::Sender<T>,
-        ) -> crate::coordinator::unified::actor::GroupActorMessage,
+        message: impl FnOnce(tokio::sync::oneshot::Sender<T>) -> GroupActorMessage,
     ) -> Option<T> {
         let handle = self
             .broker
@@ -30,12 +37,11 @@ impl BrokerHandle {
     /// `None` if the group has no live actor.
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
-    pub async fn group_describe_for_test(
-        &self,
-        group_id: &str,
-    ) -> Option<crate::coordinator::unified::actor::DescribeView> {
+    pub async fn group_describe_for_test(&self, group_id: &str) -> Option<DescribeView> {
         self.inspect_group_actor(group_id, |reply| {
-            crate::coordinator::unified::actor::GroupActorMessage::Describe { reply }
+            use crate::coordinator::unified::actor::GroupActorMessage;
+
+            GroupActorMessage::Describe { reply }
         })
         .await
     }
@@ -68,12 +74,11 @@ impl BrokerHandle {
     /// Returns `None` when no actor exists or the actor is consumer-kind (not classic).
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
-    pub async fn classic_group_inspect_for_test(
-        &self,
-        group_id: &str,
-    ) -> Option<crate::coordinator::unified::actor::ClassicView> {
+    pub async fn classic_group_inspect_for_test(&self, group_id: &str) -> Option<ClassicView> {
         self.inspect_group_actor(group_id, |reply| {
-            crate::coordinator::unified::actor::GroupActorMessage::ClassicInspect { reply }
+            use crate::coordinator::unified::actor::GroupActorMessage;
+
+            GroupActorMessage::ClassicInspect { reply }
         })
         .await
     }
@@ -109,7 +114,9 @@ impl BrokerHandle {
     pub async fn streams_group_describe_for_test(
         &self,
         group_id: &str,
-    ) -> Option<crate::coordinator::unified::streams::actor::StreamsDescribeView> {
+    ) -> Option<StreamsDescribeView> {
+        use crate::coordinator::unified::streams::actor::StreamsGroupActorMessage;
+
         let handle = self
             .broker
             .group_coordinator
@@ -120,11 +127,7 @@ impl BrokerHandle {
         let (tx, rx) = tokio::sync::oneshot::channel();
         handle
             .tx
-            .send(
-                crate::coordinator::unified::streams::actor::StreamsGroupActorMessage::Describe {
-                    reply: tx,
-                },
-            )
+            .send(StreamsGroupActorMessage::Describe { reply: tx })
             .await
             .ok()?;
         rx.await.ok()
@@ -178,10 +181,7 @@ impl BrokerHandle {
     /// `StreamsGroupHeartbeat` on a drained classic group).
     #[cfg(any(test, feature = "test-helpers"))]
     #[must_use]
-    pub fn group_type_for_test(
-        &self,
-        group_id: &str,
-    ) -> Option<crate::coordinator::unified::GroupType> {
+    pub fn group_type_for_test(&self, group_id: &str) -> Option<GroupType> {
         self.broker.group_coordinator.group_type(group_id)
     }
 
@@ -191,11 +191,7 @@ impl BrokerHandle {
     /// classic/streams type marker asynchronously.
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
-    pub async fn wait_until_group_type(
-        &self,
-        group_id: &str,
-        expected: crate::coordinator::unified::GroupType,
-    ) {
+    pub async fn wait_until_group_type(&self, group_id: &str, expected: GroupType) {
         let settled =
             super::await_until(|| async { self.group_type_for_test(group_id) == Some(expected) })
                 .await;

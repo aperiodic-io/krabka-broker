@@ -45,6 +45,8 @@ use krabka_protocol::krabka::barrier::{
     AlterBarrierGroupsRequest, AlterableBarrierGroup, CUT_STATUS_COMPLETE, TriggerBarrierRequest,
 };
 
+use crate::support::jvm_parse_offset;
+
 const TOPIC: &str = "barrier-invisibility";
 const BARRIER_GROUP: &str = "invisibility-cut";
 const PARTITIONS: i32 = 3;
@@ -228,7 +230,7 @@ fn jvm_log_end_offset(partition: i32) -> i64 {
         .unwrap_or_else(|| {
             panic!("kafka-get-offsets printed no row for partition {partition}: {stdout}")
         });
-    crate::support::jvm_parse_offset(line)
+    jvm_parse_offset(line)
 }
 
 /// A JVM consumer reads across barrier markers and never sees one.

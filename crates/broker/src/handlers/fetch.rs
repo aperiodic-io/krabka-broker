@@ -70,14 +70,20 @@ use self::{
 };
 pub(crate) use self::{plan::PendingRead, read::LiveOffsets};
 use crate::{
-    broker::Broker, error::BrokerError, fetch_session::INVALID_SESSION_ID,
+    broker::Broker,
+    codes::CLUSTER_AUTHORIZATION_FAILED,
+    error::BrokerError,
+    fetch_session::INVALID_SESSION_ID,
+    handlers::{ApiKeyCode, RequestContext},
+    metrics::RequestPhases,
     network::fetch_writer::records_to_serve,
+    wal::quorum::wire::{KIP_595_FETCH_VERSION, decode_fetch_request},
 };
 
 /// This handler's own wire api key, for the `api_key` label the request-phase
 /// and throttle histograms carry. The dispatcher labels the total latency from
 /// the frame it parsed; the handler labels its phases from the same number.
-const FETCH_API_KEY: crate::handlers::ApiKeyCode = krabka_protocol::api_key::ApiKey::Fetch as i16;
+const FETCH_API_KEY: ApiKeyCode = krabka_protocol::api_key::ApiKey::Fetch as i16;
 
 /// First `Fetch` response version that carries the KIP-951 `CurrentLeader`
 /// hint and its `NodeEndpoints` companion. `NodeEndpoints` is a tagged field
@@ -128,7 +134,7 @@ pub(crate) async fn handle(
     version: i16,
     _correlation_id: i32,
     req_bytes: &[u8],
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> Result<(FetchResponse, i16), BrokerError> {
     // KIP-124 request_percentage meters server-side handler time; capture the
     // start so the request throttle can be combined with the consumer
@@ -142,7 +148,7 @@ pub(crate) async fn handle(
     // another; the rejection arms below answer before any read happens and
     // observe nothing, so the gap to `request_duration_seconds` is exactly the
     // fetches this handler refused.
-    let phases = crate::metrics::RequestPhases::default();
+    let phases = RequestPhases::default();
     let mut cur: &[u8] = req_bytes;
     let req: FetchRequest = if version < 4 {
         krabka_protocol::kafka_3_6_2::owned::fetch_request::FetchRequest::decode(&mut cur, version)?
@@ -173,9 +179,7 @@ pub(crate) async fn handle(
         read_committed,
     } = preparation;
 
-    if version >= crate::wal::quorum::wire::KIP_595_FETCH_VERSION
-        && crate::wal::quorum::wire::decode_fetch_request(&req).is_some()
-    {
+    if version >= KIP_595_FETCH_VERSION && decode_fetch_request(&req).is_some() {
         // A KIP-595 fetch always names a replica, so `prepare_fetch` has
         // already checked `ClusterAction` for it.
         if authorization.refuses_every_row() {
@@ -331,7 +335,7 @@ pub(crate) async fn handle(
 /// the quota: the routed KIP-595 answer, which is charged no client quota. It
 /// applies no throttle, so the throttle phase takes an explicit zero and its
 /// `_count` stays equal to the local and remote counts for this api.
-fn observe_unthrottled_fetch_phases(broker: &Broker, phases: &crate::metrics::RequestPhases) {
+fn observe_unthrottled_fetch_phases(broker: &Broker, phases: &RequestPhases) {
     broker.metrics.observe_request_phases(FETCH_API_KEY, phases);
     broker
         .metrics
@@ -340,7 +344,7 @@ fn observe_unthrottled_fetch_phases(broker: &Broker, phases: &crate::metrics::Re
 
 fn cluster_authorization_failed() -> FetchResponse {
     FetchResponse {
-        error_code: crate::codes::CLUSTER_AUTHORIZATION_FAILED,
+        error_code: CLUSTER_AUTHORIZATION_FAILED,
         session_id: INVALID_SESSION_ID,
         ..Default::default()
     }
@@ -445,7 +449,7 @@ pub(crate) fn compute_visibility_window(
 pub(crate) fn encode_fetch_response(
     mut resp: FetchResponse,
     version: i16,
-) -> Result<BytesMut, crate::error::BrokerError> {
+) -> Result<BytesMut, BrokerError> {
     serve_empty_rather_than_null_records(&mut resp);
     if version < 4 {
         let legacy: krabka_protocol::kafka_3_6_2::owned::fetch_response::FetchResponse =
@@ -543,10 +547,12 @@ mod tests {
     }
 
     use crate::{
+        BrokerHandle,
         authorizer::AuthorizationResult,
         broker::Broker,
+        config::BrokerConfig,
         handlers::RequestContext,
-        test_support::peer,
+        test_support::{peer, sasl_principal},
         wal::quorum::{
             engine::WalShardEngine,
             registry::ShardId,
@@ -568,13 +574,10 @@ mod tests {
     /// Start a broker holding one routable diskless-WAL shard, so a KIP-595
     /// Fetch addressed at it takes the routed branch of [`super::handle`].
     /// Returns the handle and the shard's topic id.
-    async fn broker_with_routable_wal_shard(
-        dir: &std::path::Path,
-    ) -> (crate::BrokerHandle, uuid::Uuid) {
-        let broker_handle =
-            Broker::start(crate::config::BrokerConfig::for_tests(dir.to_path_buf()))
-                .await
-                .expect("start broker");
+    async fn broker_with_routable_wal_shard(dir: &std::path::Path) -> (BrokerHandle, uuid::Uuid) {
+        let broker_handle = Broker::start(BrokerConfig::for_tests(dir.to_path_buf()))
+            .await
+            .expect("start broker");
         let broker = broker_handle.broker_arc_for_test();
         let source = std::sync::Arc::new(Mutex::new(
             Log::open(dir.join("wal-source"), LogConfig::default()).expect("open log"),
@@ -672,7 +675,7 @@ mod tests {
 
     /// The peer principal a routed WAL fetch authenticates as.
     fn wal_peer_principal() -> Principal {
-        crate::test_support::sasl_principal("broker-2")
+        sasl_principal("broker-2")
     }
 
     #[tokio::test]
@@ -762,7 +765,7 @@ mod tests {
     #[tokio::test]
     async fn wal_fetch_requires_cluster_action() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = crate::config::BrokerConfig::for_tests(dir.path().to_path_buf());
+        let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
         config.authorizer = std::sync::Arc::new(TopicReadOnly);
         let broker_handle = Broker::start(config).await.expect("start broker");
         let broker = broker_handle.broker_arc_for_test();

@@ -328,8 +328,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        config_keys::{DELIVERY_MODE_IMMEDIATE, MIN_INSYNC_REPLICAS},
-        handlers::produce::test_support::{image_with_topic, set_min_isr},
+        config_keys::{
+            COMPRESSION_TYPE, DELIVERY_MODE_IMMEDIATE, MIN_INSYNC_REPLICAS,
+            effective_min_insync_replicas,
+        },
+        handlers::produce::test_support::{image_with_overrides, image_with_topic, set_min_isr},
     };
 
     /// The node the gate runs on in these tests.
@@ -469,7 +472,7 @@ mod tests {
             let img = min_isr_image(topic_override, cluster_default);
 
             let gate = topic_min_insync_replicas(&img, NODE, "t", broker_default);
-            let controller = crate::config_keys::effective_min_insync_replicas(&img, "t", 3);
+            let controller = effective_min_insync_replicas(&img, "t", 3);
 
             assert!(gate == expected, "{label}: got {gate}");
             assert!(
@@ -555,10 +558,7 @@ mod tests {
         for (config_value, want) in cases {
             let mut img = image_with_topic("t", &[1]);
             let mut overrides = BTreeMap::new();
-            overrides.insert(
-                crate::config_keys::COMPRESSION_TYPE.into(),
-                config_value.into(),
-            );
+            overrides.insert(COMPRESSION_TYPE.into(), config_value.into());
             img.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
                 topic: "t".into(),
                 overrides,
@@ -722,7 +722,7 @@ mod tests {
             ),
         ];
         for (label, overrides, want) in cases {
-            let img = crate::handlers::produce::test_support::image_with_overrides("t", &overrides);
+            let img = image_with_overrides("t", &overrides);
             check!(
                 resolve_timestamp_policy(&img, "t", kafka_stock_broker_default()) == want,
                 "{label}"
@@ -763,7 +763,7 @@ mod tests {
             ),
         ];
         for (label, overrides, want) in cases {
-            let img = crate::handlers::produce::test_support::image_with_overrides("t", &overrides);
+            let img = image_with_overrides("t", &overrides);
             let resolved = resolve_timestamp_policy(&img, "t", kafka_stock_broker_default());
             check!(resolved == want, "{label}");
             check!(
@@ -822,7 +822,7 @@ mod tests {
             ),
         ];
         for (label, overrides, want) in cases {
-            let img = crate::handlers::produce::test_support::image_with_overrides("t", &overrides);
+            let img = image_with_overrides("t", &overrides);
             check!(
                 resolve_timestamp_policy(&img, "t", strict_broker_default) == want,
                 "{label}"

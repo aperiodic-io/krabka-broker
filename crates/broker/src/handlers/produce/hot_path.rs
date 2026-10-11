@@ -24,7 +24,7 @@ use super::{
     framing::PartitionPayload,
     prepare::{DecodeEnv, owned_fallback, prepare_batch},
 };
-use crate::{codes, metrics::BrokerMetrics, partition::ProduceData};
+use crate::{codes, error::BrokerError, metrics::BrokerMetrics, partition::ProduceData};
 
 /// The path a records field took through [`prepare_batch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +138,7 @@ fn append_produce_data(data: ProduceData, log: &mut Log) -> Result<ProducePath, 
             unreachable!("build_produce_data yields only Verbatim and Owned")
         }
     };
-    result.map_err(|error| codes::from_broker_error(&crate::error::BrokerError::from(error)))
+    result.map_err(|error| codes::from_broker_error(&BrokerError::from(error)))
 }
 
 #[cfg(test)]

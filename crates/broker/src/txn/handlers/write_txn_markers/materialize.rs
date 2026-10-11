@@ -19,6 +19,7 @@ use super::offsets::{pending_offset_entries, resolve_pending_offsets};
 use crate::{
     coordinator::{bootstrap::OFFSETS_TOPIC, unified::GroupCoordinator},
     error::BrokerError,
+    partition::Partition,
     txn::marker::{MarkerType, build_marker_batch},
 };
 
@@ -51,7 +52,7 @@ use crate::{
 /// The caller holds the transition read guard of the partition, so the leader
 /// epoch that the marker carries is the epoch the caller admitted it under.
 pub(super) async fn append_marker_and_materialize(
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     group_coordinator: Option<&Arc<GroupCoordinator>>,
     topic: &str,
     marker: MarkerAppend,
@@ -230,7 +231,7 @@ pub(super) async fn append_marker_and_materialize(
 /// the log holds at or after `from`, if an append whose acknowledgement was
 /// lost did land.
 fn landed_marker_offset(
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     producer_id: krabka_log::ProducerId,
     producer_epoch: i16,
     from: krabka_log::Offset,
@@ -282,10 +283,13 @@ mod tests {
 
     use super::*;
     use crate::{
+        codes::{INVALID_PRODUCER_EPOCH, NONE, from_broker_error},
         coordinator::{
             persistence::OffsetCommitValue,
             unified::{actor::test_support::rpc, classic_state::OffsetEntry},
         },
+        partition::Partition,
+        test_support::StandalonePartitionSetup,
         txn::handlers::write_txn_markers::{
             CommittedOffsets,
             test_support::{
@@ -352,7 +356,7 @@ mod tests {
         open_partition(
             &broker,
             dir.path(),
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: "stamped-orders",
                 ..Default::default()
             },
@@ -414,48 +418,27 @@ mod tests {
         // (label, transaction version, marker epoch, transaction open,
         //  expected code, whether the marker is appended)
         let cases = [
-            (
-                "classic, equal epoch, open",
-                0,
-                4,
-                true,
-                crate::codes::NONE,
-                true,
-            ),
+            ("classic, equal epoch, open", 0, 4, true, NONE, true),
             (
                 "tv2, equal epoch, open",
                 2,
                 4,
                 true,
-                crate::codes::INVALID_PRODUCER_EPOCH,
+                INVALID_PRODUCER_EPOCH,
                 false,
             ),
             // The retry of a marker already written: krabka's exact-retry
             // suppression answers it without a second append.
-            (
-                "tv2, equal epoch, closed",
-                2,
-                4,
-                false,
-                crate::codes::NONE,
-                false,
-            ),
+            ("tv2, equal epoch, closed", 2, 4, false, NONE, false),
             (
                 "tv2, lower epoch, closed",
                 2,
                 3,
                 false,
-                crate::codes::INVALID_PRODUCER_EPOCH,
+                INVALID_PRODUCER_EPOCH,
                 false,
             ),
-            (
-                "tv2, higher epoch, open",
-                2,
-                5,
-                true,
-                crate::codes::NONE,
-                true,
-            ),
+            ("tv2, higher epoch, open", 2, 5, true, NONE, true),
         ];
         let mut actual = Vec::new();
         let mut expected = Vec::new();
@@ -466,7 +449,7 @@ mod tests {
             let part = open_partition(
                 &broker,
                 dir.path(),
-                crate::test_support::StandalonePartitionSetup {
+                StandalonePartitionSetup {
                     topic: &topic,
                     ..Default::default()
                 },
@@ -505,10 +488,7 @@ mod tests {
                 },
             )
             .await;
-            let answered = result.map_or_else(
-                |error| crate::codes::from_broker_error(&error),
-                |_| crate::codes::NONE,
-            );
+            let answered = result.map_or_else(|error| from_broker_error(&error), |_| NONE);
             actual.push((label, answered, part.log_end_offset() != before));
             expected.push((label, code, appended));
         }
@@ -525,7 +505,7 @@ mod tests {
         open_partition(
             &broker,
             dir.path(),
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: "fenced-orders",
                 ..Default::default()
             },
@@ -694,7 +674,7 @@ mod tests {
     /// A partition that shares `part`'s log and writer, but whose writer
     /// acknowledgements never arrive: each append lands, and its caller sees
     /// the acknowledgement dropped.
-    fn dropping_acks(part: &crate::partition::Partition) -> crate::partition::Partition {
+    fn dropping_acks(part: &Partition) -> Partition {
         use crate::partition::{ProduceJob, WriterMessage};
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<WriterMessage>(8);
@@ -723,7 +703,7 @@ mod tests {
                 drop(ack);
             }
         });
-        crate::partition::Partition {
+        Partition {
             writer_tx: tx,
             ..part.clone()
         }

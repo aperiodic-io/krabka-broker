@@ -199,9 +199,12 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::metadata_observer::{
-        fetch::fetch_once,
-        test_support::{api_versions_response_v0, observer_config},
+    use crate::{
+        metadata_observer::{
+            fetch::{FetchOutcome, fetch_once},
+            test_support::{api_versions_response_v0, observer_config},
+        },
+        test_support::single_partition_topic,
     };
 
     struct SnapshotFixture {
@@ -230,7 +233,7 @@ mod tests {
             }
         }
 
-        async fn fetch(&mut self) -> Option<crate::metadata_observer::fetch::FetchOutcome> {
+        async fn fetch(&mut self) -> Option<FetchOutcome> {
             fetch_once(
                 &self.config,
                 &self.config.voters[0].1,
@@ -305,9 +308,10 @@ mod tests {
 
     fn snapshot_of(cluster_id: Uuid, topic: &str) -> bytes::Bytes {
         let mut image = MetadataImage::new(cluster_id);
-        image.apply(&MetadataRecord::V1Topic(
-            crate::test_support::single_partition_topic(topic, Uuid::new_v4()),
-        ));
+        image.apply(&MetadataRecord::V1Topic(single_partition_topic(
+            topic,
+            Uuid::new_v4(),
+        )));
         krabka_raft::serialize_metadata_snapshot(&image, 0).expect("serialize snapshot")
     }
 

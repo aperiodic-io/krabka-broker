@@ -9,6 +9,8 @@
 
 use krabka_protocol::owned::produce_response::{NodeEndpoint, TopicProduceResponse};
 
+use crate::handlers::leader_endpoints;
+
 /// The endpoint of every node named by a `CurrentLeader` hint in `topics`, one
 /// entry per node id and ordered by it.
 ///
@@ -27,7 +29,7 @@ pub(super) fn produce_node_endpoints(
     inter_broker_listener_name: &str,
     topics: &[TopicProduceResponse],
 ) -> Vec<NodeEndpoint> {
-    crate::handlers::leader_endpoints(
+    leader_endpoints(
         image,
         connection_listener_name,
         inter_broker_listener_name,

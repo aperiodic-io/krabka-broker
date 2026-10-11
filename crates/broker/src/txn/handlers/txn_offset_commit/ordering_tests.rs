@@ -23,13 +23,14 @@ use krabka_protocol::owned::{
 use super::integration_tests::{log_holds_key, seed_topic_a, seed_transaction, topic};
 use crate::{
     authorizer::AuthorizationResult,
+    broker::{Broker, BrokerHandle},
     codes,
     coordinator::{bootstrap::OFFSETS_TOPIC, partitioner::partition_for_group},
     test_support::{
-        decode_response, dispatch_context, encode_request, peer, principal, request_context,
-        start_broker_no_audit_with,
+        configure_single_partition_transactions, decode_response, dispatch_context, encode_request,
+        peer, principal, request_context, start_broker_no_audit_with,
     },
-    txn::{state::TxnEntry, version::TxnVersion},
+    txn::{state::TxnEntry, util::now_millis, version::TxnVersion},
 };
 
 /// The one topic the principal may not read.
@@ -100,7 +101,7 @@ fn expected_response(rows: &[(&str, i32, i16)]) -> TxnOffsetCommitResponse {
 /// Moves the leader of `group_id`'s `__consumer_offsets` partition to another
 /// node, so this broker answers the group's routing check with
 /// `NOT_COORDINATOR`.
-async fn lead_group_elsewhere(handle: &crate::broker::BrokerHandle, group_id: &str) {
+async fn lead_group_elsewhere(handle: &BrokerHandle, group_id: &str) {
     let broker = handle.broker_arc_for_test();
     let partition = partition_for_group(&broker.controller.current_image(), group_id);
     let elsewhere = krabka_metadata::NodeId(broker.config.node_id.0 + 1);
@@ -134,23 +135,19 @@ async fn lead_group_elsewhere(handle: &crate::broker::BrokerHandle, group_id: &s
 /// Creates the one-partition `__transaction_state` topic and waits until the
 /// transaction coordinator has loaded it, so [`stage_producer_identity`] can
 /// append to it.
-async fn bootstrap_transaction_state(handle: &crate::broker::BrokerHandle) {
+async fn bootstrap_transaction_state(handle: &BrokerHandle) {
     super::integration_tests::wait_for_coordinators(handle).await;
 }
 
 /// Gives `transactional_id` a durable entry with a staged producer identity,
 /// the state an interrupted `InitProducerId` leaves behind.
-async fn stage_producer_identity(
-    broker: &crate::broker::Broker,
-    transactional_id: &str,
-    producer_id: i64,
-) {
+async fn stage_producer_identity(broker: &Broker, transactional_id: &str, producer_id: i64) {
     let mut entry = TxnEntry::new_empty(
         transactional_id.to_string(),
         ProducerId(producer_id),
         0,
         60_000,
-        crate::txn::util::now_millis(),
+        now_millis(),
     );
     entry.next_producer_id = ProducerId(producer_id + 1);
     entry.next_producer_epoch = 0;
@@ -168,7 +165,7 @@ async fn stage_producer_identity(
 #[tokio::test]
 async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
     let (handle, _dir) = start_broker_no_audit_with(|cfg| {
-        crate::test_support::configure_single_partition_transactions(cfg, Arc::new(DenyOneTopic));
+        configure_single_partition_transactions(cfg, Arc::new(DenyOneTopic));
     })
     .await;
     let broker = handle.broker_arc_for_test();

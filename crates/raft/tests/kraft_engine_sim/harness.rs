@@ -17,7 +17,7 @@ pub(crate) use krabka_raft::{
 };
 use krabka_units::prelude::{Time, millis};
 
-use crate::sim_net::SimNet;
+use crate::{harness::SimEngineSetup as HarnessSimEngineSetup, sim_net::SimNet};
 
 pub(crate) fn three_voter_network() -> (SimNet, [NodeId; 3]) {
     (SimNet::new(), [NodeId(1), NodeId(2), NodeId(3)])
@@ -67,7 +67,7 @@ pub(crate) fn start_engines(net: &SimNet, setup: SimClusterSetup<'_>) -> Vec<tem
     for (i, &id) in ids.iter().enumerate() {
         let (ctrl, dir) = build_engine(
             net,
-            crate::harness::SimEngineSetup {
+            HarnessSimEngineSetup {
                 me: id,
                 ids,
                 cluster_id,
@@ -79,6 +79,25 @@ pub(crate) fn start_engines(net: &SimNet, setup: SimClusterSetup<'_>) -> Vec<tem
         dirs.push(dir);
     }
     dirs
+}
+
+/// Starts the three-voter scenarios and retains each node's data directory by id.
+pub(crate) fn start_cluster(
+    net: &SimNet,
+    ids: &[NodeId],
+    cluster_id: uuid::Uuid,
+) -> HashMap<NodeId, tempfile::TempDir> {
+    ids.iter()
+        .copied()
+        .zip(start_engines(
+            net,
+            SimClusterSetup {
+                ids,
+                cluster_id,
+                ..Default::default()
+            },
+        ))
+        .collect()
 }
 
 /// The metadata log configuration of a simulated engine: Kafka's segment

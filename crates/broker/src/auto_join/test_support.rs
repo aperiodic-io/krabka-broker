@@ -14,7 +14,10 @@ use tokio::{
 };
 
 use super::AutoJoinParams;
-use crate::{metadata_source::MetadataSource, test_support::FakeMetadataSource};
+use crate::{
+    metadata_source::MetadataSource, network::client::InterBrokerClient,
+    test_support::FakeMetadataSource,
+};
 
 pub(super) async fn read_frame(socket: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     let mut length = [0u8; 4];
@@ -78,13 +81,7 @@ pub(super) async fn negotiate_versions(
             .collect(),
         ..Default::default()
     };
-    write_response(
-        socket,
-        &request,
-        &response,
-        crate::auto_join::test_support::ResponseWireSetup::default(),
-    )
-    .await
+    write_response(socket, &request, &response, ResponseWireSetup::default()).await
 }
 
 pub(super) fn voter_update_params(addr: SocketAddr, leader: Option<NodeId>) -> AutoJoinParams {
@@ -114,6 +111,6 @@ pub(super) fn params(
         listener_protocol: krabka_security::ListenerProtocol::Plaintext,
         inter_broker_server_name: "broker.internal".to_string(),
         controller,
-        inter_broker_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
+        inter_broker_client: Arc::new(InterBrokerClient::new(None, None)),
     }
 }

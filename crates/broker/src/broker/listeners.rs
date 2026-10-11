@@ -17,21 +17,22 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     broker::{Broker, accept::accept_loop},
-    config::BrokerConfig,
+    config::{BrokerConfig, ListenerSpec},
     error::BrokerError,
+    future_log::{FutureLogState, MovePolicy, resume_move},
     log_dir,
     partition_registry::PartitionRegistry,
-    platform::Sockets,
+    platform::{Sockets, bind_listener},
+    throttle::ThrottleState,
 };
 
 pub(super) struct ListenerStartup {
-    pub(super) bound: Vec<(crate::config::ListenerSpec, TcpListener, SocketAddr)>,
+    pub(super) bound: Vec<(ListenerSpec, TcpListener, SocketAddr)>,
     /// The bound address of the inter-broker listener, or of the first
     /// listener when none has that name. `None` on a node without the broker
     /// role, which binds no data-plane listener.
     pub(super) listen_addr: Option<SocketAddr>,
-    pub(super) future_logs:
-        Arc<DashMap<(String, PartitionIndex), Arc<crate::future_log::FutureLogState>>>,
+    pub(super) future_logs: Arc<DashMap<(String, PartitionIndex), Arc<FutureLogState>>>,
 }
 
 /// Binds the default data-plane listener before the broker registers itself,
@@ -64,7 +65,7 @@ pub(super) async fn bind_ephemeral_data_plane_listener(
     {
         return Ok(());
     }
-    let listener = crate::platform::bind_listener(config.listen_addr).await?;
+    let listener = bind_listener(config.listen_addr).await?;
     let bound = Sockets::TARGET.listener_address(&listener, config.listen_addr)?;
     config.listen_addr = bound;
     if let Some((host, _)) = config.advertised_listener.rsplit_once(':') {
@@ -76,7 +77,7 @@ pub(super) async fn bind_ephemeral_data_plane_listener(
 
 /// The data-plane listeners that this node opens: every listener of the
 /// config on a node with the broker role, and none on a node without it.
-fn data_plane_listener_specs(config: &BrokerConfig) -> Vec<crate::config::ListenerSpec> {
+fn data_plane_listener_specs(config: &BrokerConfig) -> Vec<ListenerSpec> {
     if config.is_broker() {
         config.effective_listeners()
     } else {
@@ -93,7 +94,7 @@ pub(super) async fn bind_listeners_and_recover_moves(
     config: &mut BrokerConfig,
     supplied_listeners: Vec<TcpListener>,
     partitions: &Arc<PartitionRegistry>,
-    throttle_state: &Arc<crate::throttle::ThrottleState>,
+    throttle_state: &Arc<ThrottleState>,
 ) -> Result<ListenerStartup, BrokerError> {
     let bound = adopt_or_bind_listeners(
         Sockets::TARGET,
@@ -123,14 +124,14 @@ pub(super) async fn bind_listeners_and_recover_moves(
                 }
                 continue;
             }
-            if let Err(error) = crate::future_log::resume_move(
+            if let Err(error) = resume_move(
                 partitions,
                 &future_logs,
                 &log_dir,
                 &config.log_config,
                 &topic,
                 partition,
-                crate::future_log::MovePolicy {
+                MovePolicy {
                     retry_backoff: config.future_log_move_retry_backoff,
                     read_chunk: config.future_log_move_read_chunk,
                     throttle: throttle_state.alter_log_dirs.clone(),
@@ -157,9 +158,9 @@ pub(super) async fn bind_listeners_and_recover_moves(
 /// bound on its spec's `bind_addr`.
 async fn adopt_or_bind_listeners(
     sockets: Sockets,
-    specs: Vec<crate::config::ListenerSpec>,
+    specs: Vec<ListenerSpec>,
     mut supplied: Vec<TcpListener>,
-) -> std::io::Result<Vec<(crate::config::ListenerSpec, TcpListener, SocketAddr)>> {
+) -> std::io::Result<Vec<(ListenerSpec, TcpListener, SocketAddr)>> {
     let mut bound = Vec::with_capacity(specs.len());
     for spec in specs {
         let serving = match sockets {
@@ -172,7 +173,7 @@ async fn adopt_or_bind_listeners(
         };
         let listener = match serving {
             Some(index) => supplied.remove(index),
-            None => crate::platform::bind_listener(spec.bind_addr).await?,
+            None => bind_listener(spec.bind_addr).await?,
         };
         let address = sockets.listener_address(&listener, spec.bind_addr)?;
         bound.push((spec, listener, address));
@@ -182,7 +183,7 @@ async fn adopt_or_bind_listeners(
 
 pub(super) fn spawn_listener_tasks(
     broker: &Arc<Broker>,
-    bound: Vec<(crate::config::ListenerSpec, TcpListener, SocketAddr)>,
+    bound: Vec<(ListenerSpec, TcpListener, SocketAddr)>,
 ) -> (CancellationToken, Vec<JoinHandle<()>>) {
     let shutdown = CancellationToken::new();
     let tasks = bound
@@ -205,9 +206,12 @@ mod tests {
     use krabka_security::ListenerProtocol;
 
     use super::*;
-    use crate::config::{
-        ListenerSpec,
-        NodeRole::{Broker, Controller},
+    use crate::{
+        SslPrincipalMapper,
+        config::{
+            ListenerSpec,
+            NodeRole::{Broker, Controller},
+        },
     };
 
     fn spec(name: &str, bind_addr: SocketAddr) -> ListenerSpec {
@@ -218,7 +222,7 @@ mod tests {
             protocol: ListenerProtocol::Plaintext,
             tls_config: None,
             sasl_mechanisms: None,
-            principal_mapper: crate::SslPrincipalMapper::default(),
+            principal_mapper: SslPrincipalMapper::default(),
         }
     }
 
@@ -329,7 +333,7 @@ mod tests {
                 &mut config,
                 vec![supplied],
                 &Arc::new(PartitionRegistry::new()),
-                &Arc::new(crate::throttle::ThrottleState::new()),
+                &Arc::new(ThrottleState::new()),
             )
             .await
             .expect("bind the data plane");

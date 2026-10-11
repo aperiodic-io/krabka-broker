@@ -13,6 +13,7 @@ use super::{
     AcquisitionState, InFlightBatch, RecordState, clamp_i32,
     dlq::{ArchiveSink, DlqCause},
 };
+use crate::codes::{INVALID_RECORD_STATE, INVALID_REQUEST};
 
 /// Gives an acquired run back: Kafka's `InFlightState.tryUpdateState` to
 /// `AVAILABLE`, which archives the run instead when its delivery count has
@@ -128,11 +129,9 @@ impl AcquisitionState {
         if last < self.start_offset {
             return Ok(None);
         }
-        let end = self
-            .in_flight_end()
-            .ok_or(crate::codes::INVALID_RECORD_STATE)?;
+        let end = self.in_flight_end().ok_or(INVALID_RECORD_STATE)?;
         if last >= end {
-            return Err(crate::codes::INVALID_REQUEST);
+            return Err(INVALID_REQUEST);
         }
         Ok(Some((first.max(self.start_offset), last)))
     }
@@ -148,13 +147,13 @@ impl AcquisitionState {
         last: Offset,
     ) -> Result<Option<(Offset, Offset)>, i16> {
         if first > last {
-            return Err(crate::codes::INVALID_RECORD_STATE);
+            return Err(INVALID_RECORD_STATE);
         }
         let Some((first, last)) = self.ack_bounds(first, last)? else {
             return Ok(None);
         };
         if !self.range_acquired_by(member, first, last) {
-            return Err(crate::codes::INVALID_RECORD_STATE);
+            return Err(INVALID_RECORD_STATE);
         }
         self.split_at_offset(first);
         self.split_at_offset(last + 1);

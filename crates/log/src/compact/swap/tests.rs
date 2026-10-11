@@ -29,7 +29,7 @@ use crate::{
     name,
     recovery::{
         deleted_orphan_recover,
-        swap::{cleaned_path, recover_swaps},
+        swap::{cleaned_path, recover_swaps, swap_path},
     },
     test_support::{Files, directory_files},
 };
@@ -356,7 +356,7 @@ fn a_committed_swap_is_completed_even_when_its_base_segment_survives() {
         (&rewrite.timeindex_swap, "timeindex"),
         (&rewrite.log_swap, "log"),
     ] {
-        std::fs::rename(from, crate::recovery::swap::swap_path(dir.path(), 0, ext)).unwrap();
+        std::fs::rename(from, swap_path(dir.path(), 0, ext)).unwrap();
     }
     for path in [
         name::log_path(dir.path(), 10),

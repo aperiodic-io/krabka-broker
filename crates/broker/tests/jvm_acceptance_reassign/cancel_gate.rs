@@ -50,8 +50,14 @@ use assert2::{assert, check};
 use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle};
 
 use crate::{
-    jvm_acceptance::{broker0_advertised, wait_three_brokers_registered},
-    oracle::{CliRun, Side, ToolFile},
+    cluster::offline_for_partition,
+    jvm_acceptance::{
+        SaslClusterSetup,
+        break_glass::{approve as approve_proposal, propose},
+        broker0_advertised, plain_client_properties, start_registered_sasl_cluster,
+        wait_three_brokers_registered,
+    },
+    oracle::{AssignedTopicCommandSetup, CliRun, Side, ToolFile},
     tool_output::{Assignment, TopicPartition, parse_cancelled, reassignment_json},
 };
 
@@ -195,7 +201,7 @@ async fn restart(configs: [BrokerConfig; 3]) -> [BrokerHandle; 3] {
 /// every partition of it for the actions that name one, and a cancel is one of
 /// those, so this also checks that widening on the way through.
 async fn approve_a_cancel(bootstrap: &str) {
-    let proposal_id = crate::jvm_acceptance::break_glass::propose(
+    let proposal_id = propose(
         bootstrap,
         PROPOSER,
         WIRE_CANCEL_REASSIGNMENT,
@@ -222,7 +228,7 @@ async fn approve(
     operator: (&str, &str),
     proposal_id: krabka_protocol::primitives::uuid::Uuid,
 ) -> (i32, i32) {
-    crate::jvm_acceptance::break_glass::approve(bootstrap, operator, proposal_id).await
+    approve_proposal(bootstrap, operator, proposal_id).await
 }
 
 /// The gate off, then on and unapproved, then on and approved -- the same
@@ -231,22 +237,20 @@ async fn approve(
 #[ignore = "requires Docker"]
 async fn reassign_partitions_cancel_reports_the_break_glass_gate_to_the_jvm_tool() {
     let (h1, h2, h3, cfg1, cfg2, cfg3, _d1, _d2, _d3) =
-        Box::pin(crate::jvm_acceptance::start_registered_sasl_cluster(
-            crate::jvm_acceptance::SaslClusterSetup {
-                admin: ADMIN.0,
-                admin_pass: ADMIN.1,
-                extra_users: &[PROPOSER, APPROVER_ONE, APPROVER_TWO],
-            },
-        ))
+        Box::pin(start_registered_sasl_cluster(SaslClusterSetup {
+            admin: ADMIN.0,
+            admin_pass: ADMIN.1,
+            extra_users: &[PROPOSER, APPROVER_ONE, APPROVER_TWO],
+        }))
         .await;
 
-    let props = crate::jvm_acceptance::plain_client_properties(ADMIN.0, ADMIN.1);
+    let props = plain_client_properties(ADMIN.0, ADMIN.1);
     let advertised = broker0_advertised().to_owned();
     let side = Side::Krabka {
         bootstrap: &advertised,
     };
 
-    side.create_assigned_topic(crate::oracle::AssignedTopicCommandSetup {
+    side.create_assigned_topic(AssignedTopicCommandSetup {
         topic: TOPIC,
         props_path: CLIENT_PROPS,
         files: &[ToolFile::new(CLIENT_PROPS, &props)],
@@ -366,8 +370,7 @@ async fn offline_reassignment(
     props: &str,
     context: &str,
 ) -> ([Option<BrokerHandle>; 3], String) {
-    let (target, handles, _current) =
-        crate::cluster::offline_for_partition(brokers, TOPIC, context).await;
+    let (target, handles, _current) = offline_for_partition(brokers, TOPIC, context).await;
     let handle = handles[0].as_ref().expect("bootstrap broker stays live");
     let plan = start_a_reassignment(
         handle,

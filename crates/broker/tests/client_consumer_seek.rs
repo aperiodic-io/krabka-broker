@@ -11,22 +11,22 @@ mod support;
 use krabka_client_consumer::{AutoOffsetReset, Consumer};
 
 use crate::support::{
-    client::connect_client,
-    topics::{creatable_topic, create_topic_request},
+    client::{connect_client, standalone_topic},
+    producer::{ProducerRecordSetup, default_producer, producer_record},
+    standalone_broker,
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
 
 async fn produce_n(bootstrap: &str, topic: &str, n: u32) {
-    let producer = crate::support::producer::default_producer(bootstrap).await;
+    let producer = default_producer(bootstrap).await;
     for i in 0..n {
         producer
-            .send(crate::support::producer::producer_record(
-                crate::support::producer::ProducerRecordSetup {
-                    topic: (topic).into(),
-                    partition: Some(krabka_ids::PartitionIndex(0)),
-                    key: Some(format!("k{i}").into()),
-                    value: Some(format!("v{i}").into()),
-                },
-            ))
+            .send(producer_record(ProducerRecordSetup {
+                topic: (topic).into(),
+                partition: Some(krabka_ids::PartitionIndex(0)),
+                key: Some(format!("k{i}").into()),
+                value: Some(format!("v{i}").into()),
+            }))
             .await
             .unwrap();
     }
@@ -35,7 +35,7 @@ async fn produce_n(bootstrap: &str, topic: &str, n: u32) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn seek_before_first_poll_resumes_from_sought_offset() {
-    let (_dir, _broker, bootstrap, _admin) = crate::support::client::standalone_topic("s").await;
+    let (_dir, _broker, bootstrap, _admin) = standalone_topic("s").await;
 
     // Offsets 0..=4 on partition 0.
     produce_n(&bootstrap, "s", 5).await;
@@ -73,13 +73,13 @@ async fn seek_before_first_poll_resumes_from_sought_offset() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn seek_rejects_negative_offset() {
-    let (_dir, broker) = crate::support::standalone_broker().await;
+    let (_dir, broker) = standalone_broker().await;
     let bootstrap = broker.listen_addr().to_string();
 
     let admin = connect_client(&bootstrap, None).await;
     admin
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("n").into(),
                 ..Default::default()
             },

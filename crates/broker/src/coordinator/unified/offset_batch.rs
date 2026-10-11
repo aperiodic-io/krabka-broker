@@ -42,10 +42,11 @@ mod tests {
     use krabka_log::Log;
 
     use super::*;
+    use crate::test_support::segment_age_fixture;
 
     #[test]
     fn coordinator_records_roll_only_after_the_segment_age_limit() {
-        let mut fixture = crate::test_support::segment_age_fixture();
+        let mut fixture = segment_age_fixture();
         for elapsed_ms in [0, 1, 2, 3, fixture.roll_ms] {
             let mut builder = OffsetRecordBatchBuilder::default();
             builder.push(

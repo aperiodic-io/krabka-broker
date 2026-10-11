@@ -74,7 +74,7 @@ mod tests {
     use super::*;
     use crate::{
         barrier::test_support::open_partition, coordinator::unified::persistence::MAX_STRING_BYTES,
-        partition_registry::PartitionRegistry,
+        partition_registry::PartitionRegistry, test_support::StandalonePartitionSetup,
     };
 
     async fn leader_partition(dir: &std::path::Path) -> std::sync::Arc<Partition> {
@@ -82,7 +82,7 @@ mod tests {
         open_partition(
             &registry,
             dir,
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: "test-barrier",
                 ..Default::default()
             },

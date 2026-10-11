@@ -13,7 +13,11 @@ use crate::{
     epoch_harness::{boot_single, create_topic, record, topic_id_for},
     support::{
         client::connect_client,
-        fetch::{fetch_partition, single_partition_fetch},
+        fetch::{
+            FetchLimits, FetchPartitionSetup, RequestWaitMillis, SinglePartitionFetchSetup,
+            fetch_partition, single_partition_fetch,
+        },
+        produce::{SinglePartitionProduceSetup, batch_request},
     },
 };
 
@@ -49,9 +53,9 @@ async fn diverging_epoch_returned_on_stale_last_fetched_epoch() {
         let client = &client;
         async move {
             client
-                .send(crate::support::produce::batch_request(
+                .send(batch_request(
                     record(value),
-                    crate::support::produce::SinglePartitionProduceSetup {
+                    SinglePartitionProduceSetup {
                         topic: ("diverge").into(),
                         topic_id,
                         ..Default::default()
@@ -115,19 +119,17 @@ async fn diverging_epoch_returned_on_stale_last_fetched_epoch() {
                 replica_id: 7,
                 ..Default::default()
             },
-            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+            ..single_partition_fetch(SinglePartitionFetchSetup {
                 topic: "diverge".into(),
                 topic_id,
                 partition: FetchPartition {
                     last_fetched_epoch: e0,
-                    ..fetch_partition(crate::support::fetch::FetchPartitionSetup {
+                    ..fetch_partition(FetchPartitionSetup {
                         offset: krabka_ids::Offset(n),
                         ..Default::default()
                     })
                 },
-                limits: crate::support::fetch::FetchLimits::one_mebibyte(
-                    crate::support::fetch::RequestWaitMillis(100),
-                ),
+                limits: FetchLimits::one_mebibyte(RequestWaitMillis(100)),
             })
         })
         .await

@@ -25,7 +25,10 @@ use krabka_broker::{
 use krabka_security::ListenerProtocol;
 use tempfile::TempDir;
 
-use crate::{CLIENT_PRINCIPAL, PASSWORD, VOTERS, support};
+use crate::{
+    CLIENT_PRINCIPAL, PASSWORD, TOPIC, VOTERS,
+    support::{self, ClusterBootstrapSetup, ClusterNodeSetup, NodeIndex},
+};
 
 /// Name of the one data-plane listener every broker binds. It carries both the
 /// suite's client traffic and the inter-broker traffic, including the
@@ -56,10 +59,10 @@ impl DisklessCluster {
     pub(crate) async fn promoted_leader(&self, survivor: NodeId, former: NodeId) -> NodeId {
         let broker = self.handle_for_node(survivor).expect("the survivor is up");
         broker
-            .wait_until_partition_leader_changed(crate::TOPIC, 0, former)
+            .wait_until_partition_leader_changed(TOPIC, 0, former)
             .await;
         broker
-            .partition_leader_for_test(crate::TOPIC, 0)
+            .partition_leader_for_test(TOPIC, 0)
             .map(NodeId)
             .expect("a promoted leader")
     }
@@ -182,8 +185,8 @@ pub(crate) async fn start_diskless_cluster(
             let mut config = broker_config(
                 log_dirs[index].path(),
                 remote_dir.path(),
-                topology.node_setup(crate::support::ClusterBootstrapSetup {
-                    index: crate::support::NodeIndex(index),
+                topology.node_setup(ClusterBootstrapSetup {
+                    index: NodeIndex(index),
                     ..Default::default()
                 }),
             );
@@ -226,11 +229,7 @@ pub(crate) async fn start_diskless_cluster(
 /// One broker's config: the static-voter bootstrap, the distinct rack the WAL
 /// placement policy requires, the shared object store, and the topic-backed
 /// metadata log the diskless flush index rides on.
-fn broker_config(
-    log_dir: &Path,
-    remote_dir: &Path,
-    setup: crate::support::ClusterNodeSetup<'_>,
-) -> BrokerConfig {
+fn broker_config(log_dir: &Path, remote_dir: &Path, setup: ClusterNodeSetup<'_>) -> BrokerConfig {
     let index = setup.index.0;
     let client = setup.client_addrs[index];
     let rlmm_bootstrap = setup.client_addrs[0].to_string();
@@ -256,7 +255,7 @@ fn broker_config(
         support::diskless::DisklessAuthenticationSetup {
             listener: LISTENER,
             identity: support::diskless::DisklessIdentitySetup {
-                index: crate::support::NodeIndex(index),
+                index: NodeIndex(index),
                 node,
                 voters: support::diskless::WalVoterCount(VOTERS),
                 password: PASSWORD,

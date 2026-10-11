@@ -16,8 +16,26 @@ use krabka_protocol::{
 
 use super::*;
 use crate::{
+    api_catalog::UnstableApiVersions,
+    authorizer::{AllowAllAuthorizer, AuthorizationResult},
     broker::BrokerHandle,
-    test_support::{DenyAll, peer, principal},
+    config::{BrokerConfig, RemoteStorageBackend},
+    config_keys::{DISKLESS, serves_topic_key},
+    handlers::{
+        RequestContext,
+        describe_configs::effective_topic_configs,
+        test_support::{
+            AclSetup, TopicPartitionCount, TopicReplicationFactor, replica_availability,
+            seed_controller_quota as seed_controller_quota_helper,
+        },
+    },
+    test_support::{
+        AllowAclSetup, DenyAll, DescribedCreationSetup, KafkaErrorCode, allow_acl,
+        begin_controlled_shutdown, broker_registration, described_creation_configs, dispatch_wire,
+        fence_remote_broker, make_witness, peer, principal, seed_remote_broker,
+        start_broker_no_audit_with,
+    },
+    throttle::LEADER_THROTTLED_REPLICAS_KEY,
 };
 
 /// Live broker and request identity for the wire-driven creation cases.
@@ -63,10 +81,8 @@ fn expected_configs(overrides: &[(&str, &str)]) -> Vec<CreatableTopicConfigs> {
 
     let mut configs: Vec<CreatableTopicConfigs> = registry::keys_in(ConfigScope::Topic)
         .filter(|row| {
-            crate::config_keys::serves_topic_key(
-                row.name,
-                crate::api_catalog::UnstableApiVersions::Disabled,
-            ) && (!row.internal || overrides.iter().any(|(key, _)| *key == row.name))
+            serves_topic_key(row.name, UnstableApiVersions::Disabled)
+                && (!row.internal || overrides.iter().any(|(key, _)| *key == row.name))
         })
         .map(|row| {
             let stored = overrides
@@ -103,14 +119,14 @@ struct ExpectedTopicSetup<'a> {
     #[default("orders")]
     name: &'a str,
     topic_id: ProtoUuid,
-    error_code: crate::test_support::KafkaErrorCode,
+    error_code: KafkaErrorCode,
     error_message: Option<String>,
-    #[default(crate::handlers::test_support::TopicPartitionCount(-1))]
-    num_partitions: crate::handlers::test_support::TopicPartitionCount,
-    #[default(crate::handlers::test_support::TopicReplicationFactor(-1))]
-    replication_factor: crate::handlers::test_support::TopicReplicationFactor,
+    #[default(TopicPartitionCount(-1))]
+    num_partitions: TopicPartitionCount,
+    #[default(TopicReplicationFactor(-1))]
+    replication_factor: TopicReplicationFactor,
     configs: Vec<CreatableTopicConfigs>,
-    topic_config_error_code: crate::test_support::KafkaErrorCode,
+    topic_config_error_code: KafkaErrorCode,
 }
 
 fn expected_topic(setup: ExpectedTopicSetup<'_>) -> CreatableTopicResult {
@@ -140,8 +156,8 @@ fn expected_topic(setup: ExpectedTopicSetup<'_>) -> CreatableTopicResult {
 struct CreatedTopicExpectation<'a> {
     #[default("retries")]
     name: &'a str,
-    #[default(crate::handlers::test_support::TopicPartitionCount(1))]
-    partitions: crate::handlers::test_support::TopicPartitionCount,
+    #[default(TopicPartitionCount(1))]
+    partitions: TopicPartitionCount,
     configs: &'a [(&'a str, &'a str)],
 }
 
@@ -155,7 +171,7 @@ fn check_created_topic_response(
             name: setup.name,
             topic_id: response.topics[0].topic_id,
             num_partitions: setup.partitions,
-            replication_factor: crate::handlers::test_support::TopicReplicationFactor(1),
+            replication_factor: TopicReplicationFactor(1),
             configs: expected_configs(setup.configs),
             ..Default::default()
         })],
@@ -170,7 +186,7 @@ fn expected_empty_topic(
 ) -> CreatableTopicResult {
     expected_topic(ExpectedTopicSetup {
         name,
-        error_code: crate::test_support::KafkaErrorCode(error_code),
+        error_code: KafkaErrorCode(error_code),
         error_message,
         ..Default::default()
     })
@@ -225,7 +241,7 @@ use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker,
 async fn drive(
     broker: &Broker,
     req: &CreateTopicsRequest,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> CreateTopicsResponse {
     handle(broker, req.clone(), VERSION, ctx)
         .await
@@ -233,7 +249,7 @@ async fn drive(
 }
 
 async fn seed_controller_quota(handle: &BrokerHandle, rate: f64) {
-    crate::handlers::test_support::seed_controller_quota(handle, rate).await;
+    seed_controller_quota_helper(handle, rate).await;
 }
 
 /// A denial on cluster `Create` is a shortcut only. `DenyAll` also denies the
@@ -331,7 +347,7 @@ async fn minus_one_takes_the_broker_topic_creation_defaults() {
     /// error message, created partitions, created replication factor)
     type Row = (i32, i16, i16, Option<&'static str>, i32, i16);
 
-    let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
+    let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
         cfg.num_partitions = 4;
         cfg.default_replication_factor = 2;
     })
@@ -343,7 +359,7 @@ async fn minus_one_takes_the_broker_topic_creation_defaults() {
             .submit_change(vec![MetadataRecord::V1BrokerRegistration(
                 krabka_metadata::BrokerRegistrationRecord {
                     broker_epoch: -1,
-                    ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+                    ..broker_registration(krabka_raft::NodeId(node_id))
                 },
             )])
             .await
@@ -400,12 +416,10 @@ async fn minus_one_takes_the_broker_topic_creation_defaults() {
                 topic_id: image.topic(&name).map_or(ProtoUuid([0; 16]), |topic| {
                     ProtoUuid(topic.topic_id.into_bytes())
                 }),
-                error_code: crate::test_support::KafkaErrorCode(error_code),
+                error_code: KafkaErrorCode(error_code),
                 error_message: error_message.map(str::to_owned),
-                num_partitions: crate::handlers::test_support::TopicPartitionCount(created),
-                replication_factor: crate::handlers::test_support::TopicReplicationFactor(
-                    created_rf
-                ),
+                num_partitions: TopicPartitionCount(created),
+                replication_factor: TopicReplicationFactor(created_rf),
                 configs: if created_ok {
                     expected_configs(&[])
                 } else {
@@ -443,8 +457,8 @@ async fn handle_success_persists_topic_config_and_success_fields() {
             expected_topic(ExpectedTopicSetup {
                 name: "configured",
                 topic_id: resp.topics[0].topic_id,
-                num_partitions: crate::handlers::test_support::TopicPartitionCount(2),
-                replication_factor: crate::handlers::test_support::TopicReplicationFactor(1),
+                num_partitions: TopicPartitionCount(2),
+                replication_factor: TopicReplicationFactor(1),
                 configs: expected_configs(&[("retention.ms", "60000")]),
                 ..Default::default()
             })
@@ -561,8 +575,8 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
         // because it depends on the broker's own configuration.
         (
             "diskless-without-an-object-tier",
-            &[(crate::config_keys::DISKLESS, "true")],
-            &[crate::config_keys::DISKLESS, "remote_storage_backend"],
+            &[(DISKLESS, "true")],
+            &[DISKLESS, "remote_storage_backend"],
         ),
     ];
 
@@ -634,11 +648,11 @@ async fn handle_creates_a_diskless_topic_and_opens_its_partitions_on_the_wal_pat
     // refuses the opt-in rather than create a topic that could never flush or
     // trim. Configure the tier this test's topic depends on.
     let object_store = tempfile::TempDir::new().expect("object store dir");
-    let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
-        cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+    let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+        cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.rack = Some("rack-a".into());
         cfg.diskless_wal_local_replica_count = 1;
-        cfg.remote_storage_backend = Some(crate::config::RemoteStorageBackend::Local {
+        cfg.remote_storage_backend = Some(RemoteStorageBackend::Local {
             dir: object_store.path().to_path_buf(),
         });
     })
@@ -719,9 +733,9 @@ async fn diskless_wal_validation_names_the_active_leader_of_a_manual_assignment(
         local_object_store(object_store)
     );
     for node_id in [2, 3] {
-        crate::test_support::seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
+        seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
     }
-    crate::test_support::fence_remote_broker(&broker_handle, 2).await;
+    fence_remote_broker(&broker_handle, 2).await;
     let req = request(vec![CreatableTopic {
         name: "manual-diskless".into(),
         num_partitions: -1,
@@ -749,7 +763,7 @@ async fn diskless_wal_validation_names_the_active_leader_of_a_manual_assignment(
 #[test]
 fn diskless_wal_validation_uses_the_local_registration_fallback() {
     let dir = tempfile::TempDir::new().expect("log dir");
-    let mut config = crate::config::BrokerConfig::for_tests(dir.path().to_path_buf());
+    let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
     config.rack = Some("rack-a".into());
     config.diskless_wal_local_replica_count = 1;
 
@@ -870,16 +884,14 @@ async fn validate_only_answers_the_verdict_and_commits_nothing() {
         // with. The dry run committed nothing, so that is the empty override map resolved
         // against the image.
         let configs = if expected_row.error_code == codes::NONE {
-            Some(creatable_topic_configs(
-                crate::handlers::describe_configs::effective_topic_configs(
-                    &broker_handle.controller_image_for_test(),
-                    broker.config.node_id,
-                    name,
-                    &std::collections::BTreeMap::new(),
-                    crate::api_catalog::UnstableApiVersions::Disabled,
-                    &std::collections::BTreeMap::new(),
-                ),
-            ))
+            Some(creatable_topic_configs(effective_topic_configs(
+                &broker_handle.controller_image_for_test(),
+                broker.config.node_id,
+                name,
+                &std::collections::BTreeMap::new(),
+                UnstableApiVersions::Disabled,
+                &std::collections::BTreeMap::new(),
+            )))
         } else {
             expected_row.configs.clone()
         };
@@ -908,7 +920,7 @@ async fn validate_only_answers_the_verdict_and_commits_nothing() {
 
 #[tokio::test]
 async fn strict_create_topics_rejects_after_quota_exhaustion() {
-    let (broker_handle, _dir) = start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+    let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
     seed_controller_quota(&broker_handle, 2.0).await;
     let broker = broker_handle.broker_arc_for_test();
     request_identity!((p, peer), principal("admin"));
@@ -921,7 +933,7 @@ async fn strict_create_topics_rejects_after_quota_exhaustion() {
         &resp,
         CreatedTopicExpectation {
             name: "throttled",
-            partitions: crate::handlers::test_support::TopicPartitionCount(5),
+            partitions: TopicPartitionCount(5),
             ..Default::default()
         },
     );
@@ -966,9 +978,9 @@ struct DenyDescribeConfigs;
 
 test_authorizer!(DenyDescribeConfigs, (self, _source, req), {
     if req.operation == krabka_metadata::AclOperation::DescribeConfigs {
-        crate::authorizer::AuthorizationResult::Deny
+        AuthorizationResult::Deny
     } else {
-        crate::authorizer::AuthorizationResult::Allow
+        AuthorizationResult::Allow
     }
 });
 
@@ -1025,9 +1037,9 @@ async fn created_topic_configs_match_describe_configs_for_the_same_topic() {
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
     let image = broker_handle.controller_image_for_test();
-    let described = crate::test_support::described_creation_configs(
+    let described = described_creation_configs(
         &image,
-        crate::test_support::DescribedCreationSetup {
+        DescribedCreationSetup {
             node: broker.config.node_id,
             topic: "mirrored",
             overrides: image.topic_config("mirrored").expect("stored overrides"),
@@ -1057,9 +1069,7 @@ async fn create_without_describe_configs_withholds_the_configs_but_creates_the_t
         topics: vec![expected_topic(ExpectedTopicSetup {
             name: "undescribable",
             topic_id: resp.topics[0].topic_id,
-            topic_config_error_code: crate::test_support::KafkaErrorCode(
-                codes::TOPIC_AUTHORIZATION_FAILED
-            ),
+            topic_config_error_code: KafkaErrorCode(codes::TOPIC_AUTHORIZATION_FAILED),
             ..Default::default()
         })],
     });
@@ -1084,7 +1094,7 @@ async fn v4_response_encodes_without_the_kip_525_fields() {
     let req = request(vec![topic_with_config("legacy")]);
     test_ctx!(ctx, "admin");
 
-    let resp: CreateTopicsResponse = crate::test_support::dispatch_wire(
+    let resp: CreateTopicsResponse = dispatch_wire(
         &broker,
         krabka_protocol::api_key::ApiKey::CreateTopics as i16,
         V4,
@@ -1132,7 +1142,7 @@ async fn handle_refuses_invalid_and_colliding_topic_names() {
     /// One row: the requested name, and the error code and message it gets.
     type NameCase = (String, i16, Option<String>);
 
-    let (broker_handle, dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
+    let (broker_handle, dir) = start_broker_no_audit_with(|cfg| {
         cfg.log_dir = cfg.log_dir.join("logs");
     })
     .await;
@@ -1331,14 +1341,13 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
     for (fenced, witnesses, lists, error_code, error_message, partitions) in rows {
         broker_fixture!((broker_handle, _dir, broker), allow_all);
         for node_id in [2, 3, 4] {
-            crate::test_support::seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id))
-                .await;
+            seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
         }
         for &node_id in witnesses {
-            crate::test_support::make_witness(&broker_handle, node_id).await;
+            make_witness(&broker_handle, node_id).await;
         }
         for &node_id in fenced {
-            crate::test_support::fence_remote_broker(&broker_handle, node_id).await;
+            fence_remote_broker(&broker_handle, node_id).await;
         }
         let topic = CreatableTopic {
             name: "manual".into(),
@@ -1359,7 +1368,7 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
         };
         test_ctx!(ctx, "admin");
 
-        let resp: CreateTopicsResponse = crate::test_support::dispatch_wire(
+        let resp: CreateTopicsResponse = dispatch_wire(
             &broker,
             krabka_protocol::api_key::ApiKey::CreateTopics as i16,
             V4,
@@ -1460,14 +1469,13 @@ async fn automatic_placement_takes_fenced_brokers_last_and_shrinks_the_isr() {
     for (fenced, shutting_down, rf, outcome) in rows {
         broker_fixture!((broker_handle, _dir, broker), allow_all);
         for node_id in [2, 3] {
-            crate::test_support::seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id))
-                .await;
+            seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
         }
         for &node_id in fenced {
-            crate::test_support::fence_remote_broker(&broker_handle, node_id).await;
+            fence_remote_broker(&broker_handle, node_id).await;
         }
         for &node_id in shutting_down {
-            crate::test_support::begin_controlled_shutdown(&broker_handle, node_id).await;
+            begin_controlled_shutdown(&broker_handle, node_id).await;
         }
         request_identity!((p, peer), principal("admin"));
 
@@ -1501,8 +1509,7 @@ async fn automatic_placement_takes_fenced_brokers_last_and_shrinks_the_isr() {
                     let mut held = replicas.iter().map(|node| node.0).collect::<Vec<_>>();
                     held.sort_unstable();
                     // A fenced replica comes after every unfenced one.
-                    let (fenced_flags, isr) =
-                        crate::handlers::test_support::replica_availability(replicas, fenced);
+                    let (fenced_flags, isr) = replica_availability(replicas, fenced);
                     check!(held == brokers, "{label}, partition {index}");
                     check!(fenced_flags.is_sorted(), "{label}, partition {index}");
                     check!(
@@ -1582,15 +1589,13 @@ async fn handle_authorizes_create_per_topic_when_cluster_create_is_denied() {
 
     use crate::handlers::test_support::acl;
 
-    let cluster_create = acl(crate::handlers::test_support::AclSetup::cluster(
-        AclOperation::Create,
-    ));
-    let literal_a = acl(crate::handlers::test_support::AclSetup {
+    let cluster_create = acl(AclSetup::cluster(AclOperation::Create));
+    let literal_a = acl(AclSetup {
         resource_name: "a",
         operation: AclOperation::Create,
         ..Default::default()
     });
-    let prefixed_app = acl(crate::handlers::test_support::AclSetup {
+    let prefixed_app = acl(AclSetup {
         resource_name: "app-",
         pattern_type: PatternType::Prefixed,
         operation: AclOperation::Create,
@@ -1655,9 +1660,7 @@ async fn handle_authorizes_create_per_topic_when_cluster_create_is_denied() {
                 expected_topic(ExpectedTopicSetup {
                     name,
                     topic_id: id_of(name),
-                    topic_config_error_code: crate::test_support::KafkaErrorCode(
-                        codes::TOPIC_AUTHORIZATION_FAILED,
-                    ),
+                    topic_config_error_code: KafkaErrorCode(codes::TOPIC_AUTHORIZATION_FAILED),
                     ..Default::default()
                 })
             } else {
@@ -1743,7 +1746,7 @@ fn topic_with_nullable_configs(name: &str, configs: &[(&str, Option<&str>)]) -> 
 async fn cluster_create_and_describe_configs_probes_leave_no_denial_behind() {
     use crate::metrics::AuthorizationDeniedLabel;
 
-    let literal_a = crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+    let literal_a = allow_acl(AllowAclSetup {
         resource_name: "a",
         operation: AclOperation::Create,
         ..Default::default()
@@ -2044,7 +2047,7 @@ async fn rows_follow_kafkas_check_order_and_messages() {
 /// entries (32799 characters) is not.
 #[tokio::test]
 async fn a_config_value_over_short_max_value_answers_invalid_config() {
-    let key = crate::throttle::LEADER_THROTTLED_REPLICAS_KEY;
+    let key = LEADER_THROTTLED_REPLICAS_KEY;
     let fits = vec!["0:1"; 8_000].join(",");
     let too_long = vec!["0:1"; 8_200].join(",");
     broker_fixture!((broker_handle, _dir, broker), allow_all);
@@ -2095,7 +2098,7 @@ async fn too_many_partitions_message_follows_the_unstable_flag() {
     ];
 
     for (unstable, message) in cases {
-        let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
+        let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
             cfg.features.unstable_api_versions = unstable;
         })
         .await;
@@ -2124,7 +2127,7 @@ async fn too_many_partitions_message_follows_the_unstable_flag() {
 async fn drive_single_topic(
     broker: &Broker,
     request: &CreateTopicsRequest,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
 ) -> CreateTopicsResponse {
     let response = drive(broker, request, context).await;
     assert!(response.topics.len() == 1);

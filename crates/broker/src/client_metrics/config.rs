@@ -14,7 +14,10 @@ use std::collections::BTreeMap;
 use fancy_regex::Regex;
 
 use self::java_fold::Escape;
-use crate::config_keys::parse::{check_valid_list, int_value, java_trim, list_value, parse_int};
+use crate::{
+    codes::{INVALID_CONFIG, INVALID_REQUEST},
+    config_keys::parse::{check_valid_list, int_value, java_trim, list_value, parse_int},
+};
 
 pub(crate) const KEY_METRICS: &str = "metrics";
 pub(crate) const KEY_INTERVAL_MS: &str = "interval.ms";
@@ -42,8 +45,8 @@ impl ConfigError {
     /// The wire error code Kafka's `ConfigurationControlManager` answers.
     pub(crate) fn code(&self) -> i16 {
         match self {
-            Self::InvalidRequest(_) => crate::codes::INVALID_REQUEST,
-            Self::InvalidConfig(_) => crate::codes::INVALID_CONFIG,
+            Self::InvalidRequest(_) => INVALID_REQUEST,
+            Self::InvalidConfig(_) => INVALID_CONFIG,
         }
     }
 

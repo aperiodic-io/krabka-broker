@@ -41,9 +41,13 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    broker::registered_listener_endpoint,
     codes,
     coordinator::{
-        GroupCoordinator, bootstrap::OFFSETS_TOPIC, partitioner, unified::actor::GroupActorMessage,
+        GroupCoordinator,
+        bootstrap::OFFSETS_TOPIC,
+        partitioner,
+        unified::{actor::GroupActorMessage, classic_state::OffsetEntry},
     },
     metadata_source::MetadataSource,
     metrics::{BrokerMetrics, ConsumerGroupLabel, ReplicaLagLabel},
@@ -252,7 +256,7 @@ impl LagPoller {
         let broker = image
             .broker(leader)
             .ok_or_else(|| format!("unknown leader broker {leader}"))?;
-        let (host, port) = crate::broker::registered_listener_endpoint(broker, &self.listener_name);
+        let (host, port) = registered_listener_endpoint(broker, &self.listener_name);
         let Some((request, names)) = probe_request(image, partitions) else {
             return Ok(HashMap::new());
         };
@@ -410,7 +414,7 @@ fn coordinates_group(image: &MetadataImage, node_id: NodeId, group_id: &str) -> 
 /// group stands.
 async fn committed_offsets(
     actor: &tokio::sync::mpsc::Sender<GroupActorMessage>,
-) -> HashMap<TopicPartition, crate::coordinator::unified::classic_state::OffsetEntry> {
+) -> HashMap<TopicPartition, OffsetEntry> {
     let (reply, response) = oneshot::channel();
     let exchange = async {
         actor

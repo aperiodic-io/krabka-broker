@@ -7,7 +7,7 @@
 use krabka_ids::PartitionIndex;
 use krabka_units::{Time, convert::TimeExt as _};
 
-use crate::delivery::PartitionDelivery;
+use crate::{delivery::PartitionDelivery, metrics::BrokerMetrics};
 
 /// The gauges, the histogram, and the counter that the delivery scheduler
 /// feeds.
@@ -43,11 +43,11 @@ pub(crate) trait DeliveryMetrics: Send + Sync {
 /// without borrowing from the broker.
 #[derive(Clone)]
 pub(crate) struct BrokerDeliveryMetrics {
-    metrics: crate::metrics::BrokerMetrics,
+    metrics: BrokerMetrics,
 }
 
 impl BrokerDeliveryMetrics {
-    pub(crate) const fn new(metrics: crate::metrics::BrokerMetrics) -> Self {
+    pub(crate) const fn new(metrics: BrokerMetrics) -> Self {
         Self { metrics }
     }
 }

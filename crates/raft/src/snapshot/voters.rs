@@ -9,7 +9,10 @@ use krabka_metadata::{NodeId, VoterSet, voters::KRaftVersionRange};
 use krabka_protocol::owned::voters_record::VotersRecord as WireVotersRecord;
 use uuid::Uuid;
 
-use crate::error::RaftError;
+use crate::{
+    error::RaftError,
+    voter_wire::{from_wire, record, to_wire},
+};
 
 pub(super) fn voter_set_to_wire(voters: &VoterSet) -> Result<WireVotersRecord, RaftError> {
     let voters = voters
@@ -23,10 +26,10 @@ pub(super) fn voter_set_to_wire(voters: &VoterSet) -> Result<WireVotersRecord, R
             let max = i16::try_from(voter.kraft_version.max).map_err(|_| {
                 RaftError::ChangeRejected("snapshot maximum kraft.version exceeds int16".into())
             })?;
-            Ok(crate::voter_wire::to_wire(voter, id, min, max))
+            Ok(to_wire(voter, id, min, max))
         })
         .collect::<Result<Vec<_>, RaftError>>()?;
-    Ok(crate::voter_wire::record(voters))
+    Ok(record(voters))
 }
 
 pub(super) fn voter_set_from_wire(record: &WireVotersRecord) -> Result<VoterSet, RaftError> {
@@ -47,7 +50,7 @@ pub(super) fn voter_set_from_wire(record: &WireVotersRecord) -> Result<VoterSet,
                     "inverted kraft.version range in snapshot".into(),
                 ));
             }
-            Ok(crate::voter_wire::from_wire(
+            Ok(from_wire(
                 voter,
                 NodeId(id),
                 Uuid::from_bytes(voter.voter_directory_id.0),

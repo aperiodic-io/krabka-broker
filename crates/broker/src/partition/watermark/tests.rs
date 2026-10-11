@@ -6,9 +6,15 @@ use assert2::{assert, check};
 use krabka_log::Offset;
 use tokio::sync::Notify;
 
-use crate::partition::test_support::{append_records, test_partition};
+use crate::{
+    partition::{
+        Partition,
+        test_support::{append_records, install_three_replica_isr, test_partition},
+    },
+    test_support::{PartitionRecordsSetup, RecordCount},
+};
 
-async fn install_local_isr(partition: &crate::partition::Partition) {
+async fn install_local_isr(partition: &Partition) {
     let local = krabka_audit::NodeId(1);
     partition.install_isr(&[local], &[local], local).await;
 }
@@ -23,7 +29,7 @@ async fn high_watermark_reads_cached_value() {
 #[tokio::test]
 async fn install_isr_populates_replica_state() {
     let (p, _dir) = test_partition(Arc::new(Notify::new()));
-    crate::partition::test_support::install_three_replica_isr(&p).await;
+    install_three_replica_isr(&p).await;
     let st = p.replica_state.lock().await;
     check!(
         st.isr
@@ -46,8 +52,8 @@ async fn install_isr_advances_and_notifies_only_synced_storage() {
         partition.diskless = diskless;
         append_records(
             &partition,
-            crate::test_support::PartitionRecordsSetup {
-                count: crate::test_support::RecordCount(3),
+            PartitionRecordsSetup {
+                count: RecordCount(3),
                 ..Default::default()
             },
         );
@@ -78,8 +84,8 @@ async fn install_isr_same_high_watermark_does_not_notify() {
     let (p, _td) = test_partition(hw_advance_notify.clone());
     append_records(
         &p,
-        crate::test_support::PartitionRecordsSetup {
-            count: crate::test_support::RecordCount(2),
+        PartitionRecordsSetup {
+            count: RecordCount(2),
             ..Default::default()
         },
     );
@@ -128,8 +134,8 @@ async fn set_follower_hw_clamps_advances_and_notifies() {
     // Append a 3-record batch so log_end_offset() == 3.
     append_records(
         &p,
-        crate::test_support::PartitionRecordsSetup {
-            count: crate::test_support::RecordCount(3),
+        PartitionRecordsSetup {
+            count: RecordCount(3),
             ..Default::default()
         },
     );

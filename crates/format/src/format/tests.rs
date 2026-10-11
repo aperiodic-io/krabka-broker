@@ -9,7 +9,9 @@
 use assert2::check;
 
 use super::*;
-use crate::{format::output::ZERO_CHECKPOINT_NAME, meta_properties::META_PROPERTIES};
+use crate::{
+    Cli, format::output::ZERO_CHECKPOINT_NAME, meta_properties::META_PROPERTIES, run_from_args,
+};
 
 type DirectoryCase<'a, Expected> = (
     &'a str,
@@ -116,7 +118,7 @@ async fn exit_code_for_each_argv() {
 
     for (what, extra, want) in cases {
         let (_tmp, argv) = fresh_argv(extra);
-        let got = crate::run_from_args(argv).await;
+        let got = run_from_args(argv).await;
         check!(got == *want, "{what}: exit {got}, want {want}");
     }
 }
@@ -164,7 +166,7 @@ fn the_first_error_follows_kafkas_order() {
     ];
     for (what, extra, want) in cases {
         let (_tmp, argv) = fresh_argv(extra);
-        let cli = crate::Cli::try_parse_from(argv).expect("parse");
+        let cli = Cli::try_parse_from(argv).expect("parse");
 
         let Err((code, message)) = plan(cli.args, Vec::new()) else {
             panic!("{what}: the plan was accepted");
@@ -184,7 +186,7 @@ async fn format_into(
 ) -> (i32, std::path::PathBuf) {
     let log_dir = tmp.join("data");
     let argv = format_argv(&log_dir, node_id, extra);
-    (crate::run_from_args(argv).await, log_dir)
+    (run_from_args(argv).await, log_dir)
 }
 
 fn checkpoint_len(log_dir: &std::path::Path) -> u64 {
@@ -351,7 +353,7 @@ async fn a_non_empty_log_dir_is_refused() {
     std::fs::create_dir_all(&log_dir).expect("mkdir");
     std::fs::write(log_dir.join("someone-elses.txt"), b"x").expect("write");
 
-    let code = crate::run_from_args([
+    let code = run_from_args([
         "krabka-format",
         "--log-dir",
         &log_dir.display().to_string(),
@@ -369,7 +371,7 @@ async fn a_non_empty_log_dir_is_refused() {
 async fn a_standalone_format_writes_what_a_boot_reads() {
     let (_tmp, log_dir) = fresh_data_directory();
 
-    let code = crate::run_from_args(standalone_argv(&log_dir, &[])).await;
+    let code = run_from_args(standalone_argv(&log_dir, &[])).await;
     check!(code == EXIT_OK);
 
     for name in [META_PROPERTIES, "bootstrap.records.bin", "bootstrap.json"] {
@@ -429,7 +431,7 @@ async fn ignore_formatted_makes_a_second_format_a_no_op() {
 async fn ignore_formatted_still_formats_a_fresh_directory() {
     let (_tmp, log_dir) = fresh_data_directory();
 
-    let code = crate::run_from_args(standalone_argv(&log_dir, &["--ignore-formatted"])).await;
+    let code = run_from_args(standalone_argv(&log_dir, &["--ignore-formatted"])).await;
     check!(code == EXIT_OK);
     check!(log_dir.join(META_PROPERTIES).is_file());
 }
@@ -473,7 +475,7 @@ async fn an_unreadable_marker_is_skipped_unless_it_is_the_metadata_directory() {
         std::fs::write(dir.join(META_PROPERTIES), UNREADABLE).expect("write");
     };
     let run = |first: &std::path::Path, second: &std::path::Path| {
-        crate::run_from_args([
+        run_from_args([
             "krabka-format".to_owned(),
             "--log-dir".to_owned(),
             first.display().to_string(),
@@ -535,10 +537,7 @@ fn argv_under(root: &Path, setup: FormatArgvSetup<'_>) -> Vec<String> {
 fn plan_of(argv: Vec<String>) -> Result<Plan, Failure> {
     use clap::Parser as _;
 
-    plan(
-        crate::Cli::try_parse_from(argv).expect("parse").args,
-        Vec::new(),
-    )
+    plan(Cli::try_parse_from(argv).expect("parse").args, Vec::new())
 }
 
 /// The run writes the metadata log directory first and then each `--log-dir`
@@ -750,7 +749,7 @@ async fn only_the_metadata_log_directory_gets_the_bootstrap_files() {
     ];
     for (what, metadata, log_dirs, extra, want) in cases {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let code = crate::run_from_args(argv_under(
+        let code = run_from_args(argv_under(
             tmp.path(),
             FormatArgvSetup {
                 metadata: *metadata,

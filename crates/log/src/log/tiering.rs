@@ -13,7 +13,10 @@ use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
 use tracing::instrument;
 
 use super::Log;
-use crate::{error::LogError, name, producer_snapshot, retention, segment::Segment};
+use crate::{
+    error::LogError, leader_epoch_checkpoint::EpochEntry, name, producer_snapshot, retention,
+    segment::Segment,
+};
 
 /// A sealed segment described for tiered-storage offload (KIP-405).
 ///
@@ -86,7 +89,7 @@ pub struct ActiveSegmentExport {
 /// `sorted` must be ordered by `start_offset` ascending (the caller sorts
 /// once and reuses the slice across segments).
 fn epochs_for_range(
-    sorted: &[crate::leader_epoch_checkpoint::EpochEntry],
+    sorted: &[EpochEntry],
     base: Offset,
     last: Offset,
 ) -> Vec<(LeaderEpoch, Offset)> {

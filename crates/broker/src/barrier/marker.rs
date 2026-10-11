@@ -162,7 +162,10 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::coordinator::unified::persistence::MAX_STRING_BYTES;
+    use crate::{
+        coordinator::unified::persistence::MAX_STRING_BYTES,
+        txn::marker::{MarkerType, build_marker_batch},
+    };
 
     fn sample() -> BarrierMarker {
         BarrierMarker {
@@ -295,11 +298,11 @@ mod tests {
 
     #[test]
     fn parsing_rejects_a_transaction_marker() {
-        let commit = crate::txn::marker::build_marker_batch(
+        let commit = build_marker_batch(
             krabka_log::ProducerId(1000),
             0,
             Offset(0),
-            crate::txn::marker::MarkerType::Commit,
+            MarkerType::Commit,
             19,
         );
         assert!(parse_barrier_marker(&commit.records[0]).is_err());

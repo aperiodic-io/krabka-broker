@@ -344,6 +344,26 @@ mod tests {
     use krabka_metadata::{MetadataRecord, PartitionRecord};
 
     use super::*;
+    use crate::{
+        broker::Broker,
+        codes::{COORDINATOR_LOAD_IN_PROGRESS, NONE},
+        coordinator::{
+            test_support::default_coordinator,
+            unified::{ImageMetadataProvider, offsets_log::fake::InMemoryOffsetsLog},
+        },
+        handlers::{
+            delete_groups::handle as delete_groups_handle, heartbeat::handle,
+            join_group::handle as join_group_handle, leave_group::handle as leave_group_handle,
+            list_groups::handle as list_groups_handle,
+            offset_commit::handle as offset_commit_handle,
+            offset_fetch::handle as offset_fetch_handle,
+        },
+        metrics::{BrokerMetrics, ConsumerGroupLabel, ShareGroupIdLabel},
+        test_support::{
+            FakeMetadataSource, peer, principal, request_context, start_broker_no_audit_with,
+        },
+        txn::handlers::txn_offset_commit::handle as txn_offset_commit_handle,
+    };
 
     #[test]
     fn led_partitions_track_every_local_offsets_leader_and_its_epoch() {
@@ -371,11 +391,8 @@ mod tests {
 
     /// A coordinator that leads the one partition of the offsets topic, its
     /// image, and the metrics it reports to.
-    fn coordinator_of_the_offsets_partition() -> (
-        Arc<GroupCoordinator>,
-        MetadataImage,
-        crate::metrics::BrokerMetrics,
-    ) {
+    fn coordinator_of_the_offsets_partition()
+    -> (Arc<GroupCoordinator>, MetadataImage, BrokerMetrics) {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
             name: OFFSETS_TOPIC.into(),
@@ -392,18 +409,18 @@ mod tests {
             ..PartitionRecord::default()
         }));
         let metadata: Arc<dyn MetadataSource> = Arc::new(
-            crate::test_support::FakeMetadataSource::builder()
+            FakeMetadataSource::builder()
                 .image(image.clone())
                 .leader(Some(NodeId(1)))
                 .build(),
         );
-        let coordinator = crate::coordinator::test_support::default_coordinator(
-            Arc::new(crate::coordinator::unified::ImageMetadataProvider {
+        let coordinator = default_coordinator(
+            Arc::new(ImageMetadataProvider {
                 controller: Arc::clone(&metadata),
             }),
-            Arc::new(crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog::default()),
+            Arc::new(InMemoryOffsetsLog::default()),
         );
-        let metrics = crate::metrics::BrokerMetrics::new();
+        let metrics = BrokerMetrics::new();
         coordinator.set_metrics(metrics.clone());
         (coordinator, image, metrics)
     }
@@ -417,7 +434,7 @@ mod tests {
         let (coordinator, image, metrics) = coordinator_of_the_offsets_partition();
         // The group has to be live for the unload to find it.
         let _actor = coordinator.get_or_create_classic("billing");
-        let label = crate::metrics::ConsumerGroupLabel {
+        let label = ConsumerGroupLabel {
             group_id: "billing".into(),
             topic: "orders".into(),
             partition: 0,
@@ -444,7 +461,7 @@ mod tests {
 
         unload_partition(&coordinator, &image, PartitionIndex(0)).await;
 
-        let label = crate::metrics::ShareGroupIdLabel {
+        let label = ShareGroupIdLabel {
             group_id: "workers".into(),
         };
         check!(
@@ -482,7 +499,7 @@ mod tests {
         ListGroups,
     }
 
-    async fn call(broker: &crate::broker::Broker, rpc: GroupRpc) -> i16 {
+    async fn call(broker: &Broker, rpc: GroupRpc) -> i16 {
         use krabka_protocol::owned::{
             delete_groups_request::DeleteGroupsRequest,
             heartbeat_request::HeartbeatRequest,
@@ -499,9 +516,9 @@ mod tests {
             },
         };
 
-        let principal = crate::test_support::principal("alice");
-        let peer = crate::test_support::peer();
-        let ctx = crate::test_support::request_context(&principal, &peer, "load-client");
+        let principal = principal("alice");
+        let peer = peer();
+        let ctx = request_context(&principal, &peer, "load-client");
         match rpc {
             GroupRpc::JoinGroup => {
                 let request = JoinGroupRequest {
@@ -515,7 +532,7 @@ mod tests {
                     }],
                     ..Default::default()
                 };
-                crate::handlers::join_group::handle(broker, request, 9, &ctx)
+                join_group_handle(broker, request, 9, &ctx)
                     .await
                     .unwrap()
                     .error_code
@@ -527,10 +544,7 @@ mod tests {
                     generation_id: 1,
                     ..Default::default()
                 };
-                crate::handlers::heartbeat::handle(broker, request, 4, &ctx)
-                    .await
-                    .unwrap()
-                    .error_code
+                handle(broker, request, 4, &ctx).await.unwrap().error_code
             }
             GroupRpc::LeaveGroup => {
                 let request = LeaveGroupRequest {
@@ -541,7 +555,7 @@ mod tests {
                     }],
                     ..Default::default()
                 };
-                crate::handlers::leave_group::handle(broker, request, 5, &ctx)
+                leave_group_handle(broker, request, 5, &ctx)
                     .await
                     .unwrap()
                     .error_code
@@ -562,7 +576,7 @@ mod tests {
                     }],
                     ..Default::default()
                 };
-                crate::handlers::offset_commit::handle(broker, request, 8, &ctx)
+                offset_commit_handle(broker, request, 8, &ctx)
                     .await
                     .unwrap()
                     .topics[0]
@@ -588,7 +602,7 @@ mod tests {
                     }],
                     ..Default::default()
                 };
-                crate::txn::handlers::txn_offset_commit::handle(broker, request, 4, &ctx)
+                txn_offset_commit_handle(broker, request, 4, &ctx)
                     .await
                     .unwrap()
                     .topics[0]
@@ -604,14 +618,14 @@ mod tests {
                     }],
                     ..Default::default()
                 };
-                crate::handlers::offset_fetch::handle(broker, request, 8, &ctx)
+                offset_fetch_handle(broker, request, 8, &ctx)
                     .await
                     .unwrap()
                     .groups[0]
                     .error_code
             }
             GroupRpc::ListGroups => {
-                crate::handlers::list_groups::handle(broker, ListGroupsRequest::default(), 4, &ctx)
+                list_groups_handle(broker, ListGroupsRequest::default(), 4, &ctx)
                     .await
                     .unwrap()
                     .error_code
@@ -621,7 +635,7 @@ mod tests {
                     groups_names: vec!["g".into()],
                     ..Default::default()
                 };
-                crate::handlers::delete_groups::handle(broker, request, 2, &ctx)
+                delete_groups_handle(broker, request, 2, &ctx)
                     .await
                     .unwrap()
                     .results[0]
@@ -648,7 +662,7 @@ mod tests {
     /// Once the partition is served the same group is served again.
     #[tokio::test]
     async fn group_rpcs_answer_load_in_progress_until_the_partition_is_served() {
-        let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|config| {
+        let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
             config.offsets_topic_replication_factor = 1;
         })
         .await;
@@ -663,37 +677,16 @@ mod tests {
         check!(!broker.group_coordinator.is_loading(partition.get(), epoch));
 
         let rows = [
-            (
-                GroupRpc::JoinGroup,
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
-            (GroupRpc::Heartbeat, crate::codes::NONE),
-            (
-                GroupRpc::LeaveGroup,
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
-            (
-                GroupRpc::OffsetCommit,
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
-            (
-                GroupRpc::TxnOffsetCommit,
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
-            (
-                GroupRpc::OffsetFetch,
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
-            (
-                GroupRpc::DeleteGroups,
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
+            (GroupRpc::JoinGroup, COORDINATOR_LOAD_IN_PROGRESS),
+            (GroupRpc::Heartbeat, NONE),
+            (GroupRpc::LeaveGroup, COORDINATOR_LOAD_IN_PROGRESS),
+            (GroupRpc::OffsetCommit, COORDINATOR_LOAD_IN_PROGRESS),
+            (GroupRpc::TxnOffsetCommit, COORDINATOR_LOAD_IN_PROGRESS),
+            (GroupRpc::OffsetFetch, COORDINATOR_LOAD_IN_PROGRESS),
+            (GroupRpc::DeleteGroups, COORDINATOR_LOAD_IN_PROGRESS),
             // Kafka's `listGroups` reads every local shard, so one loading
             // shard fails the whole answer.
-            (
-                GroupRpc::ListGroups,
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
+            (GroupRpc::ListGroups, COORDINATOR_LOAD_IN_PROGRESS),
         ];
         for unserved in [Unserved::Loading, Unserved::NotTakenUp, Unserved::OlderTerm] {
             let coordinator = &broker.group_coordinator;
@@ -732,11 +725,11 @@ mod tests {
     /// mark of the load that replaced it.
     #[test]
     fn a_stale_load_does_not_clear_the_newer_mark() {
-        let coordinator = crate::coordinator::test_support::default_coordinator(
-            Arc::new(crate::coordinator::unified::ImageMetadataProvider {
-                controller: Arc::new(crate::test_support::FakeMetadataSource::builder().build()),
+        let coordinator = default_coordinator(
+            Arc::new(ImageMetadataProvider {
+                controller: Arc::new(FakeMetadataSource::builder().build()),
             }),
-            Arc::new(crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog::default()),
+            Arc::new(InMemoryOffsetsLog::default()),
         );
         let stale = LoadGuard::begin(Arc::clone(&coordinator), PartitionIndex(3), LeaderEpoch(1));
         coordinator.end_any_load(PartitionIndex(3));

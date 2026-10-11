@@ -12,6 +12,7 @@ use krabka_units::{
 };
 
 use super::FileConfigError;
+use crate::config_value::{PositiveCount, PositiveI32, PositiveI64};
 
 pub(super) fn invalid_runtime_value(name: &str, error: impl std::fmt::Display) -> FileConfigError {
     FileConfigError::InvalidConfig(format!("{name}: {error}"))
@@ -24,20 +25,20 @@ pub(super) fn positive_u64(name: &str, value: u64) -> Result<u64, FileConfigErro
 }
 
 pub(super) fn positive_i32(name: &str, value: i32) -> Result<i32, FileConfigError> {
-    crate::config_value::PositiveI32::new(value)
-        .map(crate::config_value::PositiveI32::into_value)
+    PositiveI32::new(value)
+        .map(PositiveI32::into_value)
         .map_err(|error| invalid_runtime_value(name, error))
 }
 
 pub(super) fn positive_i64(name: &str, value: i64) -> Result<i64, FileConfigError> {
-    crate::config_value::PositiveI64::new(value)
-        .map(crate::config_value::PositiveI64::into_value)
+    PositiveI64::new(value)
+        .map(PositiveI64::into_value)
         .map_err(|error| invalid_runtime_value(name, error))
 }
 
 pub(super) fn positive_usize(name: &str, value: usize) -> Result<usize, FileConfigError> {
-    crate::config_value::PositiveCount::new(value)
-        .map(crate::config_value::PositiveCount::into_value)
+    PositiveCount::new(value)
+        .map(PositiveCount::into_value)
         .map_err(|error| invalid_runtime_value(name, error))
 }
 
@@ -283,24 +284,30 @@ pub(super) fn positive_i16(name: &str, value: i16) -> Result<i16, FileConfigErro
 mod tests {
     use assert2::{assert, check};
 
-    use crate::file_config::FileConfig;
+    use crate::{
+        config::{
+            AuthenticationOrigins, BrokerConfig, LogOrigins, StaticConfigOrigins,
+            TopicAdminOrigins, TopicCreationOrigins,
+        },
+        file_config::{FileConfig, test_support::configured},
+    };
 
     /// Independent default provenance with the two explicitly varied expiry flags.
-    fn expected_origins(expiration: bool, cleanup: bool) -> crate::config::StaticConfigOrigins {
-        crate::config::StaticConfigOrigins {
+    fn expected_origins(expiration: bool, cleanup: bool) -> StaticConfigOrigins {
+        StaticConfigOrigins {
             txn_id_expiration: expiration,
             txn_id_expiration_cleanup_interval: cleanup,
-            topic_creation: crate::config::TopicCreationOrigins::default(),
-            log: crate::config::LogOrigins::default(),
-            topic_admin: crate::config::TopicAdminOrigins::default(),
-            authentication: crate::config::AuthenticationOrigins::default(),
+            topic_creation: TopicCreationOrigins::default(),
+            log: LogOrigins::default(),
+            topic_admin: TopicAdminOrigins::default(),
+            authentication: AuthenticationOrigins::default(),
             ..Default::default()
         }
     }
 
     #[test]
     fn runtime_file_config_rejects_zero_and_names_field() {
-        let error = crate::file_config::test_support::configured(
+        let error = configured(
             "[runtime]\ncleaner_interval = \"0ms\"\n",
             "parse runtime config",
         )
@@ -311,7 +318,7 @@ mod tests {
 
     #[test]
     fn runtime_file_config_rejects_voter_timeout_above_wire_limit() {
-        let error = crate::file_config::test_support::configured(
+        let error = configured(
             "[runtime]\nauto_join_voter_request_timeout = \"2147483648ms\"\n",
             "parse runtime config",
         )
@@ -336,9 +343,8 @@ mod tests {
                 "[runtime]\nproducer_id_expiration = \"1.5ms\"\n",
             ),
         ] {
-            let error =
-                crate::file_config::test_support::configured(source, "parse runtime config")
-                    .expect_err("fractional protocol milliseconds must fail");
+            let error = configured(source, "parse runtime config")
+                .expect_err("fractional protocol milliseconds must fail");
             assert!(error.to_string().contains(field));
         }
     }
@@ -376,8 +382,7 @@ mod tests {
                 None,
             ),
         ] {
-            let result =
-                crate::file_config::test_support::configured(source, "parse runtime config");
+            let result = configured(source, "parse runtime config");
 
             if let Some(field) = field {
                 let error = result.expect_err(label);
@@ -421,8 +426,8 @@ mod tests {
             (
                 "the KIP-464 topic-creation defaults supplied, at Kafka's own default value",
                 "[runtime]\nnum_partitions = 1\ndefault_replication_factor = 1\n",
-                crate::config::StaticConfigOrigins {
-                    topic_creation: crate::config::TopicCreationOrigins {
+                StaticConfigOrigins {
+                    topic_creation: TopicCreationOrigins {
                         num_partitions: true,
                         default_replication_factor: true,
                     },
@@ -433,8 +438,8 @@ mod tests {
                 "the log defaults that back a topic key supplied, at Kafka's own default value",
                 "[runtime]\nmessage_max_bytes = \"1048588B\"\nlog_segment_bytes = \"1GiB\"\n\
                  default_min_insync_replicas = 1\n",
-                crate::config::StaticConfigOrigins {
-                    log: crate::config::LogOrigins {
+                StaticConfigOrigins {
+                    log: LogOrigins {
                         message_max_bytes: true,
                         log_segment_bytes: true,
                         min_insync_replicas: true,
@@ -446,8 +451,8 @@ mod tests {
                 "the authentication limits supplied, at Kafka's own default value",
                 "[runtime]\nsasl_server_max_receive = \"524288B\"\n\
                  connection_failed_authentication_delay = \"100ms\"\n",
-                crate::config::StaticConfigOrigins {
-                    authentication: crate::config::AuthenticationOrigins {
+                StaticConfigOrigins {
+                    authentication: AuthenticationOrigins {
                         sasl_server_max_receive: true,
                         connection_failed_authentication_delay: true,
                     },
@@ -455,8 +460,7 @@ mod tests {
                 },
             ),
         ] {
-            let cfg = crate::file_config::test_support::configured(source, "parse runtime config")
-                .expect("apply runtime config");
+            let cfg = configured(source, "parse runtime config").expect("apply runtime config");
 
             check!(cfg.static_config_origins == expected, "{label}");
         }
@@ -489,15 +493,14 @@ mod tests {
         ] {
             let source = format!("[runtime]\n{field} = \"0B\"\n");
             let error =
-                crate::file_config::test_support::configured(&source, "parse runtime config")
-                    .expect_err("zero byte size must fail");
+                configured(&source, "parse runtime config").expect_err("zero byte size must fail");
             assert!(error.to_string().contains(field), "{error}");
         }
 
         let field = "record_decompression_max_ratio";
         let source = format!("[runtime]\n{field} = \"0\"\n");
-        let error = crate::file_config::test_support::configured(&source, "parse runtime config")
-            .expect_err("invalid ratio must fail");
+        let error =
+            configured(&source, "parse runtime config").expect_err("invalid ratio must fail");
         assert!(error.to_string().contains(field), "{error}");
     }
 
@@ -523,9 +526,8 @@ mod tests {
             ("message_max_bytes", "2147483648B"),
         ] {
             let source = format!("[runtime]\n{field} = \"{value}\"\n");
-            let error =
-                crate::file_config::test_support::configured(&source, "parse runtime config")
-                    .expect_err("fractional or overflowing byte size must fail");
+            let error = configured(&source, "parse runtime config")
+                .expect_err("fractional or overflowing byte size must fail");
             let expected = if field == "record_decompression_output_ceiling" {
                 "record_decompression"
             } else {
@@ -555,8 +557,7 @@ mod tests {
                 false,
             ),
         ] {
-            let result =
-                crate::file_config::test_support::configured(source, "parse runtime config");
+            let result = configured(source, "parse runtime config");
             assert!(result.is_ok() == expect_ok, "{source}: {result:?}");
         }
     }
@@ -710,7 +711,7 @@ mod tests {
         for (line, expected) in cases {
             let source = format!("[runtime]\n{line}\n");
             let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
+            let mut cfg = BrokerConfig::default();
             let actual = file
                 .apply_to(&mut cfg)
                 .map(|()| cfg.metadata_log)
@@ -747,8 +748,7 @@ mod tests {
         ];
 
         for (source, field) in cases {
-            let error = crate::file_config::test_support::configured(source, "parse config")
-                .expect_err("zero must fail");
+            let error = configured(source, "parse config").expect_err("zero must fail");
             assert!(error.to_string().contains(field));
         }
     }

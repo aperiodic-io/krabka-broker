@@ -134,7 +134,7 @@ use tokio::time::Instant;
 
 use crate::{
     jvm_acceptance::{broker0_advertised, start_host_broker},
-    support::client::connect_owned,
+    support::{admin::topic_spec, client::connect_owned},
 };
 
 /// The image, built here and named in the `sarama_conformance` entry of the
@@ -828,11 +828,7 @@ async fn sarama_round_trip_and_cluster_views_agree_with_krabka() {
         .expect("admin client");
     admin
         .create_topics(
-            &[crate::support::admin::topic_spec(
-                TOPIC.to_string(),
-                PARTITIONS,
-                1,
-            )],
+            &[topic_spec(TOPIC.to_string(), PARTITIONS, 1)],
             krabka_client_admin::TopicMutationOptions::with_timeout(krabka_units::secs(5)),
         )
         .await

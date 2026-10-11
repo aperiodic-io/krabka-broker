@@ -19,13 +19,18 @@ use krabka_protocol::{
 };
 
 use crate::{
-    CLIENT_PRINCIPAL, PASSWORD, TOPIC, support,
+    CLIENT_PRINCIPAL, PASSWORD, TOPIC,
     support::{
-        fetch::{fetch_partition, single_partition_fetch},
+        self,
+        fetch::{
+            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+        },
         offsets::{
             delete_records_partition, delete_records_request, delete_records_topic,
             list_offset_partition, single_partition_list_offsets,
         },
+        produce::{SinglePartitionProduceSetup, batch_request, send_batch},
         records::batch_from_records,
     },
 };
@@ -102,10 +107,14 @@ async fn produce_one(client: &Client, topic_id: WireUuid, value: Bytes, index: u
     let deadline = Instant::now() + Duration::from_mins(1);
     loop {
         let batch = stamped_batch(value.clone());
-        let response = crate::support::produce::send_batch(
+        let response = send_batch(
             &client,
             batch,
-            crate::support::produce::SinglePartitionProduceSetup {topic: (TOPIC).into(), topic_id, ..crate::support::produce::SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()},
+            SinglePartitionProduceSetup {
+                topic: (TOPIC).into(),
+                topic_id,
+                ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
+            },
         )
         .await;
         let partition = &response.responses[0].partition_responses[0];
@@ -131,17 +140,15 @@ fn data_fetch(
     topic_id: WireUuid,
     offset: krabka_ids::Offset,
 ) -> krabka_protocol::owned::fetch_request::FetchRequest {
-    single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+    single_partition_fetch(SinglePartitionFetchSetup {
         topic: TOPIC.into(),
         topic_id,
-        partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
+        partition: fetch_partition(FetchPartitionSetup {
             offset,
-            maximum: crate::support::fetch::FetchByteLimit(4 * 1024 * 1024),
+            maximum: FetchByteLimit(4 * 1024 * 1024),
             ..Default::default()
         }),
-        limits: crate::support::fetch::FetchLimits::wait_for_data(
-            crate::support::fetch::RequestWaitMillis(500),
-        ),
+        limits: FetchLimits::wait_for_data(RequestWaitMillis(500)),
     })
 }
 
@@ -248,12 +255,12 @@ pub(crate) async fn produce_until_stopped(
     while !stop.is_cancelled() {
         let batch = stamped_batch(Bytes::from(format!("diskless-e2e-churn-{index:04}")));
         let _ = client
-            .send(crate::support::produce::batch_request(
+            .send(batch_request(
                 batch,
-                crate::support::produce::SinglePartitionProduceSetup {
+                SinglePartitionProduceSetup {
                     topic: (TOPIC).into(),
                     topic_id,
-                    ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                    ..SinglePartitionProduceSetup::replicated()
                 },
             ))
             .await;

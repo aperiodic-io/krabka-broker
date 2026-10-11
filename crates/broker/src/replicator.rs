@@ -71,7 +71,10 @@ use self::fetch_loop::run_fetcher_loop;
 pub(crate) use self::follower_throttle::ReplicaLag;
 use crate::{
     broker::spawn_partition_with_replication_target, config::ReplicationRuntimeConfig,
-    partition::ReplicationTarget, partition_registry::PartitionRegistry, throttle::ThrottleState,
+    log_dir::place_partition_dir_avoiding, log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource, metrics::BrokerMetrics, network::client::InterBrokerClient,
+    partition::ReplicationTarget, partition_registry::PartitionRegistry,
+    producer_state::ProducerState, throttle::ThrottleState,
 };
 
 /// Outbound dialer and pacing policy shared by the two replication loops.
@@ -83,7 +86,7 @@ pub(crate) struct ReplicationConnectionConfig {
     /// needs them. It falls back to raw TCP for PLAINTEXT. The fetcher's own
     /// connection carries the Fetch rounds; this one is for the
     /// `OffsetForLeaderEpoch` lookup a fenced partition makes on its own.
-    pub inter_broker_client: Arc<crate::network::client::InterBrokerClient>,
+    pub inter_broker_client: Arc<InterBrokerClient>,
     pub inter_broker_listener_protocol: ListenerProtocol,
     pub inter_broker_server_name: String,
     pub replication: ReplicationRuntimeConfig,
@@ -132,13 +135,13 @@ pub(crate) struct Config {
     ///
     /// The replicator uses the image to look up
     /// `follower.replication.throttled.replicas`.
-    pub controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    pub controller: Arc<dyn MetadataSource>,
     /// KIP-113 runtime offline-dir registry.
     ///
     /// The replicator forwards this registry into `spawn_partition`. The
     /// per-partition writer can then set the owning dir offline after a
     /// segment-write failure or an fsync failure.
-    pub log_dir_status: crate::log_dir_status::LogDirRegistry,
+    pub log_dir_status: LogDirRegistry,
     /// Broker-wide producer-sequence tracker for idempotent and transactional
     /// producers.
     ///
@@ -146,12 +149,12 @@ pub(crate) struct Config {
     /// `ensure_local_partition`, so that the per-partition writer copies the
     /// producer state of each replicated transaction marker into it. The
     /// replicator also removes the entries of a tail that it truncates.
-    pub producer_state: Arc<crate::producer_state::ProducerState>,
+    pub producer_state: Arc<ProducerState>,
     /// Broker-wide metrics handle.
     ///
     /// The replicator increments `replication_bytes_in` after a successful
     /// follower-side append.
-    pub metrics: crate::metrics::BrokerMetrics,
+    pub metrics: BrokerMetrics,
     /// How far this partition trails the leader's high watermark, which decides
     /// whether the KIP-73 follower throttle applies to it: a follower that has
     /// caught up is never throttled.
@@ -302,7 +305,7 @@ pub(super) fn ensure_local_partition(cfg: &Config) -> Result<(), String> {
             // A name that fails the check would put the directory outside
             // the log directory.
             krabka_log::topic_name::validate_topic_name(&cfg.topic).map_err(|e| e.to_string())?;
-            let dir = crate::log_dir::place_partition_dir_avoiding(
+            let dir = place_partition_dir_avoiding(
                 &cfg.log_dirs,
                 cfg.partitions.cordoned_log_dirs(),
                 &cfg.topic,

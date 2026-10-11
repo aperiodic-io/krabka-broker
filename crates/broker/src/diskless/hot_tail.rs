@@ -11,6 +11,8 @@ use krabka_protocol::records::RecordBatch;
 use krabka_units::convert::ByteSizeExt as _;
 use uuid::Uuid;
 
+use crate::config::DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE;
+
 /// Advisory cache of recently quorum-committed diskless WAL batches.
 #[derive(Debug)]
 pub(crate) struct HotTailCache {
@@ -21,7 +23,7 @@ pub(crate) struct HotTailCache {
 impl Default for HotTailCache {
     fn default() -> Self {
         Self::new(
-            crate::config::DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE
+            DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE
                 .bytes_u64()
                 .try_into()
                 .unwrap_or(usize::MAX),

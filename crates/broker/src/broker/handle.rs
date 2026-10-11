@@ -8,7 +8,16 @@ use std::net::SocketAddr;
 use krabka_ids::PartitionIndex;
 use tokio::task::JoinHandle;
 
-use crate::{broker::BrokerHandle, error::BrokerError, partition_registry::PartitionRegistry};
+#[cfg(test)]
+use crate::broker::Broker;
+use crate::{
+    broker::BrokerHandle,
+    clean_shutdown::write,
+    error::BrokerError,
+    future_log::{abort_moves, shutdown_moves},
+    partition_registry::PartitionRegistry,
+    time_util::now_ms,
+};
 
 #[cfg(any(test, feature = "test-helpers"))]
 mod cluster;
@@ -37,7 +46,9 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
-    tokio::time::timeout(crate::broker::TEST_AWAITER_TIMEOUT, async {
+    use crate::broker::TEST_AWAITER_TIMEOUT;
+
+    tokio::time::timeout(TEST_AWAITER_TIMEOUT, async {
         while !condition().await {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
@@ -95,7 +106,7 @@ impl BrokerHandle {
     /// tests that drive a subsystem taking `&Arc<Broker>` directly rather than
     /// over a socket. `BrokerControllerAdminRouter::bind` is one.
     #[cfg(test)]
-    pub(crate) fn broker_for_test(&self) -> &std::sync::Arc<crate::broker::Broker> {
+    pub(crate) fn broker_for_test(&self) -> &std::sync::Arc<Broker> {
         &self.broker
     }
 
@@ -459,7 +470,7 @@ impl BrokerHandle {
             let _ = task.await;
         }
 
-        crate::future_log::shutdown_moves(&self.broker.future_logs).await;
+        shutdown_moves(&self.broker.future_logs).await;
         shutdown_partition_writers(&self.broker.partitions).await;
         if let Some(task) = self.broker.audit_writer_handle.lock().await.take() {
             task.abort();
@@ -491,7 +502,7 @@ impl BrokerHandle {
         if !config.is_broker() || config.broker_epoch < 0 || self.fatal_fault().is_some() {
             return;
         }
-        crate::clean_shutdown::write(&config.log_dir, config.broker_epoch);
+        write(&config.log_dir, config.broker_epoch);
     }
 
     /// Cancel the listener and drain in-flight connections. The returned
@@ -527,13 +538,13 @@ impl BrokerHandle {
             .emit(krabka_audit::AuditEvent::Lifecycle {
                 kind: krabka_audit::LifecycleKind::BrokerStopping,
                 node_id: i64::from(self.broker.config.broker_id),
-                time_ms: crate::time_util::now_ms(),
+                time_ms: now_ms(),
             });
         self.broker.audit_log.close();
         if let Some(task) = self.broker.audit_writer_handle.lock().await.take() {
             let _ = task.await;
         }
-        crate::future_log::shutdown_moves(&self.broker.future_logs).await;
+        shutdown_moves(&self.broker.future_logs).await;
         shutdown_partition_writers(&self.broker.partitions).await;
         snapshot_producer_state(&self.broker.partitions);
         self.broker.client_metrics.shutdown().await;
@@ -571,7 +582,7 @@ impl Drop for BrokerHandle {
         if let Some(task) = self.diskless_task.take() {
             task.abort();
         }
-        crate::future_log::abort_moves(&self.broker.future_logs);
+        abort_moves(&self.broker.future_logs);
         abort_partition_writers(&self.broker.partitions);
     }
 }

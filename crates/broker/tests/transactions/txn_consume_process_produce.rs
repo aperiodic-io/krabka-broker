@@ -10,7 +10,10 @@ use std::time::Duration;
 use assert2::assert;
 use krabka_client_consumer::{AutoOffsetReset, Consumer, IsolationLevel};
 
-use crate::txn_harness::{boot_single, create_topic, rec, send_ok};
+use crate::{
+    support::producer::{default_producer, transactional_producer},
+    txn_harness::{boot_single, create_topic, rec, send_ok},
+};
 
 /// Consume-process-produce loop with `send_offsets_to_transaction`. After the
 /// commit, 5 records must appear on the output topic under `read_committed`.
@@ -29,7 +32,7 @@ async fn send_offsets_to_transaction_atomic_with_records() {
 
     // Pre-seed the input topic with 5 records via a non-transactional producer.
     {
-        let nt = crate::support::producer::default_producer(bootstrap.clone()).await;
+        let nt = default_producer(bootstrap.clone()).await;
         for v in ["i0", "i1", "i2", "i3", "i4"] {
             send_ok(&nt, rec("input", v)).await;
         }
@@ -48,8 +51,7 @@ async fn send_offsets_to_transaction_atomic_with_records() {
             .await
             .unwrap();
 
-        let producer =
-            crate::support::producer::transactional_producer(bootstrap.clone(), "cpp-tid").await;
+        let producer = transactional_producer(bootstrap.clone(), "cpp-tid").await;
         let txn = producer.begin_transaction().await.unwrap();
 
         // Read all 5 records from input.

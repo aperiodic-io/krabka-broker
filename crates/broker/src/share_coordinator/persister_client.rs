@@ -54,6 +54,8 @@ use krabka_security::ListenerProtocol;
 
 use crate::{
     auto_topic_creation::AutoTopicCreation,
+    broker::registered_listener_endpoint,
+    codes::{COORDINATOR_NOT_AVAILABLE, UNKNOWN_TOPIC_OR_PARTITION},
     error::BrokerError,
     metadata_source::MetadataSource,
     network::client::InterBrokerClient,
@@ -224,7 +226,7 @@ impl SharePersister {
         // The group has nothing left to delete for it.
         match result {
             Err(BrokerError::SharePartitionState {
-                code: crate::codes::UNKNOWN_TOPIC_OR_PARTITION,
+                code: UNKNOWN_TOPIC_OR_PARTITION,
                 ..
             }) if self
                 .controller
@@ -277,7 +279,7 @@ impl SharePersister {
         self.find_state_partition(state_partition)
             .await
             .map_err(|error| BrokerError::SharePartitionState {
-                code: crate::codes::COORDINATOR_NOT_AVAILABLE,
+                code: COORDINATOR_NOT_AVAILABLE,
                 message: error.to_string(),
             })
     }
@@ -530,7 +532,7 @@ impl SharePersister {
         let pr = image
             .partition(bootstrap::TOPIC, state_partition.get())
             .ok_or_else(|| BrokerError::SharePartitionState {
-                code: crate::codes::COORDINATOR_NOT_AVAILABLE,
+                code: COORDINATOR_NOT_AVAILABLE,
                 message: format!(
                     "{}-{state_partition} not present in metadata image",
                     bootstrap::TOPIC
@@ -540,13 +542,11 @@ impl SharePersister {
         let broker_info = image
             .broker(leader)
             .ok_or_else(|| BrokerError::SharePartitionState {
-                code: crate::codes::COORDINATOR_NOT_AVAILABLE,
+                code: COORDINATOR_NOT_AVAILABLE,
                 message: format!("share-state leader node {leader} not in metadata image"),
             })?;
-        let (host, port) = crate::broker::registered_listener_endpoint(
-            broker_info,
-            &self.inter_broker_listener_name,
-        );
+        let (host, port) =
+            registered_listener_endpoint(broker_info, &self.inter_broker_listener_name);
         let host = host.to_owned();
 
         let opts = krabka_client_core::ConnectionOptions {
@@ -709,6 +709,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::codes::{
+        COORDINATOR_LOAD_IN_PROGRESS, FENCED_LEADER_EPOCH, FENCED_STATE_EPOCH, INVALID_REQUEST,
+    };
 
     fn response(partitions: &[(i32, i16)]) -> InitializeShareGroupStateResponse {
         InitializeShareGroupStateResponse {
@@ -754,13 +757,10 @@ mod tests {
     #[test]
     fn a_refused_share_state_call_keeps_the_coordinator_code() {
         let cases = [
-            ("ReadShareGroupState", crate::codes::INVALID_REQUEST),
-            ("ReadShareGroupState", crate::codes::FENCED_LEADER_EPOCH),
-            ("WriteShareGroupState", crate::codes::FENCED_STATE_EPOCH),
-            (
-                "ReadShareGroupStateSummary",
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
+            ("ReadShareGroupState", INVALID_REQUEST),
+            ("ReadShareGroupState", FENCED_LEADER_EPOCH),
+            ("WriteShareGroupState", FENCED_STATE_EPOCH),
+            ("ReadShareGroupStateSummary", COORDINATOR_LOAD_IN_PROGRESS),
         ];
         let actual: Vec<_> = cases
             .iter()

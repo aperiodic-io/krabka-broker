@@ -10,7 +10,7 @@ use krabka_metadata::MetadataRecord;
 use krabka_protocol::owned::create_acls_response::{AclCreationResult, CreateAclsResponse};
 use krabka_raft::RaftError;
 
-use crate::codes;
+use crate::{codes, handlers::submit_failure_code};
 
 /// The row for a creation the controller committed.
 ///
@@ -57,7 +57,7 @@ pub(super) fn apply_submit_error(
 ) {
     let code = match err {
         RaftError::NotLeader { .. } | RaftError::LeaderUnknown => codes::NOT_CONTROLLER,
-        other => crate::handlers::submit_failure_code(other, codes::UNKNOWN_SERVER_ERROR),
+        other => submit_failure_code(other, codes::UNKNOWN_SERVER_ERROR),
     };
     for (idx, _) in to_submit {
         results[*idx] = AclCreationResult {

@@ -7,6 +7,10 @@ use krabka_metadata::MetadataImage;
 use tracing::warn;
 
 use super::{ReplicatorSupervisor, desired_local_set, desired_wal_placements, push_topic_configs};
+use crate::{
+    config_keys::resolve_diskless,
+    wal::quorum::{prune_orphaned_shard_dirs, registry::ShardId, shard_dir},
+};
 
 impl ReplicatorSupervisor {
     pub(crate) async fn reconcile(&self, image: &MetadataImage) {
@@ -35,12 +39,10 @@ impl ReplicatorSupervisor {
             .await;
         let wal_dirs_to_keep = image
             .all_partitions()
-            .filter(|partition| {
-                crate::config_keys::resolve_diskless(image.topic_config(&partition.topic))
-            })
+            .filter(|partition| resolve_diskless(image.topic_config(&partition.topic)))
             .filter_map(|partition| {
                 let topic_id = image.topic(&partition.topic)?.topic_id;
-                let shard = crate::wal::quorum::registry::ShardId {
+                let shard = ShardId {
                     topic_id,
                     partition: PartitionIndex(partition.partition),
                 };
@@ -51,18 +53,11 @@ impl ReplicatorSupervisor {
             })
             .flat_map(|(topic, shard)| {
                 self.log_dirs.iter().map(move |log_dir| {
-                    crate::wal::quorum::shard_dir(
-                        log_dir,
-                        &topic,
-                        Some(shard.topic_id),
-                        shard.partition,
-                    )
+                    shard_dir(log_dir, &topic, Some(shard.topic_id), shard.partition)
                 })
             })
             .collect();
-        if let Err(error) =
-            crate::wal::quorum::prune_orphaned_shard_dirs(&self.log_dirs, &wal_dirs_to_keep)
-        {
+        if let Err(error) = prune_orphaned_shard_dirs(&self.log_dirs, &wal_dirs_to_keep) {
             warn!(error = %error, "failed to prune orphaned WAL shard directories");
         }
 

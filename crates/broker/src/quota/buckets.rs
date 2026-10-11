@@ -10,7 +10,7 @@ use krabka_metadata::EntityKey;
 use krabka_units::Time;
 
 use super::IpNames;
-use crate::throttle::TokenBucket;
+use crate::{config::DEFAULT_QUOTA_WINDOW, throttle::TokenBucket};
 
 /// Stored entry beside each live quota bucket. It holds no client identity:
 /// the bucket belongs to its entity key, and every client that resolves to the
@@ -54,7 +54,7 @@ impl QuotaBuckets {
     /// callers that have no config to read, which is the in-process tests.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_window(crate::config::DEFAULT_QUOTA_WINDOW)
+        Self::with_window(DEFAULT_QUOTA_WINDOW)
     }
 
     /// Buckets whose byte-rate burst is `rate * quota_window`, which is the

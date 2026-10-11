@@ -29,10 +29,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::{refusal, required_operation};
 use crate::{
-    ClusterGrants, ClusterOperation,
-    kraft::transport::api_key,
+    ClusterGrants, ClusterOperation, ListenerLimits,
+    kraft::{KraftController, transport::api_key},
     server::{
-        ConnectionContext, handle_conn,
+        ConnectionContext, Unstable, handle_conn,
         test_support::{encoded, single_voter_engine, wait_for_leader},
     },
     wire::{
@@ -611,10 +611,10 @@ async fn a_denied_request_never_reaches_the_engine() {
                 authenticated_via_token: false,
                 expires_at_ms: None,
                 grants: Grants::of(grants),
-                unstable: crate::server::Unstable::default(),
-                limits: crate::ListenerLimits::default(),
+                unstable: Unstable::default(),
+                limits: ListenerLimits::default(),
             },
-            crate::kraft::KraftController::wall_clock_ms,
+            KraftController::wall_clock_ms,
         ));
 
         let response = exchange(&mut client, api, version, &body).await;

@@ -5,7 +5,10 @@
 
 use krabka_units::{Time, convert::TimeExt as _};
 
-use crate::barrier::persistence::CutStatus;
+use crate::{
+    barrier::persistence::CutStatus,
+    metrics::{BarrierGroupLabel, BrokerMetrics},
+};
 
 /// What one finished injection reported.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,16 +31,16 @@ pub(crate) struct InjectionReport {
 /// cheaply, so the coordinator can own one without borrowing from the broker.
 #[derive(Clone)]
 pub(crate) struct BrokerBarrierMetrics {
-    metrics: crate::metrics::BrokerMetrics,
+    metrics: BrokerMetrics,
 }
 
 impl BrokerBarrierMetrics {
-    pub(crate) const fn new(metrics: crate::metrics::BrokerMetrics) -> Self {
+    pub(crate) const fn new(metrics: BrokerMetrics) -> Self {
         Self { metrics }
     }
 
-    fn group(group: &str) -> crate::metrics::BarrierGroupLabel {
-        crate::metrics::BarrierGroupLabel {
+    fn group(group: &str) -> BarrierGroupLabel {
+        BarrierGroupLabel {
             group: group.to_owned(),
         }
     }

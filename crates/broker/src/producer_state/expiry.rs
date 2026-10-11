@@ -78,7 +78,7 @@ mod tests {
     use krabka_units::millis;
 
     use super::*;
-    use crate::producer_state::Decision;
+    use crate::{producer_state::Decision, test_support::UnixMillis};
 
     /// How a row's producer reaches the sweep.
     #[derive(Clone, Copy, Debug)]
@@ -180,7 +180,7 @@ mod tests {
             ProducerCommitSetup {
                 producer: krabka_log::ProducerId(1),
                 delta: SequenceDelta(0),
-                timestamp: crate::test_support::UnixMillis(0),
+                timestamp: UnixMillis(0),
                 ..Default::default()
             },
         )

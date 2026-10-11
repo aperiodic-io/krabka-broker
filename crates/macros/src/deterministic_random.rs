@@ -2,8 +2,10 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::fixtures::name;
+
 pub(crate) fn splitmix64_step(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(tokens)?;
+    let name = name(tokens)?;
     Ok(moxy::template! {
         pub(crate) fn {{ name }}(state: &mut u64) -> u64 {
             *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);

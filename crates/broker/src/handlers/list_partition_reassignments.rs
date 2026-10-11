@@ -11,16 +11,17 @@ use krabka_protocol::owned::{
 use crate::{
     broker::Broker,
     codes::{CLUSTER_AUTHORIZATION_FAILED, NONE},
+    handlers::{RequestContext, cluster_describe_denied, metadata::wire_id},
 };
 
 pub(crate) fn handle(
     broker: &Broker,
     req: &ListPartitionReassignmentsRequest,
     _version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> ListPartitionReassignmentsResponse {
     let image = broker.controller.current_image();
-    if crate::handlers::cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+    if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
         let topics = match &req.topics {
             None => vec![],
             Some(filter) => filter
@@ -117,11 +118,7 @@ fn ongoing(pr: &PartitionRecord) -> OngoingPartitionReassignment {
 }
 
 fn wire_node_ids(nodes: &[krabka_metadata::NodeId]) -> Vec<i32> {
-    nodes
-        .iter()
-        .copied()
-        .map(crate::handlers::metadata::wire_id)
-        .collect()
+    nodes.iter().copied().map(wire_id).collect()
 }
 
 #[cfg(test)]
@@ -134,7 +131,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::test_support::DenyAll;
+    use crate::{authorizer::AllowAllAuthorizer, test_support::DenyAll};
 
     const VERSION: i16 = krabka_protocol::owned::list_partition_reassignments_response::MAX_VERSION;
 
@@ -265,8 +262,7 @@ mod tests {
     /// empty index list, an idle partition, an unknown topic) gives no row.
     #[tokio::test]
     async fn success_response_lists_what_kafka_lists() {
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         broker_handle
             .broker_arc_for_test()
             .controller

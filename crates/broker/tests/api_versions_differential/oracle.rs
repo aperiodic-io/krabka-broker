@@ -34,7 +34,11 @@ use krabka_security::ListenerProtocol;
 
 use crate::{
     probe::{retry_until, wait_bounded},
-    support::{JvmListeners, unique_container_name},
+    support::{
+        JvmBrokerSetup, JvmDockerSetup, JvmListeners, controller_voters, docker_logs, init_tracing,
+        jvm_broker_config, jvm_docker_command, kafka_single_node_env_args, remove_container,
+        unique_container_name,
+    },
 };
 
 /// The Kafka release this suite compares krabka against.
@@ -69,7 +73,7 @@ const ORACLE_BOOT_GAP: Duration = Duration::from_secs(1);
 /// this suite exists to have removed, because there the one listener carries
 /// both kinds of traffic.
 pub(crate) async fn start_krabka(listeners: &JvmListeners) -> (BrokerHandle, tempfile::TempDir) {
-    crate::support::init_tracing();
+    init_tracing();
     let dir = tempfile::tempdir().expect("tempdir");
     let controller_addr: std::net::SocketAddr =
         listeners.controller.parse().expect("allocated addr");
@@ -100,13 +104,13 @@ pub(crate) async fn start_krabka(listeners: &JvmListeners) -> (BrokerHandle, tem
             },
         ],
         inter_broker_listener_name: "BROKER".to_string(),
-        ..crate::support::jvm_broker_config(
+        ..jvm_broker_config(
             dir.path().to_path_buf(),
-            crate::support::JvmBrokerSetup {
+            JvmBrokerSetup {
                 listen: client_addr,
                 controller: controller_addr,
                 advertised: listeners.advertised.clone(),
-                voters: crate::support::controller_voters(&[(1, controller_addr)]),
+                voters: controller_voters(&[(1, controller_addr)]),
                 ..Default::default()
             },
         )
@@ -122,7 +126,7 @@ pub(crate) async fn start_krabka(listeners: &JvmListeners) -> (BrokerHandle, tem
 /// Run the tool from a throwaway container against the krabka broker that
 /// `listeners` advertises, and return its stdout.
 pub(crate) fn krabka_api_versions(listeners: &JvmListeners) -> String {
-    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let out = jvm_docker_command(JvmDockerSetup {
         image: ORACLE_IMAGE,
         args: &[TOOL, "--bootstrap-server", &listeners.advertised],
         ..Default::default()
@@ -156,7 +160,7 @@ impl OracleBroker {
         let name = unique_container_name("krabka-apiversions-oracle");
         let out = Command::new("docker")
             .args(["run", "-d", "--name", &name])
-            .args(crate::support::kafka_single_node_env_args())
+            .args(kafka_single_node_env_args())
             .args(["-e", "CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk", ORACLE_IMAGE])
             .output()
             .expect("spawn docker run kafka oracle");
@@ -238,12 +242,12 @@ impl OracleBroker {
     }
 
     fn logs(&self) -> String {
-        crate::support::docker_logs(&self.name)
+        docker_logs(&self.name)
     }
 }
 
 impl Drop for OracleBroker {
     fn drop(&mut self) {
-        crate::support::remove_container(&self.name);
+        remove_container(&self.name);
     }
 }

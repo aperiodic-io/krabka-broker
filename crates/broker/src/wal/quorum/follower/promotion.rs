@@ -11,9 +11,12 @@ use krabka_raft::NodeId;
 use krabka_verified::broker::DeleteRecordsTrimApplication;
 
 use super::log::{FollowerLog, voter_dir};
-use crate::wal::quorum::{
-    engine::{read_batches_exact, read_log_batches_covering},
-    registry::ShardId,
+use crate::{
+    BrokerError,
+    wal::quorum::{
+        engine::{read_batches_exact, read_log_batches_covering},
+        registry::ShardId,
+    },
 };
 
 /// Copy this broker's checkpointed follower prefix into a newly promoted
@@ -26,7 +29,7 @@ pub(crate) fn hydrate_on_promotion(
     node_id: NodeId,
     storage: &LogConfig,
     destination: &mut Log,
-) -> Result<Option<Offset>, crate::BrokerError> {
+) -> Result<Option<Offset>, BrokerError> {
     let Some(dir) = log_dirs
         .iter()
         .map(|root| voter_dir(root, topic, shard, node_id))
@@ -46,7 +49,7 @@ pub(crate) fn hydrate_on_promotion(
         destination_start.0,
     ) {
         DeleteRecordsTrimApplication::RejectMalformed => {
-            return Err(crate::BrokerError::Replication(
+            return Err(BrokerError::Replication(
                 "promoted WAL has a malformed logical floor".into(),
             ));
         }
@@ -91,13 +94,13 @@ pub(crate) fn hydrate_on_promotion(
                     )
                 })
             {
-                return Err(crate::BrokerError::Replication(format!(
+                return Err(BrokerError::Replication(format!(
                     "promoted WAL follower diverges from canonical log in {}..{}",
                     overlap_start.0, overlap_end.0
                 )));
             }
         } else if destination_end < source_start {
-            return Err(crate::BrokerError::Replication(format!(
+            return Err(BrokerError::Replication(format!(
                 "promoted WAL follower starts at {}, after canonical LEO {}",
                 source_start.0, destination_end.0
             )));
@@ -111,7 +114,7 @@ pub(crate) fn hydrate_on_promotion(
         }
     }
     if destination.log_end_offset() < source_end {
-        return Err(crate::BrokerError::Replication(format!(
+        return Err(BrokerError::Replication(format!(
             "promoted WAL hydration ended at {}, before durable follower LEO {}",
             destination.log_end_offset().0,
             source_end.0
@@ -131,9 +134,12 @@ mod tests {
     use krabka_units::mebibytes;
 
     use super::*;
-    use crate::wal::quorum::{
-        engine::read_log_batches_exact,
-        follower::checkpoint::{DURABLE_OFFSET_FILE, DurableRange, write_durable_offset},
+    use crate::{
+        log_dir::partition_dir,
+        wal::quorum::{
+            engine::{read_log_batches_exact, split_batches},
+            follower::checkpoint::{DURABLE_OFFSET_FILE, DurableRange, write_durable_offset},
+        },
     };
 
     macro_rules! follower_fixture {
@@ -222,7 +228,7 @@ mod tests {
             let expected_bytes = source.read_raw(Offset(0), end, mebibytes(1)).unwrap().bytes;
             checkpoint_follower!(follower_dir, Offset(0), end);
             drop(source);
-            let destination_dir = crate::log_dir::partition_dir(root.path(), "diskless", 0);
+            let destination_dir = partition_dir(root.path(), "diskless", 0);
             let mut destination = Log::open(&destination_dir, LogConfig::default()).unwrap();
             for _ in 0..2 {
                 assert!(hydrate_follower!(root, shard, destination).unwrap() == Some(end));
@@ -282,7 +288,7 @@ mod tests {
                 .read_raw(Offset(0), Offset(6), mebibytes(1))
                 .unwrap()
                 .bytes;
-            let destination_dir = crate::log_dir::partition_dir(root.path(), "diskless", 0);
+            let destination_dir = partition_dir(root.path(), "diskless", 0);
             let mut destination = Log::open(&destination_dir, LogConfig::default()).unwrap();
             for batch in
                 read_log_batches_exact(&follower, Offset(0), Offset(copied_batches * 3)).unwrap()
@@ -321,7 +327,7 @@ mod tests {
                 assert!(destination.log_start_offset() == floor);
                 assert!(destination.log_end_offset() == Offset(6));
                 let expected = if destination_floor >= 3 {
-                    crate::wal::quorum::engine::split_batches(&full_bytes).unwrap()[1]
+                    split_batches(&full_bytes).unwrap()[1]
                         .verbatim
                         .bytes
                         .clone()
@@ -373,7 +379,7 @@ mod tests {
         follower.sync().unwrap();
         drop(follower);
 
-        let destination_dir = crate::log_dir::partition_dir(root.path(), "diskless", 0);
+        let destination_dir = partition_dir(root.path(), "diskless", 0);
         let mut destination = Log::open(&destination_dir, LogConfig::default()).unwrap();
         assert!(hydrate_follower!(root, shard, destination).unwrap() == Some(Offset(2)));
         assert!(destination.log_end_offset() == Offset(2));
@@ -429,7 +435,7 @@ mod tests {
             .unwrap()
             .bytes;
         drop(follower);
-        let destination_dir = crate::log_dir::partition_dir(root.path(), "diskless", 0);
+        let destination_dir = partition_dir(root.path(), "diskless", 0);
         let mut destination = Log::open(&destination_dir, config.clone()).unwrap();
         let mut different = RecordBatch {
             records: vec![Record {
@@ -491,7 +497,7 @@ mod tests {
         follower.sync().unwrap();
         checkpoint_follower!(follower_dir, Offset(0), Offset(2));
 
-        let destination_dir = crate::log_dir::partition_dir(root.path(), "diskless", 0);
+        let destination_dir = partition_dir(root.path(), "diskless", 0);
         {
             let mut partial = Log::open(&destination_dir, LogConfig::default()).unwrap();
             let prefix = read_log_batches_exact(&follower, Offset(0), Offset(1)).unwrap();

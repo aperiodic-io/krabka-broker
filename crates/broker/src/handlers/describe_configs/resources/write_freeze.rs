@@ -5,6 +5,8 @@
 //! a stored override. This module answers it from the registry instead, and
 //! holds the vocabulary the value is spelled in.
 
+use crate::freeze::{freeze_target, resolve::resolve_freeze_verdict};
+
 /// The `write.freeze` value on a frozen topic, before the scope that matched.
 ///
 /// The rest of the value is [`crate::freeze::freeze_target`], so a frozen
@@ -23,8 +25,8 @@ pub(super) fn write_freeze_override(
     image: &krabka_metadata::MetadataImage,
     topic: &str,
 ) -> Option<String> {
-    let verdict = crate::freeze::resolve::resolve_freeze_verdict(image, topic)?;
-    let target = crate::freeze::freeze_target(verdict.pattern_type, &verdict.scope);
+    let verdict = resolve_freeze_verdict(image, topic)?;
+    let target = freeze_target(verdict.pattern_type, &verdict.scope);
     Some(format!("{WRITE_FREEZE_FROZEN_PREFIX}{target}"))
 }
 

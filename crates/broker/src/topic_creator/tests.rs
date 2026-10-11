@@ -26,9 +26,14 @@ use krabka_protocol::{
 use krabka_raft::NodeId;
 
 use super::*;
-use crate::test_support::{
-    ControllerPeerAllowed, FakeMetadataSource, GrantsInPrincipalName, start_broker_no_audit,
-    start_broker_no_audit_with,
+use crate::{
+    api_catalog::UnstableApiVersions,
+    network::{client::InterBrokerClient, request::parse_request},
+    test_support::{
+        ControllerPeerAllowed, DescribedCreationSetup, FakeMetadataSource, GrantsInPrincipalName,
+        described_creation_configs, principal, request_context, start_broker_no_audit,
+        start_broker_no_audit_with,
+    },
 };
 
 /// A retry timeout short enough that a test sees [`TopicCreatorError::Timeout`]
@@ -130,9 +135,9 @@ async fn without_principal_creates_a_topic_and_then_reports_that_it_exists() {
     // KIP-525 (v5+): the row carries the effective configs of the new topic.
     // The request set no overrides, so they are the defaults.
     let image = broker.controller.current_image();
-    let configs = crate::test_support::described_creation_configs(
+    let configs = described_creation_configs(
         &image,
-        crate::test_support::DescribedCreationSetup {
+        DescribedCreationSetup {
             node: broker.config.node_id,
             topic: "fresh",
             overrides: &std::collections::BTreeMap::new(),
@@ -261,7 +266,7 @@ fn creator_over(controller: FakeMetadataSource, voters: Vec<(NodeId, String)>) -
     TopicCreator::from_parts(
         Arc::new(controller),
         ControllerDialer {
-            outbound_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
+            outbound_client: Arc::new(InterBrokerClient::new(None, None)),
             listener_protocol: krabka_security::ListenerProtocol::Plaintext,
             server_name: "localhost".to_owned(),
             quorum_voters: voters,
@@ -458,8 +463,7 @@ impl FakeController {
                 frame.put_i16(version);
                 frame.put_i32(correlation_id);
                 frame.put_slice(body);
-                let parsed = crate::network::request::parse_request(&frame, flexible_for)
-                    .expect("a request header");
+                let parsed = parse_request(&frame, flexible_for).expect("a request header");
                 let client_id = parsed.client_id.map(ToOwned::to_owned);
                 if api_key == envelope_request::API_KEY {
                     let outer =
@@ -467,7 +471,7 @@ impl FakeController {
                     let forwarded = envelope::unwrap_request(
                         &outer.request_data,
                         flexible_for,
-                        crate::api_catalog::UnstableApiVersions::Disabled,
+                        UnstableApiVersions::Disabled,
                     )
                     .expect("an embedded request");
                     let principal =
@@ -769,10 +773,9 @@ fn each_error_reads_as_kafka_reports_it() {
 /// the client id and the correlation id of the request.
 #[test]
 fn a_forwarded_identity_is_the_identity_of_the_request() {
-    let principal = crate::test_support::principal("alice");
+    let principal = principal("alice");
     let peer: SocketAddr = "10.1.2.3:50000".parse().expect("literal address");
-    let ctx = crate::test_support::request_context(&principal, &peer, "admin-client")
-        .with_correlation_id(9);
+    let ctx = request_context(&principal, &peer, "admin-client").with_correlation_id(9);
 
     let got = ForwardedIdentity::of(&ctx);
 

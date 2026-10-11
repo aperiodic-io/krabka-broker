@@ -14,6 +14,7 @@ use crate::{
     rlmm_cluster::{await_tiered_config, build_client, start_configured_topic_rlmm},
     rlmm_round_trip::remote_log_files,
     run_broker_test,
+    topic_fixture::{create_configured_topic, tiered_configs},
 };
 
 /// While the topic-backed RLMM has not yet activated, the RLM copy task must
@@ -46,12 +47,7 @@ async fn copy_task_skips_tiering_while_rlmm_not_ready_case() {
     .await;
     let client = build_client(&broker).await;
 
-    crate::topic_fixture::create_configured_topic(
-        &client,
-        TOPIC,
-        crate::topic_fixture::tiered_configs(Some("1024")),
-    )
-    .await;
+    create_configured_topic(&client, TOPIC, tiered_configs(Some("1024"))).await;
 
     // Wait for the tiered config to propagate into the partition's LogConfig
     // (same gate as the loopback round-trip test).

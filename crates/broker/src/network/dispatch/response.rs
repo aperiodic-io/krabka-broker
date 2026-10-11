@@ -14,7 +14,14 @@ use crate::{
     broker::Broker,
     error::BrokerError,
     handlers::{ApiKeyCode, ApiVersion, CorrelationId},
-    network::codec,
+    metrics::{QuotaCharge, QuotaType},
+    network::{
+        auth::ConnectionAuth,
+        codec::{self, KafkaCodec},
+        request::ParsedRequest,
+        response_header_len, response_header_v1,
+    },
+    quota::{QuotaDelay, consume_request_quota, throttle_time_ms},
 };
 
 /// A framed response together with the KIP-219 window the connection must
@@ -26,7 +33,7 @@ pub(super) struct ThrottledResponse {
     /// A quota charge the handler left for [`apply_request_quota`] to resolve
     /// together with the request quota. See
     /// [`crate::quota::ThrottleSlot::defer`].
-    pub(super) deferred_charge: Option<crate::metrics::QuotaCharge>,
+    pub(super) deferred_charge: Option<QuotaCharge>,
     /// Set for an `acks=0` `Produce` whose response carried an error on any
     /// partition. The response body is suppressed either way, but this tells
     /// `send_registry_response` to close the connection instead of muting it,
@@ -48,7 +55,7 @@ impl ThrottledResponse {
 
 /// Write before enforcing the window, and close on exactly the same framing failure.
 pub(super) async fn send_throttled_response<S: tokio::io::AsyncWrite + Unpin>(
-    framed: &mut tokio_util::codec::Framed<S, crate::network::codec::KafkaCodec>,
+    framed: &mut tokio_util::codec::Framed<S, KafkaCodec>,
     response: ThrottledResponse,
 ) -> super::AfterResponse {
     use futures_util::SinkExt as _;
@@ -76,7 +83,7 @@ pub(super) struct ResponseShape {
 impl ResponseShape {
     /// The ordinary case: the handler answered at the version the client
     /// asked for, with the header flexibility the request header used.
-    pub(super) fn mirroring_request(parsed: &crate::network::request::ParsedRequest<'_>) -> Self {
+    pub(super) fn mirroring_request(parsed: &ParsedRequest<'_>) -> Self {
         Self {
             version: parsed.api_version,
             body_flexible: parsed.body_flexible,
@@ -100,11 +107,11 @@ impl ResponseShape {
 pub(super) fn apply_request_quota(
     broker: &Broker,
     mut response_bytes: Bytes,
-    parsed: &crate::network::request::ParsedRequest<'_>,
+    parsed: &ParsedRequest<'_>,
     shape: ResponseShape,
-    auth: &crate::network::auth::ConnectionAuth,
+    auth: &ConnectionAuth,
     handler_time: std::time::Duration,
-    deferred_charge: Option<crate::metrics::QuotaCharge>,
+    deferred_charge: Option<QuotaCharge>,
 ) -> ThrottledResponse {
     let elapsed_micros = u64::try_from(handler_time.as_micros()).unwrap_or(u64::MAX);
     let self_accounts = matches!(
@@ -121,10 +128,10 @@ pub(super) fn apply_request_quota(
         // family's `_count` equal to the number of requests this path
         // accounted for.
         let charged = match auth.principal() {
-            None => crate::quota::QuotaDelay::zero(),
+            None => QuotaDelay::zero(),
             Some(principal) => {
                 let image = broker.controller.current_image();
-                crate::quota::consume_request_quota(
+                consume_request_quota(
                     &image,
                     &broker.quota_buckets,
                     &principal.name,
@@ -137,9 +144,8 @@ pub(super) fn apply_request_quota(
         // One metrics call resolves the request quota and any quota the
         // handler deferred, and the larger delay is the window this request is
         // muted for.
-        let request_charge: crate::metrics::QuotaCharge =
-            (crate::metrics::QuotaType::Request, charged).into();
-        let quota_charges: Vec<crate::metrics::QuotaCharge> = deferred_charge
+        let request_charge: QuotaCharge = (QuotaType::Request, charged).into();
+        let quota_charges: Vec<QuotaCharge> = deferred_charge
             .into_iter()
             .chain(std::iter::once(request_charge))
             .collect();
@@ -147,7 +153,7 @@ pub(super) fn apply_request_quota(
             .metrics
             .record_applied_throttle(parsed.api_key, &quota_charges);
         if delay > <Time as TimeExt>::ZERO {
-            let delay_ms = crate::quota::throttle_time_ms(delay);
+            let delay_ms = throttle_time_ms(delay);
             if throttle_is_leading_field(parsed.api_key, shape.version) {
                 response_bytes = patch_leading_throttle(
                     response_bytes,
@@ -199,7 +205,7 @@ pub(super) fn buried_throttle_is_reencoded(api_key: ApiKeyCode) -> bool {
 /// gets is the one the handler wrote.
 fn set_buried_throttle(
     response_bytes: Bytes,
-    parsed: &crate::network::request::ParsedRequest<'_>,
+    parsed: &ParsedRequest<'_>,
     shape: ResponseShape,
     delay_ms: i32,
 ) -> Bytes {
@@ -211,7 +217,7 @@ fn set_buried_throttle(
         renew_delegation_token_response::RenewDelegationTokenResponse,
     };
 
-    let header_len = crate::network::response_header_len(parsed.api_key, shape.body_flexible);
+    let header_len = response_header_len(parsed.api_key, shape.body_flexible);
     let Some(body) = response_bytes.get(header_len..) else {
         return response_bytes;
     };
@@ -320,11 +326,11 @@ pub(super) fn encode_response(
     body_flexible: bool,
     body: &[u8],
 ) -> Result<Bytes, BrokerError> {
-    let header_len = crate::network::response_header_len(api_key, body_flexible);
+    let header_len = response_header_len(api_key, body_flexible);
     codec::response_frame_length(header_len + body.len())?;
     let mut buf = BytesMut::with_capacity(header_len + body.len());
     buf.put_i32(correlation_id);
-    if crate::network::response_header_v1(api_key, body_flexible) {
+    if response_header_v1(api_key, body_flexible) {
         buf.put_u8(0); // empty tagged fields
     }
     buf.put_slice(body);
@@ -488,7 +494,7 @@ fn patch_leading_throttle(
     body_flexible: bool,
     delay_ms: i32,
 ) -> Bytes {
-    let off = crate::network::response_header_len(api_key, body_flexible);
+    let off = response_header_len(api_key, body_flexible);
     if resp.len() < off + 4 {
         return resp;
     }

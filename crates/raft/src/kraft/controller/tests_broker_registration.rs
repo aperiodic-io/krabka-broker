@@ -5,8 +5,11 @@
 use assert2::{assert, check};
 
 use super::*;
-use crate::kraft::controller::test_support::{
-    ControllerSetup, build, submit_change_with_timeout, topic_record,
+use crate::kraft::controller::{
+    recovery::replay_committed,
+    test_support::{
+        ControllerSetup, build, elect_leader_with_helper, submit_change_with_timeout, topic_record,
+    },
 };
 
 #[test]
@@ -177,8 +180,7 @@ async fn a_registration_change_waits_for_an_uncommitted_registration() {
     use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord};
 
     let (ctrl, _dir) = build(ControllerSetup::default());
-    crate::kraft::controller::test_support::elect_leader_with_helper(&ctrl, NodeId(1), NodeId(2))
-        .await;
+    elect_leader_with_helper(&ctrl, NodeId(1), NodeId(2)).await;
     let commit = || async {
         super::test_support::commit_pending(&ctrl, NodeId(2)).await;
     };
@@ -469,7 +471,7 @@ fn replay_recovers_fencing_and_controlled_shutdown() {
     }
 
     let mut recovered = MetadataImage::new(uuid::Uuid::nil());
-    crate::kraft::controller::recovery::replay_committed(
+    replay_committed(
         &engine.log,
         &mut recovered,
         Offset(0),

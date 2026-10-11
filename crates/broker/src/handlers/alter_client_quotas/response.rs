@@ -17,7 +17,10 @@ use krabka_protocol::{
     },
 };
 
-use crate::codes::{COORDINATOR_NOT_AVAILABLE, NONE};
+use crate::{
+    codes::{COORDINATOR_NOT_AVAILABLE, NONE},
+    handlers::stamp_unset,
+};
 
 fn entity_rows(entity: &[(String, Option<String>)]) -> Vec<RespEntity> {
     entity
@@ -49,7 +52,7 @@ pub(super) fn err_entry(entity: &[(String, Option<String>)], code: i16, msg: Str
 }
 
 pub(super) fn apply_submit_error(entry_results: &mut [RespEntry], error: impl std::fmt::Display) {
-    crate::handlers::stamp_unset(
+    stamp_unset(
         entry_results,
         COORDINATOR_NOT_AVAILABLE,
         &format!("submit failed: {error}"),

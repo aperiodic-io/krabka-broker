@@ -12,6 +12,10 @@ use super::{
     minio::minio_list_objects,
     ports::broker0_advertised,
 };
+use crate::{
+    jvm_acceptance::wait_jvm_log_config,
+    support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output},
+};
 
 /// Segment size every tiered-storage suite boots its broker with, as
 /// `BrokerConfig::log_config.segment_size`.
@@ -82,7 +86,7 @@ pub(crate) async fn create_tiered_topic(broker: &krabka_broker::BrokerHandle, to
 
     // Only the overrides the JVM CLI actually sent are worth waiting for; the
     // segment size is inherited the moment the partition exists.
-    let cfg = crate::jvm_acceptance::wait_jvm_log_config(
+    let cfg = wait_jvm_log_config(
         broker,
         topic,
         |cfg| cfg.remote_storage_enable && cfg.local_retention_size == Some(krabka_units::bytes(1)),
@@ -117,7 +121,7 @@ pub(crate) fn produce_records(topic: &str, n: usize) {
         use std::fmt::Write as _;
         let _ = writeln!(payload, "record-{i:04}");
     }
-    let mut child_command = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let mut child_command = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE,
         args: &[
             "kafka-console-producer",
@@ -132,10 +136,10 @@ pub(crate) fn produce_records(topic: &str, n: usize) {
             "--producer-property",
             "max.in.flight.requests.per.connection=1",
         ],
-        input: crate::support::ContainerInput::Attached,
+        input: ContainerInput::Attached,
         ..Default::default()
     });
-    let producer_out = crate::support::jvm_stdin_output(&mut child_command, payload.as_bytes());
+    let producer_out = jvm_stdin_output(&mut child_command, payload.as_bytes());
     assert!(
         producer_out.status.success(),
         "producer failed: {}",

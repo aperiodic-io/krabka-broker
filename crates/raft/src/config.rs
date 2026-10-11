@@ -15,7 +15,7 @@ use krabka_units::{
 };
 use uuid::Uuid;
 
-use crate::{network::OutboundDialer, types::NodeId};
+use crate::{RaftListenerHandshake, network::OutboundDialer, types::NodeId};
 
 mod kafka_release;
 mod limits;
@@ -195,7 +195,7 @@ pub struct ControllerConfig {
     /// implementation here when the controller listener should
     /// terminate TLS and/or SASL before raft frames start flowing.
     #[debug("{}", handshake.is_some())]
-    pub handshake: Option<Arc<dyn crate::RaftListenerHandshake>>,
+    pub handshake: Option<Arc<dyn RaftListenerHandshake>>,
     /// Optional KIP-595 shard router. Metadata traffic returns `None`; diskless
     /// WAL shards return an encoded response body and bypass metadata dispatch.
     #[debug("{}", shard_router.is_some())]

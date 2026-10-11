@@ -165,12 +165,15 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::file_config::{FileConfig, FileConfigError};
+    use crate::{
+        config::{BrokerConfig, RemoteStorageBackend},
+        file_config::{FileConfig, FileConfigError, test_support::configured_unwrap_parse},
+    };
 
     fn configured_s3(source: &str) -> krabka_remote_storage::S3Config {
-        let config = crate::file_config::test_support::configured_unwrap_parse(source).unwrap();
+        let config = configured_unwrap_parse(source).unwrap();
         match config.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::S3(s3)) => s3,
+            Some(RemoteStorageBackend::S3(s3)) => s3,
             other => panic!("expected S3 backend, got {other:?}"),
         }
     }
@@ -252,9 +255,9 @@ prefix = "cluster-a"
 endpoint = "http://fake-gcs:4443"
 allow_http = true
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         match cfg.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::Gcs(g)) => {
+            Some(RemoteStorageBackend::Gcs(g)) => {
                 // Leaving all credential fields unset selects Workload
                 // Identity / ADC; multipart knobs default when the TOML
                 // omits them.
@@ -280,9 +283,9 @@ allow_http = true
 bucket = "b"
 service_account_path = "/etc/gcs/key.json"
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         match cfg.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::Gcs(g)) => {
+            Some(RemoteStorageBackend::Gcs(g)) => {
                 assert!(g.bucket == "b");
                 assert!(g.service_account_path.as_deref() == Some("/etc/gcs/key.json"));
             }
@@ -335,7 +338,7 @@ signing_key_path = "/etc/krabka/worm-signing.pk8"
 signing_key_id = "worm-2026-q3"
 write_only = true
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         check!(
             cfg.remote_storage_worm
                 == Some(krabka_remote_storage::WormConfig {
@@ -355,7 +358,7 @@ bucket = "krabka-archive"
 
 [remote_storage.worm]
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         // An empty table still enables WORM; every knob takes its default.
         check!(cfg.remote_storage_worm == Some(krabka_remote_storage::WormConfig::default()));
     }
@@ -394,7 +397,7 @@ bucket = "krabka-archive"
             ),
         ] {
             let file: FileConfig = toml::from_str(source).expect("parse worm syntax");
-            let mut cfg = crate::config::BrokerConfig::default();
+            let mut cfg = BrokerConfig::default();
             let error = file
                 .apply_to(&mut cfg)
                 .expect_err("invalid worm config must fail");
@@ -416,7 +419,7 @@ bucket = "krabka-archive"
 bucket = "krabka-prod"
 region = "us-east-1"
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         check!(cfg.remote_storage_worm.is_none());
     }
     #[test]
@@ -447,10 +450,10 @@ region = "us-east-1"
 max_retries = 3
 request_timeout = "10s"
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         let defaults = krabka_remote_storage::S3Config::default();
         match cfg.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::S3(s3)) => {
+            Some(RemoteStorageBackend::S3(s3)) => {
                 check!(s3.max_retries == 3);
                 check!(s3.request_timeout == std::time::Duration::from_secs(10));
                 check!(s3.retry_timeout == defaults.retry_timeout);
@@ -469,10 +472,10 @@ bucket = "krabka-prod"
 retry_timeout = "45s"
 connect_timeout = "2s"
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         let defaults = krabka_remote_storage::GcsConfig::default();
         match cfg.remote_storage_backend {
-            Some(crate::config::RemoteStorageBackend::Gcs(gcs)) => {
+            Some(RemoteStorageBackend::Gcs(gcs)) => {
                 check!(gcs.retry_timeout == std::time::Duration::from_secs(45));
                 check!(gcs.connect_timeout == std::time::Duration::from_secs(2));
                 check!(gcs.max_retries == defaults.max_retries);

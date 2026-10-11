@@ -13,7 +13,16 @@ use krabka_units::prelude::{
 use tracing::instrument;
 
 use super::Log;
-use crate::{error::LogError, retention, segment::Segment, txn_index::TxnIndex};
+use crate::{
+    compact::{
+        CleanedTransactionMetadata, CleaningRound, RewriteOutput, RewriteRetention, atomic_swap,
+        atomic_swap_retiring, build_offset_map, rewrite_segments,
+    },
+    error::LogError,
+    retention,
+    segment::Segment,
+    txn_index::TxnIndex,
+};
 
 /// Inputs to one [`Log::compact`] pass that depend on broker-side state.
 ///
@@ -396,16 +405,16 @@ impl Log {
         // groups of one pass.
         self.rollover_flusher.finish()?;
         let active_producers = self.last_records_of_active_producers();
-        let mut rewrites: Vec<(Vec<Offset>, crate::compact::RewriteOutput)> = Vec::new();
+        let mut rewrites: Vec<(Vec<Offset>, RewriteOutput)> = Vec::new();
         {
             let sealed_refs: Vec<&Segment> = self.segments[..consumed].iter().collect();
             let consumed_end = self.sealed_segment_end(consumed - 1);
-            let offset_map = crate::compact::build_offset_map(
+            let offset_map = build_offset_map(
                 &sealed_refs,
                 self.aborted_in_range(sealed_refs[0].base_offset(), consumed_end),
                 record_limit,
             )?;
-            let mut txn_meta = crate::compact::CleanedTransactionMetadata::default();
+            let mut txn_meta = CleanedTransactionMetadata::default();
             let sizes: Vec<ByteSize> = sealed_refs.iter().map(|segment| segment.size()).collect();
             let groups = Self::group_segments_by_size(&sizes, segment_bytes);
             rewrites.reserve_exact(groups.len());
@@ -421,17 +430,17 @@ impl Log {
                     group_refs[0].base_offset(),
                     self.sealed_segment_end(start + group_len - 1),
                 ));
-                let rewrite = crate::compact::rewrite_segments(
+                let rewrite = rewrite_segments(
                     &*self.io,
                     &self.dir,
                     group_refs,
                     &offset_map,
                     &mut txn_meta,
-                    crate::compact::RewriteRetention {
+                    RewriteRetention {
                         now_ms,
                         delete_retention,
                     },
-                    crate::compact::CleaningRound {
+                    CleaningRound {
                         active_producers: &active_producers,
                         // The round rewrites the offset map's whole range, so
                         // it ends where the last consumed segment does.
@@ -469,12 +478,12 @@ impl Log {
         let mut new_segments: Vec<Segment> = Vec::with_capacity(rewrites.len());
         for (group_bases, rewrite) in &rewrites {
             if self.config.read().unwrap().file_delete_delay <= krabka_units::Time::ZERO {
-                crate::compact::atomic_swap(&*self.io, &self.dir, group_bases, rewrite)?;
+                atomic_swap(&*self.io, &self.dir, group_bases, rewrite)?;
             } else {
                 let io = self.io.clone();
                 let dir = self.dir.clone();
                 let now = std::time::SystemTime::now();
-                crate::compact::atomic_swap_retiring(&*io, &dir, group_bases, rewrite, |base| {
+                atomic_swap_retiring(&*io, &dir, group_bases, rewrite, |base| {
                     self.retire_files(base, now, &["log", "index", "timeindex", "txnindex"])
                 })?;
             }
@@ -525,7 +534,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        config::LogConfig,
+        CleanupPolicy,
+        config::{DeliveryPolicy, LogConfig},
         log::test_support::{
             append_keyed_samples, compact_test_log, compacting_segments, compaction_ctx,
             keyed_batch, set_segment_size, tiny_segments,
@@ -712,7 +722,7 @@ mod tests {
     fn a_topic_written_to_faster_than_its_min_lag_is_still_due() {
         let dir = tempdir().unwrap();
         let cfg = LogConfig {
-            cleanup_policy: crate::CleanupPolicy::Compact,
+            cleanup_policy: CleanupPolicy::Compact,
             // Longer than the second that separates two appends, and short
             // enough to leave the older segments cleanable.
             min_compaction_lag: Time::from_millis(1_500),
@@ -798,7 +808,7 @@ mod tests {
     fn the_min_lag_holds_back_the_oldest_segment_of_a_never_cleaned_log() {
         let dir = tempdir().unwrap();
         let cfg = LogConfig {
-            cleanup_policy: crate::CleanupPolicy::Compact,
+            cleanup_policy: CleanupPolicy::Compact,
             min_compaction_lag: Time::from_millis(3_000),
             ..tiny_segments()
         };
@@ -836,7 +846,7 @@ mod tests {
     fn a_pass_leaves_the_segments_the_min_lag_withholds() {
         let dir = tempdir().unwrap();
         let cfg = LogConfig {
-            cleanup_policy: crate::CleanupPolicy::Compact,
+            cleanup_policy: CleanupPolicy::Compact,
             min_compaction_lag: Time::from_millis(2_500),
             ..tiny_segments()
         };
@@ -909,7 +919,7 @@ mod tests {
     fn a_watermark_inside_a_segment_withholds_that_segment() {
         let dir = tempdir().unwrap();
         let cfg = LogConfig {
-            cleanup_policy: crate::CleanupPolicy::Compact,
+            cleanup_policy: CleanupPolicy::Compact,
             // Two batches per sealed segment.
             segment_size: bytes(200),
             ..Default::default()
@@ -945,7 +955,7 @@ mod tests {
     fn a_ratio_of_one_holds_a_partly_dirty_log_back_until_the_max_lag() {
         let dir = tempdir().unwrap();
         let cfg = LogConfig {
-            cleanup_policy: crate::CleanupPolicy::Compact,
+            cleanup_policy: CleanupPolicy::Compact,
             min_cleanable_dirty_ratio: fraction(1.0),
             ..tiny_segments()
         };
@@ -1053,7 +1063,7 @@ mod tests {
     /// Three sealed versions of k1 plus an active record outside the pass.
     fn versioned_log(dir: &std::path::Path, active: (&[u8], &[u8])) -> Log {
         let cfg = LogConfig {
-            cleanup_policy: crate::CleanupPolicy::Compact,
+            cleanup_policy: CleanupPolicy::Compact,
             segment_size: bytes(256), // force rolls
             ..Default::default()
         };
@@ -1093,7 +1103,7 @@ mod tests {
         ] {
             let dir = tempdir().unwrap();
             let cfg = LogConfig {
-                cleanup_policy: crate::CleanupPolicy::Compact,
+                cleanup_policy: CleanupPolicy::Compact,
                 max_decompressed_record: limit,
                 ..tiny_segments()
             };
@@ -1152,8 +1162,8 @@ mod tests {
         ] {
             let dir = tempdir().unwrap();
             let cfg = LogConfig {
-                cleanup_policy: crate::CleanupPolicy::Compact,
-                delivery_policy: crate::config::DeliveryPolicy::Scheduled,
+                cleanup_policy: CleanupPolicy::Compact,
+                delivery_policy: DeliveryPolicy::Scheduled,
                 max_decompressed_record: limit,
                 ..tiny_segments()
             };
@@ -1179,7 +1189,7 @@ mod tests {
     fn compact_no_op_when_only_one_segment() {
         let dir = tempdir().unwrap();
         let cfg = LogConfig {
-            cleanup_policy: crate::CleanupPolicy::Compact,
+            cleanup_policy: CleanupPolicy::Compact,
             ..Default::default()
         };
         let mut log = Log::open(dir.path(), cfg).unwrap();

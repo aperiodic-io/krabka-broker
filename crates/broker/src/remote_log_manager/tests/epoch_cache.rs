@@ -18,7 +18,7 @@ use krabka_remote_storage::{
 use uuid::Uuid;
 
 use super::*;
-use crate::remote_log_manager::test_support as fixtures;
+use crate::{log_dir::partition_dir, remote_log_manager::test_support as fixtures};
 
 /// The id and the `(first offset, last offset, epoch)` of each archive segment.
 ///
@@ -150,7 +150,7 @@ async fn the_epoch_cache_cleanup_follows_an_established_log_start_across_a_resta
     ];
     for (name, mutate, expected) in cases {
         let log_dir = tempfile::tempdir().unwrap();
-        let partition_dir = crate::log_dir::partition_dir(log_dir.path(), "orders", 0);
+        let partition_dir = partition_dir(log_dir.path(), "orders", 0);
         std::fs::create_dir_all(&partition_dir).unwrap();
         let mut log = epoch_log(&partition_dir);
         mutate(&mut log);

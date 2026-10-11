@@ -5,11 +5,10 @@
 use krabka_metadata::MetadataRecord;
 use uuid::Uuid;
 
+use crate::test_support::single_partition_topic;
+
 pub(super) fn topic_record(name: &str) -> MetadataRecord {
-    MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-        name,
-        Uuid::new_v4(),
-    ))
+    MetadataRecord::V1Topic(single_partition_topic(name, Uuid::new_v4()))
 }
 
 pub(super) async fn wait_for_controller_leader(ctrl: &krabka_raft::ControllerHandle) {

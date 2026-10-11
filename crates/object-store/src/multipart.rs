@@ -174,6 +174,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
+    use crate::test_support::{http_listener, s3_config, serve_http_pages};
 
     async fn with_listing<T>(
         pages: Vec<(&'static str, &'static str, &'static str)>,
@@ -184,7 +185,7 @@ mod tests {
             .into_iter()
             .map(|(request, status, body)| (request.into(), status, body))
             .collect();
-        let (endpoint, server) = crate::test_support::serve_http_pages(pages, true).await;
+        let (endpoint, server) = serve_http_pages(pages, true).await;
         let result = extract(list_s3_multipart_uploads(&config(endpoint), prefix).await);
         server.await.unwrap();
         result
@@ -199,7 +200,7 @@ mod tests {
     }
 
     fn config(endpoint: String) -> S3Config {
-        crate::test_support::s3_config("bucket", endpoint)
+        s3_config("bucket", endpoint)
     }
 
     #[test]
@@ -289,7 +290,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_that_never_reaches_the_store_is_a_backend_error() {
-        let (listener, endpoint) = crate::test_support::http_listener().await;
+        let (listener, endpoint) = http_listener().await;
         drop(listener);
 
         let client = s3_http_client(&config(endpoint.clone())).unwrap();

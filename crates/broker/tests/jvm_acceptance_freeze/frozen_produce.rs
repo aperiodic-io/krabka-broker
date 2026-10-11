@@ -9,7 +9,7 @@ use assert2::check;
 use krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED};
 
 use crate::{
-    control_plane::freeze,
+    control_plane::{freeze, plain_topic_fixture},
     jvm_tool::jvm_produce,
     vocabulary::{
         CONTROL_TOPIC, LITERAL_REASON, LITERAL_TOPIC, POLICY_VIOLATION_EXCEPTION, PREFIX_REASON,
@@ -33,9 +33,7 @@ use crate::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires docker"]
 async fn the_jvm_console_producer_reads_a_freeze_as_a_policy_violation() {
-    let (broker, client) =
-        crate::control_plane::plain_topic_fixture(&[LITERAL_TOPIC, PREFIX_TOPIC, CONTROL_TOPIC])
-            .await;
+    let (broker, client) = plain_topic_fixture(&[LITERAL_TOPIC, PREFIX_TOPIC, CONTROL_TOPIC]).await;
     freeze(&client, LITERAL_TOPIC, PATTERN_TYPE_LITERAL, LITERAL_REASON).await;
     freeze(&client, PREFIX_SCOPE, PATTERN_TYPE_PREFIXED, PREFIX_REASON).await;
 

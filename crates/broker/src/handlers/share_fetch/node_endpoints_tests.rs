@@ -37,10 +37,14 @@ use crate::{
     authorizer::AllowAllAuthorizer,
     broker::BrokerHandle,
     codes,
-    handlers::test_support::CreateTopicSetup,
+    handlers::test_support::{
+        CreateTopicSetup, ReplicatedPartitionSetup, ShareWireSetup, configured_topic_request,
+        replicated_partition, share_fetch_wire,
+    },
+    share_partition::session::FetchPartitions,
     test_support::{
-        decode_response, encode_request, peer, principal, request_context,
-        start_broker_no_audit_with,
+        decode_response, encode_request, initialize_share_state, peer, principal, request_context,
+        start_broker_no_audit_with, try_dispatch_context,
     },
 };
 
@@ -66,12 +70,10 @@ async fn create_local_topic(broker: &BrokerHandle) -> WireUuid {
         .await
         .expect("client build");
     let response = client
-        .send(crate::handlers::test_support::configured_topic_request(
-            CreateTopicSetup {
-                topic: "local",
-                ..Default::default()
-            },
-        ))
+        .send(configured_topic_request(CreateTopicSetup {
+            topic: "local",
+            ..Default::default()
+        }))
         .await
         .expect("CreateTopics");
     assert!(response.topics[0].error_code == codes::NONE, "{response:?}");
@@ -90,14 +92,12 @@ fn partition(topic: &str, partition: i32, leader: i32, epoch: i32) -> MetadataRe
     let leader = NodeId(u64::try_from(leader).expect("a node id"));
     MetadataRecord::V1Partition(PartitionRecord {
         leader_epoch: LeaderEpoch(epoch),
-        ..crate::handlers::test_support::replicated_partition(
-            crate::handlers::test_support::ReplicatedPartitionSetup {
-                topic,
-                partition: krabka_ids::PartitionIndex(partition),
-                leader,
-                replicas: &[leader],
-            },
-        )
+        ..replicated_partition(ReplicatedPartitionSetup {
+            topic,
+            partition: krabka_ids::PartitionIndex(partition),
+            leader,
+            replicas: &[leader],
+        })
     })
 }
 
@@ -168,8 +168,7 @@ fn fetch_row(partition_index: i32, error_code: i16, leader: (i32, i32)) -> Parti
 async fn share_fetch_sends_the_endpoint_of_each_remote_leader_once() {
     let (broker, _dir) = start().await;
     let local = create_local_topic(&broker).await;
-    crate::test_support::initialize_share_state(&broker, GROUP, uuid::Uuid::from_bytes(local.0), 0)
-        .await;
+    initialize_share_state(&broker, GROUP, uuid::Uuid::from_bytes(local.0), 0).await;
     seed_remote_leaders(&broker).await;
     let request = ShareFetchRequest {
         group_id: Some(GROUP.into()),
@@ -196,10 +195,10 @@ async fn share_fetch_sends_the_endpoint_of_each_remote_leader_once() {
         ..Default::default()
     };
     let version = share_fetch_response::MAX_VERSION;
-    let response = crate::handlers::test_support::share_fetch_wire(
+    let response = share_fetch_wire(
         &broker,
         &request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(version),
             ..Default::default()
         },
@@ -262,7 +261,7 @@ async fn share_acknowledge_on_a_remote_leader_answers_unknown_partition_without_
             (GROUP, "member"),
             ctx.connection_id,
             0,
-            crate::share_partition::session::FetchPartitions {
+            FetchPartitions {
                 requested: &[],
                 forgotten: &std::collections::HashSet::new(),
             },
@@ -297,7 +296,7 @@ async fn share_acknowledge_on_a_remote_leader_answers_unknown_partition_without_
         ..Default::default()
     };
     let version = share_acknowledge_response::MAX_VERSION;
-    let response = crate::test_support::try_dispatch_context(
+    let response = try_dispatch_context(
         &shared,
         krabka_protocol::owned::share_acknowledge_request::API_KEY,
         version,

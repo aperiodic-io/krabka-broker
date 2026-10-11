@@ -8,7 +8,10 @@
 use assert2::assert;
 use krabka_client_producer::{ConsumerGroupMetadata, Producer};
 
-use crate::txn_harness::{boot_single_sasl, create_topic_sasl, sasl_plain_security};
+use crate::{
+    support::{producer::enqueue_string_values, transaction_wire::committed_values},
+    txn_harness::{boot_single_sasl, create_topic_sasl, sasl_plain_security},
+};
 
 /// Full transactional flow over a `SASL_PLAINTEXT`/`PLAIN` listener.
 ///
@@ -45,7 +48,7 @@ async fn sasl_authenticated_transactional_flow_commits() {
     // this is the call that failed with Client(Disconnected) before the fix.
     producer.init_transactions().await.unwrap();
     let txn = producer.begin_transaction().await.unwrap();
-    crate::support::producer::enqueue_string_values(&producer, "sasl-txn", &["a", "b", "c"]).await;
+    enqueue_string_values(&producer, "sasl-txn", &["a", "b", "c"]).await;
     // send_offsets_to_transaction dials the group coordinator on a *second*
     // fresh connection — the other secondary connection that must carry SASL.
     producer
@@ -71,7 +74,7 @@ async fn sasl_authenticated_transactional_flow_commits() {
         return;
     }
 
-    let (consumer, seen) = crate::support::transaction_wire::committed_values(
+    let (consumer, seen) = committed_values(
         bootstrap,
         "sasl-verify",
         "sasl-txn",

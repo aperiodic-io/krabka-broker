@@ -15,7 +15,17 @@ use krabka_protocol::{
 };
 
 use super::*;
-use crate::codes;
+use crate::{
+    SslPrincipalMapper,
+    api_catalog::{
+        ClientMetricsReceiver, ListenerKind, UnstableApiVersions, VersionGates, supported_apis,
+    },
+    cluster_id::encode,
+    codes,
+    config::ListenerSpec,
+    handlers::RequestContext,
+    test_support::{decode_response as decode_wire_response, peer, principal, start_broker_with},
+};
 
 const API_VERSIONS_V3: i16 = 3;
 const API_VERSIONS_V5: i16 = 5;
@@ -47,7 +57,7 @@ fn routing_request(cluster_id: Option<String>, node_id: i32) -> Bytes {
 }
 
 fn decode_response(version: i16, bytes: &Bytes) -> ApiVersionsResponse {
-    crate::test_support::decode_response(bytes, version)
+    decode_wire_response(bytes, version)
 }
 
 /// The anonymous, plaintext context the dispatch loop builds for a handshake
@@ -55,7 +65,7 @@ fn decode_response(version: i16, bytes: &Bytes) -> ApiVersionsResponse {
 /// request quota, which no broker in this module configures, so every response
 /// below reports `throttle_time_ms = 0`.
 fn anonymous_principal() -> krabka_security::Principal {
-    crate::test_support::principal("ANONYMOUS")
+    principal("ANONYMOUS")
 }
 
 /// The anonymous handshake fixture, retaining resource and identity bindings.
@@ -149,11 +159,7 @@ fn api_versions_advertises_the_deliberate_ranges() {
             ],
         ),
     ] {
-        let table = crate::api_catalog::supported_apis(
-            crate::api_catalog::ListenerKind::Client,
-            crate::api_catalog::ClientMetricsReceiver::Absent,
-            gates,
-        );
+        let table = supported_apis(ListenerKind::Client, ClientMetricsReceiver::Absent, gates);
         let pinned: Vec<ApiVersion> = table
             .into_iter()
             .filter(|api| [0, 1, 2, 18, 22].contains(&api.api_key))
@@ -191,17 +197,17 @@ async fn api_versions_answers_every_version_on_every_listener_shape() {
         ("INTERNAL", false),
         ("INTERNAL", true),
     ] {
-        let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
-            let external = crate::config::ListenerSpec {
+        let (broker_handle, _dir) = start_broker_with(|cfg| {
+            let external = ListenerSpec {
                 name: "EXTERNAL".to_string(),
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 advertised: "127.0.0.1:0".to_string(),
                 protocol: krabka_security::ListenerProtocol::Plaintext,
                 tls_config: None,
                 sasl_mechanisms: None,
-                principal_mapper: crate::SslPrincipalMapper::default(),
+                principal_mapper: SslPrincipalMapper::default(),
             };
-            let internal = crate::config::ListenerSpec {
+            let internal = ListenerSpec {
                 name: "INTERNAL".to_string(),
                 bind_addr: "127.0.0.2:0".parse().unwrap(),
                 advertised: "127.0.0.2:0".to_string(),
@@ -214,8 +220,8 @@ async fn api_versions_answers_every_version_on_every_listener_shape() {
         .await;
         let broker = broker_handle.broker_arc_for_test();
         let principal = anonymous_principal();
-        let peer = crate::test_support::peer();
-        let context = crate::handlers::RequestContext::new(
+        let peer = peer();
+        let context = RequestContext::new(
             &principal,
             &peer,
             "krabka-test",
@@ -223,10 +229,10 @@ async fn api_versions_answers_every_version_on_every_listener_shape() {
             false,
             listener,
         );
-        let expected_keys = crate::api_catalog::supported_apis(
+        let expected_keys = supported_apis(
             broker.config.listener_kind(listener),
             broker.config.client_metrics_receiver(),
-            crate::api_catalog::VersionGates::default(),
+            VersionGates::default(),
         );
         check!(
             expected_keys
@@ -254,7 +260,7 @@ async fn api_versions_answers_every_version_on_every_listener_shape() {
                 "{listener} telemetry={telemetry} v{version}"
             );
         }
-        let body = unsupported_version_response(crate::api_catalog::UnstableApiVersions::Disabled)
+        let body = unsupported_version_response(UnstableApiVersions::Disabled)
             .expect("unsupported answer");
         check!(
             decode_response(0, &body) == unsupported,
@@ -270,10 +276,10 @@ fn api_versions_advertises_kip853_rpcs_and_describe_quorum_v2() {
     use krabka_protocol::owned;
     // UpdateRaftVoter (82) is inter-broker only, so the table that carries all
     // three KIP-853 RPCs is the inter-broker listener's.
-    let table = crate::api_catalog::supported_apis(
-        crate::api_catalog::ListenerKind::InterBroker,
-        crate::api_catalog::ClientMetricsReceiver::Absent,
-        crate::api_catalog::VersionGates::default(),
+    let table = supported_apis(
+        ListenerKind::InterBroker,
+        ClientMetricsReceiver::Absent,
+        VersionGates::default(),
     );
     let by_key = |k: i16| table.iter().find(|v| v.api_key == k);
 
@@ -432,7 +438,7 @@ async fn handle_applies_kip1242_routing_checks() {
     // A real KIP-1242 client learned this cluster id from a `Metadata` or
     // `DescribeCluster` response, which reports Kafka's base64 `Uuid` form
     // (#1082), and echoes that exact string back here.
-    let cluster_id = crate::cluster_id::encode(raw_cluster_id);
+    let cluster_id = encode(raw_cluster_id);
     let hyphenated_cluster_id = raw_cluster_id.to_string();
     let node_id = i32::try_from(broker.config.node_id.0).expect("node id fits Kafka wire");
     assert!(node_id != broker.config.broker_id);

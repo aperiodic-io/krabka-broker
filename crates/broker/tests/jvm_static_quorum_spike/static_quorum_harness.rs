@@ -27,6 +27,9 @@ pub(crate) fn kafka_cluster_id_string(id: Uuid) -> String {
 /// 3-voter set, with the shared cluster id. `i` is 0-indexed, and the id is
 /// `i+1`.
 pub(crate) use crate::support::jvm_static_voter_config as krabka_controller_config;
+use crate::support::{
+    JvmBrokerSetup, JvmStaticVoterSetup, bind_and_drop_ports, controller_voters, format_jvm_voter,
+};
 
 /// Formats a Krabka voter's log directory at Kafka 4.0's `metadata.version`.
 ///
@@ -38,7 +41,7 @@ pub(crate) use crate::support::jvm_static_voter_config as krabka_controller_conf
 /// Cargo working tree to spawn it from.
 pub(crate) async fn format_at_kafka_4_0(log_dir: &std::path::Path, node: &BrokerConfig) {
     let cluster_id = node.cluster_id.expect("the spikes name their cluster id");
-    crate::support::format_jvm_voter(log_dir, &kafka_cluster_id_string(cluster_id), node).await;
+    format_jvm_voter(log_dir, &kafka_cluster_id_string(cluster_id), node).await;
 }
 
 pub(crate) fn docker_rm(name: &str) {
@@ -102,7 +105,7 @@ impl MixedQuorum {
         (endpoints.ports, brokers, dirs)
     }
     pub(crate) async fn allocate() -> Self {
-        let (clients, controllers) = crate::support::bind_and_drop_ports(3).await;
+        let (clients, controllers) = bind_and_drop_ports(3).await;
         Self {
             ports: std::array::from_fn(|index| controllers[index].port()),
             clients,
@@ -126,15 +129,15 @@ impl MixedQuorum {
             let bind = SocketAddr::from(([0, 0, 0, 0], self.ports[index]));
             let mut config = krabka_controller_config(
                 dirs[index].path(),
-                crate::support::JvmStaticVoterSetup {
-                    broker: crate::support::JvmBrokerSetup {
+                JvmStaticVoterSetup {
+                    broker: JvmBrokerSetup {
                         node: krabka_broker::NodeId(
                             u64::try_from((index) + 1).expect("one-based node id"),
                         ),
                         listen: self.clients[index],
                         advertised: (self.clients[index]).to_string(),
                         controller: bind,
-                        voters: crate::support::controller_voters(&voters),
+                        voters: controller_voters(&voters),
                     },
                     cluster_id,
                 },

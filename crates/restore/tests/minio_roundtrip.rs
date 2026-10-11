@@ -29,7 +29,10 @@ use krabka_remote_storage::{S3Config, S3RemoteStorage, TopicIdPartition};
 use krabka_restore::{Cli, restore};
 use uuid::Uuid;
 
-use crate::batches::{append_groups, tiny_segment_config};
+use crate::{
+    archive_fixture::archive_segment,
+    batches::{append_groups, tiny_segment_config},
+};
 
 /// The `MinIO` server image, built by the same `//bazel/images` targets the
 /// broker's container suites load from. `MinIO` discontinued distribution of
@@ -157,7 +160,7 @@ fn archive_partition(
     );
 
     for export in &exports {
-        crate::archive_fixture::archive_segment(
+        archive_segment(
             storage,
             TopicIdPartition::new(topic_id, TOPIC, partition),
             Uuid::new_v4(),

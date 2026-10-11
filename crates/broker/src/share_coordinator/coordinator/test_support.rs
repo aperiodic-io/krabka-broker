@@ -18,7 +18,13 @@ use qubit_clock::{ManualMonotonicClock, ManualWallClock};
 
 use super::ShareCoordinator;
 use crate::{
+    broker::spawn_partition_with_replication_target,
+    coordinator::test_support::single_replica_partition,
+    log_dir::partition_dir,
+    log_dir_status::LogDirRegistry,
+    partition::ReplicationTarget,
     partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
     share_coordinator::{
         bootstrap,
         config::ShareCoordinatorConfig,
@@ -98,14 +104,14 @@ pub(crate) fn state_batch(setup: StateBatchSetup) -> StateBatch {
 /// The partition has a live writer, and it leads on node 1 at leader epoch
 /// 0. This function mirrors `fixture_partition` in `partition_registry`.
 pub(crate) fn open_state_partition(reg: &PartitionRegistry, log_dir: &Path, p: i32) {
-    let part_dir = crate::log_dir::partition_dir(log_dir, bootstrap::TOPIC, p);
+    let part_dir = partition_dir(log_dir, bootstrap::TOPIC, p);
     std::fs::create_dir_all(&part_dir).unwrap();
     let log = Log::open(&part_dir, LogConfig::default()).unwrap();
-    let part = crate::broker::spawn_partition_with_replication_target(
+    let part = spawn_partition_with_replication_target(
         bootstrap::TOPIC.to_string(),
         // The metadata reconcile installs the leader of the image before the
         // partition is visible: here this broker, node 1, at epoch 0.
-        crate::partition::ReplicationTarget {
+        ReplicationTarget {
             topic_id: None,
             leader_node_id: krabka_raft::NodeId(1),
             leader_epoch: krabka_metadata::LeaderEpoch(0),
@@ -113,8 +119,8 @@ pub(crate) fn open_state_partition(reg: &PartitionRegistry, log_dir: &Path, p: i
         PartitionIndex(p),
         log_dir.to_path_buf(),
         log,
-        crate::log_dir_status::LogDirRegistry::default(),
-        Arc::new(crate::producer_state::ProducerState::new()),
+        LogDirRegistry::default(),
+        Arc::new(ProducerState::new()),
         false,
     );
     reg.insert(bootstrap::TOPIC.into(), PartitionIndex(p), part);
@@ -277,7 +283,7 @@ pub(crate) fn image_with_topics(topics: &[(uuid::Uuid, i32)]) -> krabka_metadata
         ));
         for partition in 0..*partitions {
             records.push(krabka_metadata::MetadataRecord::V1Partition(
-                crate::coordinator::test_support::single_replica_partition(
+                single_replica_partition(
                     &name,
                     krabka_ids::PartitionIndex(partition),
                     krabka_metadata::NodeId(1),

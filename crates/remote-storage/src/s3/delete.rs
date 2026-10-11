@@ -49,9 +49,11 @@ mod tests {
     use super::{ObjectOps, RemoteStorageError, S3RemoteStorage, WormError};
     use crate::{
         s3::test_support::{
-            counting_rsm, rsm, sample_data, sample_metadata, seeded_blocking, stamped_metadata,
+            SeededCopySetup, StampedMetadataSetup, counting_rsm, memory_worm_archive, rsm,
+            sample_data, sample_metadata, seeded_blocking, stamped_metadata,
         },
         storage_manager::{IndexType, RemoteStorageManager},
+        test_support::TransactionIndex,
     };
 
     /// Every key the backing store currently holds, sorted.
@@ -71,7 +73,7 @@ mod tests {
         let md = sample_metadata(uuid::Uuid::from_u128(14));
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup {
+            SeededCopySetup {
                 metadata: md,
                 ..Default::default()
             },
@@ -109,7 +111,7 @@ mod tests {
         let md = sample_metadata(uuid::Uuid::from_u128(13));
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup {
+            SeededCopySetup {
                 metadata: md,
                 ..Default::default()
             },
@@ -133,16 +135,13 @@ mod tests {
         let b = sample_metadata(uuid::Uuid::from_u128(21));
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup {
+            SeededCopySetup {
                 metadata: a,
-                transaction_index: crate::test_support::TransactionIndex::Omitted,
+                transaction_index: TransactionIndex::Omitted,
             },
             move |store, a| {
                 store
-                    .copy_log_segment_data(
-                        &b,
-                        &sample_data(src.path(), crate::test_support::TransactionIndex::Omitted),
-                    )
+                    .copy_log_segment_data(&b, &sample_data(src.path(), TransactionIndex::Omitted))
                     .unwrap();
                 store.delete_log_segment_data(&a).unwrap();
                 assert!(store.fetch_log_segment(&b, 0, None).unwrap() == b"0123456789");
@@ -153,14 +152,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worm_delete_is_refused() {
-        let (_keys, store) = crate::s3::test_support::memory_worm_archive();
-        let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+        let (_keys, store) = memory_worm_archive();
+        let md = stamped_metadata(StampedMetadataSetup {
             segment_id: uuid::Uuid::from_u128(55),
             ..Default::default()
         });
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup {
+            SeededCopySetup {
                 metadata: md,
                 ..Default::default()
             },

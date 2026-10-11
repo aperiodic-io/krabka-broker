@@ -59,6 +59,11 @@ use jvm_acceptance::{
     rlmm_broker0_advertised, start_host_broker,
 };
 
+use crate::{
+    jvm_acceptance::{create_console_topic_at, describe_console_topic_configs},
+    support::client::connect_owned,
+};
+
 /// The Apache Kafka image whose jars carry KIP-1071. It is JRE-only, which is
 /// why the class it runs is compiled elsewhere.
 const KAFKA_IMAGE_STREAMS_PROTOCOL: &str = "mirror.gcr.io/apache/kafka:4.3.1";
@@ -197,7 +202,9 @@ fn shared_class_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     #[cfg(unix)]
     {
-        crate::support::chmod_for_container(dir.path(), 0o777, "chmod the class directory");
+        use crate::support::chmod_for_container;
+
+        chmod_for_container(dir.path(), 0o777, "chmod the class directory");
     }
     dir
 }
@@ -208,7 +215,7 @@ fn shared_class_dir() -> tempfile::TempDir {
 /// topics of the topology: `builder.stream(...)` and `.to(...)` both require
 /// the topic to exist already.
 fn create_topic(bootstrap: &str, topic: &str) {
-    crate::jvm_acceptance::create_console_topic_at(bootstrap, topic);
+    create_console_topic_at(bootstrap, topic);
 }
 
 /// Every topic the broker holds, one per line.
@@ -242,7 +249,7 @@ fn only_topic(topics: &[String], what: &str, matches: impl Fn(&str) -> bool) -> 
 /// sent on the `CreateTopics` request, so a broker that dropped it renders
 /// nothing rather than a default.
 fn describe_topic_configs(bootstrap: &str, topic: &str) -> String {
-    crate::jvm_acceptance::describe_console_topic_configs(bootstrap, topic)
+    describe_console_topic_configs(bootstrap, topic)
 }
 
 /// Read the sink topic under `read_committed`, which is the isolation level
@@ -272,7 +279,7 @@ fn read_committed_sink(bootstrap: &str, topic: &str) -> Vec<String> {
 /// stop answering `UNSUPPORTED_VERSION`. `upgrade_type: 1` is UPGRADE, the
 /// same call `jvm_streams_groups.rs` makes.
 async fn finalize_streams_version() {
-    let client = crate::support::client::connect_owned(
+    let client = connect_owned(
         rlmm_broker0_advertised(),
         "krabka-streams-app-test",
         "client build",

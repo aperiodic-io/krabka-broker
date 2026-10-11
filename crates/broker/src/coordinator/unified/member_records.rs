@@ -7,6 +7,8 @@
 //! may change, taken before it, and [`MemberValues::record_changes`] compares
 //! them with the values after it.
 
+use crate::error::BrokerError;
+
 /// A pending batch's three per-member record families. `Some(value)` writes
 /// the record, and `None` writes a tombstone.
 pub(crate) trait MemberRecordFamilies {
@@ -51,8 +53,8 @@ pub(crate) fn append_removed_members<M, T, C>(
     metadata: &[(String, Option<M>)],
     targets: &[(String, Option<T>)],
     current: &[(String, Option<C>)],
-    encode_key: impl Fn(MemberTombstone, &str) -> Result<bytes::Bytes, crate::error::BrokerError>,
-) -> Result<Vec<String>, crate::error::BrokerError> {
+    encode_key: impl Fn(MemberTombstone, &str) -> Result<bytes::Bytes, BrokerError>,
+) -> Result<Vec<String>, BrokerError> {
     let removed = removed_member_ids(metadata);
     for member_id in &removed {
         if has_member_tombstone(current, member_id) {

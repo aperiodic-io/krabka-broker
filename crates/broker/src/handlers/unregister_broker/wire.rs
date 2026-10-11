@@ -7,7 +7,10 @@
 use krabka_metadata::NodeId;
 use krabka_protocol::owned::unregister_broker_response::UnregisterBrokerResponse;
 
-use crate::handlers::{ErrorResponse, forward_to_controller::wrong_controller_message};
+use crate::{
+    codes::NOT_CONTROLLER,
+    handlers::{ErrorResponse, forward_to_controller::wrong_controller_message},
+};
 
 /// The refusal of a node that is not the active controller, or `None` when
 /// `node` leads. `leader` is the node that this one believes leads.
@@ -20,9 +23,6 @@ pub(super) fn not_controller_refusal(
     node: NodeId,
 ) -> Option<UnregisterBrokerResponse> {
     (leader != Some(node)).then(|| {
-        UnregisterBrokerResponse::error(
-            crate::codes::NOT_CONTROLLER,
-            Some(wrong_controller_message(leader)),
-        )
+        UnregisterBrokerResponse::error(NOT_CONTROLLER, Some(wrong_controller_message(leader)))
     })
 }

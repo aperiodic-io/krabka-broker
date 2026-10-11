@@ -26,6 +26,7 @@ use crate::{
     partition::{ProduceData, ProduceJob, WriterMessage},
     producer_state::ProducerState,
     replica_state::ReplicaState,
+    wal::{OffsetSequencer, SharedWal},
 };
 
 pub(super) async fn handle_produce(
@@ -44,10 +45,7 @@ pub(super) async fn handle_produce(
         &Arc<tokio::sync::Mutex<ReplicaState>>,
         &Arc<Notify>,
     ),
-    diskless: (
-        Option<&crate::wal::SharedWal>,
-        Option<&Arc<dyn crate::wal::OffsetSequencer>>,
-    ),
+    diskless: (Option<&SharedWal>, Option<&Arc<dyn OffsetSequencer>>),
 ) {
     let (first, max_produce_group) = group;
     let (wal, sequencer) = diskless;

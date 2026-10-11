@@ -11,8 +11,10 @@ use bytes::{Bytes, BytesMut};
 #[cfg(test)]
 use crate::voter_requests::valid_wire_listeners;
 use crate::{
+    NodeId,
     error::RaftError,
     kraft::KraftController,
+    reconfig::{AddVoter, RemoveVoter, UpdateVoter, VoterChange},
     voter_requests::{
         Refusal, VoterOperation, add_voter_refusal, candidate_kraft_version_refusal,
         candidate_unavailable_refusal, reconfiguration_refusal, remove_voter_refusal,
@@ -67,7 +69,7 @@ fn requested_voter(
     kraft_version: krabka_metadata::KRaftVersionRange,
 ) -> krabka_metadata::Voter {
     krabka_metadata::Voter {
-        id: crate::NodeId(u64::try_from(voter_id).unwrap_or_default()),
+        id: NodeId(u64::try_from(voter_id).unwrap_or_default()),
         directory_id: uuid::Uuid::from_bytes(voter_directory_id.0),
         endpoints: endpoints.into_iter().collect(),
         kraft_version,
@@ -104,17 +106,15 @@ pub(super) async fn add_raft_voter_response(
         // a retried or refused add never probes an unreachable candidate.
         None => match reconfiguration_refusal(
             engine
-                .reconfigure(crate::reconfig::VoterChange::CheckAdd(
-                    crate::reconfig::AddVoter {
-                        voter: requested_voter(
-                            voter_id,
-                            directory_id,
-                            [],
-                            krabka_metadata::KRaftVersionRange::default(),
-                        ),
-                        ack_when_committed,
-                    },
-                ))
+                .reconfigure(VoterChange::CheckAdd(AddVoter {
+                    voter: requested_voter(
+                        voter_id,
+                        directory_id,
+                        [],
+                        krabka_metadata::KRaftVersionRange::default(),
+                    ),
+                    ack_when_committed,
+                }))
                 .await,
             VoterOperation::Add,
             voter_id,
@@ -144,12 +144,10 @@ pub(super) async fn add_raft_voter_response(
         );
         reconfiguration_refusal(
             engine
-                .reconfigure(crate::reconfig::VoterChange::Add(
-                    crate::reconfig::AddVoter {
-                        voter,
-                        ack_when_committed,
-                    },
-                ))
+                .reconfigure(VoterChange::Add(AddVoter {
+                    voter,
+                    ack_when_committed,
+                }))
                 .await,
             VoterOperation::Add,
             voter_id,
@@ -188,12 +186,10 @@ pub(super) async fn remove_raft_voter_response(
         } else {
             reconfiguration_refusal(
                 engine
-                    .reconfigure(crate::reconfig::VoterChange::Remove(
-                        crate::reconfig::RemoveVoter {
-                            id: crate::NodeId(u64::try_from(request.voter_id).unwrap_or_default()),
-                            directory_id: uuid::Uuid::from_bytes(request.voter_directory_id.0),
-                        },
-                    ))
+                    .reconfigure(VoterChange::Remove(RemoveVoter {
+                        id: NodeId(u64::try_from(request.voter_id).unwrap_or_default()),
+                        directory_id: uuid::Uuid::from_bytes(request.voter_directory_id.0),
+                    }))
                     .await,
                 VoterOperation::Remove,
                 request.voter_id,
@@ -250,9 +246,7 @@ pub(super) async fn update_raft_voter_response(
         );
         reconfiguration_refusal(
             engine
-                .reconfigure(crate::reconfig::VoterChange::Update(
-                    crate::reconfig::UpdateVoter { voter },
-                ))
+                .reconfigure(VoterChange::Update(UpdateVoter { voter }))
                 .await,
             VoterOperation::Update,
             voter_id,

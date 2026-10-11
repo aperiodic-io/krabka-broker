@@ -24,9 +24,12 @@ use super::{
 use crate::{
     codes,
     error::BrokerError,
+    metrics::RequestPhases,
     partition::{
-        AppendedBatch, Partition, ProduceData, ProduceJob, ReplicationTarget, WriterMessage,
+        AppendedBatch, Partition, ProduceData, ProduceJob, ProducerAppendCheck, ReplicationTarget,
+        WriterMessage,
     },
+    producer_state::ProducerState,
 };
 
 /// The partition metadata-transition barrier a produce holds from the dedup
@@ -36,8 +39,8 @@ pub(super) type ProduceTransition = tokio::sync::OwnedRwLockReadGuard<Replicatio
 
 #[derive(Clone, Copy)]
 pub(super) struct AppendContext<'a> {
-    pub(super) partition: &'a Arc<crate::partition::Partition>,
-    pub(super) producer_state: &'a Arc<crate::producer_state::ProducerState>,
+    pub(super) partition: &'a Arc<Partition>,
+    pub(super) producer_state: &'a Arc<ProducerState>,
     pub(super) partition_index: i32,
     pub(super) acks: i16,
     pub(super) leader_epoch: i32,
@@ -45,9 +48,9 @@ pub(super) struct AppendContext<'a> {
     /// charged to the local phase here; its `acks=-1` high-watermark wait is
     /// charged to the remote phase once, by the handler, around the one wait
     /// that covers every partition of the request.
-    pub(super) phases: &'a crate::metrics::RequestPhases,
+    pub(super) phases: &'a RequestPhases,
     /// The transaction check the log runs just before the append.
-    pub(super) producer_check: Option<crate::partition::ProducerAppendCheck>,
+    pub(super) producer_check: Option<ProducerAppendCheck>,
 }
 
 /// What the append half of one partition produced.
@@ -245,7 +248,7 @@ pub(super) async fn dispatch_prepared(
 /// The struct groups the eight positional `commit` arguments into one value,
 /// so the commit call exists in exactly one place, [`AppendCommit::record`].
 pub(super) struct AppendCommit {
-    producer_state: Arc<crate::producer_state::ProducerState>,
+    producer_state: Arc<ProducerState>,
     topic: Arc<str>,
     partition: i32,
     pid: i64,
@@ -459,7 +462,16 @@ mod tests {
     use krabka_raft::NodeId;
 
     use super::PendingAck;
-    use crate::codes;
+    use crate::{
+        codes,
+        error::BrokerError,
+        log_dir::partition_dir,
+        metrics::{BrokerMetrics, RequestPhases},
+        partition::{AppendedBatch, test_support::test_partition},
+        partition_writer::storage_failure_error,
+        producer_state::ProducerState,
+        test_support::{StandalonePartitionSetup, spawn_standalone_partition},
+    };
 
     /// Kafka's `acks=all` completion: `DelayedProduce` leaves an expired wait
     /// at `REQUEST_TIMED_OUT`, and `Partition.checkEnoughReplicasReachOffset`
@@ -550,12 +562,12 @@ mod tests {
         ];
         for case in cases {
             let dir = tempfile::tempdir().expect("tempdir");
-            let part_dir = crate::log_dir::partition_dir(dir.path(), "orders", 0);
+            let part_dir = partition_dir(dir.path(), "orders", 0);
             std::fs::create_dir_all(&part_dir).expect("partition dir");
-            let partition = crate::test_support::spawn_standalone_partition(
+            let partition = spawn_standalone_partition(
                 dir.path(),
                 krabka_log::Log::open(&part_dir, krabka_log::LogConfig::default()).expect("log"),
-                crate::test_support::StandalonePartitionSetup::default(),
+                StandalonePartitionSetup::default(),
             );
             let isr: Vec<NodeId> = case.isr.iter().copied().map(NodeId).collect();
             partition
@@ -604,7 +616,7 @@ mod tests {
     /// `answer` once `delay` has passed. Returns the partition's row.
     async fn append_answered_by_the_writer(
         delay: std::time::Duration,
-        answer: Result<crate::partition::AppendedBatch, crate::error::BrokerError>,
+        answer: Result<AppendedBatch, BrokerError>,
     ) -> PartitionProduceResponse {
         use bytes::Bytes;
         use krabka_compression::RecordDecompressionPolicy;
@@ -620,8 +632,7 @@ mod tests {
             partition::{Partition, WriterMessage},
         };
 
-        let (partition, _dir) =
-            crate::partition::test_support::test_partition(Arc::new(tokio::sync::Notify::new()));
+        let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
         let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(1);
         let partition = Arc::new(Partition {
             writer_tx,
@@ -647,7 +658,7 @@ mod tests {
             false,
             DecodeEnv {
                 topic_name: &topic,
-                metrics: &crate::metrics::BrokerMetrics::new(),
+                metrics: &BrokerMetrics::new(),
                 policy: RecordDecompressionPolicy::default(),
             },
             13,
@@ -658,11 +669,11 @@ mod tests {
             prepared,
             super::AppendContext {
                 partition: &partition,
-                producer_state: &Arc::new(crate::producer_state::ProducerState::new()),
+                producer_state: &Arc::new(ProducerState::new()),
                 partition_index: 0,
                 acks: 1,
                 leader_epoch: 0,
-                phases: &crate::metrics::RequestPhases::default(),
+                phases: &RequestPhases::default(),
                 producer_check: None,
             },
             &topic,
@@ -684,10 +695,7 @@ mod tests {
     async fn an_io_failure_of_the_append_is_a_storage_error() {
         let row = append_answered_by_the_writer(
             std::time::Duration::ZERO,
-            Err(crate::partition_writer::storage_failure_error(
-                "append failed",
-                "synthetic EIO",
-            )),
+            Err(storage_failure_error("append failed", "synthetic EIO")),
         )
         .await;
 
@@ -710,7 +718,7 @@ mod tests {
     async fn a_slow_writer_still_gets_its_append_reported() {
         let row = append_answered_by_the_writer(
             std::time::Duration::from_secs(3600),
-            Ok(crate::partition::AppendedBatch {
+            Ok(AppendedBatch {
                 base_offset: Offset(5),
                 log_append_time_ms: None,
             }),

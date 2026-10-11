@@ -2,16 +2,18 @@
 
 use std::path::Path;
 
+use crate::args::{ControllerListener, RestoreOptions, restore_args};
+
 /// Restore an archive into a fresh child directory with the requested cluster id.
 pub(crate) async fn restore_fixture(
     archive_root: &Path,
     target_parent: &Path,
     cluster_id: uuid::Uuid,
 ) -> krabka_restore::RestoreReport {
-    let args = crate::args::restore_args(
+    let args = restore_args(
         archive_root,
         &target_parent.join("restored"),
-        crate::args::RestoreOptions {
+        RestoreOptions {
             extra: &["--cluster-id", &cluster_id.to_string()],
             ..Default::default()
         },
@@ -47,12 +49,12 @@ pub(crate) async fn restore_for_controller(
 ) -> (
     tempfile::TempDir,
     std::path::PathBuf,
-    crate::args::ControllerListener,
+    ControllerListener,
     krabka_restore::RestoreReport,
 ) {
     let target = tempfile::tempdir().expect("target parent");
     let log_dir = target.path().join("restored");
-    let controller = crate::args::ControllerListener::bind().await;
+    let controller = ControllerListener::bind().await;
     let args = controller.restore_args(archive_root, &log_dir, extra);
     let report = krabka_restore::restore(&args).await.expect("restore");
     (target, log_dir, controller, report)

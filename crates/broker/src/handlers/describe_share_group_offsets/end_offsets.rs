@@ -17,7 +17,10 @@ use krabka_protocol::owned::{
     list_offsets_response::ListOffsetsResponse,
 };
 
-use crate::{broker::Broker, codes};
+use crate::{
+    broker::{Broker, registered_listener_endpoint},
+    codes,
+};
 
 /// A partition by topic name, as `ListOffsets` names it.
 pub(super) type TopicPartition = (String, i32);
@@ -99,10 +102,8 @@ impl NetworkLatestOffsets<'_> {
         let Some(registration) = image.broker(leader) else {
             return failed(codes::LEADER_NOT_AVAILABLE);
         };
-        let (host, port) = crate::broker::registered_listener_endpoint(
-            registration,
-            &config.inter_broker_listener_name,
-        );
+        let (host, port) =
+            registered_listener_endpoint(registration, &config.inter_broker_listener_name);
         let host = host.to_owned();
         let protocol = config
             .effective_listeners()
@@ -279,6 +280,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::handlers::test_support::single_replica_partition;
 
     fn tp(topic: &str, partition: i32) -> TopicPartition {
         (topic.to_owned(), partition)
@@ -359,13 +361,11 @@ mod tests {
             replication_factor: 1,
         }));
         for (partition, leader) in [(0, 1), (1, 2), (2, 1)] {
-            image.apply(&MetadataRecord::V1Partition(
-                crate::handlers::test_support::single_replica_partition(
-                    "a",
-                    krabka_ids::PartitionIndex(partition),
-                    NodeId(leader),
-                ),
-            ));
+            image.apply(&MetadataRecord::V1Partition(single_replica_partition(
+                "a",
+                krabka_ids::PartitionIndex(partition),
+                NodeId(leader),
+            )));
         }
         let grouped = group_by_leader(&image, &[tp("a", 0), tp("a", 1), tp("a", 2), tp("a", 3)]);
         let expected = (

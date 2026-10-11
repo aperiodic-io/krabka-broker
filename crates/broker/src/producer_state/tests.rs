@@ -4,8 +4,12 @@
 use assert2::{assert, check};
 
 use super::*;
-use crate::producer_state::test_support::{
-    ProducerCommitSetup, ProducerEpoch, ProducerSequence, SequenceDelta, commit_fixture,
+use crate::{
+    producer_state::test_support::{
+        ProducerBatchSetup, ProducerCommitSetup, ProducerEpoch, ProducerSequence, SequenceDelta,
+        commit_fixture, opened_log, producer_batch,
+    },
+    test_support::{EmptyPayloadBatchSetup, UnixMillis, default_records_batch},
 };
 
 async fn mirror_marker(state: &ProducerState) {
@@ -141,7 +145,7 @@ async fn sequence_rollover_appends_and_commits_without_overflow() {
         ProducerCommitSetup {
             delta: SequenceDelta(2),
             offset: krabka_log::Offset(12),
-            timestamp: crate::test_support::UnixMillis(2),
+            timestamp: UnixMillis(2),
             ..Default::default()
         },
     )
@@ -347,7 +351,7 @@ async fn higher_epoch_continuing_sequence_is_out_of_order() {
             epoch: ProducerEpoch(6),
             delta: SequenceDelta(0),
             offset: krabka_log::Offset(10),
-            timestamp: crate::test_support::UnixMillis(2),
+            timestamp: UnixMillis(2),
             ..Default::default()
         },
     )
@@ -441,7 +445,7 @@ async fn a_marker_mirror_keeps_the_earlier_batches_only_at_the_same_epoch() {
                 sequence: ProducerSequence(1),
                 delta: SequenceDelta(0),
                 offset: krabka_log::Offset(1),
-                timestamp: crate::test_support::UnixMillis(2),
+                timestamp: UnixMillis(2),
                 ..Default::default()
             },
         )
@@ -628,21 +632,17 @@ async fn replay_chooses_first_retained_alias_after_sequence_wrap() {
 #[tokio::test]
 async fn snapshot_reload_preserves_retry_frontiers_and_epoch_fencing() {
     for sequence in [0, 1, i32::MAX - 1, i32::MAX] {
-        let (dir, config, mut log) = crate::producer_state::test_support::opened_log();
+        let (dir, config, mut log) = opened_log();
         for _ in 0..3 {
-            log.append(&mut crate::test_support::default_records_batch(
-                crate::test_support::EmptyPayloadBatchSetup::default(),
-            ))
-            .unwrap();
+            log.append(&mut default_records_batch(EmptyPayloadBatchSetup::default()))
+                .unwrap();
         }
-        log.append(&mut crate::producer_state::test_support::producer_batch(
-            crate::producer_state::test_support::ProducerBatchSetup {
-                sequence: ProducerSequence(sequence),
-                delta: SequenceDelta(2),
-                timestamp: crate::test_support::UnixMillis(44),
-                ..Default::default()
-            },
-        ))
+        log.append(&mut producer_batch(ProducerBatchSetup {
+            sequence: ProducerSequence(sequence),
+            delta: SequenceDelta(2),
+            timestamp: UnixMillis(44),
+            ..Default::default()
+        }))
         .unwrap();
         log.sync().unwrap();
         log.take_producer_snapshot().unwrap();

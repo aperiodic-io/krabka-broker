@@ -20,18 +20,23 @@ use super::{
     *,
 };
 use crate::{
+    api_catalog::UnstableApiVersions,
     authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer},
+    broker::BrokerHandle,
     codes,
     coordinator::unified::streams::actor::StreamsGroupActorMessage,
-    handlers::authorized_operations::authorized_operations_bits,
-    test_support::{DenyAll, peer, principal},
+    handlers::{
+        authorized_operations::authorized_operations_bits,
+        group_heartbeat_test_support::{StreamsTopologySetup, streams_request_with_topology},
+    },
+    test_support::{DenyAll, peer, principal, request_context, start_broker_with},
 };
 
 /// Commit one literal `Allow` ACL for `User:<user>` on `(resource_type,
 /// resource_name)`, for the tests that drive a specific ACL gate rather than
 /// allow or deny everything.
 async fn grant(
-    broker_handle: &crate::broker::BrokerHandle,
+    broker_handle: &BrokerHandle,
     resource_type: ResourceType,
     resource_name: &str,
     operation: AclOperation,
@@ -296,7 +301,7 @@ async fn include_authorized_operations_fills_the_bitfield_only_on_opt_in() {
             let expected = authorized_operations_bits(
                 authorizer.as_ref(),
                 &broker.controller.current_image(),
-                &crate::test_support::request_context(&alice, &peer(), "test-client"),
+                &request_context(&alice, &peer(), "test-client"),
                 ResourceType::Group,
                 "g1",
             );
@@ -337,9 +342,9 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
 
     // The member reports task offsets, which Kafka 4.3.1 refuses and trunk
     // takes.
-    let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
+    let (broker_handle, _dir) = start_broker_with(|cfg| {
         cfg.streams_group.enable = true;
-        cfg.features.unstable_api_versions = crate::api_catalog::UnstableApiVersions::Enabled;
+        cfg.features.unstable_api_versions = UnstableApiVersions::Enabled;
     })
     .await;
     broker_handle.wait_until_group_coordinator_ready().await;
@@ -359,16 +364,14 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
             value: "z1".into(),
             ..Default::default()
         }]),
-        ..crate::handlers::group_heartbeat_test_support::streams_request_with_topology(
-            crate::handlers::group_heartbeat_test_support::StreamsTopologySetup {
-                group_id: "app",
-                state_changelog_topics: vec![hb::topic_info::TopicInfo {
-                    name: "app-store-changelog".into(),
-                    ..Default::default()
-                }],
+        ..streams_request_with_topology(StreamsTopologySetup {
+            group_id: "app",
+            state_changelog_topics: vec![hb::topic_info::TopicInfo {
+                name: "app-store-changelog".into(),
                 ..Default::default()
-            },
-        )
+            }],
+            ..Default::default()
+        })
     };
     let joined = heartbeat(&broker, &join).await;
     check!(joined.error_code == codes::NONE, "{joined:?}");
@@ -490,17 +493,15 @@ async fn empty_group_is_empty_and_another_group_type_is_not_found() {
     broker_fixture!((broker_handle, _dir, broker), start_broker(true));
     finalize_streams_version(&broker).await;
     broker.group_coordinator.mark_share("share");
-    let join = crate::handlers::group_heartbeat_test_support::streams_request_with_topology(
-        crate::handlers::group_heartbeat_test_support::StreamsTopologySetup {
-            group_id: "left",
-            source_topic: "absent",
-            state_changelog_topics: vec![hb::topic_info::TopicInfo {
-                name: "left-changelog".into(),
-                ..Default::default()
-            }],
+    let join = streams_request_with_topology(StreamsTopologySetup {
+        group_id: "left",
+        source_topic: "absent",
+        state_changelog_topics: vec![hb::topic_info::TopicInfo {
+            name: "left-changelog".into(),
             ..Default::default()
-        },
-    );
+        }],
+        ..Default::default()
+    });
     check!(heartbeat(&broker, &join).await.error_code == codes::NONE);
     let leave = StreamsGroupHeartbeatRequest {
         group_id: "left".into(),

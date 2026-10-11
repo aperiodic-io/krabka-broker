@@ -11,7 +11,8 @@ use krabka_metadata::{
 use uuid::Uuid;
 
 use crate::{
-    heartbeat::controller_state::ControllerLivenessState, test_support::ReassignmentSetup,
+    heartbeat::controller_state::ControllerLivenessState,
+    test_support::{ReassignmentSetup, broker_registration, reassignment_partition},
 };
 
 pub(super) async fn liveness(alive: &[u64]) -> ControllerLivenessState {
@@ -39,7 +40,7 @@ pub(super) fn img(setup: ReassignmentSetup<'_>) -> Arc<MetadataImage> {
             BrokerRegistrationRecord {
                 host: String::new(),
                 port: 0,
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(n))
+                ..broker_registration(krabka_raft::NodeId(n))
             },
         ));
     }
@@ -50,8 +51,6 @@ pub(super) fn img(setup: ReassignmentSetup<'_>) -> Arc<MetadataImage> {
         replication_factor: i16::try_from(setup.replicas.len())
             .expect("replication factor fits i16"),
     }));
-    image.apply(&MetadataRecord::V1Partition(
-        crate::test_support::reassignment_partition(setup),
-    ));
+    image.apply(&MetadataRecord::V1Partition(reassignment_partition(setup)));
     Arc::new(image)
 }

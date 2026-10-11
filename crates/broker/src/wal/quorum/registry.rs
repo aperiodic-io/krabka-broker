@@ -17,6 +17,7 @@ use super::{
         fetch_response, unknown_shard_fetch_response,
     },
 };
+use crate::{BrokerError, metrics::BrokerMetrics};
 
 /// Per-partition WAL shard identity for distributed WAL registry work stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,7 +39,7 @@ pub(crate) struct WalShardRegistry {
     principal_node_ids: HashMap<String, krabka_raft::NodeId>,
     engines: DashMap<ShardId, Arc<WalShardEngine>>,
     placements: RwLock<HashMap<ShardId, WalPlacement>>,
-    metrics: crate::metrics::BrokerMetrics,
+    metrics: BrokerMetrics,
     #[cfg(any(test, feature = "test-helpers"))]
     follower_fetchers: DashMap<ShardId, std::collections::BTreeSet<krabka_raft::NodeId>>,
 }
@@ -51,14 +52,14 @@ impl WalShardRegistry {
             principal_node_ids: HashMap::new(),
             engines: DashMap::new(),
             placements: RwLock::new(HashMap::new()),
-            metrics: crate::metrics::BrokerMetrics::new(),
+            metrics: BrokerMetrics::new(),
             #[cfg(any(test, feature = "test-helpers"))]
             follower_fetchers: DashMap::new(),
         }
     }
 
     #[must_use]
-    pub(crate) fn with_metrics(mut self, metrics: crate::metrics::BrokerMetrics) -> Self {
+    pub(crate) fn with_metrics(mut self, metrics: BrokerMetrics) -> Self {
         self.metrics = metrics;
         self
     }
@@ -190,8 +191,7 @@ impl WalShardRegistry {
         &self,
         request: &krabka_protocol::owned::fetch_request::FetchRequest,
         authenticated_from: krabka_raft::NodeId,
-    ) -> Option<Result<krabka_protocol::owned::fetch_response::FetchResponse, crate::BrokerError>>
-    {
+    ) -> Option<Result<krabka_protocol::owned::fetch_response::FetchResponse, BrokerError>> {
         self.route_decoded_fetch(decode_fetch_request(request)?, Some(authenticated_from))
     }
 
@@ -199,8 +199,7 @@ impl WalShardRegistry {
         &self,
         request: WalFetchRequest,
         authenticated_from: Option<krabka_raft::NodeId>,
-    ) -> Option<Result<krabka_protocol::owned::fetch_response::FetchResponse, crate::BrokerError>>
-    {
+    ) -> Option<Result<krabka_protocol::owned::fetch_response::FetchResponse, BrokerError>> {
         let QuorumGroup::DisklessWal {
             topic_id,
             partition,
@@ -351,10 +350,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::wal::quorum::{
-        engine::WalShardEngine,
-        test_support::open_log,
-        wire::{encode_fetch_for_group, fetch_request},
+    use crate::{
+        test_support::sasl_principal,
+        wal::quorum::{
+            engine::WalShardEngine,
+            test_support::open_log,
+            wire::{encode_fetch_for_group, fetch_request},
+        },
     };
 
     fn value_batch() -> RecordBatch {
@@ -392,7 +394,7 @@ mod tests {
     }
 
     fn broker_principal(id: u64) -> krabka_security::Principal {
-        crate::test_support::sasl_principal(&format!("broker-{id}"))
+        sasl_principal(&format!("broker-{id}"))
     }
 
     #[tokio::test]
@@ -436,7 +438,7 @@ mod tests {
             0,
             0,
         );
-        let principal = crate::test_support::sasl_principal("admin");
+        let principal = sasl_principal("admin");
 
         let decoded = route_fetch(&router, body, &principal).await;
         let partition = &decoded.responses[0].partitions[0];

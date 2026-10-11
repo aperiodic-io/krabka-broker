@@ -22,7 +22,11 @@ use super::{
     persistence::replay_partition,
     pid_index::RecoveredTransactions,
 };
-use crate::{error::BrokerError, txn::bootstrap};
+use crate::{
+    blocking::spawn_blocking,
+    error::BrokerError,
+    txn::{bootstrap, partitioner::partition_for_tid},
+};
 
 crate::task_util::scheduled_tasks_type! {
     /// The load tasks that one refresh started.
@@ -249,17 +253,12 @@ impl TxnCoordinator {
             let read_max = self.recovery_read_max;
             let last_epoch_tag = self.persist_last_producer_epoch;
             let num_partitions = self.num_partitions;
-            crate::blocking::spawn_blocking(move || {
+            spawn_blocking(move || {
                 Ok(replay_partition(
                     &part,
                     partition,
                     (read_max, last_epoch_tag),
-                    |tid| {
-                        PartitionIndex(crate::txn::partitioner::partition_for_tid(
-                            tid,
-                            num_partitions,
-                        ))
-                    },
+                    |tid| PartitionIndex(partition_for_tid(tid, num_partitions)),
                 ))
             })
             .await

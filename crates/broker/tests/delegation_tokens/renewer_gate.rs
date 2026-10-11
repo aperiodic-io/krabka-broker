@@ -15,10 +15,11 @@ use krabka_protocol::owned::{
 
 use crate::{
     DELEGATION_TOKEN_OWNER_MISMATCH,
-    cluster::{wait_for_token, wait_for_token_gone},
+    cluster::{start_admin_alice, wait_for_token, wait_for_token_gone},
     rpc::{
         send_create_delegation_token, send_expire_delegation_token, send_renew_delegation_token,
     },
+    wire::admin_plain,
 };
 
 /// Super user `admin` mints two tokens owned by `alice`: one without
@@ -26,10 +27,10 @@ use crate::{
 /// `admin` answer 63 and change nothing; on the second, both succeed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn super_user_renews_and_expires_only_as_a_listed_renewer() {
-    let (handle, _dir, addr) = crate::cluster::start_admin_alice().await;
+    let (handle, _dir, addr) = start_admin_alice().await;
 
     let result: Result<(), String> = async {
-        let mut admin = crate::wire::admin_plain(addr).await?;
+        let mut admin = admin_plain(addr).await?;
 
         let mut hmacs = Vec::new();
         for (correlation_id, renewers) in [

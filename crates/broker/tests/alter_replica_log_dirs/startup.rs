@@ -13,7 +13,9 @@ use krabka_client_producer::Producer;
 
 use crate::{
     harness::{count_topic_dirs, wait_for_move_complete},
-    wire::describe_log_dirs,
+    support::{producer::enqueue_unkeyed_values, storage::two_dir_config},
+    two_dir_topic::{Setup, create_and_wait},
+    wire::{CLIENT_ID, describe_log_dirs},
 };
 
 /// Boot a broker, create a topic, produce records, shut down, then
@@ -30,14 +32,14 @@ async fn startup_resumes_move_for_existing_partition() {
 
     // First boot: create topic, produce a handful of records, then
     // shut down cleanly so the partition directory is left on disk.
-    let cfg = crate::support::storage::two_dir_config(primary.path(), extra.path());
+    let cfg = two_dir_config(primary.path(), extra.path());
     let handle = Broker::start(cfg).await.expect("first boot");
     let addr = handle.listen_addr();
-    crate::two_dir_topic::create_and_wait(
+    create_and_wait(
         &handle,
         addr,
-        crate::two_dir_topic::Setup {
-            client_id: crate::wire::CLIENT_ID,
+        Setup {
+            client_id: CLIENT_ID,
             ..Default::default()
         },
     )
@@ -48,7 +50,7 @@ async fn startup_resumes_move_for_existing_partition() {
         .build()
         .await
         .expect("producer");
-    crate::support::producer::enqueue_unkeyed_values(
+    enqueue_unkeyed_values(
         &producer,
         "t",
         (0..5i32).map(|i| Bytes::from(format!("v{i}"))),
@@ -80,7 +82,7 @@ async fn startup_resumes_move_for_existing_partition() {
 
     // Restart against the same dirs. `BootstrapMode::Rejoin`
     // because the raft log from the first boot is still on disk.
-    let mut cfg = crate::support::storage::two_dir_config(primary.path(), extra.path());
+    let mut cfg = two_dir_config(primary.path(), extra.path());
     cfg.bootstrap_mode = krabka_broker::BootstrapMode::Rejoin;
     let handle = Broker::start(cfg).await.expect("restart");
     let addr = handle.listen_addr();
@@ -109,7 +111,7 @@ async fn startup_cleans_up_stranded_future_dir() {
     std::fs::create_dir_all(&stranded).unwrap();
     assert!(stranded.exists());
 
-    let cfg = crate::support::storage::two_dir_config(primary.path(), extra.path());
+    let cfg = two_dir_config(primary.path(), extra.path());
     let handle = Broker::start(cfg).await.expect("broker start");
     let addr = handle.listen_addr();
 

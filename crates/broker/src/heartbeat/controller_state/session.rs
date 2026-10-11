@@ -230,8 +230,9 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::heartbeat::controller_state::{
-        BrokerControlState, ReplicatedRegistration, TestClock,
+    use crate::{
+        heartbeat::controller_state::{BrokerControlState, ReplicatedRegistration, TestClock},
+        test_support::expired_broker_fixture,
     };
 
     /// krabka-io/krabka-broker#825: a controller that takes over, a restarted
@@ -301,7 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_marks_expired_broker_dead() {
-        let (_clock, liveness, transitions) = crate::test_support::expired_broker_fixture(2).await;
+        let (_clock, liveness, transitions) = expired_broker_fixture(2).await;
         assert!(transitions == vec![LivenessTransition::AliveToDead(2)]);
         assert!(liveness.state(2).await == Some(BrokerLivenessState::Dead));
     }

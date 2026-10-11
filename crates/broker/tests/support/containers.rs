@@ -156,7 +156,7 @@ pub async fn start_jvm_single(
     let dir = tempfile::tempdir().expect("broker directory");
     let mut config = jvm_single_broker_config(
         dir.path().to_path_buf(),
-        crate::support::JvmSingleBrokerSetup {
+        JvmSingleBrokerSetup {
             listen: &listeners.listen,
             advertised: &listeners.advertised,
             controller: &listeners.controller,
@@ -179,6 +179,8 @@ pub fn init_jvm_tracing(default_filter: &str) {
 }
 
 use krabka_broker::NodeId;
+
+use crate::support::controller_voters;
 
 #[derive(krabka_macros::FieldDefaults)]
 pub struct JvmBrokerSetup {
@@ -380,7 +382,7 @@ pub async fn format_jvm_voter(
 
 /// Run a JVM tool while leaving success and output assertions to its caller.
 pub fn jvm_docker_run(image: &str, args: &[&str]) -> std::process::Output {
-    let out = jvm_docker_command(crate::support::JvmDockerSetup {
+    let out = jvm_docker_command(JvmDockerSetup {
         image,
         args,
         ..Default::default()
@@ -441,14 +443,14 @@ pub async fn start_jvm_cluster<const N: usize>(
             let dir = tempfile::tempdir().expect("broker directory");
             let mut config = jvm_broker_config(
                 dir.path().to_path_buf(),
-                crate::support::JvmBrokerSetup {
+                JvmBrokerSetup {
                     node: krabka_broker::NodeId(voters[index].0),
                     listen: format!("0.0.0.0:{port}").parse().expect("client address"),
                     controller: format!("0.0.0.0:{}", controller_ports[index])
                         .parse()
                         .expect("controller address"),
                     advertised: format!("host.docker.internal:{port}"),
-                    voters: crate::support::controller_voters(&voters),
+                    voters: controller_voters(&voters),
                 },
             );
             adjust(&mut config);
@@ -695,7 +697,7 @@ pub fn jvm_spawn_piped(command: &mut std::process::Command, context: &str) -> st
 /// The shared acks-all console-producer command; callers retain their write/exit assertions.
 pub fn jvm_acks_all_producer(image: &str, bootstrap: &str, topic: &str) -> std::process::Child {
     jvm_spawn_piped(
-        &mut jvm_docker_command(crate::support::JvmDockerSetup {
+        &mut jvm_docker_command(JvmDockerSetup {
             image,
             args: &[
                 "kafka-console-producer",
@@ -706,7 +708,7 @@ pub fn jvm_acks_all_producer(image: &str, bootstrap: &str, topic: &str) -> std::
                 "--producer-property",
                 "acks=all",
             ],
-            input: crate::support::ContainerInput::Attached,
+            input: ContainerInput::Attached,
             ..Default::default()
         }),
         "spawn JVM producer",
@@ -715,7 +717,7 @@ pub fn jvm_acks_all_producer(image: &str, bootstrap: &str, topic: &str) -> std::
 
 /// Capture a plain JVM tool while retaining the suite-specific log prefix.
 pub fn jvm_tool_output(image: &str, args: &[&str], log_scope: &str) -> std::process::Output {
-    let out = jvm_docker_command(crate::support::JvmDockerSetup {
+    let out = jvm_docker_command(JvmDockerSetup {
         image,
         args,
         ..Default::default()

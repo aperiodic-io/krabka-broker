@@ -2,8 +2,10 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::fixtures::named_root;
+
 pub(crate) fn policy(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let (name, root) = crate::fixtures::named_root(input)?;
+    let (name, root) = named_root(input)?;
     Ok(moxy::template! {
         fn {{ name }}() -> ::bytes::BytesMut {
             let records = vec![{{ root }}::ParsedRecord {

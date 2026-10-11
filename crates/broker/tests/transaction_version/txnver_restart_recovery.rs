@@ -17,8 +17,16 @@ use krabka_protocol::owned::{
 use tempfile::TempDir;
 
 use crate::{
-    support::transactions::{end_transaction_request, init_producer_request},
-    txnver_harness::{NONE, create_topic, downgrade_transaction_version},
+    support::{
+        client::start_client,
+        topics::TopicPartitionCount,
+        transaction_wire::{TransactionPartitionsSetup, partitions_request, transaction_topic},
+        transactions::{
+            EndTransactionSetup, InitProducerSetup, ProducerIdentity, end_transaction_request,
+            init_producer_request,
+        },
+    },
+    txnver_harness::{NONE, create_topic, downgrade_transaction_version, expected_partitions},
 };
 
 /// Re-open the broker on the SAME data dir. A populated dir replays the raft
@@ -69,12 +77,10 @@ async fn init_producer_id(client: &Client, tid: &str) -> (i64, i16) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         let resp = client
-            .send(init_producer_request(
-                crate::support::transactions::InitProducerSetup {
-                    transactional_id: Some(tid.into()),
-                    ..Default::default()
-                },
-            ))
+            .send(init_producer_request(InitProducerSetup {
+                transactional_id: Some(tid.into()),
+                ..Default::default()
+            }))
             .await
             .expect("InitProducerId");
         if resp.error_code == 0 {
@@ -105,19 +111,17 @@ async fn add_partition_ongoing(
     topic: &str,
     partition: i32,
 ) {
-    let added_topic = crate::support::transaction_wire::transaction_topic(topic, vec![partition]);
+    let added_topic = transaction_topic(topic, vec![partition]);
     let add = client
-        .send(crate::support::transaction_wire::partitions_request(
-            crate::support::transaction_wire::TransactionPartitionsSetup {
-                transactional_id: tid,
-                producer: crate::support::transactions::ProducerIdentity::from_wire((pid, epoch)),
-                topics: vec![added_topic],
-                ..Default::default()
-            },
-        ))
+        .send(partitions_request(TransactionPartitionsSetup {
+            transactional_id: tid,
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            topics: vec![added_topic],
+            ..Default::default()
+        }))
         .await
         .expect("AddPartitionsToTxn add");
-    let expected = crate::txnver_harness::expected_partitions(tid, topic, &[(partition, NONE)]);
+    let expected = expected_partitions(tid, topic, &[(partition, NONE)]);
     assert!(
         add == expected,
         "adding ({topic},{partition}) returned an unexpected response: {add:?}"
@@ -140,10 +144,8 @@ async fn commit_via_end_txn(client: &Client, tid: &str, pid: i64, epoch: i16) ->
         let resp = client
             .send(end_transaction_request(
                 tid,
-                crate::support::transactions::EndTransactionSetup {
-                    producer: crate::support::transactions::ProducerIdentity::from_wire((
-                        pid, epoch,
-                    )),
+                EndTransactionSetup {
+                    producer: ProducerIdentity::from_wire((pid, epoch)),
                     ..Default::default()
                 },
             ))
@@ -183,17 +185,9 @@ async fn assert_ongoing_txn_survives_restart(case: &RecoveryCase) {
 
     let (pid, epoch);
     {
-        let (broker, _bootstrap, client) = crate::support::client::start_client(
-            recovery_config(log_dir.clone()),
-            Some("krabka-txnv-test"),
-        )
-        .await;
-        create_topic(
-            &client,
-            case.topic,
-            crate::support::topics::TopicPartitionCount(1),
-        )
-        .await;
+        let (broker, _bootstrap, client) =
+            start_client(recovery_config(log_dir.clone()), Some("krabka-txnv-test")).await;
+        create_topic(&client, case.topic, TopicPartitionCount(1)).await;
         if let Some(level) = case.downgrade_to {
             downgrade_transaction_version(&client, level).await;
         }
@@ -208,8 +202,7 @@ async fn assert_ongoing_txn_survives_restart(case: &RecoveryCase) {
     // Re-boot on the same dir: triggers TxnCoordinator::recover + decode.
     {
         let (broker, _bootstrap, client) =
-            crate::support::client::start_client(rejoin_config(log_dir), Some("krabka-txnv-test"))
-                .await;
+            start_client(rejoin_config(log_dir), Some("krabka-txnv-test")).await;
 
         let response = commit_via_end_txn(&client, case.tid, pid, epoch).await;
         let expected = EndTxnResponse {

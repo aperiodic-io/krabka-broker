@@ -4,17 +4,17 @@
 //! a leader the network isolates gives its epoch up instead of holding it.
 
 use crate::{
-    harness as fixture,
     harness::{
-        STAGGERED_TIMEOUTS, await_single_leader, await_until, metadata_log, start_engines,
-        topic_record, voter_set,
+        self as fixture, STAGGERED_TIMEOUTS, SimClusterSetup, await_single_leader, await_until,
+        metadata_log, start_cluster, start_engines, three_voter_network, topic_record, voter_set,
     },
+    sim_net::SimNet,
 };
 
 /// Start the failover fixture and retain its directories through the scenario.
 async fn elected_cluster(
-    net: &crate::sim_net::SimNet,
-    setup: crate::harness::SimClusterSetup<'_>,
+    net: &SimNet,
+    setup: SimClusterSetup<'_>,
 ) -> (Vec<tempfile::TempDir>, fixture::NodeId, u32) {
     let ids = setup.ids;
     let dirs = start_engines(net, setup);
@@ -28,7 +28,7 @@ async fn elected_cluster(
 /// from, so it is the right place to observe whether a node still answers as
 /// the controller leader.
 async fn await_surviving_leader(
-    net: &crate::sim_net::SimNet,
+    net: &SimNet,
     ids: &[fixture::NodeId],
     former: fixture::NodeId,
     former_epoch: u32,
@@ -70,12 +70,12 @@ async fn await_quorum_state<F>(
 ///    leader, and a `submit_change` to the new leader commits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn leader_failure_reelects() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(300);
 
     let (_dirs, leader, epoch1) = elected_cluster(
         &net,
-        crate::harness::SimClusterSetup {
+        SimClusterSetup {
             ids: &ids,
             cluster_id: cid,
             ..Default::default()
@@ -131,20 +131,9 @@ async fn leader_failure_reelects() {
 ///     never idle and virtual time would never auto-advance.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn repeated_leader_restart_reelects() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(301);
-    let dirs: fixture::HashMap<_, _> = ids
-        .iter()
-        .copied()
-        .zip(start_engines(
-            &net,
-            crate::harness::SimClusterSetup {
-                ids: &ids,
-                cluster_id: cid,
-                ..Default::default()
-            },
-        ))
-        .collect();
+    let dirs = start_cluster(&net, &ids, cid);
 
     for _ in 0..5 {
         let (leader, _) = await_single_leader(&net, &ids, fixture::Duration::from_secs(10)).await;
@@ -197,11 +186,11 @@ async fn repeated_leader_restart_reelects() {
 ///     changes is that no voter's Fetch arrives.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn isolated_leader_resigns_and_rejoins_after_heal() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(302);
     let (_dirs, leader, epoch1) = elected_cluster(
         &net,
-        crate::harness::SimClusterSetup {
+        SimClusterSetup {
             ids: &ids,
             cluster_id: cid,
             ..Default::default()

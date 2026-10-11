@@ -16,13 +16,14 @@ use crate::{
         describe_all_topic_acls, drive_create_acls_as_plain, drive_delete_acls_as_plain,
         drive_describe_acls_as_plain, topic_allow_creation,
     },
-    sasl_cluster::sasl_plain_broker_config,
+    framing::CLIENT_ID,
+    kafka_wire::PlainAuthenticationSetup,
+    sasl_cluster::{sasl_plain_broker_config, start_admin_with},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_acls_super_user_can_provision_and_describe() {
-    let (_log_dir, handle, addr) =
-        crate::sasl_cluster::start_admin_with(&[("admin", "admin-secret")]).await;
+    let (_log_dir, handle, addr) = start_admin_with(&[("admin", "admin-secret")]).await;
 
     // Provision: Allow Read on Topic LITERAL "foo" for User:alice from *.
     let create_req = CreateAclsRequest {
@@ -32,7 +33,7 @@ async fn create_acls_super_user_can_provision_and_describe() {
     let create_resp = drive_create_acls_as_plain(
         addr,
         create_req,
-        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+        &PlainAuthenticationSetup::admin(CLIENT_ID),
     )
     .await
     .expect("CreateAcls as super-user must succeed");
@@ -52,7 +53,7 @@ async fn create_acls_super_user_can_provision_and_describe() {
     let describe_resp = drive_describe_acls_as_plain(
         addr,
         describe_all_topic_acls(),
-        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+        &PlainAuthenticationSetup::admin(CLIENT_ID),
     )
     .await
     .expect("DescribeAcls as super-user must succeed");
@@ -107,8 +108,8 @@ async fn create_acls_non_super_user_rejected() {
     let resp = drive_create_acls_as_plain(
         addr,
         req,
-        &crate::kafka_wire::PlainAuthenticationSetup {
-            client_id: crate::framing::CLIENT_ID,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
             ..Default::default()
         },
     )
@@ -127,8 +128,7 @@ async fn create_acls_non_super_user_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_acls_removes_matching() {
-    let (_log_dir, handle, addr) =
-        crate::sasl_cluster::start_admin_with(&[("admin", "admin-secret")]).await;
+    let (_log_dir, handle, addr) = start_admin_with(&[("admin", "admin-secret")]).await;
 
     // Provision two ACLs (Read on "foo", Write on "bar").
     let create_req = CreateAclsRequest {
@@ -141,7 +141,7 @@ async fn delete_acls_removes_matching() {
     let create_resp = drive_create_acls_as_plain(
         addr,
         create_req,
-        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+        &PlainAuthenticationSetup::admin(CLIENT_ID),
     )
     .await
     .expect("provisioning CreateAcls must succeed");
@@ -167,7 +167,7 @@ async fn delete_acls_removes_matching() {
     let delete_resp = drive_delete_acls_as_plain(
         addr,
         delete_req,
-        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+        &PlainAuthenticationSetup::admin(CLIENT_ID),
     )
     .await
     .expect("DeleteAcls must succeed");
@@ -193,7 +193,7 @@ async fn delete_acls_removes_matching() {
     let describe_resp = drive_describe_acls_as_plain(
         addr,
         describe_all_topic_acls(),
-        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
+        &PlainAuthenticationSetup::admin(CLIENT_ID),
     )
     .await
     .expect("DescribeAcls must succeed");

@@ -12,7 +12,11 @@ use std::{
 use krabka_ids::{LeaderEpoch, Offset};
 
 use super::{EpochEntry, LeaderEpochCheckpoint, is_strict_successor};
-use crate::{error::LogError, index::open_index, io::IoTarget};
+use crate::{
+    error::LogError,
+    index::open_index,
+    io::{IoTarget, write_atomic},
+};
 
 /// The `leader-epoch-checkpoint` format version this build writes and reads:
 /// the first line of the file, as in Kafka's `CheckpointFile`.
@@ -111,7 +115,7 @@ impl LeaderEpochCheckpoint {
             let _ = writeln!(s, "{} {}", e.epoch.0, e.start_offset.0);
         }
         let tmp = self.path.with_extension("tmp");
-        crate::io::write_atomic(
+        write_atomic(
             &*self.io,
             IoTarget::LeaderEpochCheckpoint,
             &tmp,

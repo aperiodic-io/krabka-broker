@@ -9,12 +9,14 @@ use tempfile::tempdir;
 use super::*;
 use crate::{
     config::LogConfig,
+    leader_epoch_checkpoint::EpochEntry,
     log::test_support::{
-        rolling_test_log, sample_batch, sample_batch_with_epoch, test_batch_at, test_log,
-        tiny_segments,
+        append_samples, check_stamps, rolling_test_log, sample_batch, sample_batch_with_epoch,
+        stamped_rolling_log, stamped_test_log, test_batch_at, test_log, tiny_segments,
     },
     producer_snapshot::ProducerSnapshotEntry,
     stamp_index::{StampEntry, StampIndex},
+    test_support::open_log,
     txn_index::AbortedTxn,
 };
 
@@ -29,7 +31,7 @@ use crate::{
 #[test]
 fn a_truncation_below_the_log_start_lowers_the_start_to_the_target() {
     let (dir, mut log) = test_log();
-    crate::log::test_support::append_samples(&mut log, 4, 2);
+    append_samples(&mut log, 4, 2);
     log.set_log_start_offset(Offset(4)).expect("set log start");
 
     log.truncate_to(Offset(4)).unwrap();
@@ -41,7 +43,7 @@ fn a_truncation_below_the_log_start_lowers_the_start_to_the_target() {
     check!(log.log_end_offset() == Offset(2));
     check!(log.log_start_offset() == Offset(2));
 
-    let reopened = crate::test_support::open_log(dir.path());
+    let reopened = open_log(dir.path());
     check!(reopened.log_start_offset() == Offset(2));
     check!(reopened.log_end_offset() == Offset(2));
 }
@@ -53,7 +55,7 @@ fn a_truncation_below_the_log_start_lowers_the_start_to_the_target() {
 fn a_truncation_below_every_local_segment_resets_the_log_at_the_target() {
     let (_dir, mut log) = test_log();
     log.reset_to(Offset(20)).unwrap();
-    crate::log::test_support::append_samples(&mut log, 3, 2);
+    append_samples(&mut log, 3, 2);
     check!(log.log_start_offset() == Offset(20));
     check!(log.log_end_offset() == Offset(26));
 
@@ -162,7 +164,7 @@ fn truncate_to_rebuilds_producer_state_from_surviving_batches() {
 fn truncate_to_removes_future_empty_producer_snapshots() {
     let dir = tempdir().unwrap();
     let mut log = rolling_test_log(dir.path());
-    crate::log::test_support::append_samples(&mut log, 3, 2);
+    append_samples(&mut log, 3, 2);
     assert2::assert!(log.producer_state.is_empty());
 
     log.truncate_to(Offset(2)).unwrap();
@@ -280,8 +282,8 @@ fn truncate_to_active_segment_uses_relative_offset() {
 
 #[test]
 fn truncate_removes_stamps_for_discarded_tail() {
-    let (dir, mut log) = crate::log::test_support::stamped_test_log(10, 1);
-    crate::log::test_support::append_samples(&mut log, 2, 1);
+    let (dir, mut log) = stamped_test_log(10, 1);
+    append_samples(&mut log, 2, 1);
     check!(log.stamp_for_offset(Offset(1)) == Some(11));
 
     log.truncate_to(Offset(1)).unwrap();
@@ -301,20 +303,20 @@ fn truncate_removes_stamps_for_discarded_tail() {
 
 #[test]
 fn truncate_preserves_stamp_indexes_before_promoted_segment() {
-    let (_dir, mut log) = crate::log::test_support::stamped_rolling_log(10, 1, 3);
+    let (_dir, mut log) = stamped_rolling_log(10, 1, 3);
 
     log.truncate_to(Offset(2)).unwrap();
 
-    crate::log::test_support::check_stamps(&log, &[(0, Some(10)), (1, Some(11)), (2, None)]);
+    check_stamps(&log, &[(0, Some(10)), (1, Some(11)), (2, None)]);
 }
 
 #[test]
 fn trim_removes_only_evicted_segment_stamp_indexes() {
-    let (_dir, mut log) = crate::log::test_support::stamped_rolling_log(10, 1, 3);
+    let (_dir, mut log) = stamped_rolling_log(10, 1, 3);
 
     log.trim_to_offset(Offset(1)).unwrap();
 
-    crate::log::test_support::check_stamps(&log, &[(0, None), (1, Some(11)), (2, Some(12))]);
+    check_stamps(&log, &[(0, None), (1, Some(11)), (2, Some(12))]);
 }
 
 #[test]
@@ -351,7 +353,7 @@ fn truncate_to_drops_stale_epoch_checkpoint_entries() {
 /// leader's epoch can be recorded at the same offset.
 #[test]
 fn a_no_op_truncation_still_drops_an_epoch_no_record_backs() {
-    let entry = |epoch, start_offset| crate::leader_epoch_checkpoint::EpochEntry {
+    let entry = |epoch, start_offset| EpochEntry {
         epoch: LeaderEpoch(epoch),
         start_offset: Offset(start_offset),
     };
@@ -383,7 +385,7 @@ fn trim_to_offset_drops_old_segments() {
     )
     .expect("open");
     // Append 30 records to force multiple sealed segments.
-    crate::log::test_support::append_samples(&mut log, 30, 1);
+    append_samples(&mut log, 30, 1);
     let leo = log.log_end_offset();
     let sealed_before = log.segments.len();
     check!(sealed_before > 0);
@@ -404,7 +406,7 @@ fn trim_to_offset_drops_old_segments() {
 #[test]
 fn trim_to_offset_clamps_to_leo() {
     let (_dir, mut log) = test_log();
-    crate::log::test_support::append_samples(&mut log, 3, 1);
+    append_samples(&mut log, 3, 1);
     let leo = log.log_end_offset();
     let new_start = log.trim_to_offset(Offset(999)).expect("trim");
     // Asking to trim past LEO means trim to LEO.
@@ -420,7 +422,7 @@ fn trim_to_offset_rejects_negative() {
 #[test]
 fn trim_to_offset_idempotent_at_or_below_log_start() {
     let (_dir, mut log) = test_log();
-    crate::log::test_support::append_samples(&mut log, 3, 1);
+    append_samples(&mut log, 3, 1);
     // Trim to 0 on a fresh log → no change.
     let r = log.trim_to_offset(Offset(0)).expect("trim");
     assert2::assert!(r == log.log_start_offset());

@@ -36,9 +36,14 @@ use krabka_protocol::{
 };
 use tokio::net::TcpStream;
 
-use crate::support::{
-    records::{batch_from_records, value_record},
-    wire::ApiRequestSetup,
+use crate::{
+    support::{
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{batch_from_records, value_record},
+        topics::TopicPartitionCount,
+        wire::ApiRequestSetup,
+    },
+    two_dir_topic::{Setup, create_and_wait, start},
 };
 
 krabka_macros::assignment_dirs_fixture!(assignment_dirs_request);
@@ -73,9 +78,9 @@ async fn produce_and_get_error(addr: SocketAddr, topic: &str, partition: i32) ->
         0,
         Some(bytes::Bytes::from_static(b"kip-112-test")),
     )]);
-    let req = crate::support::produce::batch_request(
+    let req = batch_request(
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: topic.to_string(),
             partition: krabka_ids::PartitionIndex(partition),
             ..Default::default()
@@ -106,10 +111,10 @@ async fn produce_to_partition_on_offline_dir_returns_storage_error() {
     // both dirs under the least-loaded placement algorithm.
     const N: i32 = 6;
 
-    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
+    let (handle, primary, extra, addr) = start(Setup {
         client_id: CLIENT_ID,
         topic: TOPIC,
-        partitions: crate::support::topics::TopicPartitionCount(N),
+        partitions: TopicPartitionCount(N),
         ..Default::default()
     })
     .await;
@@ -237,13 +242,13 @@ async fn assign_replicas_to_dirs_reports_and_echoes() {
     // Use a single-dir broker so the broker IS the controller leader.
     let (_primary, handle, addr) = single_directory_broker().await;
 
-    crate::two_dir_topic::create_and_wait(
+    create_and_wait(
         &handle,
         addr,
-        crate::two_dir_topic::Setup {
+        Setup {
             client_id: CLIENT_ID,
             topic: TOPIC,
-            partitions: crate::support::topics::TopicPartitionCount(N),
+            partitions: TopicPartitionCount(N),
             ..Default::default()
         },
     )

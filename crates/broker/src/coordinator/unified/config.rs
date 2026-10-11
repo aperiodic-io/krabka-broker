@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use qubit_clock::Timer;
 
 use super::assignor::{Assignor, RangeAssignor, UniformAssignor};
+use crate::time_util::system_timer;
 
 /// `group.consumer.migration.policy` governs classic ↔ next-gen consumer
 /// group conversion. The default is `Bidirectional`, which matches Apache
@@ -359,7 +360,7 @@ impl Default for NextGenConfig {
             assignors: vec![Arc::new(UniformAssignor), Arc::new(RangeAssignor)],
             max_size: DEFAULT_MAX_GROUP_SIZE,
             migration_policy: ConsumerGroupMigrationPolicy::default(),
-            timer: crate::time_util::system_timer(),
+            timer: system_timer(),
         }
     }
 }

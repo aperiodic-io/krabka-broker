@@ -7,6 +7,7 @@ use krabka_units::{millis, secs};
 use super::*;
 use crate::network::auth::test_support::{
     assert_failed_authenticate_response, assert_success_authenticate_response,
+    oauth_reauthenticating,
 };
 
 fn unsecured_token(sub: &str, exp_s: i64) -> String {
@@ -63,8 +64,7 @@ async fn reauthenticate(
     now_ms: i64,
     token: &str,
 ) -> (ConnectionAuth, SaslAuthenticateResponse) {
-    let mut auth =
-        crate::network::auth::test_support::oauth_reauthenticating("alice", now_ms + 1_000);
+    let mut auth = oauth_reauthenticating("alice", now_ms + 1_000);
     let response = handle_authenticate_oauthbearer(
         &oauthbearer_client_response(token),
         &mut auth,
@@ -283,8 +283,7 @@ async fn authenticate_during_reauth_different_principal_rejected_with_sasl_auth_
 async fn a_rejected_reauth_token_gets_the_error_challenge_then_fails_with_its_json() {
     let validator = krabka_security::OAuthBearerValidator::default();
     let now_ms = 1_000_000_000_000;
-    let mut auth =
-        crate::network::auth::test_support::oauth_reauthenticating("alice", now_ms + 1_000);
+    let mut auth = oauth_reauthenticating("alice", now_ms + 1_000);
     let garbage = SaslAuthenticateRequest {
         auth_bytes: bytes::Bytes::from_static(b"not a client response"),
         ..Default::default()

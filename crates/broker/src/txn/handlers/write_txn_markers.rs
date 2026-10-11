@@ -288,9 +288,15 @@ mod tests {
     use crate::{
         coordinator::{
             bootstrap::OFFSETS_TOPIC,
+            partitioner::partition_for_group,
             persistence::OffsetCommitValue,
-            unified::actor::{GroupActorMessage, test_support::rpc},
+            unified::actor::{
+                GroupActorHandle, GroupActorMessage, GroupKindTag, test_support::rpc,
+            },
         },
+        replica_state::LeaderPolicy,
+        test_support::{StandalonePartitionSetup, peer, principal, request_context},
+        time_util::now_ms,
         txn::handlers::write_txn_markers::test_support::{open_partition, start_broker},
     };
 
@@ -325,16 +331,15 @@ mod tests {
     async fn mark_pending_offsets(
         broker: &Broker,
         setup: PendingOffsetsSetup<'_>,
-    ) -> std::sync::Arc<crate::coordinator::unified::actor::GroupActorHandle> {
+    ) -> std::sync::Arc<GroupActorHandle> {
         let PendingOffsetsSetup {
             group_id,
             topic,
             partition,
         } = setup;
-        let handle = broker.group_coordinator.get_or_create_group(
-            group_id,
-            crate::coordinator::unified::actor::GroupKindTag::Classic,
-        );
+        let handle = broker
+            .group_coordinator
+            .get_or_create_group(group_id, GroupKindTag::Classic);
         let ack = rpc::begin(&handle, |reply| GroupActorMessage::AddPendingTxnOffsets {
             producer_id: 91,
             written_at: 0,
@@ -361,9 +366,9 @@ mod tests {
         broker: &Broker,
         req: WriteTxnMarkersRequest,
     ) -> Result<WriteTxnMarkersResponse, BrokerError> {
-        let user = crate::test_support::principal("ANONYMOUS");
-        let address = crate::test_support::peer();
-        let ctx = crate::test_support::request_context(&user, &address, "write-txn-markers-test");
+        let user = principal("ANONYMOUS");
+        let address = peer();
+        let ctx = request_context(&user, &address, "write-txn-markers-test");
         super::handle(broker, req, VERSION, &ctx).await
     }
 
@@ -447,7 +452,7 @@ mod tests {
                     let part = open_partition(
                         &broker,
                         &log_dir,
-                        crate::test_support::StandalonePartitionSetup {
+                        StandalonePartitionSetup {
                             partition: krabka_ids::PartitionIndex(1),
                             ..Default::default()
                         },
@@ -524,7 +529,7 @@ mod tests {
             let part = open_partition(
                 &broker,
                 &dir.path().join("markers"),
-                crate::test_support::StandalonePartitionSetup {
+                StandalonePartitionSetup {
                     partition: krabka_ids::PartitionIndex(1),
                     ..Default::default()
                 },
@@ -537,14 +542,11 @@ mod tests {
             if matches!(change, Change::UnderMinIsr) {
                 part.install_isr(&[node_id], &[node_id, follower], node_id)
                     .await;
-                part.replica_state
-                    .lock()
-                    .await
-                    .set_policy(crate::replica_state::LeaderPolicy {
-                        effective_min_isr: 2,
-                        replica_lag_time_max: std::time::Duration::from_secs(30),
-                        brokers: std::collections::HashMap::new(),
-                    });
+                part.replica_state.lock().await.set_policy(LeaderPolicy {
+                    effective_min_isr: 2,
+                    replica_lag_time_max: std::time::Duration::from_secs(30),
+                    brokers: std::collections::HashMap::new(),
+                });
             }
 
             let request = WriteTxnMarkersRequest {
@@ -595,7 +597,7 @@ mod tests {
             open_partition(
                 &broker,
                 dir.path(),
-                crate::test_support::StandalonePartitionSetup {
+                StandalonePartitionSetup {
                     partition: krabka_ids::PartitionIndex(partition),
                     ..Default::default()
                 },
@@ -647,7 +649,7 @@ mod tests {
             // A real commit timestamp: an epoch-relative one is older than
             // `offsets.retention.minutes`, so the KIP-211 sweep would
             // correctly reap the offset this test is about.
-            commit_timestamp_ms: crate::time_util::now_ms(),
+            commit_timestamp_ms: now_ms(),
             expire_timestamp_ms: None,
             topic_id: None,
         };
@@ -765,10 +767,7 @@ mod tests {
         // Both groups' records go into one batch on one partition, which is
         // what a single marker resolves; the group ids come off the record
         // keys, not from the partition.
-        let offsets_partition = crate::coordinator::partitioner::partition_for_group(
-            &broker.controller.current_image(),
-            first,
-        );
+        let offsets_partition = partition_for_group(&broker.controller.current_image(), first);
         let part = broker
             .partitions
             .get(OFFSETS_TOPIC, PartitionIndex(offsets_partition))

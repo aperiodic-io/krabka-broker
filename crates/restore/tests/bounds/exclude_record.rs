@@ -14,7 +14,7 @@ use krabka_protocol::records::RecordBatch;
 use crate::{
     archive::build_archive,
     fixtures::{headered_record, keyed_record, plain_batch, value_record},
-    harness::{reopen, run_restore},
+    harness::{check_batches, empty_first_batch, reopen, restore_excluding_keys, run_restore},
 };
 
 // ---------------------------------------------------------------------
@@ -32,8 +32,7 @@ async fn exclude_key_drops_a_middle_record_without_shifting_later_offsets() {
         ]),
         plain_batch(vec![value_record(0, "keep-4")]),
     ];
-    let (_archive, _target, target_dir) =
-        crate::harness::restore_excluding_keys(&mut fixture).await;
+    let (_archive, _target, target_dir) = restore_excluding_keys(&mut fixture).await;
 
     let expected = vec![
         RecordBatch {
@@ -45,7 +44,7 @@ async fn exclude_key_drops_a_middle_record_without_shifting_later_offsets() {
         },
         fixture[1].clone(),
     ];
-    crate::harness::check_batches(&target_dir, 4, &expected);
+    check_batches(&target_dir, 4, &expected);
 }
 
 // ---------------------------------------------------------------------
@@ -62,11 +61,10 @@ async fn exclude_key_matching_every_record_of_one_batch_still_claims_its_offsets
         ]),
         plain_batch(vec![value_record(0, "keep-c")]),
     ];
-    let (_archive, _target, target_dir) =
-        crate::harness::restore_excluding_keys(&mut fixture).await;
+    let (_archive, _target, target_dir) = restore_excluding_keys(&mut fixture).await;
 
-    let expected = crate::harness::empty_first_batch(&fixture);
-    crate::harness::check_batches(&target_dir, 3, &expected);
+    let expected = empty_first_batch(&fixture);
+    check_batches(&target_dir, 3, &expected);
 }
 
 // ---------------------------------------------------------------------
@@ -87,8 +85,7 @@ async fn exclude_key_dropping_a_batchs_trailing_record_survives_the_full_pipelin
         ]),
         plain_batch(vec![value_record(0, "keep-z")]),
     ];
-    let (_archive, _target, target_dir) =
-        crate::harness::restore_excluding_keys(&mut fixture).await;
+    let (_archive, _target, target_dir) = restore_excluding_keys(&mut fixture).await;
 
     let expected = vec![
         RecordBatch {
@@ -97,7 +94,7 @@ async fn exclude_key_dropping_a_batchs_trailing_record_survives_the_full_pipelin
         },
         fixture[1].clone(),
     ];
-    crate::harness::check_batches(&target_dir, 3, &expected);
+    check_batches(&target_dir, 3, &expected);
 }
 
 // ---------------------------------------------------------------------
@@ -124,7 +121,7 @@ async fn exclude_header_matches_on_name_and_value_not_name_alone() {
         ],
         ..fixture[0].clone()
     }];
-    crate::harness::check_batches(&target_dir, 3, &expected);
+    check_batches(&target_dir, 3, &expected);
 }
 
 // ---------------------------------------------------------------------

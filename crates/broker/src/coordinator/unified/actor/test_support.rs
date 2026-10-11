@@ -10,7 +10,12 @@ use krabka_protocol::{
     owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest, primitives::uuid::Uuid,
 };
 
-use crate::coordinator::unified::test_support::MemberEpoch;
+use crate::coordinator::unified::{
+    ClientIdentity, classic_state::Member, config::ConsumerGroupMigrationPolicy,
+    consumer_state::MemberState, offsets_log::fake::ClassicMetadataRecord,
+    persistence::GroupMetadataValue, share::config::ShareGroupConfig,
+    streams::config::StreamsGroupConfig, test_support::MemberEpoch,
+};
 
 pub(crate) mod rpc;
 
@@ -63,10 +68,10 @@ pub(super) fn coordinator_with_log(
 ) -> Arc<GroupCoordinator> {
     Arc::new(GroupCoordinator::new(
         config,
-        crate::coordinator::unified::share::config::ShareGroupConfig::assigning_at_once(),
+        ShareGroupConfig::assigning_at_once(),
         metadata,
         log,
-        crate::coordinator::unified::streams::config::StreamsGroupConfig::default(),
+        StreamsGroupConfig::default(),
     ))
 }
 
@@ -91,17 +96,15 @@ pub(super) fn subscribed_consumer_group(
 ) -> GroupState {
     let mut state = GroupState::new(group_id);
     for member_id in member_ids {
-        state.add_or_update_member(subscribed_member(
-            crate::coordinator::unified::actor::test_support::ConsumerMemberSetup {
-                member_id,
-                topics,
-                client: crate::coordinator::unified::ClientIdentity {
-                    id: "client",
-                    host: "host",
-                },
-                ..Default::default()
+        state.add_or_update_member(subscribed_member(ConsumerMemberSetup {
+            member_id,
+            topics,
+            client: ClientIdentity {
+                id: "client",
+                host: "host",
             },
-        ));
+            ..Default::default()
+        }));
     }
     state
 }
@@ -114,14 +117,12 @@ pub(super) struct ConsumerMemberSetup<'a> {
     #[default(&["t"])]
     pub topics: &'a [&'a str],
     #[default(crate::coordinator::unified::ClientIdentity { id: "client", host: "host" })]
-    pub client: crate::coordinator::unified::ClientIdentity<'a>,
+    pub client: ClientIdentity<'a>,
     #[default(std::time::Instant::now())]
     pub now: std::time::Instant,
 }
 
-pub(super) fn subscribed_member(
-    setup: ConsumerMemberSetup<'_>,
-) -> crate::coordinator::unified::consumer_state::MemberState {
+pub(super) fn subscribed_member(setup: ConsumerMemberSetup<'_>) -> MemberState {
     let ConsumerMemberSetup {
         member_id,
         topics,
@@ -189,9 +190,7 @@ pub(super) fn seed_completing_classic(
     seed_classic_group(coordinator, completing_classic_group(members))
 }
 
-pub(super) async fn last_classic_metadata(
-    log: &InMemoryOffsetsLog,
-) -> crate::coordinator::unified::persistence::GroupMetadataValue {
+pub(super) async fn last_classic_metadata(log: &InMemoryOffsetsLog) -> GroupMetadataValue {
     use crate::coordinator::unified::persistence::{GroupMetadataValue, Key, parse_key};
 
     for batch in log.batches().await.iter().rev() {
@@ -219,27 +218,17 @@ pub(super) fn make_coordinator_with_topic(
     topic: &str,
     partitions: i32,
 ) -> (Arc<GroupCoordinator>, Arc<InMemoryOffsetsLog>) {
-    make_coordinator_with_topic_policy(
-        topic,
-        partitions,
-        crate::coordinator::unified::config::ConsumerGroupMigrationPolicy::default(),
-    )
+    make_coordinator_with_topic_policy(topic, partitions, ConsumerGroupMigrationPolicy::default())
 }
 
 /// A two-partition topic `t` whose classic and consumer groups can migrate both ways.
 pub(super) fn bidirectional_coordinator() -> (Arc<GroupCoordinator>, Arc<InMemoryOffsetsLog>) {
-    make_coordinator_with_topic_policy(
-        "t",
-        2,
-        crate::coordinator::unified::config::ConsumerGroupMigrationPolicy::Bidirectional,
-    )
+    make_coordinator_with_topic_policy("t", 2, ConsumerGroupMigrationPolicy::Bidirectional)
 }
 
 /// One classic member using the common retention/dispatch test identity.
-pub(crate) fn classic_member(
-    member_id: &str,
-) -> crate::coordinator::unified::classic_state::Member {
-    crate::coordinator::unified::classic_state::Member::new(
+pub(crate) fn classic_member(member_id: &str) -> Member {
+    Member::new(
         member_id,
         "client",
         "127.0.0.1",
@@ -271,7 +260,7 @@ pub(super) fn parked_follower(
 pub(super) fn make_coordinator_with_topic_policy(
     topic: &str,
     partitions: i32,
-    policy: crate::coordinator::unified::config::ConsumerGroupMigrationPolicy,
+    policy: ConsumerGroupMigrationPolicy,
 ) -> (Arc<GroupCoordinator>, Arc<InMemoryOffsetsLog>) {
     make_coordinator_with_topic_config(
         topic,
@@ -351,7 +340,7 @@ pub(super) async fn seed_and_upgrade(
 ) -> Arc<GroupActorHandle> {
     let handle = seed_classic_member(
         coord,
-        crate::coordinator::unified::actor::test_support::ClassicMemberSetup {
+        ClassicMemberSetup {
             topic,
             ..Default::default()
         },
@@ -363,11 +352,7 @@ pub(super) async fn seed_and_upgrade(
 
 /// The two-partition topic fixture with classic-to-consumer upgrades enabled.
 pub(super) fn upgrade_coordinator() -> (Arc<GroupCoordinator>, Arc<InMemoryOffsetsLog>) {
-    make_coordinator_with_topic_policy(
-        "t",
-        2,
-        crate::coordinator::unified::config::ConsumerGroupMigrationPolicy::Upgrade,
-    )
+    make_coordinator_with_topic_policy("t", 2, ConsumerGroupMigrationPolicy::Upgrade)
 }
 
 /// Upgrade the fixture's hosted member, then rejoin it on the classic facade.
@@ -412,11 +397,8 @@ pub(super) async fn log_has_classic_group_metadata_write(
     log: &InMemoryOffsetsLog,
     group_id: &str,
 ) -> bool {
-    log.has_classic_group_metadata_record(
-        group_id,
-        crate::coordinator::unified::offsets_log::fake::ClassicMetadataRecord::Write,
-    )
-    .await
+    log.has_classic_group_metadata_record(group_id, ClassicMetadataRecord::Write)
+        .await
 }
 
 /// Seeds a classic consumer group "g" with a single classic member
@@ -558,10 +540,7 @@ pub(super) async fn join_native_consumer(handle: &Arc<GroupActorHandle>) -> Join
 pub(super) async fn seed_classic_with_native(
     coordinator: &Arc<GroupCoordinator>,
 ) -> (Arc<GroupActorHandle>, String) {
-    let handle = seed_classic_member(
-        coordinator,
-        crate::coordinator::unified::actor::test_support::ClassicMemberSetup::default(),
-    );
+    let handle = seed_classic_member(coordinator, ClassicMemberSetup::default());
     let native = join_native_consumer(&handle).await;
     (handle, native.member_id)
 }

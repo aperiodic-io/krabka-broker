@@ -12,6 +12,10 @@
 //! quorum -- the same two-tier lookup `ControllerHandle::voter_addr` uses for
 //! the leader it forwards a rejected `submit_change` to.
 
+use crate::{
+    host_port::parse_host_port, metadata_source::MetadataSource, network::client::InterBrokerClient,
+};
+
 /// The listener name a controller advertises for the RPCs its peers address
 /// to it.
 pub(crate) const CONTROLLER_LISTENER_NAME: &str = "CONTROLLER";
@@ -63,8 +67,31 @@ pub(crate) fn leader_endpoint(
             static_voters
                 .iter()
                 .find(|(node_id, _)| *node_id == leader)
-                .and_then(|(_, endpoint)| crate::host_port::parse_host_port(endpoint))
+                .and_then(|(_, endpoint)| parse_host_port(endpoint))
         })
+}
+
+/// Resolve the current controller leader and the image used to build a request
+/// for it. Controller RPC senders share this lookup so they report missing
+/// leadership and missing endpoint information consistently.
+pub(crate) fn current_leader_endpoint(
+    controller: &dyn MetadataSource,
+    static_voters: &[(krabka_raft::NodeId, String)],
+) -> Result<
+    (
+        krabka_raft::NodeId,
+        std::sync::Arc<krabka_metadata::MetadataImage>,
+        String,
+        u16,
+    ),
+    String,
+> {
+    let leader = *controller.watch_leader().borrow();
+    let leader = leader.ok_or_else(|| "no controller leader".to_string())?;
+    let image = controller.current_image();
+    let (host, port) = leader_endpoint(&image, static_voters, leader)
+        .ok_or_else(|| "controller leader has no known controller endpoint".to_string())?;
+    Ok((leader, image, host, port))
 }
 
 /// The id that the `index`th bootstrap server stands under, counted down from
@@ -123,7 +150,7 @@ pub(crate) fn quorum_targets(
 /// Kafka frames at a secured controller port and fail every attempt.
 pub(crate) struct ControllerDialer {
     /// Shared outbound dialer that runs the controller listener's TLS / SASL.
-    pub outbound_client: std::sync::Arc<crate::network::client::InterBrokerClient>,
+    pub outbound_client: std::sync::Arc<InterBrokerClient>,
     pub listener_protocol: krabka_security::ListenerProtocol,
     /// SNI and SASL server name for the controller listener, matching the one
     /// the raft dialer presents.
@@ -139,6 +166,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::test_support::{VoterImageSetup, voter_image};
 
     fn endpoints(named: &[(&str, &str, u16)]) -> Vec<krabka_metadata::VoterEndpoint> {
         named
@@ -184,7 +212,7 @@ mod tests {
     }
 
     fn image_with_voter(node: u64, host: &str, port: u16) -> krabka_metadata::MetadataImage {
-        crate::test_support::voter_image(crate::test_support::VoterImageSetup {
+        voter_image(VoterImageSetup {
             node: krabka_ids::NodeId(node),
             endpoints: endpoints(&[("CONTROLLER", host, port)]),
         })

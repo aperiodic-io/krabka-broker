@@ -38,7 +38,9 @@ use krabka_protocol::{
 };
 
 use crate::support::{
-    fetch::single_partition_fetch,
+    discovery::named_topic_metadata,
+    fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+    produce::{SinglePartitionProduceSetup, batch_request},
     records::{batch_from_records, value_record},
 };
 
@@ -80,7 +82,7 @@ async fn create_topic_with_compression(addr: SocketAddr, topic: &str, codec: &st
 }
 
 async fn get_topic_id(addr: SocketAddr, topic: &str) -> Uuid {
-    let req = crate::support::discovery::named_topic_metadata(topic);
+    let req = named_topic_metadata(topic);
     let version: i16 = 12;
     let (_, r): (usize, MetadataResponse) =
         kafka_wire::request_once(addr, &req, (3, version), CLIENT_ID, (1, true)).await;
@@ -96,12 +98,12 @@ async fn produce_gzip(addr: SocketAddr, topic: &str, topic_id: Uuid, value: &[u8
         attributes: Attributes::default().with_compression(CompressionType::Gzip),
         ..batch_from_records(vec![value_record(0, Some(Bytes::copy_from_slice(value)))])
     };
-    let req = crate::support::produce::batch_request(
+    let req = batch_request(
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: (topic).into(),
             topic_id,
-            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            ..SinglePartitionProduceSetup::replicated()
         },
     );
     let version: i16 = 9;
@@ -114,7 +116,7 @@ async fn produce_gzip(addr: SocketAddr, topic: &str, topic_id: Uuid, value: &[u8
 async fn fetch_first_batch(addr: SocketAddr, topic: &str, topic_id: Uuid) -> RecordBatch {
     let req = FetchRequest {
         replica_id: -1,
-        ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+        ..single_partition_fetch(SinglePartitionFetchSetup {
             topic: topic.into(),
             topic_id,
             ..Default::default()

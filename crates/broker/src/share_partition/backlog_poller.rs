@@ -20,6 +20,7 @@ use krabka_security::ListenerProtocol;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    broker::registered_listener_endpoint,
     codes,
     coordinator::{GroupCoordinator, bootstrap::OFFSETS_TOPIC, partitioner},
     metadata_source::MetadataSource,
@@ -163,7 +164,7 @@ impl BacklogPoller {
         let broker = image
             .broker(leader)
             .ok_or_else(|| format!("unknown leader broker {leader}"))?;
-        let (host, port) = crate::broker::registered_listener_endpoint(broker, &self.listener_name);
+        let (host, port) = registered_listener_endpoint(broker, &self.listener_name);
         let options = ConnectionOptions {
             client_id: format!("krabka-share-backlog-{}", self.node_id),
             ..ConnectionOptions::default()

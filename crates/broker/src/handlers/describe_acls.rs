@@ -21,7 +21,12 @@ use super::acl_wire::{
     binding_filter::{AclBindingFilter, UnknownElement, WireAclBindingFilter},
     operation_to_wire, pattern_type_to_wire, permission_to_wire, resource_type_to_wire,
 };
-use crate::{broker::Broker, codes, handlers::ErrorResponse as _};
+use crate::{
+    broker::Broker,
+    codes,
+    error::BrokerError,
+    handlers::{ErrorResponse as _, RequestContext, cluster_describe_denied},
+};
 
 /// The message of a cluster-describe refusal. Kafka's `AuthHelper` writes
 /// "Request <request> needs DESCRIBE permission.", where `<request>` is the JVM
@@ -71,8 +76,8 @@ pub(crate) fn handle(
     broker: &Broker,
     req: &DescribeAclsRequest,
     _version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
-) -> Result<DescribeAclsResponse, crate::error::BrokerError> {
+    ctx: &RequestContext<'_>,
+) -> Result<DescribeAclsResponse, BrokerError> {
     // Kafka's `DescribeAclsRequest` constructor refuses an `UNKNOWN` element
     // while the request parses, before any authorization, and the broker
     // closes the connection. The error return is that close.
@@ -81,7 +86,7 @@ pub(crate) fn handle(
     })?;
 
     let image = broker.controller.current_image();
-    if crate::handlers::cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+    if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
         return Ok(DescribeAclsResponse::error(
             codes::CLUSTER_AUTHORIZATION_FAILED,
             Some(CLUSTER_DESCRIBE_DENIED_MESSAGE.into()),
@@ -153,10 +158,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        handlers::acl_test_support::{
-            OPERATION_ANY, OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL,
-            PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ALLOW, PERMISSION_ANY,
-            RESOURCE_TYPE_TOPIC,
+        broker::Broker,
+        handlers::{
+            RequestContext,
+            acl_test_support::{
+                OPERATION_ANY, OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_ANY,
+                PATTERN_TYPE_LITERAL, PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ALLOW,
+                PERMISSION_ANY, RESOURCE_TYPE_TOPIC, expected_empty_match_filter,
+            },
+            acl_wire::PATTERN_MATCHING_FIXTURE,
         },
         test_support::DenyAll,
     };
@@ -198,7 +208,7 @@ mod tests {
 
         let built = build_filter(&req).expect("filter");
 
-        let expected = crate::handlers::acl_test_support::expected_empty_match_filter();
+        let expected = expected_empty_match_filter();
         assert!(built == expected);
     }
 
@@ -270,10 +280,7 @@ mod tests {
         assert!(resp == expected_resp);
     }
 
-    fn describe_alice_orders(
-        broker: &crate::broker::Broker,
-        ctx: &crate::handlers::RequestContext<'_>,
-    ) -> DescribeAclsResponse {
+    fn describe_alice_orders(broker: &Broker, ctx: &RequestContext<'_>) -> DescribeAclsResponse {
         handle(
             broker,
             &request(Some("orders"), Some("User:alice"), OPERATION_READ),
@@ -392,7 +399,7 @@ mod tests {
     #[tokio::test]
     async fn handle_matches_patterns_the_way_kafka_does() {
         let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-        let seeded = crate::handlers::acl_wire::PATTERN_MATCHING_FIXTURE;
+        let seeded = PATTERN_MATCHING_FIXTURE;
         seed_acls(
             &broker_handle,
             seeded

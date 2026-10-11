@@ -11,11 +11,15 @@ use krabka_log::{Log, Offset};
 use krabka_protocol::records::RecordBatch;
 
 use super::storage::{lock_log, storage_failure_error};
-use crate::partition::{AppendedBatch, ProduceData, ProducerAppendCheck};
+use crate::{
+    blocking::run_blocking_catching,
+    error::BrokerError,
+    partition::{AppendedBatch, ProduceData, ProducerAppendCheck},
+};
 
 type CheckedBatches = (Vec<ProduceData>, Vec<Option<ProducerAppendCheck>>);
 type AppendOutcome = (
-    Vec<Result<AppendedBatch, crate::error::BrokerError>>,
+    Vec<Result<AppendedBatch, BrokerError>>,
     Offset,
     Vec<krabka_log::ProducerSnapshotEntry>,
 );
@@ -51,7 +55,7 @@ fn append_data(
     data: ProduceData,
     target: Option<CompressionType>,
     base: Option<Offset>,
-) -> Result<AppendedBatch, crate::error::BrokerError> {
+) -> Result<AppendedBatch, BrokerError> {
     let result = match data {
         ProduceData::Verbatim(batch) => match base {
             Some(base) => log.append_verbatim_at(&batch, base).map(at_offset),
@@ -78,7 +82,7 @@ fn append_data(
                 .map(at_offset),
         },
     };
-    result.map_err(crate::error::BrokerError::from)
+    result.map_err(BrokerError::from)
 }
 
 /// Mirror successful control appends while the group's original log lock is held.
@@ -124,11 +128,11 @@ fn at_offset(base_offset: Offset) -> AppendedBatch {
 fn refuse_transactional_append(
     log: &Log,
     check: Option<&Option<ProducerAppendCheck>>,
-) -> Option<crate::error::BrokerError> {
+) -> Option<BrokerError> {
     let check = check.copied().flatten()?;
     log.check_transactional_append(check.batch, check.guard)
         .err()
-        .map(crate::error::BrokerError::TransactionAppend)
+        .map(BrokerError::TransactionAppend)
 }
 
 /// Append a whole group of produce jobs under a single lock acquisition.
@@ -226,12 +230,10 @@ pub(crate) async fn run_produce_append_batch(
     log: Arc<Mutex<Log>>,
     high_watermark: Option<Offset>,
     datas: CheckedBatches,
-) -> Result<AppendOutcome, crate::error::BrokerError> {
-    crate::blocking::run_blocking_catching(move || {
-        append_produce_batch(&log, high_watermark, datas)
-    })
-    .await
-    .map_err(|error| storage_failure_error("append task panicked", error))
+) -> Result<AppendOutcome, BrokerError> {
+    run_blocking_catching(move || append_produce_batch(&log, high_watermark, datas))
+        .await
+        .map_err(|error| storage_failure_error("append task panicked", error))
 }
 
 pub(crate) async fn run_produce_append_batch_at(
@@ -239,12 +241,10 @@ pub(crate) async fn run_produce_append_batch_at(
     base: Offset,
     high_watermark: Option<Offset>,
     datas: CheckedBatches,
-) -> Result<AppendOutcome, crate::error::BrokerError> {
-    crate::blocking::run_blocking_catching(move || {
-        append_produce_batch_at(&log, base, high_watermark, datas)
-    })
-    .await
-    .map_err(|error| storage_failure_error("append task panicked", error))
+) -> Result<AppendOutcome, BrokerError> {
+    run_blocking_catching(move || append_produce_batch_at(&log, base, high_watermark, datas))
+        .await
+        .map_err(|error| storage_failure_error("append task panicked", error))
 }
 
 #[cfg(test)]
@@ -254,7 +254,11 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::partition_writer::test_support::sample_batch;
+    use crate::{
+        error::BrokerError,
+        partition_writer::test_support::sample_batch,
+        test_support::{EmptyPayloadBatchSetup, RecordCount},
+    };
 
     #[derive(Debug)]
     struct FailNthWrite {
@@ -297,10 +301,7 @@ mod tests {
         Mutex::new(log)
     }
 
-    fn assert_partial_append(
-        results: &[Result<AppendedBatch, crate::error::BrokerError>],
-        leo: Offset,
-    ) {
+    fn assert_partial_append(results: &[Result<AppendedBatch, BrokerError>], leo: Offset) {
         assert!(results[0].as_ref().unwrap().base_offset == Offset(0));
         assert!(matches!(
             &results[1],
@@ -312,9 +313,7 @@ mod tests {
 
     fn two_single_record_batches() -> Vec<ProduceData> {
         std::iter::repeat_with(|| {
-            ProduceData::Owned(sample_batch(
-                crate::test_support::EmptyPayloadBatchSetup::default(),
-            ))
+            ProduceData::Owned(sample_batch(EmptyPayloadBatchSetup::default()))
         })
         .take(2)
         .collect()
@@ -367,8 +366,8 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let log = lz4_log(dir.path());
 
-        let original = sample_batch(crate::test_support::EmptyPayloadBatchSetup {
-            count: crate::test_support::RecordCount(2),
+        let original = sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(2),
         });
         assert!(original.attributes.compression() == CompressionType::None);
 
@@ -394,7 +393,7 @@ mod tests {
     /// and a 6-byte value (version 0, coordinator epoch 17), so the append
     /// path's control-record check accepts it.
     fn commit_marker_batch() -> krabka_protocol::records::RecordBatch {
-        let mut marker = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
+        let mut marker = sample_batch(EmptyPayloadBatchSetup::default());
         marker.attributes = marker
             .attributes
             .with_transactional(true)
@@ -459,13 +458,13 @@ mod tests {
     #[test]
     fn a_marker_group_releases_transactions_below_the_high_watermark() {
         fn data(producer_id: i64) -> ProduceData {
-            let mut batch = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
+            let mut batch = sample_batch(EmptyPayloadBatchSetup::default());
             batch.producer_id = producer_id;
             batch.attributes = batch.attributes.with_transactional(true);
             ProduceData::Owned(batch)
         }
         fn commit(producer_id: i64) -> ProduceData {
-            let mut batch = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
+            let mut batch = sample_batch(EmptyPayloadBatchSetup::default());
             batch.producer_id = producer_id;
             batch.attributes = batch.attributes.with_transactional(true).with_control(true);
             batch.records[0].key = Some(bytes::Bytes::from_static(&[0, 0, 0, 1]));

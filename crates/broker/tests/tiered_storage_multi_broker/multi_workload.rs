@@ -19,13 +19,24 @@ use krabka_broker::BrokerHandle;
 use krabka_client_core::Client;
 use krabka_protocol::records::Record;
 
-use crate::{RECORDS, TOPIC, multi_client::topic_id_for, support::records::batch_from_records};
+use crate::{
+    RECORDS, TOPIC,
+    multi_client::topic_id_for,
+    support::{
+        client::{BatchProduceSetup, produce_batch},
+        produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
+        records::batch_from_records,
+        storage::remote_log_files,
+        topics::AssignedTopicSetup,
+    },
+    topic_fixture::{AssignedTieredTopicSetup, await_tiered_replicas, create_assigned_topic},
+};
 
 /// Counts current `*.log` files and legacy files named `log` under `root`.
 /// Each one is the `LocalTieredStorage` segment-bytes object of a copied
 /// segment. This is the same helper as in `tiered_storage_topic_rlmm.rs`.
 fn count_remote_log_files(root: &std::path::Path) -> usize {
-    crate::support::storage::remote_log_files(root).len()
+    remote_log_files(root).len()
 }
 
 /// Counts `*.log` files directly under one partition's local log directory.
@@ -104,20 +115,20 @@ pub(crate) async fn await_follower_local_eviction(log_dir: &std::path::Path) {
 }
 
 pub(crate) async fn create_tiered_topic(admin: &Client, b1: &BrokerHandle, b2: &BrokerHandle) {
-    let assignment = crate::support::topics::AssignedTopicSetup::on_replicas(
+    let assignment = AssignedTopicSetup::on_replicas(
         TOPIC,
         vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
     );
-    crate::topic_fixture::create_assigned_topic(
+    create_assigned_topic(
         admin,
-        crate::topic_fixture::AssignedTieredTopicSetup {
+        AssignedTieredTopicSetup {
             topic: assignment,
             segment_bytes: Some("1024"),
         },
     )
     .await;
 
-    crate::topic_fixture::await_tiered_replicas(
+    await_tiered_replicas(
         &[b1, b2],
         TOPIC,
         Some(krabka_units::kibibytes(1)),
@@ -136,14 +147,14 @@ pub(crate) async fn produce_and_await_remote_segments(
             value: Some(bytes::Bytes::from(format!("test-record-{index}"))),
             ..Default::default()
         }]);
-        let response = crate::support::client::produce_batch(
+        let response = produce_batch(
             admin,
             batch,
-            crate::support::client::BatchProduceSetup {
+            BatchProduceSetup {
                 topic: TOPIC,
                 topic_id,
-                acknowledgements: crate::support::produce::ProduceAcknowledgements::AllReplicas,
-                timeout: crate::support::produce::ProduceTimeoutMillis(10_000),
+                acknowledgements: ProduceAcknowledgements::AllReplicas,
+                timeout: ProduceTimeoutMillis(10_000),
             },
         )
         .await;

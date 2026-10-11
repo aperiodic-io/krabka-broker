@@ -23,10 +23,17 @@ use super::{
     API_KEY_API_VERSIONS, API_KEY_SASL_AUTHENTICATE, API_KEY_SASL_HANDSHAKE, BrokerRaftHandshake,
     frame::{read_kafka_request, write_response, write_response_body},
 };
-use crate::network::auth::{
-    ConnectionAuth, ReauthClock, generic_failure_message, handle_authenticate_gssapi,
-    handle_authenticate_oauthbearer_with_jwks_cache, handle_authenticate_plain,
-    handle_authenticate_scram, handle_handshake,
+use crate::{
+    codes::SASL_AUTHENTICATION_FAILED,
+    network::{
+        auth::{
+            ConnectionAuth, ReauthClock, generic_failure_message, handle_authenticate_gssapi,
+            handle_authenticate_oauthbearer_with_jwks_cache, handle_authenticate_plain,
+            handle_authenticate_scram, handle_handshake,
+        },
+        dispatch::sasl::{audit_principal, emit_authentication as emit_audit_authentication},
+    },
+    time_util::now_ms,
 };
 
 /// Initial per-connection auth state for an unauthenticated SASL peer.
@@ -77,9 +84,9 @@ fn emit_authentication(
             name: String::new(),
             auth_method: format!("{:?}", krabka_security::AuthMethod::from_sasl(mechanism)),
         },
-        crate::network::dispatch::sasl::audit_principal,
+        audit_principal,
     );
-    crate::network::dispatch::sasl::emit_authentication(
+    emit_audit_authentication(
         audit_log,
         peer,
         mechanism.wire_name(),
@@ -222,7 +229,7 @@ pub(super) async fn run_inbound_sasl(
                             &cfg.oauthbearer_validator,
                             &cfg.oauthbearer_jwks_cache_generation,
                             &cfg.oauthbearer_jwks_last_successful_fetch_ms,
-                            crate::time_util::now_ms,
+                            now_ms,
                             CONTROLLER_MAX_REAUTH,
                         )
                         .await
@@ -237,9 +244,7 @@ pub(super) async fn run_inbound_sasl(
                         handle_authenticate_gssapi(&req, &mut auth, config, CONTROLLER_MAX_REAUTH)
                     }
                 };
-                if resp.error_code == crate::codes::SASL_AUTHENTICATION_FAILED
-                    && resp.error_message.is_none()
-                {
+                if resp.error_code == SASL_AUTHENTICATION_FAILED && resp.error_message.is_none() {
                     resp.error_message = Some(generic_failure_message(mech, false));
                 }
                 let error_code = resp.error_code;
@@ -326,10 +331,13 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::*;
-    use crate::raft_handshake::test_support::{
-        HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
-        RequestFrameSetup, api_versions_body, read_response_frame, request_frame,
-        sasl_authenticate_body, sasl_handshake_body, sasl_test_config,
+    use crate::{
+        network::test_support::assert_authentication_event,
+        raft_handshake::test_support::{
+            HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
+            RequestFrameSetup, api_versions_body, read_response_frame, request_frame,
+            sasl_authenticate_body, sasl_handshake_body, sasl_test_config,
+        },
     };
 
     fn test_peer() -> SocketAddr {
@@ -469,7 +477,7 @@ mod tests {
         assert!(outcome.is_ok());
 
         let event = rx.try_recv().expect("the controller authentication row");
-        crate::network::test_support::assert_authentication_event(
+        assert_authentication_event(
             &event,
             krabka_audit::AuditOutcome::Success,
             "PLAIN",
@@ -486,7 +494,7 @@ mod tests {
         let (resp, _outcome) = rejected_plain_login(cfg).await;
 
         let event = rx.try_recv().expect("the controller authentication row");
-        crate::network::test_support::assert_authentication_event(
+        assert_authentication_event(
             &event,
             krabka_audit::AuditOutcome::Failure,
             "PLAIN",

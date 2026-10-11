@@ -10,7 +10,10 @@ use std::{process::Command, time::Duration};
 use uuid::Uuid;
 
 use crate::{
-    static_quorum_harness::{docker_rm, kafka_cluster_id_string},
+    static_quorum_harness::{
+        MixedQuorum, docker_rm, jvm_controller_properties, kafka_cluster_id_string,
+        start_jvm_controller,
+    },
     support,
 };
 
@@ -46,20 +49,14 @@ async fn contested_election_krabka_counts_jvm_prevote() {
     let cid_str = kafka_cluster_id_string(cluster_id);
 
     let ([p1, p2, p3], [c1, c2], [_dir1, _dir2]) =
-        crate::static_quorum_harness::MixedQuorum::start(cluster_id, Some(krabka_units::secs(2)))
-            .await;
+        MixedQuorum::start(cluster_id, Some(krabka_units::secs(2))).await;
 
     // JVM voter id 3: release the dead leader fast, self-nominate slowly.
-    let props = crate::static_quorum_harness::jvm_controller_properties(
+    let props = jvm_controller_properties(
         [p1, p2, p3],
         "controller.quorum.fetch.timeout.ms=300\ncontroller.quorum.election.timeout.ms=10000\n",
     );
-    let _propdir = crate::static_quorum_harness::start_jvm_controller(
-        CONTESTED_CONTAINER,
-        p3,
-        &cid_str,
-        &props,
-    );
+    let _propdir = start_jvm_controller(CONTESTED_CONTAINER, p3, &cid_str, &props);
 
     // ── Phase 1: a Krabka node leads and the JVM joins as a follower. ───────
     let deadline = std::time::Instant::now() + Duration::from_secs(50);

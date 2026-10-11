@@ -8,8 +8,10 @@ use krabka_protocol::records::{Record, RecordBatch, RecordHeader};
 
 use super::*;
 use crate::{
+    FileEd25519Signer,
     chain::{ChainState, GENESIS_HEAD},
     checkpoint::Checkpoint,
+    event::AuditEventClass,
     ids::EpochMs,
     sink::AuditRecord,
     test_support::shared_signer as signer,
@@ -65,7 +67,7 @@ fn record_at_delta(rec: &AuditRecord, offset_delta: i32) -> Record {
 
 fn lifecycle_record(value: Vec<u8>) -> AuditRecord {
     AuditRecord {
-        class: crate::event::AuditEventClass::ApplicationLifecycle,
+        class: AuditEventClass::ApplicationLifecycle,
         value,
         headers: vec![("event_class".into(), b"application_lifecycle".to_vec())],
     }
@@ -85,7 +87,7 @@ fn trusted_report(directory: &std::path::Path, public_key: Vec<u8>) -> VerifyRep
     verify_partition_dir(directory, &TrustedKeys::single("k1".into(), public_key)).unwrap()
 }
 
-fn signed_head(chain: &ChainState, signer: &crate::FileEd25519Signer, time: i64) -> Checkpoint {
+fn signed_head(chain: &ChainState, signer: &FileEd25519Signer, time: i64) -> Checkpoint {
     Checkpoint::signed(
         signer,
         Seq(chain.next_seq() - 1),
@@ -382,7 +384,7 @@ fn dropped_record_detected_as_seq_gap() {
     let mut chain = ChainState::new();
 
     // Build 3 records into memory first, then write only [0] and [2] (skip [1]).
-    let mut records: Vec<crate::sink::AuditRecord> = (0..3u8)
+    let mut records: Vec<AuditRecord> = (0..3u8)
         .map(|i| lifecycle_record(format!("{{\"i\":{i}}}").into_bytes()))
         .collect();
 
@@ -484,7 +486,7 @@ fn stale_checkpoint_chain_head_mismatch_detected() {
 
     // Build original partition: 2 records + checkpoint
     let mut orig_chain = ChainState::new();
-    let mut orig_records: Vec<crate::sink::AuditRecord> = (0..2u8)
+    let mut orig_records: Vec<AuditRecord> = (0..2u8)
         .map(|i| lifecycle_record(format!("{{\"i\":{i}}}").into_bytes()))
         .collect();
     for rec in &mut orig_records {
@@ -495,7 +497,7 @@ fn stale_checkpoint_chain_head_mismatch_detected() {
     // Build tampered partition: same structure but different values → different chain head
     // but reuse the OLD checkpoint (signed over the original head)
     let mut tampered_chain = ChainState::new();
-    let mut tampered_records: Vec<crate::sink::AuditRecord> = (0..2u8)
+    let mut tampered_records: Vec<AuditRecord> = (0..2u8)
         .map(|i| lifecycle_record(format!("{{\"i\":{},\"tampered\":true}}", i + 10).into_bytes()))
         .collect();
     for rec in &mut tampered_records {

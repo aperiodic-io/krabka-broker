@@ -16,12 +16,16 @@ use krabka_protocol::owned::create_acls_response::{AclCreationResult, CreateAcls
 
 use super::handle;
 use crate::{
+    broker::{Broker, BrokerHandle},
     codes,
     handlers::create_acls::test_support::{
         OPERATION_READ, OPERATION_WRITE, VERSION, all_acls, configured_authorizer, creation,
         request, test_context,
     },
-    test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx},
+    test_support::{
+        AllowAclSetup, DenyAll, allow_acl, start_broker_no_audit_with,
+        start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+    },
 };
 
 /// The row Kafka's `AclApis.handleCreateAcls` sends for a committed
@@ -57,7 +61,7 @@ async fn handle_stores_long_resource_names_and_principals() {
     });
     assert!(resp == expected);
     let stored = |resource_name: &str, principal: &str| {
-        crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+        allow_acl(AllowAclSetup {
             resource_name,
             principal,
             ..Default::default()
@@ -165,8 +169,8 @@ async fn handle_answers_security_disabled_for_each_creation_when_no_authorizer_i
 
 /// A broker with `unstable.feature.versions.enable`, the mode in which
 /// `CreateAcls` applies Kafka trunk's host validation.
-async fn start_trunk_broker() -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-    crate::test_support::start_broker_no_audit_with(|cfg| {
+async fn start_trunk_broker() -> (BrokerHandle, tempfile::TempDir) {
+    start_broker_no_audit_with(|cfg| {
         cfg.authorizer = configured_authorizer();
         cfg.features.unstable_feature_versions = krabka_raft::UnstableFeatureVersions::Enabled;
     })
@@ -456,7 +460,7 @@ async fn handle_rejects_cidr_host_on_a_freshly_bootstrapped_cluster() {
 #[test]
 fn count_new_acls_counts_distinct_new_acls_in_linear_time() {
     let acl = |n: usize| {
-        crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+        allow_acl(AllowAclSetup {
             resource_name: &format!("topic-{n}"),
             ..Default::default()
         })
@@ -477,14 +481,14 @@ fn count_new_acls_counts_distinct_new_acls_in_linear_time() {
     check!(elapsed < std::time::Duration::from_secs(5), "{elapsed:?}");
 }
 
-async fn drive_cidr_request(broker: &crate::broker::Broker) -> CreateAclsResponse {
+async fn drive_cidr_request(broker: &Broker) -> CreateAclsResponse {
     test_ctx!(ctx, "admin");
     handle(broker, cidr_request(), VERSION, &ctx)
         .await
         .expect("handle")
 }
 
-async fn check_cidr_refusal(broker_handle: &crate::broker::BrokerHandle) {
+async fn check_cidr_refusal(broker_handle: &BrokerHandle) {
     let broker = broker_handle.broker_arc_for_test();
     let resp = drive_cidr_request(&broker).await;
 

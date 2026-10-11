@@ -1,6 +1,8 @@
 //! The independent compatibility and protocol feature gates, together with
 //! the two sets of defaults that the production and the test constructor use.
 
+use crate::api_catalog::{LegacyRequestVersions, UnstableApiVersions, VersionGates};
+
 /// Construction-time configuration for [`crate::Broker::start`].
 ///
 /// Build it directly when you embed the broker as a library. In production,
@@ -18,7 +20,7 @@ pub struct BrokerFeatureFlags {
     /// that sends a version or an api key only Kafka trunk has. It also keeps
     /// the KIP-939 `keepPreparedTxn` recovery, which 4.3.1 answers
     /// `UNSUPPORTED_VERSION`, off.
-    pub unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    pub unstable_api_versions: UnstableApiVersions,
     /// Kafka's internal `unstable.feature.versions.enable`, read from
     /// `server_properties` under that name. While it is
     /// [`Disabled`][krabka_raft::UnstableFeatureVersions::Disabled], the
@@ -30,14 +32,14 @@ pub struct BrokerFeatureFlags {
     /// krabka's `[runtime]` `legacy_request_versions_enable`: whether the
     /// pre-4.0 `Fetch`, `ListOffsets` and `Produce` versions Kafka 4.x refuses
     /// are served. See [`crate::api_catalog::LegacyRequestVersions`].
-    pub legacy_request_versions: crate::api_catalog::LegacyRequestVersions,
+    pub legacy_request_versions: LegacyRequestVersions,
 }
 
 impl BrokerFeatureFlags {
     /// The two switches a listener's API table depends on.
     #[must_use]
-    pub const fn version_gates(&self) -> crate::api_catalog::VersionGates {
-        crate::api_catalog::VersionGates {
+    pub const fn version_gates(&self) -> VersionGates {
+        VersionGates {
             unstable: self.unstable_api_versions,
             legacy: self.legacy_request_versions,
         }
@@ -49,9 +51,9 @@ pub(super) const fn test_feature_flags() -> BrokerFeatureFlags {
         oauthbearer_jwks_ignore_key_use: false,
         auto_leader_rebalance_enable: false,
         transaction_two_phase_commit_enable: false,
-        unstable_api_versions: crate::api_catalog::UnstableApiVersions::Disabled,
+        unstable_api_versions: UnstableApiVersions::Disabled,
         unstable_feature_versions: krabka_raft::UnstableFeatureVersions::Disabled,
-        legacy_request_versions: crate::api_catalog::LegacyRequestVersions::Disabled,
+        legacy_request_versions: LegacyRequestVersions::Disabled,
     }
 }
 
@@ -60,8 +62,8 @@ pub(super) const fn default_feature_flags() -> BrokerFeatureFlags {
         oauthbearer_jwks_ignore_key_use: false,
         auto_leader_rebalance_enable: true,
         transaction_two_phase_commit_enable: false,
-        unstable_api_versions: crate::api_catalog::UnstableApiVersions::Disabled,
+        unstable_api_versions: UnstableApiVersions::Disabled,
         unstable_feature_versions: krabka_raft::UnstableFeatureVersions::Disabled,
-        legacy_request_versions: crate::api_catalog::LegacyRequestVersions::Disabled,
+        legacy_request_versions: LegacyRequestVersions::Disabled,
     }
 }

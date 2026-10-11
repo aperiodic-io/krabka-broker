@@ -13,6 +13,8 @@
 
 use krabka_ids::Offset;
 
+use crate::DeliveryPolicy;
+
 /// Result of
 /// [`Log::advance_delivery_watermark`](crate::Log::advance_delivery_watermark).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,13 +48,13 @@ pub(crate) fn visible_at_ms(activation_ms: i64, uncertainty_ms: i64) -> i64 {
 /// Apply the shared scheduled-delivery visibility rule to one batch.
 #[must_use]
 pub fn batch_is_deliverable(
-    policy: crate::DeliveryPolicy,
+    policy: DeliveryPolicy,
     uncertainty_ms: i64,
     activation_ms: i64,
     now_ms: i64,
 ) -> bool {
     krabka_verified::scheduled_delivery_visible(
-        policy == crate::DeliveryPolicy::Scheduled,
+        policy == DeliveryPolicy::Scheduled,
         uncertainty_ms,
         activation_ms,
         now_ms,

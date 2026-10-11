@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     metadata::{
-        RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentState, TopicIdPartition,
+        RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+        RemoteLogSegmentState, TopicIdPartition,
     },
     storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
 };
@@ -28,7 +29,7 @@ pub fn sample_metadata(id: Uuid) -> RemoteLogSegmentMetadata {
         123,
         1,
         456,
-        crate::metadata::RemoteLogSegmentDetails::new(
+        RemoteLogSegmentDetails::new(
             8,
             RemoteLogSegmentState::CopySegmentStarted,
             maplit::btreemap! {LeaderEpoch(0) => 0},

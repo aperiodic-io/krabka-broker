@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     config::{LogConfig, SegmentAllocation},
-    io::LogIo,
+    io::{DirectFile, LogIo},
     name,
 };
 
@@ -61,7 +61,7 @@ impl LogIo for Recorder {
 
     /// No `O_DIRECT` here: these cases are about the reservation alone, and
     /// `direct_writes` covers the writes.
-    fn open_direct(&self, _path: &Path) -> std::io::Result<crate::io::DirectFile> {
+    fn open_direct(&self, _path: &Path) -> std::io::Result<DirectFile> {
         Err(std::io::ErrorKind::Unsupported.into())
     }
 }

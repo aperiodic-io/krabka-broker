@@ -14,6 +14,8 @@ use krabka_client_core::{Client, security::ClientSecurity};
 use krabka_protocol::krabka::freeze::SetTopicFreezeRequest;
 
 use crate::{
+    host_broker::{JvmBroker, start_jvm_broker},
+    jvm_acceptance::break_glass::{approve as approve_proposal, propose},
     support,
     vocabulary::{APPROVER_ONE, APPROVER_TWO, PROPOSER, WIRE_UNCLEAN_ELECT_LEADERS},
 };
@@ -95,7 +97,7 @@ struct Approvals {
 /// name a partition, and an unclean election is one of those, so this also
 /// checks that widening on the way through.
 pub(super) async fn approved_unclean_election(bootstrap: &str, target: &str) {
-    let proposal_id = crate::jvm_acceptance::break_glass::propose(
+    let proposal_id = propose(
         bootstrap,
         PROPOSER,
         WIRE_UNCLEAN_ELECT_LEADERS,
@@ -127,14 +129,13 @@ async fn approve(
     operator: (&str, &str),
     proposal_id: krabka_protocol::primitives::uuid::Uuid,
 ) -> Approvals {
-    let (held, required) =
-        crate::jvm_acceptance::break_glass::approve(bootstrap, operator, proposal_id).await;
+    let (held, required) = approve_proposal(bootstrap, operator, proposal_id).await;
     Approvals { held, required }
 }
 
 /// Plaintext fixture with all topics installed before the first control-plane mutation.
-pub(super) async fn plain_topic_fixture(names: &[&str]) -> (crate::host_broker::JvmBroker, Client) {
-    let broker = crate::host_broker::start_jvm_broker(|_| {}).await;
+pub(super) async fn plain_topic_fixture(names: &[&str]) -> (JvmBroker, Client) {
+    let broker = start_jvm_broker(|_| {}).await;
     let client = plain_client(&broker.host).await;
     create_topics(&broker.host, None, names).await;
     (broker, client)

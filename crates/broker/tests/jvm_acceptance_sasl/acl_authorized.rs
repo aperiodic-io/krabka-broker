@@ -9,8 +9,9 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-    docker_run_kafka_tool_with_image_and_mount, plain_jaas, write_client_props,
+    ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, add_console_acl, assert_console_produced,
+    broker0_advertised, docker_run_kafka_tool_with_image_and_mount, numbered_payload, plain_jaas,
+    produce_console, start_plain_acl_topic_with_ops, write_client_props,
 };
 
 /// JVM acceptance: authorized produce + consume round-trip.
@@ -37,19 +38,14 @@ async fn jvm_authorized_produce_consume() {
     const TOPIC: &str = "foo";
     const GROUP: &str = "cg-foo";
 
-    let (broker, _dir, admin_props) = crate::jvm_acceptance::start_plain_acl_topic_with_ops(
-        TOPIC,
-        ALICE,
-        ALICE_PASS,
-        &["Read", "Write"],
-    )
-    .await;
+    let (broker, _dir, admin_props) =
+        start_plain_acl_topic_with_ops(TOPIC, ALICE, ALICE_PASS, &["Read", "Write"]).await;
     let admin_mount = admin_props.mount_str();
 
     // Allow Read on Group cg-foo for User:alice. ACL implications grant Describe
     // from Read on the same group resource, so no explicit Describe is
     // needed.
-    crate::jvm_acceptance::add_console_acl(
+    add_console_acl(
         KAFKA_IMAGE_TXN,
         &[&admin_mount],
         "User:alice",
@@ -78,15 +74,15 @@ async fn jvm_authorized_produce_consume() {
 
     // Produce 10 records via stdin.
 
-    let payload: String = crate::jvm_acceptance::numbered_payload("msg", 10);
-    let producer_out = crate::jvm_acceptance::produce_console(
+    let payload: String = numbered_payload("msg", 10);
+    let producer_out = produce_console(
         KAFKA_IMAGE_TXN,
         &[&alice_mount],
         TOPIC,
         false,
         payload.as_bytes(),
     );
-    crate::jvm_acceptance::assert_console_produced(&producer_out);
+    assert_console_produced(&producer_out);
 
     // Consume via `--group cg-foo --from-beginning` (the group-coordinator
     // path; exercises JoinGroup/OffsetFetch/OffsetCommit authorize).

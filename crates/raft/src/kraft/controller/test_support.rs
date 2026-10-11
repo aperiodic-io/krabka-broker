@@ -7,7 +7,10 @@ use std::time::Duration as StdDuration;
 use krabka_units::prelude::{TimeExt as _, secs};
 
 use super::*;
-use crate::kraft::transport::NullPeerSender;
+use crate::{
+    MetadataLogConfig,
+    kraft::{Activation, transport::NullPeerSender},
+};
 
 /// Deadline every test-side channel receive is bounded by.
 pub const TEST_RECV_TIMEOUT: Time = secs(1);
@@ -114,7 +117,7 @@ pub fn test_kraft_config(me: NodeId, cluster_id: uuid::Uuid, state: QuorumState)
         max_snapshot_interval: krabka_units::prelude::millis(0),
         metadata_snapshot_fetch_max: MetadataSnapshotFetchMax::default(),
         metadata_log: test_metadata_log(),
-        activation: crate::kraft::Activation::default(),
+        activation: Activation::default(),
     }
 }
 
@@ -140,7 +143,7 @@ pub struct ControllerOpenSetup {
     pub voters: VoterSet,
     #[default(TEST_ELECTION_TIMEOUT)]
     pub election_timeout: krabka_units::Time,
-    pub activation: crate::kraft::Activation,
+    pub activation: Activation,
 }
 
 pub fn open_test_controller_with(
@@ -180,7 +183,7 @@ fn spawn_test_controller(
     customize: impl FnOnce(&mut KraftConfig),
 ) -> (KraftController, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let log = KraftLog::open(dir.path(), &crate::MetadataLogConfig::default()).expect("open log");
+    let log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open log");
     let state = QuorumState::bootstrap(uuid::Uuid::nil(), voter_set(ids));
     let mut config = test_kraft_config(me, uuid::Uuid::nil(), state);
     customize(&mut config);
@@ -288,7 +291,7 @@ pub fn build_engine_only(setup: EngineSetup<'_>) -> (Engine, tempfile::TempDir) 
             wall_clock_base: std::time::SystemTime::now(),
             leader_reported_hwm: log_hwm_at_open,
             pending_reconfig: None,
-            activation: crate::kraft::Activation::default(),
+            activation: Activation::default(),
             activation_fault: None,
             replay_fault: None,
         },

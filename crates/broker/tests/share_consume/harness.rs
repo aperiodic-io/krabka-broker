@@ -16,6 +16,9 @@
 /// steady-state heartbeats inside the wait loop rather than sleeping. It mirrors
 /// the `lifecycle_initializes_share_state` pattern in `share_groups.rs`.
 pub use crate::support::share::wait_for_share_init;
+use crate::support::share::{
+    ShareRecordCount, ShareRecordSeedSetup, consumption_fixture as share_consumption_fixture,
+};
 pub use crate::support::share::{
     bootstrap_share_state, broker_config, broker_test_permit, join, produce_n, produce_values,
     topic_id, wire,
@@ -30,16 +33,14 @@ crate::share_consumption_fixture!(
 
 pub use crate::support::share::ConsumptionFixture;
 
-pub async fn consumption_fixture(
-    setup: crate::support::share::ShareRecordSeedSetup,
-) -> ConsumptionFixture {
-    crate::support::share::consumption_fixture(setup, initialize_consumption).await
+pub async fn consumption_fixture(setup: ShareRecordSeedSetup) -> ConsumptionFixture {
+    share_consumption_fixture(setup, initialize_consumption).await
 }
 
 /// A fresh g1/t session whose initial batch contains exactly one record.
 pub async fn single_record_consumption_fixture() -> ConsumptionFixture {
-    consumption_fixture(crate::support::share::ShareRecordSeedSetup {
-        count: crate::support::share::ShareRecordCount(1),
+    consumption_fixture(ShareRecordSeedSetup {
+        count: ShareRecordCount(1),
     })
     .await
 }

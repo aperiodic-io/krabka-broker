@@ -24,7 +24,7 @@ use krabka_units::{
 };
 
 use super::Config;
-use crate::throttle::TopicThrottle;
+use crate::throttle::{REPLICATION_QUOTA_WINDOW, TopicThrottle};
 
 /// How far a followed partition trails the leader's high watermark, as the
 /// `lag` of Kafka's `PartitionFetchState`.
@@ -94,7 +94,7 @@ pub(super) fn record_replicated(cfg: &Config, bytes: u64) {
     {
         cfg.throttle_state
             .follower_in
-            .record_bounded(bytes, crate::throttle::REPLICATION_QUOTA_WINDOW);
+            .record_bounded(bytes, REPLICATION_QUOTA_WINDOW);
         cfg.metrics.record_replication_throttled_in(bytes);
     }
 }
@@ -146,8 +146,11 @@ mod tests {
     use krabka_units::{bytes, bytes_per_sec};
 
     use super::*;
-    use crate::replicator::test_support::{
-        LEADER_ID, NODE_ID, image_with_follower_throttle, image_with_leader, test_config,
+    use crate::{
+        replicator::test_support::{
+            LEADER_ID, NODE_ID, image_with_follower_throttle, image_with_leader, test_config,
+        },
+        throttle::MICROS_PER_TOKEN,
     };
 
     #[test]
@@ -326,8 +329,7 @@ mod tests {
         record_replicated(&cfg, 100_000);
 
         // The refill between the charge and the read repays a few micro-tokens.
-        let debt_tokens =
-            cfg.throttle_state.follower_in.record(0) / crate::throttle::MICROS_PER_TOKEN;
+        let debt_tokens = cfg.throttle_state.follower_in.record(0) / MICROS_PER_TOKEN;
         check!((10_900..=11_000).contains(&debt_tokens), "{debt_tokens}");
     }
 

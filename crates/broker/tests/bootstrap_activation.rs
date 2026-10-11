@@ -36,7 +36,12 @@ use krabka_protocol::owned::{
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 
-use crate::support::{client::connect_owned, configs::describe_resource};
+use crate::support::{
+    AddressedNodeSetup, addressed_node_config,
+    client::{connect_owned, metadata_fetch},
+    configs::describe_resource,
+    records::metadata_batches,
+};
 
 mod support;
 
@@ -130,9 +135,9 @@ fn config(node: &Node, setup: ActivationSetup<'_>) -> BrokerConfig {
         None,
     )
     .expect("krabka-format wrote meta.properties");
-    let mut config = crate::support::addressed_node_config(
+    let mut config = addressed_node_config(
         &node.log_dir,
-        crate::support::AddressedNodeSetup {
+        AddressedNodeSetup {
             node: node.id,
             client: node.client_addr,
             controller: node.controller_addr,
@@ -197,12 +202,11 @@ enum Batch {
 /// listener at `controller`, with each value decoded against the image that
 /// the values before it produce.
 async fn committed_batches(controller: SocketAddr) -> Vec<Batch> {
-    let response =
-        crate::support::client::metadata_fetch(controller, "bootstrap-activation-test", 0).await;
+    let response = metadata_fetch(controller, "bootstrap-activation-test", 0).await;
 
     let mut image = MetadataImage::new(uuid::Uuid::nil());
     let mut batches = Vec::new();
-    for batch in crate::support::records::metadata_batches(&response.records) {
+    for batch in metadata_batches(&response.records) {
         if batch.attributes.is_control_batch() {
             batches.push(Batch::Control);
             continue;

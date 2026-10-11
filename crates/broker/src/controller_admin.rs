@@ -9,9 +9,15 @@ use krabka_raft::{
 };
 
 use crate::{
+    api_catalog::is_disabled_version,
+    authorizer::{AuthorizationRequest, AuthorizationResult},
     broker::Broker,
     envelope::{self, EnvelopeError, ForwardedRequest},
-    handlers::{ApiKeyCode, ApiVersion, CorrelationId, DispatchKind, RequestContext},
+    error::BrokerError,
+    handlers::{
+        ApiKeyCode, ApiVersion, CorrelationId, DispatchKind, RequestContext,
+        acl_wire::CLUSTER_RESOURCE_NAME,
+    },
     network::auth::ConnectionAuth,
 };
 
@@ -227,7 +233,7 @@ struct Invocation<'a> {
 async fn invoke_registered_handler(
     broker: &std::sync::Arc<Broker>,
     invocation: Invocation<'_>,
-) -> Result<Bytes, crate::error::BrokerError> {
+) -> Result<Bytes, BrokerError> {
     let Invocation {
         api_key,
         api_version,
@@ -238,12 +244,13 @@ async fn invoke_registered_handler(
         principal,
         authenticated_via_token,
     } = invocation;
-    let entry = broker.handlers().get(api_key).ok_or_else(|| {
-        crate::error::BrokerError::UnsupportedApi {
+    let entry = broker
+        .handlers()
+        .get(api_key)
+        .ok_or_else(|| BrokerError::UnsupportedApi {
             api_key,
             version: api_version,
-        }
-    })?;
+        })?;
     match entry.kind() {
         // Every krabka-registered controller-listener handler is a context
         // dispatch, so it receives a principal to authorize: `AssignReplicasToDirs`
@@ -272,7 +279,7 @@ async fn invoke_registered_handler(
             };
             handler(broker, api_version, correlation_id, body, &auth, peer).await
         }
-        _ => Err(crate::error::BrokerError::UnsupportedApi {
+        _ => Err(BrokerError::UnsupportedApi {
             api_key,
             version: api_version,
         }),
@@ -374,14 +381,14 @@ fn unwrap_envelope(
     // `ApiKeys.ENVELOPE.clusterAction` is true: only a peer that holds
     // `ClusterAction` on the cluster resource may speak for another identity.
     let image = broker.controller.current_image();
-    if crate::authorizer::AuthorizationResult::Deny
+    if AuthorizationResult::Deny
         == broker.config.authorizer.authorize(
             image.as_ref(),
-            &crate::authorizer::AuthorizationRequest {
+            &AuthorizationRequest {
                 principal: outer,
                 host: &request.peer,
                 resource_type: krabka_metadata::ResourceType::Cluster,
-                resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+                resource_name: CLUSTER_RESOURCE_NAME,
                 operation: krabka_metadata::AclOperation::ClusterAction,
             },
         )
@@ -412,7 +419,7 @@ fn unwrap_envelope(
     // `RequestHeader.parse` on a 4.3.1 controller, and `EnvelopeUtils` reports
     // an unparseable embedded header as UNSUPPORTED_VERSION. The same
     // answer covers a version the listener's gates disable.
-    if crate::api_catalog::is_disabled_version(
+    if is_disabled_version(
         forwarded.api_key,
         forwarded.api_version,
         broker.config.features.version_gates(),
@@ -444,6 +451,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+    use crate::test_support::start_controller;
 
     /// The Kafka 4.x controller-listener set, as a live
     /// `mirror.gcr.io/apache/kafka:4.3.1` controller advertises it (the same
@@ -548,7 +556,7 @@ mod tests {
     async fn a_context_kind_api_key_routes_to_the_broker_registry() {
         use krabka_protocol::{Decode as _, Encode as _};
 
-        let (controller, _controller_addr, _dir) = crate::test_support::start_controller().await;
+        let (controller, _controller_addr, _dir) = start_controller().await;
         let handle = controller;
 
         let router = BrokerControllerAdminRouter::new();

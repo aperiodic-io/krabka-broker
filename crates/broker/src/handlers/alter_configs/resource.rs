@@ -24,12 +24,16 @@ use super::{
     group_configs::group_config_record, topic_configs::topic_config_record,
     validate_resource_shape,
 };
-use crate::{broker::Broker, handlers::response_encoding::ErrorRow as _};
+use crate::{
+    broker::Broker,
+    config_keys::{broker_dynamic::BrokerConfigContext, clear_elr_records, group::GroupBounds},
+    handlers::{RequestContext, response_encoding::ErrorRow as _},
+};
 
 pub(super) async fn process_resource(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     resource: AlterConfigsResource,
     validate_only: bool,
     is_duplicate: bool,
@@ -58,7 +62,7 @@ pub(super) async fn process_resource(
         .map(|record| vec![record]),
         RESOURCE_TYPE_BROKER => broker_config_records(
             &resource,
-            crate::config_keys::broker_dynamic::BrokerConfigContext {
+            BrokerConfigContext {
                 image,
                 serving: krabka_metadata::NodeId(broker.config.node_id.0),
                 log_dirs: &broker.config.broker_log_dirs(),
@@ -67,7 +71,7 @@ pub(super) async fn process_resource(
         ),
         RESOURCE_TYPE_GROUP => group_config_record(
             &resource,
-            &crate::config_keys::group::GroupBounds::of(&broker.config),
+            &GroupBounds::of(&broker.config),
             broker.config.features.unstable_api_versions,
         )
         .map(|record| vec![record]),
@@ -91,7 +95,7 @@ pub(super) async fn process_resource(
     if min_isr_changed {
         let topic = (resource.resource_type == RESOURCE_TYPE_TOPIC)
             .then_some(resource.resource_name.as_str());
-        records.extend(crate::config_keys::clear_elr_records(image, topic));
+        records.extend(clear_elr_records(image, topic));
     }
     if validate_only {
         // Validation pass already happened above (per-config loop). Nothing

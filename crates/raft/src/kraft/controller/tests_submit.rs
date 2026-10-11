@@ -13,6 +13,7 @@ use crate::{
     SubmitChangeResult,
     error::RaftError,
     kraft::{
+        KraftController,
         controller::test_support::{
             ControllerSetup, EngineSetup, await_leader, build, build_engine_only, commit_pending,
             one_offset_batch, submit_change_with_timeout, topic_record, topic_record_named,
@@ -22,7 +23,7 @@ use crate::{
     },
 };
 
-async fn acknowledge_tip(ctrl: &crate::kraft::KraftController, follower: NodeId) {
+async fn acknowledge_tip(ctrl: &KraftController, follower: NodeId) {
     tokio::time::sleep(StdDuration::from_millis(20)).await;
     commit_pending(ctrl, follower).await;
 }
@@ -162,7 +163,7 @@ async fn pending_offset_reservations_are_contiguous_before_commit() {
 }
 
 async fn check_rejected_without_append(
-    ctrl: &crate::kraft::KraftController,
+    ctrl: &KraftController,
     record: krabka_metadata::MetadataRecord,
     log_end: i64,
 ) {

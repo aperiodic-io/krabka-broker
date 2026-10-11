@@ -53,13 +53,17 @@ use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, rou
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::sync::CancellationToken;
 
+#[cfg(not(target_family = "wasm"))]
+use crate::http_server::spawn;
+use crate::metadata_source::MetadataSource;
+
 #[cfg(test)]
 mod tests;
 
 /// The two `__cluster_metadata` offsets the readiness probe compares.
 ///
 /// It is a trait rather than a direct
-/// [`MetadataSource`](crate::metadata_source::MetadataSource) reference so
+/// [`MetadataSource`] reference so
 /// that the readiness rule can be driven from a test with no quorum behind
 /// it. [`metadata_progress`] adapts the real source onto it.
 pub trait MetadataProgress: Send + Sync {
@@ -73,10 +77,8 @@ pub trait MetadataProgress: Send + Sync {
 
 /// Adapts the broker's live metadata authority onto [`MetadataProgress`].
 #[must_use]
-pub fn metadata_progress(
-    source: Arc<dyn crate::metadata_source::MetadataSource>,
-) -> Arc<dyn MetadataProgress> {
-    struct SourceProgress(Arc<dyn crate::metadata_source::MetadataSource>);
+pub fn metadata_progress(source: Arc<dyn MetadataSource>) -> Arc<dyn MetadataProgress> {
+    struct SourceProgress(Arc<dyn MetadataSource>);
     impl MetadataProgress for SourceProgress {
         fn node_metadata_offset(&self) -> i64 {
             self.0.current_metadata_offset()
@@ -284,7 +286,7 @@ pub async fn serve(
     let bound = listener.local_addr()?;
     tracing::info!(%bound, "health server listening");
     let app = router(state);
-    crate::http_server::spawn(listener, app, shutdown, |error| {
+    spawn(listener, app, shutdown, |error| {
         tracing::warn!(error = %error, "health server error");
     });
     Ok(bound)

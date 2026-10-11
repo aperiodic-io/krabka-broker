@@ -9,7 +9,8 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
 use super::*;
 use crate::{
-    error::PersistedFormatError,
+    MetadataLogConfig,
+    error::{MetadataReplayError, PersistedFormatError},
     kraft::controller::{
         control_state::voter_set_to_wire,
         quorum_state_file::{load_quorum_state, save_quorum_state},
@@ -33,11 +34,10 @@ fn recovery_voters() -> (VoterSet, VoterSet, VoterSet) {
 fn reopened_control_log(write: impl FnOnce(&mut KraftLog)) -> (tempfile::TempDir, KraftLog) {
     let dir = tempfile::tempdir().expect("tempdir");
     {
-        let mut log =
-            KraftLog::open(dir.path(), &crate::MetadataLogConfig::default()).expect("open log");
+        let mut log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open log");
         write(&mut log);
     }
-    let log = KraftLog::open(dir.path(), &crate::MetadataLogConfig::default()).expect("reopen log");
+    let log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("reopen log");
     (dir, log)
 }
 
@@ -186,8 +186,7 @@ fn control_state_at_replays_version_and_voters_at_boundary_offsets() {
     let max = MetadataRaftFetchMax::default();
 
     {
-        let mut log =
-            KraftLog::open(dir.path(), &crate::MetadataLogConfig::default()).expect("open log");
+        let mut log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open log");
         let mut batch0 = typed_control_batch(
             1,
             &[ControlRecord::KRaftVersion(
@@ -223,7 +222,7 @@ fn control_state_at_replays_version_and_voters_at_boundary_offsets() {
         log.advance_hwm(log.log_end_offset());
     }
 
-    let log = KraftLog::open(dir.path(), &crate::MetadataLogConfig::default()).expect("reopen log");
+    let log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("reopen log");
 
     // end_offset 0: no records applied
     let s0 = control_state_at(&log, &bootstrap, Offset(0), max).expect("offset 0");
@@ -247,7 +246,7 @@ fn control_state_at_replays_version_and_voters_at_boundary_offsets() {
     };
     check!(
         fault
-            == crate::error::MetadataReplayError::InvalidControlRecord {
+            == MetadataReplayError::InvalidControlRecord {
                 offset: 2,
                 reason: "negative kraft.version -1".into(),
             }
@@ -262,8 +261,7 @@ async fn snapshot_then_restart_recovers_image() {
     let voters = voter_set(&[NodeId(1)]);
 
     {
-        let log =
-            KraftLog::open(&data_dir, &crate::MetadataLogConfig::default()).expect("open log");
+        let log = KraftLog::open(&data_dir, &MetadataLogConfig::default()).expect("open log");
         let ctrl = KraftController::spawn(
             test_kraft_config(
                 NodeId(1),

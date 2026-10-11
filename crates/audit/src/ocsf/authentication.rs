@@ -8,13 +8,13 @@ use super::{
     ProductInfo,
     envelope::{metadata, status_id},
 };
-use crate::event::AuditOutcome;
+use crate::event::{AuditEndpoint, AuditOutcome, AuditPrincipal};
 
 pub(super) fn ocsf_authentication(
     outcome: AuditOutcome,
     mechanism: &str,
-    principal: &crate::event::AuditPrincipal,
-    source: &crate::event::AuditEndpoint,
+    principal: &AuditPrincipal,
+    source: &AuditEndpoint,
     reason: Option<&String>,
     time_ms: i64,
     product: &ProductInfo,

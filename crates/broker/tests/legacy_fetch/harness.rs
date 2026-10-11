@@ -21,9 +21,15 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::support::{
-    topics::{creatable_topic, create_topic_request},
-    wire::CorrelationId as WireCorrelationId,
+use crate::{
+    kafka_wire::LegacyExchangeSetup,
+    support::{
+        produce::{SinglePartitionProduceSetup, batch_request},
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+        wire::{CorrelationId as WireCorrelationId, HeaderEncoding, WireFrameSetup, request_frame},
+    },
 };
 
 /// Verify successful down-conversion and extract the exact legacy bytes.
@@ -66,9 +72,9 @@ pub async fn create_topic_with_partitions(
 ) {
     let cr = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (name).into(),
-                partitions: crate::support::topics::TopicPartitionCount(num_partitions),
+                partitions: TopicPartitionCount(num_partitions),
                 ..Default::default()
             },
         )))
@@ -96,9 +102,9 @@ pub async fn produce_batch_to(
     batch: RecordBatch,
 ) {
     const PRODUCE_VERSION: i16 = 9;
-    let req = crate::support::produce::batch_request(
+    let req = batch_request(
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: (topic).into(),
             partition: krabka_ids::PartitionIndex(partition),
             ..Default::default()
@@ -111,11 +117,11 @@ pub async fn produce_batch_to(
     let mut stream = TcpStream::connect(addr).await.expect("connect for produce");
     stream.set_nodelay(true).ok();
     // ProduceRequest v9 is flexible (FLEXIBLE_MIN = 9).
-    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+    let frame = request_frame(WireFrameSetup {
         api_key: krabka_ids::ApiKey(0),
         version: krabka_ids::ApiVersion(PRODUCE_VERSION),
-        correlation: crate::support::wire::CorrelationId(99),
-        header: crate::support::wire::HeaderEncoding::Flexible,
+        correlation: WireCorrelationId(99),
+        header: HeaderEncoding::Flexible,
         client_id: "legacy-fetch-produce",
         body: &body,
         ..Default::default()
@@ -211,7 +217,7 @@ pub async fn fetch_legacy_raw_partitions(
     stream.set_nodelay(true).ok();
     round_trip_nonflexible(
         &mut stream,
-        crate::kafka_wire::LegacyExchangeSetup {
+        LegacyExchangeSetup {
             api_key: WireApiKey(1),
             version: WireApiVersion(version),
             correlation: WireCorrelationId(42),

@@ -76,7 +76,11 @@ mod tests {
     use krabka_units::prelude::kibibytes;
 
     use super::*;
-    use crate::segment::test_support::{NO_LIMIT, sample_batch};
+    use crate::segment::test_support::{
+        FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH, RecordCount, RecordTimestamp,
+        SECOND_LARGE_TIMESTAMP_BATCH, SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup,
+        SeededSegmentSetup, THIRD_SINGLE_RECORD_BATCH, sample_batch, seeded_fixture, test_segment,
+    };
 
     // `Segment::read` maps the absolute fetch offset to a relative index key
     // via `offset - base_offset`. With a dense index and base_offset 100,
@@ -105,16 +109,14 @@ mod tests {
     /// read stops after one batch.
     #[test]
     fn read_consumed_bytes_gates_max_bytes_budget() {
-        let (_dir, seg) = crate::segment::test_support::seeded_fixture(
-            crate::segment::test_support::SeededSegmentSetup {
-                batches: &[
-                    crate::segment::test_support::ONE_RECORD_BATCH,
-                    crate::segment::test_support::SECOND_SINGLE_RECORD_BATCH,
-                    crate::segment::test_support::THIRD_SINGLE_RECORD_BATCH,
-                ],
-                ..Default::default()
-            },
-        );
+        let (_dir, seg) = seeded_fixture(SeededSegmentSetup {
+            batches: &[
+                ONE_RECORD_BATCH,
+                SECOND_SINGLE_RECORD_BATCH,
+                THIRD_SINGLE_RECORD_BATCH,
+            ],
+            ..Default::default()
+        });
         // Exactly the whole segment: correct consumed accounting fits all three
         // batches; inflated accounting overshoots after the first.
         let max_size = seg.size();
@@ -125,17 +127,11 @@ mod tests {
 
     #[test]
     fn read_at_higher_offset_skips_earlier_batches() {
-        let (_dir, mut seg) = crate::segment::test_support::test_segment();
-        seg.append(
-            &sample_batch(crate::segment::test_support::FIRST_LARGE_TIMESTAMP_BATCH),
-            kibibytes(4),
-        )
-        .unwrap();
-        seg.append(
-            &sample_batch(crate::segment::test_support::SECOND_LARGE_TIMESTAMP_BATCH),
-            kibibytes(4),
-        )
-        .unwrap();
+        let (_dir, mut seg) = test_segment();
+        seg.append(&sample_batch(FIRST_LARGE_TIMESTAMP_BATCH), kibibytes(4))
+            .unwrap();
+        seg.append(&sample_batch(SECOND_LARGE_TIMESTAMP_BATCH), kibibytes(4))
+            .unwrap();
         let read = seg.read(Offset(4), NO_LIMIT).unwrap();
         // Offset 4 falls inside the second batch (offsets 3..=4).
         assert2::assert!(
@@ -147,11 +143,11 @@ mod tests {
 
     #[test]
     fn read_past_last_offset_returns_empty() {
-        let (_dir, mut seg) = crate::segment::test_support::test_segment();
+        let (_dir, mut seg) = test_segment();
         seg.append(
-            &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                records: crate::segment::test_support::RecordCount(2),
-                timestamp: crate::segment::test_support::RecordTimestamp(1_000),
+            &sample_batch(SampleBatchSetup {
+                records: RecordCount(2),
+                timestamp: RecordTimestamp(1_000),
                 ..Default::default()
             }),
             kibibytes(4),

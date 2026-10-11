@@ -156,7 +156,7 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::txn::coordinator::test_support::entry;
+    use crate::txn::coordinator::test_support::{ProducerEpoch, TxnEntrySetup, entry};
 
     #[derive(Clone, Copy)]
     enum StatePartition {
@@ -165,7 +165,7 @@ mod tests {
     }
 
     fn rolled_entry() -> TxnEntry {
-        entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+        entry(TxnEntrySetup {
             producer: krabka_log::ProducerId(2000),
             previous: krabka_log::ProducerId(1000),
             ..Default::default()
@@ -194,15 +194,12 @@ mod tests {
         let map: DashMap<ProducerId, String> = DashMap::new();
         map.insert(ProducerId(1000), "tid-a".into());
         // Never rolled: prev == -1 → nothing evicted.
-        TxnCoordinator::evict_superseded_pids(
-            &map,
-            &entry(crate::txn::coordinator::test_support::TxnEntrySetup::default()),
-        );
+        TxnCoordinator::evict_superseded_pids(&map, &entry(TxnEntrySetup::default()));
         assert!(map.get(&ProducerId(1000)).is_some());
         // prev == current (defensive): nothing evicted.
         TxnCoordinator::evict_superseded_pids(
             &map,
-            &entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+            &entry(TxnEntrySetup {
                 previous: krabka_log::ProducerId(1000),
                 ..Default::default()
             }),
@@ -227,7 +224,7 @@ mod tests {
         map.insert(ProducerId(1000), "tid-a".into());
         map.insert(ProducerId(2000), "tid-a".into());
 
-        let mut current = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
+        let mut current = entry(TxnEntrySetup::default());
         current.next_producer_id = ProducerId(3000);
         current.next_producer_epoch = 0;
         TxnCoordinator::evict_superseded_pids(&map, &current);
@@ -240,17 +237,14 @@ mod tests {
     fn recovery_replay_evicts_superseded_ids_and_tombstone_dominates() {
         let mut recovered = RecoveredTransactions::default();
         recovered
-            .apply_value(
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup::default()),
-                true,
-            )
+            .apply_value(entry(TxnEntrySetup::default()), true)
             .unwrap();
         recovered
             .apply_value(
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+                entry(TxnEntrySetup {
                     producer: krabka_log::ProducerId(2000),
                     next: krabka_log::ProducerId(3000),
-                    next_epoch: crate::txn::coordinator::test_support::ProducerEpoch(0),
+                    next_epoch: ProducerEpoch(0),
                     ..Default::default()
                 }),
                 true,
@@ -282,13 +276,13 @@ mod tests {
     #[test]
     fn recovery_retry_is_idempotent_and_pid_collision_is_atomic() {
         let mut recovered = RecoveredTransactions::default();
-        let first = entry(crate::txn::coordinator::test_support::TxnEntrySetup::default());
+        let first = entry(TxnEntrySetup::default());
         recovered.apply_value(first.clone(), true).unwrap();
         recovered.apply_value(first, true).unwrap();
 
         let error = recovered
             .apply_value(
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+                entry(TxnEntrySetup {
                     transactional_id: "tid-b",
                     ..Default::default()
                 }),
@@ -314,9 +308,9 @@ mod tests {
 
         recovered
             .apply_value(
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+                entry(TxnEntrySetup {
                     next: krabka_log::ProducerId(1000),
-                    next_epoch: crate::txn::coordinator::test_support::ProducerEpoch(1),
+                    next_epoch: ProducerEpoch(1),
                     ..Default::default()
                 }),
                 true,
@@ -338,7 +332,7 @@ mod tests {
     fn recovery_rejects_malformed_or_misplaced_identities_without_mutation() {
         for (entry, partition_matches, message) in [
             (
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+                entry(TxnEntrySetup {
                     producer: krabka_log::ProducerId(-1),
                     ..Default::default()
                 }),
@@ -346,7 +340,7 @@ mod tests {
                 "invalid current producer identity",
             ),
             (
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+                entry(TxnEntrySetup {
                     producer: krabka_log::ProducerId(1),
                     next: krabka_log::ProducerId(2),
                     ..Default::default()
@@ -355,16 +349,16 @@ mod tests {
                 "invalid staged producer identity",
             ),
             (
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+                entry(TxnEntrySetup {
                     producer: krabka_log::ProducerId(1),
-                    next_epoch: crate::txn::coordinator::test_support::ProducerEpoch(0),
+                    next_epoch: ProducerEpoch(0),
                     ..Default::default()
                 }),
                 StatePartition::Matching,
                 "invalid staged producer identity",
             ),
             (
-                entry(crate::txn::coordinator::test_support::TxnEntrySetup {
+                entry(TxnEntrySetup {
                     producer: krabka_log::ProducerId(1),
                     ..Default::default()
                 }),

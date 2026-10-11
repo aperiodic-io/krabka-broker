@@ -2,8 +2,10 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::fixtures::function;
+
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::function(
+    function(
         input,
         &moxy::template! {},
         &moxy::template! { base_offset: i64, timestamps: &[i64], value_byte: u8 },

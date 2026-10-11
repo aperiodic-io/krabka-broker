@@ -13,7 +13,9 @@ use krabka_protocol::records::{Record, RecordBatch};
 use uuid::Uuid;
 
 use super::{QuorumWalStore, engine::WalShardEngine};
-use crate::error::BrokerError;
+use crate::{
+    error::BrokerError, partition::AppendedBatch, partition_writer::run_produce_append_batch,
+};
 
 pub(super) fn open_log(path: &Path) -> Arc<Mutex<Log>> {
     Arc::new(Mutex::new(Log::open(path, LogConfig::default()).unwrap()))
@@ -85,11 +87,8 @@ pub(super) fn batch(records: i32) -> RecordBatch {
 pub(super) async fn append_source(
     store: &QuorumWalStore,
     records: i32,
-) -> (
-    Vec<Result<crate::partition::AppendedBatch, BrokerError>>,
-    Offset,
-) {
-    let (results, leo, _) = crate::partition_writer::run_produce_append_batch(
+) -> (Vec<Result<AppendedBatch, BrokerError>>, Offset) {
+    let (results, leo, _) = run_produce_append_batch(
         store.source.clone(),
         None,
         (

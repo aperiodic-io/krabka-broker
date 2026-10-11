@@ -82,6 +82,12 @@ use krabka_protocol::{
 use support::{docker, free_port};
 use zerocopy::FromBytes;
 
+use crate::support::{
+    producer::{ProducerRecordSetup, no_retry_acks_all_producer, producer_record},
+    remove_container_with_volumes,
+    storage::host_directory_user,
+};
+
 mod support;
 
 /// The tag `//packaging:image_load` loads the broker image under.
@@ -189,7 +195,7 @@ impl BrokerProcess {
 
     /// `uid:gid` of the host data directory, for `docker run --user`.
     fn user(&self) -> String {
-        crate::support::storage::host_directory_user(self.host_root())
+        host_directory_user(self.host_root())
     }
 
     fn host_root(&self) -> &Path {
@@ -240,7 +246,7 @@ impl Drop for BrokerProcess {
     fn drop(&mut self) {
         // Best effort: a container that never started leaves nothing to remove,
         // and a panic in `drop` would replace the real failure with this one.
-        crate::support::remove_container_with_volumes(&self.name);
+        remove_container_with_volumes(&self.name);
     }
 }
 
@@ -424,7 +430,7 @@ async fn produce_settled(producer: &Producer, topic: &str, keys: &[String]) -> V
 }
 
 fn record(topic: &str, key: &str) -> ProducerRecord {
-    crate::support::producer::producer_record(crate::support::producer::ProducerRecordSetup {
+    producer_record(ProducerRecordSetup {
         topic: topic.to_owned(),
         partition: Some(krabka_ids::PartitionIndex(0)),
         key: Some(key.to_owned().into()),
@@ -439,7 +445,7 @@ fn record(topic: &str, key: &str) -> ProducerRecord {
 /// acknowledged, which is precisely the confusion this suite has to avoid.
 /// `acks=All` with one in-sync replica is the leader's own commit.
 async fn producer_for(bootstrap: &str) -> Producer {
-    crate::support::producer::no_retry_acks_all_producer(bootstrap, None, "build a producer").await
+    no_retry_acks_all_producer(bootstrap, None, "build a producer").await
 }
 
 /// Wait until a fresh producer can get one record acked, and return its key.

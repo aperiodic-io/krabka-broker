@@ -25,14 +25,18 @@ use super::{
     kafka_broker::roster,
     parse::{check_one_of, check_range, int_value, java_trim, parse_bool, parse_int, parse_long},
 };
-use crate::coordinator::unified::{
-    config::NextGenConfig,
-    share::config::ShareGroupConfig,
-    streams::config::{
-        KEY_ACCEPTABLE_RECOVERY_LAG, KEY_ASSIGNOR_NAME, KEY_HEARTBEAT_INTERVAL_MS,
-        KEY_NUM_STANDBY_REPLICAS, KEY_NUM_WARMUP_REPLICAS, KEY_RACK_AWARE_ASSIGNMENT_TAGS,
-        KEY_SESSION_TIMEOUT_MS, KEY_SHARE_AUTO_OFFSET_RESET, KEY_TASK_OFFSET_INTERVAL_MS,
-        ShareAutoOffsetReset, StreamsGroupConfig,
+use crate::{
+    api_catalog::UnstableApiVersions,
+    config::BrokerConfig,
+    coordinator::unified::{
+        config::NextGenConfig,
+        share::config::ShareGroupConfig,
+        streams::config::{
+            KEY_ACCEPTABLE_RECOVERY_LAG, KEY_ASSIGNOR_NAME, KEY_HEARTBEAT_INTERVAL_MS,
+            KEY_NUM_STANDBY_REPLICAS, KEY_NUM_WARMUP_REPLICAS, KEY_RACK_AWARE_ASSIGNMENT_TAGS,
+            KEY_SESSION_TIMEOUT_MS, KEY_SHARE_AUTO_OFFSET_RESET, KEY_TASK_OFFSET_INTERVAL_MS,
+            ShareAutoOffsetReset, StreamsGroupConfig,
+        },
     },
 };
 
@@ -117,18 +121,17 @@ pub(crate) const KAFKA_TRUNK_GROUP_KEYS: &[&str] = &[
 /// The group keys a broker serves under `unstable`: Kafka 4.3.1's
 /// `GroupConfig` by default, trunk's with unstable api versions enabled.
 pub(crate) fn served_group_keys(
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 ) -> impl Iterator<Item = &'static GroupKey> {
     KAFKA_GROUP_KEYS.iter().filter(move |key| {
-        unstable == crate::api_catalog::UnstableApiVersions::Enabled
-            || !KAFKA_TRUNK_GROUP_KEYS.contains(&key.name)
+        unstable == UnstableApiVersions::Enabled || !KAFKA_TRUNK_GROUP_KEYS.contains(&key.name)
     })
 }
 
 /// The row for one group key served under `unstable`.
 pub(crate) fn kafka_group_key(
     name: &str,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 ) -> Option<&'static GroupKey> {
     served_group_keys(unstable).find(|key| key.name == name)
 }
@@ -235,7 +238,7 @@ pub(crate) struct GroupBounds {
 impl GroupBounds {
     /// The bounds `config` runs its coordinators with.
     #[must_use]
-    pub(crate) fn of(config: &crate::config::BrokerConfig) -> Self {
+    pub(crate) fn of(config: &BrokerConfig) -> Self {
         Self {
             consumer: (*config.next_gen_consumer_group).clone(),
             share: (*config.share_group).clone(),
@@ -312,9 +315,9 @@ fn parse_value(key: &GroupKey, value: &str) -> Result<(), String> {
 fn check_bounds(
     overrides: &BTreeMap<String, String>,
     bounds: &GroupBounds,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 ) -> Result<(), String> {
-    let trunk = unstable == crate::api_catalog::UnstableApiVersions::Enabled;
+    let trunk = unstable == UnstableApiVersions::Enabled;
     let int = |name: &str| overrides.get(name).and_then(|value| int_value(value));
     let range = |name: &str, min: (i32, &str), max: (i32, &str)| -> Result<(), String> {
         let Some(value) = int(name) else {
@@ -551,7 +554,7 @@ fn check_trunk_streams_bounds(overrides: &BTreeMap<String, String>) -> Result<()
 pub(crate) fn validate_group_configs(
     overrides: &BTreeMap<String, String>,
     bounds: &GroupBounds,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 ) -> Result<(), String> {
     for name in overrides.keys() {
         if kafka_group_key(name, unstable).is_none() {

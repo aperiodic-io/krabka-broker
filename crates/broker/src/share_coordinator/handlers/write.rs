@@ -87,6 +87,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::test_support::PartitionCount;
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([51; 16]);
     const WIRE_TOPIC: ProtoUuid = ProtoUuid([51; 16]);
@@ -202,7 +203,7 @@ mod tests {
                 dir.path(),
                 super::super::test_support::StateFixtureSetup {
                     topic: TOPIC,
-                    partitions: crate::test_support::PartitionCount(8),
+                    partitions: PartitionCount(8),
                     partition: krabka_ids::PartitionIndex(4),
                 },
             )

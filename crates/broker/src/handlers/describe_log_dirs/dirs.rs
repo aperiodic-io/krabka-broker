@@ -8,7 +8,7 @@
 
 use krabka_protocol::owned::describe_log_dirs_response::DescribeLogDirsResult;
 
-use crate::codes;
+use crate::{codes, cordoned_log_dirs::CordonedLogDirs};
 
 /// The directories `DescribeLogDirs` reports with `is_cordoned = true`.
 ///
@@ -17,7 +17,7 @@ use crate::codes;
 /// (`MetadataVersion.isCordonedLogDirsSupported`), and none below it.
 pub(super) fn cordoned_log_dirs_reported(
     image: &krabka_metadata::MetadataImage,
-    cordoned: &crate::cordoned_log_dirs::CordonedLogDirs,
+    cordoned: &CordonedLogDirs,
 ) -> Vec<std::path::PathBuf> {
     let supported = image.finalized_metadata_version().is_some_and(|level| {
         level >= krabka_metadata::metadata_version::CORDONED_LOG_DIRS_MIN_LEVEL

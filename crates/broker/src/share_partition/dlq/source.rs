@@ -18,7 +18,10 @@ use krabka_remote_storage::TopicIdPartition;
 use krabka_units::{ByteSize, convert::ByteSizeExt as _, mebibytes};
 
 use super::record::SourceRecord;
-use crate::{metrics::BrokerMetrics, partition::Partition, remote_reader::RemoteReader};
+use crate::{
+    blocking::spawn_blocking, metrics::BrokerMetrics, partition::Partition,
+    remote_reader::RemoteReader,
+};
 
 /// The most bytes of one log read. Most dead-letter ranges are one record, so
 /// a larger read would be wasted. Kafka's `DLQ_MAX_FETCH_BYTES`.
@@ -149,7 +152,7 @@ async fn read_raw(
         };
     }
     let log = partition.log.clone();
-    let read = crate::blocking::spawn_blocking(move || {
+    let read = spawn_blocking(move || {
         let log = log.lock().expect("log mutex poisoned");
         log.read_raw(Offset(first), Offset(last.saturating_add(1)), MAX_FETCH)
     })
@@ -213,7 +216,10 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::share_partition::manager::test_support::open_data_partition;
+    use crate::{
+        partition_registry::PartitionRegistry,
+        share_partition::manager::test_support::{DataPartitionSetup, open_data_partition},
+    };
 
     fn records(pairs: &[(i64, &'static [u8])]) -> BTreeMap<i64, SourceRecord> {
         pairs
@@ -233,11 +239,11 @@ mod tests {
     /// A partition holding three batches: offsets 0-1, 2-3 and 4.
     async fn partition() -> (tempfile::TempDir, Arc<Partition>) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let registry = crate::partition_registry::PartitionRegistry::new();
+        let registry = PartitionRegistry::new();
         open_data_partition(
             &registry,
             dir.path(),
-            crate::share_partition::manager::test_support::DataPartitionSetup {
+            DataPartitionSetup {
                 batches: vec![
                     crate::share_partition::manager::test_support::TimedValues {
                         timestamp: crate::test_support::UnixMillis(1_000),

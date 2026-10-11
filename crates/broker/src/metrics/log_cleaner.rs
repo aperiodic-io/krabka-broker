@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use super::{BrokerMetrics, CleanerFailureLabel, CleanerFailureReason, PartitionLabel};
+use crate::error::BrokerError;
 
 impl BrokerMetrics {
     /// Account one clean log-compaction sweep (a full `tick_all` pass that
@@ -89,7 +90,7 @@ impl BrokerMetrics {
 }
 
 /// Compaction and retention classify failures identically for operator metrics.
-pub(crate) fn failure_reason(error: &crate::error::BrokerError) -> CleanerFailureReason {
+pub(crate) fn failure_reason(error: &BrokerError) -> CleanerFailureReason {
     use crate::error::BrokerError;
     match error {
         BrokerError::Log(krabka_log::LogError::Io(_)) => CleanerFailureReason::Io,

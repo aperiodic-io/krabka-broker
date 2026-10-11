@@ -26,7 +26,17 @@ use krabka_protocol::{
     records::{Record, RecordBatch},
 };
 
-use crate::{support, support::records::batch_from_records};
+use crate::{
+    cluster_lock,
+    support::{
+        self,
+        client::connect_with_context,
+        produce::{SinglePartitionProduceSetup, send_batch},
+        records::batch_from_records,
+        registered_cluster, shutdown_cluster,
+        topics::CreateTopicRequestSetup,
+    },
+};
 
 const TOPIC: &str = "compaction-replicas";
 
@@ -100,10 +110,14 @@ fn record(
 /// Send `batch` to the leader with `acks=-1`, and return the error code of
 /// the partition row.
 async fn produce(leader: &Connection, topic_id: WireUuid, batch: RecordBatch) -> i16 {
-    let response = crate::support::produce::send_batch(
+    let response = send_batch(
         &leader,
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {topic: (TOPIC).into(), topic_id, ..crate::support::produce::SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()},
+        SinglePartitionProduceSetup {
+            topic: (TOPIC).into(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
+        },
     )
     .await;
     response.responses[0].partition_responses[0].error_code
@@ -132,15 +146,11 @@ async fn wait_for_the_topic_config(broker: &BrokerHandle) {
 /// sequence of the producer for a later leader.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_replica_keeps_the_last_batch_of_an_active_producer() {
-    let _g = crate::cluster_lock().lock().await;
-    let cluster = crate::support::registered_cluster(3).await;
+    let _g = cluster_lock().lock().await;
+    let cluster = registered_cluster(3).await;
 
-    let admin = crate::support::client::connect_with_context(
-        cluster[0].1.listen_addr.to_string(),
-        None,
-        "admin client",
-    )
-    .await;
+    let admin =
+        connect_with_context(cluster[0].1.listen_addr.to_string(), None, "admin client").await;
     // One batch for each segment, so that every batch except the last is in a
     // sealed segment that a pass rewrites.
     let mut topic = support::topic_on(TOPIC, &[&[1, 2, 3]]);
@@ -155,12 +165,8 @@ async fn every_replica_keeps_the_last_batch_of_an_active_producer() {
         ..Default::default()
     })
     .collect();
-    let topic_id = support::client::create_topic_spec(
-        &admin,
-        topic,
-        crate::support::topics::CreateTopicRequestSetup::default(),
-    )
-    .await;
+    let topic_id =
+        support::client::create_topic_spec(&admin, topic, CreateTopicRequestSetup::default()).await;
     for (handle, _, _) in &cluster {
         handle.wait_until_partition_present(TOPIC, 0).await;
         wait_for_the_topic_config(handle).await;
@@ -217,5 +223,5 @@ async fn every_replica_keeps_the_last_batch_of_an_active_producer() {
     ];
     assert!(kept == vec![expected; 3]);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

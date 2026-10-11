@@ -7,6 +7,7 @@ use crate::{
     log::test_support::{
         AppendPath as Path, append_path as append, control_key, control_value, test_log,
     },
+    test_support::open_log,
 };
 
 // A data batch of `producer` (`(id, epoch)`) with `records` records from
@@ -214,11 +215,11 @@ fn check_append_paths<T: std::fmt::Debug + PartialEq>(
         assert!(read(&log) == *want, "{name}, {path:?}");
 
         drop(log);
-        let replayed = crate::test_support::open_log(dir.path());
+        let replayed = open_log(dir.path());
         assert!(read(&replayed) == *want, "{name}, {path:?}, replayed");
 
         replayed.close();
-        let loaded = crate::test_support::open_log(dir.path());
+        let loaded = open_log(dir.path());
         assert!(
             read(&loaded) == *want,
             "{name}, {path:?}, from the snapshot"

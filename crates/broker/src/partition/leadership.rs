@@ -7,7 +7,12 @@ use std::sync::{Arc, atomic::Ordering};
 
 use krabka_log::Log;
 
-use crate::{error::BrokerError, partition::Partition, producer_state::ProducerState};
+use crate::{
+    codes::{FENCED_LEADER_EPOCH, UNKNOWN_LEADER_EPOCH},
+    error::BrokerError,
+    partition::Partition,
+    producer_state::ProducerState,
+};
 
 #[cfg(test)]
 mod promotion_producer_state;
@@ -306,9 +311,9 @@ impl Partition {
             return None;
         }
         let code = if request_epoch < current {
-            crate::codes::FENCED_LEADER_EPOCH
+            FENCED_LEADER_EPOCH
         } else {
-            crate::codes::UNKNOWN_LEADER_EPOCH
+            UNKNOWN_LEADER_EPOCH
         };
         Some((code, current))
     }
@@ -336,11 +341,11 @@ impl Partition {
         match krabka_verified::list_offsets_epoch_decision(request_epoch, current) {
             krabka_verified::ListOffsetsEpochDecision::Proceed => None,
             krabka_verified::ListOffsetsEpochDecision::Fenced => {
-                Some((crate::codes::FENCED_LEADER_EPOCH, current))
+                Some((FENCED_LEADER_EPOCH, current))
             }
             krabka_verified::ListOffsetsEpochDecision::RejectMalformed
             | krabka_verified::ListOffsetsEpochDecision::Unknown => {
-                Some((crate::codes::UNKNOWN_LEADER_EPOCH, current))
+                Some((UNKNOWN_LEADER_EPOCH, current))
             }
         }
     }
@@ -363,7 +368,12 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::*;
-    use crate::partition::test_support::{EpochCheckpointFull, test_partition};
+    use crate::{
+        codes::{FENCED_LEADER_EPOCH, UNKNOWN_LEADER_EPOCH},
+        partition::test_support::{
+            EpochCheckpointFull, epoch_history as test_epoch_history, test_partition,
+        },
+    };
 
     #[tokio::test]
     async fn replication_target_guard_fences_stale_generation_and_topic_identity() {
@@ -488,7 +498,7 @@ mod tests {
     }
 
     fn epoch_history(partition: &Partition) -> Vec<(i32, i64)> {
-        crate::partition::test_support::epoch_history(&partition.log.lock().expect("log mutex"))
+        test_epoch_history(&partition.log.lock().expect("log mutex"))
     }
 
     /// One promotion step: an optional write at an epoch, or a
@@ -636,8 +646,8 @@ mod tests {
         let (p, _td) = test_partition(Arc::new(Notify::new()));
         p.test_set_leader_epoch(LIVE);
 
-        let fenced = Some((crate::codes::FENCED_LEADER_EPOCH, LIVE));
-        let unknown = Some((crate::codes::UNKNOWN_LEADER_EPOCH, LIVE));
+        let fenced = Some((FENCED_LEADER_EPOCH, LIVE));
+        let unknown = Some((UNKNOWN_LEADER_EPOCH, LIVE));
         // (request epoch, Fetch verdict, ListOffsets verdict)
         let cases = [
             (LIVE - 1, fenced, fenced),

@@ -15,9 +15,12 @@ use ring::{
 };
 use tokio::net::TcpStream;
 
-use crate::oauthbearer::{
-    now_unix_secs, oauthbearer_authenticate, oauthbearer_initial, start_oauthbearer_broker,
-    unsecured_jws,
+use crate::{
+    harness::metadata_probe,
+    oauthbearer::{
+        now_unix_secs, oauthbearer_authenticate, oauthbearer_fixture, oauthbearer_initial,
+        oauthbearer_session_start, start_oauthbearer_broker, unsecured_jws,
+    },
 };
 
 /// Happy path: a valid unsecured token authenticates in a single round.
@@ -26,14 +29,11 @@ use crate::oauthbearer::{
 /// that the broker accepted the principal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_oauthbearer_happy_path() {
-    let (_log_dir, handle, addr) = crate::oauthbearer::oauthbearer_fixture(
-        krabka_security::OAuthBearerValidator::default(),
-        None,
-    )
-    .await;
+    let (_log_dir, handle, addr) =
+        oauthbearer_fixture(krabka_security::OAuthBearerValidator::default(), None).await;
 
     let result: Result<(), io::Error> = async {
-        let (mut stream, mut corr) = crate::oauthbearer::oauthbearer_session_start(addr).await?;
+        let (mut stream, mut corr) = oauthbearer_session_start(addr).await?;
 
         let token = unsecured_jws("svc-account", now_unix_secs() + 3600);
         authenticate_success(
@@ -44,7 +44,7 @@ async fn sasl_oauthbearer_happy_path() {
         )
         .await?;
 
-        crate::harness::metadata_probe(&mut stream, corr).await
+        metadata_probe(&mut stream, corr).await
     }
     .await;
 
@@ -70,7 +70,7 @@ async fn sasl_oauthbearer_invalid_token_two_round_failure() {
     let addr = handle.listen_addr();
 
     let result: Result<(), io::Error> = async {
-        let (mut stream, mut corr) = crate::oauthbearer::oauthbearer_session_start(addr).await?;
+        let (mut stream, mut corr) = oauthbearer_session_start(addr).await?;
 
         // Expired token (exp an hour in the past, zero skew).
         let token = unsecured_jws("admin", now_unix_secs() - 3600);
@@ -129,11 +129,10 @@ fn signed_validator(jwks_json: &str) -> krabka_security::OAuthBearerValidator {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_oauthbearer_signed_token_happy_path() {
     let (kp, jwks) = es256_key("k1");
-    let (_log_dir, handle, addr) =
-        crate::oauthbearer::oauthbearer_fixture(signed_validator(&jwks), None).await;
+    let (_log_dir, handle, addr) = oauthbearer_fixture(signed_validator(&jwks), None).await;
 
     let result: Result<(), io::Error> = async {
-        let (mut stream, mut corr) = crate::oauthbearer::oauthbearer_session_start(addr).await?;
+        let (mut stream, mut corr) = oauthbearer_session_start(addr).await?;
 
         let claims = format!(
             "{{\"sub\":\"svc-account\",\"exp\":{}}}",
@@ -149,7 +148,7 @@ async fn sasl_oauthbearer_signed_token_happy_path() {
         .await?;
 
         // Post-auth Metadata proves the connection survived authentication.
-        crate::harness::metadata_probe(&mut stream, corr).await
+        metadata_probe(&mut stream, corr).await
     }
     .await;
 
@@ -167,11 +166,10 @@ async fn sasl_oauthbearer_signed_token_wrong_key_two_round_failure() {
     // JWKS advertises key A's public key; the token is signed by key B.
     let (_kp_a, jwks_a) = es256_key("k1");
     let (kp_b, _jwks_b) = es256_key("k1");
-    let (_log_dir, handle, addr) =
-        crate::oauthbearer::oauthbearer_fixture(signed_validator(&jwks_a), None).await;
+    let (_log_dir, handle, addr) = oauthbearer_fixture(signed_validator(&jwks_a), None).await;
 
     let result: Result<(), io::Error> = async {
-        let (mut stream, mut corr) = crate::oauthbearer::oauthbearer_session_start(addr).await?;
+        let (mut stream, mut corr) = oauthbearer_session_start(addr).await?;
 
         let claims = format!("{{\"sub\":\"admin\",\"exp\":{}}}", now_unix_secs() + 3600);
         let token = es256_token(&kp_b, "k1", &claims);

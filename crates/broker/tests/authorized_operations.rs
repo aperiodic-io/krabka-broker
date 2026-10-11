@@ -41,7 +41,12 @@ use crate::support::{
         BIT_DESCRIBE_CONFIGS, BIT_IDEMPOTENT_WRITE, BIT_READ, TOPIC_FULL_MASK,
     },
     client::connect_owned,
-    topics::{creatable_topic, create_topic_request, metadata_topic},
+    discovery::named_topic_metadata,
+    topics::{
+        ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        metadata_topic,
+    },
+    wire::{CorrelationId, HeaderEncoding, WireFrameSetup, request_body_capacity, request_frame},
 };
 
 // Bit positions match Kafka's `AclOperation.code()` (verified by the
@@ -114,9 +119,9 @@ fn boot_with_super_user(super_user: &str) -> impl std::future::Future<Output = H
 async fn create_topic(client: &Client, name: &str, partitions: i32) {
     let resp = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: name.to_string(),
-                partitions: crate::support::topics::TopicPartitionCount(partitions),
+                partitions: TopicPartitionCount(partitions),
                 ..Default::default()
             },
         )))
@@ -199,7 +204,7 @@ async fn metadata_topic_authorized_operations_super_user_gets_full_mask() {
         .client
         .send(MetadataRequest {
             include_topic_authorized_operations: true,
-            ..crate::support::discovery::named_topic_metadata("foo")
+            ..named_topic_metadata("foo")
         })
         .await
         .expect("Metadata");
@@ -322,14 +327,14 @@ async fn metadata_cluster_authorized_operations_super_user_gets_full_mask_v9() {
 
     // Build the v2 request header (flexible — Metadata went flexible at
     // v9). One TCP round-trip, plaintext, no SASL.
-    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+    let frame = request_frame(WireFrameSetup {
         api_key: krabka_ids::ApiKey(3),
         version: krabka_ids::ApiVersion(version),
-        correlation: crate::support::wire::CorrelationId(7),
-        header: crate::support::wire::HeaderEncoding::Flexible,
+        correlation: CorrelationId(7),
+        header: HeaderEncoding::Flexible,
         client_id: "krabka-kip-430-v9",
         body: &body,
-        capacity: Some(crate::support::wire::request_body_capacity(&body)),
+        capacity: Some(request_body_capacity(&body)),
         ..Default::default()
     });
 

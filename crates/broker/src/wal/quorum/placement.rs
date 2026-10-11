@@ -61,6 +61,7 @@ mod tests {
     use krabka_security::ListenerProtocol;
 
     use super::*;
+    use crate::test_support::broker_registration;
 
     #[test]
     fn placement_prefers_rack_distinct_voters_with_local_first() {
@@ -117,7 +118,7 @@ mod tests {
                 port: 19092,
                 protocol: ListenerProtocol::Plaintext,
             }],
-            ..crate::test_support::broker_registration(krabka_raft::NodeId(id))
+            ..broker_registration(krabka_raft::NodeId(id))
         }
     }
 }

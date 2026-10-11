@@ -65,7 +65,7 @@ pub async fn no_retry_acks_all_producer(
 
 /// A value-only record with the transaction fixtures' original owned string bytes.
 pub fn string_record(topic: &str, value: &str) -> ProducerRecord {
-    producer_record(crate::support::producer::ProducerRecordSetup {
+    producer_record(ProducerRecordSetup {
         topic: (topic).into(),
         value: Some(Bytes::from(value.to_string())),
         ..Default::default()
@@ -103,13 +103,11 @@ pub async fn enqueue_unkeyed_values(
     for value in values {
         drop(
             producer
-                .enqueue(producer_record(
-                    crate::support::producer::ProducerRecordSetup {
-                        topic: (topic).into(),
-                        value: Some(value),
-                        ..Default::default()
-                    },
-                ))
+                .enqueue(producer_record(ProducerRecordSetup {
+                    topic: (topic).into(),
+                    value: Some(value),
+                    ..Default::default()
+                }))
                 .await
                 .expect("record is queued"),
         );

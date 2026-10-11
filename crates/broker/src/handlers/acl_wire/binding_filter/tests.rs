@@ -1,6 +1,10 @@
 use assert2::check;
 
 use super::*;
+use crate::{
+    handlers::acl_wire::PATTERN_MATCHING_FIXTURE,
+    test_support::{AllowAclSetup, allow_acl},
+};
 
 const TOPIC: i8 = 2;
 const LITERAL: i8 = 3;
@@ -163,7 +167,7 @@ fn from_wire_refuses_unknown_on_any_axis() {
 /// six seeded topic patterns.
 #[test]
 fn resource_pattern_matching_follows_kafka() {
-    let seeded = crate::handlers::acl_wire::PATTERN_MATCHING_FIXTURE;
+    let seeded = PATTERN_MATCHING_FIXTURE;
     let all: &[&str] = &["foo", "*", "f", "fo", "bar", "food"];
     let cases: [(i8, Option<&str>, &[&str]); 13] = [
         (WIRE_ANY, None, all),
@@ -263,7 +267,7 @@ fn host_filter_compares_a_cidr_host_as_text() {
 /// `CreateAcls` stored, so `DescribeAcls` lists it and `DeleteAcls` revokes it.
 #[test]
 fn exact_user_token_filter_matches_the_stored_binding() {
-    let entry = crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+    let entry = allow_acl(AllowAclSetup {
         resource_type: ResourceType::User,
         resource_name: "User:bob",
         operation: AclOperation::CreateTokens,

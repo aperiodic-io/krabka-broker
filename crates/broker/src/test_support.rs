@@ -68,11 +68,40 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    broker::{Broker, BrokerHandle},
+    api_catalog::UnstableApiVersions,
+    authorizer::{
+        AclSource, AllowAllAuthorizer, AuthorizationRequest, AuthorizationResult, Authorizer,
+    },
+    bootstrap::encode_bootstrap_records,
+    broker::{Broker, BrokerHandle, spawn_partition},
+    codes::{
+        COORDINATOR_NOT_AVAILABLE, KAFKA_STORAGE_ERROR, MESSAGE_TOO_LARGE, NONE, NOT_COORDINATOR,
+        NOT_ENOUGH_REPLICAS, NOT_LEADER_OR_FOLLOWER, RECORD_LIST_TOO_LARGE, REQUEST_TIMED_OUT,
+        UNKNOWN_SERVER_ERROR,
+    },
     config::BrokerConfig,
-    config_keys::MIN_INSYNC_REPLICAS,
-    handlers::RequestContext,
+    config_keys::{BROKER_WITNESS, MIN_INSYNC_REPLICAS, WITNESS_TRUE},
+    controller_endpoint::ControllerDialer,
+    elr::state::PartitionElr,
+    error::BrokerError,
+    features::ELR_VERSION,
+    handlers::{
+        DispatchKind, RequestContext, acl_wire::CLUSTER_RESOURCE_NAME, alter_partition::handle,
+        describe_configs::effective_topic_configs, encode_response,
+    },
+    heartbeat::{
+        controller_state::{ControllerLivenessState, LivenessTransition, TestClock},
+        fencing::{RegistrationChange, registration_change},
+    },
+    log_dir::partition_dir,
+    log_dir_status::LogDirRegistry,
     metadata_source::MetadataSource,
+    network::client::InterBrokerClient,
+    partition::Partition,
+    partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
+    share_coordinator::coordinator::UNINITIALIZED_START_OFFSET,
+    txn::{bootstrap::TOPIC, coordinator::leadership::LoadStatus},
 };
 
 /// The localhost ECDSA pair used by reload and socket-drain tests.
@@ -195,7 +224,7 @@ where
 /// Own the temporary directory alongside its replica until the caller drops both.
 pub(crate) fn temporary_partition(
     setup: StandalonePartitionSetup<'_>,
-) -> (tempfile::TempDir, Arc<crate::partition::Partition>) {
+) -> (tempfile::TempDir, Arc<Partition>) {
     let directory = tempfile::tempdir().expect("tempdir");
     let partition = open_partition(directory.path(), setup);
     (directory, partition)
@@ -205,8 +234,8 @@ pub(crate) fn temporary_partition(
 pub(crate) fn open_partition(
     log_dir: &std::path::Path,
     setup: StandalonePartitionSetup<'_>,
-) -> Arc<crate::partition::Partition> {
-    let path = crate::log_dir::partition_dir(log_dir, setup.topic, setup.partition.0);
+) -> Arc<Partition> {
+    let path = partition_dir(log_dir, setup.topic, setup.partition.0);
     std::fs::create_dir_all(&path).expect("create partition directory");
     let log = krabka_log::Log::open(&path, krabka_log::LogConfig::default()).expect("open log");
     spawn_standalone_partition(log_dir, log, setup)
@@ -307,19 +336,19 @@ pub(crate) fn spawn_standalone_partition(
     log_dir: &std::path::Path,
     log: krabka_log::Log,
     setup: StandalonePartitionSetup<'_>,
-) -> Arc<crate::partition::Partition> {
+) -> Arc<Partition> {
     let StandalonePartitionSetup {
         topic,
         partition,
         storage,
     } = setup;
-    crate::broker::spawn_partition(
+    spawn_partition(
         topic.to_owned(),
         partition,
         log_dir.to_path_buf(),
         log,
-        crate::log_dir_status::LogDirRegistry::default(),
-        Arc::new(crate::producer_state::ProducerState::new()),
+        LogDirRegistry::default(),
+        Arc::new(ProducerState::new()),
         storage == StorageMode::Diskless,
     )
 }
@@ -331,7 +360,7 @@ pub(crate) fn block_log_artifact_paths(
     extension: &str,
     expectation: &str,
 ) -> Vec<std::path::PathBuf> {
-    let directory = crate::log_dir::partition_dir(root, topic, 0);
+    let directory = partition_dir(root, topic, 0);
     let mut blocked = Vec::new();
     for entry in std::fs::read_dir(&directory).expect("read partition dir") {
         let path = entry.expect("partition dir entry").path();
@@ -563,7 +592,7 @@ pub(crate) fn topic_thaw_record(
         ..topic_freeze_record(FreezeSetup {
             scope,
             pattern_type,
-            state: crate::test_support::FreezeState::Thawed,
+            state: FreezeState::Thawed,
             reason: "",
         })
     }
@@ -845,7 +874,7 @@ pub(crate) async fn propose_isr(
         },
         new_isr,
     });
-    crate::handlers::alter_partition::handle(broker, request, version.0, &ctx)
+    handle(broker, request, version.0, &ctx)
         .await
         .expect("AlterPartition")
 }
@@ -864,10 +893,10 @@ pub(crate) async fn accepted_isr_proposal(
 ) {
     let response = propose_isr(broker, setup).await;
     if response_check == IsrResponseCheck::EnvelopeAndPartition {
-        assert2::assert!(response.error_code == crate::codes::NONE);
+        assert2::assert!(response.error_code == NONE);
     }
     assert2::assert!(
-        response.topics[0].partitions[0].error_code == crate::codes::NONE,
+        response.topics[0].partitions[0].error_code == NONE,
         "AlterPartition refused the proposal: {response:?}"
     );
 }
@@ -877,13 +906,13 @@ pub(crate) async fn accepted_isr_proposal(
 #[derive(Debug)]
 pub(crate) struct DenyAll;
 
-impl crate::authorizer::Authorizer for DenyAll {
+impl Authorizer for DenyAll {
     fn authorize(
         &self,
         _source: &dyn krabka_authz::AclSource,
-        _req: &crate::authorizer::AuthorizationRequest<'_>,
-    ) -> crate::authorizer::AuthorizationResult {
-        crate::authorizer::AuthorizationResult::Deny
+        _req: &AuthorizationRequest<'_>,
+    ) -> AuthorizationResult {
+        AuthorizationResult::Deny
     }
 }
 
@@ -928,12 +957,12 @@ macro_rules! delegate_authorizer_metadata {
     };
 }
 
-impl<A: crate::authorizer::Authorizer> crate::authorizer::Authorizer for ControllerPeerAllowed<A> {
+impl<A: Authorizer> Authorizer for ControllerPeerAllowed<A> {
     fn authorize(
         &self,
-        source: &dyn crate::authorizer::AclSource,
-        request: &crate::authorizer::AuthorizationRequest<'_>,
-    ) -> crate::authorizer::AuthorizationResult {
+        source: &dyn AclSource,
+        request: &AuthorizationRequest<'_>,
+    ) -> AuthorizationResult {
         if request.principal.name == "ANONYMOUS"
             && request.resource_type == krabka_metadata::ResourceType::Cluster
             && matches!(
@@ -942,7 +971,7 @@ impl<A: crate::authorizer::Authorizer> crate::authorizer::Authorizer for Control
                     | krabka_metadata::AclOperation::Create
             )
         {
-            crate::authorizer::AuthorizationResult::Allow
+            AuthorizationResult::Allow
         } else {
             self.0.authorize(source, request)
         }
@@ -954,14 +983,14 @@ impl<A: crate::authorizer::Authorizer> crate::authorizer::Authorizer for Control
 /// An authorizer that a fixture holds as a trait object, so that it can go
 /// inside [`ControllerPeerAllowed`].
 #[derive(Debug)]
-struct SharedAuthorizer(std::sync::Arc<dyn crate::authorizer::Authorizer>);
+struct SharedAuthorizer(std::sync::Arc<dyn Authorizer>);
 
-impl crate::authorizer::Authorizer for SharedAuthorizer {
+impl Authorizer for SharedAuthorizer {
     fn authorize(
         &self,
-        source: &dyn crate::authorizer::AclSource,
-        request: &crate::authorizer::AuthorizationRequest<'_>,
-    ) -> crate::authorizer::AuthorizationResult {
+        source: &dyn AclSource,
+        request: &AuthorizationRequest<'_>,
+    ) -> AuthorizationResult {
         self.0.authorize(source, request)
     }
 
@@ -974,8 +1003,8 @@ impl crate::authorizer::Authorizer for SharedAuthorizer {
 /// coordinator topic only on an unfenced broker, as Kafka's
 /// `ReplicaPlacer` does.
 pub(crate) fn controller_peer_allowed(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
-) -> std::sync::Arc<dyn crate::authorizer::Authorizer> {
+    authorizer: std::sync::Arc<dyn Authorizer>,
+) -> std::sync::Arc<dyn Authorizer> {
     std::sync::Arc::new(ControllerPeerAllowed(SharedAuthorizer(authorizer)))
 }
 
@@ -989,7 +1018,7 @@ pub(crate) fn controller_peer_allowed(
 pub(crate) fn finalize_elr_version(image: &mut MetadataImage) {
     image.apply(&MetadataRecord::V1FeatureLevel(
         krabka_metadata::FeatureLevelRecord {
-            name: crate::features::ELR_VERSION.into(),
+            name: ELR_VERSION.into(),
             level: 1,
         },
     ));
@@ -1002,12 +1031,12 @@ pub(crate) fn finalize_elr_version(image: &mut MetadataImage) {
 /// broker: the level has to arrive as a committed record, the way an
 /// operator's `kafka-features upgrade --feature
 /// eligible.leader.replicas.version=1` delivers it.
-pub(crate) async fn finalize_elr_version_on(broker: &crate::Broker) {
+pub(crate) async fn finalize_elr_version_on(broker: &Broker) {
     broker
         .controller
         .submit_change(vec![MetadataRecord::V1FeatureLevel(
             krabka_metadata::FeatureLevelRecord {
-                name: crate::features::ELR_VERSION.into(),
+                name: ELR_VERSION.into(),
                 level: 1,
             },
         )])
@@ -1019,7 +1048,7 @@ pub(crate) async fn finalize_elr_version_on(broker: &crate::Broker) {
             if broker
                 .controller
                 .current_image()
-                .finalized_feature(crate::features::ELR_VERSION)
+                .finalized_feature(ELR_VERSION)
                 == Some(1)
             {
                 break;
@@ -1049,8 +1078,7 @@ pub(crate) const UNSUPPORTED_LEVEL_FAULT: &str = "Tried to apply FeatureLevelRec
 /// Writes `records` as the length-prefixed frames of `bootstrap.records.bin`,
 /// the file `krabka format` leaves for the first start to submit.
 pub(crate) fn write_bootstrap_records(log_dir: &std::path::Path, records: &[MetadataRecord]) {
-    let bytes =
-        crate::bootstrap::encode_bootstrap_records(records).expect("encode bootstrap records");
+    let bytes = encode_bootstrap_records(records).expect("encode bootstrap records");
     std::fs::write(log_dir.join("bootstrap.records.bin"), bytes).expect("write bootstrap records");
 }
 
@@ -1061,7 +1089,7 @@ pub(crate) fn write_bootstrap_records(log_dir: &std::path::Path, records: &[Meta
 /// that fetches or acknowledges without a share group heartbeat calls this
 /// first.
 pub(crate) async fn initialize_share_state(
-    broker: &crate::broker::BrokerHandle,
+    broker: &BrokerHandle,
     group: &str,
     topic_id: uuid::Uuid,
     partition: i32,
@@ -1076,7 +1104,7 @@ pub(crate) async fn initialize_share_state(
             topic_id,
             partition,
             1,
-            krabka_log::Offset(crate::share_coordinator::coordinator::UNINITIALIZED_START_OFFSET),
+            krabka_log::Offset(UNINITIALIZED_START_OFFSET),
         )
         .await
         .expect("initialize the share state");
@@ -1088,7 +1116,7 @@ pub(crate) async fn initialize_share_state(
 /// It first waits for a liveness tick of the current controller term to
 /// finish. The first tick of a term seeds every registered broker with a
 /// session, so a session ended before that tick would be opened again.
-pub(crate) async fn end_heartbeat_session(broker: &crate::Broker, broker_id: u64) {
+pub(crate) async fn end_heartbeat_session(broker: &Broker, broker_id: u64) {
     let ticks = broker.metrics.controller_fencing_publications_total.get();
     tokio::time::timeout(Duration::from_secs(10), async {
         while broker.metrics.controller_fencing_publications_total.get() <= ticks {
@@ -1144,7 +1172,7 @@ pub(crate) async fn lead_transaction_state_partitions(
 ) {
     let broker = handle.broker_arc_for_test();
     let node = broker.config.node_id;
-    let topic = crate::txn::bootstrap::TOPIC;
+    let topic = TOPIC;
     // The controller translates a partition record against the topic that the
     // image already holds, so the topic goes first.
     broker
@@ -1184,7 +1212,7 @@ pub(crate) async fn lead_transaction_state_partitions(
                 .txn_coordinator
                 .load_status(krabka_ids::PartitionIndex(partition))
                 .await
-                != Some(crate::txn::coordinator::leadership::LoadStatus::Loaded)
+                != Some(LoadStatus::Loaded)
             {
                 // intentional: a load has no awaiter that a test can reach.
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1269,10 +1297,10 @@ pub(crate) async fn seed_remote_broker(handle: &BrokerHandle, node_id: NodeId) {
 pub(crate) async fn fence_remote_broker(handle: &BrokerHandle, node_id: u64) {
     let broker = handle.broker_arc_for_test();
     broker.liveness.record_fenced_heartbeat(node_id).await;
-    let fence = crate::heartbeat::fencing::registration_change(
+    let fence = registration_change(
         &broker.controller.current_image(),
         krabka_raft::NodeId(node_id),
-        crate::heartbeat::fencing::RegistrationChange::FENCE,
+        RegistrationChange::FENCE,
     );
     broker
         .controller
@@ -1290,8 +1318,8 @@ pub(crate) async fn make_witness(handle: &BrokerHandle, node_id: u64) {
         .submit_change(vec![MetadataRecord::V1BrokerConfig(
             krabka_metadata::BrokerConfigRecord {
                 node_id: krabka_raft::NodeId(node_id),
-                config_name: crate::config_keys::BROKER_WITNESS.to_string(),
-                config_value: Some(crate::config_keys::WITNESS_TRUE.to_string()),
+                config_name: BROKER_WITNESS.to_string(),
+                config_value: Some(WITNESS_TRUE.to_string()),
             },
         )])
         .await
@@ -1302,10 +1330,10 @@ pub(crate) async fn make_witness(handle: &BrokerHandle, node_id: u64) {
 /// state machine does: its registration says so, and it stays unfenced.
 pub(crate) async fn begin_controlled_shutdown(handle: &BrokerHandle, node_id: u64) {
     let broker = handle.broker_arc_for_test();
-    let change = crate::heartbeat::fencing::registration_change(
+    let change = registration_change(
         &broker.controller.current_image(),
         krabka_raft::NodeId(node_id),
-        crate::heartbeat::fencing::RegistrationChange::CONTROLLED_SHUTDOWN,
+        RegistrationChange::CONTROLLED_SHUTDOWN,
     );
     broker
         .controller
@@ -1355,7 +1383,7 @@ pub(crate) fn round_trip_response<T: Encode + Decode<'static>>(
     response: &T,
     version: krabka_ids::ApiVersion,
 ) -> (T, bool) {
-    let bytes = crate::handlers::encode_response(response, version.0).expect("encode");
+    let bytes = encode_response(response, version.0).expect("encode");
     let mut cursor: &[u8] = &bytes;
     let decoded = T::decode(&mut cursor, version.0).expect("decode");
     (decoded, cursor.is_empty())
@@ -1370,12 +1398,12 @@ pub(crate) fn round_trip_response<T: Encode + Decode<'static>>(
 #[derive(Debug)]
 pub(crate) struct GrantsInPrincipalName;
 
-impl crate::authorizer::Authorizer for GrantsInPrincipalName {
+impl Authorizer for GrantsInPrincipalName {
     fn authorize(
         &self,
-        _source: &dyn crate::authorizer::AclSource,
-        request: &crate::authorizer::AuthorizationRequest<'_>,
-    ) -> crate::authorizer::AuthorizationResult {
+        _source: &dyn AclSource,
+        request: &AuthorizationRequest<'_>,
+    ) -> AuthorizationResult {
         let wanted = format!("{:?}:{:?}", request.resource_type, request.operation);
         if request
             .principal
@@ -1383,9 +1411,9 @@ impl crate::authorizer::Authorizer for GrantsInPrincipalName {
             .split('+')
             .any(|grant| grant == wanted)
         {
-            crate::authorizer::AuthorizationResult::Allow
+            AuthorizationResult::Allow
         } else {
-            crate::authorizer::AuthorizationResult::Deny
+            AuthorizationResult::Deny
         }
     }
 }
@@ -1463,9 +1491,9 @@ pub(crate) async fn grant_cluster_operation(
         .broker_arc_for_test()
         .controller
         .submit_change(vec![MetadataRecord::V1AccessControlEntry(allow_acl(
-            crate::test_support::AllowAclSetup {
+            AllowAclSetup {
                 resource_type: krabka_metadata::ResourceType::Cluster,
-                resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+                resource_name: CLUSTER_RESOURCE_NAME,
                 principal: &format!("User:{user}"),
                 operation,
             },
@@ -1491,7 +1519,7 @@ pub(crate) async fn grant_topic_operation(
         .broker_arc_for_test()
         .controller
         .submit_change(vec![MetadataRecord::V1AccessControlEntry(allow_acl(
-            crate::test_support::AllowAclSetup {
+            AllowAclSetup {
                 resource_name: topic,
                 principal: &format!("User:{user}"),
                 operation,
@@ -1509,7 +1537,7 @@ pub(crate) async fn grant_topic_operation(
 /// authorization test that calls it therefore also fails when its api goes
 /// back to a dispatch kind that gets no principal.
 pub(crate) async fn dispatch_context(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     api_key: i16,
     version: i16,
     body: &[u8],
@@ -1523,17 +1551,17 @@ pub(crate) async fn dispatch_context(
 /// [`dispatch_context`], returning the handler's error instead of panicking
 /// on it: a test of a request the adapter or the handler refuses.
 pub(crate) async fn try_dispatch_context(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     api_key: i16,
     version: i16,
     body: &[u8],
     ctx: &RequestContext<'_>,
-) -> Result<Bytes, crate::error::BrokerError> {
+) -> Result<Bytes, BrokerError> {
     let entry = broker
         .handlers()
         .get(api_key)
         .unwrap_or_else(|| panic!("api_key {api_key} is registered"));
-    let crate::handlers::DispatchKind::Context(handler) = entry.kind() else {
+    let DispatchKind::Context(handler) = entry.kind() else {
         panic!("api_key {api_key} is a context dispatch, so its handler gets the principal");
     };
     handler(broker, version, body, ctx).await
@@ -1546,7 +1574,7 @@ pub(crate) async fn try_dispatch_context(
 /// directly. This is the path for a test about the wire itself: a field that
 /// an older version drops, or the encoding of the response.
 pub(crate) async fn dispatch_wire<Resp: Decode<'static>>(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     api_key: i16,
     version: i16,
     req: &impl Encode,
@@ -1561,7 +1589,7 @@ pub(crate) async fn dispatch_wire<Resp: Decode<'static>>(
 /// Readiness waits remain the caller's responsibility.
 pub(crate) fn configure_single_partition_transactions(
     config: &mut BrokerConfig,
-    authorizer: Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: Arc<dyn Authorizer>,
 ) {
     config.authorizer = authorizer;
     config.transaction_state_num_partitions = 1;
@@ -1610,7 +1638,7 @@ pub(crate) async fn finalize_share_version(broker: &Broker, level: i16) {
 /// path with [`DenyAll`] or a custom authorizer, and it otherwise takes
 /// the `for_tests` defaults.
 pub(crate) async fn start_broker_with_authorizer(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: std::sync::Arc<dyn Authorizer>,
 ) -> (BrokerHandle, tempfile::TempDir) {
     start_broker_with(|cfg| cfg.authorizer = authorizer).await
 }
@@ -1643,7 +1671,7 @@ pub(crate) fn start_broker_no_audit()
 /// `audit_enabled` off, so that audit-log assertions elsewhere in the suite
 /// stay stable.
 pub(crate) async fn start_broker_with_authorizer_no_audit(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: std::sync::Arc<dyn Authorizer>,
 ) -> (BrokerHandle, tempfile::TempDir) {
     start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await
 }
@@ -1668,14 +1696,14 @@ pub(crate) async fn start_group_broker_with(
 /// so a restrictive authorizer still lets the broker unfence and create the
 /// coordinator topic that this waits for.
 pub(crate) async fn start_group_broker(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: std::sync::Arc<dyn Authorizer>,
 ) -> (BrokerHandle, tempfile::TempDir) {
     start_group_broker_with(|cfg| cfg.authorizer = controller_peer_allowed(authorizer)).await
 }
 
 /// Like [`start_group_broker`], but it also disables audit logging.
 pub(crate) async fn start_group_broker_no_audit(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: std::sync::Arc<dyn Authorizer>,
 ) -> (BrokerHandle, tempfile::TempDir) {
     start_group_broker_with(|cfg| {
         cfg.audit_enabled = false;
@@ -1700,7 +1728,7 @@ pub(crate) struct ShareBrokerSetup {
 /// serves `__share_group_state`. Disabled support then finalizes
 /// `share.version` at 0, which turns the share-group APIs off.
 pub(crate) async fn start_share_broker(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: std::sync::Arc<dyn Authorizer>,
     setup: ShareBrokerSetup,
 ) -> (BrokerHandle, tempfile::TempDir) {
     let (handle, dir) = start_group_broker(authorizer).await;
@@ -1868,16 +1896,16 @@ pub(crate) async fn await_until(what: &str, mut cond: impl FnMut() -> bool) {
 }
 
 /// Plaintext controller transport for fixtures with no configured voters.
-pub(crate) fn plaintext_controller_dialer() -> crate::controller_endpoint::ControllerDialer {
+pub(crate) fn plaintext_controller_dialer() -> ControllerDialer {
     plaintext_controller_dialer_with_voters(Vec::new())
 }
 
 /// The same transport with a statically configured controller quorum.
 pub(crate) fn plaintext_controller_dialer_with_voters(
     voters: Vec<(krabka_raft::NodeId, String)>,
-) -> crate::controller_endpoint::ControllerDialer {
-    crate::controller_endpoint::ControllerDialer {
-        outbound_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
+) -> ControllerDialer {
+    ControllerDialer {
+        outbound_client: Arc::new(InterBrokerClient::new(None, None)),
         listener_protocol: krabka_security::ListenerProtocol::Plaintext,
         server_name: "localhost".to_owned(),
         quorum_voters: voters,
@@ -2374,8 +2402,9 @@ mod tests {
     use super::FakeMetadataSource;
     use crate::{
         authorizer::{
-            AuthorizationRequest,
-            AuthorizationResult::{Allow, Deny},
+            AclSource, AllowAllAuthorizer, AuthorizationRequest,
+            AuthorizationResult::{self, Allow, Deny},
+            Authorizer,
         },
         metadata_source::MetadataSource,
     };
@@ -2385,13 +2414,13 @@ mod tests {
     #[derive(Debug)]
     struct Cached;
 
-    impl crate::authorizer::Authorizer for Cached {
+    impl Authorizer for Cached {
         fn authorize(
             &self,
-            _source: &dyn crate::authorizer::AclSource,
-            _request: &crate::authorizer::AuthorizationRequest<'_>,
-        ) -> crate::authorizer::AuthorizationResult {
-            crate::authorizer::AuthorizationResult::Deny
+            _source: &dyn AclSource,
+            _request: &AuthorizationRequest<'_>,
+        ) -> AuthorizationResult {
+            AuthorizationResult::Deny
         }
 
         fn decision_ttl(&self) -> Option<std::time::Duration> {
@@ -2400,13 +2429,13 @@ mod tests {
 
         fn authorize_by_resource_type(
             &self,
-            _source: &dyn crate::authorizer::AclSource,
+            _source: &dyn AclSource,
             _principal: &krabka_security::Principal,
             _host: &std::net::SocketAddr,
             _resource_type: krabka_metadata::ResourceType,
             _operation: krabka_metadata::AclOperation,
-        ) -> crate::authorizer::AuthorizationResult {
-            crate::authorizer::AuthorizationResult::Allow
+        ) -> AuthorizationResult {
+            AuthorizationResult::Allow
         }
     }
 
@@ -2480,9 +2509,7 @@ mod tests {
                 ),
             ) == (true, Some(std::time::Duration::from_secs(7)), Allow)
         );
-        let unconfigured = super::controller_peer_allowed(std::sync::Arc::new(
-            crate::authorizer::AllowAllAuthorizer,
-        ));
+        let unconfigured = super::controller_peer_allowed(std::sync::Arc::new(AllowAllAuthorizer));
         assert!(!unconfigured.is_configured());
     }
 
@@ -2598,11 +2625,8 @@ mod tests {
 }
 
 /// Independent published ELR fixture; both lists retain the caller's order.
-pub(crate) fn partition_elr(
-    eligible: &[i32],
-    last_known: &[i32],
-) -> crate::elr::state::PartitionElr {
-    crate::elr::state::PartitionElr {
+pub(crate) fn partition_elr(eligible: &[i32], last_known: &[i32]) -> PartitionElr {
+    PartitionElr {
         eligible_leader_replicas: eligible.to_vec(),
         last_known_elr: last_known.to_vec(),
     }
@@ -2674,7 +2698,7 @@ pub(crate) struct CommittedPartitionSetup<'a> {
     pub topic: &'a str,
     pub partition: krabka_ids::PartitionIndex,
     pub leader: krabka_metadata::NodeId,
-    pub registry: crate::log_dir_status::LogDirRegistry,
+    pub registry: LogDirRegistry,
 }
 
 impl Default for CommittedPartitionSetup<'_> {
@@ -2683,7 +2707,7 @@ impl Default for CommittedPartitionSetup<'_> {
             topic: "orders",
             partition: krabka_ids::PartitionIndex(0),
             leader: krabka_metadata::NodeId(1),
-            registry: crate::log_dir_status::LogDirRegistry::default(),
+            registry: LogDirRegistry::default(),
         }
     }
 }
@@ -2692,20 +2716,20 @@ pub(crate) async fn committed_partition(
     root: &std::path::Path,
     log: krabka_log::Log,
     setup: CommittedPartitionSetup<'_>,
-) -> Arc<crate::partition::Partition> {
+) -> Arc<Partition> {
     let CommittedPartitionSetup {
         topic,
         partition,
         leader,
         registry,
     } = setup;
-    let part = crate::broker::spawn_partition(
+    let part = spawn_partition(
         topic.to_owned(),
         partition,
         root.to_path_buf(),
         log,
         registry,
-        Arc::new(crate::producer_state::ProducerState::new()),
+        Arc::new(ProducerState::new()),
         false,
     );
     part.current_leader.store(leader.0, Ordering::Relaxed);
@@ -2722,7 +2746,7 @@ pub(crate) fn elr_topic_records(
     let topic = partition.topic.clone();
     vec![
         MetadataRecord::V1FeatureLevel(krabka_metadata::FeatureLevelRecord {
-            name: crate::features::ELR_VERSION.into(),
+            name: ELR_VERSION.into(),
             level: 1,
         }),
         MetadataRecord::V1Topic(TopicRecord {
@@ -2734,12 +2758,9 @@ pub(crate) fn elr_topic_records(
         MetadataRecord::V1Partition(partition),
         MetadataRecord::V1TopicConfig(TopicConfigRecord {
             topic,
-            overrides: [(
-                crate::config_keys::MIN_INSYNC_REPLICAS.to_owned(),
-                min_isr.to_owned(),
-            )]
-            .into_iter()
-            .collect(),
+            overrides: [(MIN_INSYNC_REPLICAS.to_owned(), min_isr.to_owned())]
+                .into_iter()
+                .collect(),
         }),
     ]
 }
@@ -2785,12 +2806,12 @@ pub(crate) fn described_creation_configs(
     image: &krabka_metadata::MetadataImage,
     setup: DescribedCreationSetup<'_>,
 ) -> Vec<krabka_protocol::owned::create_topics_response::CreatableTopicConfigs> {
-    crate::handlers::describe_configs::effective_topic_configs(
+    effective_topic_configs(
         image,
         setup.node,
         setup.topic,
         setup.overrides,
-        crate::api_catalog::UnstableApiVersions::Disabled,
+        UnstableApiVersions::Disabled,
         &std::collections::BTreeMap::new(),
     )
     .into_iter()
@@ -2891,44 +2912,19 @@ pub(crate) fn scripted_response_body(body: &impl Encode, version: i16, flexible:
 
 /// Kafka's common offset/transaction append-error translations, independent of either mapper.
 pub(crate) const COORDINATOR_WRITE_ERROR_CASES: [(i16, i16); 7] = [
-    (
-        crate::codes::NOT_ENOUGH_REPLICAS,
-        crate::codes::COORDINATOR_NOT_AVAILABLE,
-    ),
-    (
-        crate::codes::REQUEST_TIMED_OUT,
-        crate::codes::COORDINATOR_NOT_AVAILABLE,
-    ),
-    (
-        crate::codes::NOT_LEADER_OR_FOLLOWER,
-        crate::codes::NOT_COORDINATOR,
-    ),
-    (
-        crate::codes::KAFKA_STORAGE_ERROR,
-        crate::codes::NOT_COORDINATOR,
-    ),
-    (
-        crate::codes::MESSAGE_TOO_LARGE,
-        crate::codes::UNKNOWN_SERVER_ERROR,
-    ),
-    (
-        crate::codes::RECORD_LIST_TOO_LARGE,
-        crate::codes::UNKNOWN_SERVER_ERROR,
-    ),
-    (
-        crate::codes::UNKNOWN_SERVER_ERROR,
-        crate::codes::UNKNOWN_SERVER_ERROR,
-    ),
+    (NOT_ENOUGH_REPLICAS, COORDINATOR_NOT_AVAILABLE),
+    (REQUEST_TIMED_OUT, COORDINATOR_NOT_AVAILABLE),
+    (NOT_LEADER_OR_FOLLOWER, NOT_COORDINATOR),
+    (KAFKA_STORAGE_ERROR, NOT_COORDINATOR),
+    (MESSAGE_TOO_LARGE, UNKNOWN_SERVER_ERROR),
+    (RECORD_LIST_TOO_LARGE, UNKNOWN_SERVER_ERROR),
+    (UNKNOWN_SERVER_ERROR, UNKNOWN_SERVER_ERROR),
 ];
 
 /// One heartbeat expiring after the fixed ten-millisecond test window.
 pub(crate) async fn expired_broker_fixture(
     broker: u64,
-) -> (
-    crate::heartbeat::controller_state::TestClock,
-    crate::heartbeat::controller_state::ControllerLivenessState,
-    Vec<crate::heartbeat::controller_state::LivenessTransition>,
-) {
+) -> (TestClock, ControllerLivenessState, Vec<LivenessTransition>) {
     use crate::heartbeat::controller_state::{ControllerLivenessState, TestClock};
     let clock = TestClock::new();
     let liveness =
@@ -2975,18 +2971,14 @@ pub(crate) fn voter_image(setup: VoterImageSetup) -> krabka_metadata::MetadataIm
 
 /// Start the allow-all fixture and wait for its local controller to lead.
 pub(crate) async fn started_controller_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
-    let (handle, dir) =
-        start_broker_with_authorizer(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+    let (handle, dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
     let broker = handle.broker_arc_for_test();
     wait_for_controller_leader(&broker).await;
     (handle, dir, broker)
 }
 
 /// Append a fixture batch through the partition's real log.
-pub(crate) fn append_partition_batch(
-    partition: &crate::partition::Partition,
-    batch: &mut RecordBatch,
-) {
+pub(crate) fn append_partition_batch(partition: &Partition, batch: &mut RecordBatch) {
     partition
         .log
         .lock()
@@ -3025,13 +3017,10 @@ pub(crate) fn listener_time_overrides(
 }
 
 /// Keep a sweep's log root alive alongside its initially empty registry.
-pub(crate) fn sweep_registry_fixture() -> (
-    tempfile::TempDir,
-    Arc<crate::partition_registry::PartitionRegistry>,
-) {
+pub(crate) fn sweep_registry_fixture() -> (tempfile::TempDir, Arc<PartitionRegistry>) {
     (
         tempfile::tempdir().expect("log root"),
-        Arc::new(crate::partition_registry::PartitionRegistry::new()),
+        Arc::new(PartitionRegistry::new()),
     )
 }
 

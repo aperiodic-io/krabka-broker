@@ -20,6 +20,7 @@ use crate::{
     codes,
     config::BreakGlassConfig,
     operator_keys::{OperatorKeyEntry, OperatorKeys},
+    test_support::{OperatorKeyFileSetup, ed25519_public_key_file},
 };
 
 // An operator key bound to `principal`, plus the signer for it.
@@ -28,9 +29,9 @@ fn operator_key(
     key_id: &str,
     principal: &str,
 ) -> (Ed25519KeyPair, OperatorKeyEntry) {
-    let (pair, path) = crate::test_support::ed25519_public_key_file(
+    let (pair, path) = ed25519_public_key_file(
         dir.path(),
-        crate::test_support::OperatorKeyFileSetup {
+        OperatorKeyFileSetup {
             name: &format!("{key_id}.pub"),
             context: "write key file",
         },

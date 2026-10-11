@@ -34,7 +34,10 @@
 
 use std::sync::{Arc, atomic::Ordering};
 
-use crate::{codes, partition::Partition, partition_registry::PartitionRegistry};
+use crate::{
+    broker::Broker, codes, log_dir_status::LogDirRegistry, partition::Partition,
+    partition_registry::PartitionRegistry,
+};
 
 /// Kafka's `ListOffsetsRequest.DEBUGGING_REPLICA_ID`: the one `replica_id`
 /// allowed to read a follower's own local log instead of being redirected to
@@ -47,7 +50,7 @@ pub(super) const DEBUGGING_REPLICA_ID: i32 = -2;
 #[derive(Clone, Copy)]
 pub(super) struct LeadershipContext<'a> {
     pub(super) partitions: &'a PartitionRegistry,
-    pub(super) log_dir_status: &'a crate::log_dir_status::LogDirRegistry,
+    pub(super) log_dir_status: &'a LogDirRegistry,
     pub(super) image: &'a krabka_metadata::MetadataImage,
     pub(super) node_id: krabka_metadata::NodeId,
 }
@@ -107,12 +110,12 @@ pub(super) fn resolve_leadership(
 }
 
 pub(super) fn resolve_for_broker(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     topic: &str,
     partition: i32,
     replica_id: i32,
     current_leader_epoch: i32,
-) -> Result<Arc<crate::partition::Partition>, i16> {
+) -> Result<Arc<Partition>, i16> {
     resolve_leadership(
         topic,
         partition,
@@ -134,32 +137,33 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::log_dir_status::LogDirRegistry;
+    use crate::{
+        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        test_support::{
+            StandalonePartitionSetup, spawn_standalone_partition, topic_partition_image,
+        },
+    };
 
     fn image_with_topic(topic: &str, leader: u64) -> MetadataImage {
-        crate::test_support::topic_partition_image(topic, 2, || {
-            crate::handlers::test_support::replicated_partition(
-                crate::handlers::test_support::ReplicatedPartitionSetup {
-                    topic,
-                    leader: krabka_audit::NodeId(leader),
-                    replicas: &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-                    ..Default::default()
-                },
-            )
+        topic_partition_image(topic, 2, || {
+            replicated_partition(ReplicatedPartitionSetup {
+                topic,
+                leader: krabka_audit::NodeId(leader),
+                replicas: &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
+                ..Default::default()
+            })
         })
     }
 
     fn local_partition(dir: &std::path::Path) -> Arc<Partition> {
         let log = krabka_log::Log::open(
-            crate::log_dir::partition_dir(dir, "orders", 0),
+            partition_dir(dir, "orders", 0),
             krabka_log::LogConfig::default(),
         )
         .expect("open log");
-        crate::test_support::spawn_standalone_partition(
-            dir,
-            log,
-            crate::test_support::StandalonePartitionSetup::default(),
-        )
+        spawn_standalone_partition(dir, log, StandalonePartitionSetup::default())
     }
 
     #[derive(Clone, Copy, Default)]

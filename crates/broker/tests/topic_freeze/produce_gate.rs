@@ -11,7 +11,7 @@ use krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXE
 use crate::{
     control_plane::freeze_scope,
     support,
-    wire::{CONTROL, accepted, create_topic, refused},
+    wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
 };
 
 /// A literal freeze stops writes to the topic it names, and to nothing else.
@@ -23,7 +23,7 @@ use crate::{
 /// nothing proves that `POLICY_VIOLATION` ever reaches a producer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_literal_freeze_refuses_produce_and_the_control_topic_still_accepts() {
-    let (p, frozen, control) = Box::pin(crate::wire::controlled_fixture("orders")).await;
+    let (p, frozen, control) = Box::pin(controlled_fixture("orders")).await;
 
     crate::wire::check_produce!(&p.broker, &p.client, "orders", frozen => accepted(1));
     crate::wire::check_produce!(&p.broker, &p.client, CONTROL, control => accepted(1));

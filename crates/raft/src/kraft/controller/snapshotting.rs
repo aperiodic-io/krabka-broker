@@ -21,7 +21,10 @@ use super::{
     },
     recovery::replay_committed,
 };
-use crate::error::RaftError;
+use crate::{
+    error::RaftError,
+    snapshot::{SnapshotReader, SnapshotWriter},
+};
 
 impl Engine {
     /// (Every voter, KIP-630) once the committed offset has advanced past the
@@ -100,7 +103,7 @@ impl Engine {
     /// either retention cleaning or pruning changes the readable log prefix.
     fn write_current_snapshot(&mut self) -> Result<Offset, RaftError> {
         let last_contained_ts = self.last_contained_ts(self.log.hwm());
-        let bytes = crate::snapshot::SnapshotWriter::serialize(&self.image, last_contained_ts)?;
+        let bytes = SnapshotWriter::serialize(&self.image, last_contained_ts)?;
         let end_offset = self.write_snapshot_checkpoint(&bytes)?;
         self.last_snapshot_timestamp_ms = last_contained_ts;
         Ok(end_offset)
@@ -124,13 +127,13 @@ impl Engine {
             ));
         }
         let last_contained_ts = self.last_contained_ts(pending.end_offset);
-        let bytes = crate::snapshot::SnapshotWriter::serialize(&pending.image, last_contained_ts)?;
+        let bytes = SnapshotWriter::serialize(&pending.image, last_contained_ts)?;
         // KIP-1155 is a snapshot reload, not only a checkpoint write. Decode
         // the exact bytes first and rebuild every metadata index from their
         // lower-version record representation before discarding the log
         // prefix. This also proves locally that the checkpoint is readable
         // before any durable state is pruned.
-        let contents = crate::snapshot::SnapshotReader::read(&bytes)?;
+        let contents = SnapshotReader::read(&bytes)?;
         let mut reloaded =
             MetadataImage::from_records(pending.image.cluster_id(), &contents.metadata_records);
         if let Some(control) = &contents.control_state {
@@ -234,7 +237,7 @@ impl Engine {
         }
         let end_offset = self.log.hwm();
         let last_contained_ts = self.last_contained_ts(end_offset);
-        let bytes = crate::snapshot::SnapshotWriter::serialize(&self.image, last_contained_ts)?;
+        let bytes = SnapshotWriter::serialize(&self.image, last_contained_ts)?;
         let epoch = i32::try_from(self.core.quorum_state().leader_epoch).unwrap_or(i32::MAX);
         // Checkpoint filenames encode the raw offset (on-disk boundary).
         write_checkpoint(&self.data_dir, end_offset.0, epoch, &bytes)?;

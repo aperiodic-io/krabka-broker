@@ -9,7 +9,7 @@ use qubit_clock::{ManualMonotonicClock, MonotonicClock as _, StdTimer};
 use super::*;
 use crate::{
     oauth_jwks::test_support::{
-        JWKS_BODY, await_until, dormant_timer, make_signal_refresher, serve_jwks,
+        JWKS_BODY, RefresherSetup, await_until, dormant_timer, make_signal_refresher, serve_jwks,
         serve_jwks_counting, serve_jwks_https, test_refresher,
     },
     test_support::{BrokenTimer, TimerFailure},
@@ -38,7 +38,7 @@ async fn refresher_populates_handle_then_stops_on_shutdown() {
     let refresher = test_refresher(
         handle.clone(),
         shutdown.clone(),
-        crate::oauth_jwks::test_support::RefresherSetup { endpoint: format!("http://{addr}/jwks"), timer: // The production timer, so that one test covers the real thing
+        RefresherSetup { endpoint: format!("http://{addr}/jwks"), timer: // The production timer, so that one test covers the real thing
         // driving this loop. `StdTimer` needs no Tokio runtime of its own.
         Arc::new(StdTimer::new()), ..Default::default() },
     );
@@ -63,7 +63,7 @@ async fn refresher_fetches_jwks_over_https_with_custom_trust() {
     let refresher = test_refresher(
         handle.clone(),
         shutdown.clone(),
-        crate::oauth_jwks::test_support::RefresherSetup { endpoint: format!("https://127.0.0.1:{}/jwks", addr.port()), tls_trust: Some(ca_path), timer: // This test asserts on the t=0 fetch alone, so the periodic tick is
+        RefresherSetup { endpoint: format!("https://127.0.0.1:{}/jwks", addr.port()), tls_trust: Some(ca_path), timer: // This test asserts on the t=0 fetch alone, so the periodic tick is
         // parked rather than re-fetching over TLS every 50 ms of real time.
         dormant_timer(), ..Default::default() },
     );
@@ -103,7 +103,7 @@ async fn refresher_https_fetch_fails_when_custom_trust_doesnt_match_server_cert(
     let refresher = test_refresher(
         handle.clone(),
         shutdown.clone(),
-        crate::oauth_jwks::test_support::RefresherSetup {
+        RefresherSetup {
             endpoint: format!("https://127.0.0.1:{}/jwks", addr.port()),
             interval,
             tls_trust: Some(bogus_ca),
@@ -428,7 +428,7 @@ fn dead_timer_refresher(
     test_refresher(
         handle.clone(),
         CancellationToken::new(),
-        crate::oauth_jwks::test_support::RefresherSetup {
+        RefresherSetup {
             endpoint: format!("http://{addr}/jwks"),
             timer: timer.injectable(),
             ..Default::default()

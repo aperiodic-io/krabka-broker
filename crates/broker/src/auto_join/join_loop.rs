@@ -15,6 +15,10 @@ use super::{
     request::{advertised_controller_listener, build_add_raft_voter_request, join_target},
     rpc::{send_add_raft_voter, send_remove_raft_voter},
 };
+#[cfg(test)]
+use crate::Broker;
+#[cfg(test)]
+use crate::BrokerConfig;
 
 /// Drive the auto-join loop. Returns immediately (without touching the
 /// network) when `auto_join` is disabled. Otherwise loops until this broker
@@ -143,7 +147,10 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
-    use crate::test_support::FakeMetadataSource;
+    use crate::{
+        auto_join::test_support::params, metadata_source::MetadataSource,
+        test_support::FakeMetadataSource,
+    };
 
     fn image_with_voter(node_id: NodeId) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
@@ -168,21 +175,21 @@ mod tests {
     /// `run` honoured the flag it never dials; if it regressed and dialed, the
     /// loop would spin against the unreachable address and the timeout would
     /// fire (failing the test).
-    fn voter_params(source: Arc<dyn crate::metadata_source::MetadataSource>) -> AutoJoinParams {
+    fn voter_params(source: Arc<dyn MetadataSource>) -> AutoJoinParams {
         AutoJoinParams {
             retry_backoff: millis(7),
             voter_request_timeout: secs(30),
             node_id: NodeId(7),
             directory_id: uuid::Uuid::from_u128(7),
-            ..crate::auto_join::test_support::params(source, vec!["127.0.0.1:1".to_string()])
+            ..params(source, vec!["127.0.0.1:1".to_string()])
         }
     }
 
     #[tokio::test]
     async fn run_returns_immediately_when_auto_join_disabled() {
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let config = crate::BrokerConfig::for_tests(tempdir.path().to_path_buf());
-        let handle = crate::Broker::start(config).await.expect("broker start");
+        let config = BrokerConfig::for_tests(tempdir.path().to_path_buf());
+        let handle = Broker::start(config).await.expect("broker start");
         let broker = handle.broker_arc_for_test();
 
         let params = AutoJoinParams {

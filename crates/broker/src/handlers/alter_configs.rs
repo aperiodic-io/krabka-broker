@@ -36,9 +36,16 @@ mod test_support;
 mod tests;
 
 use self::resource::process_resource;
-use crate::handlers::describe_configs::{
-    RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
-    RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+use crate::{
+    codes::{INVALID_CONFIG, INVALID_REQUEST, NONE, NOT_CONTROLLER, UNKNOWN_SERVER_ERROR},
+    config_keys::{MIN_INSYNC_REPLICAS, is_controller_managed_topic_config},
+    handlers::{
+        audit_resource,
+        describe_configs::{
+            RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
+            RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+        },
+    },
 };
 
 /// Both config APIs validate and audit resources in request order.
@@ -104,13 +111,13 @@ pub(super) fn submission_code<T>(
     log_failure: impl FnOnce(krabka_raft::RaftError),
 ) -> i16 {
     match result {
-        Ok(_) => crate::codes::NONE,
+        Ok(_) => NONE,
         Err(krabka_raft::RaftError::NotLeader { .. } | krabka_raft::RaftError::LeaderUnknown) => {
-            crate::codes::NOT_CONTROLLER
+            NOT_CONTROLLER
         }
         Err(error) => {
             log_failure(error);
-            crate::codes::UNKNOWN_SERVER_ERROR
+            UNKNOWN_SERVER_ERROR
         }
     }
 }
@@ -131,7 +138,7 @@ fn audit_resources_for(
         RESOURCE_TYPE_TOPIC => changed_config_keys(
             resource,
             image.topic_config(&resource.resource_name),
-            crate::config_keys::is_controller_managed_topic_config,
+            is_controller_managed_topic_config,
         ),
         RESOURCE_TYPE_GROUP => changed_config_keys(
             resource,
@@ -149,10 +156,7 @@ fn audit_resources_for(
             .map(|config| config.name.clone())
             .collect(),
     };
-    out.extend(
-        keys.into_iter()
-            .map(|key| crate::handlers::audit_resource("ConfigKey", key)),
-    );
+    out.extend(keys.into_iter().map(|key| audit_resource("ConfigKey", key)));
     out
 }
 
@@ -238,17 +242,14 @@ pub(super) fn validate_resource_shape<'a>(
 ) -> Result<(), (i16, String)> {
     if is_duplicate {
         return Err((
-            crate::codes::INVALID_REQUEST,
+            INVALID_REQUEST,
             "Each resource must appear at most once.".into(),
         ));
     }
     let configs: Vec<(&str, bool)> = configs.into_iter().collect();
     let mut seen = std::collections::BTreeSet::new();
     if configs.iter().any(|(name, _)| !seen.insert(*name)) {
-        return Err((
-            crate::codes::INVALID_REQUEST,
-            "Error due to duplicate config keys".into(),
-        ));
+        return Err((INVALID_REQUEST, "Error due to duplicate config keys".into()));
     }
     let null_names: Vec<&str> = configs
         .iter()
@@ -257,7 +258,7 @@ pub(super) fn validate_resource_shape<'a>(
         .collect();
     if !null_names.is_empty() {
         return Err((
-            crate::codes::INVALID_REQUEST,
+            INVALID_REQUEST,
             format!("Null value not supported for : {}", null_names.join(", ")),
         ));
     }
@@ -280,14 +281,12 @@ pub(super) fn changes_min_isr(
             include_topic
                 && image
                     .topic_config(&config.topic)
-                    .and_then(|current| current.get(crate::config_keys::MIN_INSYNC_REPLICAS))
-                    != config
-                        .overrides
-                        .get(crate::config_keys::MIN_INSYNC_REPLICAS)
+                    .and_then(|current| current.get(MIN_INSYNC_REPLICAS))
+                    != config.overrides.get(MIN_INSYNC_REPLICAS)
         }
         krabka_metadata::MetadataRecord::V1BrokerConfig(config) => {
             config.node_id == krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID
-                && config.config_name == crate::config_keys::MIN_INSYNC_REPLICAS
+                && config.config_name == MIN_INSYNC_REPLICAS
                 && image
                     .broker_config(config.node_id)
                     .and_then(|current| current.get(&config.config_name))
@@ -319,7 +318,7 @@ pub(super) fn config_value_size_error(
     });
     oversized.then(|| {
         (
-            crate::codes::INVALID_CONFIG,
+            INVALID_CONFIG,
             format!(
                 "The configuration value cannot be added because it exceeds the maximum value \
                  size of {MAX_CONFIG_VALUE_LENGTH} bytes."

@@ -9,18 +9,19 @@ use crate::{
     config_keys,
     handlers::describe_configs::{
         resources::tests::{describe_topic, entry_named},
-        test_support::TopicConfigSetup,
+        test_support::{TopicConfigSetup, set_topic_config},
         wire::{CONFIG_SOURCE_DEFAULT, CONFIG_SOURCE_DYNAMIC_TOPIC},
     },
+    test_support::{FrozenTopicsImageSetup, frozen_topics_image},
 };
 
 /// A metadata image whose freeze registry holds `entries`, and nothing else. A
 /// freeze never reaches a topic-config record, so the image needs no topic and
 /// no override map to answer the synthesised key.
 fn image_with_freezes(entries: &[(&str, PatternType)]) -> MetadataImage {
-    crate::test_support::frozen_topics_image(
+    frozen_topics_image(
         entries,
-        crate::test_support::FrozenTopicsImageSetup {
+        FrozenTopicsImageSetup {
             cluster: Uuid::nil(),
         },
     )
@@ -112,10 +113,7 @@ fn topic_describe_places_write_freeze_beside_the_stored_overrides() {
 #[test]
 fn topic_describe_applies_the_key_filter_to_the_synthesised_key() {
     let mut image = image_with_freezes(&[("orders", PatternType::Literal)]);
-    crate::handlers::describe_configs::test_support::set_topic_config(
-        &mut image,
-        TopicConfigSetup::default(),
-    );
+    set_topic_config(&mut image, TopicConfigSetup::default());
 
     for (label, keys, expected) in [
         (

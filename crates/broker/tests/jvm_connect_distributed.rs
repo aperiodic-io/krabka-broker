@@ -51,6 +51,11 @@ use std::{
 use assert2::assert;
 use jvm_acceptance::broker0_advertised;
 
+use crate::{
+    jvm_acceptance::{create_console_topic_at, describe_console_topic_configs},
+    support::{docker_logs, remove_container},
+};
+
 /// The Apache Kafka image the worker runs from. Its tarball is the whole
 /// release, so `connect-distributed.sh` and the `FileStream` connector jar are
 /// both in it.
@@ -95,7 +100,7 @@ struct ConnectWorker {
 
 impl Drop for ConnectWorker {
     fn drop(&mut self) {
-        crate::support::remove_container(&self.container);
+        remove_container(&self.container);
     }
 }
 
@@ -169,7 +174,7 @@ impl ConnectWorker {
     /// `listOffsets` that never answered or a plugin that was not found is
     /// written down.
     fn logs(&self) -> String {
-        crate::support::docker_logs(&self.container)
+        docker_logs(&self.container)
     }
 
     /// One file inside the container, or `None` if it is not there yet. The
@@ -343,12 +348,12 @@ fn http(
 /// `cleanup.policy=compact` line here is `TopicAdmin`'s `CreateTopics` config
 /// having survived on the broker rather than a default being echoed back.
 fn describe_topic_configs(bootstrap: &str, topic: &str) -> String {
-    crate::jvm_acceptance::describe_console_topic_configs(bootstrap, topic)
+    describe_console_topic_configs(bootstrap, topic)
 }
 
 /// Create a one-partition topic through the JVM `kafka-topics` tool.
 fn create_topic(bootstrap: &str, topic: &str) {
-    crate::jvm_acceptance::create_console_topic_at(bootstrap, topic);
+    create_console_topic_at(bootstrap, topic);
 }
 
 /// A distributed Connect worker boots against krabka, runs a `FileStream`

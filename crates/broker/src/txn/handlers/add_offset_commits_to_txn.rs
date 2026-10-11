@@ -26,8 +26,8 @@ use crate::{
     txn::{
         coordinator::TxnCoordinator,
         state::{TopicPartition, TxnEntry, TxnState},
-        util::now_millis,
-        version::TxnVersion,
+        util::{now_millis, producer_fenced_wire_code},
+        version::{TxnVersion, resolve_txn_version},
     },
 };
 
@@ -82,7 +82,7 @@ fn serve(
         // before checking coordinator-ness, to avoid a race. Resolve the
         // finalized transaction.version from the same image read.
         let image = controller.current_image();
-        let txnv = crate::txn::version::resolve_txn_version(&image);
+        let txnv = resolve_txn_version(&image);
         drop(coord.refresh_leader_partitions(&image).await);
 
         // KIP-890 / Kafka model: a consumer-group offset commit is represented
@@ -101,7 +101,7 @@ fn serve(
             txnv,
         )
         .await;
-        AddOffsetsToTxnResponse::error(crate::txn::util::producer_fenced_wire_code(version, code))
+        AddOffsetsToTxnResponse::error(producer_fenced_wire_code(version, code))
     })
 }
 

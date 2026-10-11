@@ -16,7 +16,7 @@ use super::{
     response::{fail_authenticate_with, sasl_ok},
     state::{ConnectionAuth, SaslExchange, session_expiry},
 };
-use crate::codes::ILLEGAL_SASL_STATE;
+use crate::{codes::ILLEGAL_SASL_STATE, time_util::now_ms};
 
 /// Handles `SaslAuthenticate` (`api_key` 36) for the PLAIN mechanism.
 ///
@@ -95,8 +95,7 @@ pub fn handle_authenticate_plain<S: BuildHasher>(
                     .to_owned(),
             );
         }
-        let (expires_at_ms, session_lifetime_ms) =
-            session_expiry(crate::time_util::now_ms(), None, max_reauth);
+        let (expires_at_ms, session_lifetime_ms) = session_expiry(now_ms(), None, max_reauth);
         *auth = ConnectionAuth::Authenticated {
             principal: p,
             mechanism: SaslMechanism::Plain,
@@ -114,9 +113,14 @@ mod tests {
     use krabka_security::AuthMethod;
 
     use super::*;
-    use crate::network::auth::{
-        state::AuthenticatedSnapshot,
-        test_support::{assert_failed_authenticate_response, assert_success_authenticate_response},
+    use crate::{
+        network::auth::{
+            state::AuthenticatedSnapshot,
+            test_support::{
+                assert_failed_authenticate_response, assert_success_authenticate_response,
+            },
+        },
+        test_support::sasl_principal,
     };
 
     fn credentials() -> HashMap<String, String> {
@@ -152,7 +156,7 @@ mod tests {
 
     fn alice_session() -> AuthenticatedSnapshot {
         AuthenticatedSnapshot {
-            principal: crate::test_support::sasl_principal("alice"),
+            principal: sasl_principal("alice"),
             mechanism: SaslMechanism::Plain,
             expires_at_ms: Some(9_000),
             authenticated_via_token: false,
@@ -179,7 +183,7 @@ mod tests {
             (
                 "already authenticated as someone else",
                 ConnectionAuth::Authenticated {
-                    principal: crate::test_support::sasl_principal("bob"),
+                    principal: sasl_principal("bob"),
                     mechanism: SaslMechanism::Plain,
                     expires_at_ms: None,
                     authenticated_via_token: false,

@@ -11,7 +11,14 @@ use tracing::Instrument as _;
 use super::{AfterResponse, response::encode_response, session::principal_or_anonymous};
 use crate::{
     error::BrokerError,
-    network::{codec::KafkaCodec, fetch_writer::WriteOp},
+    handlers::{
+        RequestContext,
+        fetch::{encode_fetch_response, handle},
+    },
+    network::{
+        codec::{KafkaCodec, response_frame_length},
+        fetch_writer::{SendfileSink, WriteOp, resolve_records_inline, write_fetch_plan},
+    },
 };
 
 /// A finished fetch: the ordered write plan for its response, and the KIP-219
@@ -28,10 +35,9 @@ pub(super) async fn dispatch_fetch<S>(
     request_span: tracing::Span,
 ) -> AfterResponse
 where
-    S: AsyncRead + AsyncWrite + Unpin + crate::network::fetch_writer::SendfileSink,
+    S: AsyncRead + AsyncWrite + Unpin + SendfileSink,
 {
-    let sendfile_capable =
-        crate::network::fetch_writer::SendfileSink::is_sendfile_capable(framed.get_ref());
+    let sendfile_capable = SendfileSink::is_sendfile_capable(framed.get_ref());
     match handle_fetch_frame_from_parsed(context, sendfile_capable)
         .instrument(request_span)
         .await
@@ -44,12 +50,8 @@ where
                 tracing::warn!(%error, "framed.flush error before fetch plan, closing");
                 return AfterResponse::Close;
             }
-            if let Err(error) = crate::network::fetch_writer::write_fetch_plan(
-                framed.get_mut(),
-                operations,
-                &context.broker.metrics,
-            )
-            .await
+            if let Err(error) =
+                write_fetch_plan(framed.get_mut(), operations, &context.broker.metrics).await
             {
                 tracing::warn!(%error, "fetch plan write error, closing");
                 return AfterResponse::Close;
@@ -111,7 +113,7 @@ async fn handle_fetch_frame_from_parsed(
     assert2::assert!((parsed.api_key) == (1));
 
     let principal = principal_or_anonymous(auth);
-    let ctx = crate::handlers::RequestContext::new(
+    let ctx = RequestContext::new(
         principal,
         peer,
         parsed.client_id,
@@ -121,7 +123,7 @@ async fn handle_fetch_frame_from_parsed(
     )
     .with_correlation_id(parsed.correlation_id);
 
-    let (resp, version) = crate::handlers::fetch::handle(
+    let (resp, version) = handle(
         broker,
         parsed.api_version,
         parsed.correlation_id,
@@ -136,7 +138,7 @@ async fn handle_fetch_frame_from_parsed(
     if version < 4 {
         // Legacy down-conversion path: encode the whole body the old way and
         // wrap it (plus the response header) as a single inline op.
-        let body_bytes = crate::handlers::fetch::encode_fetch_response(resp, version)?;
+        let body_bytes = encode_fetch_response(resp, version)?;
         let framed = encode_response(
             parsed.api_key,
             parsed.correlation_id,
@@ -145,7 +147,7 @@ async fn handle_fetch_frame_from_parsed(
         )?;
         // Prepend the 4-byte frame length so the writer path is uniform.
         let mut framed_with_len = BytesMut::with_capacity(4 + framed.len());
-        framed_with_len.put_u32(crate::network::codec::response_frame_length(framed.len())?);
+        framed_with_len.put_u32(response_frame_length(framed.len())?);
         framed_with_len.put_slice(&framed);
         return Ok(FetchPlan {
             operations: vec![WriteOp::Inline(framed_with_len.freeze())],
@@ -181,7 +183,7 @@ async fn handle_fetch_frame_from_parsed(
         version,
         parsed.correlation_id,
         parsed.body_flexible,
-        crate::network::fetch_writer::resolve_records_inline,
+        resolve_records_inline,
     )
     .map(|operations| FetchPlan {
         operations,

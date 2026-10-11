@@ -23,6 +23,8 @@ use std::net::SocketAddr;
 use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use tokio_util::sync::CancellationToken;
 
+#[cfg(not(target_family = "wasm"))]
+use crate::http_server::spawn;
 use crate::metrics::SharedRegistry;
 
 /// Builds the router. It serves `/metrics` for Prometheus, and
@@ -56,7 +58,7 @@ pub(crate) async fn run(
     let bound = listener.local_addr()?;
     tracing::info!(%bound, "metrics server listening");
     let app = router(registry, profiling)?;
-    crate::http_server::spawn(listener, app, shutdown, |error| {
+    spawn(listener, app, shutdown, |error| {
         tracing::warn!(error = %error, "metrics server error");
     });
     Ok(bound)

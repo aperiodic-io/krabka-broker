@@ -5,10 +5,13 @@ use std::io::Write as _;
 
 use assert2::assert;
 
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE, KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image,
-    docker_run_kafka_tool_with_mount, nc_check_connectivity, start_host_broker,
-    start_host_broker_in, wait_jvm_partition_leader, write_temp_file,
+use crate::{
+    jvm_acceptance::{
+        KAFKA_IMAGE, KAFKA_IMAGE_TXN, broker0_advertised, create_console_topic,
+        docker_run_kafka_tool_with_image, docker_run_kafka_tool_with_mount, nc_check_connectivity,
+        start_host_broker, start_host_broker_in, wait_jvm_partition_leader, write_temp_file,
+    },
+    support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_parse_offset},
 };
 
 /// `kafka-delete-records --offset-json-file <(...)`: produce 20
@@ -84,19 +87,13 @@ async fn kafka_delete_records_trim_survives_a_broker_restart() {
 
 /// One partition at replication factor one, which is all a single node hosts.
 fn create_topic(topic: &str) {
-    crate::jvm_acceptance::create_console_topic(
-        crate::jvm_acceptance::KAFKA_IMAGE,
-        &[],
-        topic,
-        1,
-        1,
-    );
+    create_console_topic(KAFKA_IMAGE, &[], topic, 1, 1);
 }
 
 /// Produce `count` records to `topic` through `kafka-console-producer`, one
 /// line per record on the tool's stdin.
 fn produce_lines(topic: &str, count: usize) {
-    let mut child = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let mut child = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE,
         args: &[
             "kafka-console-producer",
@@ -105,7 +102,7 @@ fn produce_lines(topic: &str, count: usize) {
             "--topic",
             topic,
         ],
-        input: crate::support::ContainerInput::Attached,
+        input: ContainerInput::Attached,
         ..Default::default()
     })
     .stdin(std::process::Stdio::piped())
@@ -188,5 +185,5 @@ fn jvm_earliest_offset(topic: &str) -> i64 {
         .map(str::trim)
         .find(|line| line.starts_with(&prefix))
         .unwrap_or_else(|| panic!("kafka-get-offsets printed no row for {topic}-0: {stdout}"));
-    crate::support::jvm_parse_offset(line)
+    jvm_parse_offset(line)
 }

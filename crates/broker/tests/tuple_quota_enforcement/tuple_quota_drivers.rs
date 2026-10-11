@@ -16,7 +16,13 @@ use assert2::assert;
 use krabka_protocol::owned::produce_response::ProduceResponse;
 
 pub use crate::kafka_wire::quotas::drive_alter_client_quotas_sasl;
-use crate::{CLIENT_ID, kafka_wire};
+use crate::{
+    CLIENT_ID,
+    kafka_wire::{
+        self, PlainAuthenticationSetup, ProduceRecordCount, SaslProduceSetup,
+        ZeroFilledRecordsSetup,
+    },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire driver for Produce with explicit on-wire client_id
@@ -31,16 +37,16 @@ pub(crate) async fn await_authorized_produce(
     loop {
         let response = kafka_wire::produce_sasl_with_ids(
             addr,
-            crate::kafka_wire::SaslProduceSetup {
-                authentication: crate::kafka_wire::PlainAuthenticationSetup {
+            SaslProduceSetup {
+                authentication: PlainAuthenticationSetup {
                     client_id: CLIENT_ID,
                     password: (password).to_vec(),
                     ..Default::default()
                 },
                 produce_client_id: client_id,
-                records: crate::kafka_wire::ZeroFilledRecordsSetup {
+                records: ZeroFilledRecordsSetup {
                     topic: ("tuple-quota-topic").to_string(),
-                    count: crate::kafka_wire::ProduceRecordCount(4),
+                    count: ProduceRecordCount(4),
                     ..Default::default()
                 },
             },

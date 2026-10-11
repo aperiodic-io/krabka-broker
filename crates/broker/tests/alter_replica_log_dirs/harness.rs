@@ -13,13 +13,13 @@ use std::{
 
 use assert2::assert;
 
-use crate::wire::describe_log_dirs;
+use crate::{support::storage::count_partition_dirs, wire::describe_log_dirs};
 
 pub(crate) fn count_topic_dirs(dir: &std::path::Path, topic: &str) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
-    crate::support::storage::count_partition_dirs(entries, topic, false)
+    count_partition_dirs(entries, topic, false)
 }
 
 /// Wait until `DescribeLogDirs` reports both partitions of `topic`

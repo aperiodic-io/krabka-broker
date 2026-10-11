@@ -33,6 +33,13 @@ use krabka_broker::{
 use krabka_client_producer::{Acks, Producer, ProducerRecord};
 use tempfile::TempDir;
 
+use crate::support::{
+    NodeIndex, RoleNodeSetup,
+    client::create_topic_for_broker,
+    producer::{ProducerRecordSetup, producer_record},
+    topics::{CreateTopicSetup, TopicReplicationFactor},
+};
+
 mod support;
 
 /// The topic that takes the first placement on every broker, so the topic
@@ -91,7 +98,7 @@ async fn start_cluster() -> Cluster {
     let controller_dir = TempDir::new().unwrap();
     let ctrl_cfg = topology.config(
         controller_dir.path(),
-        crate::support::RoleNodeSetup {
+        RoleNodeSetup {
             role: NodeRole::Controller,
             ..Default::default()
         },
@@ -111,8 +118,8 @@ async fn start_cluster() -> Cluster {
         let extra = TempDir::new().unwrap();
         let mut cfg = topology.config(
             primary.path(),
-            crate::support::RoleNodeSetup {
-                index: crate::support::NodeIndex(index),
+            RoleNodeSetup {
+                index: NodeIndex(index),
                 mode: BootstrapMode::Join,
                 ..Default::default()
             },
@@ -226,14 +233,12 @@ async fn produce(producer: &Producer, timestamp_ms: i64) {
     producer
         .send(ProducerRecord {
             timestamp_ms: Some(timestamp_ms),
-            ..crate::support::producer::producer_record(
-                crate::support::producer::ProducerRecordSetup {
-                    topic: TOPIC.to_owned(),
-                    partition: Some(krabka_ids::PartitionIndex(0)),
-                    value: Some(Bytes::from_static(b"log-dir-failure")),
-                    ..Default::default()
-                },
-            )
+            ..producer_record(ProducerRecordSetup {
+                topic: TOPIC.to_owned(),
+                partition: Some(krabka_ids::PartitionIndex(0)),
+                value: Some(Bytes::from_static(b"log-dir-failure")),
+                ..Default::default()
+            })
         })
         .await
         .expect("the leader acknowledges the record");
@@ -243,21 +248,21 @@ async fn produce(producer: &Producer, timestamp_ms: i64) {
 async fn a_follower_whose_log_directory_fails_leaves_the_isr() {
     support::init_tracing();
     let cluster = start_cluster().await;
-    crate::support::client::create_topic_for_broker(
+    create_topic_for_broker(
         &cluster.brokers[0].handle,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: FILLER,
-            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            replication_factor: TopicReplicationFactor(3),
             ..Default::default()
         },
     )
     .await;
     wait_until_materialized(&cluster.brokers, &format!("{FILLER}-0")).await;
-    crate::support::client::create_topic_for_broker(
+    create_topic_for_broker(
         &cluster.brokers[0].handle,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: TOPIC,
-            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            replication_factor: TopicReplicationFactor(3),
             ..Default::default()
         },
     )

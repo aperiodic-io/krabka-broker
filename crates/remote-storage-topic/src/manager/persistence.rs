@@ -13,6 +13,7 @@ use super::TopicBasedRemoteLogMetadataManager;
 use crate::{
     error::{CodecError, SnapshotError},
     log::PartitionStart,
+    snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
 };
 
 impl TopicBasedRemoteLogMetadataManager {
@@ -25,7 +26,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// highest committed offset written, for the "advanced since last"
     /// check.
     #[instrument(skip_all, err)]
-    pub(super) fn write_snapshot(&self) -> Result<i64, crate::error::SnapshotError> {
+    pub(super) fn write_snapshot(&self) -> Result<i64, SnapshotError> {
         // Benign-replay invariant: the pump updates `inner` BEFORE bumping
         // `applied`, so the captured cache may lead the captured committed
         // offset by at most one event (the in-flight one). On resume that
@@ -40,11 +41,11 @@ impl TopicBasedRemoteLogMetadataManager {
             (applied.clone(), dump)
         };
         let max = committed_offsets.iter().copied().max().unwrap_or(-1);
-        let snap = crate::snapshot::Snapshot {
+        let snap = Snapshot {
             committed_offsets,
             dump,
         };
-        let path = self.snapshot_dir.join(crate::snapshot::SNAPSHOT_FILE_NAME);
+        let path = self.snapshot_dir.join(SNAPSHOT_FILE_NAME);
         snap.write_atomic(&path)?;
         Ok(max)
     }
@@ -65,7 +66,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// imported. [`Self::resume_start_offset`] is the only place the
     /// `committed + 1` policy lives; do not recompute it elsewhere.
     pub(super) fn resume_from_snapshot(
-        snapshot: Option<&crate::snapshot::Snapshot>,
+        snapshot: Option<&Snapshot>,
         n: usize,
     ) -> Result<(Vec<i64>, Vec<PartitionStart>), SnapshotError> {
         let mut committed = vec![-1i64; n];
@@ -121,11 +122,17 @@ mod tests {
     use super::*;
     use crate::{
         log::{InProcessMetadataEventLog, MetadataEventLog},
-        manager::test_support::{finish, on_blocking, snapshot_test_dir, started, tp},
+        manager::test_support::{
+            finish, on_blocking, snapshot_test_dir, start_manager_in, start_seeded_manager_in,
+            started, tp,
+        },
+        partitioning::metadata_partition_for,
+        serde::MetadataEvent,
+        snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
     };
 
-    fn snapshot_with_offsets(committed_offsets: Vec<i64>) -> crate::snapshot::Snapshot {
-        crate::snapshot::Snapshot {
+    fn snapshot_with_offsets(committed_offsets: Vec<i64>) -> Snapshot {
+        Snapshot {
             committed_offsets,
             dump: RlmmCacheDump::default(),
         }
@@ -166,10 +173,10 @@ mod tests {
     async fn invalid_snapshot_cursor_discards_stale_dump_and_replays_from_zero() {
         let dir = snapshot_test_dir("invalid-cursor");
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
-        let mp = crate::partitioning::metadata_partition_for(&tp(), log.partition_count());
+        let mp = metadata_partition_for(&tp(), log.partition_count());
         let mut committed_offsets = vec![-1; 4];
         committed_offsets[usize::try_from(mp).unwrap()] = i64::MAX;
-        let snapshot = crate::snapshot::Snapshot {
+        let snapshot = Snapshot {
             committed_offsets,
             dump: RlmmCacheDump {
                 partitions: vec![PartitionDump {
@@ -180,11 +187,11 @@ mod tests {
             },
         };
         snapshot
-            .write_atomic(&dir.join(crate::snapshot::SNAPSHOT_FILE_NAME))
+            .write_atomic(&dir.join(SNAPSHOT_FILE_NAME))
             .expect("write invalid semantic snapshot");
 
-        let manager = crate::manager::test_support::start_manager_in(log, dir.clone())
-            .expect("invalid cursor falls back to full replay");
+        let manager =
+            start_manager_in(log, dir.clone()).expect("invalid cursor falls back to full replay");
         check!(manager.committed_offset(mp) == -1);
         manager.reconcile_assignment(&[mp]).await;
         check!(manager.metadata_partition_ready(mp));
@@ -197,10 +204,9 @@ mod tests {
     async fn stale_snapshot_cursor_replays_the_exact_lifecycle_suffix() {
         let dir = snapshot_test_dir("stale-cursor");
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
-        let mp = crate::partitioning::metadata_partition_for(&tp(), log.partition_count());
+        let mp = metadata_partition_for(&tp(), log.partition_count());
 
-        let writer =
-            crate::manager::test_support::start_manager_in(log.clone(), dir.clone()).unwrap();
+        let writer = start_manager_in(log.clone(), dir.clone()).unwrap();
         writer.reconcile_assignment(&[mp]).await;
         let writer_for_add = writer.clone();
         on_blocking(move || {
@@ -212,15 +218,12 @@ mod tests {
         writer.shutdown_and_flush().await;
 
         let suffix_offset = log
-            .publish(
-                mp,
-                crate::serde::MetadataEvent::UpdateSegment(finish(10)).encode(),
-            )
+            .publish(mp, MetadataEvent::UpdateSegment(finish(10)).encode())
             .await
             .expect("append lifecycle suffix");
         check!(suffix_offset == 1);
 
-        let resumed = crate::manager::test_support::start_manager_in(log, dir.clone()).unwrap();
+        let resumed = start_manager_in(log, dir.clone()).unwrap();
         check!(resumed.committed_offset(mp) == 0);
         resumed.reconcile_assignment(&[mp]).await;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -245,21 +248,14 @@ mod tests {
     async fn shutdown_flushes_a_snapshot_covering_applied_events() {
         let dir = snapshot_test_dir("mgr-snap");
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
-        let m = crate::manager::test_support::start_seeded_manager_in(
-            log.clone(),
-            dir.clone(),
-            &[(10, 0, 99)],
-        )
-        .await;
+        let m = start_seeded_manager_in(log.clone(), dir.clone(), &[(10, 0, 99)]).await;
 
         m.shutdown_and_flush().await;
 
-        let path = dir.join(crate::snapshot::SNAPSHOT_FILE_NAME);
-        let snap = crate::snapshot::Snapshot::load(&path)
-            .unwrap()
-            .expect("snapshot written");
+        let path = dir.join(SNAPSHOT_FILE_NAME);
+        let snap = Snapshot::load(&path).unwrap().expect("snapshot written");
         // The orders partition's committed offset covers both events.
-        let p = crate::partitioning::metadata_partition_for(&tp(), 4);
+        let p = metadata_partition_for(&tp(), 4);
         let idx = usize::try_from(p).unwrap();
         check!(
             snap.committed_offsets[idx] >= 1,
@@ -279,7 +275,7 @@ mod tests {
         // First lifetime: seed three finished segments, then shutdown-flush.
         let pre_cache;
         {
-            let m = crate::manager::test_support::start_seeded_manager_in(
+            let m = start_seeded_manager_in(
                 log.clone(),
                 dir.clone(),
                 &[(10, 0, 99), (11, 100, 199), (12, 200, 299)],
@@ -290,9 +286,9 @@ mod tests {
         }
 
         // Snapshot now records committed offset N for the orders partition.
-        let p = crate::partitioning::metadata_partition_for(&tp(), 4);
+        let p = metadata_partition_for(&tp(), 4);
         let idx = usize::try_from(p).unwrap();
-        let snap = crate::snapshot::Snapshot::load(&dir.join(crate::snapshot::SNAPSHOT_FILE_NAME))
+        let snap = Snapshot::load(&dir.join(SNAPSHOT_FILE_NAME))
             .unwrap()
             .expect("snapshot present");
         let committed = snap.committed_offsets[idx];
@@ -315,8 +311,7 @@ mod tests {
         assert!(resumed_committed[idx] == committed);
 
         // Second lifetime against the SAME log + dir: must resume, not replay.
-        let fresh =
-            crate::manager::test_support::start_manager_in(log.clone(), dir.clone()).unwrap();
+        let fresh = start_manager_in(log.clone(), dir.clone()).unwrap();
         // The manager exposes the same committed offset via its canonical
         // accessor used by the assignment reconciler.
         assert!(fresh.committed_offset(p) == committed);

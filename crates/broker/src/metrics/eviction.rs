@@ -64,7 +64,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{BrokerMetrics, PartitionLabel, QuotaType, SchemaRejectionLabel, TopicLabel};
-use crate::schema_validation::RejectReason;
+use crate::{metrics::QuotaEntityLabel, schema_validation::RejectReason};
 
 impl BrokerMetrics {
     pub(crate) fn track_topic_series(&self, label: &TopicLabel) {
@@ -130,7 +130,7 @@ impl BrokerMetrics {
         client_id: Option<String>,
     ) {
         self.quota_entity_throttle_seconds_total
-            .remove(&crate::metrics::QuotaEntityLabel {
+            .remove(&QuotaEntityLabel {
                 quota_type,
                 user,
                 client_id,

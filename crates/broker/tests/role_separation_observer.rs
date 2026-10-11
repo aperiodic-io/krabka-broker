@@ -35,8 +35,10 @@ use krabka_protocol::owned::{
 use tempfile::TempDir;
 
 use crate::support::{
-    client::connect_client,
-    topics::{creatable_topic, create_topic_request},
+    NodeIndex, RoleNodeSetup,
+    client::{connect_client, create_topic},
+    quorum::metadata_quorum_request,
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
 
 mod support;
@@ -103,7 +105,7 @@ async fn start_role_separated_with(
     let ctrl_dir = TempDir::new().unwrap();
     let mut ctrl_cfg = topology.config(
         ctrl_dir.path(),
-        crate::support::RoleNodeSetup {
+        RoleNodeSetup {
             role: NodeRole::Controller,
             ..Default::default()
         },
@@ -130,8 +132,8 @@ async fn start_role_separated_with(
         let dir = TempDir::new().unwrap();
         let mut cfg = topology.config(
             dir.path(),
-            crate::support::RoleNodeSetup {
-                index: crate::support::NodeIndex(index),
+            RoleNodeSetup {
+                index: NodeIndex(index),
                 mode: BootstrapMode::Join,
                 ..Default::default()
             },
@@ -216,7 +218,7 @@ async fn broker_only_node_observes_and_forwards() {
     let client = connect_client(broker_only.listen_addr().to_string(), None).await;
     let resp = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (topic).into(),
                 ..Default::default()
             },
@@ -533,7 +535,7 @@ async fn broker_only_node_forwards_describe_quorum_to_controller() {
     let broker = &cluster.brokers[0];
     let client = connect_client(broker.listen_addr().to_string(), None).await;
 
-    let req = crate::support::quorum::metadata_quorum_request();
+    let req = metadata_quorum_request();
 
     let resp = client.send(req).await.unwrap();
     assert!(resp.error_code == 0, "top-level error_code must be NONE");
@@ -573,7 +575,7 @@ async fn broker_only_nodes_are_described_as_quorum_observers() {
         .map(|broker| i32::try_from(broker.node_id()).expect("small node id"))
         .collect();
     let client = connect_client(cluster.brokers[0].listen_addr().to_string(), None).await;
-    let request = crate::support::quorum::metadata_quorum_request;
+    let request = metadata_quorum_request;
 
     // The observers appear once each has completed a fetch, and their caught-up
     // time is set once each has fetched to the end of a log that nothing is
@@ -866,6 +868,6 @@ async fn a_separate_metadata_log_directory_rolls_cleans_and_restores_a_wiped_nod
 
 async fn create_topics(client: &Client, topics: &[String]) {
     for topic in topics {
-        crate::support::client::create_topic(client, topic, 1).await;
+        create_topic(client, topic, 1).await;
     }
 }

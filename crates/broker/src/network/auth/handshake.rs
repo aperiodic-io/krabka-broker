@@ -176,11 +176,12 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::network::auth::test_support::authenticated as test_authenticated;
 
     const NOW_MS: i64 = 10_000_000;
 
     fn authenticated(expires_at_ms: Option<i64>) -> ConnectionAuth {
-        crate::network::auth::test_support::authenticated(
+        test_authenticated(
             "alice",
             krabka_security::AuthMethod::SaslOAuthBearer,
             SaslMechanism::OAuthBearer,

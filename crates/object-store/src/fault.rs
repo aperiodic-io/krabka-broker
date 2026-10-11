@@ -33,6 +33,8 @@ use object_store::{
     PutMultipartOptions, PutOptions, PutPayload, PutResult, path::Path,
 };
 
+use crate::{build::build_object_store, config::ObjectStoreConfig, error::ObjectStoreError};
+
 /// The operation classes a [`FaultPolicy`] can single out.
 ///
 /// The granularity is the one an operator's incident is described in -- "puts
@@ -383,11 +385,11 @@ impl ObjectStore for FaultInjectingStore {
 ///
 /// Whatever [`crate::build_object_store`] returns for `cfg`.
 pub fn build_faulty_object_store(
-    cfg: &crate::config::ObjectStoreConfig,
+    cfg: &ObjectStoreConfig,
     policy: FaultPolicy,
-) -> Result<Arc<FaultInjectingStore>, crate::error::ObjectStoreError> {
+) -> Result<Arc<FaultInjectingStore>, ObjectStoreError> {
     Ok(Arc::new(FaultInjectingStore::new(
-        crate::build::build_object_store(cfg)?,
+        build_object_store(cfg)?,
         policy,
     )))
 }
@@ -398,7 +400,7 @@ mod tests {
     use object_store::ObjectStoreExt as _;
 
     use super::*;
-    use crate::config::ObjectStoreConfig;
+    use crate::{config::ObjectStoreConfig, test_support::round_trip};
 
     fn memory(policy: FaultPolicy) -> Arc<FaultInjectingStore> {
         build_faulty_object_store(&ObjectStoreConfig::InMemory, policy).unwrap()
@@ -486,7 +488,7 @@ mod tests {
         let store = memory(FaultPolicy::none());
         let path = Path::from("seg.log");
 
-        let got = crate::test_support::round_trip(&store, &path, b"bytes").await;
+        let got = round_trip(&store, &path, b"bytes").await;
 
         check!(&got[..] == b"bytes");
         check!(store.attempts(StoreOp::Put) == 1);

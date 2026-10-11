@@ -28,11 +28,14 @@ use krabka_log::ProducerId;
 use krabka_protocol::owned::{end_txn_request::EndTxnRequest, end_txn_response::EndTxnResponse};
 
 use crate::{
+    api_catalog::UnstableApiVersions,
     broker::Broker,
     error::BrokerError,
+    handlers::RequestContext,
     txn::{
         decision::{CompletionDecision, decide_end_txn_completion},
         util::now_millis,
+        version::{TxnVersion, resolve_txn_version},
     },
 };
 
@@ -72,7 +75,7 @@ pub(crate) async fn handle(
     broker: &Broker,
     req: EndTxnRequest,
     version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> Result<EndTxnResponse, BrokerError> {
     let coord = broker.txn_coordinator.clone();
     let controller = broker.controller.clone();
@@ -88,12 +91,11 @@ pub(crate) async fn handle(
     // only picks the `__transaction_state` value format, so an EndTxn v4 on a
     // `TV_2` cluster keeps its epoch, as a client that cannot read the new
     // epoch out of the response needs.
-    let txnv = crate::txn::version::resolve_txn_version(&image);
-    let client_txnv = crate::txn::version::TxnVersion::for_end_txn(version);
+    let txnv = resolve_txn_version(&image);
+    let client_txnv = TxnVersion::for_end_txn(version);
     // Trunk's answer to a commit that races a coordinator-side abort
     // (KAFKA-20785) is not in Kafka 4.3.1.
-    let trunk_rules = broker.config.features.unstable_api_versions
-        == crate::api_catalog::UnstableApiVersions::Enabled;
+    let trunk_rules = broker.config.features.unstable_api_versions == UnstableApiVersions::Enabled;
     drop(coord.refresh_leader_partitions(&image).await);
 
     let tid = req.transactional_id.as_str();

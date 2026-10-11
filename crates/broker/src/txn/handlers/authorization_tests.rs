@@ -22,8 +22,8 @@ use krabka_protocol::owned::{
 use crate::{
     codes,
     test_support::{
-        GrantsInPrincipalName, decode_response, dispatch_context, encode_request, peer, principal,
-        request_context, start_broker_no_audit_with,
+        GrantsInPrincipalName, StandalonePartitionSetup, decode_response, dispatch_context,
+        encode_request, peer, principal, request_context, start_broker_no_audit_with,
     },
 };
 
@@ -96,7 +96,7 @@ async fn write_txn_markers_needs_cluster_alter_or_cluster_action() {
     let local = super::write_txn_markers::test_support::open_partition(
         &broker,
         dir.path(),
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic: TOPIC,
             partition: krabka_ids::PartitionIndex(1),
             ..Default::default()

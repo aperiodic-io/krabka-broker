@@ -20,7 +20,11 @@ use crate::{
         GroupCoordinator,
         unified::{GroupType, streams::actor::StreamsGroupActorMessage},
     },
-    handlers::authorized_operations::{DescribedGroupRow as _, fill_group_authorized_operations},
+    handlers::{
+        RequestContext, any_topic_describe_denied,
+        authorized_operations::{DescribedGroupRow as _, fill_group_authorized_operations},
+        group_coordinator_error,
+    },
     task_util::{AskError, ask},
 };
 
@@ -54,11 +58,11 @@ pub(super) async fn describe_group(
     broker: &Broker,
     ng: &GroupCoordinator,
     image: &krabka_metadata::MetadataImage,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     included: Included,
     gid: &str,
 ) -> DescribedGroup {
-    if let Some(error_code) = crate::handlers::group_coordinator_error(broker, gid) {
+    if let Some(error_code) = group_coordinator_error(broker, gid) {
         return DescribedGroup::error_row(gid, error_code, None);
     }
     let Some(handle) = ng.find_streams(gid) else {
@@ -94,12 +98,7 @@ pub(super) async fn describe_group(
     // members, instead of disclosing the topic names via the topology.
     if let Some(topology) = view.topology.as_ref() {
         let required = topic_authz::required_topics(topology);
-        if crate::handlers::any_topic_describe_denied(
-            broker.config.authorizer.as_ref(),
-            image,
-            ctx,
-            &required,
-        ) {
+        if any_topic_describe_denied(broker.config.authorizer.as_ref(), image, ctx, &required) {
             return DescribedGroup::error_row(
                 gid,
                 codes::TOPIC_AUTHORIZATION_FAILED,

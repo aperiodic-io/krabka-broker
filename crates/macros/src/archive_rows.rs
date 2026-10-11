@@ -5,6 +5,8 @@ use moxy::{
     token::{Ident, Span, TokenStream},
 };
 
+use crate::{fixtures::name, meta::arguments};
+
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
     let mut sections = vec![TokenStream::new()];
     for token in input {
@@ -21,10 +23,10 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
                 "expected signature; bindings; invariants; validity; result body",
             )
         })?;
-    let names = crate::meta::arguments(bindings, 5)?;
+    let names = arguments(bindings, 5)?;
     let names = names
         .into_iter()
-        .map(crate::fixtures::name)
+        .map(name)
         .collect::<Result<Vec<Ident>, _>>()?;
     let [entries, index, previous, first, second]: [Ident; 5] =
         names.try_into().expect("five bindings");

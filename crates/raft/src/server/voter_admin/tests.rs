@@ -13,7 +13,9 @@ use krabka_protocol::{
 };
 
 use super::*;
-use crate::server::test_support::{decoded, single_voter_engine, wait_for_leader};
+use crate::server::test_support::{
+    activate_dynamic_membership, decoded, single_voter_engine, wait_for_leader,
+};
 
 #[derive(Clone, Copy)]
 struct ListenerPort(u16);
@@ -349,7 +351,7 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
 
     // At kraft.version >= 1, AddRaftVoter probes the candidate listeners.
     // Unreachable candidate fails probe with code 7.
-    crate::server::test_support::activate_dynamic_membership(&engine).await;
+    activate_dynamic_membership(&engine).await;
     let request = AddRaftVoterRequest {
         cluster_id: None,
         voter_id: 2,

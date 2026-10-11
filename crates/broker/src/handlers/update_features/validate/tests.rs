@@ -6,8 +6,13 @@ use krabka_metadata::NodeId;
 use krabka_raft::UnstableFeatureVersions;
 
 use super::*;
-use crate::handlers::update_features::test_support::{
-    elr_update, metadata_update, named_update, validate_only,
+use crate::{
+    config_keys::MIN_INSYNC_REPLICAS,
+    features::ELR_VERSION,
+    handlers::update_features::test_support::{
+        elr_update, metadata_update, named_update, validate_only,
+    },
+    test_support::broker_registration,
 };
 
 /// The local controller at the defaults: `unstable.feature.versions.enable`
@@ -45,7 +50,7 @@ fn remote_feature_image(
             host: String::new(),
             port: 0,
             features: setup.ranges.0,
-            ..crate::test_support::broker_registration(setup.node_id)
+            ..broker_registration(setup.node_id)
         },
     ));
     image
@@ -403,7 +408,7 @@ fn kraft_version_rows_follow_kafka() {
 fn elr_image(elr_level: Option<i16>, published: bool) -> krabka_metadata::MetadataImage {
     let mut image = image(&[("metadata.version", 30)]);
     if let Some(level) = elr_level {
-        image.apply(&feature_record(crate::features::ELR_VERSION, level));
+        image.apply(&feature_record(ELR_VERSION, level));
     }
     if published {
         image.apply(&MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
@@ -436,7 +441,7 @@ fn elr_image(elr_level: Option<i16>, published: bool) -> krabka_metadata::Metada
 /// any writes the feature record alone.
 #[test]
 fn an_elr_downgrade_clears_the_published_state_before_the_feature_record() {
-    let elr = crate::features::ELR_VERSION;
+    let elr = ELR_VERSION;
     let clear = MetadataRecord::V1PartitionElr(krabka_metadata::PartitionElrRecord {
         topic: "orders".into(),
         partition: 0,
@@ -460,7 +465,7 @@ fn an_elr_downgrade_clears_the_published_state_before_the_feature_record() {
 /// blocks turning the feature on but not off.
 #[test]
 fn a_feature_unaware_broker_blocks_only_enabling() {
-    let elr = crate::features::ELR_VERSION;
+    let elr = ELR_VERSION;
     let unaware = |elr_level| {
         let image = elr_image(elr_level, false);
         let mut features = krabka_metadata::supported_feature_ranges();
@@ -502,7 +507,7 @@ fn a_feature_unaware_broker_blocks_only_enabling() {
 /// (`brokersWithConfigs`), not the registered brokers.
 #[test]
 fn enabling_elr_writes_kafkas_safety_config_records() {
-    let key = crate::config_keys::MIN_INSYNC_REPLICAS;
+    let key = MIN_INSYNC_REPLICAS;
     let cluster = krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID;
     let node = NodeId(1);
     let unregistered = NodeId(7);

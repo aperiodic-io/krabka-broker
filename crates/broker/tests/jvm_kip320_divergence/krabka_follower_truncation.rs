@@ -12,6 +12,10 @@ use krabka_metadata::{LeaderEpoch, MetadataRecord};
 use crate::{
     docker::{produce_lines_via_jvm, set_container_paused},
     dump_log::{dump_log_in_container, max_offset_in_dump},
+    mixed_cluster::{
+        DivergenceDirection, PartitionEpochDelta, SingleLeaderSetup, prepare_divergence,
+        single_leader_record,
+    },
     topic_admin::{LEADER_WAIT, wait_for_described_leader},
 };
 
@@ -25,11 +29,8 @@ use crate::{
 #[ignore = "requires Docker + a published controller/data port; Linux-bound"]
 async fn kip320_krabka_follower_truncates_from_jvm_leader() {
     const TOPIC: &str = "krabka-kip320-krabka-follower";
-    let (container, cluster, bootstrap_all, prefix_leo) = crate::mixed_cluster::prepare_divergence(
-        TOPIC,
-        crate::mixed_cluster::DivergenceDirection::KrabkaFollower,
-    )
-    .await;
+    let (container, cluster, bootstrap_all, prefix_leo) =
+        prepare_divergence(TOPIC, DivergenceDirection::KrabkaFollower).await;
     let c1 = &cluster.krabka[0].0;
 
     // 3. Park replication behind a phantom leader before appending the
@@ -47,17 +48,15 @@ async fn kip320_krabka_follower_truncates_from_jvm_leader() {
     // metadata is still propagating, making its authoritative prefix longer.
     set_container_paused(&container, true);
 
-    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
-        crate::mixed_cluster::single_leader_record(
-            &partition,
-            crate::mixed_cluster::SingleLeaderSetup {
-                topic: TOPIC,
-                leader: krabka_broker::NodeId(99),
-                epoch: parked_epoch,
-                ..Default::default()
-            },
-        ),
-    ))
+    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(single_leader_record(
+        &partition,
+        SingleLeaderSetup {
+            topic: TOPIC,
+            leader: krabka_broker::NodeId(99),
+            epoch: parked_epoch,
+            ..Default::default()
+        },
+    )))
     .await
     .expect("park reverse-direction replicas behind phantom leader");
     c1.wait_until_local_partition_target(TOPIC, 0, krabka_broker::NodeId(99), parked_epoch)
@@ -78,17 +77,15 @@ async fn kip320_krabka_follower_truncates_from_jvm_leader() {
     // 4. Promote the JVM replica at the next epoch. Its log still ends at the
     //    shared prefix, so the Krabka follower must truncate before fetching.
     let jvm_epoch = LeaderEpoch(parked_epoch.0 + 1);
-    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
-        crate::mixed_cluster::single_leader_record(
-            &partition,
-            crate::mixed_cluster::SingleLeaderSetup {
-                topic: TOPIC,
-                leader: krabka_broker::NodeId(3),
-                epoch: jvm_epoch,
-                partition_epoch_delta: crate::mixed_cluster::PartitionEpochDelta(2),
-            },
-        ),
-    ))
+    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(single_leader_record(
+        &partition,
+        SingleLeaderSetup {
+            topic: TOPIC,
+            leader: krabka_broker::NodeId(3),
+            epoch: jvm_epoch,
+            partition_epoch_delta: PartitionEpochDelta(2),
+        },
+    )))
     .await
     .expect("promote JVM broker for reverse-direction recovery");
 

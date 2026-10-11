@@ -19,9 +19,15 @@ use krabka_protocol::{
 };
 
 use crate::{
-    CLIENT_ID, kafka_wire,
-    kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
-    support::{topics::creatable_topic, wire::HeaderEncoding as RequestHeaderEncoding},
+    CLIENT_ID,
+    kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+    support::{
+        topics::{
+            ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis,
+            TopicPartitionCount, creatable_topic, create_topic_request_with_setup,
+        },
+        wire::HeaderEncoding as RequestHeaderEncoding,
+    },
 };
 
 /// Drive `CreateTopics` (`api_key=19`) over a SASL/PLAIN connection.
@@ -35,14 +41,14 @@ pub(crate) async fn drive_create_topics_sasl(
 ) -> (i32, i16) {
     const VERSION: i16 = 7; // MAX_VERSION; flexible (>= 5)
 
-    let req = crate::support::topics::create_topic_request_with_setup(
-        creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+    let req = create_topic_request_with_setup(
+        creatable_topic(ConfiguredTopicSetup {
             name: topic.to_string(),
-            partitions: crate::support::topics::TopicPartitionCount(partitions),
+            partitions: TopicPartitionCount(partitions),
             ..Default::default()
         }),
-        crate::support::topics::CreateTopicRequestSetup {
-            timeout: crate::support::topics::CreateTopicsTimeoutMillis(30_000),
+        CreateTopicRequestSetup {
+            timeout: CreateTopicsTimeoutMillis(30_000),
         },
     );
 

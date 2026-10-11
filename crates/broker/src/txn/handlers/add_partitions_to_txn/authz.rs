@@ -28,6 +28,8 @@ use krabka_security::Principal;
 use crate::{
     authorizer::{AuthorizationResult, Authorizer, authorize_topics},
     codes,
+    config::BrokerConfig,
+    internal_topics::is_internal_topic,
 };
 
 /// Who sent the request, and so which topics need a `Write` check.
@@ -39,7 +41,7 @@ pub(super) enum TopicAuthorization<'a> {
         authorizer: &'a dyn Authorizer,
         principal: &'a Principal,
         peer: &'a SocketAddr,
-        config: &'a crate::config::BrokerConfig,
+        config: &'a BrokerConfig,
     },
     /// Versions 4 and later: a broker that holds `ClusterAction`. Every topic
     /// is authorized.
@@ -64,7 +66,7 @@ pub(super) fn failed_partitions(
             let checked = topics
                 .iter()
                 .map(|topic| topic.name.as_str())
-                .filter(|name| !crate::internal_topics::is_internal_topic(config, name));
+                .filter(|name| !is_internal_topic(config, name));
             let allowed: std::collections::HashSet<&str> = authorize_topics(
                 authorizer,
                 image,

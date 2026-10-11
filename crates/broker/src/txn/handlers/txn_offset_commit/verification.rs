@@ -26,12 +26,14 @@ use crate::{
     coordinator::bootstrap::OFFSETS_TOPIC,
     error::BrokerError,
     partition::ProducerAppendCheck,
+    time_util::now_ms,
     txn::{
         coordinator::produce_verification::{
             INTERNAL_REGISTRATION_VERSION, TransactionCheck, partition_verification_enabled,
             skips_coordinator_verification,
         },
         state::TopicPartition,
+        version::TxnVersion,
     },
 };
 
@@ -71,7 +73,7 @@ pub(super) async fn verify_producer(
     broker: &Broker,
     req: &TxnOffsetCommitRequest,
     version: i16,
-    (offsets_partition, format_txnv): (i32, crate::txn::version::TxnVersion),
+    (offsets_partition, format_txnv): (i32, TxnVersion),
 ) -> Result<ProducerAppendCheck, i16> {
     let Some(partition) = broker
         .partitions
@@ -90,10 +92,7 @@ pub(super) async fn verify_producer(
         .start_transaction_verification(
             batch,
             supports_epoch_bump,
-            (
-                crate::time_util::now_ms(),
-                broker.config.producer_id_expiration.millis_i64(),
-            ),
+            (now_ms(), broker.config.producer_id_expiration.millis_i64()),
         )
         .await
         .map_err(|refusal| {

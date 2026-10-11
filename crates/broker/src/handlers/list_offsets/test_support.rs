@@ -9,7 +9,10 @@ use krabka_protocol::owned::{
 };
 
 use super::sentinels::UNKNOWN_EPOCH;
-use crate::codes;
+use crate::{
+    broker::BrokerHandle, codes, config::RemoteStorageBackend,
+    test_support::start_broker_no_audit_with,
+};
 
 crate::test_support::wire_helpers!(
     pub(super) ListOffsetsRequest,
@@ -17,7 +20,7 @@ crate::test_support::wire_helpers!(
     client_id = "admin-client"
 );
 
-pub(super) async fn client_for(broker: &crate::broker::BrokerHandle) -> krabka_client_core::Client {
+pub(super) async fn client_for(broker: &BrokerHandle) -> krabka_client_core::Client {
     krabka_client_core::Client::builder()
         .bootstrap(broker.listen_addr().to_string())
         .client_id("list-offsets-test")
@@ -54,15 +57,14 @@ pub(super) async fn remote_topic(
     topic: &str,
     extra_configs: Vec<CreatableTopicConfig>,
 ) -> (
-    crate::broker::BrokerHandle,
+    BrokerHandle,
     krabka_client_core::Client,
     [tempfile::TempDir; 2],
 ) {
     let remote_dir = tempfile::tempdir().expect("remote tempdir");
     let remote_path = remote_dir.path().to_path_buf();
-    let (broker, directory) = crate::test_support::start_broker_no_audit_with(move |config| {
-        config.remote_storage_backend =
-            Some(crate::config::RemoteStorageBackend::Local { dir: remote_path });
+    let (broker, directory) = start_broker_no_audit_with(move |config| {
+        config.remote_storage_backend = Some(RemoteStorageBackend::Local { dir: remote_path });
     })
     .await;
     let client = client_for(&broker).await;

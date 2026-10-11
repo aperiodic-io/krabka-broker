@@ -6,6 +6,7 @@
 
 use crate::{
     event::LogEnd,
+    simulation_support::{append_epochs, truncate_epochs},
     types::{Epoch, LogView},
 };
 
@@ -23,11 +24,11 @@ krabka_macros::epoch_log_view!(SimLog, crate);
 
 impl SimLog {
     pub(super) fn append_in_epoch(&mut self, epoch: Epoch, count: usize) {
-        crate::simulation_support::append_epochs(&mut self.epochs, epoch, count);
+        append_epochs(&mut self.epochs, epoch, count);
     }
 
     pub(super) fn truncate_to(&mut self, offset: i64) {
-        crate::simulation_support::truncate_epochs(&mut self.epochs, offset);
+        truncate_epochs(&mut self.epochs, offset);
     }
 
     pub(super) fn replicate_from(&mut self, leader: &Self) {

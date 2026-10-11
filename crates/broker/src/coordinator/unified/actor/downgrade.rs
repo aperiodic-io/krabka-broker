@@ -8,13 +8,16 @@
 use std::time::Instant;
 
 use super::{MetadataProvider, chrono_now_ms};
-use crate::coordinator::unified::{
-    GroupCoordinator,
-    config::NextGenConfig,
-    consumer_state::GroupState,
-    group::{CoordinatorGroup, GroupKind},
-    migration,
-    offsets_log::OffsetsLog,
+use crate::{
+    coordinator::unified::{
+        GroupCoordinator,
+        config::NextGenConfig,
+        consumer_state::GroupState,
+        group::{CoordinatorGroup, GroupKind},
+        migration,
+        offsets_log::OffsetsLog,
+    },
+    error::BrokerError,
 };
 
 #[cfg(test)]
@@ -62,7 +65,7 @@ pub(super) async fn downgrade_fencing(
     metadata: &dyn MetadataProvider,
     offsets_log: &dyn OffsetsLog,
     coordinator: &GroupCoordinator,
-) -> Result<(), crate::error::BrokerError> {
+) -> Result<(), BrokerError> {
     let Some(state) = group.as_consumer() else {
         return Ok(());
     };

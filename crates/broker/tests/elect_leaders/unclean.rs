@@ -10,11 +10,17 @@ use krabka_metadata::{MetadataRecord, PartitionRecord};
 
 use crate::{
     cluster_lock,
+    kafka_wire::ElectionExchangeSetup,
+    support::{
+        admin::{ElectionKind, ElectionSetup},
+        registered_cluster, shutdown_cluster,
+        topics::AssignedTopicSetup,
+    },
     wait::{
         wait_partition_exists, wait_partition_isr_contains, wait_partition_isr_only,
         wait_partition_leader, wait_partition_record_known,
     },
-    wire::{create_topic_plaintext, drive_elect_leaders},
+    wire::{CLIENT_ID, create_topic_plaintext, drive_elect_leaders},
 };
 
 /// A 3-broker PLAINTEXT cluster with an rf=2 topic where `replicas = [1, 2]`.
@@ -36,7 +42,7 @@ use crate::{
 async fn unclean_election_via_wire_picks_alive_replica() {
     let _g = cluster_lock().lock().await;
 
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
 
     // Send ElectLeaders to the current raft leader. Any broker answers it the
     // same way now that the election reads replicated state, but the leader is
@@ -62,7 +68,7 @@ async fn unclean_election_via_wire_picks_alive_replica() {
     // Create rf=2 topic. Replicas=[1,2]; broker 1 is preferred.
     create_topic_plaintext(
         addr,
-        crate::support::topics::AssignedTopicSetup {
+        AssignedTopicSetup {
             name: ("foo-unclean").into(),
             replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
         },
@@ -111,11 +117,11 @@ async fn unclean_election_via_wire_picks_alive_replica() {
     // First alive in replicas=[1,2] → broker 1 → new leader=1, isr=[1].
     let result = drive_elect_leaders(
         addr,
-        crate::kafka_wire::ElectionExchangeSetup {
-            client_id: crate::wire::CLIENT_ID,
-            election: crate::support::admin::ElectionSetup {
+        ElectionExchangeSetup {
+            client_id: CLIENT_ID,
+            election: ElectionSetup {
                 topic: ("foo-unclean").to_string(),
-                kind: crate::support::admin::ElectionKind::Unclean,
+                kind: ElectionKind::Unclean,
                 ..Default::default()
             },
         },
@@ -136,5 +142,5 @@ async fn unclean_election_via_wire_picks_alive_replica() {
     wait_partition_isr_contains(h0, "foo-unclean", 0, 1).await;
 
     // Clean up.
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

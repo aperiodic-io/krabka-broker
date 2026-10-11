@@ -76,7 +76,11 @@ use self::{
     resolve::resolve_partition,
     response::error_response,
 };
-use crate::{broker::Broker, codes};
+use crate::{
+    broker::Broker,
+    codes,
+    handlers::{RequestContext, acl_denied},
+};
 
 /// The `(topic_index, partition)` rows whose `(name, partition)` key appears
 /// more than once in `topics`.
@@ -117,10 +121,10 @@ fn partition_topics_by_describe<T>(
     name: fn(&T) -> &str,
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> (IndexedTopics<T>, IndexedTopics<T>) {
     topics.into_iter().enumerate().partition(|(_, topic)| {
-        !crate::handlers::acl_denied(
+        !acl_denied(
             broker.config.authorizer.as_ref(),
             image,
             ctx,

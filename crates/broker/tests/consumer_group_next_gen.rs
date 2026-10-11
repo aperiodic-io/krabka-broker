@@ -20,9 +20,11 @@ use krabka_protocol::owned::{
 };
 
 use crate::support::{
-    classic::classic_join_request,
+    classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request},
     client::connect_client,
-    topics::{creatable_topic, create_topic_request},
+    consumer_groups::{consumer_heartbeat, reported_assignment},
+    discovery::named_topic_metadata,
+    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
 };
 
 async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
@@ -38,9 +40,9 @@ async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
 async fn create_topic(client: &Client, topic: &str, partitions: i32) {
     let resp = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (topic).into(),
-                partitions: crate::support::topics::TopicPartitionCount(partitions),
+                partitions: TopicPartitionCount(partitions),
                 ..Default::default()
             },
         )))
@@ -64,7 +66,7 @@ fn heartbeat(group: &str, member_id: &str, epoch: i32) -> ConsumerGroupHeartbeat
     ConsumerGroupHeartbeatRequest {
         rebalance_timeout_ms: 60_000,
         topic_partitions: (epoch == 0).then(Vec::new),
-        ..crate::support::consumer_groups::consumer_heartbeat(group, member_id, epoch)
+        ..consumer_heartbeat(group, member_id, epoch)
     }
 }
 
@@ -122,10 +124,7 @@ async fn two_members_split_partitions() {
     // Each re-heartbeat reports what the member owns, so it is Kafka's full
     // request and the response carries the assignment.
     let owned = |response: &ConsumerGroupHeartbeatResponse| {
-        response
-            .assignment
-            .as_ref()
-            .map(crate::support::consumer_groups::reported_assignment)
+        response.assignment.as_ref().map(reported_assignment)
     };
     let mut a3 = heartbeat("g2", &mid_a, ra.member_epoch);
     a3.subscribed_topic_names = Some(vec!["t2".into()]);
@@ -175,10 +174,10 @@ async fn classic_group_locked_against_next_gen() {
     // Kafka's `validateOnlineUpgrade` refuses to upgrade it; an empty classic
     // group would be replaced instead.
     let join = |member_id: String| {
-        classic_join_request(crate::support::classic::ClassicJoinSetup {
+        classic_join_request(ClassicJoinSetup {
             group_id: ("g3").into(),
             member_id,
-            timeouts: crate::support::classic::ClassicTimeouts {
+            timeouts: ClassicTimeouts {
                 rebalance: krabka_units::millis(60_000),
                 ..Default::default()
             },
@@ -279,8 +278,7 @@ async fn an_old_epoch_is_fenced() {
 
     // A reports what it keeps, and moves to epoch 3.
     let mut acknowledge = heartbeat("g6", &mid, 2);
-    acknowledge.topic_partitions =
-        Some(crate::support::consumer_groups::reported_assignment(&kept));
+    acknowledge.topic_partitions = Some(reported_assignment(&kept));
     let ra = client.send(acknowledge).await.unwrap();
     assert!(ra.error_code == 0);
     assert!(ra.member_epoch == 3, "A moves to epoch 3 once it revoked");
@@ -470,7 +468,7 @@ async fn a_topic_created_after_the_member_joined_reaches_its_next_heartbeat() {
 
     create_topic(&client, "late", 3).await;
     let metadata = client
-        .send(crate::support::discovery::named_topic_metadata("late"))
+        .send(named_topic_metadata("late"))
         .await
         .expect("Metadata");
     let topic_id = metadata.topics[0].topic_id;

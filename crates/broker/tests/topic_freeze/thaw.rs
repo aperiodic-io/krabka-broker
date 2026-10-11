@@ -20,7 +20,7 @@ use krabka_protocol::{
 use crate::{
     control_plane::{cluster_id, freeze_scope, set_freeze, wait_for_registry_len},
     signing::{SignedFreeze, signed_request},
-    support,
+    support::{self, OperatorKeysSetup, OperatorSaslSetup},
     wire::{CONTROL, accepted, create_topic, now_ms, refused},
 };
 
@@ -79,8 +79,8 @@ async fn a_thaw_restores_writes() {
     let key = support::mint_operator_key(keys.path(), "alice-yubi", "User:alice");
     let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
         logs.path(),
-        crate::support::OperatorSaslSetup {
-            trust: crate::support::OperatorKeysSetup { keys: &[&key], approvers: // The proposer has to be in the set as well: a proposer outside it
+        OperatorSaslSetup {
+            trust: OperatorKeysSetup { keys: &[&key], approvers: // The proposer has to be in the set as well: a proposer outside it
         // would turn a rule about three people into a rule about two people
         // and a stranger. Alice still may not approve her own proposal.
         &["User:alice", "User:bob", "User:carol"] },

@@ -32,10 +32,21 @@ use crate::{
     harness::{broker_config, broker_test_permit, produce_n, produce_values, topic_id, wire},
     share_rpc::{acquired_count, fetch_until_acquired, share_fetch},
     support::{
-        configs::{feature_update, incremental_config, incremental_request, incremental_resource},
-        fetch::single_partition_fetch,
+        configs::{
+            ConfigOperation, IncrementalConfigsSetup, feature_update, incremental_config,
+            incremental_request, incremental_resource,
+        },
+        fetch::{
+            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+        },
         offsets::{list_offset_partition, single_partition_list_offsets},
-        share::{acknowledge_partition, acknowledge_request, acknowledge_topic},
+        share::{
+            AcknowledgeRequestSetup, ShareAck, ShareFetchSetup, ShareProduceSetup,
+            ShareRecordCount, ShareRecordsSetup, ShareSessionEpoch, ShareSessionSetup,
+            StartGroupTopicSetup, acknowledge_partition, acknowledge_request, acknowledge_success,
+            acknowledge_topic, join_consume_member, start_group_topic,
+        },
+        topics::topic_configs,
     },
 };
 
@@ -75,7 +86,7 @@ async fn create_dead_letter_topic_with(
     client: &Client,
     extra: &[(&str, &str)],
 ) {
-    let configs = crate::support::topics::topic_configs(
+    let configs = topic_configs(
         std::iter::once(("errors.deadletterqueue.group.enable", "true"))
             .chain(extra.iter().copied()),
     );
@@ -117,30 +128,24 @@ struct DeadLetterConfigSetup<'a> {
 /// Sets `configs` on the resource of `resource_type` and `resource_name`.
 async fn set_configs(client: &Client, setup: DeadLetterConfigSetup<'_>) {
     let response = client
-        .send(incremental_request(
-            crate::support::configs::IncrementalConfigsSetup {
-                resources: vec![incremental_resource(
-                    match setup.target {
-                        DeadLetterConfigTarget::Group => 32,
-                        DeadLetterConfigTarget::Broker => 4,
-                        DeadLetterConfigTarget::Topic => 2,
-                    },
-                    setup.name,
-                    setup
-                        .values
-                        .iter()
-                        .map(|(name, value)| {
-                            incremental_config(
-                                *name,
-                                Some((*value).into()),
-                                crate::support::configs::ConfigOperation::Set,
-                            )
-                        })
-                        .collect(),
-                )],
-                ..Default::default()
-            },
-        ))
+        .send(incremental_request(IncrementalConfigsSetup {
+            resources: vec![incremental_resource(
+                match setup.target {
+                    DeadLetterConfigTarget::Group => 32,
+                    DeadLetterConfigTarget::Broker => 4,
+                    DeadLetterConfigTarget::Topic => 2,
+                },
+                setup.name,
+                setup
+                    .values
+                    .iter()
+                    .map(|(name, value)| {
+                        incremental_config(*name, Some((*value).into()), ConfigOperation::Set)
+                    })
+                    .collect(),
+            )],
+            ..Default::default()
+        }))
         .await
         .expect("IncrementalAlterConfigs");
     assert!(
@@ -170,16 +175,12 @@ async fn point_group_at_dead_letter_topic(client: &Client) {
 async fn dead_letter_records(broker: &BrokerHandle, client: &Client) -> Vec<Record> {
     let dlq_id = topic_id(broker, DLQ_TOPIC);
     let response = client
-        .send(single_partition_fetch(
-            crate::support::fetch::SinglePartitionFetchSetup {
-                topic: DLQ_TOPIC.into(),
-                topic_id: wire(dlq_id),
-                limits: crate::support::fetch::FetchLimits::one_mebibyte(
-                    crate::support::fetch::RequestWaitMillis(100),
-                ),
-                ..Default::default()
-            },
-        ))
+        .send(single_partition_fetch(SinglePartitionFetchSetup {
+            topic: DLQ_TOPIC.into(),
+            topic_id: wire(dlq_id),
+            limits: FetchLimits::one_mebibyte(RequestWaitMillis(100)),
+            ..Default::default()
+        }))
         .await
         .expect("Fetch");
     records_of(response.responses[0].partitions[0].records.as_ref())
@@ -209,7 +210,7 @@ fn records_of(payload: Option<&RecordsPayload>) -> Vec<Record> {
 async fn wait_for_dead_letters(
     broker: &BrokerHandle,
     client: &Client,
-    count: crate::support::share::ShareRecordCount,
+    count: ShareRecordCount,
 ) -> Vec<Record> {
     let expected = usize::try_from(count.0).expect("dead-letter count fits usize");
     tokio::time::timeout(Duration::from_secs(60), async {
@@ -234,7 +235,7 @@ krabka_macros::record_header_text!(header, lossy);
 struct RejectRangesSetup<'a> {
     topic_id: uuid::Uuid,
     #[default(crate::support::share::ShareSessionEpoch(1))]
-    epoch: crate::support::share::ShareSessionEpoch,
+    epoch: ShareSessionEpoch,
     #[default(&[])]
     ranges: &'a [(krabka_ids::Offset, krabka_ids::Offset)],
 }
@@ -243,34 +244,31 @@ struct RejectRangesSetup<'a> {
 /// offsets of partition 0, in a batch of its own.
 async fn reject_ranges(client: &Client, member: &str, setup: RejectRangesSetup<'_>) {
     let response = client
-        .send(acknowledge_request(
-            crate::support::share::AcknowledgeRequestSetup {
-                group_id: Some(GROUP.into()),
-                member_id: Some(member.into()),
-                epoch: setup.epoch,
-                topics: vec![acknowledge_topic(
-                    wire(setup.topic_id),
-                    vec![acknowledge_partition(
-                        0,
-                        setup
-                            .ranges
-                            .iter()
-                            .map(|(first, last)| AcknowledgementBatch {
-                                first_offset: first.0,
-                                last_offset: last.0,
-                                acknowledge_types: vec![
-                                    REJECT;
-                                    usize::try_from(last.0 - first.0 + 1)
-                                        .unwrap()
-                                ],
-                                ..Default::default()
-                            })
-                            .collect(),
-                    )],
+        .send(acknowledge_request(AcknowledgeRequestSetup {
+            group_id: Some(GROUP.into()),
+            member_id: Some(member.into()),
+            epoch: setup.epoch,
+            topics: vec![acknowledge_topic(
+                wire(setup.topic_id),
+                vec![acknowledge_partition(
+                    0,
+                    setup
+                        .ranges
+                        .iter()
+                        .map(|(first, last)| AcknowledgementBatch {
+                            first_offset: first.0,
+                            last_offset: last.0,
+                            acknowledge_types: vec![
+                                REJECT;
+                                usize::try_from(last.0 - first.0 + 1).unwrap()
+                            ],
+                            ..Default::default()
+                        })
+                        .collect(),
                 )],
-                ..Default::default()
-            },
-        ))
+            )],
+            ..Default::default()
+        }))
         .await
         .expect("ShareAcknowledge");
     assert!(response.error_code == NONE, "{response:?}");
@@ -308,7 +306,7 @@ struct RejectArchiveSetup {
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct DeadLetterReadSetup {
-    count: crate::support::share::ShareRecordCount,
+    count: ShareRecordCount,
     #[default(krabka_ids::Offset(1))]
     expected_spso: krabka_ids::Offset,
 }
@@ -341,9 +339,9 @@ impl Cluster {
         (&self.broker, &self.client, &self.tid, &self.member)
     }
     async fn reject_acquired(&self, first: krabka_ids::Offset, last: krabka_ids::Offset) {
-        crate::support::share::acknowledge_success(
+        acknowledge_success(
             &self.client,
-            crate::support::share::ShareAck::prefix_for(&self.member, self.tid, last)
+            ShareAck::prefix_for(&self.member, self.tid, last)
                 .starting_at(first)
                 .reject(),
         )
@@ -361,7 +359,7 @@ enum DeadLetterShareVersion {
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct DeadLetterQueueSetup<'a> {
     #[default(crate::support::share::ShareRecordCount(3))]
-    records: crate::support::share::ShareRecordCount,
+    records: ShareRecordCount,
     version: DeadLetterShareVersion,
     #[default(&[])]
     topic_configs: &'a [(&'a str, &'a str)],
@@ -383,7 +381,7 @@ async fn configure_dead_letters(
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct AcquiredRecordsSetup {
     #[default(crate::support::share::ShareRecordCount(3))]
-    records: crate::support::share::ShareRecordCount,
+    records: ShareRecordCount,
 }
 
 /// Required script steps for a custom acquisition, separate from its defaulted record setup.
@@ -394,7 +392,7 @@ struct AcquisitionHooks<T, C, P> {
 }
 
 async fn acquired_records(
-    records: crate::support::share::ShareRecordCount,
+    records: ShareRecordCount,
     tweak: impl FnOnce(&mut BrokerConfig),
     configure: impl AsyncFnOnce(&Client, &BrokerHandle),
 ) -> Cluster {
@@ -406,7 +404,7 @@ async fn acquired_records(
             produce: async |client: &Client, tid| {
                 produce_n(
                     client,
-                    crate::support::share::ShareRecordsSetup {
+                    ShareRecordsSetup {
                         topic_id: tid,
                         count: records,
                         ..Default::default()
@@ -429,13 +427,12 @@ async fn join_and_acquire(
     String,
     krabka_protocol::owned::share_fetch_response::PartitionData,
 ) {
-    let (member, _member_epoch) =
-        crate::support::share::join_consume_member(broker, client, tid).await;
+    let (member, _member_epoch) = join_consume_member(broker, client, tid).await;
     let row = fetch_until_acquired(
         client,
-        crate::support::share::ShareSessionSetup {
+        ShareSessionSetup {
             group: GROUP,
-            ..crate::support::share::ShareSessionSetup::opening(&member, tid)
+            ..ShareSessionSetup::opening(&member, tid)
         },
     )
     .await;
@@ -454,11 +451,7 @@ where
     let dir = tempfile::TempDir::new().unwrap();
     let mut config = trunk_config(&dir);
     (hooks.tweak)(&mut config);
-    let (broker, client, tid) = crate::support::share::start_group_topic(
-        config,
-        crate::support::share::StartGroupTopicSetup::default(),
-    )
-    .await;
+    let (broker, client, tid) = start_group_topic(config, StartGroupTopicSetup::default()).await;
     (hooks.configure)(&client, &broker).await;
     (hooks.produce)(&client, tid).await;
     let (member, row) = join_and_acquire(&broker, &client, tid).await;
@@ -484,8 +477,7 @@ async fn a_rejected_batch_is_dead_lettered_then_archived() {
     cluster
         .reject_acquired(krabka_ids::Offset(0), krabka_ids::Offset(2))
         .await;
-    let records =
-        wait_for_dead_letters(broker, client, crate::support::share::ShareRecordCount(3)).await;
+    let records = wait_for_dead_letters(broker, client, ShareRecordCount(3)).await;
     broker.wait_until_share_spso(GROUP, *tid, 0, 3).await;
 
     let seen: Vec<_> = records
@@ -540,7 +532,7 @@ async fn rejects_that_are_not_neighbours_are_all_dead_lettered_and_counted() {
     let cluster = acquired_dead_letters(
         |_| {},
         DeadLetterQueueSetup {
-            records: crate::support::share::ShareRecordCount(5),
+            records: ShareRecordCount(5),
             ..Default::default()
         },
     )
@@ -561,8 +553,7 @@ async fn rejects_that_are_not_neighbours_are_all_dead_lettered_and_counted() {
         },
     )
     .await;
-    let mut records =
-        wait_for_dead_letters(broker, client, crate::support::share::ShareRecordCount(3)).await;
+    let mut records = wait_for_dead_letters(broker, client, ShareRecordCount(3)).await;
     broker
         .wait_for_metrics("the dead-letter meters", |metrics| {
             meters(metrics, GROUP) == (3, 3, 0)
@@ -604,7 +595,7 @@ async fn a_write_the_topic_refuses_counts_as_failed_and_still_archives() {
     let cluster = acquired_dead_letters(
         |_| {},
         DeadLetterQueueSetup {
-            records: crate::support::share::ShareRecordCount(1),
+            records: ShareRecordCount(1),
             topic_configs: &[("max.message.bytes", "100")],
             ..Default::default()
         },
@@ -639,7 +630,7 @@ async fn a_record_that_uses_up_its_deliveries_is_dead_lettered() {
             config.share_group.max_delivery_attempts = 2;
         },
         DeadLetterQueueSetup {
-            records: crate::support::share::ShareRecordCount(1),
+            records: ShareRecordCount(1),
             ..Default::default()
         },
     )
@@ -653,9 +644,9 @@ async fn a_record_that_uses_up_its_deliveries_is_dead_lettered() {
         .await;
     let second = share_fetch(
         client,
-        crate::support::share::ShareFetchSetup::from(crate::support::share::ShareSessionSetup {
+        ShareFetchSetup::from(ShareSessionSetup {
             group: GROUP,
-            ..crate::support::share::ShareSessionSetup::joined(member, *tid)
+            ..ShareSessionSetup::joined(member, *tid)
         }),
     )
     .await;
@@ -692,7 +683,7 @@ async fn a_reject_below_share_version_two_writes_nothing() {
     let cluster = acquired_dead_letters(
         |_| {},
         DeadLetterQueueSetup {
-            records: crate::support::share::ShareRecordCount(2),
+            records: ShareRecordCount(2),
             version: DeadLetterShareVersion::One,
             ..Default::default()
         },
@@ -721,7 +712,7 @@ async fn a_reject_below_share_version_two_writes_nothing() {
 async fn a_failed_write_still_archives_the_record() {
     let _permit = broker_test_permit().await;
     let cluster = acquired_records(
-        crate::support::share::ShareRecordCount(2),
+        ShareRecordCount(2),
         |_| {},
         async |client, _| {
             finalize_share_version_two(client).await;
@@ -762,7 +753,7 @@ async fn a_failed_write_still_archives_the_record() {
 async fn a_missing_topic_is_created_when_the_cluster_allows_it() {
     let _permit = broker_test_permit().await;
     let cluster = acquired_records(
-        crate::support::share::ShareRecordCount(1),
+        ShareRecordCount(1),
         |_| {},
         async |client, _| {
             finalize_share_version_two(client).await;
@@ -813,7 +804,7 @@ async fn a_copied_record_too_big_for_the_topic_is_written_with_headers_alone() {
     let _permit = broker_test_permit().await;
     let cluster = acquired_records_from(
         AcquiredRecordsSetup {
-            records: crate::support::share::ShareRecordCount(1),
+            records: ShareRecordCount(1),
         },
         AcquisitionHooks {
             tweak: |_: &mut BrokerConfig| {},
@@ -833,7 +824,7 @@ async fn a_copied_record_too_big_for_the_topic_is_written_with_headers_alone() {
                 produce_values(
                     client,
                     values,
-                    crate::support::share::ShareProduceSetup {
+                    ShareProduceSetup {
                         topic_id: tid,
                         ..Default::default()
                     },
@@ -956,20 +947,16 @@ async fn records_that_only_the_remote_tier_holds_are_acquired_and_dead_lettered(
         dir: remote_dir.path().to_path_buf(),
     });
     config.remote_log_manager_interval = krabka_units::millis(100);
-    let (broker, client, tid) = crate::support::share::start_group_topic(
-        config,
-        crate::support::share::StartGroupTopicSetup::default(),
-    )
-    .await;
+    let (broker, client, tid) = start_group_topic(config, StartGroupTopicSetup::default()).await;
     finalize_share_version_two(&client).await;
     create_dead_letter_topic(&broker, &client).await;
     point_group_at_dead_letter_topic(&client).await;
     tier_the_source_topic(&broker, &client).await;
     produce_n(
         &client,
-        crate::support::share::ShareRecordsSetup {
+        ShareRecordsSetup {
             topic_id: tid,
-            count: crate::support::share::ShareRecordCount(3),
+            count: ShareRecordCount(3),
             ..Default::default()
         },
     )
@@ -986,13 +973,12 @@ async fn records_that_only_the_remote_tier_holds_are_acquired_and_dead_lettered(
     check!(acquired_count(&row) == 3);
     check!(values(&records_of(row.records.as_ref())) == produced);
 
-    crate::support::share::acknowledge_success(
+    acknowledge_success(
         &client,
-        crate::support::share::ShareAck::prefix_for(&member, tid, krabka_ids::Offset(2)).reject(),
+        ShareAck::prefix_for(&member, tid, krabka_ids::Offset(2)).reject(),
     )
     .await;
-    let dead_letters =
-        wait_for_dead_letters(&broker, &client, crate::support::share::ShareRecordCount(3)).await;
+    let dead_letters = wait_for_dead_letters(&broker, &client, ShareRecordCount(3)).await;
     check!(values(&dead_letters) == produced);
     broker.shutdown().await;
 }

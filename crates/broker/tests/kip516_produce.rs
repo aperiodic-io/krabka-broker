@@ -6,7 +6,7 @@
 //! not resolve to a name. The zero id is such an id.
 use assert2::assert;
 
-use crate::support::topics::{creatable_topic, create_topic_request};
+use crate::support::topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request};
 mod support;
 
 use krabka_protocol::owned::{
@@ -22,7 +22,7 @@ async fn produce_unresolved_topic_id_returns_unknown_topic_id() {
     let p = support::start().await;
     p.client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("p_known").into(),
                 ..Default::default()
             },

@@ -2,6 +2,8 @@
 
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::config::BrokerConfig;
+
 // Build request headers independently of the parser under test. Arbitrary
 // tagged bytes let malformed-header cases exercise the same path.
 krabka_macros::request_frame_fixture!(request_frame);
@@ -71,8 +73,8 @@ pub(crate) fn assert_authentication_event(
 }
 
 /// The unchanged default config and its directory guard, before caller-specific edits.
-pub(crate) fn broker_config() -> (tempfile::TempDir, crate::config::BrokerConfig) {
+pub(crate) fn broker_config() -> (tempfile::TempDir, BrokerConfig) {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let cfg = crate::config::BrokerConfig::for_tests(dir.path().to_path_buf());
+    let cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
     (dir, cfg)
 }

@@ -382,7 +382,10 @@ mod tests {
             TargetAssignmentMemberValue, TargetAssignmentMetadataValue,
         },
         share::persistence::ShareGroupMetadataValue,
-        test_support::{next_current, next_member, proto_uuid, replay_tombstone_constructor},
+        test_support::{
+            check_replay_cases, deletion_replay_cases, next_current, next_member, proto_uuid,
+            replay_tombstone_constructor,
+        },
     };
 
     /// What a log leaves: the group that replay holds, or the message of
@@ -644,14 +647,8 @@ mod tests {
                 Err("Group g is not a consumer group".into()),
             ),
         ];
-        rows.splice(
-            5..5,
-            crate::coordinator::unified::test_support::deletion_replay_cases(
-                full_group(),
-                kafka_deletion(),
-            ),
-        );
-        crate::coordinator::unified::test_support::check_replay_cases(
+        rows.splice(5..5, deletion_replay_cases(full_group(), kafka_deletion()));
+        check_replay_cases(
             &rows,
             replay,
             |coord| coord.seeds.get("g").map(|seed| seed.value().clone()),

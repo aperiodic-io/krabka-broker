@@ -12,13 +12,15 @@
 
 use krabka_protocol::owned::api_versions_response::{FinalizedFeatureKey, SupportedFeatureKey};
 
+use crate::features::supported_features;
+
 /// The supported-feature rows of this broker's feature table at `api_version`,
 /// under `unstable`.
 pub(super) fn supported_feature_keys(
     api_version: i16,
     unstable: krabka_raft::UnstableFeatureVersions,
 ) -> Vec<SupportedFeatureKey> {
-    crate::features::supported_features(unstable)
+    supported_features(unstable)
         .iter()
         .filter_map(|feature| {
             krabka_raft::supported_feature_key(
@@ -44,6 +46,7 @@ mod tests {
     use krabka_metadata::{FeatureLevelRecord, KRaftVersionRecord, MetadataRecord};
 
     use super::*;
+    use crate::features::{LATEST_PRODUCTION_METADATA_VERSION, METADATA_VERSION_MIN};
 
     krabka_macros::supported_feature_fixture!(supported);
     krabka_macros::supported_features_fixture!(modern_supported, supported);
@@ -57,8 +60,8 @@ mod tests {
     fn supported_features_follow_kafkas_minimums() {
         let metadata_version = supported(
             "metadata.version",
-            crate::features::METADATA_VERSION_MIN,
-            crate::features::LATEST_PRODUCTION_METADATA_VERSION,
+            METADATA_VERSION_MIN,
+            LATEST_PRODUCTION_METADATA_VERSION,
         );
         let modern = modern_supported(metadata_version.clone(), 1);
         let legacy = vec![metadata_version];

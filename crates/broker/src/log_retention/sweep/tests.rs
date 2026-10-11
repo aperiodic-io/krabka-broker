@@ -15,7 +15,7 @@ use crate::{
         block_segment_deletion, expired_partition, log_size, segment_files,
     },
     metrics::{CleanerFailureLabel, CleanerFailureReason},
-    test_support::FreezeSetup,
+    test_support::{CommittedPartitionSetup, FreezeSetup, topic_freeze_record, topic_thaw_record},
 };
 
 /// The failure counter's value for one `(topic, partition, reason)`.
@@ -33,12 +33,12 @@ fn failures(metrics: &BrokerMetrics, topic: &str, reason: CleanerFailureReason) 
 /// An image holding one live freeze entry for `scope`.
 fn image_with_freeze(scope: &str) -> MetadataImage {
     let mut image = MetadataImage::new(Uuid::from_u128(0x5150));
-    image.apply(&MetadataRecord::V1TopicFreeze(
-        crate::test_support::topic_freeze_record(FreezeSetup {
+    image.apply(&MetadataRecord::V1TopicFreeze(topic_freeze_record(
+        FreezeSetup {
             scope,
             ..Default::default()
-        }),
-    ));
+        },
+    )));
     image
 }
 
@@ -55,7 +55,7 @@ async fn a_sweep_deletes_expired_segments_and_the_log_size_follows() {
     let registry = PartitionRegistry::new();
     let partition = expired_partition(
         &dir,
-        crate::test_support::CommittedPartitionSetup {
+        CommittedPartitionSetup {
             leader: NodeId(7),
             ..Default::default()
         },
@@ -106,7 +106,7 @@ async fn a_sweep_trims_a_follower_replica_as_well_as_a_led_one() {
     for (topic, leader) in cases {
         let partition = expired_partition(
             &dir,
-            crate::test_support::CommittedPartitionSetup {
+            CommittedPartitionSetup {
                 topic,
                 leader,
                 ..Default::default()
@@ -144,7 +144,7 @@ async fn a_frozen_topic_is_not_trimmed_until_it_thaws() {
     let registry = PartitionRegistry::new();
     let partition = expired_partition(
         &dir,
-        crate::test_support::CommittedPartitionSetup {
+        CommittedPartitionSetup {
             topic: "frozen",
             leader: NodeId(7),
             ..Default::default()
@@ -169,9 +169,10 @@ async fn a_frozen_topic_is_not_trimmed_until_it_thaws() {
 
     // The thaw record clears the entry, and the next sweep trims with no
     // operator step in between.
-    image.apply(&MetadataRecord::V1TopicFreeze(
-        crate::test_support::topic_thaw_record("frozen", PatternType::Literal),
-    ));
+    image.apply(&MetadataRecord::V1TopicFreeze(topic_thaw_record(
+        "frozen",
+        PatternType::Literal,
+    )));
     tick_all(&registry, Some(&image), &metrics).await;
 
     check!(
@@ -190,7 +191,7 @@ async fn a_failed_deletion_is_counted_and_takes_the_log_dir_offline() {
     let registry = PartitionRegistry::new();
     let partition = expired_partition(
         &dir,
-        crate::test_support::CommittedPartitionSetup {
+        CommittedPartitionSetup {
             leader: NodeId(7),
             registry: status.clone(),
             ..Default::default()

@@ -19,6 +19,7 @@ use super::failover_state::{FailoverState, pr_of};
 use crate::{
     config_keys::effective_min_insync_replicas,
     elr::{maintain::next_partition_elr, state::PartitionElr},
+    test_support::elr_model_image,
 };
 
 /// The one topic the modelled partition belongs to.
@@ -30,7 +31,7 @@ const REPLICAS: usize = 3;
 /// `min_isr`, at both the topic and the cluster default, so the rule and the
 /// model read the same number back.
 pub(super) fn image(min_isr: usize) -> MetadataImage {
-    crate::test_support::elr_model_image(
+    elr_model_image(
         TOPIC,
         i16::try_from(REPLICAS).expect("the modelled partition is tiny"),
         min_isr,

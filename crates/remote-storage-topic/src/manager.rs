@@ -41,7 +41,10 @@ mod rlmm;
 pub(crate) mod test_support;
 
 use self::pump::pump_loop;
-use crate::log::{AssignmentHandle, MetadataEventLog};
+use crate::{
+    log::{AssignmentHandle, MetadataEventLog},
+    snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
+};
 
 /// Production [`RemoteLogMetadataManager`](krabka_remote_storage::RemoteLogMetadataManager)
 /// backed by the `__remote_log_metadata` topic through a [`MetadataEventLog`]
@@ -127,9 +130,7 @@ impl TopicBasedRemoteLogMetadataManager {
         // the same proved adapter that dynamic assignment calls.
         // On absence/corruption, committed[] is all -1 (full replay) and the
         // cache stays empty — never fatal.
-        let snapshot = match crate::snapshot::Snapshot::load(
-            &snapshot_dir.join(crate::snapshot::SNAPSHOT_FILE_NAME),
-        ) {
+        let snapshot = match Snapshot::load(&snapshot_dir.join(SNAPSHOT_FILE_NAME)) {
             Ok(snap) => snap,
             Err(e) => {
                 warn!(error = ?e, "topic-based RLMM: snapshot corrupt; starting from empty cache");

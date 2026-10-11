@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub use krabka_log::name::{FUTURE_SUFFIX, parse_partition_dir, partition_dir};
 
-use crate::error::BrokerError;
+use crate::{cordoned_log_dirs::CordonedLogDirs, error::BrokerError};
 
 /// Builds the future-log directory path for a (topic, partition) in `log_dir`.
 ///
@@ -145,7 +145,7 @@ pub fn place_partition_dir(log_dirs: &[PathBuf], topic: &str, partition: i32) ->
 #[must_use]
 pub(crate) fn place_partition_dir_avoiding(
     log_dirs: &[PathBuf],
-    cordoned: &crate::cordoned_log_dirs::CordonedLogDirs,
+    cordoned: &CordonedLogDirs,
     topic: &str,
     partition: i32,
 ) -> PathBuf {
@@ -202,6 +202,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::{cordoned_log_dirs::CordonedLogDirs, test_support::two_log_dirs};
 
     fn partition_dirs(names: &[&str]) -> tempfile::TempDir {
         let dir = tempdir().unwrap();
@@ -253,7 +254,7 @@ mod tests {
 
     #[test]
     fn place_reuses_existing_location() {
-        let (_a, b, dirs) = crate::test_support::two_log_dirs();
+        let (_a, b, dirs) = two_log_dirs();
         // Pre-create the partition in the *second* dir.
         std::fs::create_dir(b.path().join("t-0")).unwrap();
         let placed = place_partition_dir(&dirs, "t", 0);
@@ -262,7 +263,7 @@ mod tests {
 
     #[test]
     fn place_picks_least_loaded_then_order() {
-        let (a, b, dirs) = crate::test_support::two_log_dirs();
+        let (a, b, dirs) = two_log_dirs();
         // Empty cluster: tie → first dir.
         assert!(place_partition_dir(&dirs, "t", 0) == a.path().join("t-0"));
         // Load `a` with two partitions; next placement should go to `b`.
@@ -275,12 +276,9 @@ mod tests {
     /// loaded, and a partition that already lives in one stays there.
     #[test]
     fn placement_avoids_cordoned_dirs_but_keeps_existing_partitions() {
-        let (a, b, dirs) = crate::test_support::two_log_dirs();
+        let (a, b, dirs) = two_log_dirs();
         std::fs::create_dir(b.path().join("t-0")).unwrap();
-        let cordoned = crate::cordoned_log_dirs::CordonedLogDirs::new(
-            dirs.clone(),
-            Some(a.path().display().to_string()),
-        );
+        let cordoned = CordonedLogDirs::new(dirs.clone(), Some(a.path().display().to_string()));
         let cases = [
             ("a new partition", 1, b.path().join("t-1")),
             ("an existing partition", 0, b.path().join("t-0")),
@@ -292,8 +290,7 @@ mod tests {
             );
         }
         std::fs::create_dir(a.path().join("u-0")).unwrap();
-        let everything =
-            crate::cordoned_log_dirs::CordonedLogDirs::new(dirs.clone(), Some("*".into()));
+        let everything = CordonedLogDirs::new(dirs.clone(), Some("*".into()));
         check!(place_partition_dir_avoiding(&dirs, &everything, "u", 0) == a.path().join("u-0"));
         check!(place_partition_dir_avoiding(&dirs, &everything, "t", 1) == a.path().join("t-1"));
     }

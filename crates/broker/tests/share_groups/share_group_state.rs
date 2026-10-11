@@ -9,7 +9,7 @@
 use assert2::assert;
 
 use crate::share_group_harness::{
-    boot, connect, create_topic, describe, heartbeat, start, topic_id,
+    boot, connect, create_topic, describe, heartbeat, rejoin, start, topic_id,
 };
 
 /// Kafka's `PartitionFactory.UNINITIALIZED_START_OFFSET`: the share state
@@ -126,7 +126,7 @@ async fn lifecycle_metadata_survives_restart() {
     }
 
     {
-        let (broker, client) = crate::share_group_harness::rejoin(log_dir).await;
+        let (broker, client) = rejoin(log_dir).await;
 
         // The recovered ShareCoordinator replays __share_group_state, so the
         // summary is present immediately after restart.

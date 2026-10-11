@@ -8,7 +8,7 @@ use assert2::assert;
 
 use crate::support::{
     discovery::topic_metadata_request,
-    topics::{creatable_topic, create_topic_request, metadata_topic},
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request, metadata_topic},
 };
 mod support;
 
@@ -62,7 +62,7 @@ async fn metadata_name_and_id_of_different_topics_describes_the_id() {
     for n in ["m_a", "m_b"] {
         p.client
             .send(create_topic_request(creatable_topic(
-                crate::support::topics::ConfiguredTopicSetup {
+                ConfiguredTopicSetup {
                     name: (n).into(),
                     ..Default::default()
                 },

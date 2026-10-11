@@ -2,6 +2,11 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::{
+    fixtures::{name as fixture_name, named_arguments, named_root},
+    meta::{arguments, mode},
+};
+
 fn started_metadata(
     root: &TokenStream,
     id: &TokenStream,
@@ -24,7 +29,7 @@ fn started_metadata(
 }
 
 pub(crate) fn remote_started_segment(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let (name, mut arguments) = crate::fixtures::named_arguments(input, 2)?;
+    let (name, mut arguments) = named_arguments(input, 2)?;
     let root = arguments.next().unwrap();
     let metadata = started_metadata(
         &root,
@@ -49,12 +54,11 @@ pub(crate) fn remote_started_segment(input: TokenStream) -> Result<TokenStream, 
 
 /// `started_name, finish_name, metadata_crate, end | next_offset`.
 pub(crate) fn segment(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let [started, finish, root, timestamp]: [TokenStream; 4] = crate::meta::arguments(input, 4)?
-        .try_into()
-        .expect("four arguments");
-    let started = crate::fixtures::name(started)?;
-    let finish = crate::fixtures::name(finish)?;
-    let timestamp = match crate::meta::mode(timestamp, ["end", "next_offset"])? {
+    let [started, finish, root, timestamp]: [TokenStream; 4] =
+        arguments(input, 4)?.try_into().expect("four arguments");
+    let started = fixture_name(started)?;
+    let finish = fixture_name(finish)?;
+    let timestamp = match mode(timestamp, ["end", "next_offset"])? {
         "end" => moxy::template! { end },
         "next_offset" => moxy::template! { end + 1 },
         _ => unreachable!(),
@@ -88,10 +92,8 @@ pub(crate) fn segment(input: TokenStream) -> Result<TokenStream, ParseError> {
 /// Indexed, version-zero WORM metadata with the caller's segment-id namespace.
 pub(crate) fn worm_segment(input: TokenStream) -> Result<TokenStream, ParseError> {
     let [name, root, id_base, topic, partition, span]: [TokenStream; 6] =
-        crate::meta::arguments(input, 6)?
-            .try_into()
-            .expect("six arguments");
-    let name = crate::fixtures::name(name)?;
+        arguments(input, 6)?.try_into().expect("six arguments");
+    let name = fixture_name(name)?;
     let metadata = started_metadata(
         &root,
         &moxy::template! {
@@ -116,7 +118,7 @@ pub(crate) fn worm_segment(input: TokenStream) -> Result<TokenStream, ParseError
 
 /// `check_name, metadata_crate`; callers retain the unknown partition identity.
 pub(crate) fn missing(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let (name, root) = crate::fixtures::named_root(input)?;
+    let (name, root) = named_root(input)?;
     Ok(moxy::template! {
         fn {{ name }}(
             manager: &impl {{ root }}::RemoteLogMetadataManager,
@@ -130,7 +132,7 @@ pub(crate) fn missing(input: TokenStream) -> Result<TokenStream, ParseError> {
 }
 
 pub(crate) fn wal_capture_topic_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let (name, mut arguments) = crate::fixtures::named_arguments(input, 4)?;
+    let (name, mut arguments) = named_arguments(input, 4)?;
     let topic_id = arguments.next().unwrap();
     let topic = arguments.next().unwrap();
     let partitions = arguments.next().unwrap();

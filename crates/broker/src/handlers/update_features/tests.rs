@@ -8,11 +8,14 @@ use krabka_protocol::owned::update_features_response::UpdatableFeatureResult;
 
 use super::*;
 use crate::{
+    authorizer::AllowAllAuthorizer,
+    broker::Broker,
+    features::{LATEST_PRODUCTION_METADATA_VERSION, METADATA_VERSION},
     handlers::update_features::test_support::{
         apply_request, call, call_with, metadata_update, named_update, start_broker, validate_only,
         wait_for_finalized_feature,
     },
-    test_support::DenyAll,
+    test_support::{DenyAll, start_broker_no_audit_with},
 };
 
 const PREFIX: &str =
@@ -139,8 +142,7 @@ async fn requests_apply_atomically_with_kafkas_response_shape() {
         ),
     ];
     for (case, version, updates, validate, expected, group_after) in cases {
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         let req = UpdateFeaturesRequest {
             feature_updates: updates,
             validate_only: validate,
@@ -162,7 +164,7 @@ async fn requests_apply_atomically_with_kafkas_response_shape() {
     }
 }
 
-async fn wait_for_group_version_off(broker: &crate::broker::Broker) {
+async fn wait_for_group_version_off(broker: &Broker) {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         while broker
             .controller
@@ -181,12 +183,12 @@ async fn wait_for_group_version_off(broker: &crate::broker::Broker) {
 async fn handle_persists_a_lossless_metadata_downgrade() {
     // 4.4-IV0 is a Kafka trunk level: the controller supports it only under
     // `unstable.feature.versions.enable`.
-    let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
-        cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+    let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+        cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.features.unstable_feature_versions = krabka_raft::UnstableFeatureVersions::Enabled;
     })
     .await;
-    let target = crate::features::LATEST_PRODUCTION_METADATA_VERSION - 1;
+    let target = LATEST_PRODUCTION_METADATA_VERSION - 1;
     // 4.3-IV0 changed metadata, so step up to 4.4-IV0 first and back down
     // to 4.3-IV0, a downgrade across 4.4-IV0 alone.
     let up = Box::pin(call(
@@ -197,7 +199,7 @@ async fn handle_persists_a_lossless_metadata_downgrade() {
     .await;
     assert!(up == accepted(&[crate::features::METADATA_VERSION]));
     let broker = broker_handle.broker_arc_for_test();
-    wait_for_finalized_feature(&broker, crate::features::METADATA_VERSION, target + 2).await;
+    wait_for_finalized_feature(&broker, METADATA_VERSION, target + 2).await;
 
     let down = Box::pin(call(
         &broker_handle,
@@ -207,6 +209,6 @@ async fn handle_persists_a_lossless_metadata_downgrade() {
     .await;
 
     assert!(down == accepted(&[crate::features::METADATA_VERSION]));
-    wait_for_finalized_feature(&broker, crate::features::METADATA_VERSION, target + 1).await;
+    wait_for_finalized_feature(&broker, METADATA_VERSION, target + 1).await;
     broker_handle.shutdown().await;
 }

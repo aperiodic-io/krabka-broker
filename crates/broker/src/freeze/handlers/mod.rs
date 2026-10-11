@@ -39,7 +39,7 @@ use krabka_protocol::krabka::freeze::{
 pub(crate) use crate::handlers::cluster_describe_denied;
 use crate::{
     break_glass::handlers::{PrivilegedAudit, privileged_event},
-    handlers::RequestContext,
+    handlers::{DESCRIBE_TOPIC_FREEZES_API_KEY, RequestContext, SET_TOPIC_FREEZE_API_KEY},
     operator_keys::approver_set_fingerprint,
 };
 
@@ -47,9 +47,9 @@ use crate::{
 // reads the broker's constant and the framing reads the codec's, so a drift
 // between the two would register a handler under a key that no message
 // decodes.
-const _: [(); crate::handlers::SET_TOPIC_FREEZE_API_KEY as usize] =
+const _: [(); SET_TOPIC_FREEZE_API_KEY as usize] =
     [(); krabka_protocol::krabka::freeze::set_topic_freeze::API_KEY as usize];
-const _: [(); crate::handlers::DESCRIBE_TOPIC_FREEZES_API_KEY as usize] =
+const _: [(); DESCRIBE_TOPIC_FREEZES_API_KEY as usize] =
     [(); krabka_protocol::krabka::freeze::describe_topic_freezes::API_KEY as usize];
 
 /// The pattern type that a request's `pattern_type` byte names, or `None` when

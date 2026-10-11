@@ -15,7 +15,7 @@ use krabka_verified::isr::{IsrCandidateFacts, IsrMemberRole};
 
 use crate::{
     partition::Partition,
-    replica_state::{LeaderPolicy, ReplicaState},
+    replica_state::{FollowerStats, LeaderPolicy, ReplicaState},
 };
 
 /// A computed ISR change proposal. `compute_proposal` captures all fields
@@ -131,7 +131,7 @@ fn proposal_at(
         // it has no state for.
         if krabka_verified::isr::isr_candidate_selected(IsrCandidateFacts {
             role,
-            follower_log_end: stats.map_or(-1, crate::replica_state::FollowerStats::log_end),
+            follower_log_end: stats.map_or(-1, FollowerStats::log_end),
             leader_log_end: leader_leo.0,
             leader_high_watermark: st.hw.0,
             leader_epoch_start: epoch_start.map(|start| start.0),

@@ -11,7 +11,11 @@ use krabka_restore::{
 };
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 
-use crate::{args::restore_args, fixture::build_fixture};
+use crate::{
+    args::{RestoreOptions, restore_args},
+    fixture::build_fixture,
+    restored::fresh_restore,
+};
 
 #[tokio::test]
 async fn authenticated_object_count_covers_only_the_selected_topic() {
@@ -57,7 +61,7 @@ async fn authenticated_object_count_covers_only_the_selected_topic() {
     let args = restore_args(
         fixture.archive_root.path(),
         target.path(),
-        crate::args::RestoreOptions {
+        RestoreOptions {
             extra: &refs,
             ..Default::default()
         },
@@ -73,7 +77,7 @@ async fn authenticated_object_count_covers_only_the_selected_topic() {
 #[tokio::test]
 async fn json_report_matches_the_fixtures_exact_record_and_segment_counts() {
     let fixture = build_fixture();
-    let restored = crate::restored::fresh_restore(fixture.archive_root.path()).await;
+    let restored = fresh_restore(fixture.archive_root.path()).await;
 
     let expected = RestoreReport {
         dry_run: false,

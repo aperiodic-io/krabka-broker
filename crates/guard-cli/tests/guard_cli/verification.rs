@@ -7,15 +7,14 @@
 
 use assert2::check;
 
-use crate::support::{BAD_SIGNATURE, verify_registry};
+use crate::support::{BAD_SIGNATURE, frozen_cluster_with_stranger, verify_registry};
 
 /// `freeze list --verify-signatures` says the registry is authentic from this
 /// machine, so a trust set that cannot prove an entry has to say so rather than
 /// pass the entry.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_registry_the_local_keys_cannot_prove_does_not_pass() {
-    let (_broker, _dir, bootstrap, _key, stranger) =
-        crate::support::frozen_cluster_with_stranger().await;
+    let (_broker, _dir, bootstrap, _key, stranger) = frozen_cluster_with_stranger().await;
 
     // The stranger's trust file names another key id, so the entry cannot be
     // checked here at all. That is the mismatch code, not the signature code:

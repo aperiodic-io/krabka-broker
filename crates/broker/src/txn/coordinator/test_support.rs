@@ -16,7 +16,8 @@ use super::TxnCoordinator;
 use crate::{
     partition::Partition,
     partition_registry::PartitionRegistry,
-    test_support::PartitionCount,
+    producer_id_manager::ProducerIdManager,
+    test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
     txn::{bootstrap, state::TxnEntry},
 };
 
@@ -66,9 +67,9 @@ pub(super) fn state_registry(dir: &Path) -> Arc<PartitionRegistry> {
     partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),
-        crate::test_support::open_partition(
+        open_partition(
             dir,
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: bootstrap::TOPIC,
                 ..Default::default()
             },
@@ -85,7 +86,7 @@ pub(super) fn coordinator_with_registry(
     TxnCoordinator::new(
         node,
         partitions,
-        Arc::new(crate::producer_id_manager::ProducerIdManager::new()),
+        Arc::new(ProducerIdManager::new()),
         num_partitions.0,
         krabka_units::mebibytes(1),
     )
@@ -96,9 +97,9 @@ pub(super) async fn hosted_data_partition(
     dir: &Path,
     partitions: &PartitionRegistry,
 ) -> Arc<Partition> {
-    let data = crate::test_support::open_partition(
+    let data = open_partition(
         dir,
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic: DATA_TOPIC,
             ..Default::default()
         },
@@ -123,9 +124,9 @@ pub(super) async fn live_coordinator(dir: &Path) -> (Arc<TxnCoordinator>, Arc<Pa
     let coordinator = Arc::new(coordinator_with_registry(
         NodeId(1),
         partitions,
-        crate::test_support::PartitionCount(1),
+        PartitionCount(1),
     ));
-    let image = state_image(crate::txn::coordinator::test_support::StateImageSetup::default());
+    let image = state_image(StateImageSetup::default());
     coordinator
         .refresh_leader_partitions(&image)
         .await

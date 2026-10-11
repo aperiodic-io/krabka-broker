@@ -6,7 +6,12 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use krabka_security::{ListenerProtocol, SaslMechanism, TlsConfig};
 
-use crate::{BrokerError, config::BrokerConfig};
+use crate::{
+    BrokerError,
+    api_catalog::{ClientMetricsReceiver, ListenerKind},
+    config::{BrokerConfig, DEFAULT_CONNECTIONS_MAX_IDLE},
+    network::auth::SslPrincipalMapper,
+};
 
 /// A single named listener: the port the broker binds and the address it
 /// gives to clients.
@@ -30,7 +35,7 @@ pub struct ListenerSpec {
     /// rewrites the Subject DN of an mTLS peer certificate into the principal
     /// name ACLs are written against. The default is an empty rule list, which
     /// passes the DN through exactly as Kafka's `DEFAULT` rule does.
-    pub principal_mapper: crate::network::auth::SslPrincipalMapper,
+    pub principal_mapper: SslPrincipalMapper,
 }
 
 /// Credentials the broker uses to connect *to* other brokers.
@@ -114,7 +119,7 @@ impl BrokerConfig {
     #[must_use]
     pub fn effective_connections_max_idle(&self) -> krabka_units::Time {
         self.connections_max_idle
-            .unwrap_or(crate::config::DEFAULT_CONNECTIONS_MAX_IDLE)
+            .unwrap_or(DEFAULT_CONNECTIONS_MAX_IDLE)
     }
 
     /// The idle window a connection accepted on `listener_name` is held to.
@@ -182,7 +187,7 @@ impl BrokerConfig {
     /// that keeps advertising them, because nothing else negotiates the RPC
     /// version against that table.
     #[must_use]
-    pub fn listener_kind(&self, listener_name: &str) -> crate::api_catalog::ListenerKind {
+    pub fn listener_kind(&self, listener_name: &str) -> ListenerKind {
         use crate::api_catalog::ListenerKind;
 
         if !listener_name.eq_ignore_ascii_case(&self.inter_broker_listener_name) {
@@ -205,7 +210,7 @@ impl BrokerConfig {
     /// counts as a receiver. Both are off by default, which is what a Kafka
     /// broker with no `ClientTelemetry` metric reporter advertises.
     #[must_use]
-    pub fn client_metrics_receiver(&self) -> crate::api_catalog::ClientMetricsReceiver {
+    pub fn client_metrics_receiver(&self) -> ClientMetricsReceiver {
         use crate::api_catalog::ClientMetricsReceiver;
 
         if self.client_metrics_enable || self.client_metrics_otlp_endpoint.is_some() {
@@ -287,7 +292,11 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::{BrokerError as BrokerStartError, config::test_support::base};
+    use crate::{
+        BrokerError as BrokerStartError, SslPrincipalMapper,
+        config::test_support::base,
+        test_support::{OAuthTokenContents, oauth_token_file},
+    };
 
     #[test]
     fn accepts_distinct_listener_bind_addresses() {
@@ -405,9 +414,7 @@ mod tests {
 
     #[test]
     fn outbound_oauthbearer_credentials_validate_for_data_and_controller_listeners() {
-        let (_dir, token_path) = crate::test_support::oauth_token_file(
-            crate::test_support::OAuthTokenContents::Nonempty,
-        );
+        let (_dir, token_path) = oauth_token_file(OAuthTokenContents::Nonempty);
         let credentials = Some(InterBrokerCredentials::OAuthBearer { token_path });
         let data_listener = ListenerSpec {
             name: "OAUTH".into(),
@@ -416,7 +423,7 @@ mod tests {
             protocol: ListenerProtocol::SaslPlaintext,
             tls_config: None,
             sasl_mechanisms: Some(vec![SaslMechanism::OAuthBearer]),
-            principal_mapper: crate::SslPrincipalMapper::default(),
+            principal_mapper: SslPrincipalMapper::default(),
         };
         let data = BrokerConfig {
             listeners: vec![data_listener],
@@ -490,8 +497,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_outbound_oauthbearer_token() {
-        let (_dir, token_path) =
-            crate::test_support::oauth_token_file(crate::test_support::OAuthTokenContents::Empty);
+        let (_dir, token_path) = oauth_token_file(OAuthTokenContents::Empty);
         let c = BrokerConfig {
             inter_broker_credentials: Some(InterBrokerCredentials::OAuthBearer { token_path }),
             ..BrokerConfig::default()
@@ -523,7 +529,7 @@ mod tests {
             protocol: ListenerProtocol::SaslSsl,
             tls_config: Some(tls.clone()),
             sasl_mechanisms: Some(vec![SaslMechanism::ScramSha512]),
-            principal_mapper: crate::SslPrincipalMapper::default(),
+            principal_mapper: SslPrincipalMapper::default(),
         };
         let c = BrokerConfig {
             listeners: vec![listener],
@@ -705,13 +711,16 @@ mod connections_max_idle_tests {
     use assert2::assert;
     use krabka_units::{Time, convert::TimeExt as _, millis, secs};
 
-    use crate::config::{BrokerConfig, DEFAULT_CONNECTIONS_MAX_IDLE};
+    use crate::{
+        config::{BrokerConfig, DEFAULT_CONNECTIONS_MAX_IDLE},
+        test_support::listener_time_overrides,
+    };
 
     /// A broker-wide window of `idle` with the named per-listener overrides.
     fn config(idle: Time, overrides: &[(&str, Time)]) -> BrokerConfig {
         BrokerConfig {
             connections_max_idle: Some(idle),
-            connections_max_idle_overrides: crate::test_support::listener_time_overrides(overrides),
+            connections_max_idle_overrides: listener_time_overrides(overrides),
             ..BrokerConfig::default()
         }
     }
@@ -775,15 +784,13 @@ mod connections_max_reauth_tests {
     use assert2::assert;
     use krabka_units::{Time, convert::TimeExt as _, millis, secs};
 
-    use crate::config::BrokerConfig;
+    use crate::{config::BrokerConfig, test_support::listener_time_overrides};
 
     /// A broker-wide KIP-368 window with the named per-listener overrides.
     fn config(broker_wide: Option<Time>, overrides: &[(&str, Time)]) -> BrokerConfig {
         BrokerConfig {
             connections_max_reauth: broker_wide,
-            connections_max_reauth_overrides: crate::test_support::listener_time_overrides(
-                overrides,
-            ),
+            connections_max_reauth_overrides: listener_time_overrides(overrides),
             ..BrokerConfig::default()
         }
     }

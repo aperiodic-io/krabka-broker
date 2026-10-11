@@ -6,14 +6,17 @@ use assert2::assert;
 use tempfile::tempdir;
 
 use super::*;
-use crate::partition_writer::test_support::{observed_writer, sample_batch};
+use crate::{
+    partition_writer::test_support::{ObservedWriter, observed_writer, sample_batch},
+    test_support::{EmptyPayloadBatchSetup, RecordCount},
+};
 
 async fn fixture(
     isr: &[u64],
 ) -> (
     tempfile::TempDir,
     mpsc::Sender<WriterMessage>,
-    crate::partition_writer::test_support::ObservedWriter,
+    ObservedWriter,
 ) {
     let dir = tempdir().expect("tempdir");
     let log = open_default_log(dir.path());
@@ -39,8 +42,8 @@ async fn writer_fires_hw_notify_after_produce_when_rf_one() {
 
     let _ack_rx = queue_batch(
         &tx,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup {
-            count: crate::test_support::RecordCount(2),
+        sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(2),
         }),
     )
     .await;
@@ -62,11 +65,7 @@ async fn writer_does_not_notify_hw_when_append_leaves_hw_unchanged() {
     let waiter = observed.hw_advance_notify.notified();
     tokio::pin!(waiter);
 
-    let ack_rx = queue_batch(
-        &tx,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup::default()),
-    )
-    .await;
+    let ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
     ack_rx.await.expect("ack").expect("append ok");
 
     assert!(observed.replica_state.lock().await.hw == 0);
@@ -86,8 +85,8 @@ async fn writer_does_not_advance_hw_when_followers_lagging() {
 
     let ack_rx = queue_batch(
         &tx,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup {
-            count: crate::test_support::RecordCount(3),
+        sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(3),
         }),
     )
     .await;

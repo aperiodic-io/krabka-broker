@@ -29,7 +29,8 @@ use crate::{
     io::FileIo,
     leader_epoch_checkpoint::LeaderEpochCheckpoint,
     log_start_offset_checkpoint, name,
-    producer_snapshot::{self, ProducerSnapshotEntry},
+    producer_snapshot::{self, NUM_BATCHES_TO_RETAIN, ProducerSnapshotEntry},
+    recovery::{deleted_orphan_recover, swap_orphan_recover},
     segment::Segment,
     txn_index::TxnIndex,
 };
@@ -63,11 +64,11 @@ impl Log {
 
         // Heal any orphaned compaction `.swap` files before
         // we scan the directory for segments.
-        crate::recovery::swap_orphan_recover(&dir)?;
+        swap_orphan_recover(&dir)?;
         // …and reclaim what an interrupted segment deletion left: `.deleted`
         // tombstones, and sidecars whose `.log` the scan below can no longer
         // see. Both are invisible to every later pass otherwise.
-        crate::recovery::deleted_orphan_recover(&FileIo, &dir)?;
+        deleted_orphan_recover(&FileIo, &dir)?;
 
         let mut base_offsets: Vec<i64> = Vec::new();
         for entry in fs::read_dir(&dir)? {
@@ -530,7 +531,7 @@ impl Log {
         } else if let Some(previous) = entry.last_batch() {
             let earlier = self.earlier_batches.entry(producer_id).or_default();
             earlier.push_back(previous);
-            if earlier.len() >= crate::producer_snapshot::NUM_BATCHES_TO_RETAIN {
+            if earlier.len() >= NUM_BATCHES_TO_RETAIN {
                 earlier.pop_front();
             }
         }

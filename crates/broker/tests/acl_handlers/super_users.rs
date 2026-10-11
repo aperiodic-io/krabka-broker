@@ -9,6 +9,8 @@ use krabka_protocol::owned::create_acls_request::CreateAclsRequest;
 use crate::{
     OPERATION_READ, OPERATION_WRITE,
     acl_admin::{drive_create_acls_as_plain, topic_allow_creation},
+    framing::CLIENT_ID,
+    kafka_wire::PlainAuthenticationSetup,
     sasl_cluster::sasl_plain_broker_config_multi_super,
 };
 
@@ -35,13 +37,10 @@ async fn multi_super_user_both_can_provision() {
         creations: vec![topic_allow_creation("t-admin", "User:bob", OPERATION_READ)],
         ..Default::default()
     };
-    let admin_resp = drive_create_acls_as_plain(
-        addr,
-        admin_req,
-        &crate::kafka_wire::PlainAuthenticationSetup::admin(crate::framing::CLIENT_ID),
-    )
-    .await
-    .expect("CreateAcls as admin must round-trip");
+    let admin_resp =
+        drive_create_acls_as_plain(addr, admin_req, &PlainAuthenticationSetup::admin(CLIENT_ID))
+            .await
+            .expect("CreateAcls as admin must round-trip");
     assert!(admin_resp.results.len() == 1);
     assert!(
         admin_resp.results[0].error_code == 0,
@@ -57,8 +56,8 @@ async fn multi_super_user_both_can_provision() {
     let ops_resp = drive_create_acls_as_plain(
         addr,
         ops_req,
-        &crate::kafka_wire::PlainAuthenticationSetup {
-            client_id: crate::framing::CLIENT_ID,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
             user: "ops-bot",
             password: (b"ops-secret").to_vec(),
         },
@@ -84,8 +83,8 @@ async fn multi_super_user_both_can_provision() {
     let alice_resp = drive_create_acls_as_plain(
         addr,
         alice_req,
-        &crate::kafka_wire::PlainAuthenticationSetup {
-            client_id: crate::framing::CLIENT_ID,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
             ..Default::default()
         },
     )

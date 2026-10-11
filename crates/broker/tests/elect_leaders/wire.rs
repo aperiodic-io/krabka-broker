@@ -13,7 +13,10 @@ use assert2::assert;
 use krabka_protocol::owned::elect_leaders_request::ElectLeadersRequest;
 use tokio::net::TcpStream;
 
-use crate::kafka_wire;
+use crate::{
+    kafka_wire,
+    support::{admin::ElectionKind, topics::AssignedTopicSetup},
+};
 
 /// The client id every request header in this suite carries.
 pub const CLIENT_ID: &str = "krabka-elect-test";
@@ -29,7 +32,7 @@ pub const CLIENT_ID: &str = "krabka-elect-test";
 /// the broker answered with.
 pub async fn drive_elect_all_partitions(
     addr: SocketAddr,
-    kind: crate::support::admin::ElectionKind,
+    kind: ElectionKind,
 ) -> Vec<(String, i32, i16)> {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let req = ElectLeadersRequest {
@@ -66,10 +69,7 @@ pub async fn drive_elect_all_partitions(
 /// The topic has one partition on `replicas`, in that order, so the tests know
 /// which broker leads it and which one they can elect: an automatic placement
 /// starts at a random broker.
-pub async fn create_topic_plaintext(
-    addr: SocketAddr,
-    topic: crate::support::topics::AssignedTopicSetup,
-) {
+pub async fn create_topic_plaintext(addr: SocketAddr, topic: AssignedTopicSetup) {
     kafka_wire::create_assigned_topic_plaintext(
         addr,
         kafka_wire::AssignedTopicExchangeSetup {

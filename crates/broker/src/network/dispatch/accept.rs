@@ -12,7 +12,13 @@ use std::net::SocketAddr;
 use tokio::net::TcpStream;
 
 use super::serve_connection_stream;
-use crate::broker::Broker;
+use crate::{
+    broker::Broker,
+    config::ListenerSpec,
+    metrics::{BrokerMetrics, ConnectionCloseReason},
+    network::auth::subject_dn_rfc2253,
+    platform::Sockets,
+};
 
 /// Per-listener entrypoint.
 ///
@@ -22,7 +28,7 @@ use crate::broker::Broker;
 pub async fn serve_connection_on_listener(
     broker: std::sync::Arc<Broker>,
     stream: TcpStream,
-    spec: crate::config::ListenerSpec,
+    spec: ListenerSpec,
 ) {
     // Capture the peer address from the underlying TCP socket before we
     // hand the stream off to the TLS layer / framing loop. ACL
@@ -30,7 +36,7 @@ pub async fn serve_connection_on_listener(
     // (a socket closed mid-accept, or a platform with preopened sockets),
     // it is the unspecified address; ACL matchers treat it as a
     // non-matching host.
-    let peer = crate::platform::Sockets::TARGET.peer_address(&stream);
+    let peer = Sockets::TARGET.peer_address(&stream);
     if spec.protocol.requires_tls() {
         let acceptor = if let Some(per_tls) = spec.tls_config.as_ref() {
             match per_tls.build_server_config() {
@@ -137,7 +143,7 @@ async fn handshake_within_idle_window<F, T>(
     handshake: F,
     idle: Option<std::time::Duration>,
     peer: SocketAddr,
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
 ) -> Option<T>
 where
     F: Future<Output = std::io::Result<T>>,
@@ -152,7 +158,7 @@ where
                     idle_ms = window.as_millis(),
                     "TLS handshake idle past connections.max.idle.ms, closing"
                 );
-                metrics.record_connection_close(crate::metrics::ConnectionCloseReason::Idle);
+                metrics.record_connection_close(ConnectionCloseReason::Idle);
                 return None;
             }
         },
@@ -171,8 +177,8 @@ async fn authenticated_tls<F, S>(
     handshake: F,
     idle: Option<std::time::Duration>,
     peer: SocketAddr,
-    metrics: &crate::metrics::BrokerMetrics,
-    spec: &crate::config::ListenerSpec,
+    metrics: &BrokerMetrics,
+    spec: &ListenerSpec,
 ) -> Option<(
     tokio_rustls::server::TlsStream<S>,
     Option<krabka_security::Principal>,
@@ -200,14 +206,14 @@ where
 /// rather than admitting the peer under its DN or as `ANONYMOUS`.
 fn peer_cert_principal<S>(
     stream: &tokio_rustls::server::TlsStream<S>,
-    spec: &crate::config::ListenerSpec,
+    spec: &ListenerSpec,
     peer: SocketAddr,
 ) -> Result<Option<krabka_security::Principal>, ()> {
     let (_, server_conn) = stream.get_ref();
     let distinguished_name = server_conn
         .peer_certificates()
         .and_then(<[_]>::first)
-        .and_then(|cert| crate::network::auth::subject_dn_rfc2253(cert.as_ref()));
+        .and_then(|cert| subject_dn_rfc2253(cert.as_ref()));
     mtls_principal(spec, peer, distinguished_name.as_deref())
 }
 
@@ -218,7 +224,7 @@ fn peer_cert_principal<S>(
 /// the SASL exchange and the client certificate is never mapped, so a DN that
 /// no rule matches is no reason to close the connection there.
 fn mtls_principal(
-    spec: &crate::config::ListenerSpec,
+    spec: &ListenerSpec,
     peer: SocketAddr,
     distinguished_name: Option<&str>,
 ) -> Result<Option<krabka_security::Principal>, ()> {
@@ -249,7 +255,7 @@ fn mtls_principal(
 async fn serve_connection_plaintext(
     broker: std::sync::Arc<Broker>,
     stream: TcpStream,
-    spec: crate::config::ListenerSpec,
+    spec: ListenerSpec,
     peer: SocketAddr,
 ) {
     serve_connection_stream(broker, stream, spec, peer, None).await;

@@ -9,12 +9,17 @@ use krabka_protocol::owned::create_partitions_request::{
 
 use crate::{
     admin_harness::{build_client, create_topic_helper},
-    support::topics::{creatable_topic, create_topic_request},
+    support::{
+        registered_cluster, start_n_node_client,
+        topics::{
+            ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, create_topic_request,
+        },
+    },
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
-    let mut cluster = crate::support::registered_cluster(3).await;
+    let mut cluster = registered_cluster(3).await;
     // Stop a broker that is neither the one the test talks to nor the
     // controller leader. Its controlled shutdown ends fenced, as Kafka's
     // `processBrokerHeartbeat` fences a broker that may shut down, and it
@@ -36,9 +41,9 @@ async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
 
     let created = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("t-usable-brokers").into(),
-                replicas: crate::support::topics::TopicReplicationFactor(2),
+                replicas: TopicReplicationFactor(2),
                 ..Default::default()
             },
         )))
@@ -80,9 +85,9 @@ async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
     // succeeds. The fenced replica stays out of the ISR and never leads.
     let last_resort = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("t-last-resort").into(),
-                replicas: crate::support::topics::TopicReplicationFactor(3),
+                replicas: TopicReplicationFactor(3),
                 ..Default::default()
             },
         )))
@@ -102,9 +107,9 @@ async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
 
     let rejected = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("t-too-many-replicas").into(),
-                replicas: crate::support::topics::TopicReplicationFactor(4),
+                replicas: TopicReplicationFactor(4),
                 ..Default::default()
             },
         )))
@@ -118,7 +123,7 @@ async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
 /// broker's local registry within a few seconds.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_partitions_extends_topic() {
-    let (cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
     let broker = &cluster[0].0;
 
     create_topic_helper(&client, "t-cp", 1).await;
@@ -156,7 +161,7 @@ async fn create_partitions_extends_topic() {
 async fn create_partitions_honors_explicit_assignments() {
     use krabka_protocol::owned::create_partitions_request::CreatePartitionsAssignment;
 
-    let (cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
     let broker = &cluster[0].0;
 
     create_topic_helper(&client, "t-cpa", 1).await;

@@ -136,7 +136,12 @@ mod tests {
     };
 
     use super::*;
-    use crate::{codes, handlers::list_offsets::test_support::list_one};
+    use crate::{
+        codes,
+        handlers::list_offsets::test_support::{list_one, remote_topic},
+        partition::test_support::test_partition,
+        remote_reader::RemoteReader,
+    };
 
     /// The remote tier answers first, and what it answers decides the row: a
     /// hit competes with any earlier local match; a miss or a failure reads the local log,
@@ -150,8 +155,7 @@ mod tests {
 
         use krabka_protocol::records::{Record, RecordBatch};
 
-        let (partition, _dir) =
-            crate::partition::test_support::test_partition(Arc::new(tokio::sync::Notify::new()));
+        let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
         {
             let mut log = partition.log.lock().expect("partition log lock");
             log.append(&mut RecordBatch {
@@ -240,7 +244,7 @@ mod tests {
     }
 
     fn copy_timestamp_segment(
-        reader: &crate::remote_reader::RemoteReader,
+        reader: &RemoteReader,
         data: &LogSegmentData,
         setup: TimestampSegmentSetup,
     ) -> RemoteLogSegmentId {
@@ -293,8 +297,7 @@ mod tests {
 
         const TOPIC: &str = "list-offsets-remote-timestamp";
 
-        let (broker, client, _dirs) =
-            crate::handlers::list_offsets::test_support::remote_topic(TOPIC, vec![]).await;
+        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
 
         let broker_arc = broker.broker_arc_for_test();
         let partition = broker_arc

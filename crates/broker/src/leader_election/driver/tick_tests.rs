@@ -8,19 +8,26 @@ use assert2::assert;
 
 use super::*;
 use crate::{
-    heartbeat::controller_state::TestClock,
-    leader_election::test_support::{
-        ElectionSetup, fake_source, fencing_updates, img_with_partition, one_partition_change,
-        partition_batches, recovery_handle_for_tests, register_brokers,
+    heartbeat::{
+        controller_state::TestClock,
+        fencing::{RegistrationChange, registration_change},
     },
+    leader_election::test_support::{
+        ElectionSetup, expected_clean_election, fake_source, fencing_updates, img_with_partition,
+        one_partition_change, partition_batches, recovery_handle_for_tests, register_brokers,
+    },
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    test_support::FakeMetadataSource,
+    unclean_recovery::UncleanRecoveryHandle,
 };
 
 struct TickFixture {
-    source: Arc<crate::test_support::FakeMetadataSource>,
+    source: Arc<FakeMetadataSource>,
     clock: TestClock,
     liveness: Arc<ControllerLivenessState>,
-    metrics: crate::metrics::BrokerMetrics,
-    recovery: crate::unclean_recovery::UncleanRecoveryHandle,
+    metrics: BrokerMetrics,
+    recovery: UncleanRecoveryHandle,
     state: LivenessTickState,
 }
 
@@ -34,7 +41,7 @@ impl TickFixture {
                 &clock,
             )),
             clock,
-            metrics: crate::metrics::BrokerMetrics::new(),
+            metrics: BrokerMetrics::new(),
             recovery: recovery_handle_for_tests(),
             state: LivenessTickState {
                 was_leader,
@@ -50,7 +57,7 @@ impl TickFixture {
     }
 
     async fn tick(&mut self) {
-        let controller: Arc<dyn crate::metadata_source::MetadataSource> = self.source.clone();
+        let controller: Arc<dyn MetadataSource> = self.source.clone();
         run_liveness_tick(
             &controller,
             NodeId(2),
@@ -92,7 +99,7 @@ async fn tick_discovers_registered_broker_that_never_heartbeated_and_fails_it_ov
 
     let batches = partition_batches(&fixture.source.submitted());
     assert!(batches.len() == 1, "the edge submits once, got {batches:?}");
-    let expected = crate::leader_election::test_support::expected_clean_election(
+    let expected = expected_clean_election(
         krabka_raft::NodeId(2),
         &[krabka_raft::NodeId(2), krabka_raft::NodeId(3)],
         vec![],
@@ -172,12 +179,8 @@ async fn tick_leaves_the_unfence_of_a_returning_broker_to_its_heartbeat() {
         ..Default::default()
     });
     register_brokers(&mut img, &[1, 2, 3]);
-    let fence = crate::heartbeat::fencing::registration_change(
-        &img,
-        NodeId(3),
-        crate::heartbeat::fencing::RegistrationChange::FENCE,
-    )
-    .expect("broker 3 is registered and unfenced");
+    let fence = registration_change(&img, NodeId(3), RegistrationChange::FENCE)
+        .expect("broker 3 is registered and unfenced");
     img.apply(&fence);
     let mut fixture = TickFixture::new(img, 2, true);
     for broker in [1, 2, 3] {

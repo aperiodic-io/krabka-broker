@@ -9,7 +9,7 @@ use krabka_protocol::owned::{
 use krabka_telemetry::{LogLevel, LogLevelController};
 
 use super::handle_broker_logger_scoped;
-use crate::codes;
+use crate::{codes, config::DEFAULT_LOG_FILTER};
 
 /// This node's id in every case below.
 const NODE_ID: i32 = 3;
@@ -196,7 +196,7 @@ fn the_default_filter_names_the_loggers_an_operator_reaches_for() {
     // `--add-config krabka_broker=DEBUG` is refused on a real broker.
     for target in ["krabka_broker", "krabka_log"] {
         let (out, levels) = apply(
-            crate::config::DEFAULT_LOG_FILTER,
+            DEFAULT_LOG_FILTER,
             "3",
             vec![config(target, 0, Some("DEBUG"))],
             false,

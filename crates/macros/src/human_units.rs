@@ -11,7 +11,7 @@ use moxy::{
     token::{Group, TokenStream, TokenTree},
 };
 
-use crate::meta::compact;
+use crate::meta::{compact, named_body};
 
 /// A `krabka_units` value type that a config file writes as a human string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,7 +164,7 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
             "`#[human_units]` takes no arguments",
         ));
     }
-    let (mut tokens, body) = crate::meta::named_body(item, "human_units")?;
+    let (mut tokens, body) = named_body(item, "human_units")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

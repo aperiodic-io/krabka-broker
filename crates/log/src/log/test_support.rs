@@ -15,7 +15,12 @@ use tempfile::tempdir;
 
 use super::{BARRIER_CONTROL_TYPE, CompactionContext, Log, VerbatimBatch};
 use crate::{
-    CleanupPolicy, config::LogConfig, producer_snapshot::ProducerSnapshotEntry,
+    CleanupPolicy,
+    config::LogConfig,
+    producer_snapshot::{ProducerSnapshotEntry, list},
+    stamp_index::{StampEntry, StampIndex},
+    stamp_source::MonotonicStampSource,
+    test_support::{numbered_record, segmented_log, single_record_batch},
     txn_index::AbortedTxn,
 };
 
@@ -31,7 +36,7 @@ pub fn sample_batch(n: i32) -> RecordBatch {
         ..RecordBatch::default()
     };
     for i in 0..n {
-        b.records.push(crate::test_support::numbered_record(i, 0));
+        b.records.push(numbered_record(i, 0));
     }
     b
 }
@@ -109,10 +114,8 @@ pub fn stamped_rolling_log(first: u64, step: u64, batches: usize) -> (tempfile::
 
 /// Install an explicit monotonic stamp sequence on an existing log.
 pub fn install_stamps(log: &mut Log, first: u64, step: u64) {
-    log.set_stamp_source(std::sync::Arc::new(
-        crate::stamp_source::MonotonicStampSource::new(first, step),
-    ))
-    .unwrap();
+    log.set_stamp_source(std::sync::Arc::new(MonotonicStampSource::new(first, step)))
+        .unwrap();
 }
 
 /// A default log with the caller's explicit stamp sequence installed.
@@ -132,15 +135,17 @@ pub fn check_stamps(log: &Log, expected: &[(i64, Option<u64>)]) {
 /// Read every aborted interval from the caller's explicit sidecar filename.
 #[cfg(test)]
 pub fn transaction_entries(dir: &std::path::Path, filename: &str) -> Vec<AbortedTxn> {
-    crate::txn_index::TxnIndex::open(dir.join(filename))
+    use crate::txn_index::TxnIndex;
+
+    TxnIndex::open(dir.join(filename))
         .unwrap()
         .entries()
         .to_vec()
 }
 
 /// Read the entire durable stamp sidecar of one segment.
-pub fn stamp_entries(dir: &std::path::Path, base: i64) -> Vec<crate::stamp_index::StampEntry> {
-    crate::stamp_index::StampIndex::open(dir.join(format!("{base:020}.stampindex")))
+pub fn stamp_entries(dir: &std::path::Path, base: i64) -> Vec<StampEntry> {
+    StampIndex::open(dir.join(format!("{base:020}.stampindex")))
         .unwrap()
         .entries()
         .to_vec()
@@ -215,7 +220,7 @@ pub fn log_append_time_log() -> (tempfile::TempDir, Log) {
 
 pub fn test_batch_at(_off: i64) -> RecordBatch {
     // `Log::append` overwrites `base_offset`; one record per batch.
-    crate::test_support::single_record_batch(0, 1_000, Bytes::from("v"))
+    single_record_batch(0, 1_000, Bytes::from("v"))
 }
 
 /// Encode a "producer" batch with a producer-chosen `base_offset` and
@@ -502,7 +507,7 @@ pub(crate) fn append_path(log: &mut Log, path: AppendPath, mut batch: RecordBatc
 }
 
 pub fn snapshot_offsets(dir: &std::path::Path) -> Vec<Offset> {
-    crate::producer_snapshot::list(dir)
+    list(dir)
         .unwrap()
         .into_iter()
         .map(|(offset, _)| offset)
@@ -518,7 +523,7 @@ pub fn check_contiguous_exports(exports: &[super::SegmentExport]) {
 
 /// Several sealed segments and an active segment, with identical batch timestamps.
 pub(crate) fn rolled_sample_log(dir: &std::path::Path) -> Log {
-    let mut log = crate::test_support::segmented_log(dir, krabka_units::kibibytes(1));
+    let mut log = segmented_log(dir, krabka_units::kibibytes(1));
     append_samples(&mut log, 40, 4);
     assert2::check!(
         !log.segments.is_empty(),

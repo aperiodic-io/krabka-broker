@@ -16,6 +16,7 @@ use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHand
 use tempfile::TempDir;
 
 use super::cluster::start_n_node_with;
+use crate::support::{NodeIndex, controller_voters};
 
 /// Shut brokers down in vector order, retaining the original tuple destructuring.
 pub async fn shutdown_cluster(cluster: Vec<(BrokerHandle, BrokerConfig, TempDir)>) {
@@ -41,7 +42,7 @@ const DEFAULT_ENDPOINTS: [SocketAddr; 1] = [SocketAddr::V4(std::net::SocketAddrV
 
 #[derive(krabka_macros::FieldDefaults)]
 pub struct ClusterNodeSetup<'a> {
-    pub index: crate::support::NodeIndex,
+    pub index: NodeIndex,
     #[default(&DEFAULT_ENDPOINTS)]
     pub client_addrs: &'a [SocketAddr],
     #[default(&DEFAULT_ENDPOINTS)]
@@ -129,7 +130,7 @@ pub struct RoleTopology<'a> {
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub struct RoleNodeSetup {
-    pub index: crate::support::NodeIndex,
+    pub index: NodeIndex,
     #[default(BootstrapMode::Bootstrap)]
     pub mode: BootstrapMode,
     #[default(krabka_broker::config::NodeRole::Broker)]
@@ -138,7 +139,7 @@ pub struct RoleNodeSetup {
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub struct ClusterBootstrapSetup {
-    pub index: crate::support::NodeIndex,
+    pub index: NodeIndex,
     #[default(BootstrapMode::Bootstrap)]
     pub mode: BootstrapMode,
 }
@@ -162,7 +163,7 @@ impl<'a> RoleTopology<'a> {
             index: setup.index,
             client_addrs: self.clients,
             controller_addrs: self.controllers,
-            voters: crate::support::controller_voters(self.voters),
+            voters: controller_voters(self.voters),
             mode: setup.mode,
         }
     }

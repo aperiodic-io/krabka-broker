@@ -4,9 +4,9 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-    docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity,
-    start_three_broker_sasl_plaintext_jvm_cluster_with_users,
+    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, SaslClusterSetup, broker0_advertised,
+    describe_console_entity, docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity,
+    start_three_broker_sasl_plaintext_jvm_cluster_with_users, write_plain_props,
 };
 
 /// JVM acceptance: `kafka-configs --describe --entity-type users` round-trip for
@@ -20,13 +20,10 @@ use crate::jvm_acceptance::{
 #[ignore = "requires Docker"]
 async fn jvm_kafka_configs_describe_users_scram_credentials_end_to_end() {
     let (h1, _h2, _h3, _cfg1, _cfg2, _cfg3, _d1, _d2, _d3) =
-        start_three_broker_sasl_plaintext_jvm_cluster_with_users(
-            crate::jvm_acceptance::SaslClusterSetup::default(),
-        )
-        .await;
+        start_three_broker_sasl_plaintext_jvm_cluster_with_users(SaslClusterSetup::default()).await;
     nc_check_connectivity();
 
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     let admin_mount = admin_props.mount_str();
 
     // Provision a SCRAM user via kafka-configs --alter (hits AlterUserScramCredentials, api_key 51).
@@ -55,7 +52,7 @@ async fn jvm_kafka_configs_describe_users_scram_credentials_end_to_end() {
     );
 
     // Describe — should exit 0 cleanly (api_key 50 now implemented).
-    let desc = crate::jvm_acceptance::describe_console_entity(&admin_mount, "users", "alice");
+    let desc = describe_console_entity(&admin_mount, "users", "alice");
     let stdout = String::from_utf8_lossy(&desc.stdout);
     assert!(
         stdout.contains("SCRAM-SHA-512"),

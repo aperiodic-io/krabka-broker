@@ -432,6 +432,11 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
+    use crate::{
+        codes::SASL_AUTHENTICATION_FAILED,
+        network::auth::test_support::{authenticated, oauth_reauthenticating},
+        test_support::{principal, sasl_principal},
+    };
 
     /// The request gate follows Kafka's `SaslServerAuthenticator`: before a
     /// handshake only `SaslHandshake` and `ApiVersions`; after one only
@@ -449,7 +454,7 @@ mod tests {
         fn reauthenticating() -> ConnectionAuth {
             ConnectionAuth::Reauthenticating {
                 previous: AuthenticatedSnapshot {
-                    principal: crate::test_support::sasl_principal("alice"),
+                    principal: sasl_principal("alice"),
                     mechanism: SaslMechanism::Plain,
                     expires_at_ms: Some(1),
                     authenticated_via_token: false,
@@ -610,7 +615,7 @@ mod tests {
 
     #[test]
     fn authenticated_returns_principal() {
-        let a = crate::network::auth::test_support::authenticated(
+        let a = authenticated(
             "alice",
             krabka_security::AuthMethod::SaslScramSha512,
             SaslMechanism::ScramSha512,
@@ -627,7 +632,7 @@ mod tests {
 
     #[test]
     fn authenticated_state_carries_mechanism_and_expires_at_ms() {
-        let auth = crate::network::auth::test_support::authenticated(
+        let auth = authenticated(
             "alice",
             krabka_security::AuthMethod::SaslOAuthBearer,
             SaslMechanism::OAuthBearer,
@@ -651,7 +656,7 @@ mod tests {
 
     #[test]
     fn allows_request_during_reauthenticating_only_sasl_authenticate() {
-        let auth = crate::network::auth::test_support::oauth_reauthenticating("alice", 2_000_000);
+        let auth = oauth_reauthenticating("alice", 2_000_000);
         let cases = [
             (36, true),  // SaslAuthenticate
             (17, false), // SaslHandshake
@@ -665,7 +670,7 @@ mod tests {
 
     #[test]
     fn allows_request_authenticated_allows_all() {
-        let auth = crate::network::auth::test_support::authenticated(
+        let auth = authenticated(
             "alice",
             krabka_security::AuthMethod::SaslScramSha512,
             SaslMechanism::ScramSha512,
@@ -684,21 +689,21 @@ mod tests {
     #[test]
     fn an_expired_session_admits_a_re_authentication_and_nothing_else() {
         let now_ms = 1_000_i64;
-        let expired = crate::network::auth::test_support::authenticated(
+        let expired = authenticated(
             "alice",
             krabka_security::AuthMethod::SaslScramSha512,
             SaslMechanism::ScramSha512,
             Some(now_ms - 1),
             false,
         );
-        let live = crate::network::auth::test_support::authenticated(
+        let live = authenticated(
             "alice",
             krabka_security::AuthMethod::SaslScramSha512,
             SaslMechanism::ScramSha512,
             Some(now_ms + 1),
             false,
         );
-        let uncapped = crate::network::auth::test_support::authenticated(
+        let uncapped = authenticated(
             "alice",
             krabka_security::AuthMethod::SaslScramSha512,
             SaslMechanism::ScramSha512,
@@ -761,10 +766,9 @@ mod tests {
             exchange: SaslExchange::Plain,
             pending_token_expiry_ms: None,
         };
-        let reauthenticating =
-            crate::network::auth::test_support::oauth_reauthenticating("alice", 2_000_000);
+        let reauthenticating = oauth_reauthenticating("alice", 2_000_000);
         let authenticated = ConnectionAuth::Authenticated {
-            principal: crate::test_support::principal("ANONYMOUS"),
+            principal: principal("ANONYMOUS"),
             mechanism: SaslMechanism::Plain,
             expires_at_ms: None,
             authenticated_via_token: false,
@@ -786,7 +790,7 @@ mod tests {
     }
 
     fn alice() -> Principal {
-        crate::test_support::sasl_principal("alice")
+        sasl_principal("alice")
     }
 
     /// The session a re-authentication is measured against: SCRAM-SHA-256
@@ -972,7 +976,7 @@ mod tests {
     /// the KIP-368 window.
     #[test]
     fn finish_reauth_keeps_a_same_principal_session_and_its_new_window() {
-        let mut auth = crate::network::auth::test_support::authenticated(
+        let mut auth = authenticated(
             "alice",
             krabka_security::AuthMethod::SaslPlain,
             SaslMechanism::Plain,
@@ -1036,7 +1040,7 @@ mod tests {
     #[test]
     fn finish_reauth_refuses_a_principal_switch_and_restores_the_old_session() {
         let mut auth = ConnectionAuth::Authenticated {
-            principal: crate::test_support::sasl_principal("mallory"),
+            principal: sasl_principal("mallory"),
             mechanism: SaslMechanism::Plain,
             expires_at_ms: Some(40_000),
             authenticated_via_token: false,
@@ -1045,7 +1049,7 @@ mod tests {
 
         check!(
             resp == SaslAuthenticateResponse {
-                error_code: crate::codes::SASL_AUTHENTICATION_FAILED,
+                error_code: SASL_AUTHENTICATION_FAILED,
                 error_message: Some(
                     "Cannot change principals during re-authentication from User.alice: \
                      User.mallory"
@@ -1067,7 +1071,7 @@ mod tests {
     fn finish_reauth_restores_the_old_session_after_a_failed_exchange() {
         let mut auth = ConnectionAuth::Anonymous;
         let failure = SaslAuthenticateResponse {
-            error_code: crate::codes::SASL_AUTHENTICATION_FAILED,
+            error_code: SASL_AUTHENTICATION_FAILED,
             error_message: Some("authentication failed".to_string()),
             auth_bytes: bytes::Bytes::new(),
             session_lifetime_ms: 0,

@@ -12,10 +12,12 @@ use super::{
     StreamsDescribeView, StreamsGroupActorHandle, StreamsGroupActorMessage, StreamsHeartbeatResult,
 };
 use crate::{
+    codes::NONE,
     coordinator::unified::{
         GroupCoordinator, actor::MetadataProvider, config::NextGenConfig,
         offsets_log::fake::InMemoryOffsetsLog, reconciler::ReconcileInput,
         share::config::ShareGroupConfig, streams::config::StreamsGroupConfig,
+        test_support::MemberEpoch,
     },
     task_util::ask,
 };
@@ -109,7 +111,7 @@ pub(super) struct ActiveResponseSetup<'a> {
     #[default("m1")]
     pub member_id: &'a str,
     #[default(crate::coordinator::unified::test_support::MemberEpoch(1))]
-    pub epoch: crate::coordinator::unified::test_support::MemberEpoch,
+    pub epoch: MemberEpoch,
     pub status: Option<Vec<Status>>,
     pub active: Option<Vec<PartitionIndex>>,
 }
@@ -131,6 +133,6 @@ pub(super) fn expected_active_response(
         active_tasks: active.map(|partitions| {
             response_tasks(partitions.into_iter().map(|index| index.0).collect())
         }),
-        ..super::response::base_resp(crate::codes::NONE, epoch.0, &undelayed())
+        ..super::response::base_resp(NONE, epoch.0, &undelayed())
     }
 }

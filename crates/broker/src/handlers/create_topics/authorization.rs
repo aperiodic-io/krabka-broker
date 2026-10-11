@@ -15,6 +15,7 @@ use krabka_metadata::AclOperation;
 use crate::{
     authorizer::{AuthorizationResult, authorize_topics},
     broker::Broker,
+    handlers::{RequestContext, acl_denied_quiet, cluster_shortcut_denied},
 };
 
 /// The `Create` decision for a set of candidate topic names: an Allow for
@@ -28,11 +29,11 @@ use crate::{
 pub(super) fn authorize_create_topics<'a>(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     names: impl IntoIterator<Item = &'a str>,
 ) -> HashMap<&'a str, AuthorizationResult> {
     let names: Vec<&str> = names.into_iter().collect();
-    if !crate::handlers::cluster_shortcut_denied(broker, image, context, AclOperation::Create) {
+    if !cluster_shortcut_denied(broker, image, context, AclOperation::Create) {
         return names
             .into_iter()
             .map(|name| (name, AuthorizationResult::Allow))
@@ -60,11 +61,11 @@ pub(super) fn authorize_create_topics<'a>(
 pub(super) fn describe_configs_denied(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     topic: &str,
 ) -> bool {
     // A denial withholds disclosure without refusing the create or auditing a refusal.
-    crate::handlers::acl_denied_quiet(
+    acl_denied_quiet(
         broker.config.authorizer.as_ref(),
         image,
         context,

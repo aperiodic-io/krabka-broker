@@ -8,7 +8,7 @@ use krabka_protocol::records::Record;
 use krabka_units::{bytes, fraction};
 
 use super::*;
-use crate::handlers::produce::test_support::encode_batch;
+use crate::{handlers::produce::test_support::encode_batch, metrics::BrokerMetrics};
 
 krabka_macros::legacy_policy_fixture!(legacy_policy_wire, ::krabka_records_legacy);
 
@@ -21,7 +21,7 @@ fn topic() -> Arc<str> {
 #[test]
 fn record_decompression_policy_limits_owned_and_verbatim_produce() {
     let policy = RecordDecompressionPolicy::new(fraction(1.0), bytes(1), bytes(32)).unwrap();
-    let metrics = crate::metrics::BrokerMetrics::new();
+    let metrics = BrokerMetrics::new();
 
     let v2 = RecordBatch {
         attributes: Attributes::default().with_compression(CompressionType::Lz4),

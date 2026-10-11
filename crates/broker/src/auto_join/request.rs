@@ -9,13 +9,15 @@
 
 use krabka_protocol::owned::add_raft_voter_request::{AddRaftVoterRequest, Listener};
 
+use crate::host_port::{advertised_host, local_host_name, parse_host_port};
+
 /// The `CONTROLLER` listener of a controller bound to `bound`: the bound
 /// address, or this machine's host name for a wildcard bind, as
 /// [`crate::host_port::advertised_host`] decides.
 pub(super) fn controller_listener(bound: std::net::SocketAddr) -> Listener {
     Listener {
         name: "CONTROLLER".to_string(),
-        host: crate::host_port::advertised_host(bound.ip(), crate::host_port::local_host_name),
+        host: advertised_host(bound.ip(), local_host_name),
         port: bound.port(),
         ..Default::default()
     }
@@ -42,7 +44,7 @@ pub(super) fn advertised_controller_listener(
         return controller_listener(bound);
     }
     let Some((host, port)) = advertised
-        .and_then(crate::host_port::parse_host_port)
+        .and_then(parse_host_port)
         .filter(|(host, _)| !host.is_empty())
     else {
         return controller_listener(bound);

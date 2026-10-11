@@ -9,6 +9,10 @@ use std::process::Stdio;
 use assert2::assert;
 
 use super::ports::host_port;
+use crate::support::{
+    ContainerInput, JvmDockerSetup, combined_output, docker_tool_command, jvm_docker_command,
+    jvm_stdin_output, jvm_tool_output,
+};
 
 /// Create a topic through the JVM admin client, optionally with client properties.
 pub(crate) fn create_console_topic(
@@ -102,12 +106,12 @@ pub(crate) fn produce_console(
     if !mounts.is_empty() {
         args.extend(["--producer.config", "/client.properties"]);
     }
-    crate::support::jvm_stdin_output(
-        &mut crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    jvm_stdin_output(
+        &mut jvm_docker_command(JvmDockerSetup {
             image,
             mounts,
             args: &args,
-            input: crate::support::ContainerInput::Attached,
+            input: ContainerInput::Attached,
         }),
         payload,
     )
@@ -390,7 +394,7 @@ pub(crate) fn consume_console(
     if !mounts.is_empty() {
         args.extend(["--consumer.config", "/client.properties"]);
     }
-    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let out = jvm_docker_command(JvmDockerSetup {
         image,
         mounts,
         args: &args,
@@ -486,7 +490,7 @@ pub(crate) const KAFKA_IMAGE_ELR: &str = "mirror.gcr.io/apache/kafka:4.3.1";
 /// Verify TCP connectivity from inside a bridge-network container with
 /// `--add-host=host.docker.internal:host-gateway`.
 pub(crate) fn nc_check_connectivity() {
-    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let out = jvm_docker_command(JvmDockerSetup {
         image: "alpine",
         args: &[
             "sh",
@@ -545,7 +549,7 @@ pub(crate) fn docker_run_kafka_tool_allowing_failure_with_image(
     image: &str,
     args: &[&str],
 ) -> std::process::Output {
-    crate::support::jvm_tool_output(image, args, "test")
+    jvm_tool_output(image, args, "test")
 }
 
 /// A finished tool's stdout followed by its stderr, as one text.
@@ -554,7 +558,7 @@ pub(crate) fn docker_run_kafka_tool_allowing_failure_with_image(
 /// per tool -- `kafka-configs` prints its own summary line on stdout and the
 /// exception on stderr -- so a case about a refusal searches both.
 pub(crate) fn tool_output(out: &std::process::Output) -> String {
-    crate::support::combined_output(out)
+    combined_output(out)
 }
 
 pub(crate) const TRANSACTIONAL_PRODUCER_JAVA: &str = krabka_macros::java_string_producer_source!(
@@ -769,7 +773,9 @@ pub(crate) fn write_client_props(props: &str) -> ClientPropsFile {
     std::fs::write(tmp.path(), props).expect("write props");
     #[cfg(unix)]
     {
-        crate::support::chmod_for_container(tmp.path(), 0o644, "chmod props");
+        use crate::support::chmod_for_container;
+
+        chmod_for_container(tmp.path(), 0o644, "chmod props");
     }
     ClientPropsFile { tmp }
 }
@@ -806,7 +812,7 @@ pub(crate) fn docker_run_kafka_tool_with_image_and_mount(
     mount: &str,
     args: &[&str],
 ) -> std::process::Output {
-    let out = crate::support::docker_tool_command(
+    let out = docker_tool_command(
         image,
         &["-v", mount, "--add-host=host.docker.internal:host-gateway"],
     )
@@ -840,7 +846,7 @@ pub(crate) fn docker_run_kafka_tool_with_image_and_mounts(
         options.extend(["-v", *mount]);
     }
     options.push("--add-host=host.docker.internal:host-gateway");
-    let mut cmd = crate::support::docker_tool_command(image, &options);
+    let mut cmd = docker_tool_command(image, &options);
     cmd.args(args);
     let out = cmd.output().expect("spawn docker run");
     eprintln!(
@@ -883,7 +889,9 @@ pub(crate) fn write_temp_file(filename: &str, contents: &str) -> TempFileMount {
     std::fs::write(tmp.path(), contents).expect("write tempfile");
     #[cfg(unix)]
     {
-        crate::support::chmod_for_container(tmp.path(), 0o644, "chmod tempfile");
+        use crate::support::chmod_for_container;
+
+        chmod_for_container(tmp.path(), 0o644, "chmod tempfile");
     }
     TempFileMount { tmp }
 }
@@ -970,7 +978,7 @@ pub(crate) fn denied_console_consumer(
     group: &str,
     context: &str,
 ) -> std::process::Output {
-    crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE_TXN,
         mounts: &[mount],
         args: &[

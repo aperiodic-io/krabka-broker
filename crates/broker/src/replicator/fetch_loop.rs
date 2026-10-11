@@ -432,11 +432,14 @@ mod tests {
     use krabka_units::{bytes, millis};
 
     use super::*;
-    use crate::replicator::{
-        FollowedPartitions,
-        test_support::{
-            LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID, image_with_follower_throttle,
-            image_with_leader, test_config,
+    use crate::{
+        codes::NONE,
+        replicator::{
+            FollowedPartitions,
+            test_support::{
+                LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID, image_with_follower_throttle,
+                image_with_leader, test_config,
+            },
         },
     };
 
@@ -551,7 +554,7 @@ mod tests {
         .into_iter()
         .collect();
         build_fetch_request(&fetcher, &mut session, first, &[]);
-        session.handle_response(crate::codes::NONE, 77);
+        session.handle_response(NONE, 77);
 
         let second: WantedRows = [wanted_row(PARTITION, 5, 99)].into_iter().collect();
         let req = build_fetch_request(&fetcher, &mut session, second, &[]);

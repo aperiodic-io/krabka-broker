@@ -10,7 +10,7 @@ use super::{
     bounds::{BASE_OFFSET, BASE_SEQUENCE, MAX_LOG_LEN, NB, PRODUCER_EPOCH, PRODUCER_ID},
     witness::{WITNESS_ACKED_BEFORE_FAILOVER, WITNESS_FAILOVER, Witnesses},
 };
-use crate::producer_state::ProducerEntry;
+use crate::producer_state::{NO_EARLIER_BATCHES, ProducerEntry};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct LogBatch {
@@ -112,7 +112,7 @@ impl ProducerEntryProjection {
             last_timestamp: 0,
             entry_timestamp: 0,
             current_txn_first_offset: None,
-            earlier: crate::producer_state::NO_EARLIER_BATCHES,
+            earlier: NO_EARLIER_BATCHES,
         }
     }
 }

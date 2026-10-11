@@ -17,9 +17,11 @@ use krabka_protocol::{
 use krabka_records_legacy::decode_message_set;
 
 use crate::{
-    harness::{fetch_legacy_raw, produce_batch},
-    support,
-    support::topics::{creatable_topic, create_topic_request},
+    harness::{fetch_legacy_raw, legacy_bytes, produce_batch},
+    support::{
+        self,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
 };
 
 #[tokio::test]
@@ -30,7 +32,7 @@ async fn fetch_v3_recompresses_zstd_as_snappy() {
     let cr = p
         .client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("legacy_fetch_zstd").into(),
                 ..Default::default()
             },
@@ -73,7 +75,7 @@ async fn fetch_v3_recompresses_zstd_as_snappy() {
         LegacyFetchResponse::decode(&mut cur, 3).expect("decode LegacyFetchResponse v3");
 
     let part = &fetch_resp.responses[0].partitions[0];
-    let legacy_bytes = crate::harness::legacy_bytes(
+    let legacy_bytes = legacy_bytes(
         part.error_code,
         part.records.as_ref(),
         "expected Legacy MessageSet in Fetch v3 response, got non-Legacy payload",

@@ -5,8 +5,10 @@ use moxy::{
     token::{Span, TokenStream, TokenTree},
 };
 
+use crate::fixtures::{function, name, named_items};
+
 pub(crate) fn topic_record(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(tokens)?;
+    let name = name(tokens)?;
     Ok(moxy::template! {
         pub(crate) fn {{ name }}(name: &str, topic_id: ::uuid::Uuid) -> ::krabka_metadata::TopicRecord {
             ::krabka_metadata::TopicRecord {
@@ -94,7 +96,7 @@ pub(crate) fn producer_batch(input: TokenStream) -> Result<TokenStream, ParseErr
 }
 
 pub(crate) fn create_topic(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
             #[derive(Debug, Clone, Copy, PartialEq, Eq, ::derive_more::Display, ::derive_more::From, ::derive_more::Into)]
             pub(crate) struct TopicPartitionCount(pub i32);
@@ -137,7 +139,7 @@ pub(crate) fn create_topic(input: TokenStream) -> Result<TokenStream, ParseError
 }
 
 pub(crate) fn consumer_fetch(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::function(
+    function(
         input,
         &moxy::template! { pub(crate) },
         &moxy::template! { topic: &str },
@@ -156,7 +158,7 @@ pub(crate) fn consumer_fetch(input: TokenStream) -> Result<TokenStream, ParseErr
 }
 
 pub(crate) fn single_replica_partition(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::function(
+    function(
         input,
         &moxy::template! { pub(crate) },
         &moxy::template! { topic: &str, partition: ::krabka_ids::PartitionIndex, node: ::krabka_metadata::NodeId, },
@@ -173,7 +175,7 @@ pub(crate) fn single_replica_partition(input: TokenStream) -> Result<TokenStream
 
 /// The version-zero Kafka control-record key and value fixture bytes.
 pub(crate) fn control_marker(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(tokens)?;
+    let name = name(tokens)?;
     Ok(moxy::template! {
         mod {{ name }} {
             fn versioned(payload: &[u8]) -> ::bytes::Bytes {

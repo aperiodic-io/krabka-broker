@@ -13,20 +13,22 @@ use tokio::sync::oneshot;
 use super::*;
 use crate::{
     codes,
-    partition_writer::test_support::{GatedWal, sample_batch, test_sequencer},
-    test_support::FakeMetadataSource,
-    wal::{ControllerSequencer, OffsetSequencer},
+    diskless::hot_tail::HotTailCache,
+    log_dir_status::LogDirRegistry,
+    partition_writer::test_support::{
+        GatedWal, observed_single_replica_writer, sample_batch, test_sequencer,
+    },
+    test_support::{EmptyPayloadBatchSetup, FakeMetadataSource, RecordCount},
+    wal::{ControllerSequencer, LocalFsyncWal, OffsetSequencer, SharedWal},
 };
 
 fn seeded_log(path: &std::path::Path) -> Arc<Mutex<Log>> {
     let log = open_default_log(path);
     log.lock()
         .expect("lock")
-        .append(&mut sample_batch(
-            crate::test_support::EmptyPayloadBatchSetup {
-                count: crate::test_support::RecordCount(4),
-            },
-        ))
+        .append(&mut sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(4),
+        }))
         .expect("append");
     log
 }
@@ -80,8 +82,8 @@ async fn a_reservation_refused_during_a_controller_election_answers_not_leader()
                 .build(),
         );
         let sequencer: Arc<dyn OffsetSequencer> = Arc::new(ControllerSequencer::new(controller));
-        let wal: crate::wal::SharedWal = Arc::new(crate::wal::LocalFsyncWal::new(log.clone()));
-        let log_dir_status = crate::log_dir_status::LogDirRegistry::default();
+        let wal: SharedWal = Arc::new(LocalFsyncWal::new(log.clone()));
+        let log_dir_status = LogDirRegistry::default();
         let (tx, rx) = mpsc::channel(1);
         let writer = spawn_writer(
             dir.path(),
@@ -95,11 +97,7 @@ async fn a_reservation_refused_during_a_controller_election_answers_not_leader()
             },
         );
 
-        let ack_rx = queue_batch(
-            &tx,
-            sample_batch(crate::test_support::EmptyPayloadBatchSetup::default()),
-        )
-        .await;
+        let ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
         let answer = ack_rx
             .await
             .expect("ack recv")
@@ -122,18 +120,12 @@ async fn diskless_writer_acks_all_gates_on_durable_hw() {
     let log = open_default_log(dir.path());
     let (sync_started_tx, sync_started_rx) = oneshot::channel();
     let (release_sync_tx, release_sync_rx) = oneshot::channel();
-    let wal: Option<crate::wal::SharedWal> =
-        Some(Arc::new(GatedWal::new(sync_started_tx, release_sync_rx)));
+    let wal: Option<SharedWal> = Some(Arc::new(GatedWal::new(sync_started_tx, release_sync_rx)));
     let (tx, rx) = mpsc::channel(1);
-    let observed = crate::partition_writer::test_support::observed_single_replica_writer(
-        dir.path(),
-        log.clone(),
-        rx,
-        |options| {
-            options.wal = wal;
-            options.sequencer = Some(test_sequencer());
-        },
-    )
+    let observed = observed_single_replica_writer(dir.path(), log.clone(), rx, |options| {
+        options.wal = wal;
+        options.sequencer = Some(test_sequencer());
+    })
     .await;
 
     let hw_waiter = observed.hw_advance_notify.notified();
@@ -141,8 +133,8 @@ async fn diskless_writer_acks_all_gates_on_durable_hw() {
 
     let ack_rx = queue_batch(
         &tx,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup {
-            count: crate::test_support::RecordCount(3),
+        sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(3),
         }),
     )
     .await;
@@ -176,8 +168,7 @@ async fn diskless_acked_record_survives_reopen() {
     let dir = tempdir().expect("tempdir");
     {
         let log = open_default_log(dir.path());
-        let wal: Option<crate::wal::SharedWal> =
-            Some(Arc::new(crate::wal::LocalFsyncWal::new(log.clone())));
+        let wal: Option<SharedWal> = Some(Arc::new(LocalFsyncWal::new(log.clone())));
         let (tx, rx) = mpsc::channel(1);
         let append_notify = Arc::new(Notify::new());
         let replica_state = replica_with_isr(&[1]).await;
@@ -194,11 +185,7 @@ async fn diskless_acked_record_survives_reopen() {
             },
         );
 
-        let ack_rx = queue_batch(
-            &tx,
-            sample_batch(crate::test_support::EmptyPayloadBatchSetup::default()),
-        )
-        .await;
+        let ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
 
         let assigned = ack_rx.await.expect("ack recv").expect("append ok");
         assert2::assert!((assigned.base_offset) == (0));
@@ -221,7 +208,7 @@ async fn diskless_writer_keeps_wal_and_local_trim_frontiers_equal() {
     let log = seeded_log(dir.path());
 
     let (gated_wal, _sync_started_rx, _release_sync_tx) = trim_wal(0);
-    let wal: crate::wal::SharedWal = gated_wal.clone();
+    let wal: SharedWal = gated_wal.clone();
     let (tx, rx) = mpsc::channel(1);
     let writer = spawn_writer(
         dir.path(),
@@ -254,7 +241,7 @@ async fn diskless_trim_retry_finishes_after_wal_failure() {
     let log = seeded_log(dir.path());
 
     let (gated_wal, _sync_started_rx, _release_sync_tx) = trim_wal(1);
-    let wal: crate::wal::SharedWal = gated_wal.clone();
+    let wal: SharedWal = gated_wal.clone();
     let (tx, rx) = mpsc::channel(2);
     let writer = spawn_writer(
         dir.path(),
@@ -302,21 +289,19 @@ async fn diskless_writer_invalidates_hot_tail_after_log_rewrite() {
     let log = open_default_log(dir.path());
     log.lock()
         .expect("lock")
-        .append(&mut sample_batch(
-            crate::test_support::EmptyPayloadBatchSetup {
-                count: crate::test_support::RecordCount(2),
-            },
-        ))
+        .append(&mut sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(2),
+        }))
         .expect("append");
 
     let (sync_started_tx, _sync_started_rx) = oneshot::channel();
     let (_release_sync_tx, release_sync_rx) = oneshot::channel();
     let topic_id = uuid::Uuid::from_u128(13);
     let partition = PartitionIndex(0);
-    let cache = Arc::new(crate::diskless::hot_tail::HotTailCache::default());
+    let cache = Arc::new(HotTailCache::default());
     let mut encoded = BytesMut::new();
-    sample_batch(crate::test_support::EmptyPayloadBatchSetup {
-        count: crate::test_support::RecordCount(2),
+    sample_batch(EmptyPayloadBatchSetup {
+        count: RecordCount(2),
     })
     .encode(&mut encoded)
     .expect("encode batch");
@@ -329,7 +314,7 @@ async fn diskless_writer_invalidates_hot_tail_after_log_rewrite() {
             partition,
         ),
     );
-    let wal: crate::wal::SharedWal = gated_wal.clone();
+    let wal: SharedWal = gated_wal.clone();
     let (tx, rx) = mpsc::channel(1);
     let writer = spawn_writer(
         dir.path(),

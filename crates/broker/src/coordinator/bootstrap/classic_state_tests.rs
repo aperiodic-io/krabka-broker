@@ -25,6 +25,7 @@ use crate::{
             classic_state::{
                 ClassicGroup as ClassicState, GroupState as ClassicGroupState, Member,
             },
+            regex_resolver::no_topic_regex_resolver,
         },
     },
 };
@@ -187,7 +188,7 @@ async fn queue_join(
             version: 5,
             client_id: "client-a".into(),
             client_host: "/127.0.0.1".into(),
-            regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
+            regex_resolver: no_topic_regex_resolver(),
             reply,
         })
         .await

@@ -7,9 +7,13 @@
 
 use assert2::assert;
 
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image_and_mount,
-    wait_jvm_isr_contains, wait_jvm_partition_any_leader, wait_jvm_partition_leader,
+use crate::{
+    cluster::{admin_cluster, admin_text_cluster, election_partition},
+    jvm_acceptance::{
+        KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image_and_mount,
+        wait_jvm_isr_contains, wait_jvm_partition_any_leader, wait_jvm_partition_leader,
+    },
+    oracle::OracleComparison,
 };
 
 /// JVM acceptance test for `kafka-leader-election --election-type preferred`.
@@ -37,7 +41,7 @@ use crate::jvm_acceptance::{
 async fn jvm_kafka_leader_election_preferred() {
     const TOPIC: &str = "krabka-elect-preferred-itest";
 
-    let (cluster, admin_props) = Box::pin(crate::cluster::admin_cluster()).await;
+    let (cluster, admin_props) = Box::pin(admin_cluster()).await;
     let admin_mount = admin_props.mount_str();
 
     // Create rf=2 topic as super-user via the 7.5 JVM image.
@@ -97,7 +101,7 @@ async fn jvm_kafka_leader_election_preferred() {
     cluster
         .h1
         .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1Partition(
-            crate::cluster::election_partition(
+            election_partition(
                 TOPIC,
                 krabka_broker::NodeId(2),
                 vec![krabka_broker::NodeId(1), krabka_broker::NodeId(2)],
@@ -132,7 +136,7 @@ async fn jvm_kafka_leader_election_preferred() {
     // kafka-leader-election is NOT present in cp-kafka:6.1.1 (Kafka 2.7).
     // cp-kafka:7.5.0 (Kafka 3.5) ships it. The tool sends `ElectLeaders`
     // (api_key 43) which the Rust broker now handles via T4/T5.
-    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let out = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE_TXN,
         mounts: &[&admin_mount],
         args: &[
@@ -192,6 +196,7 @@ async fn jvm_kafka_leader_election_preferred() {
 
 use crate::{
     oracle::{Side, ToolFile},
+    support::{JvmDockerSetup, jvm_docker_command},
     tool_output::{ElectionOutcome, TopicPartition, election_json, parse_election},
 };
 
@@ -227,7 +232,7 @@ fn selector_partitions() -> Vec<TopicPartition> {
 async fn election_selectors_report_election_not_needed_as_apache_kafka_does() {
     // Kafka first: the claim that a healthy partition answers 84 rather than
     // succeeding is a claim about Kafka, and this is where a wrong one fails.
-    let comparison = crate::oracle::OracleComparison::start("elect-selectors").await;
+    let comparison = OracleComparison::start("elect-selectors").await;
     let [oracle_side, krabka_side] = comparison.sides();
 
     let document = election_json(&selector_partitions());
@@ -327,7 +332,7 @@ async fn election_selectors_report_election_not_needed_as_apache_kafka_does() {
 async fn a_preferred_replica_outside_the_isr_reports_code_80() {
     const TOPIC: &str = "krabka-elect-unavailable-itest";
 
-    let (brokers, props, advertised) = Box::pin(crate::cluster::admin_text_cluster()).await;
+    let (brokers, props, advertised) = Box::pin(admin_text_cluster()).await;
     let side = Side::Krabka {
         bootstrap: &advertised,
     };
@@ -370,7 +375,7 @@ async fn a_preferred_replica_outside_the_isr_reports_code_80() {
     let h1 = handles[0].as_ref().expect("bootstrap broker stays live");
 
     h1.submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1Partition(
-        crate::cluster::election_partition(
+        election_partition(
             TOPIC,
             krabka_broker::NodeId(1),
             vec![krabka_broker::NodeId(preferred), krabka_broker::NodeId(1)],

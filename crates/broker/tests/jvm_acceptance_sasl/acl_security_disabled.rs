@@ -24,7 +24,10 @@ use std::collections::BTreeSet;
 
 use assert2::assert;
 
-use crate::{acl_output::parse_acls, oracle::CliRun};
+use crate::{
+    acl_output::parse_acls,
+    oracle::{CliRun, OracleComparison},
+};
 
 /// The package every Kafka client-facing exception is rendered under. The
 /// tool's stack trace names the class by this path, on both sides.
@@ -59,7 +62,7 @@ fn kafka_errors(run: &CliRun) -> BTreeSet<String> {
 async fn acl_list_is_refused_as_apache_kafka_refuses_it_with_no_authorizer() {
     // No `KAFKA_AUTHORIZER_CLASS_NAME`: this oracle is the unsecured broker
     // the case is about, which is also the image's own default.
-    let comparison = crate::oracle::OracleComparison::start("acls-disabled").await;
+    let comparison = OracleComparison::start("acls-disabled").await;
     let [oracle_side, krabka_side] = comparison.sides();
 
     let mut refusals: Vec<BTreeSet<String>> = Vec::new();

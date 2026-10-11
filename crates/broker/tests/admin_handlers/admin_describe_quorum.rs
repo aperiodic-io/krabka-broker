@@ -9,7 +9,11 @@ use krabka_protocol::owned::describe_quorum_response::DescribeQuorumResponse;
 use crate::{
     admin_harness::build_client,
     support::{
-        quorum::metadata_quorum_request as describe_quorum_request, start_n_node_with_retry,
+        quorum::{
+            describe_quorum_request as support_describe_quorum_request, follower_config,
+            metadata_quorum_request as describe_quorum_request, two_node_leader,
+        },
+        shutdown_cluster, start_n_node_client, start_n_node_with_retry,
     },
 };
 
@@ -48,9 +52,9 @@ fn without_replica_progress(mut resp: DescribeQuorumResponse) -> DescribeQuorumR
 /// `crates/broker/src/handlers/describe_quorum.rs`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_quorum_reports_cluster_metadata_voter_set() {
-    let (_cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (_cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
 
-    let req = crate::support::quorum::metadata_quorum_request();
+    let req = describe_quorum_request();
     let resp = client.send(req).await.expect("describe_quorum");
     check!(resp.error_code == 0, "top-level error_code");
     assert!(resp.topics.len() == 1, "exactly one topic row");
@@ -111,8 +115,8 @@ async fn combined_follower_forwards_describe_quorum_to_the_active_controller() {
         .await
         .expect("describe_quorum from node 0");
     assert!(first_resp.error_code == 0, "top-level error_code");
-    let leader_id = crate::support::quorum::two_node_leader(&first_resp, (1, 2));
-    let follower_cfg = crate::support::quorum::follower_config(&cluster, leader_id);
+    let leader_id = two_node_leader(&first_resp, (1, 2));
+    let follower_cfg = follower_config(&cluster, leader_id);
     let follower_client = build_client(follower_cfg.listen_addr).await;
     let follower_resp = follower_client
         .send(describe_quorum_request())
@@ -141,7 +145,7 @@ async fn combined_follower_forwards_describe_quorum_to_the_active_controller() {
 
     assert!(without_replica_progress(follower_resp) == without_replica_progress(first_resp));
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// A request for a topic other than `__cluster_metadata`, or a partition
@@ -157,7 +161,7 @@ async fn describe_quorum_for_another_topic_is_unknown_topic_or_partition() {
     let (_, cfg, _dir) = &cluster[0];
     let client = build_client(cfg.listen_addr).await;
 
-    let req = crate::support::quorum::describe_quorum_request("not-the-metadata-topic", vec![0]);
+    let req = support_describe_quorum_request("not-the-metadata-topic", vec![0]);
     let resp = client.send(req).await.expect("describe_quorum");
 
     check!(resp.error_code == 0, "top-level error_code");
@@ -170,5 +174,5 @@ async fn describe_quorum_for_another_topic_is_unknown_topic_or_partition() {
         pd.error_message,
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

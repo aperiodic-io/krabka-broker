@@ -3,7 +3,7 @@ use assert2::{assert, check};
 
 use crate::support::{
     offsets::{offset_commit_topic, offset_fetch_group, offset_fetch_request, offset_fetch_topic},
-    topics::{creatable_topic, create_topic_request},
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
 mod support;
 
@@ -32,7 +32,7 @@ async fn offset_commit_and_fetch_by_topic_id_round_trip() {
     let p = start().await;
     p.client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("o_topic").into(),
                 ..Default::default()
             },
@@ -145,7 +145,7 @@ async fn offset_commit_unresolved_topic_id_returns_unknown_topic_id() {
     let p = start().await;
     p.client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("oc_known").into(),
                 ..Default::default()
             },
@@ -213,7 +213,7 @@ async fn offset_fetch_all_echoes_topic_id() {
     let p = start().await;
     p.client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("fa_topic").into(),
                 ..Default::default()
             },

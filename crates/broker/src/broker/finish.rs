@@ -12,6 +12,8 @@ use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    auto_topic_creation::AutoTopicCreation,
+    barrier::coordinator::BarrierCoordinator,
     broker::{
         Broker, BrokerHandle, DisklessRuntime,
         diskless_index::{DisklessFlusherStartup, bootstrap_diskless_index_log},
@@ -20,23 +22,36 @@ use crate::{
         runtime::BrokerRuntimeStartup,
     },
     config::BrokerConfig,
+    controller_admin::BrokerControllerAdminRouter,
+    coordinator::GroupCoordinator,
+    diskless::{flusher::FlushConfig, read::DisklessReadHandle},
     error::BrokerError,
+    handlers::registry::build_registry,
+    log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource,
+    network::{client::InterBrokerClient, dispatch::RequestByteBudget},
     partition_registry::PartitionRegistry,
+    producer_id_manager::ProducerIdManager,
+    producer_state::ProducerState,
+    share_coordinator::coordinator::ShareCoordinator,
+    share_partition::manager::SharePartitionLeaderManager,
+    time_util::now_ms,
+    txn::coordinator::TxnCoordinator,
 };
 
 pub(super) type BrokerCoordinatorSet = (
-    Arc<crate::coordinator::GroupCoordinator>,
-    Arc<crate::producer_id_manager::ProducerIdManager>,
-    Arc<crate::producer_state::ProducerState>,
-    Arc<crate::txn::coordinator::TxnCoordinator>,
-    Arc<crate::share_coordinator::coordinator::ShareCoordinator>,
-    Arc<crate::share_partition::manager::SharePartitionLeaderManager>,
-    Arc<crate::barrier::coordinator::BarrierCoordinator>,
-    Arc<crate::auto_topic_creation::AutoTopicCreation>,
+    Arc<GroupCoordinator>,
+    Arc<ProducerIdManager>,
+    Arc<ProducerState>,
+    Arc<TxnCoordinator>,
+    Arc<ShareCoordinator>,
+    Arc<SharePartitionLeaderManager>,
+    Arc<BarrierCoordinator>,
+    Arc<AutoTopicCreation>,
 );
 
 pub(super) struct BrokerStorageStartup {
-    pub(super) log_dir_status: crate::log_dir_status::LogDirRegistry,
+    pub(super) log_dir_status: LogDirRegistry,
     pub(super) diskless: DisklessRuntime,
 }
 
@@ -44,15 +59,15 @@ pub(super) async fn finish_broker_startup(
     mut config: BrokerConfig,
     data_listeners: Vec<TcpListener>,
     metadata: (
-        Arc<dyn crate::metadata_source::MetadataSource>,
+        Arc<dyn MetadataSource>,
         Arc<PartitionRegistry>,
-        Option<Arc<crate::controller_admin::BrokerControllerAdminRouter>>,
+        Option<Arc<BrokerControllerAdminRouter>>,
     ),
     coordinators: BrokerCoordinatorSet,
     transport: (
         Option<Arc<krabka_security::DynamicServerConfig>>,
         bool,
-        Arc<crate::network::client::InterBrokerClient>,
+        Arc<InterBrokerClient>,
     ),
     runtime: BrokerRuntimeStartup,
     storage: BrokerStorageStartup,
@@ -73,7 +88,7 @@ pub(super) async fn finish_broker_startup(
     let queued_requests_sem = Arc::new(tokio::sync::Semaphore::new(config.queued_max_requests));
     let queued_request_bytes = config
         .queued_max_request_bytes
-        .map(|budget| crate::network::dispatch::RequestByteBudget::of(budget.bytes_usize()));
+        .map(|budget| RequestByteBudget::of(budget.bytes_usize()));
     let broker = Arc::new(Broker {
         config,
         controller,
@@ -115,7 +130,7 @@ pub(super) async fn finish_broker_startup(
         offset_for_leader_epoch_requests: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         audit_log: runtime.audit_log,
         audit_writer_handle: tokio::sync::Mutex::new(runtime.audit_writer_handle),
-        handlers: crate::handlers::registry::build_registry(),
+        handlers: build_registry(),
     });
     // Publish the startup kTLS probe. It is a constant of the running process,
     // so this is the one place it is ever set, and an operator can read
@@ -187,7 +202,7 @@ async fn emit_broker_started(broker: &Broker, audit_partition: Option<PartitionI
     broker.audit_log.emit(krabka_audit::AuditEvent::Lifecycle {
         kind: krabka_audit::LifecycleKind::BrokerStarted,
         node_id: i64::from(broker.config.broker_id),
-        time_ms: crate::time_util::now_ms(),
+        time_ms: now_ms(),
     });
 }
 
@@ -220,7 +235,7 @@ fn spawn_rlmm_bootstrap(
 
 fn spawn_diskless_bootstrap(
     broker: &Arc<Broker>,
-    handle: &Arc<crate::diskless::read::DisklessReadHandle>,
+    handle: &Arc<DisklessReadHandle>,
     kickoff: &KafkaSwapKickoff,
     shutdown: &CancellationToken,
 ) -> (JoinHandle<()>, Arc<AtomicBool>) {
@@ -234,7 +249,7 @@ fn spawn_diskless_bootstrap(
         node_id: broker.config.node_id,
         broker_id: broker.config.broker_id,
         metrics: broker.metrics.clone(),
-        flush_config: crate::diskless::flusher::FlushConfig::from_broker(&broker.config),
+        flush_config: FlushConfig::from_broker(&broker.config),
         ready: Arc::clone(&ready),
     };
     let kickoff = kickoff.clone();

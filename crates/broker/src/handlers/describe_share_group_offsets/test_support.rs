@@ -6,6 +6,8 @@
 
 use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
 
+use crate::broker::Broker;
+
 pub(super) fn image_with_topic(name: &str, topic_id: uuid::Uuid) -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());
     image.apply(&MetadataRecord::V1Topic(TopicRecord {
@@ -24,11 +26,7 @@ pub(super) fn image_with_topic(name: &str, topic_id: uuid::Uuid) -> MetadataImag
 /// metadata does not hold, as Kafka's `ShareCoordinatorService` does, so a test
 /// registers each topic it seeds share state for. It returns once the
 /// partition is materialized locally, so a row's lag reads its high watermark.
-pub(super) async fn register_topic(
-    broker: &crate::broker::Broker,
-    name: &str,
-    topic_id: uuid::Uuid,
-) {
+pub(super) async fn register_topic(broker: &Broker, name: &str, topic_id: uuid::Uuid) {
     let leader = krabka_metadata::NodeId(broker.config.node_id.0);
     broker
         .controller

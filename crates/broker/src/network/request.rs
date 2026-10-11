@@ -68,13 +68,13 @@ mod tests {
     use bytes::{BufMut, BytesMut};
 
     use super::*;
-    use crate::network::test_support::{RequestFrameSetup, request_frame};
+    use crate::network::test_support::{FrameCorrelationId, RequestFrameSetup, request_frame};
 
     fn legacy_metadata_frame() -> BytesMut {
         request_frame(RequestFrameSetup {
             api_key: krabka_ids::ApiKey(3),
             api_version: krabka_ids::ApiVersion(8),
-            correlation_id: crate::network::test_support::FrameCorrelationId(42),
+            correlation_id: FrameCorrelationId(42),
             client_id: Some(b"client-a"),
             body: b"body",
             ..Default::default()
@@ -105,7 +105,7 @@ mod tests {
     fn parse_request_flexible_header_consumes_tagged_fields_byte() {
         let frame = request_frame(RequestFrameSetup {
             api_version: krabka_ids::ApiVersion(3),
-            correlation_id: crate::network::test_support::FrameCorrelationId(7),
+            correlation_id: FrameCorrelationId(7),
             client_id: Some(b"client-a"),
             tagged: Some(&[0]),
             body: b"body",
@@ -125,7 +125,7 @@ mod tests {
     fn parse_request_flexible_header_skips_non_empty_tagged_fields() {
         let frame = request_frame(RequestFrameSetup {
             api_version: krabka_ids::ApiVersion(3),
-            correlation_id: crate::network::test_support::FrameCorrelationId(7),
+            correlation_id: FrameCorrelationId(7),
             client_id: Some(b"client-a"),
             tagged: Some(&[1, 1, 3, b't', b'a', b'g']),
             body: b"body",
@@ -143,7 +143,7 @@ mod tests {
         let frame = request_frame(RequestFrameSetup {
             api_key: krabka_ids::ApiKey(3),
             api_version: krabka_ids::ApiVersion(8),
-            correlation_id: crate::network::test_support::FrameCorrelationId(42),
+            correlation_id: FrameCorrelationId(42),
             client_id: Some(b""),
             body: b"body",
             ..Default::default()
@@ -160,7 +160,7 @@ mod tests {
         let frame = request_frame(RequestFrameSetup {
             api_key: krabka_ids::ApiKey(3),
             api_version: krabka_ids::ApiVersion(8),
-            correlation_id: crate::network::test_support::FrameCorrelationId(42),
+            correlation_id: FrameCorrelationId(42),
             client_id: Some(&[0xff, 0xfe]),
             body: b"body",
             ..Default::default()
@@ -184,13 +184,13 @@ mod tests {
         let truncated_client_id = request_frame(RequestFrameSetup {
             api_key: krabka_ids::ApiKey(3),
             api_version: krabka_ids::ApiVersion(8),
-            correlation_id: crate::network::test_support::FrameCorrelationId(42),
+            correlation_id: FrameCorrelationId(42),
             client_id: Some(b"client"),
             ..Default::default()
         });
         let flexible_without_tag = request_frame(RequestFrameSetup {
             api_version: krabka_ids::ApiVersion(3),
-            correlation_id: crate::network::test_support::FrameCorrelationId(42),
+            correlation_id: FrameCorrelationId(42),
             client_id: Some(b"client"),
             ..Default::default()
         });

@@ -50,8 +50,16 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::server::test_support::{
-        activate_dynamic_membership, decoded, single_voter_engine, wait_for_leader,
+    use crate::{
+        NodeId,
+        kraft::transport::{
+            Inbound,
+            wire::{FETCH_VERSION, PeerRequest},
+        },
+        server::test_support::{
+            activate_dynamic_membership, decoded, quorum_request, single_voter_engine,
+            test_engine_with_voters, voter, wait_for_leader,
+        },
     };
 
     /// The listener answers `DescribeQuorum` from the live engine: the
@@ -66,7 +74,7 @@ mod tests {
         };
 
         fn body(version: i16, topic: &str, partition: i32) -> Bytes {
-            let request = crate::server::test_support::quorum_request(topic, partition);
+            let request = quorum_request(topic, partition);
             let mut buf = BytesMut::new();
             request.encode(&mut buf, version).expect("encode request");
             buf.freeze()
@@ -99,13 +107,8 @@ mod tests {
         }
 
         // A voter of a two-voter quorum with no leader yet leads nothing.
-        let (follower, _follower_dir) = crate::server::test_support::test_engine_with_voters(
-            1,
-            [
-                crate::server::test_support::voter(1, vec![]),
-                crate::server::test_support::voter(2, vec![]),
-            ],
-        );
+        let (follower, _follower_dir) =
+            test_engine_with_voters(1, [voter(1, vec![]), voter(2, vec![])]);
         let answered =
             describe_quorum_response(version, &body(version, "__cluster_metadata", 0), &follower)
                 .await
@@ -133,7 +136,7 @@ mod tests {
         wait_for_leader(&engine).await;
         activate_dynamic_membership(&engine).await;
 
-        let describe = crate::server::test_support::quorum_request("__cluster_metadata", 0);
+        let describe = quorum_request("__cluster_metadata", 0);
         let mut request_body = bytes::BytesMut::new();
         describe.encode(&mut request_body, 2).unwrap();
         let response_body =
@@ -159,11 +162,11 @@ mod tests {
         check!(response.nodes[0].listeners[0].port == 9093);
 
         // Deliver Inbound::Fetch from observer so partition.observers is non-empty
-        let req = crate::kraft::transport::wire::PeerRequest::Fetch {
+        let req = PeerRequest::Fetch {
             cluster_id: None,
             max_wait_ms: 0,
             high_watermark: -1,
-            from: crate::NodeId(99),
+            from: NodeId(99),
             current_leader_epoch: partition.leader_epoch,
             fetch_epoch: partition.leader_epoch.cast_unsigned(),
             fetch_offset: 0,
@@ -172,8 +175,8 @@ mod tests {
         let req_bytes = req.try_encode().expect("encode fetch");
         let (tx, rx) = tokio::sync::oneshot::channel();
         engine
-            .deliver(crate::kraft::transport::Inbound::Fetch {
-                version: crate::kraft::transport::wire::FETCH_VERSION,
+            .deliver(Inbound::Fetch {
+                version: FETCH_VERSION,
                 req: req_bytes,
                 reply: tx,
             })
@@ -268,7 +271,7 @@ mod tests {
 
         use crate::server::test_support::topic_record;
 
-        let describe = crate::server::test_support::quorum_request("__cluster_metadata", 0);
+        let describe = quorum_request("__cluster_metadata", 0);
 
         let (engine, _dir) = single_voter_engine();
         wait_for_leader(&engine).await;

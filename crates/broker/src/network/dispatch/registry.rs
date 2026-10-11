@@ -14,11 +14,19 @@ use super::{
     response::{ResponseShape, ThrottledResponse, apply_request_quota, encode_response},
     session::principal_or_anonymous,
 };
-use crate::{broker::Broker, error::BrokerError, network::codec::KafkaCodec};
+use crate::{
+    broker::Broker,
+    error::BrokerError,
+    handlers::{
+        DispatchEntry, DispatchKind, RequestContext, RequestQuotaPolicy, TelemetryContext,
+        produce::response_required,
+    },
+    network::{auth::ConnectionAuth, codec::KafkaCodec, request::ParsedRequest},
+};
 
 pub(super) async fn send_registry_response<S>(
     framed: &mut Framed<S, KafkaCodec>,
-    entry: crate::handlers::DispatchEntry,
+    entry: DispatchEntry,
     context: DispatchContext<'_, '_>,
     request_span: tracing::Span,
 ) -> AfterResponse
@@ -60,7 +68,7 @@ where
         // window stands.
         return AfterResponse::Mute(response.throttle);
     }
-    if entry.quota_policy() == crate::handlers::RequestQuotaPolicy::ApplyFallbackAccounting {
+    if entry.quota_policy() == RequestQuotaPolicy::ApplyFallbackAccounting {
         // Kafka mutes the channel once per request, for the longest window
         // any quota asked for, so a handler-charged window is folded in with
         // `max` rather than added. A handler that deferred its own charge
@@ -84,9 +92,9 @@ where
 #[derive(Clone, Copy)]
 pub(super) struct DispatchContext<'a, 'request> {
     pub(super) broker: &'a Broker,
-    pub(super) parsed: &'a crate::network::request::ParsedRequest<'request>,
+    pub(super) parsed: &'a ParsedRequest<'request>,
     pub(super) frame: &'a Bytes,
-    pub(super) auth: &'a crate::network::auth::ConnectionAuth,
+    pub(super) auth: &'a ConnectionAuth,
     pub(super) peer: &'a SocketAddr,
     pub(super) connection_id: &'a str,
     pub(super) listener_name: &'a str,
@@ -95,7 +103,7 @@ pub(super) struct DispatchContext<'a, 'request> {
 }
 
 async fn dispatch_registered_bytes(
-    entry: crate::handlers::DispatchEntry,
+    entry: DispatchEntry,
     context: DispatchContext<'_, '_>,
 ) -> Option<Result<ThrottledResponse, BrokerError>> {
     let DispatchContext {
@@ -110,8 +118,8 @@ async fn dispatch_registered_bytes(
         client_software_version,
     } = context;
     match entry.kind() {
-        crate::handlers::DispatchKind::Context(handler) => {
-            let ctx = crate::handlers::RequestContext::new(
+        DispatchKind::Context(handler) => {
+            let ctx = RequestContext::new(
                 principal_or_anonymous(auth),
                 peer,
                 parsed.client_id,
@@ -130,7 +138,7 @@ async fn dispatch_registered_bytes(
             );
             Some(with_recorded_throttle(&ctx, encoded))
         }
-        crate::handlers::DispatchKind::Auth(handler) => Some(unthrottled(encode_dispatch_result(
+        DispatchKind::Auth(handler) => Some(unthrottled(encode_dispatch_result(
             parsed,
             handler(
                 broker,
@@ -142,8 +150,8 @@ async fn dispatch_registered_bytes(
             )
             .await,
         ))),
-        crate::handlers::DispatchKind::Produce(handler) => {
-            let ctx = crate::handlers::RequestContext::new(
+        DispatchKind::Produce(handler) => {
+            let ctx = RequestContext::new(
                 principal_or_anonymous(auth),
                 peer,
                 parsed.client_id,
@@ -158,14 +166,11 @@ async fn dispatch_registered_bytes(
             .with_correlation_id(parsed.correlation_id);
             let body_offset = frame.len() - parsed.body.len();
             let body_bytes = frame.slice(body_offset..);
-            let response_required = match crate::handlers::produce::response_required(
-                parsed.body,
-                body_bytes.clone(),
-                parsed.api_version,
-            ) {
-                Ok(required) => required,
-                Err(error) => return Some(Err(error)),
-            };
+            let response_required =
+                match response_required(parsed.body, body_bytes.clone(), parsed.api_version) {
+                    Ok(required) => required,
+                    Err(error) => return Some(Err(error)),
+                };
             let encoded = encode_dispatch_result(
                 parsed,
                 handler(broker, parsed.api_version, parsed.body, body_bytes, &ctx).await,
@@ -177,8 +182,8 @@ async fn dispatch_registered_bytes(
             };
             Some(with_recorded_throttle(&ctx, encoded))
         }
-        crate::handlers::DispatchKind::Telemetry(handler) => {
-            let ctx = crate::handlers::TelemetryContext::new(
+        DispatchKind::Telemetry(handler) => {
+            let ctx = TelemetryContext::new(
                 connection_id,
                 peer,
                 parsed.client_id.unwrap_or(""),
@@ -197,7 +202,7 @@ async fn dispatch_registered_bytes(
                 .await,
             )))
         }
-        crate::handlers::DispatchKind::Fetch | crate::handlers::DispatchKind::SaslMetadata => None,
+        DispatchKind::Fetch | DispatchKind::SaslMetadata => None,
     }
 }
 
@@ -221,7 +226,7 @@ pub(super) async fn with_active_time<F: std::future::Future>(
 /// Pairs a handler's framed bytes with the KIP-219 window that handler
 /// recorded on its [`crate::handlers::RequestContext`].
 fn with_recorded_throttle(
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     encoded: Result<Bytes, BrokerError>,
 ) -> Result<ThrottledResponse, BrokerError> {
     let throttle = ctx.take_throttle();
@@ -242,7 +247,7 @@ fn unthrottled(encoded: Result<Bytes, BrokerError>) -> Result<ThrottledResponse,
 }
 
 fn encode_dispatch_result(
-    parsed: &crate::network::request::ParsedRequest<'_>,
+    parsed: &ParsedRequest<'_>,
     result: Result<Bytes, BrokerError>,
 ) -> Result<Bytes, BrokerError> {
     result.and_then(|body| {
@@ -256,7 +261,7 @@ fn encode_dispatch_result(
 }
 
 async fn dispatch_registry_response(
-    entry: crate::handlers::DispatchEntry,
+    entry: DispatchEntry,
     context: DispatchContext<'_, '_>,
 ) -> Result<Option<ThrottledResponse>, BrokerError> {
     match dispatch_registered_bytes(entry, context).await {

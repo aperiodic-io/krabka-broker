@@ -15,20 +15,26 @@ use crate::{
     authorizer::AllowAllAuthorizer,
     broker::BrokerHandle,
     codes,
-    coordinator::unified::{
-        classic_state::{ClassicGroup, Member},
-        consumer_state::{
-            GroupState as ConsumerGroup, ResolvedRegularExpression, test_support::member,
+    coordinator::{
+        bootstrap::OFFSETS_TOPIC,
+        partitioner::local_partition_for_group,
+        unified::{
+            classic_state::{ClassicGroup, Member},
+            consumer_state::{
+                GroupState as ConsumerGroup, ResolvedRegularExpression, test_support::member,
+            },
+            group::{CoordinatorGroup, GroupKind},
         },
-        group::{CoordinatorGroup, GroupKind},
     },
-    test_support::{DenyAll, peer},
+    handlers::test_support::{ClientTopicSetup, create_topic as create_topic_from_test_support},
+    test_support::{DenyAll, peer, start_group_broker_no_audit},
+    time_util::now_ms,
 };
 
 async fn create_topic(broker: &BrokerHandle, name: &str) {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "offset-delete-test",
             name,
             ..Default::default()
@@ -96,10 +102,8 @@ type Case<'a> = (
 
 #[tokio::test]
 async fn offset_delete_matches_kafka_whole_responses() {
-    let (allowed, _allowed_dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
-    let (denied, _denied_dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(DenyAll)).await;
+    let (allowed, _allowed_dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let (denied, _denied_dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
     create_topic(&allowed, "t").await;
     create_topic(&allowed, "u").await;
     let coordinator = allowed.broker_arc_for_test().group_coordinator.clone();
@@ -199,7 +203,7 @@ async fn offset_delete_matches_kafka_whole_responses() {
         client_id = "offset-delete-client"
     );
     let version = offset_delete_response::MAX_VERSION;
-    let before_ms = crate::time_util::now_ms();
+    let before_ms = now_ms();
     for (name, broker, group_id, topics, want) in rows {
         let req = krabka_protocol::owned::offset_delete_request::OffsetDeleteRequest {
             group_id: group_id.into(),
@@ -215,7 +219,7 @@ async fn offset_delete_matches_kafka_whole_responses() {
     // be the broker's clock, so later commits do not age this segment from 1970.
     {
         let broker = allowed.broker_arc_for_test();
-        let partition = crate::coordinator::partitioner::local_partition_for_group(
+        let partition = local_partition_for_group(
             &broker.controller.current_image(),
             broker.config.node_id,
             "classic-g",
@@ -223,10 +227,7 @@ async fn offset_delete_matches_kafka_whole_responses() {
         .unwrap();
         let part = broker
             .partitions
-            .get(
-                crate::coordinator::bootstrap::OFFSETS_TOPIC,
-                krabka_ids::PartitionIndex(partition),
-            )
+            .get(OFFSETS_TOPIC, krabka_ids::PartitionIndex(partition))
             .unwrap();
         let log = part.log.lock().unwrap();
         let (offset, timestamp) = log

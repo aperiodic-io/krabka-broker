@@ -30,10 +30,13 @@ use crate::{
     codes,
     handlers::test_support::{
         AcknowledgementBatchSetup, AcknowledgementMode, AcknowledgementPartitionSetup,
-        AcknowledgementSetup, RecordCount, ShareSessionEpoch,
+        AcknowledgementSetup, ClientTopicSetup, ProduceRecordsSetup, RecordCount,
+        ShareSessionEpoch, ShareWireSetup, acknowledge_batches_request, acquired_share_records,
+        create_topic as create_topic_from_test_support, produce_records, share_acknowledge_wire,
+        share_fetch_wire,
     },
     share_partition::state::RecordState::{self, Acknowledged, Acquired, Available},
-    test_support::KafkaErrorCode,
+    test_support::{KafkaErrorCode, initialize_share_state},
 };
 
 /// The request version that carries `IsRenewAck`.
@@ -52,9 +55,9 @@ use crate::{
 };
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "share-renew-test",
             name,
             ..Default::default()
@@ -65,9 +68,9 @@ async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
 
 /// Appends one batch of `count` records to partition 0 of `topic`.
 async fn produce(broker: &BrokerHandle, topic: &str, count: RecordCount) {
-    crate::handlers::test_support::produce_records(
+    produce_records(
         broker,
-        crate::handlers::test_support::ProduceRecordsSetup {
+        ProduceRecordsSetup {
             topic,
             count,
             ..Default::default()
@@ -119,10 +122,10 @@ async fn share_fetch_as(
     user: &str,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    crate::handlers::test_support::share_fetch_wire(
+    share_fetch_wire(
         broker,
         request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(VERSION),
             user,
         },
@@ -134,11 +137,11 @@ async fn share_acknowledge(
     broker: &BrokerHandle,
     setup: AcknowledgementSetup<'_>,
 ) -> ShareAcknowledgeResponse {
-    let request = crate::handlers::test_support::acknowledge_batches_request(setup);
-    crate::handlers::test_support::share_acknowledge_wire(
+    let request = acknowledge_batches_request(setup);
+    share_acknowledge_wire(
         broker,
         &request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(VERSION),
             ..Default::default()
         },
@@ -300,13 +303,7 @@ async fn renew_acknowledgements_renew_only_the_renew_offsets() {
     for case in cases() {
         let group = format!("renew-{}", case.name);
         let topic_id = create_topic(&broker, &group).await;
-        crate::test_support::initialize_share_state(
-            &broker,
-            &group,
-            uuid::Uuid::from_bytes(topic_id.0),
-            0,
-        )
-        .await;
+        initialize_share_state(&broker, &group, uuid::Uuid::from_bytes(topic_id.0), 0).await;
         if case.availability == RenewAvailability::Disabled {
             disable_renew(&broker, &group).await;
         }
@@ -382,9 +379,7 @@ async fn renew_acknowledgements_renew_only_the_renew_offsets() {
                 Outcome {
                     error: response.error_code,
                     acknowledge_error: row.map(|row| row.acknowledge_error_code),
-                    acquired: row
-                        .map(crate::handlers::test_support::acquired_share_records)
-                        .unwrap_or_default(),
+                    acquired: row.map(acquired_share_records).unwrap_or_default(),
                     states: Vec::new(),
                 }
             }
@@ -431,7 +426,7 @@ async fn a_renew_fetch_answers_a_denied_topic_as_an_acknowledge_error() {
     let (broker, _dir) =
         start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(DenyTopicReadToOne)).await;
     let topic_id = create_topic(&broker, "renew-denied").await;
-    crate::test_support::initialize_share_state(
+    initialize_share_state(
         &broker,
         "renew-denied",
         uuid::Uuid::from_bytes(topic_id.0),

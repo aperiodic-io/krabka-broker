@@ -14,11 +14,12 @@ use krabka_protocol::{Decode, Encode};
 use tokio::net::TcpStream;
 
 use crate::{
-    CLIENT_ID, kafka_wire,
-    kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+    CLIENT_ID,
+    kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
     support::{
         configs::{
-            describe_resource, incremental_config, incremental_request, incremental_resource,
+            ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
+            incremental_request, incremental_resource,
         },
         wire::HeaderEncoding as RequestHeaderEncoding,
     },
@@ -135,7 +136,7 @@ async fn incremental_alter_configs_on(stream: &mut TcpStream, resources: ConfigR
 
     use krabka_protocol::owned::incremental_alter_configs_response::IncrementalAlterConfigsResponse;
 
-    let req = incremental_request(crate::support::configs::IncrementalConfigsSetup {
+    let req = incremental_request(IncrementalConfigsSetup {
         resources: resources
             .into_iter()
             .map(|(resource_type, resource_name, configs)| {
@@ -148,9 +149,7 @@ async fn incremental_alter_configs_on(stream: &mut TcpStream, resources: ConfigR
                             incremental_config(
                                 name,
                                 value,
-                                crate::support::configs::ConfigOperation::from_wire(
-                                    config_operation,
-                                ),
+                                ConfigOperation::from_wire(config_operation),
                             )
                         })
                         .collect(),

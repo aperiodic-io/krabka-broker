@@ -23,7 +23,7 @@ use krabka_protocol::owned::{
     list_transactions_response::{ListTransactionsResponse, TransactionState},
 };
 
-use crate::{codes, txn::state::TxnState};
+use crate::{codes, re2j::compile_full_match, txn::state::TxnState};
 
 /// Every state name Kafka's `TransactionState.fromName` resolves. The handler
 /// echoes any filter string outside this set back in the KIP-664
@@ -59,7 +59,7 @@ fn matches_duration_filter(start_ms: i64, now_ms: i64, duration_filter: i64) -> 
 fn compile_transactional_id_pattern(pattern: Option<&str>) -> Result<Option<regex::Regex>, String> {
     pattern
         .filter(|pattern| !pattern.is_empty())
-        .map(crate::re2j::compile_full_match)
+        .map(compile_full_match)
         .transpose()
 }
 
@@ -200,7 +200,12 @@ mod tests {
     use super::*;
     use crate::{
         broker::Broker,
-        test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx},
+        handlers::RequestContext,
+        test_support::{
+            dispatch_wire, lead_transaction_state_partitions,
+            start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+        },
+        txn::version::TxnVersion,
     };
 
     #[test]
@@ -276,9 +281,9 @@ mod tests {
         broker: &Broker,
         version: i16,
         req: &ListTransactionsRequest,
-        ctx: &crate::handlers::RequestContext<'_>,
+        ctx: &RequestContext<'_>,
     ) -> ListTransactionsResponse {
-        crate::test_support::dispatch_wire(
+        dispatch_wire(
             broker,
             krabka_protocol::owned::list_transactions_request::API_KEY,
             version,
@@ -303,15 +308,11 @@ mod tests {
         // coordinator can persist the seeded entry.
         let tid = "txn-list-pid-filter";
         let coord = &broker.txn_coordinator;
-        crate::test_support::lead_transaction_state_partitions(
-            &broker_handle,
-            &[coord.partition_for(tid)],
-        )
-        .await;
+        lead_transaction_state_partitions(&broker_handle, &[coord.partition_for(tid)]).await;
 
         let entry = TxnEntry::new_empty(tid.to_string(), ProducerId(100), 0, 60_000, 0);
         coord
-            .put(entry, crate::txn::version::TxnVersion::Classic)
+            .put(entry, TxnVersion::Classic)
             .await
             .expect("seed txn entry");
 
@@ -408,7 +409,7 @@ mod tests {
         let coordinator = &broker.txn_coordinator;
         // Two transactions in one state partition: one ongoing, one dying.
         let (ongoing_id, dead_id) = ("txn-list-ongoing", "txn-list-dead");
-        crate::test_support::lead_transaction_state_partitions(
+        lead_transaction_state_partitions(
             &broker_handle,
             &[
                 coordinator.partition_for(ongoing_id),
@@ -427,7 +428,7 @@ mod tests {
                 TxnState::Ongoing
             };
             coordinator
-                .put(entry, crate::txn::version::TxnVersion::Classic)
+                .put(entry, TxnVersion::Classic)
                 .await
                 .expect("seed the transaction");
         }

@@ -17,10 +17,13 @@ use krabka_protocol::{
 use tokio::net::TcpStream;
 
 use crate::{
-    CLIENT_ID, kafka_wire,
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    CLIENT_ID,
+    kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
     support::{
-        fetch::{fetch_partition, single_partition_fetch},
+        fetch::{
+            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+        },
         wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
@@ -48,17 +51,17 @@ pub(crate) async fn fetch_all(addr: SocketAddr, topic: &str, topic_id: Uuid) -> 
     loop {
         let req = FetchRequest {
             replica_id: -1,
-            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+            ..single_partition_fetch(SinglePartitionFetchSetup {
                 topic: topic.to_string(),
                 topic_id,
-                partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
+                partition: fetch_partition(FetchPartitionSetup {
                     offset: krabka_ids::Offset(next_offset),
-                    maximum: crate::support::fetch::FetchByteLimit(1 << 22),
+                    maximum: FetchByteLimit(1 << 22),
                     ..Default::default()
                 }),
-                limits: crate::support::fetch::FetchLimits::wait_for_data_with_maximum(
-                    crate::support::fetch::RequestWaitMillis(100),
-                    crate::support::fetch::FetchByteLimit(1 << 22),
+                limits: FetchLimits::wait_for_data_with_maximum(
+                    RequestWaitMillis(100),
+                    FetchByteLimit(1 << 22),
                 ),
             })
         };

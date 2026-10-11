@@ -20,7 +20,9 @@ use krabka_remote_storage::{
 use uuid::Uuid;
 
 use crate::{
-    args::RestoreArgs, discover::ArchiveInventory, error::RestoreError,
+    args::RestoreArgs,
+    discover::{ArchiveInventory, load_snapshot},
+    error::RestoreError,
     report::MetadataRestoreReport,
 };
 
@@ -112,7 +114,7 @@ pub fn seed_rlmm_snapshot(
     let Some(path) = args.archive.rlmm_snapshot.as_ref() else {
         return Ok(());
     };
-    let mut snapshot = crate::discover::load_snapshot(path)?;
+    let mut snapshot = load_snapshot(path)?;
     snapshot.committed_offsets.fill(-1);
     snapshot
         .dump

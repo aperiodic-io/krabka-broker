@@ -8,7 +8,13 @@ use krabka_protocol::owned::create_topics_response::{
 };
 use krabka_units::Time;
 
-use crate::{broker::Broker, codes};
+use crate::{
+    broker::Broker,
+    codes,
+    handlers::{RequestContext, audit_admin_success, audit_resource},
+    metrics::QuotaType,
+    quota::throttle_time_ms,
+};
 
 pub(super) fn topic_error_result(
     name: String,
@@ -87,18 +93,18 @@ pub(super) fn created_topic_resources(
     results
         .iter()
         .filter(|t| t.error_code == codes::NONE)
-        .map(|t| crate::handlers::audit_resource("Topic", t.name.clone()))
+        .map(|t| audit_resource("Topic", t.name.clone()))
         .collect()
 }
 
 pub(super) fn finish_response(
     broker: &Broker,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     results: Vec<CreatableTopicResult>,
     validate_only: bool,
     delay: Time,
 ) -> CreateTopicsResponse {
-    crate::handlers::audit_admin_success(
+    audit_admin_success(
         broker.audit_log.as_ref(),
         context,
         "CreateTopics",
@@ -110,8 +116,8 @@ pub(super) fn finish_response(
     // `sendResponseMaybeThrottleWithControllerQuota` does. The response
     // carries the controller-mutation delay now; the dispatch loop raises it
     // when the request quota asks for more.
-    context.defer_quota_charge((crate::metrics::QuotaType::ControllerMutation, delay).into());
-    create_topics_response(results, crate::quota::throttle_time_ms(delay))
+    context.defer_quota_charge((QuotaType::ControllerMutation, delay).into());
+    create_topics_response(results, throttle_time_ms(delay))
 }
 
 #[cfg(test)]

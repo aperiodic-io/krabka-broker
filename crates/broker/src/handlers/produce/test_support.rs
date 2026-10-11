@@ -8,17 +8,32 @@ use bytes::{Bytes, BytesMut};
 use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
 use krabka_protocol::records::RecordBatch;
 
-use crate::config_keys::MIN_INSYNC_REPLICAS;
+use crate::{
+    api_catalog::UnstableApiVersions,
+    config_keys::MIN_INSYNC_REPLICAS,
+    freeze::resolve::FreezeMutationResolution,
+    handlers::test_support::{
+        PartitionSpawnSetup, ReplicatedPartitionSetup, replicated_partition, spawn_partition,
+    },
+    log_dir_status::LogDirRegistry,
+    metrics::{BrokerMetrics, RequestPhases},
+    partition::Partition,
+    partition_registry::PartitionRegistry,
+    producer_id_manager::ProducerIdManager,
+    producer_state::ProducerState,
+    test_support::{replica_nodes, string_pairs, topic_partition_image},
+    txn::coordinator::TxnCoordinator,
+};
 
 /// The default services of a standalone produce pipeline, shared by tests
 /// that vary one admission gate or one writer outcome.
 pub(super) struct PipelineFixture {
-    pub(super) partitions: Arc<crate::partition_registry::PartitionRegistry>,
-    pub(super) txn_coordinator: Arc<crate::txn::coordinator::TxnCoordinator>,
-    pub(super) producer_state: Arc<crate::producer_state::ProducerState>,
-    pub(super) log_dir_status: crate::log_dir_status::LogDirRegistry,
-    pub(super) metrics: crate::metrics::BrokerMetrics,
-    phases: crate::metrics::RequestPhases,
+    pub(super) partitions: Arc<PartitionRegistry>,
+    pub(super) txn_coordinator: Arc<TxnCoordinator>,
+    pub(super) producer_state: Arc<ProducerState>,
+    pub(super) log_dir_status: LogDirRegistry,
+    pub(super) metrics: BrokerMetrics,
+    phases: RequestPhases,
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -34,7 +49,7 @@ impl PipelineFixture {
         root: &std::path::Path,
         topic: &str,
         image: &MetadataImage,
-    ) -> Arc<crate::partition::Partition> {
+    ) -> Arc<Partition> {
         let partition = self.partition(root, topic, image).await;
         self.partitions.insert(
             topic.into(),
@@ -49,7 +64,7 @@ impl PipelineFixture {
         root: &std::path::Path,
         topic: &str,
         image: &MetadataImage,
-    ) -> Arc<crate::partition::Partition> {
+    ) -> Arc<Partition> {
         self.partition_with_config(
             root,
             image,
@@ -66,11 +81,11 @@ impl PipelineFixture {
         root: &std::path::Path,
         image: &MetadataImage,
         setup: PipelinePartitionSetup<'_>,
-    ) -> Arc<crate::partition::Partition> {
+    ) -> Arc<Partition> {
         let PipelinePartitionSetup { topic, log_config } = setup;
-        let partition = crate::handlers::test_support::spawn_partition(
+        let partition = spawn_partition(
             root,
-            crate::handlers::test_support::PartitionSpawnSetup {
+            PartitionSpawnSetup {
                 topic,
                 log_dir_status: self.log_dir_status.clone(),
                 producer_state: Arc::clone(&self.producer_state),
@@ -90,21 +105,21 @@ impl PipelineFixture {
     }
 
     pub(super) fn new(node_id: krabka_ids::NodeId) -> Self {
-        let partitions = Arc::new(crate::partition_registry::PartitionRegistry::new());
-        let txn_coordinator = Arc::new(crate::txn::coordinator::TxnCoordinator::new(
+        let partitions = Arc::new(PartitionRegistry::new());
+        let txn_coordinator = Arc::new(TxnCoordinator::new(
             node_id,
             Arc::clone(&partitions),
-            Arc::new(crate::producer_id_manager::ProducerIdManager::new()),
+            Arc::new(ProducerIdManager::new()),
             50,
             krabka_units::mebibytes(1),
         ));
         Self {
             partitions,
             txn_coordinator,
-            producer_state: Arc::new(crate::producer_state::ProducerState::new()),
-            log_dir_status: crate::log_dir_status::LogDirRegistry::default(),
-            metrics: crate::metrics::BrokerMetrics::new(),
-            phases: crate::metrics::RequestPhases::default(),
+            producer_state: Arc::new(ProducerState::new()),
+            log_dir_status: LogDirRegistry::default(),
+            metrics: BrokerMetrics::new(),
+            phases: RequestPhases::default(),
         }
     }
 
@@ -127,7 +142,7 @@ impl PipelineFixture {
             metrics: &self.metrics,
             phases: &self.phases,
             schema_validator: None,
-            unstable_api_versions: crate::api_catalog::UnstableApiVersions::Disabled,
+            unstable_api_versions: UnstableApiVersions::Disabled,
         }
     }
 }
@@ -145,7 +160,7 @@ pub(super) fn pipeline_input(
         delivery: None,
         schema: None,
         topic_name: topic.into(),
-        freeze: crate::freeze::resolve::FreezeMutationResolution::Admit,
+        freeze: FreezeMutationResolution::Admit,
         internal_topic_denied: false,
         transaction: super::producer_checks::TransactionRequest {
             transactional_id: None,
@@ -158,20 +173,14 @@ pub(super) fn pipeline_input(
 }
 
 pub(crate) fn image_with_topic(topic: &str, isr: &[u64]) -> MetadataImage {
-    crate::test_support::topic_partition_image(
-        topic,
-        i16::try_from(isr.len().max(1)).unwrap(),
-        || {
-            crate::handlers::test_support::replicated_partition(
-                crate::handlers::test_support::ReplicatedPartitionSetup {
-                    topic,
-                    leader: krabka_audit::NodeId(*isr.first().unwrap_or(&1)),
-                    replicas: &crate::test_support::replica_nodes(isr),
-                    ..Default::default()
-                },
-            )
-        },
-    )
+    topic_partition_image(topic, i16::try_from(isr.len().max(1)).unwrap(), || {
+        replicated_partition(ReplicatedPartitionSetup {
+            topic,
+            leader: krabka_audit::NodeId(*isr.first().unwrap_or(&1)),
+            replicas: &replica_nodes(isr),
+            ..Default::default()
+        })
+    })
 }
 
 pub(super) fn set_min_isr(img: &mut MetadataImage, topic: &str, n: i32) {
@@ -187,7 +196,7 @@ pub(super) fn image_with_overrides(topic: &str, overrides: &[(&str, &str)]) -> M
     let mut image = image_with_topic(topic, &[1]);
     image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
         topic: topic.into(),
-        overrides: crate::test_support::string_pairs(overrides),
+        overrides: string_pairs(overrides),
     }));
     image
 }

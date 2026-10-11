@@ -63,6 +63,7 @@ use uuid::Uuid;
 use crate::{
     args::ControllerListener,
     fixture::{Fixture, build_fixture},
+    topic_configuration::check_topic_configuration,
 };
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
@@ -325,13 +326,7 @@ async fn a_captured_cluster_restores_with_its_configuration_and_its_group_positi
 
     // 5. The restored cluster has the configuration back and the group's
     //    position gone. Nothing in a KIP-405 archive holds a committed offset.
-    crate::topic_configuration::check_topic_configuration(
-        &post_client,
-        TOPIC,
-        "retention.ms",
-        RETENTION_MS,
-    )
-    .await;
+    check_topic_configuration(&post_client, TOPIC, "retention.ms", RETENTION_MS).await;
 
     check!(committed_offset(&post_bootstrap).await == NO_COMMITTED_OFFSET);
 

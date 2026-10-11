@@ -13,7 +13,15 @@ use assert2::assert;
 use krabka_broker::BrokerHandle;
 use krabka_client_core::Client;
 
-use crate::support::{fetch::single_partition_fetch, topic_id_for};
+use crate::{
+    support::{
+        fetch::{
+            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+        },
+        topic_id_for,
+    },
+    topic_fixture::{create_configured_topic, tiered_configs},
+};
 
 /// Shared copy→metadata→read body: create a tiered topic, wait for the
 /// config to propagate, produce enough to seal segments, wait for the RLM
@@ -29,12 +37,7 @@ pub(crate) async fn copy_then_fetch_round_trip(
     // Tiny `internal.segment.bytes` so a modest produce seals several segments;
     // `local.retention.bytes=1` evicts every copied segment from local
     // disk so the read-back must consult the remote tier.
-    crate::topic_fixture::create_configured_topic(
-        client,
-        topic,
-        crate::topic_fixture::tiered_configs(Some("1024")),
-    )
-    .await;
+    create_configured_topic(client, topic, tiered_configs(Some("1024"))).await;
 
     // Wait for the tiered config to flow from the metadata image through
     // the supervisor's reconcile loop into the partition's `LogConfig`.
@@ -96,16 +99,12 @@ pub(crate) async fn copy_then_fetch_round_trip(
     let fetch_deadline = Instant::now() + Duration::from_secs(30);
     let value = loop {
         let r = client
-            .send(single_partition_fetch(
-                crate::support::fetch::SinglePartitionFetchSetup {
-                    topic: topic.into(),
-                    topic_id,
-                    limits: crate::support::fetch::FetchLimits::wait_for_data(
-                        crate::support::fetch::RequestWaitMillis(500),
-                    ),
-                    ..Default::default()
-                },
-            ))
+            .send(single_partition_fetch(SinglePartitionFetchSetup {
+                topic: topic.into(),
+                topic_id,
+                limits: FetchLimits::wait_for_data(RequestWaitMillis(500)),
+                ..Default::default()
+            }))
             .await
             .expect("Fetch");
         if let Some(batches) = r

@@ -12,6 +12,11 @@ use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::config::{
+    DEFAULT_AUDIT_CHECKPOINT_EVERY, DEFAULT_AUDIT_CHECKPOINT_EVERY_N, DEFAULT_AUDIT_SPOOL_DIR,
+    DEFAULT_AUDIT_SPOOL_MAX, DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N, DEFAULT_AUDIT_TOPIC,
+};
+
 /// `[audit]` section of `broker.toml` (`FedRAMP` 20x MLA).
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -80,15 +85,15 @@ impl Default for FileAuditSpoolConfig {
 }
 
 fn default_spool_dir() -> String {
-    crate::config::DEFAULT_AUDIT_SPOOL_DIR.to_string()
+    DEFAULT_AUDIT_SPOOL_DIR.to_string()
 }
 
 fn default_spool_max_bytes() -> u64 {
-    crate::config::DEFAULT_AUDIT_SPOOL_MAX.bytes_u64()
+    DEFAULT_AUDIT_SPOOL_MAX.bytes_u64()
 }
 
 fn default_spool_sync_every_n() -> NonZeroU64 {
-    crate::config::DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N
+    DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N
 }
 
 /// `[audit.signing]` — Ed25519 checkpoint signing key.
@@ -124,13 +129,11 @@ impl Default for FileAuditCheckpointConfig {
 }
 
 fn default_checkpoint_every_n() -> u64 {
-    crate::config::DEFAULT_AUDIT_CHECKPOINT_EVERY_N
+    DEFAULT_AUDIT_CHECKPOINT_EVERY_N
 }
 
 fn default_checkpoint_every_secs() -> u64 {
-    crate::config::DEFAULT_AUDIT_CHECKPOINT_EVERY
-        .secs_i64()
-        .cast_unsigned()
+    DEFAULT_AUDIT_CHECKPOINT_EVERY.secs_i64().cast_unsigned()
 }
 
 fn default_audit_enabled() -> bool {
@@ -142,7 +145,7 @@ fn default_audit_failure_mode() -> krabka_audit::AuditMode {
 }
 
 fn default_audit_topic() -> String {
-    crate::config::DEFAULT_AUDIT_TOPIC.to_string()
+    DEFAULT_AUDIT_TOPIC.to_string()
 }
 
 #[cfg(test)]
@@ -205,7 +208,7 @@ mod tests {
     // An absent `[audit]` table, like any other absent table, keeps what the
     // broker config already holds, and so does an absent subtable of a
     // present one. A present table and its subtables still apply.
-    fn check_default_audit(cfg: &crate::config::BrokerConfig) {
+    fn check_default_audit(cfg: &BrokerConfig) {
         assert2::check!(cfg.audit_enabled);
         assert2::check!(cfg.audit_failure_mode == krabka_audit::AuditMode::FailOpen);
         assert2::check!(cfg.audit_topic == "__krabka_audit");
@@ -281,8 +284,8 @@ mod tests {
         assert2::assert!(applied_rows == expected_rows);
     }
 
-    fn applied_for_tests(file: FileConfig) -> crate::config::BrokerConfig {
-        let mut cfg = crate::config::BrokerConfig::for_tests(std::path::PathBuf::from("/tmp/x"));
+    fn applied_for_tests(file: FileConfig) -> BrokerConfig {
+        let mut cfg = BrokerConfig::for_tests(std::path::PathBuf::from("/tmp/x"));
         file.apply_to(&mut cfg).expect("apply");
         cfg
     }

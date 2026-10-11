@@ -15,7 +15,10 @@ use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 pub(crate) use crate::support::topic_id_for;
 use crate::support::{
     client::connect_owned,
-    fetch::{fetch_partition, single_partition_fetch},
+    fetch::{
+        FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+        SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+    },
 };
 
 /// Fetches all records from `(topic, partition)`, starting at `start_offset`,
@@ -52,20 +55,16 @@ pub(crate) async fn fetch_all_records(
 
     loop {
         let resp = client
-            .send(single_partition_fetch(
-                crate::support::fetch::SinglePartitionFetchSetup {
-                    topic: topic.into(),
-                    topic_id,
-                    partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
-                        partition: krabka_ids::PartitionIndex(partition),
-                        offset: krabka_ids::Offset(fetch_offset),
-                        maximum: crate::support::fetch::FetchByteLimit(2_097_152),
-                    }),
-                    limits: crate::support::fetch::FetchLimits::wait_for_data(
-                        crate::support::fetch::RequestWaitMillis(1_000),
-                    ),
-                },
-            ))
+            .send(single_partition_fetch(SinglePartitionFetchSetup {
+                topic: topic.into(),
+                topic_id,
+                partition: fetch_partition(FetchPartitionSetup {
+                    partition: krabka_ids::PartitionIndex(partition),
+                    offset: krabka_ids::Offset(fetch_offset),
+                    maximum: FetchByteLimit(2_097_152),
+                }),
+                limits: FetchLimits::wait_for_data(RequestWaitMillis(1_000)),
+            }))
             .await
             .expect("Fetch");
 

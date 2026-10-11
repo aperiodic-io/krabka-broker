@@ -14,8 +14,12 @@ use crate::{
     harness::{create_topic, topic_id_for},
     support,
     support::{
-        fetch::single_partition_fetch,
+        fetch::{
+            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
+            single_partition_fetch,
+        },
         offsets::{list_offset_partition, single_partition_list_offsets},
+        produce::{SinglePartitionProduceSetup, batch_request},
     },
 };
 
@@ -26,9 +30,9 @@ async fn produce_assigns_base_offsets() {
     let topic_id = topic_id_for(&p.client, "prod").await;
 
     // First produce: 3 records → base 0.
-    let req = crate::support::produce::batch_request(
+    let req = batch_request(
         one_record_batch(3),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("prod").into(),
             topic_id,
             ..Default::default()
@@ -41,9 +45,9 @@ async fn produce_assigns_base_offsets() {
     check!(resp.responses[0].partition_responses[0].base_offset == 0);
 
     // Second produce: 2 records → base 3.
-    let req2 = crate::support::produce::batch_request(
+    let req2 = batch_request(
         one_record_batch(2),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("prod").into(),
             topic_id,
             ..Default::default()
@@ -63,9 +67,9 @@ async fn produce_assigns_base_offsets() {
 #[tokio::test]
 async fn produce_without_a_topic_id_returns_unknown_topic_id() {
     let p = support::start().await;
-    let req = crate::support::produce::batch_request(
+    let req = batch_request(
         one_record_batch(1),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("nope").into(),
             ..Default::default()
         },
@@ -81,9 +85,9 @@ async fn produce_then_fetch_round_trip() {
     create_topic(&p, "round", 1).await;
     let topic_id = topic_id_for(&p.client, "round").await;
 
-    let prod = crate::support::produce::batch_request(
+    let prod = batch_request(
         one_record_batch(3),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("round").into(),
             topic_id,
             ..Default::default()
@@ -92,17 +96,15 @@ async fn produce_then_fetch_round_trip() {
     let presp = p.client.send(prod).await.expect("Produce");
     assert!(presp.responses[0].partition_responses[0].error_code == 0);
 
-    let fetch = single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+    let fetch = single_partition_fetch(SinglePartitionFetchSetup {
         topic: "round".into(),
         topic_id,
-        limits: crate::support::fetch::FetchLimits::wait_for_data(
-            crate::support::fetch::RequestWaitMillis(100),
-        ),
+        limits: FetchLimits::wait_for_data(RequestWaitMillis(100)),
         ..Default::default()
     });
     let fresp = p.client.send(fetch).await.expect("Fetch");
     assert!(fresp.responses.len() == 1);
-    crate::support::fetch::check_record_count(&fresp.responses[0].partitions[0], 3);
+    check_record_count(&fresp.responses[0].partitions[0], 3);
 
     p.broker.shutdown().await;
 }

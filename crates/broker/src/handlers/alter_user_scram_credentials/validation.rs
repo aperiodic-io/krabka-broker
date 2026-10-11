@@ -179,8 +179,8 @@ mod tests {
             answer,
             test_support::{
                 KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
-                KAFKA_UNSUPPORTED_SASL_MECHANISM, deletion, expected_result, process_deletion,
-                process_upsertion, start_broker, test_context, valid_upsertion,
+                KAFKA_UNSUPPORTED_SASL_MECHANISM, deletion, expected_response, expected_result,
+                process_deletion, process_upsertion, start_broker, test_context, valid_upsertion,
             },
         },
         test_support::test_ctx,
@@ -383,14 +383,11 @@ mod tests {
             controller_leader
         );
         let resp = answer(&broker, req, &ctx).await;
-        let expected =
-            crate::handlers::alter_user_scram_credentials::test_support::expected_response(vec![
-                expected_result(
-                    "",
-                    KAFKA_UNACCEPTABLE_CREDENTIAL,
-                    Some("Username must not be empty"),
-                ),
-            ]);
+        let expected = expected_response(vec![expected_result(
+            "",
+            KAFKA_UNACCEPTABLE_CREDENTIAL,
+            Some("Username must not be empty"),
+        )]);
         assert!(resp == expected);
         assert!(
             broker

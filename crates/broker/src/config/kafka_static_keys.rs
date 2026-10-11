@@ -25,6 +25,15 @@ use krabka_units::{
 };
 
 use super::BrokerConfig;
+use crate::{
+    api_catalog::UnstableApiVersions,
+    config_keys::{
+        broker_dynamic::{TOPIC_DEFAULT_SYNONYMS, topic_broker_synonyms},
+        group::KAFKA_GROUP_KEYS,
+        in_topic_unit,
+        kafka_broker::lookup,
+    },
+};
 
 /// One `KafkaConfig` key and how this node states its value.
 pub(crate) struct KafkaStaticKey {
@@ -305,24 +314,22 @@ impl KafkaStaticKey {
     /// conversion when the direct row has no default, or the group default
     /// for a group synonym that Kafka 4.3.1 does not define.
     pub(crate) fn kafka_default(&self) -> Option<String> {
-        crate::config_keys::kafka_broker::lookup(self.name)
+        lookup(self.name)
             .and_then(|row| row.default)
             .or_else(|| {
-                crate::config_keys::group::KAFKA_GROUP_KEYS
+                KAFKA_GROUP_KEYS
                     .iter()
                     .find(|group_key| group_key.broker_synonym == Some(self.name))
                     .and_then(|group_key| group_key.default)
             })
             .map(str::to_owned)
             .or_else(|| {
-                let (_, topic) = crate::config_keys::broker_dynamic::TOPIC_DEFAULT_SYNONYMS
+                let (_, topic) = TOPIC_DEFAULT_SYNONYMS
                     .iter()
                     .find(|(broker, _)| *broker == self.name)?;
-                crate::config_keys::broker_dynamic::topic_broker_synonyms(topic)
+                topic_broker_synonyms(topic)
                     .iter()
-                    .find_map(|synonym| {
-                        crate::config_keys::in_topic_unit(topic, synonym.name, synonym.default?)
-                    })
+                    .find_map(|synonym| in_topic_unit(topic, synonym.name, synonym.default?))
             })
     }
 
@@ -334,8 +341,7 @@ impl KafkaStaticKey {
         // Streams assignor setting is part of trunk's GroupConfig surface and
         // is only visible when Kafka's unstable API versions are enabled.
         if self.name == "group.streams.assignors"
-            && config.features.unstable_api_versions
-                == crate::api_catalog::UnstableApiVersions::Disabled
+            && config.features.unstable_api_versions == UnstableApiVersions::Disabled
         {
             return None;
         }
@@ -353,6 +359,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
+    use crate::{api_catalog::UnstableApiVersions, file_config::RuntimeFileConfig};
 
     /// The keys whose value a default `BrokerConfig` runs differently from
     /// Kafka 4.3.1's default: the 1 MiB socket buffers that the network layer
@@ -393,9 +400,8 @@ mod tests {
     /// names would never be recorded.
     #[test]
     fn every_runtime_field_is_one_the_table_has() {
-        let serde_json::Value::Object(fields) =
-            serde_json::to_value(crate::file_config::RuntimeFileConfig::default())
-                .expect("serialize the runtime table")
+        let serde_json::Value::Object(fields) = serde_json::to_value(RuntimeFileConfig::default())
+            .expect("serialize the runtime table")
         else {
             panic!("the runtime table serializes as an object");
         };
@@ -434,7 +440,7 @@ mod tests {
             .expect("Streams assignor key");
 
         check!(key.static_value(&config).is_none());
-        config.features.unstable_api_versions = crate::api_catalog::UnstableApiVersions::Enabled;
+        config.features.unstable_api_versions = UnstableApiVersions::Enabled;
         check!(key.static_value(&config).as_deref() == Some("auto"));
     }
 

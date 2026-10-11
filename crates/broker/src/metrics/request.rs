@@ -10,7 +10,14 @@ use super::{
     ApiKeyLabel, BrokerMetrics, ConnectionCloseReason, ConnectionCloseReasonLabel, QuotaType,
     QuotaTypeLabel, UNKNOWN_LABEL,
 };
-use crate::handlers::ApiKeyCode;
+use crate::{
+    handlers::{
+        ALTER_BARRIER_GROUPS_API_KEY, ApiKeyCode, DESCRIBE_BARRIER_GROUPS_API_KEY,
+        KRABKA_PRIVATE_API_KEY_FLOOR, LIST_BARRIER_CUTS_API_KEY, TRIGGER_BARRIER_API_KEY,
+        WRITE_BARRIER_MARKERS_API_KEY,
+    },
+    quota::QuotaDelay,
+};
 
 /// The `api_key` label every per-API family in this module shares.
 fn api_key_label(api_key: ApiKeyCode) -> ApiKeyLabel {
@@ -23,7 +30,7 @@ impl BrokerMetrics {
     /// Account one dispatched request for `api_key`. The label is the
     /// human-readable name from `api_key_label_name`; unknown keys fold under
     /// `"Unknown"`.
-    pub fn record_api_request(&self, api_key: crate::handlers::ApiKeyCode) {
+    pub fn record_api_request(&self, api_key: ApiKeyCode) {
         let lbl = ApiKeyLabel {
             api_key: api_key_label_name(api_key).to_string(),
         };
@@ -34,7 +41,7 @@ impl BrokerMetrics {
     /// outside the registered range: by closing the connection, or for
     /// `ApiVersions` with `UNSUPPORTED_VERSION`. Mirrors the labelling of
     /// `record_api_request`.
-    pub fn record_unsupported_api_request(&self, api_key: crate::handlers::ApiKeyCode) {
+    pub fn record_unsupported_api_request(&self, api_key: ApiKeyCode) {
         let lbl = ApiKeyLabel {
             api_key: api_key_label_name(api_key).to_string(),
         };
@@ -130,8 +137,8 @@ impl From<(QuotaType, Time)> for QuotaCharge {
     }
 }
 
-impl From<(QuotaType, crate::quota::QuotaDelay)> for QuotaCharge {
-    fn from((quota_type, qd): (QuotaType, crate::quota::QuotaDelay)) -> Self {
+impl From<(QuotaType, QuotaDelay)> for QuotaCharge {
+    fn from((quota_type, qd): (QuotaType, QuotaDelay)) -> Self {
         Self {
             quota_type,
             delay: qd.delay,
@@ -216,10 +223,10 @@ impl BrokerMetrics {
 /// krabka-private key with a generated schema. Any other krabka-private api
 /// key resolves through [`krabka_private_api_key_label_name`]. Anything else
 /// folds under [`UNKNOWN_LABEL`].
-fn api_key_label_name(api_key: crate::handlers::ApiKeyCode) -> &'static str {
+fn api_key_label_name(api_key: ApiKeyCode) -> &'static str {
     match krabka_protocol::api_key::ApiKey::from_i16(api_key) {
         Some(k) => k.into(),
-        None if api_key >= crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR => {
+        None if api_key >= KRABKA_PRIVATE_API_KEY_FLOOR => {
             krabka_private_api_key_label_name(api_key)
         }
         None => UNKNOWN_LABEL,
@@ -232,13 +239,13 @@ fn api_key_label_name(api_key: crate::handlers::ApiKeyCode) -> &'static str {
 /// `api_requests{api_key="Unknown"}` series with genuine garbage traffic, and
 /// an operator cannot tell the two apart. Cardinality stays bounded: the range
 /// holds one label per krabka-private RPC, plus [`UNKNOWN_LABEL`].
-fn krabka_private_api_key_label_name(api_key: crate::handlers::ApiKeyCode) -> &'static str {
+fn krabka_private_api_key_label_name(api_key: ApiKeyCode) -> &'static str {
     match api_key {
-        crate::handlers::ALTER_BARRIER_GROUPS_API_KEY => "AlterBarrierGroups",
-        crate::handlers::DESCRIBE_BARRIER_GROUPS_API_KEY => "DescribeBarrierGroups",
-        crate::handlers::TRIGGER_BARRIER_API_KEY => "TriggerBarrier",
-        crate::handlers::LIST_BARRIER_CUTS_API_KEY => "ListBarrierCuts",
-        crate::handlers::WRITE_BARRIER_MARKERS_API_KEY => "WriteBarrierMarkers",
+        ALTER_BARRIER_GROUPS_API_KEY => "AlterBarrierGroups",
+        DESCRIBE_BARRIER_GROUPS_API_KEY => "DescribeBarrierGroups",
+        TRIGGER_BARRIER_API_KEY => "TriggerBarrier",
+        LIST_BARRIER_CUTS_API_KEY => "ListBarrierCuts",
+        WRITE_BARRIER_MARKERS_API_KEY => "WriteBarrierMarkers",
         _ => UNKNOWN_LABEL,
     }
 }
@@ -249,6 +256,11 @@ mod tests {
     use krabka_units::{micros, millis};
 
     use super::*;
+    use crate::handlers::{
+        ALTER_BARRIER_GROUPS_API_KEY, DESCRIBE_BARRIER_GROUPS_API_KEY,
+        KRABKA_PRIVATE_API_KEY_FLOOR, LIST_BARRIER_CUTS_API_KEY, TRIGGER_BARRIER_API_KEY,
+        WRITE_BARRIER_MARKERS_API_KEY,
+    };
 
     /// The applied throttle is the largest delay charged, and it is attributed
     /// to the quota that asked for it — the one an operator has to raise.
@@ -363,23 +375,11 @@ mod tests {
     #[test]
     fn api_key_label_name_names_every_krabka_private_api() {
         let cases = [
-            (
-                crate::handlers::ALTER_BARRIER_GROUPS_API_KEY,
-                "AlterBarrierGroups",
-            ),
-            (
-                crate::handlers::DESCRIBE_BARRIER_GROUPS_API_KEY,
-                "DescribeBarrierGroups",
-            ),
-            (crate::handlers::TRIGGER_BARRIER_API_KEY, "TriggerBarrier"),
-            (
-                crate::handlers::LIST_BARRIER_CUTS_API_KEY,
-                "ListBarrierCuts",
-            ),
-            (
-                crate::handlers::WRITE_BARRIER_MARKERS_API_KEY,
-                "WriteBarrierMarkers",
-            ),
+            (ALTER_BARRIER_GROUPS_API_KEY, "AlterBarrierGroups"),
+            (DESCRIBE_BARRIER_GROUPS_API_KEY, "DescribeBarrierGroups"),
+            (TRIGGER_BARRIER_API_KEY, "TriggerBarrier"),
+            (LIST_BARRIER_CUTS_API_KEY, "ListBarrierCuts"),
+            (WRITE_BARRIER_MARKERS_API_KEY, "WriteBarrierMarkers"),
             // A Kafka api key still resolves through the generated enum, and
             // so does the one krabka-private key that has a generated schema.
             (0, "Produce"),
@@ -388,7 +388,7 @@ mod tests {
             (93, "StreamsGroupTopologyDescriptionUpdate"),
             // Garbage inside the krabka-private range, and outside it, both
             // fold under the sentinel.
-            (crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR, UNKNOWN_LABEL),
+            (KRABKA_PRIVATE_API_KEY_FLOOR, UNKNOWN_LABEL),
             (9999, UNKNOWN_LABEL),
             (999, UNKNOWN_LABEL),
         ];

@@ -9,8 +9,10 @@ use krabka_protocol::primitives::uuid::Uuid;
 
 use super::*;
 use crate::coordinator::unified::{
-    actor::test_support::StaticMetadata, persistence_next_gen::RegularExpressionValue,
-    reconciler::ReconcileInput, regex_resolver::FixedRegexResolver,
+    actor::{seed::apply_seed, test_support::StaticMetadata},
+    persistence_next_gen::RegularExpressionValue,
+    reconciler::ReconcileInput,
+    regex_resolver::FixedRegexResolver,
 };
 
 const A1: Uuid = Uuid([1; 16]);
@@ -368,7 +370,7 @@ fn a_failover_keeps_the_topics_of_a_regex_without_a_heartbeat_that_carries_the_p
     };
     let metadata = metadata(true);
     let mut state = GroupState::new("g");
-    crate::coordinator::unified::actor::seed::apply_seed(&mut state, seed);
+    apply_seed(&mut state, seed);
     // Were the resolver asked, it would find nothing.
     let resolver = FixedRegexResolver::new(&[]);
 

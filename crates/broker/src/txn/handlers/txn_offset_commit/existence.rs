@@ -53,6 +53,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::coordinator::test_support::single_replica_partition;
 
     fn topic(name: &str, partitions: &[i32]) -> TxnOffsetCommitRequestTopic {
         TxnOffsetCommitRequestTopic {
@@ -82,7 +83,7 @@ mod tests {
             image.apply(&krabka_metadata::MetadataRecord::V1Partition(
                 krabka_metadata::PartitionRecord {
                     leader,
-                    ..crate::coordinator::test_support::single_replica_partition(
+                    ..single_replica_partition(
                         name,
                         krabka_ids::PartitionIndex(partition),
                         NodeId(1),

@@ -6,7 +6,13 @@
 use krabka_broker::{BrokerConfig, BrokerHandle, authorizer::SimpleAclAuthorizer};
 use krabka_security::SaslMechanism;
 
-use crate::support::acl::TopicAclSetup;
+use crate::{
+    acl_admin::create_topic_as_admin,
+    support::{
+        acl::{TopicAclSetup, seed_dummy_acl, topic_acl_record},
+        sasl::{sasl_plaintext_mechanisms, start_broker},
+    },
+};
 
 /// Build a `BrokerConfig` with a single `SASL_PLAINTEXT` listener, PLAIN
 /// enabled, and the given super-user. The non-super-user case still
@@ -31,10 +37,7 @@ pub fn sasl_plain_broker_config_multi_super(
     creds: &[(&str, &str)],
     super_users: &[&str],
 ) -> BrokerConfig {
-    let mut cfg = crate::support::sasl::sasl_plaintext_mechanisms(
-        log_dir.to_path_buf(),
-        vec![SaslMechanism::Plain],
-    );
+    let mut cfg = sasl_plaintext_mechanisms(log_dir.to_path_buf(), vec![SaslMechanism::Plain]);
     for (u, p) in creds {
         cfg.plain_credentials
             .insert((*u).to_string(), (*p).to_string());
@@ -70,7 +73,7 @@ pub async fn start_admin_alice() -> (BrokerHandle, tempfile::TempDir, std::net::
         &[("admin", "admin-secret"), ("alice", "wonderland")],
         Some("admin"),
     );
-    crate::support::sasl::start_broker(cfg, dir).await
+    start_broker(cfg, dir).await
 }
 
 /// A single foo partition with Alice's exact topic operation grant.
@@ -79,9 +82,9 @@ pub async fn start_alice_topic_grant(
 ) -> (BrokerHandle, tempfile::TempDir, std::net::SocketAddr) {
     let (handle, dir, _) = start_admin_alice().await;
     let addr = handle.listen_addr();
-    crate::acl_admin::create_topic_as_admin(addr, "foo", 1).await;
+    create_topic_as_admin(addr, "foo", 1).await;
     handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
             topic: "foo",
             operation,
             ..Default::default()
@@ -107,7 +110,7 @@ pub async fn start_admin_with(
 /// A real foo partition with only an irrelevant ACL: Alice's topic operations remain denied.
 pub async fn start_denied_foo() -> (BrokerHandle, tempfile::TempDir, std::net::SocketAddr) {
     let (handle, directory, address) = start_admin_alice().await;
-    crate::acl_admin::create_topic_as_admin(address, "foo", 1).await;
-    crate::support::acl::seed_dummy_acl(&handle).await;
+    create_topic_as_admin(address, "foo", 1).await;
+    seed_dummy_acl(&handle).await;
     (handle, directory, address)
 }

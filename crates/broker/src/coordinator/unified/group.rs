@@ -17,6 +17,7 @@
 // (the classic file keeps its internal `Group`/`GroupState` names).
 use std::collections::{HashMap, HashSet};
 
+use crate::codes::{ILLEGAL_GENERATION, STALE_MEMBER_EPOCH, UNKNOWN_MEMBER_ID};
 pub(crate) use crate::coordinator::unified::{
     classic_state::{ClassicGroup as ClassicState, OffsetEntry},
     consumer_state::GroupState as ConsumerState,
@@ -349,13 +350,13 @@ impl CoordinatorGroup {
         }
         let member = member_id
             .and_then(|id| state.members.get(id))
-            .ok_or(crate::codes::UNKNOWN_MEMBER_ID)?;
+            .ok_or(UNKNOWN_MEMBER_ID)?;
         if member.member_epoch == member_epoch {
             Ok(())
         } else if member.is_classic() {
-            Err(crate::codes::ILLEGAL_GENERATION)
+            Err(ILLEGAL_GENERATION)
         } else {
-            Err(crate::codes::STALE_MEMBER_EPOCH)
+            Err(STALE_MEMBER_EPOCH)
         }
     }
 

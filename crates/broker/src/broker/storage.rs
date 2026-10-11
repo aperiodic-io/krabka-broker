@@ -14,59 +14,75 @@ use crate::{
         partition_spawn::{PartitionSpawnConfig, try_spawn_partition_with_replication_target},
     },
     config::BrokerConfig,
+    config_keys::resolve_diskless,
+    coordinator::{
+        GroupCoordinator,
+        bootstrap::{bootstrap, bootstrap_audit_topic},
+        unified::{ImageMetadataProvider, offsets_log::ProductionOffsetsLog},
+    },
+    cordoned_log_dirs::CordonedLogDirs,
+    diskless::recovery::{open_config, recover_open_log},
     error::BrokerError,
     log_dir,
+    log_dir_id::LogDirIds,
+    log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource,
+    partition::{PartitionRuntimeConfig, ReplicationTarget},
     partition_registry::PartitionRegistry,
+    producer_id_manager::ProducerIdManager,
+    producer_state::ProducerState,
+    replicator_supervisor::desired_wal_placements,
+    wal::{
+        ControllerSequencer, OffsetSequencer,
+        quorum::{follower::hydrate_on_promotion, registry::ShardId},
+    },
 };
 
 pub(super) struct StorageStartup {
-    pub(super) log_dir_status: crate::log_dir_status::LogDirRegistry,
-    pub(super) log_dir_ids: crate::log_dir_id::LogDirIds,
+    pub(super) log_dir_status: LogDirRegistry,
+    pub(super) log_dir_ids: LogDirIds,
     pub(super) partitions: Arc<PartitionRegistry>,
-    pub(super) producer_state: Arc<crate::producer_state::ProducerState>,
-    pub(super) group_coordinator: Arc<crate::coordinator::GroupCoordinator>,
-    pub(super) producer_ids: Arc<crate::producer_id_manager::ProducerIdManager>,
+    pub(super) producer_state: Arc<ProducerState>,
+    pub(super) group_coordinator: Arc<GroupCoordinator>,
+    pub(super) producer_ids: Arc<ProducerIdManager>,
 }
 
 pub(super) async fn recover_storage_and_groups(
     config: &BrokerConfig,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &Arc<dyn MetadataSource>,
     diskless_runtime: &DisklessRuntime,
 ) -> Result<StorageStartup, BrokerError> {
     let log_dirs = config.all_log_dirs();
-    let log_dir_status = crate::log_dir_status::LogDirRegistry::probe(&log_dirs)
-        .with_metadata_dir(config.metadata_dir());
-    let log_dir_ids = crate::log_dir_id::LogDirIds::provision(
+    let log_dir_status = LogDirRegistry::probe(&log_dirs).with_metadata_dir(config.metadata_dir());
+    let log_dir_ids = LogDirIds::provision(
         &log_dirs,
         config.cluster_id.unwrap_or_else(uuid::Uuid::nil),
         config.node_id,
     );
     let partitions = Arc::new(
         PartitionRegistry::with_stamp_source(config.stamp_source.as_ref().map(Arc::clone))
-            .with_cordoned_log_dirs(crate::cordoned_log_dirs::CordonedLogDirs::new(
+            .with_cordoned_log_dirs(CordonedLogDirs::new(
                 log_dirs.clone(),
                 config.cordoned_log_dirs.clone(),
             )),
     );
-    let producer_state = Arc::new(crate::producer_state::ProducerState::new());
+    let producer_state = Arc::new(ProducerState::new());
     if config.is_broker() {
         let startup_image = controller.current_image();
         let scan_dirs = log_dir_status.online_subset(&log_dirs);
-        let wal_placements = crate::replicator_supervisor::desired_wal_placements(
-            &startup_image,
-            config.diskless_wal_local_replica_count,
-        );
+        let wal_placements =
+            desired_wal_placements(&startup_image, config.diskless_wal_local_replica_count);
         for (topic, partition_id, owning_dir) in log_dir::scan_all(&scan_dirs)? {
             let directory = log_dir::partition_dir(&owning_dir, &topic, partition_id);
-            let diskless = crate::config_keys::resolve_diskless(startup_image.topic_config(&topic));
-            let open_config = crate::diskless::recovery::open_config(&config.log_config, diskless);
+            let diskless = resolve_diskless(startup_image.topic_config(&topic));
+            let open_config = open_config(&config.log_config, diskless);
             let mut log = krabka_log::Log::open(&directory, open_config)?;
             if let Some(stamp_source) = partitions.stamp_source() {
                 log.set_stamp_source(stamp_source)?;
             }
             if diskless {
                 if let Some(topic_id) = startup_image.topic(&topic).map(|topic| topic.topic_id) {
-                    let shard = crate::wal::quorum::registry::ShardId {
+                    let shard = ShardId {
                         topic_id,
                         partition: PartitionIndex(partition_id),
                     };
@@ -81,7 +97,7 @@ pub(super) async fn recover_storage_and_groups(
                         // follower prefix, the exact-overlap check makes this a
                         // safe retry and closes the remaining durable tail
                         // before any request can observe the partition.
-                        crate::wal::quorum::follower::hydrate_on_promotion(
+                        hydrate_on_promotion(
                             &scan_dirs,
                             &topic,
                             shard,
@@ -91,7 +107,7 @@ pub(super) async fn recover_storage_and_groups(
                         )?;
                     }
                 }
-                crate::diskless::recovery::recover_open_log(
+                recover_open_log(
                     &topic,
                     PartitionIndex(partition_id),
                     &mut log,
@@ -106,19 +122,19 @@ pub(super) async fn recover_storage_and_groups(
             }
             let topic_id = startup_image.topic(&topic).map(|topic| topic.topic_id);
             let initial_target = if diskless {
-                crate::partition::ReplicationTarget {
+                ReplicationTarget {
                     topic_id,
                     leader_node_id: krabka_raft::NodeId(0),
                     leader_epoch: krabka_metadata::LeaderEpoch(0),
                 }
             } else {
                 startup_image.partition(&topic, partition_id).map_or(
-                    crate::partition::ReplicationTarget {
+                    ReplicationTarget {
                         topic_id,
                         leader_node_id: krabka_raft::NodeId(0),
                         leader_epoch: krabka_metadata::LeaderEpoch(0),
                     },
-                    |record| crate::partition::ReplicationTarget {
+                    |record| ReplicationTarget {
                         topic_id,
                         leader_node_id: record.leader,
                         leader_epoch: record.leader_epoch,
@@ -134,17 +150,15 @@ pub(super) async fn recover_storage_and_groups(
                     log,
                     log_dir_status: log_dir_status.clone(),
                     producer_state: Arc::clone(&producer_state),
-                    runtime: crate::partition::PartitionRuntimeConfig::from_broker(
+                    runtime: PartitionRuntimeConfig::from_broker(
                         config,
                         diskless,
                         (
                             Some(Arc::clone(&diskless_runtime.hot_tail)),
                             Some(Arc::clone(&diskless_runtime.wal_shards)),
                             diskless.then(|| {
-                                Arc::new(crate::wal::ControllerSequencer::new(Arc::clone(
-                                    controller,
-                                )))
-                                    as Arc<dyn crate::wal::OffsetSequencer>
+                                Arc::new(ControllerSequencer::new(Arc::clone(controller)))
+                                    as Arc<dyn OffsetSequencer>
                             }),
                         ),
                     ),
@@ -154,13 +168,11 @@ pub(super) async fn recover_storage_and_groups(
             partitions.insert(Arc::from(topic), PartitionIndex(partition_id), partition);
         }
     }
-    let offsets_log = Arc::new(
-        crate::coordinator::unified::offsets_log::ProductionOffsetsLog::new(
-            Arc::clone(&partitions),
-            Arc::clone(controller),
-            config.node_id,
-        ),
-    );
+    let offsets_log = Arc::new(ProductionOffsetsLog::new(
+        Arc::clone(&partitions),
+        Arc::clone(controller),
+        config.node_id,
+    ));
     let mut consumer_group = config.next_gen_consumer_group.as_ref().clone();
     consumer_group.session_expiry_tick = config.coordinator_session_expiry_tick.to_std();
     consumer_group.actor_mailbox_capacity = config.coordinator_actor_mailbox_capacity;
@@ -172,21 +184,21 @@ pub(super) async fn recover_storage_and_groups(
     let mut streams_group = config.streams_group.as_ref().clone();
     streams_group.actor_mailbox_capacity = config.coordinator_actor_mailbox_capacity;
     streams_group.unstable_api_versions = config.features.unstable_api_versions;
-    let group_coordinator = Arc::new(crate::coordinator::GroupCoordinator::new(
+    let group_coordinator = Arc::new(GroupCoordinator::new(
         consumer_group,
         share_group,
-        Arc::new(crate::coordinator::unified::ImageMetadataProvider {
+        Arc::new(ImageMetadataProvider {
             controller: Arc::clone(controller),
         }),
         offsets_log,
         streams_group,
     ));
-    let producer_ids = Arc::new(crate::producer_id_manager::ProducerIdManager::clustered(
+    let producer_ids = Arc::new(ProducerIdManager::clustered(
         config.node_id,
         config.broker_epoch,
         Arc::clone(controller),
     ));
-    crate::coordinator::bootstrap::bootstrap(
+    bootstrap(
         config,
         controller,
         &partitions,
@@ -195,7 +207,7 @@ pub(super) async fn recover_storage_and_groups(
         &producer_state,
     )
     .await?;
-    crate::coordinator::bootstrap::bootstrap_audit_topic(config, controller).await?;
+    bootstrap_audit_topic(config, controller).await?;
     Ok(StorageStartup {
         log_dir_status,
         log_dir_ids,

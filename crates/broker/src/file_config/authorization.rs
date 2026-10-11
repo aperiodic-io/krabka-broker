@@ -125,7 +125,12 @@ mod tests {
     use krabka_units::{Time, convert::TimeExt as _};
 
     use super::*;
-    use crate::test_support::peer;
+    use crate::{
+        authorizer::opa::OpaAuthorizer,
+        config::BrokerConfig,
+        file_config::test_support::configured_unwrap_parse,
+        test_support::{peer, sasl_principal},
+    };
 
     /// Both `super_users` lists take Kafka's `User:<name>` form, and
     /// `User:ANONYMOUS` is a super user as in Kafka.
@@ -146,7 +151,7 @@ super_users = ["User:admin", "User:ANONYMOUS", "operator"]
             ),
         ];
         for (case, toml) in cases {
-            let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+            let cfg = configured_unwrap_parse(toml).unwrap();
 
             let expected: std::collections::HashSet<String> = [
                 "admin".to_string(),
@@ -164,7 +169,7 @@ super_users = ["User:admin", "User:ANONYMOUS", "operator"]
         let toml = r#"
 super_users = ["operator", "admin"]
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
 
         let expected: std::collections::HashSet<String> =
             ["operator".to_string(), "admin".to_string()].into();
@@ -173,7 +178,7 @@ super_users = ["operator", "admin"]
     // `[authorization]` TOML section → `Arc<dyn Authorizer>`.
 
     fn test_principal(name: &str) -> krabka_security::Principal {
-        crate::test_support::sasl_principal(name)
+        sasl_principal(name)
     }
     #[test]
     fn authorization_section_simple_builds_simple_acl_authorizer() {
@@ -186,7 +191,7 @@ super_users = ["operator", "admin"]
 type = "simple"
 super_users = ["admin"]
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
 
         assert!(
             cfg.super_users.contains("admin"),
@@ -276,7 +281,7 @@ allow_everyone_if_no_acl_found = true
             ),
         ];
         for (case, toml, expected) in cases {
-            let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+            let cfg = configured_unwrap_parse(toml).unwrap();
             assert!(cfg.authorizer.authorize(&img, &req) == expected, "{case}");
         }
     }
@@ -304,7 +309,7 @@ allow_on_error = false
 maximum_cache_size = 100
 expire_after_ms = 60000
 "#;
-            let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+            let cfg = configured_unwrap_parse(toml).unwrap();
 
             assert!(cfg.super_users.contains("operator"));
 
@@ -345,14 +350,14 @@ expire_after_ms = 60000
 
             use crate::authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer};
 
-            let auth = crate::authorizer::opa::OpaAuthorizer::new(
+            let auth = OpaAuthorizer::new(
                 std::collections::HashSet::new(),
                 // Unresolvable host → every call errors.
                 "http://opa.invalid:8181/v1/data/k/a".to_string(),
                 opa.allow_on_error,
                 opa.maximum_cache_size,
                 Time::from_millis(opa.expire_after_ms),
-                crate::config::BrokerConfig::default().opa_http_timeout,
+                BrokerConfig::default().opa_http_timeout,
             )
             .unwrap();
             let img = MetadataImage::new(uuid::Uuid::nil());
@@ -387,7 +392,7 @@ url = "http://opa.invalid:8181/v1/data/k/a"
 
         use crate::authorizer::{AuthorizationRequest, AuthorizationResult};
 
-        let cfg = crate::file_config::test_support::configured_unwrap_parse("").unwrap();
+        let cfg = configured_unwrap_parse("").unwrap();
 
         // Default authorizer is AllowAll — anyone gets Allow, including
         // a principal who isn't in any super-user set.

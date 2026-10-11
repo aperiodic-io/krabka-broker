@@ -2,6 +2,16 @@ use assert2::assert;
 use tempfile::tempdir;
 
 use super::*;
+use crate::{
+    config::BrokerConfig,
+    log_dir::partition_dir,
+    log_dir_status::LogDirRegistry,
+    producer_state::ProducerState,
+    wal::quorum::{
+        registry::{ShardId, WalShardRegistry},
+        wire::{QuorumGroup, fetch_request},
+    },
+};
 
 #[tokio::test]
 async fn nondefault_partition_writer_queue_depth_backpressures_at_bound() {
@@ -12,14 +22,10 @@ async fn nondefault_partition_writer_queue_depth_backpressures_at_bound() {
         partition_id: PartitionIndex(0),
         log_dir: dir.path().to_path_buf(),
         log: krabka_log::Log::open(dir.path(), krabka_log::LogConfig::default()).expect("open log"),
-        log_dir_status: crate::log_dir_status::LogDirRegistry::default(),
-        producer_state: Arc::new(crate::producer_state::ProducerState::new()),
+        log_dir_status: LogDirRegistry::default(),
+        producer_state: Arc::new(ProducerState::new()),
         runtime: PartitionRuntimeConfig::new(
-            (
-                crate::config::BrokerConfig::default().max_produce_group,
-                2,
-                3,
-            ),
+            (BrokerConfig::default().max_produce_group, 2, 3),
             false,
             (None, None, None),
         ),
@@ -104,13 +110,11 @@ fn diskless_partition_requires_distributed_identity_and_registry() {
 async fn distributed_wal_ack_restores_the_partition_watermark() {
     let dir = tempdir().expect("tempdir");
     let topic_id = uuid::Uuid::new_v4();
-    let shard = crate::wal::quorum::registry::ShardId {
+    let shard = ShardId {
         topic_id,
         partition: PartitionIndex(0),
     };
-    let registry = Arc::new(crate::wal::quorum::registry::WalShardRegistry::new(
-        krabka_raft::NodeId(1),
-    ));
+    let registry = Arc::new(WalShardRegistry::new(krabka_raft::NodeId(1)));
     registry.replace_placements(
         &maplit::hashmap! {shard => crate::wal::quorum::registry::WalPlacement {
             voters: vec![
@@ -121,7 +125,7 @@ async fn distributed_wal_ack_restores_the_partition_watermark() {
             leader_epoch: 0,
         }},
     );
-    let partition_dir = crate::log_dir::partition_dir(dir.path(), "recovered", 0);
+    let partition_dir = partition_dir(dir.path(), "recovered", 0);
     std::fs::create_dir_all(&partition_dir).expect("partition directory");
     let mut log = krabka_log::Log::open(&partition_dir, krabka_log::LogConfig::default()).unwrap();
     let mut batch = krabka_protocol::records::RecordBatch {
@@ -142,8 +146,8 @@ async fn distributed_wal_ack_restores_the_partition_watermark() {
         partition_id: PartitionIndex(0),
         log_dir: dir.path().to_path_buf(),
         log,
-        log_dir_status: crate::log_dir_status::LogDirRegistry::default(),
-        producer_state: Arc::new(crate::producer_state::ProducerState::new()),
+        log_dir_status: LogDirRegistry::default(),
+        producer_state: Arc::new(ProducerState::new()),
         runtime: PartitionRuntimeConfig::new(
             (1_024, 64, 3),
             true,
@@ -153,8 +157,8 @@ async fn distributed_wal_ack_restores_the_partition_watermark() {
     .expect("spawn recovered partition");
     assert!(partition.high_watermark().await == krabka_log::Offset(0));
 
-    let acknowledgement = crate::wal::quorum::wire::fetch_request(
-        crate::wal::quorum::wire::QuorumGroup::diskless_wal(topic_id, PartitionIndex(0)),
+    let acknowledgement = fetch_request(
+        QuorumGroup::diskless_wal(topic_id, PartitionIndex(0)),
         krabka_raft::NodeId(2),
         0,
         0,

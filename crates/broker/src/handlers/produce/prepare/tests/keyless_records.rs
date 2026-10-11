@@ -9,11 +9,15 @@ use bytes::Bytes;
 use krabka_compression::{CompressionType, RecordDecompressionPolicy};
 use krabka_protocol::records::{Record, RecordBatch};
 
-use crate::handlers::produce::{
-    framing::PartitionPayload,
-    prepare::{DecodeEnv, prepare_batch},
-    test_support::{encode_batch, image_with_topic},
-    topic_settings::{kafka_stock_broker_default, resolve_timestamp_policy},
+use crate::{
+    handlers::produce::{
+        framing::PartitionPayload,
+        prepare::{DecodeEnv, prepare_batch},
+        test_support::{encode_batch, image_with_topic},
+        topic_settings::{kafka_stock_broker_default, resolve_timestamp_policy},
+    },
+    metrics::BrokerMetrics,
+    time_util::now_ms,
 };
 
 /// A batch with one record per `(key, timestamp_ms)` pair.
@@ -46,7 +50,7 @@ fn a_compacted_topic_names_every_keyless_record_on_both_paths() {
         "t",
         kafka_stock_broker_default(),
     );
-    let now = crate::time_util::now_ms();
+    let now = now_ms();
     let far_future = now + 7_200_000;
     let mixed = batch(&[(None, now), (Some(b"k"), now), (None, now)]);
     // The only record with a bad timestamp has no key, so Kafka reports the
@@ -79,7 +83,7 @@ fn a_compacted_topic_names_every_keyless_record_on_both_paths() {
                 vec![1],
             ),
         ] {
-            let metrics = crate::metrics::BrokerMetrics::new();
+            let metrics = BrokerMetrics::new();
             let prepared = prepare_batch(
                 PartitionPayload::Slice(encode_batch(input)),
                 topic_compression,

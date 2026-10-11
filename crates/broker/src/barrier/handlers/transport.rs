@@ -243,6 +243,7 @@ mod tests {
     use crate::{
         barrier::{injection::MarkerPlacement, marker::BarrierMarker, state::TargetPartition},
         codes,
+        test_support::broker_registration,
     };
 
     fn marker() -> BarrierMarker {
@@ -264,7 +265,7 @@ mod tests {
         BrokerRegistrationRecord {
             host: "legacy.example".to_owned(),
             endpoints,
-            ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
+            ..broker_registration(krabka_raft::NodeId(2))
         }
     }
 

@@ -12,11 +12,14 @@ use krabka_units::{
     days, hours, mebibytes, millis, minutes, secs,
 };
 
-use crate::file_config::FileConfig;
+use crate::{
+    config::BrokerConfig,
+    file_config::{FileConfig, test_support::configured},
+};
 
 #[test]
 fn runtime_file_config_applies_representative_values() {
-    let cfg = crate::file_config::test_support::configured(
+    let cfg = configured(
         r#"
 [runtime]
 cleaner_interval = "7s"
@@ -87,7 +90,7 @@ streams_group_max_size = 19
 /// as `30`, changes a Kafka wire field by three orders of magnitude.
 #[test]
 fn runtime_millisecond_and_byte_keys_round_trip_through_quantities() {
-    let cfg = crate::file_config::test_support::configured(
+    let cfg = configured(
         r#"
 [runtime]
 heartbeat_interval = "3s"
@@ -209,8 +212,8 @@ fn runtime_file_config_rejects_relational_conflicts() {
     )];
 
     for (source, message) in cases {
-        let error = crate::file_config::test_support::configured(source, "parse runtime config")
-            .expect_err("relational conflict must fail");
+        let error =
+            configured(source, "parse runtime config").expect_err("relational conflict must fail");
         assert!(error.to_string().contains(message));
     }
 }
@@ -219,7 +222,7 @@ fn runtime_file_config_rejects_relational_conflicts() {
 /// accepts zero for it, where the other coordinator timings stay positive.
 #[test]
 fn runtime_file_config_accepts_a_zero_classic_group_initial_rebalance_delay() {
-    let cfg = crate::file_config::test_support::configured(
+    let cfg = configured(
         "[runtime]\nclassic_group_initial_rebalance_delay = \"0ms\"\n",
         "parse runtime config",
     )
@@ -235,7 +238,7 @@ fn runtime_file_config_accepts_a_zero_classic_group_initial_rebalance_delay() {
 /// one is an error.
 #[test]
 fn the_sasl_receive_limit_and_failed_authentication_delay_follow_kafka() {
-    let defaults = crate::config::BrokerConfig::default();
+    let defaults = BrokerConfig::default();
     assert!(defaults.sasl_server_max_receive.bytes_i64() == 524_288);
     assert!(defaults.connection_failed_authentication_delay == millis(100));
 
@@ -253,7 +256,7 @@ fn the_sasl_receive_limit_and_failed_authentication_delay_follow_kafka() {
     ];
     for (source, want_limit, want_delay) in cases {
         let file: FileConfig = toml::from_str(source).expect("parse runtime config");
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
         file.apply_to(&mut cfg).expect("apply runtime config");
         assert!(cfg.sasl_server_max_receive == want_limit, "{source}");
         assert!(cfg.failed_authentication_delay() == want_delay, "{source}");
@@ -263,7 +266,7 @@ fn the_sasl_receive_limit_and_failed_authentication_delay_follow_kafka() {
         toml::from_str("[runtime]\nconnection_failed_authentication_delay = \"-1ms\"\n")
             .expect("parse runtime config");
     let error = file
-        .apply_to(&mut crate::config::BrokerConfig::default())
+        .apply_to(&mut BrokerConfig::default())
         .expect_err("a negative delay must fail");
     assert!(
         error
@@ -280,7 +283,7 @@ fn the_sasl_receive_limit_and_failed_authentication_delay_follow_kafka() {
 #[test]
 fn the_runtime_table_records_the_kafka_keys_it_named() {
     let recorded = |sources: &[&str]| -> Vec<&'static str> {
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
         for source in sources {
             let file: FileConfig = toml::from_str(source).expect("parse runtime config");
             file.apply_to(&mut cfg).expect("apply runtime config");
@@ -325,7 +328,7 @@ fn the_runtime_table_records_the_kafka_keys_it_named() {
 /// `STATIC_BROKER_CONFIG`.
 #[test]
 fn the_metadata_log_keys_set_the_whole_metadata_log_config() {
-    let cfg = crate::file_config::test_support::configured(
+    let cfg = configured(
         r#"
 [runtime]
 metadata_log_segment_bytes = "16MiB"

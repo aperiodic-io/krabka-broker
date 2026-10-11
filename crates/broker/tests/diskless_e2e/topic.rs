@@ -15,9 +15,10 @@ use krabka_client_core::Client;
 use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
 use crate::{
-    TOPIC, VOTERS,
-    cluster::{DisklessCluster, wait_for},
-    support,
+    CLIENT_PRINCIPAL, PASSWORD, RECORDS, TOPIC, VOTERS,
+    cluster::{DisklessCluster, start_flushing_cluster, wait_for},
+    support::{self, topics::diskless_topic_request},
+    wire::{produce_all, value_at},
 };
 
 /// Create the suite's diskless topic and return its assigned id.
@@ -29,7 +30,7 @@ use crate::{
 /// a 3-broker cluster is the assignment that guarantees it.
 pub(crate) async fn create_diskless_topic(client: &Client) -> WireUuid {
     let response = client
-        .send(crate::support::topics::diskless_topic_request(
+        .send(diskless_topic_request(
             TOPIC,
             i16::try_from(VOTERS).expect("small cluster"),
         ))
@@ -101,20 +102,20 @@ pub(crate) async fn seed_workload(
 ) -> (Client, WireUuid, NodeId, Vec<bytes::Bytes>, Client) {
     let admin = support::sasl_client(
         &cluster.bootstrap_for_node(cluster.node_ids()[0]),
-        crate::CLIENT_PRINCIPAL,
-        crate::PASSWORD,
+        CLIENT_PRINCIPAL,
+        PASSWORD,
     )
     .await;
     let topic_id = create_diskless_topic(&admin).await;
     let leader = await_wal_quorum(cluster).await;
-    let values: Vec<bytes::Bytes> = (0..crate::RECORDS).map(crate::wire::value_at).collect();
+    let values: Vec<bytes::Bytes> = (0..RECORDS).map(value_at).collect();
     let producer = support::sasl_client(
         &cluster.bootstrap_for_node(leader),
-        crate::CLIENT_PRINCIPAL,
-        crate::PASSWORD,
+        CLIENT_PRINCIPAL,
+        PASSWORD,
     )
     .await;
-    crate::wire::produce_all(&producer, topic_id, &values).await;
+    produce_all(&producer, topic_id, &values).await;
     (admin, topic_id, leader, values, producer)
 }
 
@@ -129,7 +130,7 @@ pub(crate) async fn flushing_workload(
     Vec<bytes::Bytes>,
     Client,
 ) {
-    let cluster = Box::pin(crate::cluster::start_flushing_cluster(interval)).await;
+    let cluster = Box::pin(start_flushing_cluster(interval)).await;
     cluster.await_ready().await;
     let (admin, topic, leader, values, producer) = Box::pin(seed_workload(&cluster)).await;
     (cluster, admin, topic, leader, values, producer)
@@ -143,6 +144,6 @@ pub(crate) fn seeded_leader(
     let broker = cluster
         .handle_for_node(leader)
         .expect("the diskless leader is up");
-    let committed = i64::try_from(crate::RECORDS).expect("small count");
+    let committed = i64::try_from(RECORDS).expect("small count");
     (broker, committed)
 }

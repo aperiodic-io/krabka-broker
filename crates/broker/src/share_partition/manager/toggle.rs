@@ -43,6 +43,7 @@ mod tests {
     use krabka_metadata::{FeatureLevelRecord, MetadataImage, MetadataRecord};
 
     use crate::{
+        features::SHARE_VERSION,
         partition_registry::PartitionRegistry,
         share_partition::{manager::test_support::manager_over, state::AcquisitionState},
         test_support::FakeMetadataSource,
@@ -51,7 +52,7 @@ mod tests {
     fn image_with_share_version(level: i16) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-            name: crate::features::SHARE_VERSION.into(),
+            name: SHARE_VERSION.into(),
             level,
         }));
         image

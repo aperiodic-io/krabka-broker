@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::{BrokerError, config::BrokerConfig};
+use crate::{BrokerError, config::BrokerConfig, cordoned_log_dirs::resolve};
 
 impl BrokerConfig {
     pub(super) fn validate_log_io_policy(&self) -> Result<(), BrokerError> {
@@ -25,7 +25,7 @@ impl BrokerConfig {
     /// configured log directory, and `*` stands alone.
     fn validate_cordoned_log_dirs(&self) -> Result<(), BrokerError> {
         match (&self.cordoned_log_dirs, self.is_broker()) {
-            (Some(value), true) => crate::cordoned_log_dirs::resolve(value, &self.all_log_dirs())
+            (Some(value), true) => resolve(value, &self.all_log_dirs())
                 .map(drop)
                 .map_err(BrokerError::InvalidRuntimeConfig),
             _ => Ok(()),

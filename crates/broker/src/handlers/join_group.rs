@@ -227,6 +227,7 @@ mod tests {
     use krabka_protocol::{Decode, owned::join_group_response};
 
     use super::*;
+    use crate::handlers::encode_response;
 
     /// #791: Kafka's `GroupCoordinatorService.joinGroup` request checks with
     /// the default `group.min.session.timeout.ms` and
@@ -265,7 +266,7 @@ mod tests {
                 (None, empty.clone()),
                 (Some("range".to_owned()), Some("range".to_owned())),
             ] {
-                let bytes = crate::handlers::encode_response(
+                let bytes = encode_response(
                     &respond(
                         version,
                         JoinGroupResponse {

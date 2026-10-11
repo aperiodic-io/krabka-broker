@@ -14,7 +14,7 @@ use crate::{
         OffsetRecordBatchBuilder,
         member_records::{
             MemberRecordFamilies, MemberRecordLists, MemberTombstone, MemberValues,
-            append_removed_members,
+            append_removed_members, append_target_records,
         },
         share::{
             persistence::{
@@ -232,7 +232,7 @@ impl ShareRecorder {
                 assignment_epoch: state.target.epoch,
                 assignment_timestamp_ms: state.assignment_timestamp_ms,
             });
-            crate::coordinator::unified::member_records::append_target_records(
+            append_target_records(
                 &mut pending.target_per_member,
                 changed,
                 &state.target.per_member,

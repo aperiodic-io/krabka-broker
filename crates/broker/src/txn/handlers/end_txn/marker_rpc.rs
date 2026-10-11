@@ -15,6 +15,7 @@ use krabka_protocol::owned::{
 
 use super::markers::{MarkerDispatchContext, MarkerFanOut};
 use crate::{
+    broker::registered_listener_endpoint,
     error::BrokerError,
     txn::{
         marker::{MarkerCodeClass, MarkerType, classify_marker_code},
@@ -90,8 +91,7 @@ async fn write_remote_markers(
     // host/port. Mirrors the resolution in the replicator supervisor and
     // heartbeat client — the marker RPC must target the same listener whose
     // protocol we dial with.
-    let (host, port) =
-        crate::broker::registered_listener_endpoint(broker_info, inter_broker_listener_name);
+    let (host, port) = registered_listener_endpoint(broker_info, inter_broker_listener_name);
     let host = host.to_owned();
 
     let req = build_write_txn_markers_request(entry, marker_type, tps, coordinator_epoch);
@@ -242,6 +242,7 @@ mod tests {
     use crate::{
         codes,
         network::client::InterBrokerClient,
+        test_support::broker_registration,
         txn::handlers::end_txn::test_support::{marker_entry, plaintext_client, tps},
     };
 
@@ -455,7 +456,7 @@ mod tests {
                     port: 9,
                     protocol: ListenerProtocol::Plaintext,
                 }],
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
+                ..broker_registration(krabka_raft::NodeId(2))
             },
         ));
         let err = send_test_markers(&image, NodeId(2), "INTERNAL")
@@ -485,7 +486,7 @@ mod tests {
                     port: 65000,
                     protocol: ListenerProtocol::Plaintext,
                 }],
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
+                ..broker_registration(krabka_raft::NodeId(2))
             },
         ));
         let err = send_test_markers(&image, NodeId(2), "INTERNAL")
@@ -535,7 +536,7 @@ mod tests {
                     port,
                     protocol: ListenerProtocol::Ssl,
                 }],
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(2))
+                ..broker_registration(krabka_raft::NodeId(2))
             },
         ));
         let tls = ClientConfig::builder()

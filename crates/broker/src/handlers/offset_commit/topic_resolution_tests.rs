@@ -30,7 +30,9 @@ use crate::{
     codes,
     coordinator::unified::actor::GroupActorMessage,
     handlers::test_support::CreateTopicSetup,
-    test_support::{DenyAll, peer, principal, request_context},
+    test_support::{
+        DenyAll, dispatch_wire, peer, principal, request_context, start_group_broker_no_audit,
+    },
 };
 
 /// An id that no topic in these tests has.
@@ -179,7 +181,7 @@ async fn drive(
 }
 
 async fn run_table(authorizer: Arc<dyn Authorizer>, cases: &[Case]) {
-    let (broker, _dir) = crate::test_support::start_group_broker_no_audit(authorizer).await;
+    let (broker, _dir) = start_group_broker_no_audit(authorizer).await;
     // A table that names no existing topic can run under an authorizer that
     // refuses `CreateTopics`.
     let needs_known = cases
@@ -256,8 +258,7 @@ async fn group_authorization_answers_before_topic_resolution() {
 async fn refused_rows_precede_the_committed_row() {
     const VERSION: i16 = 10;
     const GROUP: &str = "resolution-mixed";
-    let (broker, _dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let known_id = create_known_topic(&broker).await;
     let row = |topic_id| OffsetCommitRequestTopic {
         topic_id,
@@ -313,8 +314,7 @@ async fn refused_rows_precede_the_committed_row() {
 #[tokio::test]
 async fn unknown_partition_answers_on_its_own_row() {
     const MISSING_PARTITION: i32 = 7;
-    let (broker, _dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let known_id = create_known_topic(&broker).await;
     let shared = broker.broker_arc_for_test();
     request_identity!(
@@ -353,7 +353,7 @@ async fn unknown_partition_answers_on_its_own_row() {
             }],
             ..Default::default()
         };
-        let response: OffsetCommitResponse = crate::test_support::dispatch_wire(
+        let response: OffsetCommitResponse = dispatch_wire(
             &shared,
             krabka_protocol::owned::offset_commit_request::API_KEY,
             version,

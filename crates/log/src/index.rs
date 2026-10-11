@@ -20,7 +20,7 @@ use zerocopy::{
 
 use crate::{
     error::LogError,
-    io::{IoTarget, LogIo},
+    io::{IoTarget, LogIo, write_all},
 };
 
 // Keep the open span consistent for every on-disk index and checkpoint.
@@ -170,7 +170,7 @@ fn append_index<Key>(
     entry: (Key, u32),
 ) -> Result<(), LogError> {
     file.seek(SeekFrom::End(0))?;
-    crate::io::write_all(io, target, file, bytes)?;
+    write_all(io, target, file, bytes)?;
     entries.push(entry);
     Ok(())
 }

@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use krabka_units::{Time, convert::TimeExt};
 
+use crate::metrics::QuotaCharge;
+
 /// The KIP-219 throttle window a handler computed for the request in flight.
 ///
 /// KIP-219 splits a quota violation in two. The response tells the client how
@@ -31,7 +33,7 @@ pub(crate) struct ThrottleSlot {
     /// it together with the request quota in one metrics call. Kafka's
     /// `sendResponseMaybeThrottleWithControllerQuota` takes the larger of the
     /// controller-mutation and request throttles as one decision.
-    deferred: std::sync::OnceLock<crate::metrics::QuotaCharge>,
+    deferred: std::sync::OnceLock<QuotaCharge>,
 }
 
 impl ThrottleSlot {
@@ -49,14 +51,14 @@ impl ThrottleSlot {
     /// Leaves `charge` for the dispatch loop to resolve with the request quota,
     /// and records its window. A request defers at most one charge; a second
     /// one is ignored.
-    pub(crate) fn defer(&self, charge: crate::metrics::QuotaCharge) {
+    pub(crate) fn defer(&self, charge: QuotaCharge) {
         self.record(charge.delay);
         // The first charge wins. No handler defers two.
         let _ = self.deferred.set(charge);
     }
 
     /// The charge a handler deferred, if any.
-    pub(crate) fn deferred(&self) -> Option<crate::metrics::QuotaCharge> {
+    pub(crate) fn deferred(&self) -> Option<QuotaCharge> {
         self.deferred.get().cloned()
     }
 

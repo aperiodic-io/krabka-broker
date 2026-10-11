@@ -19,6 +19,7 @@ use crate::{
         test_support::{RETENTION, control_batch, write_sealed_batches},
     },
     error::LogError,
+    io::FileIo,
     txn_index::AbortedTxn,
 };
 
@@ -127,7 +128,7 @@ fn the_passes_refuse_a_compressed_record_above_the_limit() {
         let mut txn = CleanedTransactionMetadata::default();
         let active = HashMap::new();
         let rewritten = rewrite_segments(
-            &crate::io::FileIo,
+            &FileIo,
             dir.path(),
             &segments,
             &unchecked,
@@ -213,7 +214,7 @@ fn an_aborted_batch_is_read_only_when_the_pass_keeps_it_empty() {
             .into_iter()
             .collect();
         let rewritten = rewrite_segments(
-            &crate::io::FileIo,
+            &FileIo,
             dir.path(),
             &segments,
             &map,

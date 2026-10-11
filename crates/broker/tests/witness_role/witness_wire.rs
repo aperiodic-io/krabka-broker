@@ -19,23 +19,31 @@ use krabka_protocol::{
     primitives::uuid::Uuid as WireUuid,
 };
 
-use crate::{TOPIC, support::fetch::fetch_topic_row};
+use crate::{
+    TOPIC,
+    support::{
+        client::{ValueBatchSetup, ValueRecordCount, create_replicated_topic, value_batch},
+        discovery::{metadata_first_partition, named_topic_metadata},
+        fetch::fetch_topic_row,
+        produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, batch_request},
+    },
+};
 
 /// Create `TOPIC` with one partition and rf=3, and return its id.
 pub(crate) async fn create_topic(client: &Client) -> WireUuid {
-    crate::support::client::create_replicated_topic(client, TOPIC).await
+    create_replicated_topic(client, TOPIC).await
 }
 
 fn produce_request(topic_id: WireUuid, n: i32) -> ProduceRequest {
-    crate::support::produce::batch_request(
-        crate::support::client::value_batch(crate::support::client::ValueBatchSetup {
-            records: crate::support::client::ValueRecordCount(n),
+    batch_request(
+        value_batch(ValueBatchSetup {
+            records: ValueRecordCount(n),
         }),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: (TOPIC).into(),
             topic_id,
-            timeout: crate::support::produce::ProduceTimeoutMillis(10_000),
-            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            timeout: ProduceTimeoutMillis(10_000),
+            ..SinglePartitionProduceSetup::replicated()
         },
     )
 }
@@ -97,11 +105,10 @@ pub(crate) struct PartitionView {
 
 pub(crate) async fn partition_view(client: &Client) -> PartitionView {
     let resp = client
-        .send(crate::support::discovery::named_topic_metadata(TOPIC))
+        .send(named_topic_metadata(TOPIC))
         .await
         .expect("Metadata for the topic");
-    let partition = crate::support::discovery::metadata_first_partition(&resp, TOPIC)
-        .expect("the topic has partition 0");
+    let partition = metadata_first_partition(&resp, TOPIC).expect("the topic has partition 0");
     // Placement starts at a random site, as Kafka's does, so the order of the
     // replicas after the first one, the preferred leader, is not fixed.
     let mut replica_nodes = partition.replica_nodes.clone();

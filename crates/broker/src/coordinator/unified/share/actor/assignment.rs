@@ -18,6 +18,7 @@ use crate::coordinator::unified::{
         assignor::ShareGroupAssignor,
         state::{ShareGroupState, ShareMemberState},
     },
+    wall_clock_ms,
 };
 
 /// The group epoch cannot move past `i32::MAX`.
@@ -58,10 +59,7 @@ pub(super) fn reconcile(
     }
     state.metadata_hash = metadata_hash;
     if state.target.epoch >= state.group_epoch
-        || state.assignment_delayed(
-            assignment_interval,
-            crate::coordinator::unified::wall_clock_ms(),
-        )
+        || state.assignment_delayed(assignment_interval, wall_clock_ms())
     {
         return Ok(None);
     }
@@ -102,10 +100,7 @@ pub(super) fn reconcile(
         assignable.entry(*topic_id).or_default().insert(*partition);
     }
     let assignment = ShareGroupAssignor.assign(&group, &topics, Some(&assignable));
-    Ok(Some(state.install_target(
-        assignment,
-        crate::coordinator::unified::wall_clock_ms(),
-    )))
+    Ok(Some(state.install_target(assignment, wall_clock_ms())))
 }
 
 /// Kafka's `ModernGroup.computeMetadataHash` over the topics that the

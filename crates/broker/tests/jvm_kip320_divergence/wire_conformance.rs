@@ -21,7 +21,7 @@ use crate::{
         KAFKA_IMAGE, KAFKA_IMAGE_MODERN, docker_rm, docker_run_kafka_tool_with_image,
         produce_lines_via_jvm,
     },
-    support,
+    support::{self, JvmBrokerSetup, controller_voters, jvm_broker_config},
 };
 
 /// Single-broker Krabka config bound on `0.0.0.0:<client_port>`, advertised as
@@ -42,13 +42,13 @@ async fn start_host_broker_on(client_port: u16, controller_port: u16) -> (Broker
         // Keep it alive for the bounded in-container Java compile and probe.
         heartbeat_timeout: krabka_units::secs(120),
         bootstrap_mode: BootstrapMode::Bootstrap,
-        ..crate::support::jvm_broker_config(
+        ..jvm_broker_config(
             dir.path().to_path_buf(),
-            crate::support::JvmBrokerSetup {
+            JvmBrokerSetup {
                 listen: format!("0.0.0.0:{client_port}").parse().expect("addr"),
                 controller: format!("0.0.0.0:{controller_port}").parse().expect("addr"),
                 advertised: format!("host.docker.internal:{client_port}"),
-                voters: crate::support::controller_voters(&[(
+                voters: controller_voters(&[(
                     1,
                     format!("0.0.0.0:{controller_port}").parse().expect("addr"),
                 )]),
@@ -262,12 +262,10 @@ async fn kip320_wire_conformance_offset_for_leader_epoch() {
     // The helper image runs as a non-root uid, while `TempDir` is 0700.
     #[cfg(unix)]
     {
-        crate::support::chmod_for_container(
-            helper_dir.path(),
-            0o755,
-            "chmod Java helper directory",
-        );
-        crate::support::chmod_for_container(&helper_path, 0o644, "chmod Java helper source");
+        use crate::support::chmod_for_container;
+
+        chmod_for_container(helper_dir.path(), 0o755, "chmod Java helper directory");
+        chmod_for_container(&helper_path, 0o644, "chmod Java helper source");
     }
     let entry = format!(
         "set -e; cp /helper/Kip320Probe.java /tmp/Kip320Probe.java; \

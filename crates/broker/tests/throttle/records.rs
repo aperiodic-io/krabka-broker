@@ -15,11 +15,16 @@ use krabka_protocol::{Decode, Encode};
 use tokio::net::TcpStream;
 
 use crate::{
-    CLIENT_ID, kafka_wire,
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    CLIENT_ID,
+    kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
     support::{
+        fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
+        produce::{SinglePartitionProduceSetup, single_partition_produce},
         records::{batch_from_records, value_record},
-        wire::HeaderEncoding as RequestHeaderEncoding,
+        wire::{
+            HeaderEncoding as RequestHeaderEncoding, WireFrameSetup, read_frame,
+            request_body_capacity, request_frame, write_frame,
+        },
     },
 };
 
@@ -43,9 +48,9 @@ pub async fn produce_plaintext(addr: SocketAddr, topic: &str, record_bytes: usiz
         })
         .collect();
 
-    let req = crate::support::produce::single_partition_produce(
+    let req = single_partition_produce(
         // leader ack only (rf=1 topic)
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: topic.to_string(),
             records: Some(
                 RecordBatch {
@@ -106,12 +111,7 @@ pub async fn fetch_plaintext_replica(addr: SocketAddr, topic: &str, replica_id: 
 
     let req = FetchRequest {
         replica_id,
-        ..crate::support::fetch::named_topic_fetch(
-            topic,
-            crate::support::fetch::FetchLimits::one_mebibyte(
-                crate::support::fetch::RequestWaitMillis(0),
-            ),
-        )
+        ..named_topic_fetch(topic, FetchLimits::one_mebibyte(RequestWaitMillis(0)))
     };
 
     let mut stream = TcpStream::connect(addr).await.expect("connect");
@@ -120,21 +120,19 @@ pub async fn fetch_plaintext_replica(addr: SocketAddr, topic: &str, replica_id: 
 
     // Send raw frame and capture the full raw response (before decode) so we
     // can measure response bytes.
-    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+    let frame = request_frame(WireFrameSetup {
         api_key: krabka_ids::ApiKey(1),
         version: krabka_ids::ApiVersion(VERSION),
-        header: crate::support::wire::HeaderEncoding::Flexible,
+        header: RequestHeaderEncoding::Flexible,
         client_id: "krabka-throttle-test",
         body: &body,
-        capacity: Some(crate::support::wire::request_body_capacity(&body)),
+        capacity: Some(request_body_capacity(&body)),
         ..Default::default()
     });
 
-    crate::support::wire::write_frame(&mut stream, &frame, None)
-        .await
-        .unwrap();
+    write_frame(&mut stream, &frame, None).await.unwrap();
 
-    let resp = crate::support::wire::read_frame(&mut stream).await.unwrap();
+    let resp = read_frame(&mut stream).await.unwrap();
 
     // Decode to assert no transport error and no partition error.
     let mut cur: &[u8] = &resp[4..]; // skip corr_id

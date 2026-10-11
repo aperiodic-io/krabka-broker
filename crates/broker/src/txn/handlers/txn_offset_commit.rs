@@ -86,6 +86,7 @@ use self::{
     response::{build_response, error_response},
 };
 use crate::{
+    api_catalog::UnstableApiVersions,
     authorizer::{AuthorizationRequest, AuthorizationResult, authorize_topics},
     broker::Broker,
     codes,
@@ -93,21 +94,22 @@ use crate::{
         partitioner::{GroupRoutingError, local_partition_for_group},
         unified::{
             actor::{
-                CommitFence, CommitRequest, GroupActorMessage, GroupKindTag, TxnOffsetReservation,
-                validate_commit,
+                CommitFence, CommitRequest, GroupActorHandle, GroupActorMessage, GroupKindTag,
+                TxnOffsetReservation, validate_commit,
             },
             streams::actor::validate_streams_group_commit,
         },
     },
     error::BrokerError,
-    txn::util::now_millis,
+    handlers::{RequestContext, group_partition_loading},
+    txn::{util::now_millis, version::resolve_txn_version},
 };
 
 pub(crate) async fn handle(
     broker: &Broker,
     mut req: TxnOffsetCommitRequest,
     version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> Result<TxnOffsetCommitResponse, BrokerError> {
     let partitions = broker.partitions.clone();
 
@@ -219,10 +221,10 @@ pub(crate) async fn handle(
                 // A shard still replaying answers `COORDINATOR_LOAD_IN_PROGRESS`
                 // on every row, as Kafka's `CoordinatorRuntime` does for a
                 // `LOADING` shard, before either coordinator is touched.
-                if let Some(code) = crate::handlers::group_partition_loading(broker, partition) {
+                if let Some(code) = group_partition_loading(broker, partition) {
                     return respond(code);
                 }
-                (partition, crate::txn::version::resolve_txn_version(&image))
+                (partition, resolve_txn_version(&image))
             }
             Err(GroupRoutingError::Unavailable) => {
                 return respond(codes::COORDINATOR_NOT_AVAILABLE);
@@ -340,8 +342,7 @@ pub(crate) async fn handle(
     // the topic id of every commit. 4.3.1 keeps the zero id, and its versions
     // stop at 5, so only a v6 request and trunk mode record an id.
     let record_topic_ids = version >= FIRST_TOPIC_ID_VERSION
-        || broker.config.features.unstable_api_versions
-            == crate::api_catalog::UnstableApiVersions::Enabled;
+        || broker.config.features.unstable_api_versions == UnstableApiVersions::Enabled;
     let appended = match append_txn_batch(
         &req,
         (&partitions, &*broker.controller, broker.config.node_id),
@@ -491,7 +492,7 @@ fn committed_partitions(
 /// Reserves (`reserve = true`) or releases the keys of an append on the group
 /// actor. `Err` means the actor has stopped.
 async fn reserve_offsets(
-    handle: &crate::coordinator::unified::actor::GroupActorHandle,
+    handle: &GroupActorHandle,
     producer_id: i64,
     keys: Vec<(String, i32)>,
     reserve: bool,
@@ -520,7 +521,7 @@ async fn reserve_offsets(
 /// `COORDINATOR_NOT_AVAILABLE` rather than claiming a success the fetch path
 /// cannot honour.
 async fn mark_offsets_pending(
-    handle: &crate::coordinator::unified::actor::GroupActorHandle,
+    handle: &GroupActorHandle,
     producer_id: i64,
     appended: AppendedTxnOffsets,
     group_id: &str,

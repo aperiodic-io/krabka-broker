@@ -26,7 +26,9 @@ use zerocopy::FromBytes as _;
 
 use super::tiered::TieredSource;
 use crate::{
+    blocking::spawn_blocking,
     error::BrokerError,
+    partition::Partition,
     remote_reader::RemoteReader,
     share_partition::state::{AcquireShape, AcquiredRange, AcquisitionState},
 };
@@ -110,7 +112,7 @@ pub(super) fn read_budget(partition_max_bytes: i32, request_max_bytes: i32) -> i
 /// that do so for the local log cannot read the tier.
 pub(super) async fn acquire_read_records(
     out: &mut PartitionData,
-    partition: &Arc<crate::partition::Partition>,
+    partition: &Arc<Partition>,
     state: &mut AcquisitionState,
     request: &AcquireRequest<'_>,
 ) -> Result<i64, BrokerError> {
@@ -395,7 +397,7 @@ fn corrupt_read(what: &str) -> BrokerError {
 /// through `Log::read_raw`, off the reactor thread. It returns `None` when it
 /// read nothing.
 async fn read_raw(
-    part: &crate::partition::Partition,
+    part: &Partition,
     fetch_offset: Offset,
     limit_offset: Offset,
     max_bytes: i32,
@@ -405,7 +407,7 @@ async fn read_raw(
     }
     let read_max = ByteSize::from_bytes_i64(i64::from(max_bytes.max(0)));
     let log = part.log.clone();
-    let join = crate::blocking::spawn_blocking(move || {
+    let join = spawn_blocking(move || {
         let log = log.lock().expect("log mutex poisoned");
         log.read_raw(fetch_offset, limit_offset, read_max)
     });
@@ -471,7 +473,7 @@ const UNREADABLE_SCAN_CHUNK_BYTES: u64 = 1 << 20;
 /// transactional and its producer has an aborted transaction whose range, up
 /// to the abort marker, holds the batch.
 pub(super) async fn unreadable_batch_ranges(
-    part: &crate::partition::Partition,
+    part: &Partition,
     start: Offset,
     end: Offset,
     read_committed: bool,
@@ -537,7 +539,7 @@ pub(super) async fn unreadable_batch_ranges(
 /// delivers immediately answers with nothing before it reads a batch header,
 /// so the ordinary case costs one call and no I/O.
 pub(super) async fn pending_activation_ranges(
-    part: &crate::partition::Partition,
+    part: &Partition,
     start: Offset,
     end: Offset,
     now_ms: i64,
@@ -553,12 +555,12 @@ pub(super) async fn pending_activation_ranges(
 
 /// Run a range scan under the log lock and retain each caller's panic label.
 async fn scan_log<T: Send + 'static>(
-    part: &crate::partition::Partition,
+    part: &Partition,
     kind: &'static str,
     read: impl FnOnce(&krabka_log::Log) -> T + Send + 'static,
 ) -> Result<T, BrokerError> {
     let log = part.log.clone();
-    crate::blocking::spawn_blocking(move || {
+    spawn_blocking(move || {
         let log = log.lock().expect("log mutex poisoned");
         read(&log)
     })
@@ -577,7 +579,10 @@ mod tests {
     use qubit_clock::{FixedWallClock, WallClock};
 
     use super::*;
-    use crate::delivery::test_support::{NOW_MS, scheduled_partition, wall_at};
+    use crate::{
+        delivery::test_support::{NOW_MS, ScheduleSetup, scheduled_partition, wall_at},
+        test_support::UnixMillis,
+    };
 
     #[tokio::test]
     async fn only_the_batches_that_are_not_due_are_reported_as_pending() {
@@ -590,12 +595,8 @@ mod tests {
         let scheduled = scheduled_partition(
             &dir,
             &clock,
-            crate::delivery::test_support::ScheduleSetup {
-                activations: activations
-                    .iter()
-                    .copied()
-                    .map(crate::test_support::UnixMillis)
-                    .collect(),
+            ScheduleSetup {
+                activations: activations.iter().copied().map(UnixMillis).collect(),
                 leader: krabka_ids::NodeId(0),
                 ..Default::default()
             },
@@ -617,14 +618,10 @@ mod tests {
         let immediate = scheduled_partition(
             &immediate_dir,
             &clock,
-            crate::delivery::test_support::ScheduleSetup {
+            ScheduleSetup {
                 topic: "immediate",
                 policy: DeliveryPolicy::Immediate,
-                activations: activations
-                    .iter()
-                    .copied()
-                    .map(crate::test_support::UnixMillis)
-                    .collect(),
+                activations: activations.iter().copied().map(UnixMillis).collect(),
                 leader: krabka_ids::NodeId(0),
             },
         );

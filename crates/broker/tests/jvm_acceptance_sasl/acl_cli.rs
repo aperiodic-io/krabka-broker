@@ -8,10 +8,13 @@
 
 use assert2::{assert, check};
 
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-    docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity,
-    start_sasl_plaintext_broker_with_super_user,
+use crate::{
+    jvm_acceptance::{
+        ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
+        docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity, plain_client_properties,
+        start_sasl_plaintext_broker_with_super_user, write_plain_props,
+    },
+    oracle::secured_sides,
 };
 
 /// JVM acceptance: `kafka-acls.sh` end-to-end provision flow.
@@ -33,7 +36,7 @@ async fn jvm_kafka_acls_provision_via_cli() {
         start_sasl_plaintext_broker_with_super_user(ADMIN, &[(ADMIN, ADMIN_PASS)]).await;
     nc_check_connectivity();
 
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     let mount = admin_props.mount_str();
 
     // 1. --add.
@@ -373,12 +376,11 @@ async fn acl_shorthands_expand_as_apache_kafka_expands_them() {
     let krabka_side = Side::Krabka {
         bootstrap: &advertised,
     };
-    let admin_props = crate::jvm_acceptance::plain_client_properties(ADMIN, ADMIN_PASS);
+    let admin_props = plain_client_properties(ADMIN, ADMIN_PASS);
 
     for case in SHORTHAND_CASES {
         let mut listings: Vec<BTreeSet<AclBinding>> = Vec::new();
-        for (side, props) in crate::oracle::secured_sides(&oracle_side, &krabka_side, &admin_props)
-        {
+        for (side, props) in secured_sides(&oracle_side, &krabka_side, &admin_props) {
             let added = acls(side, props, case.add);
             assert!(
                 added.succeeded(),
@@ -429,7 +431,7 @@ async fn acl_shorthands_expand_as_apache_kafka_expands_them() {
         .find(|case| case.label == "--consumer")
         .expect("the --consumer case");
     let mut remaining: Vec<BTreeSet<AclBinding>> = Vec::new();
-    for (side, props) in crate::oracle::secured_sides(&oracle_side, &krabka_side, &admin_props) {
+    for (side, props) in secured_sides(&oracle_side, &krabka_side, &admin_props) {
         let mut remove: Vec<&str> = vec!["--remove", "--force"];
         remove.extend(removing.add.iter().skip(1).copied());
         acls(side, props, &remove).expect_success();

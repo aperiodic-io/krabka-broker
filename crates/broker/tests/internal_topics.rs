@@ -30,7 +30,9 @@
 use assert2::{assert, check};
 
 use crate::support::{
-    client::connect_owned, discovery::topic_metadata_request, topics::creatable_topic,
+    client::connect_owned,
+    discovery::topic_metadata_request,
+    topics::{ConfiguredTopicSetup, creatable_topic},
 };
 mod support;
 
@@ -90,7 +92,7 @@ async fn create_every_topic(p: &support::InProcess) {
             topics: TOPICS
                 .iter()
                 .map(|(name, _)| {
-                    creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+                    creatable_topic(ConfiguredTopicSetup {
                         name: (*name).into(),
                         ..Default::default()
                     })

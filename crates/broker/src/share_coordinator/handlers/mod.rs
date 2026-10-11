@@ -19,7 +19,11 @@ pub(crate) mod write;
 #[cfg(test)]
 mod authorization_tests;
 
-use crate::{broker::Broker, handlers::RequestContext};
+use crate::{
+    broker::Broker,
+    codes::NONE,
+    handlers::{RequestContext, cluster_action_denied as request_cluster_action_denied},
+};
 
 /// Whether a request has no topic rows or contains an empty partition row.
 macro_rules! empty_partition_data {
@@ -39,7 +43,7 @@ fn operation_result(
     operation: &str,
 ) -> (i16, Option<String>) {
     match result {
-        Ok(()) => (crate::codes::NONE, None),
+        Ok(()) => (NONE, None),
         Err(error) => (error.code(), Some(error.row_message(operation))),
     }
 }
@@ -51,7 +55,7 @@ const CLUSTER_AUTHORIZATION_FAILED_MESSAGE: &str = "Cluster authorization failed
 /// Whether the authorizer denies `ClusterAction` on the cluster to the
 /// principal of `ctx`.
 fn cluster_action_denied(broker: &Broker, ctx: &RequestContext<'_>) -> bool {
-    crate::handlers::cluster_action_denied(
+    request_cluster_action_denied(
         broker.config.authorizer.as_ref(),
         &broker.controller.current_image(),
         ctx,
@@ -155,13 +159,15 @@ pub(crate) mod test_support {
             bootstrap,
             config::ShareCoordinatorConfig,
             coordinator::{
-                ShareCoordinator,
+                LoadStatus, ShareCoordinator,
                 test_support::{
-                    DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+                    DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, image_with_topic,
+                    manual_clock, open_state_partition, share_write, state_batch,
                 },
             },
             persistence::StateBatch,
         },
+        topic_creator::TopicCreator,
     };
 
     pub(crate) fn batch(bounds: std::ops::RangeInclusive<Offset>) -> StateBatch {
@@ -178,9 +184,7 @@ pub(crate) mod test_support {
         num_partitions: i32,
     ) {
         for partition in 0..num_partitions {
-            crate::share_coordinator::coordinator::test_support::open_state_partition(
-                registry, log_dir, partition,
-            );
+            open_state_partition(registry, log_dir, partition);
         }
     }
 
@@ -200,7 +204,7 @@ pub(crate) mod test_support {
             NodeId(1),
             registry,
             config,
-            crate::share_coordinator::coordinator::test_support::manual_clock(),
+            manual_clock(),
         ))
     }
 
@@ -226,10 +230,7 @@ pub(crate) mod test_support {
             partition,
         } = setup;
         let coordinator = coordinator(log_dir);
-        let image = crate::share_coordinator::coordinator::test_support::image_with_topic(
-            topic,
-            partitions.0,
-        );
+        let image = image_with_topic(topic, partitions.0);
         coordinator.lead_all_partitions_for_test().await;
         coordinator
             .initialize(&image, "share-group", topic, partition.0, 17, Offset(90))
@@ -257,11 +258,7 @@ pub(crate) mod test_support {
                 "share-group",
                 topic,
                 partition.0,
-                crate::share_coordinator::coordinator::test_support::share_write(
-                    (17, 3),
-                    (101, 9),
-                    vec![batch(Offset(101)..=Offset(105))],
-                ),
+                share_write((17, 3), (101, 9), vec![batch(Offset(101)..=Offset(105))]),
             )
             .await
             .expect("write state");
@@ -397,21 +394,23 @@ pub(crate) mod test_support {
     /// metadata reconcile loop applies the image again at any time, and an
     /// image without the topic drops every led partition.
     pub(crate) async fn lead_share_state_partitions(broker: &Broker) {
+        use crate::{
+            auto_topic_creation::creatable_topic,
+            codes::{NONE, TOPIC_ALREADY_EXISTS},
+        };
+
         let partitions = broker.config.share_coordinator.state_topic_num_partitions;
         let request = krabka_protocol::owned::create_topics_request::CreateTopicsRequest {
-            topics: vec![crate::auto_topic_creation::creatable_topic(
-                &broker.config,
-                bootstrap::TOPIC,
-            )],
+            topics: vec![creatable_topic(&broker.config, bootstrap::TOPIC)],
             ..Default::default()
         };
-        let response = crate::topic_creator::TopicCreator::new(broker)
+        let response = TopicCreator::new(broker)
             .create_topic_without_principal(request)
             .await
             .expect("the controller answers CreateTopics");
         for row in &response.topics {
             assert2::assert!(
-                [crate::codes::NONE, crate::codes::TOPIC_ALREADY_EXISTS].contains(&row.error_code),
+                [NONE, TOPIC_ALREADY_EXISTS].contains(&row.error_code),
                 "create __share_group_state: {row:?}"
             );
         }
@@ -429,7 +428,7 @@ pub(crate) mod test_support {
                         .share_coordinator
                         .load_status(PartitionIndex(partition))
                         .await
-                        == Some(crate::share_coordinator::coordinator::LoadStatus::Active);
+                        == Some(LoadStatus::Active);
                 }
                 if active {
                     return;

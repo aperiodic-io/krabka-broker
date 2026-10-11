@@ -6,8 +6,14 @@ use assert2::assert;
 
 use crate::{
     cluster_lock,
+    kafka_wire::ElectionExchangeSetup,
+    support::{
+        admin::{ElectionKind, ElectionSetup},
+        registered_cluster, shutdown_cluster,
+        topics::AssignedTopicSetup,
+    },
     wait::{wait_isr_contains, wait_partition_exists, wait_partition_leader},
-    wire::{create_topic_plaintext, drive_elect_all_partitions, drive_elect_leaders},
+    wire::{CLIENT_ID, create_topic_plaintext, drive_elect_all_partitions, drive_elect_leaders},
 };
 
 /// A 3-broker PLAINTEXT cluster with an rf=2 topic where `replicas = [1, 2]`.
@@ -25,7 +31,7 @@ use crate::{
 async fn preferred_election_via_wire_returns_success() {
     let _g = cluster_lock().lock().await;
 
-    let mut cluster = crate::support::registered_cluster(3).await;
+    let mut cluster = registered_cluster(3).await;
 
     // All three brokers' addresses captured before any shutdowns.
     let broker1_addr = cluster[0].1.listen_addr;
@@ -34,7 +40,7 @@ async fn preferred_election_via_wire_returns_success() {
     // replicas [1, 2]; broker 1 is the preferred (first) replica.
     create_topic_plaintext(
         broker1_addr,
-        crate::support::topics::AssignedTopicSetup {
+        AssignedTopicSetup {
             name: ("foo-preferred").into(),
             replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
         },
@@ -114,9 +120,9 @@ async fn preferred_election_via_wire_returns_success() {
     // preferred replica (replicas[0]) and is now back in ISR and alive.
     let result = drive_elect_leaders(
         elect_addr,
-        crate::kafka_wire::ElectionExchangeSetup {
-            client_id: crate::wire::CLIENT_ID,
-            election: crate::support::admin::ElectionSetup {
+        ElectionExchangeSetup {
+            client_id: CLIENT_ID,
+            election: ElectionSetup {
                 topic: ("foo-preferred").to_string(),
                 ..Default::default()
             },
@@ -134,7 +140,7 @@ async fn preferred_election_via_wire_returns_success() {
 
     // Clean up.
     revived_h.shutdown().await;
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
     drop(dead_dir);
 }
 
@@ -155,14 +161,14 @@ async fn preferred_election_via_wire_returns_success() {
 async fn electing_every_partition_omits_the_ones_already_on_their_preferred_leader() {
     let _g = cluster_lock().lock().await;
 
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
     let broker1_addr = cluster[0].1.listen_addr;
 
     // Nothing has failed over, so every partition is already led by its
     // preferred replica and no election is needed anywhere.
     create_topic_plaintext(
         broker1_addr,
-        crate::support::topics::AssignedTopicSetup {
+        AssignedTopicSetup {
             name: ("foo-all-partitions").into(),
             replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
         },
@@ -170,9 +176,7 @@ async fn electing_every_partition_omits_the_ones_already_on_their_preferred_lead
     .await;
     wait_partition_exists(&cluster[0].0, "foo-all-partitions", 0).await;
 
-    let rows =
-        drive_elect_all_partitions(broker1_addr, crate::support::admin::ElectionKind::Preferred)
-            .await;
+    let rows = drive_elect_all_partitions(broker1_addr, ElectionKind::Preferred).await;
 
     assert!(
         rows.is_empty(),
@@ -183,9 +187,9 @@ async fn electing_every_partition_omits_the_ones_already_on_their_preferred_lead
     // The same partition, named explicitly, still reports why it was skipped.
     let named = drive_elect_leaders(
         broker1_addr,
-        crate::kafka_wire::ElectionExchangeSetup {
-            client_id: crate::wire::CLIENT_ID,
-            election: crate::support::admin::ElectionSetup {
+        ElectionExchangeSetup {
+            client_id: CLIENT_ID,
+            election: ElectionSetup {
                 topic: ("foo-all-partitions").to_string(),
                 ..Default::default()
             },

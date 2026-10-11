@@ -299,7 +299,7 @@ mod tests {
             123,
             1,
             456,
-            crate::metadata::RemoteLogSegmentDetails::new(
+            RemoteLogSegmentDetails::new(
                 1024,
                 RemoteLogSegmentState::CopySegmentStarted,
                 leader_epochs,
@@ -322,7 +322,7 @@ mod tests {
             777, // max_timestamp_ms
             5,
             888,
-            crate::metadata::RemoteLogSegmentDetails::new(
+            RemoteLogSegmentDetails::new(
                 4096, // segment_size_in_bytes
                 RemoteLogSegmentState::CopySegmentStarted,
                 epochs(),
@@ -423,7 +423,7 @@ mod tests {
             9,
             1,
             100,
-            crate::metadata::RemoteLogSegmentDetails::new(
+            RemoteLogSegmentDetails::new(
                 1024,
                 RemoteLogSegmentState::CopySegmentStarted,
                 maplit::btreemap! {LeaderEpoch(0) => 0},

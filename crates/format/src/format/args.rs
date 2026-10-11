@@ -212,6 +212,7 @@ mod tests {
     use clap::{Parser as _, error::ErrorKind};
 
     use super::*;
+    use crate::Cli;
 
     /// `--log-dir` takes repeated flags and comma-separated lists alike, and
     /// keeps the order they were given in.
@@ -223,7 +224,7 @@ mod tests {
             &["--log-dir=/a", "--log-dir=/b"],
         ];
         for argv in cases {
-            let cli = crate::Cli::try_parse_from(
+            let cli = Cli::try_parse_from(
                 ["krabka-format", "--node-id", "1"]
                     .into_iter()
                     .chain(argv.iter().copied()),
@@ -276,7 +277,7 @@ mod tests {
             ),
         ];
         for (argv, want) in cases {
-            let got: Parsed = crate::Cli::try_parse_from(
+            let got: Parsed = Cli::try_parse_from(
                 ["krabka-format", "--node-id", "1"]
                     .into_iter()
                     .chain(argv.iter().copied()),
@@ -347,14 +348,13 @@ mod tests {
     /// `meta.properties` records it.
     #[test]
     fn node_id_is_required() {
-        let missing = crate::Cli::try_parse_from(["krabka-format", "--log-dir", "/a"])
+        let missing = Cli::try_parse_from(["krabka-format", "--log-dir", "/a"])
             .map(|cli| cli.args.node_id)
             .map_err(|error| error.kind());
         check!(missing == Err(ErrorKind::MissingRequiredArgument));
-        let given =
-            crate::Cli::try_parse_from(["krabka-format", "--log-dir", "/a", "--node-id", "3"])
-                .map(|cli| cli.args.node_id)
-                .map_err(|error| error.kind());
+        let given = Cli::try_parse_from(["krabka-format", "--log-dir", "/a", "--node-id", "3"])
+            .map(|cli| cli.args.node_id)
+            .map_err(|error| error.kind());
         check!(given == Ok(krabka_metadata::NodeId(3)));
     }
 }

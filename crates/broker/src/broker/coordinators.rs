@@ -5,29 +5,45 @@
 
 use std::sync::Arc;
 
-use crate::{config::BrokerConfig, partition_registry::PartitionRegistry};
+use crate::{
+    api_catalog::UnstableApiVersions,
+    auto_topic_creation::AutoTopicCreation,
+    barrier::{
+        config::BarrierConfig, coordinator::BarrierCoordinator,
+        handlers::transport::InterBrokerMarkerWriter, metrics::BrokerBarrierMetrics,
+    },
+    config::BrokerConfig,
+    coordinator::GroupCoordinator,
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    network::client::InterBrokerClient,
+    partition_registry::PartitionRegistry,
+    producer_id_manager::ProducerIdManager,
+    share_coordinator::{coordinator::ShareCoordinator, persister_client::SharePersister},
+    share_partition::{dlq::DlqWriter, manager::SharePartitionLeaderManager},
+    txn::coordinator::TxnCoordinator,
+};
 
 pub(super) struct CoordinatorStartup {
-    pub(super) txn_coordinator: Arc<crate::txn::coordinator::TxnCoordinator>,
-    pub(super) barrier_coordinator: Arc<crate::barrier::coordinator::BarrierCoordinator>,
-    pub(super) share_coordinator: Arc<crate::share_coordinator::coordinator::ShareCoordinator>,
-    pub(super) share_partition_leaders:
-        Arc<crate::share_partition::manager::SharePartitionLeaderManager>,
-    pub(super) share_persister: Arc<crate::share_coordinator::persister_client::SharePersister>,
+    pub(super) txn_coordinator: Arc<TxnCoordinator>,
+    pub(super) barrier_coordinator: Arc<BarrierCoordinator>,
+    pub(super) share_coordinator: Arc<ShareCoordinator>,
+    pub(super) share_partition_leaders: Arc<SharePartitionLeaderManager>,
+    pub(super) share_persister: Arc<SharePersister>,
     /// The share groups' dead-letter writer, which the broker hands its remote
     /// reader once it has built one.
-    pub(super) dead_letters: Arc<crate::share_partition::dlq::DlqWriter>,
+    pub(super) dead_letters: Arc<DlqWriter>,
 }
 
 /// The shared components the coordinators are built on.
 pub(super) struct CoordinatorInputs<'a> {
-    pub(super) controller: &'a Arc<dyn crate::metadata_source::MetadataSource>,
+    pub(super) controller: &'a Arc<dyn MetadataSource>,
     pub(super) partitions: &'a Arc<PartitionRegistry>,
-    pub(super) group_coordinator: &'a Arc<crate::coordinator::GroupCoordinator>,
-    pub(super) producer_ids: &'a Arc<crate::producer_id_manager::ProducerIdManager>,
-    pub(super) inter_broker_client: &'a Arc<crate::network::client::InterBrokerClient>,
-    pub(super) auto_topic_creation: &'a Arc<crate::auto_topic_creation::AutoTopicCreation>,
-    pub(super) metrics: &'a crate::metrics::BrokerMetrics,
+    pub(super) group_coordinator: &'a Arc<GroupCoordinator>,
+    pub(super) producer_ids: &'a Arc<ProducerIdManager>,
+    pub(super) inter_broker_client: &'a Arc<InterBrokerClient>,
+    pub(super) auto_topic_creation: &'a Arc<AutoTopicCreation>,
+    pub(super) metrics: &'a BrokerMetrics,
 }
 
 pub(super) async fn start_coordinators(
@@ -50,7 +66,7 @@ pub(super) async fn start_coordinators(
         .map_or(krabka_security::ListenerProtocol::Plaintext, |listener| {
             listener.protocol
         });
-    let mut txn_coordinator = crate::txn::coordinator::TxnCoordinator::new(
+    let mut txn_coordinator = TxnCoordinator::new(
         config.node_id,
         Arc::clone(partitions),
         Arc::clone(producer_ids),
@@ -58,7 +74,7 @@ pub(super) async fn start_coordinators(
         config.transaction_recovery_read_max,
     );
     txn_coordinator.set_persist_last_producer_epoch(
-        config.features.unstable_api_versions == crate::api_catalog::UnstableApiVersions::Enabled,
+        config.features.unstable_api_versions == UnstableApiVersions::Enabled,
     );
     txn_coordinator.configure_marker_transport(
         Arc::clone(controller),
@@ -80,30 +96,26 @@ pub(super) async fn start_coordinators(
         config.features.unstable_api_versions,
         crate::api_catalog::UnstableApiVersions::Enabled
     );
-    let share_coordinator = Arc::new(
-        crate::share_coordinator::coordinator::ShareCoordinator::new(
-            config.node_id,
-            Arc::clone(partitions),
-            share_coordinator_config,
-        ),
-    );
+    let share_coordinator = Arc::new(ShareCoordinator::new(
+        config.node_id,
+        Arc::clone(partitions),
+        share_coordinator_config,
+    ));
     if let Err(error) = share_coordinator.recover(&controller.current_image()).await {
         tracing::warn!(%error, "share coordinator recovery error");
     }
-    let share_persister = Arc::new(
-        crate::share_coordinator::persister_client::SharePersister::new(
-            config.node_id,
-            Arc::clone(&share_coordinator),
-            Arc::clone(controller),
-            Arc::clone(auto_topic_creation),
-            Arc::clone(inter_broker_client),
-            listener_protocol,
-            config.inter_broker_listener_name.clone(),
-        ),
-    );
+    let share_persister = Arc::new(SharePersister::new(
+        config.node_id,
+        Arc::clone(&share_coordinator),
+        Arc::clone(controller),
+        Arc::clone(auto_topic_creation),
+        Arc::clone(inter_broker_client),
+        listener_protocol,
+        config.inter_broker_listener_name.clone(),
+    ));
     group_coordinator.set_share_persister(Arc::clone(&share_persister));
     group_coordinator.set_metadata_source(Arc::clone(controller));
-    let dead_letters = Arc::new(crate::share_partition::dlq::DlqWriter::new(
+    let dead_letters = Arc::new(DlqWriter::new(
         config,
         Arc::clone(controller),
         Arc::clone(partitions),
@@ -112,7 +124,7 @@ pub(super) async fn start_coordinators(
         listener_protocol,
         metrics.clone(),
     ));
-    let share_partition_leaders = crate::share_partition::manager::SharePartitionLeaderManager::new(
+    let share_partition_leaders = SharePartitionLeaderManager::new(
         config.node_id,
         Arc::clone(partitions),
         Arc::clone(controller),
@@ -123,12 +135,12 @@ pub(super) async fn start_coordinators(
     );
     share_partition_leaders.spawn_lock_sweeper();
     share_partition_leaders.spawn_share_version_watcher();
-    let mut barrier_coordinator = crate::barrier::coordinator::BarrierCoordinator::new(
+    let mut barrier_coordinator = BarrierCoordinator::new(
         config.node_id,
         Arc::clone(partitions),
         Arc::clone(controller),
         Arc::clone(auto_topic_creation),
-        crate::barrier::config::BarrierConfig {
+        BarrierConfig {
             state_topic_num_partitions: config.barrier_state_num_partitions,
             recovery_read_max: config.barrier_recovery_read_max,
             injection_timeout: config.barrier_injection_timeout,
@@ -137,25 +149,21 @@ pub(super) async fn start_coordinators(
             max_groups: config.barrier_max_groups,
             max_topics_per_group: config.barrier_max_topics_per_group,
             min_injection_interval: config.barrier_min_injection_interval,
-            ..crate::barrier::config::BarrierConfig::default()
+            ..BarrierConfig::default()
         },
-        Arc::new(crate::barrier::metrics::BrokerBarrierMetrics::new(
-            metrics.clone(),
-        )),
+        Arc::new(BrokerBarrierMetrics::new(metrics.clone())),
     );
     // The transport has to be bound before the coordinator goes into its `Arc`.
     // Without it the coordinator marks only the partitions it leads, and every
     // remote partition lands in the `missing` list of the cut.
-    barrier_coordinator.configure_marker_transport(Arc::new(
-        crate::barrier::handlers::transport::InterBrokerMarkerWriter::new(
-            config.node_id,
-            Arc::clone(controller),
-            Arc::clone(inter_broker_client),
-            listener_protocol,
-            config.inter_broker_listener_name.clone(),
-            config.inter_broker_server_name.clone(),
-        ),
-    ));
+    barrier_coordinator.configure_marker_transport(Arc::new(InterBrokerMarkerWriter::new(
+        config.node_id,
+        Arc::clone(controller),
+        Arc::clone(inter_broker_client),
+        listener_protocol,
+        config.inter_broker_listener_name.clone(),
+        config.inter_broker_server_name.clone(),
+    )));
     let barrier_coordinator = Arc::new(barrier_coordinator);
     // __barrier_state is created when the first group is defined, not here,
     // as the other coordinator topics are created on first use

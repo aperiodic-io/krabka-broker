@@ -6,9 +6,12 @@ use std::collections::BTreeSet;
 use assert2::{assert, check};
 
 use super::*;
-use crate::handlers::{
-    self,
-    registry::{DispatchKind, RequestQuotaPolicy, build_registry},
+use crate::{
+    api_catalog::dispatched_apis,
+    handlers::{
+        self,
+        registry::{DispatchKind, RequestQuotaPolicy, build_registry},
+    },
 };
 
 /// Every krabka-private api key, the adapter that dispatch must reach, and
@@ -96,7 +99,7 @@ fn registry_dispatches_every_krabka_private_key_to_its_own_handler() {
 
 #[test]
 fn no_krabka_private_key_reaches_api_versions() {
-    let dispatched: BTreeSet<ApiKeyCode> = crate::api_catalog::dispatched_apis()
+    let dispatched: BTreeSet<ApiKeyCode> = dispatched_apis()
         .into_iter()
         .map(|api| api.api_key)
         .collect();

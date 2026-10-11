@@ -30,7 +30,20 @@ use crate::{
     authorizer::AllowAllAuthorizer,
     broker::BrokerHandle,
     codes,
-    test_support::{decode_response, encode_request, peer, principal, start_broker_no_audit_with},
+    handlers::{
+        produce::handle,
+        test_support::{
+            AcknowledgementCode, AcknowledgementPartitionSetup, AcknowledgementSetup,
+            ClientTopicSetup, ShareSessionEpoch, ShareWireSetup, TopicPartitionCount,
+            acknowledge_batches_request, acquired_share_records,
+            create_topic as create_topic_from_test_support, share_acknowledge_wire,
+            share_fetch_wire,
+        },
+    },
+    test_support::{
+        decode_response, encode_request, initialize_share_state, peer, principal,
+        start_broker_no_audit_with,
+    },
 };
 
 /// The number of batches that each topic holds.
@@ -71,12 +84,12 @@ async fn create_topic_with_partitions(
     name: &str,
     partitions: i32,
 ) -> WireUuid {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "share-fetch-byte-limit-test",
             name,
-            partitions: crate::handlers::test_support::TopicPartitionCount(partitions),
+            partitions: TopicPartitionCount(partitions),
         },
     )
     .await
@@ -122,7 +135,7 @@ async fn produce_batch(broker: &BrokerHandle, topic: &str, partition: i32) {
         ..Default::default()
     };
     let request_bytes = encode_request(&request, PRODUCE_VERSION);
-    let response_bytes = crate::handlers::produce::handle(
+    let response_bytes = handle(
         &shared,
         PRODUCE_VERSION,
         &request_bytes,
@@ -196,10 +209,10 @@ async fn send_share_fetch(
     broker: &BrokerHandle,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    crate::handlers::test_support::share_fetch_wire(
+    share_fetch_wire(
         broker,
         request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(
                 krabka_protocol::owned::share_fetch_request::MAX_VERSION,
             ),
@@ -222,7 +235,7 @@ fn partition(response: &ShareFetchResponse) -> PartitionData {
 
 /// The `(first, last)` offsets of every acquired row.
 fn acquired(row: &PartitionData) -> Vec<(i64, i64)> {
-    crate::handlers::test_support::acquired_share_records(row)
+    acquired_share_records(row)
 }
 
 /// The offsets of every record that the row carries.
@@ -321,13 +334,7 @@ async fn every_acquired_offset_has_its_record_in_the_response() {
         let topic = format!("byte-limit-{}", case.name);
         let group = format!("group-{}", case.name);
         let topic_id = create_topic(&broker, &topic).await;
-        crate::test_support::initialize_share_state(
-            &broker,
-            &group,
-            uuid::Uuid::from_bytes(topic_id.0),
-            0,
-        )
-        .await;
+        initialize_share_state(&broker, &group, uuid::Uuid::from_bytes(topic_id.0), 0).await;
         // Open both sessions on the empty log, so the share partition starts
         // at offset 0 under the default `latest` reset.
         for member in ["limited", "unlimited"] {
@@ -383,13 +390,7 @@ async fn broker_fetch_cap_limits_share_fetch_and_keeps_first_batch_progress() {
     let topic = "broker-fetch-cap";
     let group = "broker-fetch-cap-group";
     let topic_id = create_topic(&broker, topic).await;
-    crate::test_support::initialize_share_state(
-        &broker,
-        group,
-        uuid::Uuid::from_bytes(topic_id.0),
-        0,
-    )
-    .await;
+    initialize_share_state(&broker, group, uuid::Uuid::from_bytes(topic_id.0), 0).await;
     let opened = share_fetch(&broker, group, "member", 0, topic_id, (500, 1 << 20), &[]).await;
     assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");
     produce_batches(&broker, topic).await;
@@ -412,13 +413,7 @@ const RELEASE: i8 = 2;
 async fn a_record_at_the_delivery_limit_does_not_stall_the_partition() {
     let (broker, _dir) = start_with_delivery_attempts(1).await;
     let topic_id = create_topic(&broker, "delivery-limit").await;
-    crate::test_support::initialize_share_state(
-        &broker,
-        "g",
-        uuid::Uuid::from_bytes(topic_id.0),
-        0,
-    )
-    .await;
+    initialize_share_state(&broker, "g", uuid::Uuid::from_bytes(topic_id.0), 0).await;
     let opened = share_fetch(&broker, "g", "m", 0, topic_id, (500, 1 << 20), &[]).await;
     assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");
     produce_batches(&broker, "delivery-limit").await;
@@ -447,8 +442,6 @@ async fn a_record_at_the_delivery_limit_does_not_stall_the_partition() {
 }
 
 /// A `ShareFetch` of every partition of `topic_id`, with no wait.
-use crate::handlers::test_support::{ShareSessionEpoch, TopicPartitionCount};
-
 #[derive(Clone, Copy)]
 struct ShareResponseByteLimit(i32);
 
@@ -567,7 +560,7 @@ async fn only_the_first_partition_may_exceed_the_byte_budget() {
         let group = format!("group-{name}");
         let topic_id = create_topic_with_partitions(&broker, &topic, PARTITIONS).await;
         for partition in 0..PARTITIONS {
-            crate::test_support::initialize_share_state(
+            initialize_share_state(
                 &broker,
                 &group,
                 uuid::Uuid::from_bytes(topic_id.0),
@@ -621,25 +614,19 @@ async fn release(
     (first_offset, last_offset): (i64, i64),
 ) {
     let version = krabka_protocol::owned::share_acknowledge_request::MAX_VERSION;
-    let request = crate::handlers::test_support::acknowledge_batches_request(
-        crate::handlers::test_support::AcknowledgementSetup {
-            member,
+    let request = acknowledge_batches_request(AcknowledgementSetup {
+        member,
 
-            partition: crate::handlers::test_support::AcknowledgementPartitionSetup::single_batch(
-                krabka_log::Offset(first_offset)..=krabka_log::Offset(last_offset),
-                crate::handlers::test_support::AcknowledgementCode(RELEASE),
-            ),
-            ..crate::handlers::test_support::AcknowledgementSetup::for_topic_session(
-                group,
-                crate::handlers::test_support::ShareSessionEpoch(epoch),
-                topic_id,
-            )
-        },
-    );
-    let response = crate::handlers::test_support::share_acknowledge_wire(
+        partition: AcknowledgementPartitionSetup::single_batch(
+            krabka_log::Offset(first_offset)..=krabka_log::Offset(last_offset),
+            AcknowledgementCode(RELEASE),
+        ),
+        ..AcknowledgementSetup::for_topic_session(group, ShareSessionEpoch(epoch), topic_id)
+    });
+    let response = share_acknowledge_wire(
         broker,
         &request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(version),
             ..Default::default()
         },
@@ -661,13 +648,7 @@ async fn release(
 async fn a_batch_acquired_over_two_passes_is_carried_once() {
     let (broker, _dir) = start().await;
     let topic_id = create_topic(&broker, "two-passes").await;
-    crate::test_support::initialize_share_state(
-        &broker,
-        "g",
-        uuid::Uuid::from_bytes(topic_id.0),
-        0,
-    )
-    .await;
+    initialize_share_state(&broker, "g", uuid::Uuid::from_bytes(topic_id.0), 0).await;
     for member in ["waiting", "other"] {
         let opened = share_fetch(&broker, "g", member, 0, topic_id, (500, 1 << 20), &[]).await;
         assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");

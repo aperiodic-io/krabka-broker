@@ -33,12 +33,20 @@ use self::{
 };
 use crate::{
     codes,
+    cordoned_log_dirs::registration_change,
     handlers::{
         ErrorCodeResponse as _, cluster_action_denied, forward_to_controller::is_active_controller,
     },
-    heartbeat::controller_state::{
-        BrokerControlState, HeartbeatFacts, HeartbeatWants, next_broker_state,
+    heartbeat::{
+        controller_state::{
+            BrokerControlState, ControllerLivenessState, HeartbeatFacts, HeartbeatWants,
+            next_broker_state,
+        },
+        fencing::is_fenced,
     },
+    leader_election::compute_unfence_changes,
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
 };
 
 context_handler! {
@@ -157,7 +165,7 @@ context_handler! {
 /// A failed submit is logged and dropped: the broker reports the same set on
 /// its next heartbeat, and the next one retries.
 async fn record_cordoned_dirs(
-    controller: &std::sync::Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &std::sync::Arc<dyn MetadataSource>,
     broker: NodeId,
     req: &BrokerHeartbeatRequest,
 ) {
@@ -188,7 +196,7 @@ fn cordoned_dirs_change(
             .map(|dir| uuid::Uuid::from_bytes(dir.0))
             .collect()
     });
-    crate::cordoned_log_dirs::registration_change(image, broker, reported.as_deref())
+    registration_change(image, broker, reported.as_deref())
 }
 
 /// Move `broker` through Kafka's heartbeat state machine
@@ -213,9 +221,9 @@ fn cordoned_dirs_change(
 /// here either, so nothing elects it again, but a leadership that came back to
 /// it before it entered is written away again on the next heartbeat.
 async fn advance_broker_state(
-    controller: &std::sync::Arc<dyn crate::metadata_source::MetadataSource>,
-    liveness: &std::sync::Arc<crate::heartbeat::controller_state::ControllerLivenessState>,
-    metrics: &crate::metrics::BrokerMetrics,
+    controller: &std::sync::Arc<dyn MetadataSource>,
+    liveness: &std::sync::Arc<ControllerLivenessState>,
+    metrics: &BrokerMetrics,
     broker: NodeId,
     req: &BrokerHeartbeatRequest,
     caught_up: bool,
@@ -252,7 +260,7 @@ async fn advance_broker_state(
     let partition_changes = if leaves {
         left.changes
     } else if unfences {
-        crate::leader_election::compute_unfence_changes(&image, broker, liveness, metrics).await
+        compute_unfence_changes(&image, broker, liveness, metrics).await
     } else {
         Vec::new()
     };
@@ -298,7 +306,7 @@ fn current_broker_state(
     image: &krabka_metadata::MetadataImage,
     broker: NodeId,
 ) -> BrokerControlState {
-    if crate::heartbeat::fencing::is_fenced(image, broker) {
+    if is_fenced(image, broker) {
         BrokerControlState::Fenced
     } else {
         registry

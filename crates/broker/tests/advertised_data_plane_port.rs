@@ -12,11 +12,13 @@ mod support;
 use assert2::assert;
 use krabka_protocol::owned::metadata_response::MetadataResponse;
 
-use crate::support::{client::connect_client, discovery::topic_metadata_request};
+use crate::support::{
+    client::connect_client, discovery::topic_metadata_request, standalone_broker,
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_port_zero_broker_registers_its_bound_port() {
-    let (_dir, broker) = crate::support::standalone_broker().await;
+    let (_dir, broker) = standalone_broker().await;
     let bound_port = i32::from(broker.listen_addr().port());
     assert!(bound_port != 0, "the broker bound an OS-assigned port");
 

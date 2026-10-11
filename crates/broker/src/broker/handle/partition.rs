@@ -8,7 +8,9 @@ use std::sync::atomic::Ordering;
 use krabka_ids::PartitionIndex;
 use krabka_units::convert::TimeExt;
 
-use crate::broker::BrokerHandle;
+#[cfg(any(test, feature = "test-helpers"))]
+use crate::error::BrokerError;
+use crate::{broker::BrokerHandle, partition::Partition};
 
 impl BrokerHandle {
     /// This broker's partition `topic-partition`, or a
@@ -18,14 +20,12 @@ impl BrokerHandle {
         &self,
         topic: &str,
         partition: i32,
-    ) -> Result<std::sync::Arc<crate::partition::Partition>, crate::error::BrokerError> {
+    ) -> Result<std::sync::Arc<Partition>, BrokerError> {
         self.broker
             .partitions
             .get(topic, PartitionIndex(partition))
             .ok_or_else(|| {
-                crate::error::BrokerError::Replication(format!(
-                    "partition {topic}-{partition} not local"
-                ))
+                BrokerError::Replication(format!("partition {topic}-{partition} not local"))
             })
     }
 
@@ -44,7 +44,7 @@ impl BrokerHandle {
         topic: &str,
         partition: i32,
         offset: i64,
-    ) -> Result<(), crate::error::BrokerError> {
+    ) -> Result<(), BrokerError> {
         let part = self.local_partition(topic, partition)?;
         part.truncate_to(krabka_log::Offset(offset)).await?;
         // Mirror the production truncation path (the replicator): a log
@@ -73,7 +73,7 @@ impl BrokerHandle {
         topic: &str,
         partition: i32,
         new_start: i64,
-    ) -> Result<(), crate::error::BrokerError> {
+    ) -> Result<(), BrokerError> {
         let part = self.local_partition(topic, partition)?;
         part.test_set_log_start(krabka_log::Offset(new_start)).await
     }
@@ -158,7 +158,7 @@ impl BrokerHandle {
         &self,
         topic: &str,
         partition: i32,
-    ) -> Result<(), crate::error::BrokerError> {
+    ) -> Result<(), BrokerError> {
         let part = self.local_partition(topic, partition)?;
         part.compact_log().await
     }
@@ -280,7 +280,7 @@ impl BrokerHandle {
         topic: &str,
         partition: i32,
         n: usize,
-    ) -> Result<i64, crate::error::BrokerError> {
+    ) -> Result<i64, BrokerError> {
         let part = self.local_partition(topic, partition)?;
         let leader_epoch = part.current_leader_epoch.load(Ordering::Acquire);
         let mut last_offset = 0i64;

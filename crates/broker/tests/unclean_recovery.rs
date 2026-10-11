@@ -88,6 +88,7 @@ use crate::kafka_wire::create_assigned_topic_plaintext as create_topic_plaintext
 /// the top-level `error_code == 0`, and returns the per-partition
 /// `(partition_id, error_code)` rows for `topic`.
 use crate::kafka_wire::elect_leaders_plaintext as drive_elect_leaders;
+use crate::kafka_wire::{AssignedTopicExchangeSetup, ElectionExchangeSetup};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Polling helpers
@@ -100,7 +101,12 @@ async fn wait_partition_hosted(handle: &BrokerHandle, topic: &str, partition: i3
     handle.wait_until_partition_present(topic, partition).await;
 }
 
-use crate::support::partitions::{wait_partition_isr_only, wait_partition_leader};
+use crate::support::{
+    admin::{ElectionKind, ElectionSetup},
+    partitions::{wait_partition_isr_only, wait_partition_leader},
+    registered_cluster, shutdown_cluster,
+    topics::AssignedTopicSetup,
+};
 
 /// The recovery strategy that routes an UNCLEAN election through the URM.
 fn topic_config(topic: &str) -> MetadataRecord {
@@ -165,9 +171,9 @@ async fn offline_partition_with_diverged_logs(
     //    [1, 2, 3]; broker 1 is the preferred/first. ──
     create_topic_plaintext(
         addr,
-        crate::kafka_wire::AssignedTopicExchangeSetup {
+        AssignedTopicExchangeSetup {
             client_id: CLIENT_ID,
-            topic: crate::support::topics::AssignedTopicSetup::three_replicas(topic),
+            topic: AssignedTopicSetup::three_replicas(topic),
         },
     )
     .await;
@@ -280,7 +286,7 @@ async fn offline_partition_with_diverged_logs(
 async fn run_unclean_recovery(elr: Option<&str>, witness: Option<u64>, expected_leader: u64) {
     let _g = support::cluster_lock().lock().await;
 
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
 
     let topic = "t";
     let addr = cluster[0].1.listen_addr;
@@ -355,11 +361,11 @@ async fn run_unclean_recovery(elr: Option<&str>, witness: Option<u64>, expected_
     // ── Trigger offset-aware recovery (election_type = 1 = UNCLEAN). ──
     let result = drive_elect_leaders(
         elect_addr,
-        crate::kafka_wire::ElectionExchangeSetup {
+        ElectionExchangeSetup {
             client_id: CLIENT_ID,
-            election: crate::support::admin::ElectionSetup {
+            election: ElectionSetup {
                 topic: (topic).to_string(),
-                kind: crate::support::admin::ElectionKind::Unclean,
+                kind: ElectionKind::Unclean,
                 ..Default::default()
             },
         },
@@ -385,5 +391,5 @@ async fn run_unclean_recovery(elr: Option<&str>, witness: Option<u64>, expected_
     wait_partition_isr_only(h1, topic, 0, &[expected_leader]).await;
 
     // Clean up.
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

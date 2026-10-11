@@ -9,7 +9,7 @@
 use std::process::{ExitStatus, Output};
 
 use crate::{
-    jvm_acceptance::{ClientPropsFile, KAFKA_IMAGE_TXN},
+    jvm_acceptance::{ClientPropsFile, KAFKA_IMAGE_TXN, tool_output},
     support,
     vocabulary::{CONFIGS_TOPIC, CONTAINER_PROPS, ELECT_TOPIC},
 };
@@ -33,7 +33,7 @@ impl ToolRun {
     /// Merge one finished `docker run` into a run, and echo it for
     /// `--nocapture`.
     fn from_output(out: &Output, args: &[&str]) -> Self {
-        let output = crate::jvm_acceptance::tool_output(out);
+        let output = tool_output(out);
         let status = out.status;
         eprintln!("KRABKA[test] jvm tool {args:?} status={status}\n{output}");
         Self { status, output }

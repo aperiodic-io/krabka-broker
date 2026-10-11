@@ -4,6 +4,7 @@ use super::{
     FetchWatermarks, LogBatchKind, aborted_transaction_interval, fetch_visibility,
     first_unstable_offset, local_append_coordinates, log_batch_kind, transaction_marker_closes,
 };
+use crate::broker::FetchVisibility;
 #[cfg(creusot)]
 use crate::transaction::first_unstable_frontier;
 
@@ -30,7 +31,7 @@ use crate::transaction::first_unstable_frontier;
 pub(super) fn committed_fetch_excludes_unstable(
     starts: &[i64],
     w: FetchWatermarks,
-) -> Option<(i64, crate::broker::FetchVisibility)> {
+) -> Option<(i64, FetchVisibility)> {
     let lso = first_unstable_offset(starts, w.log_end)?;
     let visibility = fetch_visibility(false, true, FetchWatermarks { lso, ..w }, w.log_start);
     Some((lso, visibility))

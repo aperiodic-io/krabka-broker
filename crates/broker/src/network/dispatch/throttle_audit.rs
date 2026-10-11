@@ -25,7 +25,7 @@ use krabka_protocol::Encode;
 use super::response::throttle_is_leading_field;
 use crate::{
     api_catalog::dispatched_apis,
-    handlers::{ApiKeyCode, ApiVersion},
+    handlers::{ApiKeyCode, ApiVersion, registry::build_registry},
 };
 
 /// Written into `throttle_time_ms` before encoding. Any value works as long as
@@ -273,7 +273,7 @@ fn throttle_echo_divergences_are_the_recorded_ones() {
 fn recorded_reach_matches_the_dispatch_registry() {
     use crate::handlers::RequestQuotaPolicy;
 
-    let registry = crate::handlers::registry::build_registry();
+    let registry = build_registry();
     let observed: Vec<(ApiKeyCode, QuotaReach)> = THROTTLE_ECHO_DIVERGENCES
         .iter()
         .map(|&(api_key, ..)| {

@@ -27,8 +27,12 @@ use crate::{
             streams::config::StreamsGroupConfig,
         },
     },
+    metrics::PartitionLabel,
     partition::Partition,
-    test_support::FakeMetadataSource,
+    test_support::{
+        FakeMetadataSource, RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup,
+        UnixMillis, open_partition, repeated_records_batch, single_partition_topic,
+    },
 };
 
 const TOPIC: &str = "orders";
@@ -62,9 +66,9 @@ fn image_with_remote_leader(topic: &str) -> MetadataImage {
 /// A partition backed by a real log under `dir`, registered as led by
 /// `LEADER` with `FOLLOWER` as its one in-sync follower.
 fn led_partition(dir: &Path, topic: &str, partition: i32) -> Arc<Partition> {
-    let part = crate::test_support::open_partition(
+    let part = open_partition(
         dir,
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic,
             partition: krabka_ids::PartitionIndex(partition),
             ..Default::default()
@@ -90,9 +94,9 @@ async fn install_isr(partition: &Partition) {
 fn append_records(partition: &Partition, count: i32) {
     let mut batch = RecordBatch {
         partition_leader_epoch: -1,
-        ..crate::test_support::repeated_records_batch(crate::test_support::RepeatedRecordsSetup {
-            count: crate::test_support::RecordCount(count),
-            timestamp: crate::test_support::UnixMillis(1_700_000_000),
+        ..repeated_records_batch(RepeatedRecordsSetup {
+            count: RecordCount(count),
+            timestamp: UnixMillis(1_700_000_000),
         })
     };
     partition
@@ -317,7 +321,7 @@ async fn evicting_the_worst_follower_lowers_the_max_rollup() {
     let (_dir, _partitions, metrics) = sampled_two_followers().await;
     assert!(metrics.replica_lag_max.get() == 40);
 
-    metrics.evict_partition_series(&crate::metrics::PartitionLabel {
+    metrics.evict_partition_series(&PartitionLabel {
         topic: TOPIC.into(),
         partition: 1,
     });
@@ -334,9 +338,10 @@ async fn evicting_the_worst_follower_lowers_the_max_rollup() {
 fn coordinator_image() -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());
     for (name, topic_id) in [(TOPIC, 1_u128), (OFFSETS_TOPIC, 2_u128)] {
-        image.apply(&MetadataRecord::V1Topic(
-            crate::test_support::single_partition_topic(name, uuid::Uuid::from_u128(topic_id)),
-        ));
+        image.apply(&MetadataRecord::V1Topic(single_partition_topic(
+            name,
+            uuid::Uuid::from_u128(topic_id),
+        )));
         image.apply(&MetadataRecord::V1Partition(PartitionRecord {
             topic: name.into(),
             partition: 0,

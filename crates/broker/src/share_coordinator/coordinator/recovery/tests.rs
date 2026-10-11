@@ -8,6 +8,8 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::{
+    handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+    partition::Partition,
     partition_registry::PartitionRegistry,
     share_coordinator::{
         config::ShareCoordinatorConfig,
@@ -18,6 +20,7 @@ use crate::{
                 open_state_partitions, share_write,
             },
         },
+        partitioner::partition_for_share_key,
         persistence::{StateBatch, encode_state_key},
     },
 };
@@ -27,7 +30,7 @@ async fn recover_honors_nondefault_read_bound() {
     let dir = tempdir().unwrap();
     let registry = Arc::new(PartitionRegistry::new());
     let topic_id = uuid::Uuid::from_bytes([42; 16]);
-    let state_partition = crate::share_coordinator::partitioner::partition_for_share_key(
+    let state_partition = partition_for_share_key(
         "bounded",
         &topic_id,
         0,
@@ -215,11 +218,7 @@ async fn state_records_are_stored_in_the_configured_codec_and_recover() {
 async fn led_state_partition(
     log_dir: &std::path::Path,
     topic_id: uuid::Uuid,
-) -> (
-    ShareCoordinator,
-    Arc<PartitionRegistry>,
-    Arc<crate::partition::Partition>,
-) {
+) -> (ShareCoordinator, Arc<PartitionRegistry>, Arc<Partition>) {
     let (coord, reg) = coordinator(log_dir);
     lead_all(&coord).await;
     let state_partition = coord.state_partition_for("g", &topic_id, 0);
@@ -305,7 +304,7 @@ async fn replay_snapshot_offset_is_base_plus_delta() {
 
 /// Append the two-record cursor fixture before the caller adds any later batch.
 async fn append_update_then_snapshot(
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     snapshot_key: &Bytes,
     update_key: Bytes,
 ) {
@@ -340,14 +339,12 @@ fn state_partition_image(partition: i32, leader: u64, leader_epoch: i32) -> Meta
             krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
                 leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
                 partition_epoch: leader_epoch,
-                ..crate::handlers::test_support::replicated_partition(
-                    crate::handlers::test_support::ReplicatedPartitionSetup {
-                        topic: bootstrap::TOPIC,
-                        partition: krabka_ids::PartitionIndex(partition),
-                        leader: node,
-                        ..Default::default()
-                    },
-                )
+                ..replicated_partition(ReplicatedPartitionSetup {
+                    topic: bootstrap::TOPIC,
+                    partition: krabka_ids::PartitionIndex(partition),
+                    leader: node,
+                    ..Default::default()
+                })
             }),
         ],
     )

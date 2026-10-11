@@ -141,7 +141,7 @@ pub async fn seed_alice_write_acl(handle: &BrokerHandle, topic: &str) {
 /// Populate an irrelevant binding so the permissive empty-image shim is disabled.
 pub async fn seed_dummy_acl(handle: &krabka_broker::BrokerHandle) {
     handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
             topic: "_nothing",
             principal: "User:admin",
             operation: krabka_metadata::AclOperation::Read,

@@ -10,8 +10,9 @@ use krabka_metadata::{AclOperation, ResourceType};
 
 use super::{RequestContext, acl_wire};
 use crate::{
-    authorizer::{AuthorizationResult, authorize_topics},
-    codes,
+    authorizer::{AuthorizationResult, Authorizer, authorize_topics},
+    broker::Broker,
+    codes::{self, GROUP_AUTHORIZATION_FAILED, UNSUPPORTED_VERSION},
     handlers::describe_configs::{
         RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
         RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
@@ -21,7 +22,7 @@ use crate::{
 /// Kafka's resource-specific refusal for the two config mutation APIs.
 /// Legacy `AlterConfigs` does not support broker logger resources.
 pub(crate) fn config_resource_refusal(
-    authorizer: &dyn crate::authorizer::Authorizer,
+    authorizer: &dyn Authorizer,
     image: &krabka_metadata::MetadataImage,
     ctx: &RequestContext<'_>,
     (kind, name): (i8, &str),
@@ -127,7 +128,7 @@ named_acl_gates!(
 
 /// Kafka's cluster shortcut is quiet: a denial falls back to per-topic checks.
 pub(crate) fn cluster_shortcut_denied(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     image: &krabka_metadata::MetadataImage,
     ctx: &RequestContext<'_>,
     operation: AclOperation,
@@ -218,7 +219,7 @@ pub(crate) fn allowed_topics -> HashSet<String> {
 /// KIP-932's `ShareGroupHeartbeatRequest` carries no `SubscribedTopicRegex`,
 /// so this names gate is the whole of its topic check.
 pub(crate) fn subscribed_names_describe_denied(
-    authorizer: &dyn crate::authorizer::Authorizer,
+    authorizer: &dyn Authorizer,
     image: &krabka_metadata::MetadataImage,
     ctx: &RequestContext<'_>,
     names: Option<&[String]>,
@@ -251,7 +252,7 @@ pub(crate) use authorize_subscription;
 
 /// Subscription denial code shared by consumer and share heartbeats.
 pub(crate) fn subscribed_names_refusal(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     image: &krabka_metadata::MetadataImage,
     ctx: &RequestContext<'_>,
     names: Option<&[String]>,
@@ -267,7 +268,7 @@ pub(crate) fn subscribed_names_refusal(
 /// It stops at the first denial, so a name after it is never authorized and
 /// never audited.
 pub(crate) fn any_topic_describe_denied(
-    authorizer: &dyn crate::authorizer::Authorizer,
+    authorizer: &dyn Authorizer,
     image: &krabka_metadata::MetadataImage,
     ctx: &RequestContext<'_>,
     names: &[String],
@@ -308,15 +309,15 @@ pub(crate) fn requested_topic_name(
 /// Protocol availability precedes the audited group-read authorization check.
 pub(crate) fn group_protocol_refusal(
     enabled: bool,
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     image: &krabka_metadata::MetadataImage,
     ctx: &super::RequestContext<'_>,
     group: &str,
 ) -> Option<i16> {
     if !enabled {
-        Some(crate::codes::UNSUPPORTED_VERSION)
+        Some(UNSUPPORTED_VERSION)
     } else if group_read_denied(broker.config.authorizer.as_ref(), image, ctx, group) {
-        Some(crate::codes::GROUP_AUTHORIZATION_FAILED)
+        Some(GROUP_AUTHORIZATION_FAILED)
     } else {
         None
     }
@@ -324,7 +325,7 @@ pub(crate) fn group_protocol_refusal(
 
 /// Classic group calls authorize first, release the image, then validate and route.
 pub(crate) fn classic_group_refusal(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     ctx: &RequestContext<'_>,
     group: &str,
 ) -> Option<i16> {
@@ -348,11 +349,15 @@ mod tests {
     use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
 
     use super::*;
-    use crate::{handlers::test_support::operators_principal as principal, test_support::peer};
+    use crate::{
+        authorizer::SimpleAclAuthorizer,
+        handlers::test_support::operators_principal as principal,
+        test_support::{AllowAclSetup, allow_acl, peer},
+    };
 
     #[test]
     fn acl_denied_reports_simple_acl_denial() {
-        let authorizer = crate::authorizer::SimpleAclAuthorizer::new(HashSet::new());
+        let authorizer = SimpleAclAuthorizer::new(HashSet::new());
         let image = MetadataImage::new(uuid::Uuid::nil());
         let principal = principal();
         let peer = peer();
@@ -405,9 +410,8 @@ mod tests {
                 true,
             ),
         ] {
-            let authorizer = crate::authorizer::SimpleAclAuthorizer::new(
-                super_users.into_iter().collect::<HashSet<String>>(),
-            );
+            let authorizer =
+                SimpleAclAuthorizer::new(super_users.into_iter().collect::<HashSet<String>>());
 
             check!(
                 cluster_describe_denied(&authorizer, &image, &ctx) == denied,
@@ -437,12 +441,12 @@ mod tests {
         );
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&krabka_metadata::MetadataRecord::V1AccessControlEntry(
-            crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+            allow_acl(AllowAclSetup {
                 operation: AclOperation::Write,
                 ..Default::default()
             }),
         ));
-        let authorizer = crate::authorizer::SimpleAclAuthorizer::new(HashSet::new());
+        let authorizer = SimpleAclAuthorizer::new(HashSet::new());
 
         for (label, operation, names, denied, allowed) in [
             ("no names", AclOperation::Write, vec![], vec![], vec![]),

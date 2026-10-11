@@ -3,6 +3,8 @@ mod support;
 use assert2::check;
 use krabka_client_admin::{AdminClient, AdminError, ConfigResource, DescribeConfigsOptions};
 
+use crate::support::admin::topic_spec;
+
 krabka_macros::bound_start_fixture!(config, bound_config, ::krabka_broker);
 krabka_macros::bound_start_fixture!(start, start_bound, ::krabka_broker, unwrap, bound_config);
 
@@ -33,7 +35,7 @@ async fn controller_bootstrap_routes_supported_and_rejects_unsupported_admin_rpc
         .unwrap();
     let created = broker_admin
         .create_topics(
-            &[crate::support::admin::topic_spec("controller-admin", 1, 1)],
+            &[topic_spec("controller-admin", 1, 1)],
             krabka_client_admin::TopicMutationOptions::with_timeout(krabka_units::secs(5)),
         )
         .await
@@ -69,11 +71,7 @@ async fn controller_bootstrap_routes_supported_and_rejects_unsupported_admin_rpc
     // Kafka's own request schema.
     let through_controller = controller_admin
         .create_topics(
-            &[crate::support::admin::topic_spec(
-                "created-through-controller",
-                1,
-                1,
-            )],
+            &[topic_spec("created-through-controller", 1, 1)],
             krabka_client_admin::TopicMutationOptions::with_timeout(krabka_units::secs(5)),
         )
         .await

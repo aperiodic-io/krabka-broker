@@ -23,12 +23,15 @@ use krabka_protocol::{
 use super::handle;
 use crate::{
     codes,
-    handlers::test_support::CreateTopicSetup,
+    handlers::{
+        init_producer_id::handle as init_producer_id_handle,
+        test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+    },
     test_support::{
         decode_response, dispatch_context, encode_request, peer, principal,
         start_broker_no_audit_with,
     },
-    txn::state::TopicPartition,
+    txn::{bootstrap::TOPIC as TXN_BOOTSTRAP_TOPIC, state::TopicPartition},
 };
 
 const TOPIC: &str = "orders";
@@ -52,9 +55,9 @@ async fn a_produce_that_starts_a_transaction_on_many_partitions_makes_one_coordi
         principal("client"),
         client_id = "one-check"
     );
-    let create = crate::handlers::test_support::configured_topic_request(CreateTopicSetup {
+    let create = configured_topic_request(CreateTopicSetup {
         topic: TOPIC,
-        num_partitions: crate::handlers::test_support::TopicPartitionCount(PARTITIONS),
+        num_partitions: TopicPartitionCount(PARTITIONS),
         ..Default::default()
     });
     dispatch_context(
@@ -90,14 +93,14 @@ async fn a_produce_that_starts_a_transaction_on_many_partitions_makes_one_coordi
         producer_epoch: -1,
         ..Default::default()
     };
-    let init = crate::handlers::init_producer_id::handle(&broker, init, init_version, &ctx)
+    let init = init_producer_id_handle(&broker, init, init_version, &ctx)
         .await
         .expect("InitProducerId");
     assert!(init.error_code == codes::NONE, "InitProducerId: {init:?}");
 
     let state_partition = broker
         .partitions
-        .get(crate::txn::bootstrap::TOPIC, PartitionIndex(0))
+        .get(TXN_BOOTSTRAP_TOPIC, PartitionIndex(0))
         .expect("__transaction_state-0");
     let state_records_before = state_partition.log_end_offset();
 

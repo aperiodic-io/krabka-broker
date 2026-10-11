@@ -10,7 +10,10 @@ use krabka_ids::Offset;
 use krabka_log::{Log, LogConfig, name};
 use krabka_restore::restore;
 
-use crate::{args::restore_args, fixture::build_fixture};
+use crate::{
+    args::{RestoreOptions, restore_args},
+    fixture::build_fixture,
+};
 
 /// 2. Read back the restored data: every partition's log holds exactly the
 /// batches this fixture archived for it, each at its original absolute
@@ -25,7 +28,7 @@ async fn restored_partitions_read_back_the_original_batches_at_their_original_of
     let args = restore_args(
         fixture.archive_root.path(),
         &log_dir,
-        crate::args::RestoreOptions::default(),
+        RestoreOptions::default(),
     );
 
     restore(&args).await.expect("restore");

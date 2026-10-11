@@ -14,8 +14,14 @@ use krabka_units::bytes;
 
 use crate::{
     support::{
-        client::connect_client, discovery::topic_metadata_request, fetch::single_partition_fetch,
+        client::connect_client,
+        discovery::topic_metadata_request,
+        fetch::{
+            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+        },
+        producer::{default_producer, enqueue_string_values, transactional_producer},
         topics::metadata_topic,
+        transaction_wire::{committed_values, observed_values, read_committed_at_least},
     },
     txn_harness::{boot_single, create_topic, create_topic_with_segment_bytes, rec, send_ok},
 };
@@ -27,14 +33,12 @@ async fn commit_then_read_committed_sees_records() {
     let (broker, bootstrap, _dir) = boot_single().await;
     create_topic(&bootstrap, "t").await;
 
-    let producer =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "my-tid").await;
+    let producer = transactional_producer(bootstrap.clone(), "my-tid").await;
     let txn = producer.begin_transaction().await.unwrap();
-    crate::support::producer::enqueue_string_values(&producer, "t", &["a", "b", "c"]).await;
+    enqueue_string_values(&producer, "t", &["a", "b", "c"]).await;
     txn.commit().await.unwrap();
 
-    let (consumer, seen) =
-        crate::support::transaction_wire::committed_values(bootstrap, "g1", "t", None).await;
+    let (consumer, seen) = committed_values(bootstrap, "g1", "t", None).await;
     assert!(seen == vec!["a", "b", "c"]);
 
     producer.close().await.unwrap();
@@ -67,8 +71,7 @@ async fn abort_then_read_committed_skips_records() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let producer =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "abort-tid").await;
+    let producer = transactional_producer(bootstrap.clone(), "abort-tid").await;
     let txn = producer.begin_transaction().await.unwrap();
     // Wait for each acknowledgement: like Kafka's, the producer's abort
     // discards the batches it has not sent yet, so the records would otherwise
@@ -80,7 +83,7 @@ async fn abort_then_read_committed_skips_records() {
 
     // The next append rolls the abort marker and its transaction index into a
     // sealed segment. A lagging fetch must still receive that abort entry.
-    let later = crate::support::producer::default_producer(bootstrap.clone()).await;
+    let later = default_producer(bootstrap.clone()).await;
     send_ok(&later, rec("ta", "after")).await;
     broker.wait_until_high_watermark("ta", 0, 5).await;
 
@@ -97,12 +100,10 @@ async fn abort_then_read_committed_skips_records() {
         .send(FetchRequest {
             replica_id: -1,
             isolation_level: 1,
-            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+            ..single_partition_fetch(SinglePartitionFetchSetup {
                 topic: "ta".into(),
                 topic_id,
-                limits: crate::support::fetch::FetchLimits::one_mebibyte(
-                    crate::support::fetch::RequestWaitMillis(1_000),
-                ),
+                limits: FetchLimits::one_mebibyte(RequestWaitMillis(1_000)),
                 ..Default::default()
             })
         })
@@ -118,18 +119,12 @@ async fn abort_then_read_committed_skips_records() {
     );
 
     // read_committed: must skip the three aborted records and see the later one.
-    let (consumer, seen) = crate::support::transaction_wire::read_committed_at_least(
-        bootstrap.clone(),
-        "g-abort",
-        "ta",
-        1,
-    )
-    .await;
+    let (consumer, seen) = read_committed_at_least(bootstrap.clone(), "g-abort", "ta", 1).await;
     assert!(seen == ["after"], "read_committed exposed aborted records");
     consumer.close().await.unwrap();
 
     // read_uncommitted: sees all 4 data records (including aborted ones).
-    let (consumer_uc, seen2) = crate::support::transaction_wire::observed_values(
+    let (consumer_uc, seen2) = observed_values(
         bootstrap,
         "g-abort-uc",
         "ta",
@@ -167,12 +162,11 @@ async fn interleaved_commit_and_abort() {
     let (broker, bootstrap, _dir) = boot_single().await;
     create_topic(&bootstrap, "ti").await;
 
-    let producer =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "interleave-tid").await;
+    let producer = transactional_producer(bootstrap.clone(), "interleave-tid").await;
 
     // First txn: commit ["a", "b", "c"].
     let txn = producer.begin_transaction().await.unwrap();
-    crate::support::producer::enqueue_string_values(&producer, "ti", &["a", "b", "c"]).await;
+    enqueue_string_values(&producer, "ti", &["a", "b", "c"]).await;
     txn.commit().await.unwrap();
 
     // Second txn: abort ["X", "Y"].
@@ -186,16 +180,10 @@ async fn interleaved_commit_and_abort() {
 
     // Third txn: commit ["d", "e", "f", "g"].
     let txn = producer.begin_transaction().await.unwrap();
-    crate::support::producer::enqueue_string_values(&producer, "ti", &["d", "e", "f", "g"]).await;
+    enqueue_string_values(&producer, "ti", &["d", "e", "f", "g"]).await;
     txn.commit().await.unwrap();
 
-    let (consumer, seen) = crate::support::transaction_wire::read_committed_at_least(
-        bootstrap,
-        "g-interleave",
-        "ti",
-        7,
-    )
-    .await;
+    let (consumer, seen) = read_committed_at_least(bootstrap, "g-interleave", "ti", 7).await;
     assert!(seen == vec!["a", "b", "c", "d", "e", "f", "g"]);
 
     producer.close().await.unwrap();

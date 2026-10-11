@@ -23,6 +23,8 @@
 
 use krabka_protocol::owned::api_versions_response::{FinalizedFeatureKey, SupportedFeatureKey};
 
+use crate::{UnstableFeatureVersions, supported_feature_range};
+
 /// First `ApiVersions` version whose JVM client reads a zero feature minimum.
 /// Below it Kafka sets `alterFeatureLevel0`.
 const ZERO_MINIMUM_API_VERSION: i16 = 4;
@@ -52,12 +54,12 @@ pub fn supported_feature_key(
 #[must_use]
 pub fn supported_feature_keys(
     api_version: i16,
-    unstable: crate::UnstableFeatureVersions,
+    unstable: UnstableFeatureVersions,
 ) -> Vec<SupportedFeatureKey> {
     krabka_metadata::feature_registry()
         .iter()
         .filter_map(|feature| {
-            let (min_version, max_version) = crate::supported_feature_range(*feature, unstable);
+            let (min_version, max_version) = supported_feature_range(*feature, unstable);
             supported_feature_key(feature.name(), min_version, max_version, api_version)
         })
         .collect()

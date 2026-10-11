@@ -29,11 +29,17 @@ use super::{
     topic_settings::TimestampPolicy,
 };
 use crate::{
+    api_catalog::UnstableApiVersions,
     codes,
     error::BrokerError,
     freeze::resolve::{FreezeMutationResolution, FreezeVerdict},
+    log_dir_status::LogDirRegistry,
+    metrics::{BrokerMetrics, RequestPhases},
+    partition::{Partition, ReplicationTarget},
     partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
     schema_validation::{SchemaGate, SchemaValidator},
+    txn::{coordinator::TxnCoordinator, state::TopicPartition},
 };
 
 /// Per-partition produce input, held apart so that the call site can time the
@@ -91,24 +97,24 @@ pub(super) struct PartitionInput<'a> {
 #[derive(Clone, Copy)]
 pub(super) struct PartitionServices<'a> {
     pub(super) partitions: &'a Arc<PartitionRegistry>,
-    pub(super) txn_coordinator: &'a Arc<crate::txn::coordinator::TxnCoordinator>,
-    pub(super) producer_state: &'a Arc<crate::producer_state::ProducerState>,
-    pub(super) log_dir_status: &'a crate::log_dir_status::LogDirRegistry,
+    pub(super) txn_coordinator: &'a Arc<TxnCoordinator>,
+    pub(super) producer_state: &'a Arc<ProducerState>,
+    pub(super) log_dir_status: &'a LogDirRegistry,
     pub(super) image: &'a Arc<krabka_metadata::MetadataImage>,
     pub(super) broker_policy: BrokerProducePolicy,
     pub(super) record_decompression_policy: RecordDecompressionPolicy,
-    pub(super) metrics: &'a crate::metrics::BrokerMetrics,
+    pub(super) metrics: &'a BrokerMetrics,
     /// The request's phase accumulator. The append charges the writer
     /// round-trip and the `acks=-1` high-watermark gate to it, and the handler
     /// observes the totals once the whole request is done.
-    pub(super) phases: &'a crate::metrics::RequestPhases,
+    pub(super) phases: &'a RequestPhases,
     /// The broker's KFC-7 validator. `None` is "no `[schema_registry]`
     /// section", and a topic that asks for validation on such a broker is
     /// rejected rather than admitted unchecked.
     pub(super) schema_validator: Option<&'a Arc<SchemaValidator>>,
     /// Kafka's `unstable.api.versions.enable`, which decides whether the
     /// idempotent-producer check applies Kafka trunk's empty-log sequence rule.
-    pub(super) unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    pub(super) unstable_api_versions: UnstableApiVersions,
 }
 
 /// What one partition's pipeline produced: a finished response row, or the
@@ -154,7 +160,7 @@ pub(super) enum Admission {
 /// ([`verify_admitted`]), then appends ([`complete_partition`]).
 pub(super) struct AdmittedBatch {
     prepared: PreparedBatch,
-    part: Arc<crate::partition::Partition>,
+    part: Arc<Partition>,
     shared_topic: Arc<str>,
     delivery: Option<DeliveryGate>,
     acks: i16,
@@ -168,18 +174,13 @@ pub(super) struct AdmittedBatch {
 impl AdmittedBatch {
     /// The producer and partition this batch asks the coordinator about, or
     /// `None` when it needs no coordinator call.
-    fn coordinator_check(
-        &self,
-    ) -> Option<(
-        (krabka_log::ProducerId, i16),
-        crate::txn::state::TopicPartition,
-    )> {
+    fn coordinator_check(&self) -> Option<((krabka_log::ProducerId, i16), TopicPartition)> {
         let Verification::Coordinator(check) = self.verification else {
             return None;
         };
         Some((
             (check.batch.producer_id, check.batch.producer_epoch),
-            crate::txn::state::TopicPartition {
+            TopicPartition {
                 topic: self.shared_topic.to_string(),
                 partition: krabka_ids::PartitionIndex(self.out.index),
             },
@@ -191,7 +192,7 @@ impl AdmittedBatch {
 /// index of its batch.
 struct ProducerChecks {
     producer: (krabka_log::ProducerId, i16),
-    partitions: Vec<(usize, crate::txn::state::TopicPartition)>,
+    partitions: Vec<(usize, TopicPartition)>,
 }
 
 /// The transaction coordinator's answer for each admitted batch that needs
@@ -202,7 +203,7 @@ struct ProducerChecks {
 /// sends one `addOrVerifyTransaction` for the whole request.
 pub(super) async fn verify_admitted(
     batches: &[&AdmittedBatch],
-    txn_coordinator: &Arc<crate::txn::coordinator::TxnCoordinator>,
+    txn_coordinator: &Arc<TxnCoordinator>,
     image: &krabka_metadata::MetadataImage,
     transaction: TransactionRequest<'_>,
 ) -> Vec<Option<i16>> {
@@ -247,7 +248,7 @@ pub(super) async fn verify_admitted(
 }
 
 async fn local_replica_is_ready(
-    part: &Arc<crate::partition::Partition>,
+    part: &Arc<Partition>,
     image: &krabka_metadata::MetadataImage,
     topic_name: &str,
     idx: i32,
@@ -260,11 +261,11 @@ async fn local_replica_is_ready(
 /// The partition's transition barrier, held, when the local replica is ready
 /// to lead the partition as the image names it, or `None` when it is not.
 async fn ready_transition(
-    part: &Arc<crate::partition::Partition>,
+    part: &Arc<Partition>,
     image: &krabka_metadata::MetadataImage,
     topic_name: &str,
     idx: i32,
-) -> Option<tokio::sync::OwnedRwLockReadGuard<crate::partition::ReplicationTarget>> {
+) -> Option<tokio::sync::OwnedRwLockReadGuard<ReplicationTarget>> {
     let transition = part.lock_produce_transition().await;
     let record = image.partition(topic_name, idx).expect("gate checked");
     let topic_id = image.topic(topic_name).map(|topic| topic.topic_id);
@@ -287,7 +288,7 @@ async fn ready_transition(
 /// pre-append row `refused`.
 async fn verify_before_append(
     prepared: &super::prepare::PreparedBatch,
-    part: &crate::partition::Partition,
+    part: &Partition,
     (transaction, mut refused): (TransactionRequest<'_>, PartitionProduceResponse),
 ) -> Result<Verification, Box<PartitionProduceResponse>> {
     let verified = if prepared.attributes.is_transactional() && part.diskless {
@@ -638,7 +639,7 @@ pub(super) async fn admit_partition(
 /// The limit is read off the partition's own log config, which is what the log
 /// rolls segments by, so it is the topic's effective `segment.bytes`
 /// whether the topic set it or inherited the broker's.
-fn exceeds_segment_size(prepared: &PreparedBatch, part: &crate::partition::Partition) -> bool {
+fn exceeds_segment_size(prepared: &PreparedBatch, part: &Partition) -> bool {
     let Ok(log) = part.log.lock() else {
         return false;
     };
@@ -831,7 +832,7 @@ const INVALID_TIMESTAMP_MESSAGE: &str = "One or more records have been rejected 
 fn record_validation_refusal(
     out: &PartitionProduceResponse,
     prepared: &PreparedBatch,
-    part: &crate::partition::Partition,
+    part: &Partition,
     topic_name: &str,
 ) -> Option<PartitionProduceResponse> {
     if prepared.keyless_records.is_empty() && prepared.invalid_timestamp_records.is_empty() {

@@ -32,6 +32,8 @@ use krabka_client_admin::{AdminClient, AdminError, RaftVoterEndpoint};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 
+use crate::support::{AddressedNodeSetup, addressed_node_config};
+
 mod support;
 
 /// The cluster id `kafka-storage format` is given in the system test.
@@ -98,9 +100,9 @@ async fn start(
         None,
     )
     .expect("krabka-format wrote meta.properties");
-    let mut config = crate::support::addressed_node_config(
+    let mut config = addressed_node_config(
         log_dir,
-        crate::support::AddressedNodeSetup {
+        AddressedNodeSetup {
             node: krabka_broker::NodeId(node.id),
             client: node.client_addr,
             controller: node.controller_addr,

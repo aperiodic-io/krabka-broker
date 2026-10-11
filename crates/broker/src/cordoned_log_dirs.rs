@@ -39,6 +39,8 @@ use krabka_metadata::{
     BrokerRegistrationChangeRecord, BrokerRegistrationRecord, MetadataImage, NodeId,
 };
 
+use crate::metadata_source::{MetadataSource, watch_image_loop};
+
 /// Kafka's `ServerLogConfigs.CORDONED_LOG_DIRS_CONFIG`.
 pub(crate) const CORDONED_LOG_DIRS: &str = "cordoned.log.dirs";
 
@@ -300,12 +302,12 @@ impl CordonedLogDirs {
 
 /// Keep `cordoned` in step with the metadata image until `shutdown`.
 pub(crate) fn spawn_watcher(
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &Arc<dyn MetadataSource>,
     node_id: NodeId,
     cordoned: CordonedLogDirs,
     shutdown: tokio_util::sync::CancellationToken,
 ) {
-    tokio::spawn(crate::metadata_source::watch_image_loop(
+    tokio::spawn(watch_image_loop(
         controller.watch_image(),
         "cordoned log dirs",
         shutdown,
@@ -319,6 +321,7 @@ mod tests {
     use krabka_metadata::{BrokerConfigRecord, MetadataRecord};
 
     use super::*;
+    use crate::test_support::broker_registration;
 
     /// A label, the registered directory ids, the cordoned ids, and whether
     /// placement may use the broker.
@@ -394,7 +397,7 @@ mod tests {
                 .copied()
                 .map(uuid::Uuid::from_u128)
                 .collect(),
-            ..crate::test_support::broker_registration(krabka_raft::NodeId(1))
+            ..broker_registration(krabka_raft::NodeId(1))
         }
     }
 

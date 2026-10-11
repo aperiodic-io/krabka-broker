@@ -34,6 +34,15 @@ use crate::{
     authorizer::AllowAllAuthorizer,
     broker::BrokerHandle,
     codes,
+    handlers::{
+        delete_records::handle,
+        test_support::{
+            ClientTopicSetup, ProduceRecordsSetup, RecordCount, ShareWireSetup,
+            TopicPartitionCount, create_topic as create_topic_from_test_support,
+            produce_records as produce_records_from_test_support, share_fetch_partition_rows,
+            share_fetch_topics,
+        },
+    },
     test_support::{initialize_share_state, peer, principal, start_broker_no_audit_with},
 };
 
@@ -49,12 +58,12 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str, num_partitions: i32) -> WireUuid {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "share-log-start-lockout-test",
             name,
-            partitions: crate::handlers::test_support::TopicPartitionCount(num_partitions),
+            partitions: TopicPartitionCount(num_partitions),
         },
     )
     .await
@@ -62,12 +71,12 @@ async fn create_topic(broker: &BrokerHandle, name: &str, num_partitions: i32) ->
 
 /// Appends `count` one-record batches to `partition_index` of `topic`.
 async fn produce_records(broker: &BrokerHandle, topic: &str, partition_index: i32, count: i32) {
-    crate::handlers::test_support::produce_records(
+    produce_records_from_test_support(
         broker,
-        crate::handlers::test_support::ProduceRecordsSetup {
+        ProduceRecordsSetup {
             topic,
             partition_index: krabka_ids::PartitionIndex(partition_index),
-            count: crate::handlers::test_support::RecordCount(count),
+            count: RecordCount(count),
         },
     )
     .await;
@@ -100,10 +109,9 @@ async fn delete_records(
         principal("admin"),
         client_id = "admin-client"
     );
-    let response =
-        crate::handlers::delete_records::handle(&shared, request, DELETE_RECORDS_VERSION, &ctx)
-            .await
-            .expect("handle delete records");
+    let response = handle(&shared, request, DELETE_RECORDS_VERSION, &ctx)
+        .await
+        .expect("handle delete records");
     response.topics[0].partitions[0].error_code
 }
 
@@ -111,7 +119,7 @@ async fn delete_records(
 /// `max_records`, and returns each row's `PartitionData` in request order.
 use krabka_ids::PartitionIndex;
 
-use crate::handlers::test_support::{RecordCount, ShareSessionEpoch};
+use crate::handlers::test_support::ShareSessionEpoch;
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct ShareFetchRowsSetup<'a> {
@@ -153,7 +161,7 @@ async fn share_fetch_rows(
         batch_size: setup.max_records.0.max(1),
         // Record-limit acquisition keeps the priming fetch at exactly the selected count.
         share_acquire_mode: 1,
-        topics: crate::handlers::test_support::share_fetch_topics(
+        topics: share_fetch_topics(
             setup.topic_id,
             &setup
                 .partitions
@@ -163,12 +171,7 @@ async fn share_fetch_rows(
         ),
         ..Default::default()
     };
-    crate::handlers::test_support::share_fetch_partition_rows(
-        broker,
-        &request,
-        crate::handlers::test_support::ShareWireSetup::default(),
-    )
-    .await
+    share_fetch_partition_rows(broker, &request, ShareWireSetup::default()).await
 }
 
 async fn share_fetch_one(broker: &BrokerHandle, setup: ShareFetchRowsSetup<'_>) -> PartitionData {

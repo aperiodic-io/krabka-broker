@@ -9,6 +9,13 @@ use krabka_metadata::MetadataImage;
 use krabka_raft::NodeId;
 
 use super::TopicPartition;
+use crate::{
+    config_keys::resolve_diskless,
+    wal::quorum::{
+        placement::select_voters,
+        registry::{ShardId, WalPlacement},
+    },
+};
 
 /// `(topic, partition)` pairs where `node_id` is in `replicas` AND
 /// `leader != node_id`. For each such pair the broker should run a follower
@@ -44,27 +51,21 @@ pub(crate) fn desired_local_set(node_id: NodeId, image: &MetadataImage) -> HashS
 pub(crate) fn desired_wal_placements(
     image: &MetadataImage,
     voter_count: usize,
-) -> HashMap<crate::wal::quorum::registry::ShardId, crate::wal::quorum::registry::WalPlacement> {
+) -> HashMap<ShardId, WalPlacement> {
     let brokers = image.brokers().cloned().collect::<Vec<_>>();
     image
         .all_partitions()
-        .filter(|partition| {
-            crate::config_keys::resolve_diskless(image.topic_config(&partition.topic))
-        })
+        .filter(|partition| resolve_diskless(image.topic_config(&partition.topic)))
         .filter(|partition| image.broker(partition.leader).is_some())
         .filter_map(|partition| {
             let topic_id = image.topic(&partition.topic)?.topic_id;
             Some((
-                crate::wal::quorum::registry::ShardId {
+                ShardId {
                     topic_id,
                     partition: PartitionIndex(partition.partition),
                 },
-                crate::wal::quorum::registry::WalPlacement {
-                    voters: crate::wal::quorum::placement::select_voters(
-                        brokers.iter().cloned(),
-                        partition.leader,
-                        voter_count,
-                    ),
+                WalPlacement {
+                    voters: select_voters(brokers.iter().cloned(), partition.leader, voter_count),
                     leader_epoch: partition.leader_epoch.0,
                 },
             ))
@@ -79,16 +80,17 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::replicator_supervisor::test_support::{
-        broker_record, image_with, partition_record, topic_record,
+    use crate::{
+        replicator_supervisor::test_support::{
+            SupervisorPartitionSetup, SupervisorTopicSetup, broker_record, image_with,
+            partition_record, three_replica_image, topic_record,
+        },
+        test_support::PartitionCount,
     };
 
     #[test]
     fn includes_partition_where_self_is_follower() {
-        let img = crate::replicator_supervisor::test_support::three_replica_image(
-            NodeId(1),
-            krabka_metadata::LeaderEpoch(0),
-        );
+        let img = three_replica_image(NodeId(1), krabka_metadata::LeaderEpoch(0));
         let d = desired_follower_set(NodeId(2), &img);
         assert!(d.contains(&("t".into(), 0)));
         assert!(d.len() == 1);
@@ -96,10 +98,7 @@ mod tests {
 
     #[test]
     fn desired_follower_set_includes_followers_excludes_leader_and_non_replicas() {
-        let img = crate::replicator_supervisor::test_support::three_replica_image(
-            NodeId(1),
-            krabka_metadata::LeaderEpoch(0),
-        );
+        let img = three_replica_image(NodeId(1), krabka_metadata::LeaderEpoch(0));
         let cases = [
             // Self is a follower replica → included.
             (NodeId(2), HashSet::from_iter([("t".to_string(), 0)])),
@@ -120,55 +119,41 @@ mod tests {
     #[test]
     fn desired_local_set_exactly_includes_all_local_replicas() {
         let img = image_with(&[
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "a",
-                    partitions: crate::test_support::PartitionCount(2),
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "a",
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "a",
-                    partition: krabka_ids::PartitionIndex(1),
-                    leader: NodeId(2),
-                    ..Default::default()
-                },
-            ),
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "b",
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "b",
-                    leader: NodeId(3),
-                    replicas: vec![NodeId(1), NodeId(3)],
-                    ..Default::default()
-                },
-            ),
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "c",
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "c",
-                    partition: krabka_ids::PartitionIndex(-1),
-                    replicas: vec![NodeId(2), NodeId(4)],
-                    ..Default::default()
-                },
-            ),
+            topic_record(SupervisorTopicSetup {
+                topic: "a",
+                partitions: PartitionCount(2),
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "a",
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "a",
+                partition: krabka_ids::PartitionIndex(1),
+                leader: NodeId(2),
+                ..Default::default()
+            }),
+            topic_record(SupervisorTopicSetup {
+                topic: "b",
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "b",
+                leader: NodeId(3),
+                replicas: vec![NodeId(1), NodeId(3)],
+                ..Default::default()
+            }),
+            topic_record(SupervisorTopicSetup {
+                topic: "c",
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "c",
+                partition: krabka_ids::PartitionIndex(-1),
+                replicas: vec![NodeId(2), NodeId(4)],
+                ..Default::default()
+            }),
         ]);
 
         let local = desired_local_set(NodeId(2), &img);
@@ -209,30 +194,24 @@ mod tests {
                 partitions: 1,
                 replication_factor: 3,
             }),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "diskless",
-                    leader: NodeId(2),
-                    ..Default::default()
-                },
-            ),
+            partition_record(SupervisorPartitionSetup {
+                topic: "diskless",
+                leader: NodeId(2),
+                ..Default::default()
+            }),
             MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                 topic: "diskless".into(),
                 overrides,
             }),
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "classic",
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "classic",
-                    replicas: vec![NodeId(1)],
-                    ..Default::default()
-                },
-            ),
+            topic_record(SupervisorTopicSetup {
+                topic: "classic",
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "classic",
+                replicas: vec![NodeId(1)],
+                ..Default::default()
+            }),
         ]);
 
         let placements = desired_wal_placements(&image, 3);
@@ -252,40 +231,30 @@ mod tests {
     #[test]
     fn multiple_topics_aggregated() {
         let img = image_with(&[
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "a",
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "a",
-                    ..Default::default()
-                },
-            ),
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "b",
-                    partitions: crate::test_support::PartitionCount(2),
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "b",
-                    leader: NodeId(3),
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "b",
-                    partition: krabka_ids::PartitionIndex(1),
-                    leader: NodeId(2),
-                    ..Default::default()
-                },
-            ),
+            topic_record(SupervisorTopicSetup {
+                topic: "a",
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "a",
+                ..Default::default()
+            }),
+            topic_record(SupervisorTopicSetup {
+                topic: "b",
+                partitions: PartitionCount(2),
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "b",
+                leader: NodeId(3),
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "b",
+                partition: krabka_ids::PartitionIndex(1),
+                leader: NodeId(2),
+                ..Default::default()
+            }),
         ]);
         let d = desired_follower_set(NodeId(2), &img);
         // b/1 is excluded: self is leader for it.

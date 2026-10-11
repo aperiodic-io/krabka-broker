@@ -27,7 +27,9 @@ use crate::{
     authorizer::AllowAllAuthorizer,
     broker::Broker,
     codes,
-    test_support::{decode_response, dispatch_context, encode_request, peer, principal},
+    test_support::{
+        decode_response, dispatch_context, encode_request, peer, principal, request_context,
+    },
     txn::{
         handlers::add_partitions_to_txn::test_support::{seed_transaction, start_coordinator},
         state::TxnState,
@@ -42,7 +44,7 @@ const PRODUCER_ID: i64 = 11;
 async fn add_partition(broker: &Broker, version: i16, epoch: i16) -> i16 {
     let user = principal("ANONYMOUS");
     let address = peer();
-    let ctx = crate::test_support::request_context(&user, &address, "client-version");
+    let ctx = request_context(&user, &address, "client-version");
     let topics = vec![AddPartitionsToTxnTopic {
         name: "a".into(),
         partitions: vec![0],
@@ -88,7 +90,7 @@ async fn add_partition(broker: &Broker, version: i16, epoch: i16) -> i16 {
 async fn end_txn(broker: &Broker, version: i16, epoch: i16, committed: bool) -> EndTxnResponse {
     let user = principal("ANONYMOUS");
     let address = peer();
-    let ctx = crate::test_support::request_context(&user, &address, "client-version");
+    let ctx = request_context(&user, &address, "client-version");
     let request = EndTxnRequest {
         transactional_id: TID.into(),
         producer_id: PRODUCER_ID,

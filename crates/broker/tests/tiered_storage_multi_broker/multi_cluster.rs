@@ -14,7 +14,7 @@ use krabka_broker::{
 };
 use tempfile::TempDir;
 
-use crate::support;
+use crate::support::{self, NodeIndex, controller_voters, node_config};
 
 /// Boots three in-process brokers with a shared Local remote tier and a
 /// topic-backed RLMM.
@@ -79,14 +79,13 @@ pub(crate) async fn start_three_tiered_brokers_with_segment_sizes(
     // Build a config for broker `i` (1-indexed broker_id/node_id).
     let broker_configs: Vec<BrokerConfig> = (0..3)
         .map(|i| {
-            let mut cfg =
-                crate::support::node_config(crate::support::NodeIndex(i), log_dirs[i].path());
+            let mut cfg = node_config(NodeIndex(i), log_dirs[i].path());
             cfg.log_config.segment_size = segment_sizes[i];
             cfg.directory_id = uuid::Uuid::from_u128(u128::try_from(i + 1).unwrap());
             cfg.listen_addr = client_addrs[i];
             cfg.advertised_listener = format!("127.0.0.1:{}", client_addrs[i].port());
             cfg.controller_listen_addr = controller_addrs[i];
-            cfg.controller_quorum_voters = crate::support::controller_voters(&voters);
+            cfg.controller_quorum_voters = controller_voters(&voters);
             cfg.bootstrap_mode = BootstrapMode::Bootstrap;
             cfg.auto_join = false;
             cfg.bootstrap_servers = vec![];

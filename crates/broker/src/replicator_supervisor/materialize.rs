@@ -7,7 +7,23 @@ use std::{path::PathBuf, sync::Arc};
 use krabka_ids::PartitionIndex;
 use krabka_log::{Log, LogConfig};
 
-use crate::partition_registry::PartitionRegistry;
+#[cfg(test)]
+use crate::diskless::hot_tail::HotTailCache;
+#[cfg(test)]
+use crate::wal::quorum::registry::WalShardRegistry;
+use crate::{
+    broker::{
+        PartitionSpawnConfig, try_spawn_partition_with_replication_target,
+        try_spawn_partition_with_sequencer,
+    },
+    diskless::recovery::open_config,
+    log_dir::{partition_dir, place_partition_dir_avoiding},
+    log_dir_status::LogDirRegistry,
+    partition::{PartitionRuntimeConfig, ReplicationTarget},
+    partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
+    wal::quorum::{follower::hydrate_on_promotion, registry::ShardId},
+};
 
 /// Open (or recover) the on-disk `Partition` for `(topic, partition)` and
 /// insert it into `partitions` with
@@ -28,9 +44,9 @@ pub(crate) struct MaterializePartitionConfig<'a> {
     pub partition: i32,
     pub log_dirs: &'a [PathBuf],
     pub log_config: &'a LogConfig,
-    pub log_dir_status: &'a crate::log_dir_status::LogDirRegistry,
-    pub producer_state: &'a Arc<crate::producer_state::ProducerState>,
-    pub runtime: crate::partition::PartitionRuntimeConfig,
+    pub log_dir_status: &'a LogDirRegistry,
+    pub producer_state: &'a Arc<ProducerState>,
+    pub runtime: PartitionRuntimeConfig,
 }
 
 pub(crate) fn materialize_partition(config: MaterializePartitionConfig<'_>) -> Result<(), String> {
@@ -39,7 +55,7 @@ pub(crate) fn materialize_partition(config: MaterializePartitionConfig<'_>) -> R
 
 pub(super) fn materialize_partition_with_replication_target(
     config: MaterializePartitionConfig<'_>,
-    initial_target: Option<crate::partition::ReplicationTarget>,
+    initial_target: Option<ReplicationTarget>,
 ) -> Result<(), String> {
     let MaterializePartitionConfig {
         partitions,
@@ -73,17 +89,17 @@ pub(super) fn materialize_partition_with_replication_target(
         }
         let dir = preferred.as_ref().map_or_else(
             || {
-                crate::log_dir::place_partition_dir_avoiding(
+                place_partition_dir_avoiding(
                     log_dirs,
                     partitions.cordoned_log_dirs(),
                     topic,
                     partition,
                 )
             },
-            |log_dir| crate::log_dir::partition_dir(log_dir, topic, partition),
+            |log_dir| partition_dir(log_dir, topic, partition),
         );
         std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
-        let open_config = crate::diskless::recovery::open_config(log_config, runtime.diskless);
+        let open_config = open_config(log_config, runtime.diskless);
         let mut log = Log::open(&dir, open_config).map_err(|e| format!("Log::open: {e}"))?;
         if let Some(stamp_source) = partitions.stamp_source() {
             log.set_stamp_source(stamp_source)
@@ -92,12 +108,12 @@ pub(super) fn materialize_partition_with_replication_target(
         if runtime.diskless
             && let (Some(topic_id), Some(registry)) = (topic_id, runtime.wal_shards.as_ref())
         {
-            let shard = crate::wal::quorum::registry::ShardId {
+            let shard = ShardId {
                 topic_id,
                 partition: PartitionIndex(partition),
             };
             if registry.local_is_leader(shard) {
-                crate::wal::quorum::follower::hydrate_on_promotion(
+                hydrate_on_promotion(
                     log_dirs,
                     topic,
                     shard,
@@ -121,7 +137,7 @@ pub(super) fn materialize_partition_with_replication_target(
             .parent()
             .expect("placed partition dir always has a parent log.dir")
             .to_path_buf();
-        let spawn = crate::broker::PartitionSpawnConfig {
+        let spawn = PartitionSpawnConfig {
             topic: topic.to_string(),
             topic_id,
             partition_id: PartitionIndex(partition),
@@ -132,10 +148,8 @@ pub(super) fn materialize_partition_with_replication_target(
             runtime,
         };
         let partition = match initial_target {
-            Some(target) => {
-                crate::broker::try_spawn_partition_with_replication_target(spawn, target)
-            }
-            None => crate::broker::try_spawn_partition_with_sequencer(spawn),
+            Some(target) => try_spawn_partition_with_replication_target(spawn, target),
+            None => try_spawn_partition_with_sequencer(spawn),
         }
         .map_err(|e| format!("spawn partition: {e}"))?;
         if preferred.is_some() {
@@ -155,7 +169,13 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::replicator_supervisor::test_support::MaterializeFixture;
+    use crate::{
+        log_dir::partition_dir,
+        partition::{Partition, test_support::install_three_replica_isr},
+        replicator_supervisor::test_support::{
+            MaterializeFixture, MaterializeSetup, materialized_partition,
+        },
+    };
 
     #[derive(Debug)]
     struct TestStampSource(AtomicU64);
@@ -173,7 +193,7 @@ mod tests {
     ) {
         MaterializeFixture::default().materialize(
             partitions,
-            crate::replicator_supervisor::test_support::MaterializeSetup {
+            MaterializeSetup {
                 topic,
                 log_dirs: &[log_dir.to_path_buf()],
                 context: "materialize partition",
@@ -182,7 +202,7 @@ mod tests {
         );
     }
 
-    fn append_one(partition: &crate::partition::Partition) -> krabka_log::Offset {
+    fn append_one(partition: &Partition) -> krabka_log::Offset {
         use krabka_protocol::records::{Record, RecordBatch};
 
         let mut batch = RecordBatch {
@@ -200,11 +220,10 @@ mod tests {
 
     #[tokio::test]
     async fn materialize_partition_helper_supports_isr_install() {
-        let (_dir, partitions) =
-            crate::replicator_supervisor::test_support::materialized_partition();
+        let (_dir, partitions) = materialized_partition();
         let part = partitions.get("t", PartitionIndex(0)).expect("part");
         // Mirror what reconcile does for leader partitions.
-        crate::partition::test_support::install_three_replica_isr(&part).await;
+        install_three_replica_isr(&part).await;
         let st = part.replica_state.lock().await;
         assert!(st.isr.len() == 3);
     }
@@ -223,7 +242,7 @@ mod tests {
             let partitions = Arc::new(PartitionRegistry::new());
             let result = materialize_partition(MaterializeFixture::default().config(
                 &partitions,
-                crate::replicator_supervisor::test_support::MaterializeSetup {
+                MaterializeSetup {
                     topic,
                     log_dirs: std::slice::from_ref(&log_dir),
                     ..Default::default()
@@ -268,7 +287,7 @@ mod tests {
             topic_id: Some(topic_id),
             ..MaterializeFixture::default().config(
                 &partitions,
-                crate::replicator_supervisor::test_support::MaterializeSetup {
+                MaterializeSetup {
                     log_dirs: &[first.path().to_path_buf(), preferred.path().to_path_buf()],
                     ..Default::default()
                 },
@@ -318,7 +337,7 @@ mod tests {
         use krabka_protocol::records::{Record, RecordBatch};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let partition_dir = crate::log_dir::partition_dir(dir.path(), "recovered", 0);
+        let partition_dir = partition_dir(dir.path(), "recovered", 0);
         std::fs::create_dir_all(&partition_dir).expect("partition dir");
         let mut existing = Log::open(&partition_dir, LogConfig::default()).expect("open existing");
         existing
@@ -350,21 +369,19 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let partitions = Arc::new(PartitionRegistry::new());
         let topic_id = uuid::Uuid::from_u128(0xD15C);
-        let hot_tail = Arc::new(crate::diskless::hot_tail::HotTailCache::default());
-        let wal_shards = Arc::new(crate::wal::quorum::registry::WalShardRegistry::new(
-            krabka_raft::NodeId(0),
-        ));
+        let hot_tail = Arc::new(HotTailCache::default());
+        let wal_shards = Arc::new(WalShardRegistry::new(krabka_raft::NodeId(0)));
 
         materialize_partition(MaterializePartitionConfig {
             topic_id: Some(topic_id),
-            runtime: crate::partition::PartitionRuntimeConfig::new(
+            runtime: PartitionRuntimeConfig::new(
                 (1_024, 64, 3),
                 true,
                 (Some(hot_tail), Some(wal_shards.clone()), None),
             ),
             ..MaterializeFixture::default().config(
                 &partitions,
-                crate::replicator_supervisor::test_support::MaterializeSetup {
+                MaterializeSetup {
                     topic: "diskless",
                     log_dirs: &[dir.path().to_path_buf()],
                     ..Default::default()

@@ -31,6 +31,7 @@ use crate::{
         },
     },
     error::BrokerError,
+    metadata_epoch::next_i32,
 };
 
 #[cfg(test)]
@@ -57,7 +58,7 @@ pub(super) async fn handle_classic_leave_message(
             .filter(|member_id| !state.members.contains_key(member_id))
             .collect();
         if !removed.is_empty() && state.members.is_empty() {
-            let Some(generation_id) = crate::metadata_epoch::next_i32(state.generation_id) else {
+            let Some(generation_id) = next_i32(state.generation_id) else {
                 *state = previous;
                 tracing::warn!(group_id = %state.group_id,
                     "classic LeaveGroup refused because the generation is exhausted");

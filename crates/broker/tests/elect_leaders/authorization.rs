@@ -13,9 +13,16 @@ use krabka_broker::Broker;
 use krabka_security::SaslMechanism;
 
 use crate::{
+    kafka_wire::{PlainAuthenticationSetup, SaslTopicSetup},
     sasl::{create_topic_sasl_plain, drive_elect_leaders_sasl_plain},
-    support::acl::TopicAclSetup,
+    support::{
+        acl::{TopicAclSetup, topic_acl_record, use_simple_acl_authorizer},
+        admin::ElectionSetup,
+        sasl::sasl_temp_config,
+        topics::ConfiguredTopicSetup,
+    },
     wait::wait_partition_exists,
+    wire::CLIENT_ID,
 };
 
 /// Single-broker SASL/PLAIN cluster.
@@ -30,7 +37,7 @@ async fn non_super_user_without_acl_denied() {
     // Build a single-broker SASL_PLAINTEXT config.
     // admin is the super-user so the compat shim stays off once an ACL
     // exists; alice has credentials but no ACLs.
-    let (_log_dir, mut cfg) = crate::support::sasl::sasl_temp_config(vec![SaslMechanism::Plain]);
+    let (_log_dir, mut cfg) = sasl_temp_config(vec![SaslMechanism::Plain]);
     cfg.plain_credentials
         .insert("admin".to_string(), "admin-secret".to_string());
     cfg.plain_credentials
@@ -43,7 +50,7 @@ async fn non_super_user_without_acl_denied() {
         .collect();
     // Install `SimpleAclAuthorizer` so the cluster-Alter gate
     // fires for non-super principals; default is `AllowAllAuthorizer`.
-    crate::support::acl::use_simple_acl_authorizer(&mut cfg);
+    use_simple_acl_authorizer(&mut cfg);
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
@@ -51,9 +58,9 @@ async fn non_super_user_without_acl_denied() {
     // Create the topic as admin (rf=1 fine for a single-broker cluster).
     create_topic_sasl_plain(
         addr,
-        crate::kafka_wire::SaslTopicSetup {
-            client_id: crate::wire::CLIENT_ID,
-            topic: crate::support::topics::ConfiguredTopicSetup {
+        SaslTopicSetup {
+            client_id: CLIENT_ID,
+            topic: ConfiguredTopicSetup {
                 name: ("foo-auth-test").into(),
                 ..Default::default()
             },
@@ -67,7 +74,7 @@ async fn non_super_user_without_acl_denied() {
     // is irrelevant — any non-empty `image.acls` flips the shim off and
     // forces the authorizer to evaluate every request.
     handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
             topic: "__compat_shim_disable__",
             principal: "User:admin",
             ..Default::default()
@@ -95,12 +102,12 @@ async fn non_super_user_without_acl_denied() {
     let resp = loop {
         let r = drive_elect_leaders_sasl_plain(
             addr,
-            crate::support::admin::ElectionSetup {
+            ElectionSetup {
                 topic: ("foo-auth-test").to_string(),
                 ..Default::default()
             },
-            &crate::kafka_wire::PlainAuthenticationSetup {
-                client_id: crate::wire::CLIENT_ID,
+            &PlainAuthenticationSetup {
+                client_id: CLIENT_ID,
                 password: (b"alice-secret").to_vec(),
                 ..Default::default()
             },

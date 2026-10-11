@@ -13,6 +13,7 @@ use super::withdraw_elr_membership;
 use crate::{
     config_keys::MIN_INSYNC_REPLICAS,
     elr::state::{PartitionElr, TopicElr},
+    test_support::finalize_elr_version,
 };
 
 fn nodes(ids: &[u64]) -> Vec<NodeId> {
@@ -74,7 +75,7 @@ fn topic_records(name: &str, partitions: i32, elr: &str) -> Vec<MetadataRecord> 
 
 fn image_of(topics: &[(&str, i32, &str)]) -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());
-    crate::test_support::finalize_elr_version(&mut image);
+    finalize_elr_version(&mut image);
     for (name, partitions, elr) in topics {
         for record in topic_records(name, *partitions, elr) {
             image.apply(&record);

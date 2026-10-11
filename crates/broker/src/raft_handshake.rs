@@ -32,6 +32,8 @@ use krabka_security::{ListenerProtocol, SaslMechanism};
 use tokio::{net::TcpStream, sync::OnceCell};
 use tokio_rustls::TlsAcceptor;
 
+use crate::platform::Sockets;
+
 mod authorization;
 mod frame;
 mod sasl;
@@ -39,6 +41,11 @@ mod sasl;
 mod test_support;
 
 use self::sasl::run_inbound_sasl;
+use crate::{
+    SslPrincipalMapper,
+    authorizer::Authorizer,
+    network::auth::{GssapiConfig, subject_dn_rfc2253},
+};
 
 /// Late-bound handle to the broker's [`ControllerHandle`].
 ///
@@ -74,7 +81,7 @@ pub struct BrokerRaftHandshake {
     pub tls_acceptor: Option<TlsAcceptor>,
     pub plain_credentials: HashMap<String, String>,
     pub enabled_sasl_mechanisms: Vec<SaslMechanism>,
-    pub gssapi: Option<crate::network::auth::GssapiConfig>,
+    pub gssapi: Option<GssapiConfig>,
     pub oauthbearer_validator: krabka_security::OAuthBearerValidator,
     /// Same publication metadata as the shared JWKS refresher and data listener.
     pub oauthbearer_jwks_cache_generation: Arc<AtomicU64>,
@@ -100,11 +107,11 @@ pub struct BrokerRaftHandshake {
     /// operation that each api needs, as Kafka's `ControllerApis` does. The
     /// default `AllowAllAuthorizer` allows every principal.
     /// `SimpleAclAuthorizer` allows super-users and ACL grants.
-    pub authorizer: Arc<dyn crate::authorizer::Authorizer>,
+    pub authorizer: Arc<dyn Authorizer>,
     /// KIP-371 `ssl.principal.mapping.rules` from the top-level
     /// `[tls_config]`, which map the Subject DN of a peer certificate to the
     /// connection principal.
-    pub principal_mapper: crate::SslPrincipalMapper,
+    pub principal_mapper: SslPrincipalMapper,
 }
 
 #[async_trait::async_trait]
@@ -119,7 +126,7 @@ impl RaftListenerHandshake for BrokerRaftHandshake {
         // there is none (a socket closed mid-accept, or a platform with
         // preopened sockets), it is the unspecified address, which no ACL
         // host pattern matches.
-        let peer = crate::platform::Sockets::TARGET.peer_address(&stream);
+        let peer = Sockets::TARGET.peer_address(&stream);
 
         // 1. TLS termination (if the listener protocol requires it). A
         //    client certificate names the principal of an `SSL` connection,
@@ -186,13 +193,13 @@ fn anonymous() -> krabka_security::Principal {
 /// peer presented no certificate.
 fn peer_certificate_principal<S>(
     stream: &tokio_rustls::server::TlsStream<S>,
-    mapper: &crate::SslPrincipalMapper,
+    mapper: &SslPrincipalMapper,
 ) -> Result<Option<krabka_security::Principal>, RaftHandshakeError> {
     let (_, server_connection) = stream.get_ref();
     server_connection
         .peer_certificates()
         .and_then(<[_]>::first)
-        .and_then(|certificate| crate::network::auth::subject_dn_rfc2253(certificate.as_ref()))
+        .and_then(|certificate| subject_dn_rfc2253(certificate.as_ref()))
         .map(|distinguished_name| certificate_principal(mapper, &distinguished_name))
         .transpose()
 }
@@ -202,7 +209,7 @@ fn peer_certificate_principal<S>(
 /// listener maps it. A DN that no rule matches fails the handshake, as
 /// Kafka's `SslPrincipalMapper` does.
 fn certificate_principal(
-    mapper: &crate::SslPrincipalMapper,
+    mapper: &SslPrincipalMapper,
     distinguished_name: &str,
 ) -> Result<krabka_security::Principal, RaftHandshakeError> {
     let name = mapper.apply(distinguished_name).ok_or_else(|| {
@@ -231,6 +238,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::SslPrincipalMapper;
 
     #[test]
     fn plaintext_passthrough_short_circuits() {
@@ -265,7 +273,7 @@ mod tests {
             ),
         ];
         for (name, rules, expected) in cases {
-            let mapper = crate::SslPrincipalMapper::parse(&rules).expect("rules parse");
+            let mapper = SslPrincipalMapper::parse(&rules).expect("rules parse");
             let actual = certificate_principal(&mapper, dn).ok();
             let expected = expected.map(|principal| krabka_security::Principal {
                 name: principal.to_owned(),

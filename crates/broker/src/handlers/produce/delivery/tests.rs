@@ -11,11 +11,16 @@ use krabka_units::{bytes, millis};
 
 use super::*;
 use crate::{
+    codes::{INVALID_TIMESTAMP, NONE},
     config_keys::{DELIVERY_MAX_DELAY_MS, DELIVERY_MODE_IMMEDIATE, DELIVERY_SCHEDULE_MONOTONIC},
     handlers::produce::{
         framing::PartitionPayload,
         pipeline::{PartitionInput, process_partition},
-        test_support::{encode_batch, image_with_overrides as image_with_delivery},
+        test_support::{
+            PipelineFixture, PipelinePartitionSetup, encode_batch,
+            image_with_overrides as image_with_delivery, pipeline_input,
+        },
+        topic_settings::TimestampPolicy,
     },
 };
 
@@ -179,14 +184,13 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
         ],
     ));
     let delivery = resolve_delivery_gate(&image, "sched");
-    let fixture =
-        crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(1));
+    let fixture = PipelineFixture::new(krabka_ids::NodeId(1));
 
     let part = fixture
         .partition_with_config(
             dir.path(),
             &image,
-            crate::handlers::produce::test_support::PipelinePartitionSetup {
+            PipelinePartitionSetup {
                 topic: "sched",
                 log_config: krabka_log::LogConfig {
                     delivery_policy: krabka_log::DeliveryPolicy::Scheduled,
@@ -218,7 +222,7 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
             now_ms + 300_000,
             PartitionProduceResponse {
                 index: 0,
-                error_code: crate::codes::INVALID_TIMESTAMP,
+                error_code: INVALID_TIMESTAMP,
                 base_offset: -1,
                 ..Default::default()
             },
@@ -228,7 +232,7 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
             now_ms + 7_200_000,
             PartitionProduceResponse {
                 index: 0,
-                error_code: crate::codes::INVALID_TIMESTAMP,
+                error_code: INVALID_TIMESTAMP,
                 base_offset: -1,
                 ..Default::default()
             },
@@ -238,7 +242,7 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
             accepted_delivery_ms,
             PartitionProduceResponse {
                 index: 0,
-                error_code: crate::codes::NONE,
+                error_code: NONE,
                 base_offset: 1,
                 // An accepted row carries the partition's real log start
                 // offset. Nothing has trimmed this one, so it is 0 and not
@@ -253,9 +257,9 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
     for (delivery_ms, want, label) in cases {
         let resp = process_partition(
             PartitionInput {
-                timestamps: crate::handlers::produce::topic_settings::TimestampPolicy::default(),
+                timestamps: TimestampPolicy::default(),
                 delivery,
-                ..crate::handlers::produce::test_support::pipeline_input(
+                ..pipeline_input(
                     "sched",
                     PartitionPayload::Slice(encode_batch(&batch_delivered_at(delivery_ms))),
                 )

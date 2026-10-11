@@ -5,6 +5,7 @@
 //! resources in the same shape.
 
 use super::RequestContext;
+use crate::time_util::now_ms;
 
 /// Emits an `AdminOperation` audit event for a completed admin request.
 ///
@@ -56,7 +57,7 @@ pub(crate) fn audit_admin_for(
         },
         operation: operation.to_string(),
         resources,
-        time_ms: crate::time_util::now_ms(),
+        time_ms: now_ms(),
     });
 }
 

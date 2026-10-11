@@ -12,6 +12,15 @@ use super::{
     ReplicatorSupervisor, TopicPartition,
     materialize::{MaterializePartitionConfig, materialize_partition_with_replication_target},
 };
+use crate::{
+    config_keys::resolve_diskless,
+    partition::{PartitionRuntimeConfig, ReplicationTarget},
+    partition_writer::flag_storage_failure,
+    wal::{
+        ControllerSequencer, OffsetSequencer,
+        quorum::{follower::hydrate_on_promotion, registry::ShardId},
+    },
+};
 
 impl ReplicatorSupervisor {
     pub(super) async fn reconcile_local_partitions(
@@ -52,7 +61,7 @@ impl ReplicatorSupervisor {
                     );
                     continue;
                 };
-                let shard = crate::wal::quorum::registry::ShardId {
+                let shard = ShardId {
                     topic_id,
                     partition: PartitionIndex(key.1),
                 };
@@ -63,7 +72,7 @@ impl ReplicatorSupervisor {
                         part_record.leader.0,
                         part_record.leader_epoch.0,
                         |log| {
-                            let durable = crate::wal::quorum::follower::hydrate_on_promotion(
+                            let durable = hydrate_on_promotion(
                                 &self.log_dirs,
                                 &key.0,
                                 shard,
@@ -112,11 +121,7 @@ impl ReplicatorSupervisor {
                     )
                     .await
                 {
-                    crate::partition_writer::flag_storage_failure(
-                        &error,
-                        &part.log_dir,
-                        &self.log_dir_status,
-                    );
+                    flag_storage_failure(&error, &part.log_dir, &self.log_dir_status);
                     warn!(
                         topic = %key.0,
                         partition = key.1,
@@ -167,14 +172,14 @@ impl ReplicatorSupervisor {
         topic: &str,
         partition: i32,
     ) -> Result<(), String> {
-        let diskless = crate::config_keys::resolve_diskless(image.topic_config(topic));
+        let diskless = resolve_diskless(image.topic_config(topic));
         let topic_id = image.topic(topic).map(|topic| topic.topic_id);
         let initial_target = if diskless {
             None
         } else {
             image
                 .partition(topic, partition)
-                .map(|record| crate::partition::ReplicationTarget {
+                .map(|record| ReplicationTarget {
                     topic_id,
                     leader_node_id: record.leader,
                     leader_epoch: record.leader_epoch,
@@ -190,7 +195,7 @@ impl ReplicatorSupervisor {
                 log_config: &self.log_config,
                 log_dir_status: &self.log_dir_status,
                 producer_state: &self.producer_state,
-                runtime: crate::partition::PartitionRuntimeConfig::new(
+                runtime: PartitionRuntimeConfig::new(
                     (
                         self.max_produce_group,
                         self.partition_writer_queue_depth,
@@ -201,9 +206,8 @@ impl ReplicatorSupervisor {
                         Some(self.hot_tail.clone()),
                         Some(self.wal_shards.clone()),
                         diskless.then(|| {
-                            Arc::new(crate::wal::ControllerSequencer::new(
-                                self.controller.clone(),
-                            )) as Arc<dyn crate::wal::OffsetSequencer>
+                            Arc::new(ControllerSequencer::new(self.controller.clone()))
+                                as Arc<dyn OffsetSequencer>
                         }),
                     ),
                 ),
@@ -223,9 +227,14 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::replicator_supervisor::test_support::{
-        follower_promotion_images, image_with, partition_record, reconciled_partition,
-        supervisor_fixture, three_replica_image, topic_record,
+    use crate::{
+        partition::ReplicationTarget,
+        replicator_supervisor::test_support::{
+            SupervisorPartitionSetup, SupervisorTopicSetup, follower_promotion_images, image_with,
+            partition_record, reconciled_partition, supervisor_fixture, three_replica_image,
+            topic_record,
+        },
+        test_support::single_partition_topic,
     };
 
     #[tokio::test]
@@ -322,20 +331,16 @@ mod tests {
         let mut overrides = BTreeMap::new();
         overrides.insert("krabka.diskless".into(), "true".into());
         let img = image_with(&[
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "diskless",
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "diskless",
-                    leader: NodeId(2),
-                    replicas: vec![NodeId(2)],
-                    ..Default::default()
-                },
-            ),
+            topic_record(SupervisorTopicSetup {
+                topic: "diskless",
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                topic: "diskless",
+                leader: NodeId(2),
+                replicas: vec![NodeId(2)],
+                ..Default::default()
+            }),
             MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                 topic: "diskless".into(),
                 overrides,
@@ -381,15 +386,13 @@ mod tests {
     async fn non_diskless_materialization_installs_target_before_registry_visibility() {
         let topic_id = Uuid::new_v4();
         let img = image_with(&[
-            MetadataRecord::V1Topic(crate::test_support::single_partition_topic("t", topic_id)),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    leader: NodeId(2),
-                    replicas: vec![NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(7),
-                    ..Default::default()
-                },
-            ),
+            MetadataRecord::V1Topic(single_partition_topic("t", topic_id)),
+            partition_record(SupervisorPartitionSetup {
+                leader: NodeId(2),
+                replicas: vec![NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(7),
+                ..Default::default()
+            }),
         ]);
         let (supervisor, partitions, _reporter, _dir) = supervisor_fixture(img.clone());
 
@@ -400,7 +403,7 @@ mod tests {
         let partition = partitions
             .get("t", PartitionIndex(0))
             .expect("registry-visible partition");
-        let expected = crate::partition::ReplicationTarget {
+        let expected = ReplicationTarget {
             topic_id: Some(topic_id),
             leader_node_id: NodeId(2),
             leader_epoch: krabka_metadata::LeaderEpoch(7),
@@ -417,18 +420,14 @@ mod tests {
     async fn diskless_materialization_keeps_leader_unpublished_until_hydration() {
         let topic_id = Uuid::new_v4();
         let img = image_with(&[
-            MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-                "diskless", topic_id,
-            )),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "diskless",
-                    leader: NodeId(2),
-                    replicas: vec![NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(7),
-                    ..Default::default()
-                },
-            ),
+            MetadataRecord::V1Topic(single_partition_topic("diskless", topic_id)),
+            partition_record(SupervisorPartitionSetup {
+                topic: "diskless",
+                leader: NodeId(2),
+                replicas: vec![NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(7),
+                ..Default::default()
+            }),
             MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                 topic: "diskless".into(),
                 overrides: maplit::btreemap! {"krabka.diskless".into() => "true".into()},

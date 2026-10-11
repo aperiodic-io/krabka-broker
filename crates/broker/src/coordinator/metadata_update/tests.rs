@@ -16,12 +16,18 @@ use krabka_protocol::owned::{
 use uuid::Uuid;
 
 use super::{changed_topics, on_metadata_update, regex_resolution_may_change};
-use crate::coordinator::{
-    test_support::metadata_delta_image as image,
-    unified::{
-        actor::test_support::rpc::consumer_request_as_client as heartbeat,
-        test_support::{SwitchableMetadata, make_coord_with_metadata, snapshot_of},
+use crate::{
+    coordinator::{
+        test_support::metadata_delta_image as image,
+        unified::{
+            actor::test_support::rpc::consumer_request_as_client as heartbeat,
+            test_support::{
+                ConsumerJoinSetup, SwitchableMetadata, consumer_join_request,
+                make_coord_with_metadata, snapshot_of,
+            },
+        },
     },
+    test_support::{AllowAclSetup, allow_acl},
 };
 
 fn topic(name: &str, id: u128) -> MetadataRecord {
@@ -123,13 +129,11 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
 }
 
 fn describe_acl(topic: &str) -> MetadataRecord {
-    MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-        crate::test_support::AllowAclSetup {
-            resource_name: topic,
-            operation: krabka_metadata::AclOperation::Describe,
-            ..Default::default()
-        },
-    ))
+    MetadataRecord::V1AccessControlEntry(allow_acl(AllowAclSetup {
+        resource_name: topic,
+        operation: krabka_metadata::AclOperation::Describe,
+        ..Default::default()
+    }))
 }
 
 /// A created topic and a changed ACL can change what a regular expression
@@ -219,13 +223,11 @@ async fn a_metadata_update_refreshes_the_groups_this_broker_coordinates() {
         let handle = coordinator.get_or_create_consumer(group_id);
         let joined = heartbeat(
             &handle,
-            crate::coordinator::unified::test_support::consumer_join_request(
-                crate::coordinator::unified::test_support::ConsumerJoinSetup {
-                    group_id,
-                    topics: &["orders"],
-                    ..Default::default()
-                },
-            ),
+            consumer_join_request(ConsumerJoinSetup {
+                group_id,
+                topics: &["orders"],
+                ..Default::default()
+            }),
         )
         .await;
         check!(joined.member_epoch == 2, "{group_id}");

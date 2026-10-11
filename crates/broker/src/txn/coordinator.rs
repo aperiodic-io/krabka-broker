@@ -19,7 +19,13 @@ use krabka_units::ByteSize;
 use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::{
+    codes::{INVALID_PRODUCER_ID_MAPPING, UNKNOWN_SERVER_ERROR},
+    coordinator::GroupCoordinator,
+    error::BrokerError,
+    metadata_source::MetadataSource,
+    network::client::InterBrokerClient,
     partition_registry::PartitionRegistry,
+    producer_id_manager::ProducerIdManager,
     task_util::cloned_registry_values,
     txn::{partitioner::partition_for_tid, state::TxnEntry},
 };
@@ -50,7 +56,7 @@ mod test_support;
 pub(crate) struct TxnCoordinator {
     pub(crate) node_id: krabka_metadata::NodeId,
     pub(crate) partitions: Arc<PartitionRegistry>,
-    pub(crate) producer_ids: Arc<crate::producer_id_manager::ProducerIdManager>,
+    pub(crate) producer_ids: Arc<ProducerIdManager>,
     num_partitions: i32,
     recovery_read_max: ByteSize,
     /// Live in-memory state: `transactional_id` → locked `TxnEntry`.
@@ -77,7 +83,7 @@ pub(crate) struct TxnCoordinator {
     /// partition. A write waits to commit only while it names this broker at
     /// the epoch of the write's term. `None` in tests that build no
     /// controller; such a write follows the coordinator's own terms only.
-    metadata: Option<Arc<dyn crate::metadata_source::MetadataSource>>,
+    metadata: Option<Arc<dyn MetadataSource>>,
     /// Wakes the callers of [`Self::wait_for_load`] when a load ends.
     load_finished: Notify,
     /// Transactional ids whose `Prepare*` record is durable, queued for
@@ -91,7 +97,7 @@ pub(crate) struct TxnCoordinator {
     /// `Produce` transaction check reached, reused for the next check.
     verification_connections:
         Mutex<std::collections::HashMap<krabka_metadata::NodeId, VerificationConnection>>,
-    group_coordinator: Option<Arc<crate::coordinator::GroupCoordinator>>,
+    group_coordinator: Option<Arc<GroupCoordinator>>,
     /// Whether `__transaction_state` values carry `LastProducerEpoch` (tag 4).
     /// Kafka trunk persists it (KAFKA-20357); 4.3.1 keeps it in memory only, so
     /// this is on only under `unstable.api.versions.enable`.
@@ -109,8 +115,8 @@ struct VerificationConnection {
 }
 
 struct MarkerTransport {
-    controller: Arc<dyn crate::metadata_source::MetadataSource>,
-    inter_broker_client: Arc<crate::network::client::InterBrokerClient>,
+    controller: Arc<dyn MetadataSource>,
+    inter_broker_client: Arc<InterBrokerClient>,
     protocol: ListenerProtocol,
     listener_name: String,
     server_name: String,
@@ -120,7 +126,7 @@ impl TxnCoordinator {
     pub(crate) fn new(
         node_id: krabka_metadata::NodeId,
         partitions: Arc<PartitionRegistry>,
-        producer_ids: Arc<crate::producer_id_manager::ProducerIdManager>,
+        producer_ids: Arc<ProducerIdManager>,
         num_partitions: i32,
         recovery_read_max: ByteSize,
     ) -> Self {
@@ -161,12 +167,12 @@ impl TxnCoordinator {
 
     pub(crate) fn configure_marker_transport(
         &mut self,
-        controller: Arc<dyn crate::metadata_source::MetadataSource>,
-        inter_broker_client: Arc<crate::network::client::InterBrokerClient>,
+        controller: Arc<dyn MetadataSource>,
+        inter_broker_client: Arc<InterBrokerClient>,
         protocol: ListenerProtocol,
         listener_name: String,
         server_name: String,
-        group_coordinator: Arc<crate::coordinator::GroupCoordinator>,
+        group_coordinator: Arc<GroupCoordinator>,
     ) {
         self.metadata = Some(Arc::clone(&controller));
         self.marker_transport = Some(MarkerTransport {
@@ -182,10 +188,7 @@ impl TxnCoordinator {
     /// Test-only: the metadata a `__transaction_state` write checks its term
     /// against, without the marker transport that sets it in a broker.
     #[cfg(test)]
-    pub(crate) fn set_metadata_source_for_test(
-        &mut self,
-        metadata: Arc<dyn crate::metadata_source::MetadataSource>,
-    ) {
+    pub(crate) fn set_metadata_source_for_test(&mut self, metadata: Arc<dyn MetadataSource>) {
         self.metadata = Some(metadata);
     }
 
@@ -235,17 +238,13 @@ impl TxnCoordinator {
     /// `appendTransactionToLog` answers for it. Any other failure answers the
     /// coordinator error when the coordinator term changed, and
     /// `UNKNOWN_SERVER_ERROR` otherwise.
-    pub(crate) async fn append_error_code(
-        &self,
-        tid: &str,
-        error: &crate::error::BrokerError,
-    ) -> i16 {
-        if let crate::error::BrokerError::TransactionStateWriteUncommitted { code, .. } = error {
+    pub(crate) async fn append_error_code(&self, tid: &str, error: &BrokerError) -> i16 {
+        if let BrokerError::TransactionStateWriteUncommitted { code, .. } = error {
             return *code;
         }
         self.coordinator_error(tid)
             .await
-            .unwrap_or(crate::codes::UNKNOWN_SERVER_ERROR)
+            .unwrap_or(UNKNOWN_SERVER_ERROR)
     }
 
     /// The error code for a request about `tid` whose entry lookup missed.
@@ -259,7 +258,7 @@ impl TxnCoordinator {
     pub(crate) async fn missing_entry_error(&self, tid: &str) -> i16 {
         self.coordinator_error(tid)
             .await
-            .unwrap_or(crate::codes::INVALID_PRODUCER_ID_MAPPING)
+            .unwrap_or(INVALID_PRODUCER_ID_MAPPING)
     }
 
     /// The load status of `partition`, or `None` when this broker does not
@@ -319,8 +318,9 @@ mod tests {
     use assert2::check;
 
     use super::*;
-    use crate::txn::coordinator::test_support::{
-        test_coordinator, test_coordinator_with_partitions,
+    use crate::{
+        test_support::PartitionCount,
+        txn::coordinator::test_support::{test_coordinator, test_coordinator_with_partitions},
     };
 
     #[test]
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn nondefault_partition_count_changes_coordinator_routing() {
-        let coordinator = test_coordinator_with_partitions(crate::test_support::PartitionCount(7));
+        let coordinator = test_coordinator_with_partitions(PartitionCount(7));
         check!(
             coordinator.partition_for("my-tid") == PartitionIndex(partition_for_tid("my-tid", 7))
         );

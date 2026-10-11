@@ -3,17 +3,35 @@ use std::sync::Arc;
 use assert2::{assert, check};
 
 use super::*;
-use crate::broker::Broker;
+use crate::{
+    broker::Broker,
+    coordinator::unified::{
+        GroupSeed, StreamsGroupSeed,
+        actor::{GroupActorMessage, GroupKindTag},
+        classic_state::{ClassicGroup, Member},
+        group::{CoordinatorGroup, GroupKind},
+        persistence_next_gen::MemberMetadataValue,
+        streams::{
+            actor::StreamsGroupActorMessage,
+            persistence::{
+                DescriptionEpochs, StreamsGroupCurrentMemberAssignmentValue,
+                StreamsGroupMemberMetadataValue, StreamsGroupTargetAssignmentMemberValue,
+                StreamsMemberWireState,
+            },
+        },
+    },
+    test_support::start_broker_with,
+};
 
-fn consumer_group_seed(member_id: &str) -> crate::coordinator::unified::GroupSeed {
-    let mut seed = crate::coordinator::unified::GroupSeed {
+fn consumer_group_seed(member_id: &str) -> GroupSeed {
+    let mut seed = GroupSeed {
         group_epoch: 3,
         target_epoch: 4,
         ..Default::default()
     };
     seed.members.insert(
         member_id.to_string(),
-        crate::coordinator::unified::persistence_next_gen::MemberMetadataValue {
+        MemberMetadataValue {
             instance_id: None,
             rack_id: None,
             client_id: "client".to_string(),
@@ -28,14 +46,11 @@ fn consumer_group_seed(member_id: &str) -> crate::coordinator::unified::GroupSee
     seed
 }
 
-fn classic_group_with_member(
-    group_id: &str,
-    member_id: &str,
-) -> Box<crate::coordinator::unified::group::CoordinatorGroup> {
-    let mut classic = crate::coordinator::unified::classic_state::ClassicGroup::new(group_id);
+fn classic_group_with_member(group_id: &str, member_id: &str) -> Box<CoordinatorGroup> {
+    let mut classic = ClassicGroup::new(group_id);
     classic.protocol_type = Some("consumer".to_string());
     classic.generation_id = 1;
-    let member = crate::coordinator::unified::classic_state::Member::new(
+    let member = Member::new(
         member_id,
         "client",
         "127.0.0.1",
@@ -44,23 +59,21 @@ fn classic_group_with_member(
         vec![("range".to_string(), bytes::Bytes::from_static(b"metadata"))],
     );
     let _ = classic.add_member(member);
-    Box::new(
-        crate::coordinator::unified::group::CoordinatorGroup::seeded(
-            group_id,
-            crate::coordinator::unified::group::GroupKind::Classic(classic),
-            std::collections::HashMap::new(),
-        ),
-    )
+    Box::new(CoordinatorGroup::seeded(
+        group_id,
+        GroupKind::Classic(classic),
+        std::collections::HashMap::new(),
+    ))
 }
 
-fn streams_group_seed(member_id: &str) -> crate::coordinator::unified::StreamsGroupSeed {
+fn streams_group_seed(member_id: &str) -> StreamsGroupSeed {
     let mut active = std::collections::BTreeMap::new();
     active.insert("subtopology-0".to_string(), vec![0, 1]);
 
     let mut members = std::collections::HashMap::new();
     members.insert(
         member_id.to_string(),
-        crate::coordinator::unified::streams::persistence::StreamsGroupMemberMetadataValue {
+        StreamsGroupMemberMetadataValue {
             instance_id: None,
             rack_id: None,
             client_id: "streams-client".to_string(),
@@ -76,7 +89,7 @@ fn streams_group_seed(member_id: &str) -> crate::coordinator::unified::StreamsGr
     let mut target_per_member = std::collections::HashMap::new();
     target_per_member.insert(
         member_id.to_string(),
-        crate::coordinator::unified::streams::persistence::StreamsGroupTargetAssignmentMemberValue {
+        StreamsGroupTargetAssignmentMemberValue {
             active: active.clone(),
             standby: std::collections::BTreeMap::new(),
             warmup: std::collections::BTreeMap::new(),
@@ -86,10 +99,10 @@ fn streams_group_seed(member_id: &str) -> crate::coordinator::unified::StreamsGr
     let mut current_per_member = std::collections::HashMap::new();
     current_per_member.insert(
         member_id.to_string(),
-        crate::coordinator::unified::streams::persistence::StreamsGroupCurrentMemberAssignmentValue {
+        StreamsGroupCurrentMemberAssignmentValue {
             member_epoch: 5,
             previous_member_epoch: 4,
-            state: crate::coordinator::unified::streams::persistence::StreamsMemberWireState::Stable,
+            state: StreamsMemberWireState::Stable,
             active,
             standby: std::collections::BTreeMap::new(),
             warmup: std::collections::BTreeMap::new(),
@@ -101,13 +114,12 @@ fn streams_group_seed(member_id: &str) -> crate::coordinator::unified::StreamsGr
         },
     );
 
-    crate::coordinator::unified::StreamsGroupSeed {
+    StreamsGroupSeed {
         group_epoch: 5,
         metadata_hash: 0,
         validated_topology_epoch: 0,
         last_assignment_configs: std::collections::BTreeMap::new(),
-        description_epochs:
-            crate::coordinator::unified::streams::persistence::DescriptionEpochs::default(),
+        description_epochs: DescriptionEpochs::default(),
         assignment_epoch: 6,
         assignment_timestamp_ms: 0,
         topology: None,
@@ -128,11 +140,9 @@ async fn assert_streams_group_helpers_observe_live_actor_view(
         .get_or_create_streams(streams_group_id);
     streams_actor
         .tx
-        .send(
-            crate::coordinator::unified::streams::actor::StreamsGroupActorMessage::Seed(
-                streams_group_seed(streams_member_id),
-            ),
-        )
+        .send(StreamsGroupActorMessage::Seed(streams_group_seed(
+            streams_member_id,
+        )))
         .await
         .expect("seed streams group");
     assert!(
@@ -181,20 +191,17 @@ async fn assert_streams_group_helpers_observe_live_actor_view(
 
 #[tokio::test]
 async fn group_handle_helpers_observe_live_actor_views() {
-    let (handle, _dir) = crate::test_support::start_broker_with(|_| {}).await;
+    let (handle, _dir) = start_broker_with(|_| {}).await;
     let broker = handle.broker_arc_for_test();
 
     let group_id = "handle-next-gen-group-mutant";
     let member_id = "member-1";
-    let actor = broker.group_coordinator.get_or_create_group(
-        group_id,
-        crate::coordinator::unified::actor::GroupKindTag::Consumer,
-    );
+    let actor = broker
+        .group_coordinator
+        .get_or_create_group(group_id, GroupKindTag::Consumer);
     actor
         .tx
-        .send(crate::coordinator::unified::actor::GroupActorMessage::Seed(
-            consumer_group_seed(member_id),
-        ))
+        .send(GroupActorMessage::Seed(consumer_group_seed(member_id)))
         .await
         .expect("seed next-gen group");
     assert!(
@@ -222,10 +229,9 @@ async fn group_handle_helpers_observe_live_actor_views() {
     );
 
     let empty_group_id = "handle-empty-group-mutant";
-    let _ = broker.group_coordinator.get_or_create_group(
-        empty_group_id,
-        crate::coordinator::unified::actor::GroupKindTag::Consumer,
-    );
+    let _ = broker
+        .group_coordinator
+        .get_or_create_group(empty_group_id, GroupKindTag::Consumer);
     assert!(
         tokio::time::timeout(
             std::time::Duration::from_secs(1),

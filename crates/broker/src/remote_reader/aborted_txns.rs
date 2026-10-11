@@ -78,7 +78,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::remote_reader::test_support::{populated_reader_with_abort, tp};
+    use crate::remote_reader::test_support::{empty_reader, populated_reader_with_abort, tp};
 
     #[tokio::test]
     async fn aborted_transactions_returns_copied_abort() {
@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn aborted_transactions_empty_when_no_segment() {
-        let (_remote_dir, reader) = crate::remote_reader::test_support::empty_reader();
+        let (_remote_dir, reader) = empty_reader();
         // RLMM is empty → no covering segment → empty list, not an error.
         let got = reader
             .aborted_transactions(&tp(), LeaderEpoch(0), 0, 100)

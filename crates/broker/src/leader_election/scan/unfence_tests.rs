@@ -17,8 +17,10 @@ use super::*;
 use crate::{
     config_keys::{ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS},
     leader_election::test_support::{
-        ElectionSetup, ExpectedPartitionSetup, expected_partition, img_with_partition,
+        ElectionSetup, ElrFinalization, ExpectedPartitionSetup, expected_partition,
+        img_with_partition,
     },
+    metrics::BrokerMetrics,
 };
 
 /// The image of a partition `t-0` with replicas `[1, 2, 3]`, led by broker 1
@@ -26,7 +28,7 @@ use crate::{
 fn leaderless_image(published: &str) -> MetadataImage {
     img_with_partition(ElectionSetup {
         isr: &[krabka_raft::NodeId(1)],
-        elr: crate::leader_election::test_support::ElrFinalization::Enabled,
+        elr: ElrFinalization::Enabled,
         configs: &[
             (MIN_INSYNC_REPLICAS, "2"),
             (ELIGIBLE_LEADER_REPLICAS, published),
@@ -165,7 +167,7 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
         for &n in case.alive {
             l.record_heartbeat(n).await;
         }
-        let metrics = crate::metrics::BrokerMetrics::new();
+        let metrics = BrokerMetrics::new();
 
         let changes = compute_unfence_changes(&img, NodeId(case.unfenced), &l, &metrics).await;
 
@@ -223,13 +225,8 @@ async fn an_unfence_leaves_alone_what_it_cannot_elect() {
             l.record_heartbeat(n).await;
         }
 
-        let changes = compute_unfence_changes(
-            &img,
-            NodeId(case.unfenced),
-            &l,
-            &crate::metrics::BrokerMetrics::new(),
-        )
-        .await;
+        let changes =
+            compute_unfence_changes(&img, NodeId(case.unfenced), &l, &BrokerMetrics::new()).await;
 
         assert!(changes.is_empty(), "{}: {changes:?}", case.label);
     }
@@ -242,7 +239,7 @@ async fn an_unfence_leaves_alone_what_it_cannot_elect() {
 async fn an_unfence_election_leaves_a_partition_with_a_leader() {
     let mut img = leaderless_image("0::1");
     let l = ControllerLivenessState::new(krabka_units::secs(10));
-    let metrics = crate::metrics::BrokerMetrics::new();
+    let metrics = BrokerMetrics::new();
 
     let changes = compute_unfence_changes(&img, NodeId(1), &l, &metrics).await;
     for record in &changes {

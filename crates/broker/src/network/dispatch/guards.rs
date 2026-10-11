@@ -2,6 +2,8 @@
 //! in flight and records its duration when it finishes; the other counts a
 //! live client connection for the lifetime of its serve loop.
 
+use crate::metrics::BrokerMetrics;
+
 /// RAII guard for one dispatched request.
 ///
 /// The guard increments `in_flight_requests` on construction. On drop it
@@ -12,13 +14,13 @@
 /// The serve loop keeps the broker alive across the handler `.await`, so
 /// the guard borrows its metrics instead of cloning every metric handle.
 pub(super) struct InFlightGuard<'a> {
-    metrics: &'a crate::metrics::BrokerMetrics,
+    metrics: &'a BrokerMetrics,
     api_key: i16,
     started: std::time::Instant,
 }
 
 impl<'a> InFlightGuard<'a> {
-    pub(super) fn new(metrics: &'a crate::metrics::BrokerMetrics, api_key: i16) -> Self {
+    pub(super) fn new(metrics: &'a BrokerMetrics, api_key: i16) -> Self {
         metrics.in_flight_requests.inc();
         Self {
             metrics,
@@ -40,11 +42,11 @@ impl Drop for InFlightGuard<'_> {
 /// `active_connections` on construction and decrements it on drop, when the
 /// per-connection serve loop exits.
 pub(super) struct ActiveConnectionGuard<'a> {
-    metrics: &'a crate::metrics::BrokerMetrics,
+    metrics: &'a BrokerMetrics,
 }
 
 impl<'a> ActiveConnectionGuard<'a> {
-    pub(super) fn new(metrics: &'a crate::metrics::BrokerMetrics) -> Self {
+    pub(super) fn new(metrics: &'a BrokerMetrics) -> Self {
         metrics.active_connections.inc();
         Self { metrics }
     }
@@ -62,7 +64,7 @@ pub(super) struct QueuedRequestGuard<'a> {
     /// The `queued.max.request.bytes` budget this request spent, given back
     /// when the guard drops. Absent when the knob is off.
     _bytes: Option<tokio::sync::OwnedSemaphorePermit>,
-    metrics: &'a crate::metrics::BrokerMetrics,
+    metrics: &'a BrokerMetrics,
     /// The value this guard added to `queued_request_bytes`, kept as the
     /// gauge's own type so the decrement on drop is exactly the increment
     /// that was made and the gauge cannot drift.
@@ -73,7 +75,7 @@ impl<'a> QueuedRequestGuard<'a> {
     pub(super) fn new(
         permit: tokio::sync::OwnedSemaphorePermit,
         bytes_permit: Option<tokio::sync::OwnedSemaphorePermit>,
-        metrics: &'a crate::metrics::BrokerMetrics,
+        metrics: &'a BrokerMetrics,
         bytes: usize,
     ) -> Self {
         let bytes = i64::try_from(bytes).unwrap_or(i64::MAX);

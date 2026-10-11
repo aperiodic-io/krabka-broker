@@ -26,8 +26,11 @@ use krabka_protocol::{
 
 use crate::{
     control_plane::freeze_scope,
-    support,
-    wire::{CONTROL, accepted, create_topic, refused},
+    support::{
+        self,
+        configs::{ConfigOperation, TopicConfigMutationSetup, alter_topic_config, topic_config},
+    },
+    wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
 };
 
 /// Kafka's `RESOURCE_TYPE` for a topic, which both config paths take.
@@ -78,7 +81,7 @@ async fn alter_configs(client: &Client, topic: &str, value: Option<&str>) -> Alt
 /// broken.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn neither_alter_path_can_set_or_clear_a_freeze() {
-    let (p, frozen, control) = Box::pin(crate::wire::controlled_fixture("orders")).await;
+    let (p, frozen, control) = Box::pin(controlled_fixture("orders")).await;
     freeze_scope(&p.client, PATTERN_TYPE_LITERAL, "orders", "cutover").await;
 
     let refusal = (
@@ -96,9 +99,9 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs set"
     );
     check!(
-        crate::support::configs::alter_topic_config(
+        alter_topic_config(
             &p.client,
-            crate::support::configs::TopicConfigMutationSetup {
+            TopicConfigMutationSetup {
                 topic: CONTROL,
                 name: WRITE_FREEZE,
                 value: Some("true"),
@@ -115,11 +118,11 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs clear"
     );
     check!(
-        crate::support::configs::alter_topic_config(
+        alter_topic_config(
             &p.client,
-            crate::support::configs::TopicConfigMutationSetup {
+            TopicConfigMutationSetup {
                 name: WRITE_FREEZE,
-                operation: crate::support::configs::ConfigOperation::Delete,
+                operation: ConfigOperation::Delete,
                 ..Default::default()
             }
         )
@@ -169,7 +172,7 @@ async fn client_alter_retention(client: &Client, topic: &str) -> AlterOutcome {
 
 /// Read one topic's `write.freeze` entry through `DescribeConfigs`.
 async fn write_freeze_config(client: &Client, topic: &str) -> DescribeConfigsResourceResult {
-    crate::support::configs::topic_config(client, topic, WRITE_FREEZE).await
+    topic_config(client, topic, WRITE_FREEZE).await
 }
 
 /// `kafka-configs --describe` shows the freeze, read-only, naming the scope.

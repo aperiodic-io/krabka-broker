@@ -14,8 +14,12 @@ use krabka_raft::NodeId;
 use uuid::Uuid;
 
 use crate::{
+    config_keys::{BROKER_WITNESS, ELIGIBLE_LEADER_REPLICAS, WITNESS_TRUE},
+    elr::state::test_records,
     heartbeat::controller_state::{ControllerLivenessState, TestClock},
-    test_support::FakeMetadataSource,
+    metrics::BrokerMetrics,
+    test_support::{FakeMetadataSource, broker_registration, finalize_elr_version},
+    unclean_recovery::UncleanRecoveryHandle,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -62,7 +66,7 @@ pub fn img_with_partition(setup: ElectionSetup<'_>) -> MetadataImage {
     }));
     img.apply(&MetadataRecord::V1Partition(seed_partition(setup)));
     if matches!(setup.elr, ElrFinalization::Enabled) {
-        crate::test_support::finalize_elr_version(&mut img);
+        finalize_elr_version(&mut img);
     }
     if !setup.configs.is_empty() {
         set_topic_configs(
@@ -107,13 +111,7 @@ pub async fn failover(
     dead: NodeId,
     liveness: &ControllerLivenessState,
 ) -> super::policy::FailoverPlan {
-    super::scan::compute_failover_changes(
-        image,
-        dead,
-        liveness,
-        &crate::metrics::BrokerMetrics::new(),
-    )
-    .await
+    super::scan::compute_failover_changes(image, dead, liveness, &BrokerMetrics::new()).await
 }
 
 /// Run a scan with a fresh liveness registry containing the given live brokers.
@@ -202,8 +200,8 @@ pub fn mark_witnesses_in_image(img: &mut MetadataImage, ids: &[u64]) {
     for &id in ids {
         img.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
             node_id: NodeId(id),
-            config_name: crate::config_keys::BROKER_WITNESS.into(),
-            config_value: Some(crate::config_keys::WITNESS_TRUE.into()),
+            config_name: BROKER_WITNESS.into(),
+            config_value: Some(WITNESS_TRUE.into()),
         }));
     }
 }
@@ -250,9 +248,9 @@ pub fn stalled_fake_source(
     )
 }
 
-pub fn recovery_handle_for_tests() -> crate::unclean_recovery::UncleanRecoveryHandle {
+pub fn recovery_handle_for_tests() -> UncleanRecoveryHandle {
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    crate::unclean_recovery::UncleanRecoveryHandle::for_tests(tx)
+    UncleanRecoveryHandle::for_tests(tx)
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -267,7 +265,7 @@ pub fn set_topic_configs(img: &mut MetadataImage, setup: TopicConfigSetup<'_>) {
     let TopicConfigSetup { topic, entries } = setup;
     let overrides: BTreeMap<String, String> = entries
         .iter()
-        .filter(|(key, _)| *key != crate::config_keys::ELIGIBLE_LEADER_REPLICAS)
+        .filter(|(key, _)| *key != ELIGIBLE_LEADER_REPLICAS)
         .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
         .collect();
     if !overrides.is_empty() {
@@ -278,9 +276,9 @@ pub fn set_topic_configs(img: &mut MetadataImage, setup: TopicConfigSetup<'_>) {
     }
     for (_, value) in entries
         .iter()
-        .filter(|(key, _)| *key == crate::config_keys::ELIGIBLE_LEADER_REPLICAS)
+        .filter(|(key, _)| *key == ELIGIBLE_LEADER_REPLICAS)
     {
-        for record in crate::elr::state::test_records(topic, value) {
+        for record in test_records(topic, value) {
             img.apply(&record);
         }
     }
@@ -391,7 +389,7 @@ pub fn register_broker_with_dirs(img: &mut MetadataImage, id: u64, log_dirs: Vec
         krabka_metadata::BrokerRegistrationRecord {
             incarnation_id: Uuid::from_u128(u128::from(id)),
             log_dirs,
-            ..crate::test_support::broker_registration(krabka_raft::NodeId(id))
+            ..broker_registration(krabka_raft::NodeId(id))
         },
     ));
 }

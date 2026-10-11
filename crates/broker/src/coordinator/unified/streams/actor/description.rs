@@ -40,6 +40,7 @@ use crate::{
             topology::status,
         },
     },
+    error::BrokerError,
 };
 
 /// A `StreamsGroupTopologyDescriptionUpdate` that the handler passed to the
@@ -129,7 +130,7 @@ pub(super) async fn handle_push(
     offsets_log: &dyn OffsetsLog,
     coordinator: &GroupCoordinator,
     push: &DescriptionPush,
-) -> Result<PushAnswer, crate::error::BrokerError> {
+) -> Result<PushAnswer, BrokerError> {
     let group_id = actor.state.group_id.clone();
     // `GroupMetadataManager.validateStreamsGroupTopologyDescriptionUpdate`.
     if actor.holds_nothing() {

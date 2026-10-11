@@ -39,12 +39,11 @@ mod tests {
     use krabka_metadata::MetadataRecord;
 
     use super::*;
+    use crate::test_support::single_partition_topic;
 
     fn image_with(name: &str, id: uuid::Uuid) -> MetadataImage {
         let mut img = MetadataImage::new(uuid::Uuid::nil());
-        img.apply(&MetadataRecord::V1Topic(
-            crate::test_support::single_partition_topic(name, id),
-        ));
+        img.apply(&MetadataRecord::V1Topic(single_partition_topic(name, id)));
         img
     }
 

@@ -11,7 +11,10 @@ use assert2::{assert, check};
 
 use crate::support::{
     client::connect_owned,
-    configs::{describe_resource, incremental_config, incremental_request, incremental_resource},
+    configs::{
+        ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
+        incremental_request, incremental_resource,
+    },
 };
 mod support;
 
@@ -128,20 +131,18 @@ async fn broker_logger_alter_moves_the_live_filter_and_the_describe_agrees() {
 
     // ── Step 2: IncrementalAlterConfigs ──────────────────────────────────────
     let alter_resp: IncrementalAlterConfigsResponse = client
-        .send(incremental_request(
-            crate::support::configs::IncrementalConfigsSetup {
-                resources: vec![incremental_resource(
-                    RESOURCE_TYPE_BROKER_LOGGER,
-                    node.clone(),
-                    vec![incremental_config(
-                        "krabka_broker".to_owned(),
-                        Some("DEBUG".to_owned()),
-                        crate::support::configs::ConfigOperation::Set,
-                    )],
+        .send(incremental_request(IncrementalConfigsSetup {
+            resources: vec![incremental_resource(
+                RESOURCE_TYPE_BROKER_LOGGER,
+                node.clone(),
+                vec![incremental_config(
+                    "krabka_broker".to_owned(),
+                    Some("DEBUG".to_owned()),
+                    ConfigOperation::Set,
                 )],
-                ..Default::default()
-            },
-        ))
+            )],
+            ..Default::default()
+        }))
         .await
         .expect("IncrementalAlterConfigs");
 

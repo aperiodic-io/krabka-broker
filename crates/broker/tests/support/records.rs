@@ -3,6 +3,8 @@
 use bytes::Bytes;
 use krabka_protocol::records::{Record, RecordBatch};
 
+use crate::support::transactions::{ProducerEpoch, ProducerIdentity};
+
 pub fn value_record(offset_delta: i32, value: Option<Bytes>) -> Record {
     Record {
         offset_delta,
@@ -60,7 +62,7 @@ pub struct ProducerSequence(pub i32);
 pub struct ProducerValuesSetup<'a> {
     #[default(krabka_ids::ProducerId(7))]
     pub pid: krabka_ids::ProducerId,
-    pub epoch: crate::support::transactions::ProducerEpoch,
+    pub epoch: ProducerEpoch,
     pub base_seq: ProducerSequence,
     #[default(&["v"])]
     pub values: &'a [&'a str],
@@ -133,7 +135,7 @@ pub enum BatchTransaction {
 /// The producer headers and record count needed by transaction-version probes.
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub struct TransactionProbeBatchSetup {
-    pub producer: crate::support::transactions::ProducerIdentity,
+    pub producer: ProducerIdentity,
     pub sequence: ProducerSequence,
     #[default(ProbeRecordCount(1))]
     pub records: ProbeRecordCount,

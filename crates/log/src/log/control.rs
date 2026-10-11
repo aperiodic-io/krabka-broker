@@ -241,17 +241,20 @@ mod tests {
 
     use super::*;
     use crate::{
+        compact::build_offset_map,
         log::{
             Log,
             test_support::{
-                BarrierEpoch, BarrierMarkerSetup, PartitionState, abort_marker, barrier_marker,
-                barrier_marker_from_producer, commit_marker, compact_test_log, compaction_ctx,
-                control_key, control_value, keyed_batch, partition_state, sample_batch, test_log,
-                transactional_batch,
+                BarrierEpoch, BarrierMarkerSetup, HostileBarrierSetup, PartitionState,
+                ProducerEpoch, abort_marker, barrier_marker, barrier_marker_from_producer,
+                commit_marker, compact_test_log, compaction_ctx, control_key, control_value,
+                install_stamps, keyed_batch, partition_state, sample_batch, stamped_test_log,
+                test_log, transactional_batch,
             },
         },
         producer_snapshot::ProducerSnapshotEntry,
         segment::Segment,
+        test_support::open_log,
     };
 
     /// What one parse came to, with a refusal reduced to the fields that say
@@ -544,7 +547,7 @@ mod tests {
             ),
             (
                 "with a producer id",
-                barrier_marker_from_producer(crate::log::test_support::HostileBarrierSetup {
+                barrier_marker_from_producer(HostileBarrierSetup {
                     marker: BarrierMarkerSetup {
                         epoch: BarrierEpoch(7),
                         ..Default::default()
@@ -553,7 +556,7 @@ mod tests {
                 }),
             ),
         ] {
-            let (_dir, mut log) = crate::log::test_support::stamped_test_log(40, 1);
+            let (_dir, mut log) = stamped_test_log(40, 1);
 
             append_open_barrier_transaction(&mut log);
             let before = partition_state(&log, &[1000, -1]);
@@ -629,7 +632,7 @@ mod tests {
                 vec![None, None, None, None],
             ),
         ] {
-            let (_dir, mut log) = crate::log::test_support::stamped_test_log(40, 1);
+            let (_dir, mut log) = stamped_test_log(40, 1);
 
             append_open_barrier_transaction(&mut log);
             log.append(&mut barrier_marker(BarrierMarkerSetup {
@@ -668,7 +671,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let ids = [1000, 2000, 3000, -1];
         let before = {
-            let mut log = crate::test_support::open_log(dir.path());
+            let mut log = open_log(dir.path());
             log.append(&mut barrier_marker(BarrierMarkerSetup::default()))
                 .unwrap(); // 0
 
@@ -698,16 +701,14 @@ mod tests {
             // A marker that carries the open transaction's producer id closes
             // nothing on the append path, and recovery reaches the same
             // result.
-            log.append(&mut barrier_marker_from_producer(
-                crate::log::test_support::HostileBarrierSetup {
-                    marker: BarrierMarkerSetup {
-                        epoch: BarrierEpoch(4),
-                        ..Default::default()
-                    },
-                    producer: crate::ProducerId(3000),
-                    producer_epoch: crate::log::test_support::ProducerEpoch(1),
+            log.append(&mut barrier_marker_from_producer(HostileBarrierSetup {
+                marker: BarrierMarkerSetup {
+                    epoch: BarrierEpoch(4),
+                    ..Default::default()
                 },
-            ))
+                producer: ProducerId(3000),
+                producer_epoch: ProducerEpoch(1),
+            }))
             .unwrap(); // 9
 
             partition_state(&log, &ids)
@@ -716,7 +717,7 @@ mod tests {
         // transaction of producer 1000 still holds the LSO at its first offset.
         check!(before.lso == Offset(1));
 
-        let mut reopened = crate::test_support::open_log(dir.path());
+        let mut reopened = open_log(dir.path());
         check!(partition_state(&reopened, &ids) == before);
         check!(reopened.log_end_offset() == Offset(10));
         // Once the high watermark passes both markers, the open transaction of
@@ -732,24 +733,22 @@ mod tests {
     fn a_barrier_marker_keeps_stamp_ranges_across_a_restart() {
         let dir = tempdir().unwrap();
         {
-            let mut log = crate::test_support::open_log(dir.path());
+            let mut log = open_log(dir.path());
             append_open_barrier_transaction(&mut log);
             // A marker that carries the open transaction's producer id clears
             // no stamp range, on the append path or on the recovery path.
-            log.append(&mut barrier_marker_from_producer(
-                crate::log::test_support::HostileBarrierSetup {
-                    marker: BarrierMarkerSetup {
-                        epoch: BarrierEpoch(5),
-                        ..Default::default()
-                    },
+            log.append(&mut barrier_marker_from_producer(HostileBarrierSetup {
+                marker: BarrierMarkerSetup {
+                    epoch: BarrierEpoch(5),
                     ..Default::default()
                 },
-            ))
+                ..Default::default()
+            }))
             .unwrap(); // offset 2
         }
 
-        let mut reopened = crate::test_support::open_log(dir.path());
-        crate::log::test_support::install_stamps(&mut reopened, 40, 1);
+        let mut reopened = open_log(dir.path());
+        install_stamps(&mut reopened, 40, 1);
         check!(reopened.lso() == Offset(0));
 
         reopened.append(&mut commit_marker(1000, 2)).unwrap(); // offset 3
@@ -784,7 +783,7 @@ mod tests {
         // The dedup map holds the data key only. `should_index_key` keeps the
         // marker key out of it, so no barrier can shadow another.
         let sealed: Vec<&Segment> = log.segments.iter().collect();
-        let mut indexed: Vec<Bytes> = crate::compact::build_offset_map(&sealed, vec![], None)
+        let mut indexed: Vec<Bytes> = build_offset_map(&sealed, vec![], None)
             .unwrap()
             .into_keys()
             .collect();

@@ -15,7 +15,12 @@ use super::{
     plan::{PendingRead, refused_read},
     read::LiveOffsets,
 };
-use crate::{broker::Broker, codes, partition::Partition};
+use crate::{
+    broker::Broker,
+    codes,
+    metrics::{BrokerMetrics, RemoteTierPath},
+    partition::Partition,
+};
 
 /// Whether a batch the remote tier returned may go out to a consumer now.
 ///
@@ -46,12 +51,12 @@ fn remote_batch_is_deliverable(
 /// error, and a slot the reader held is a slot the pool could not hand out
 /// however the read ended.
 struct ReadTimer<'metrics> {
-    metrics: &'metrics crate::metrics::BrokerMetrics,
+    metrics: &'metrics BrokerMetrics,
     started: std::time::Instant,
 }
 
 impl<'metrics> ReadTimer<'metrics> {
-    fn started(metrics: &'metrics crate::metrics::BrokerMetrics) -> Self {
+    fn started(metrics: &'metrics BrokerMetrics) -> Self {
         Self {
             metrics,
             started: std::time::Instant::now(),
@@ -103,7 +108,7 @@ fn fail_partition(p: &mut PendingRead) -> usize {
 /// `RemoteFetchErrorsPerSec` -- it is expected churn during catch-up, so it
 /// logs at debug and `failed_fetch_requests` is what counts it.
 fn fail_remote_read(
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
     p: &mut PendingRead,
     error: &krabka_remote_storage::RemoteStorageError,
 ) -> usize {
@@ -117,7 +122,7 @@ fn fail_remote_read(
              failing the partition for client retry"
         );
     } else {
-        metrics.record_remote_error(crate::metrics::RemoteTierPath::Fetch, &p.topic_name);
+        metrics.record_remote_error(RemoteTierPath::Fetch, &p.topic_name);
         tracing::warn!(
             topic = %p.topic_name,
             partition = p.partition_index,
@@ -247,7 +252,7 @@ pub(super) async fn try_remote_read(
     // still shows up as an attempt.
     broker
         .metrics
-        .record_remote_request(crate::metrics::RemoteTierPath::Fetch, &p.topic_name);
+        .record_remote_request(RemoteTierPath::Fetch, &p.topic_name);
     // KIP-405: the remote tier serves `[log_start, local_log_start)` and
     // nothing below. An offset under the global floor was deleted by
     // `DeleteRecords` or by remote retention, so it stays
@@ -416,7 +421,7 @@ pub(super) async fn try_remote_read(
             // KIP-405's `RemoteFetchBytesPerSec`: what the tier actually
             // served, which is the batch that is about to go out.
             broker.metrics.record_remote_bytes(
-                crate::metrics::RemoteTierPath::Fetch,
+                RemoteTierPath::Fetch,
                 &p.topic_name,
                 u64::try_from(bytes_est).unwrap_or(0),
             );
@@ -434,6 +439,15 @@ mod tests {
     use assert2::{assert, check};
     use krabka_log::{DeliveryPolicy, Log, LogConfig};
     use krabka_units::prelude::millis;
+
+    use crate::{
+        broker::{Broker, BrokerHandle, spawn_partition},
+        codes::OFFSET_OUT_OF_RANGE,
+        config::{BrokerConfig, RemoteStorageBackend, RlmmKind},
+        delivery::test_support::batch_at,
+        metrics::BrokerMetrics,
+        partition::Partition,
+    };
 
     /// KIP-405 splits the floors, and only the global one bounds the remote
     /// tier: an offset a `DeleteRecords` deleted is gone from every tier, so
@@ -489,10 +503,10 @@ mod tests {
     /// one from the segments that survived -- and on this partition that
     /// inference sits above the whole archive.
     async fn tiered_partition(
-        broker: &std::sync::Arc<crate::broker::Broker>,
+        broker: &std::sync::Arc<Broker>,
         dir: &std::path::Path,
         reopen: bool,
-    ) -> std::sync::Arc<crate::partition::Partition> {
+    ) -> std::sync::Arc<Partition> {
         use krabka_ids::{LeaderEpoch, PartitionIndex};
 
         use crate::remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier};
@@ -553,7 +567,7 @@ mod tests {
                 "the reopened log infers its floor from what survived"
             );
         }
-        crate::broker::spawn_partition(
+        spawn_partition(
             TIERED_TOPIC.to_string(),
             PartitionIndex(0),
             dir.to_path_buf(),
@@ -566,21 +580,15 @@ mod tests {
 
     /// A broker with a local archive and an in-memory RLMM, and the
     /// directories both live in.
-    async fn tiered_broker() -> (
-        crate::broker::BrokerHandle,
-        tempfile::TempDir,
-        tempfile::TempDir,
-    ) {
+    async fn tiered_broker() -> (BrokerHandle, tempfile::TempDir, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         let remote_dir = tempfile::tempdir().expect("remote tempdir");
-        let mut config = crate::config::BrokerConfig::for_tests(dir.path().to_path_buf());
-        config.remote_storage_backend = Some(crate::config::RemoteStorageBackend::Local {
+        let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
+        config.remote_storage_backend = Some(RemoteStorageBackend::Local {
             dir: remote_dir.path().to_path_buf(),
         });
-        config.remote_log_metadata = crate::config::RlmmKind::InMemory;
-        let handle = crate::broker::Broker::start(config)
-            .await
-            .expect("start broker");
+        config.remote_log_metadata = RlmmKind::InMemory;
+        let handle = Broker::start(config).await.expect("start broker");
         (handle, dir, remote_dir)
     }
 
@@ -591,7 +599,7 @@ mod tests {
 
     /// Installs [`TIERED_HIGH_WATERMARK`] on `part`, as the leader's ISR would
     /// once every replica had caught up.
-    async fn commit_everything(part: &crate::partition::Partition) {
+    async fn commit_everything(part: &Partition) {
         part.replica_state.lock().await.hw = krabka_log::Offset(TIERED_HIGH_WATERMARK);
     }
 
@@ -614,10 +622,7 @@ mod tests {
 
     /// A `PendingRead` for offset 0 that the local log has already answered
     /// `OFFSET_OUT_OF_RANGE`, with the all -1 row `do_read` leaves behind.
-    fn out_of_range_at(
-        part: &std::sync::Arc<crate::partition::Partition>,
-        fetch_offset: i64,
-    ) -> super::PendingRead {
+    fn out_of_range_at(part: &std::sync::Arc<Partition>, fetch_offset: i64) -> super::PendingRead {
         use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
         use crate::codes;
@@ -820,7 +825,7 @@ mod tests {
             follower_position: None,
             partition: None,
             out: krabka_protocol::owned::fetch_response::PartitionData {
-                error_code: crate::codes::OFFSET_OUT_OF_RANGE,
+                error_code: OFFSET_OUT_OF_RANGE,
                 ..Default::default()
             },
             cpu_micros: 0,
@@ -846,7 +851,7 @@ mod tests {
     fn every_failed_cold_read_answers_the_partition_with_unknown_server_error() {
         use krabka_remote_storage::RemoteStorageError;
 
-        let metrics = crate::metrics::BrokerMetrics::new();
+        let metrics = BrokerMetrics::new();
         for error in [
             RemoteStorageError::NotReady { partition: 3 },
             RemoteStorageError::Backend("object store brownout".into()),
@@ -857,7 +862,7 @@ mod tests {
                     read_committed,
                     out: krabka_protocol::owned::fetch_response::PartitionData {
                         partition_index: 0,
-                        error_code: crate::codes::OFFSET_OUT_OF_RANGE,
+                        error_code: OFFSET_OUT_OF_RANGE,
                         high_watermark: 900,
                         last_stable_offset: 900,
                         log_start_offset: 100,
@@ -974,7 +979,7 @@ mod tests {
                 ..LogConfig::default()
             };
             let mut log = Log::open(dir.path(), config).expect("open log");
-            let mut batch = crate::delivery::test_support::batch_at(activation_ms);
+            let mut batch = batch_at(activation_ms);
             log.append(&mut batch).expect("append scheduled batch");
             let local_visible =
                 log.advance_delivery_watermark(now_ms).watermark == log.log_end_offset();

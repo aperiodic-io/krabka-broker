@@ -42,7 +42,8 @@ use tokio_rustls::{
 use crate::{
     kafka_wire::ExchangeSetup as WireExchangeSetup,
     support::{
-        topics::{creatable_topic, create_topic_request},
+        tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
         wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
@@ -77,9 +78,9 @@ fn client_config_with_pinned_server_and_client_cert(
         .expect("parse client private key PEM");
     let cfg = ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(crate::support::tls::PinnedCertVerifier {
+        .with_custom_certificate_verifier(Arc::new(PinnedCertVerifier {
             pinned: broker_cert,
-            schemes: crate::support::tls::fixture_signature_schemes(),
+            schemes: fixture_signature_schemes(),
             mismatch: "presented server cert does not match pinned dev cert",
         }))
         .with_client_auth_cert(client_certs, client_key)
@@ -202,9 +203,9 @@ async fn a_connection_with_no_certificate_is_served_rather_than_closed() {
     let server_cert_der = server_certificate();
     let client_cfg = ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(crate::support::tls::PinnedCertVerifier {
+        .with_custom_certificate_verifier(Arc::new(PinnedCertVerifier {
             pinned: server_cert_der,
-            schemes: crate::support::tls::fixture_signature_schemes(),
+            schemes: fixture_signature_schemes(),
             mismatch: "presented server cert does not match pinned dev cert",
         }))
         .with_no_client_auth();
@@ -274,7 +275,7 @@ fn mtls_fixture(
     let server_key_path = write_fixture(pem_dir.path(), "server.key", DEV_KEY);
     let client_ca_path = write_fixture(pem_dir.path(), "client_ca.pem", DEV_CLIENT_CA);
 
-    let cfg = crate::support::tls::ssl_config(
+    let cfg = ssl_config(
         log_dir.path().to_path_buf(),
         TlsConfig {
             cert_chain_path: server_cert_path.clone(),
@@ -296,12 +297,10 @@ fn server_certificate() -> CertificateDer<'static> {
 }
 
 fn create_topics_body(topic: &str) -> BytesMut {
-    let request = create_topic_request(creatable_topic(
-        crate::support::topics::ConfiguredTopicSetup {
-            name: (topic).into(),
-            ..Default::default()
-        },
-    ));
+    let request = create_topic_request(creatable_topic(ConfiguredTopicSetup {
+        name: (topic).into(),
+        ..Default::default()
+    }));
     let mut body = BytesMut::new();
     request.encode(&mut body, 7).expect("encode CreateTopics");
     body

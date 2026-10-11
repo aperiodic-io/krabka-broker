@@ -12,7 +12,10 @@ use super::{
     },
     *,
 };
-use crate::config_keys::registry::{self, ConfigScope, ConfigType, ValueCheck};
+use crate::config_keys::{
+    BROKER_WITNESS, DISKLESS, RETENTION_MS, WRITE_FREEZE,
+    registry::{self, ConfigScope, ConfigType, NODE_ID, ValueCheck},
+};
 
 const BOTH: EntryOptions = EntryOptions {
     include_synonyms: true,
@@ -24,7 +27,7 @@ const NEITHER: EntryOptions = EntryOptions {
 };
 
 fn retention_row() -> &'static registry::ConfigKey {
-    registry::lookup(ConfigScope::Topic, crate::config_keys::RETENTION_MS)
+    registry::lookup(ConfigScope::Topic, RETENTION_MS)
         .expect("retention.ms is a registered topic key")
 }
 
@@ -297,19 +300,11 @@ fn a_key_with_no_registry_row_is_treated_as_one_the_broker_may_not_disclose() {
 #[test]
 fn the_read_only_flag_comes_from_the_registry_row() {
     for (scope, name, expected) in [
-        (ConfigScope::Topic, crate::config_keys::DISKLESS, true),
-        (ConfigScope::Topic, crate::config_keys::WRITE_FREEZE, true),
-        (ConfigScope::Topic, crate::config_keys::RETENTION_MS, false),
-        (
-            ConfigScope::Broker,
-            crate::config_keys::BROKER_WITNESS,
-            true,
-        ),
-        (
-            ConfigScope::Broker,
-            crate::config_keys::registry::NODE_ID,
-            true,
-        ),
+        (ConfigScope::Topic, DISKLESS, true),
+        (ConfigScope::Topic, WRITE_FREEZE, true),
+        (ConfigScope::Topic, RETENTION_MS, false),
+        (ConfigScope::Broker, BROKER_WITNESS, true),
+        (ConfigScope::Broker, NODE_ID, true),
     ] {
         let row = registry::lookup(scope, name).expect(name);
         let entry = config_entry(Some(row), name, &[], DefaultLayer::default(), NEITHER);

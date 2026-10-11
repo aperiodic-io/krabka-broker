@@ -39,7 +39,7 @@ use std::{
 use assert2::assert;
 
 pub(crate) use crate::support::docker;
-use crate::support::free_port;
+use crate::support::{free_port, remove_container_with_volumes, storage::host_directory_user};
 
 /// The tag `//packaging:image_load` loads the broker image under.
 ///
@@ -95,7 +95,7 @@ pub(crate) struct SoakBroker {
 impl SoakBroker {
     /// `uid:gid` of the host data directory, for `docker run --user`.
     fn user(&self) -> String {
-        crate::support::storage::host_directory_user(self.host_root())
+        host_directory_user(self.host_root())
     }
 
     fn host_root(&self) -> &Path {
@@ -263,7 +263,7 @@ impl SoakBroker {
 impl Drop for SoakBroker {
     fn drop(&mut self) {
         // Best effort: a panic in `drop` would replace the real failure.
-        crate::support::remove_container_with_volumes(&self.name);
+        remove_container_with_volumes(&self.name);
     }
 }
 

@@ -1,6 +1,8 @@
 //! The three KFC-7 schema-validation keys and the produce-path gate they
 //! resolve to.
 
+use crate::schema_validation::SchemaGate;
+
 /// KFC-7: when `true`, the produce path validates the schema of every record
 /// key on this topic. A record that fails the check is rejected with
 /// `INVALID_RECORD` (87). Default `false`. This key does not reach
@@ -32,7 +34,7 @@ pub(crate) const SCHEMA_VALIDATION_MODE_FULL: &str = "full";
 pub(crate) fn resolve_schema_validation(
     image: &krabka_metadata::MetadataImage,
     topic: &str,
-) -> Option<crate::schema_validation::SchemaGate> {
+) -> Option<SchemaGate> {
     use crate::schema_validation::{SchemaGate, ValidationMode};
 
     let configs = image.topic_config(topic);

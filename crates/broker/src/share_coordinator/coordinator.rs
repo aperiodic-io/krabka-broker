@@ -62,11 +62,13 @@ mod state_machine;
 pub(crate) mod test_support;
 
 use crate::{
+    codes::{COORDINATOR_LOAD_IN_PROGRESS, NOT_COORDINATOR},
     partition_registry::PartitionRegistry,
     share_coordinator::{
         bootstrap, config::ShareCoordinatorConfig, partitioner::partition_for_share_key,
-        state::SharePartitionState,
+        persistence::StateBatch, state::SharePartitionState,
     },
+    time_util::epoch_millis,
 };
 
 /// In-memory map key: `(group_id, topic_id, partition)`.
@@ -164,7 +166,7 @@ impl ShareStateError {
 
     /// The error of a status check that [`ShareCoordinator::active`] refused.
     fn inactive(code: ShareErrorCode) -> Self {
-        let message = if code == crate::codes::COORDINATOR_LOAD_IN_PROGRESS {
+        let message = if code == COORDINATOR_LOAD_IN_PROGRESS {
             message::COORDINATOR_LOAD_IN_PROGRESS
         } else {
             message::NOT_COORDINATOR
@@ -181,7 +183,7 @@ pub(crate) struct ShareWrite {
     pub(crate) start_offset: Offset,
     /// `-1` when the request version has no such field.
     pub(crate) delivery_complete_count: i32,
-    pub(crate) batches: Vec<crate::share_coordinator::persistence::StateBatch>,
+    pub(crate) batches: Vec<StateBatch>,
 }
 
 /// `start_offset` sentinel for "no persisted share state".
@@ -305,7 +307,7 @@ impl ShareCoordinator {
 
     /// The current time in milliseconds since the epoch.
     fn now_ms(&self) -> i64 {
-        crate::time_util::epoch_millis(self.wall_clock.now())
+        epoch_millis(self.wall_clock.now())
     }
 
     /// Applies the leadership of `image` to the led partitions.
@@ -448,12 +450,12 @@ impl ShareCoordinator {
             Some(LedPartition {
                 status: LoadStatus::Pending | LoadStatus::Loading,
                 ..
-            }) => Err(crate::codes::COORDINATOR_LOAD_IN_PROGRESS),
+            }) => Err(COORDINATOR_LOAD_IN_PROGRESS),
             Some(LedPartition {
                 status: LoadStatus::Failed,
                 ..
             })
-            | None => Err(crate::codes::NOT_COORDINATOR),
+            | None => Err(NOT_COORDINATOR),
         }
     }
 

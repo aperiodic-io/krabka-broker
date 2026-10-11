@@ -78,7 +78,10 @@ use crate::{
     broker::Broker,
     codes,
     elr::TopicElr,
-    handlers::authorized_operations::authorized_operations_bits,
+    handlers::{
+        RequestContext, authorized_operations::authorized_operations_bits, metadata::wire_id,
+        offline_replicas::partition_availability,
+    },
     internal_topics::is_internal_topic,
 };
 
@@ -286,23 +289,13 @@ fn partition_response(
     // `error_code` alone for a `-1` leader here -- only `Metadata` carries
     // `LEADER_NOT_AVAILABLE` beside it -- so this row stays `NONE`. A leader
     // with no endpoint on the request's listener is `-1` as well.
-    let availability = crate::handlers::offline_replicas::partition_availability(
-        image,
-        partition,
-        unavailable,
-        listener,
-    );
+    let availability = partition_availability(image, partition, unavailable, listener);
     DescribeTopicPartitionsResponsePartition {
         error_code: codes::NONE,
         partition_index: partition.partition,
         leader_id: availability.leader_id,
         leader_epoch: partition.leader_epoch.0,
-        replica_nodes: partition
-            .replicas
-            .iter()
-            .copied()
-            .map(crate::handlers::metadata::wire_id)
-            .collect(),
+        replica_nodes: partition.replicas.iter().copied().map(wire_id).collect(),
         isr_nodes: availability.isr_nodes,
         // KIP-966. Both fields are nullable in the schema, but a real broker
         // never sends null: `Replicas.toList` gives an empty list for a
@@ -339,7 +332,7 @@ fn error_topic(name: &str, error_code: i16) -> DescribeTopicPartitionsResponseTo
 fn unknown_topic_row(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     name: &str,
 ) -> DescribeTopicPartitionsResponseTopic {
     let error_code = if validate_topic_name(name).is_ok() {
@@ -417,7 +410,15 @@ mod tests {
 
     use super::*;
     use crate::{
+        authorizer::AllowAllAuthorizer,
         broker::BrokerHandle,
+        elr::state::test_records,
+        handlers::{
+            RequestContext,
+            test_support::{
+                ReplicatedPartitionSetup, replicated_partition, single_replica_partition,
+            },
+        },
         test_support::{PartitionCount, TopicSetup},
     };
 
@@ -474,11 +475,7 @@ mod tests {
         for index in 0..partitions.0 {
             records.push(MetadataRecord::V1Partition(PartitionRecord {
                 directories: vec![uuid::Uuid::nil()],
-                ..crate::handlers::test_support::single_replica_partition(
-                    name,
-                    krabka_ids::PartitionIndex(index),
-                    NodeId(1),
-                )
+                ..single_replica_partition(name, krabka_ids::PartitionIndex(index), NodeId(1))
             }));
         }
         handle
@@ -571,7 +568,7 @@ mod tests {
     async fn describe(
         broker: &Broker,
         request: DescribeTopicPartitionsRequest,
-        ctx: &crate::handlers::RequestContext<'_>,
+        ctx: &RequestContext<'_>,
     ) -> DescribeTopicPartitionsResponse {
         handle(broker, request, VERSION, ctx).await.expect("handle")
     }
@@ -861,8 +858,7 @@ mod tests {
     #[tokio::test]
     async fn budget_exhausted_at_topic_boundary_emits_no_row_for_the_next_topic() {
         for next_topic_exists in [true, false] {
-            let (broker_handle, _dir) =
-                start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+            let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
             seed_topic(
                 &broker_handle,
                 TopicSetup {
@@ -985,14 +981,12 @@ mod tests {
                 leader_epoch: krabka_metadata::LeaderEpoch(7),
                 directories: vec![uuid::Uuid::nil(); 3],
                 partition_epoch: 4,
-                ..crate::handlers::test_support::replicated_partition(
-                    crate::handlers::test_support::ReplicatedPartitionSetup {
-                        partition: krabka_ids::PartitionIndex(index),
-                        leader: NodeId(1),
-                        replicas: &[NodeId(1), NodeId(2), NodeId(3)],
-                        ..Default::default()
-                    },
-                )
+                ..replicated_partition(ReplicatedPartitionSetup {
+                    partition: krabka_ids::PartitionIndex(index),
+                    leader: NodeId(1),
+                    replicas: &[NodeId(1), NodeId(2), NodeId(3)],
+                    ..Default::default()
+                })
             })
         };
         let mut records = vec![
@@ -1005,7 +999,7 @@ mod tests {
             partition(0),
             partition(1),
         ];
-        records.extend(crate::elr::state::test_records("orders", elr_config));
+        records.extend(test_records("orders", elr_config));
         handle
             .broker_arc_for_test()
             .controller
@@ -1024,8 +1018,7 @@ mod tests {
     /// renders `Elr: `.
     #[tokio::test]
     async fn response_partition_carries_the_elr_the_image_holds() {
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_topic_with_elr(&broker_handle, "0:2:3").await;
         let broker = broker_handle.broker_arc_for_test();
         let topic = orders_topic(&broker).await;
@@ -1059,8 +1052,7 @@ mod tests {
     /// struct-field-deletion mutant, which would set it to 0.
     #[tokio::test]
     async fn response_partition_carries_leader_epoch() {
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_topic_with_epoch(&broker_handle, LeaderEpoch(9)).await;
         let broker = broker_handle.broker_arc_for_test();
         let topic = orders_topic(&broker).await;

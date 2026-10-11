@@ -8,16 +8,20 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::{
-    config::LogConfig,
-    io::LogIo,
+    config::{DeliveryPolicy, LogConfig, ScheduleOrder},
+    io::{FileIo, LogIo},
     leader_epoch_checkpoint::EpochEntry,
     log::test_support::{
         abort_marker, append_transaction, assert_empty_append_state, assert_only_active,
-        log_append_time_log, rolling_test_log, sample_batch, sample_batch_with_epoch,
-        test_batch_at, test_log, tiny_segments, transactional_batch, verbatim_from,
-        write_with_budget,
+        check_append_time_lookup, configured_test_log, gzip_value, install_stamps,
+        log_append_time_log, rolling_test_log, sample_batch, sample_batch_with_epoch, sample_log,
+        stamped_test_log, test_batch_at, test_log, tiny_segments, transactional_batch,
+        verbatim_from, write_with_budget,
     },
+    name::log_path,
+    retention::now_ms,
     stamp_index::{StampEntry, StampIndex},
+    test_support::{log_file_count, open_log},
 };
 
 #[derive(Debug)]
@@ -96,7 +100,7 @@ fn partial_write_rolls_back_cursor_and_recovers_pre_append_state() {
     assert!(log.log_end_offset() == Offset(0));
     assert!(log.producer_state_snapshot().is_empty());
     drop(log);
-    let recovered = crate::test_support::open_log(dir.path());
+    let recovered = open_log(dir.path());
     assert!(recovered.log_end_offset() == Offset(0));
 }
 
@@ -105,7 +109,7 @@ fn shorter_append_after_partial_write_leaves_no_physical_tail() {
     let (dir, mut log) = test_log();
     let mut first = sample_batch(1);
     log.append(&mut first).unwrap();
-    let log_path = crate::name::log_path(dir.path(), 0);
+    let log_path = log_path(dir.path(), 0);
     let position = std::fs::metadata(&log_path).unwrap().len();
 
     let mut next = sample_batch(1);
@@ -119,7 +123,7 @@ fn shorter_append_after_partial_write_leaves_no_physical_tail() {
     assert_storage_full(&error);
     assert!(std::fs::metadata(&log_path).unwrap().len() == position);
 
-    log.test_set_io(std::sync::Arc::new(crate::io::FileIo));
+    log.test_set_io(std::sync::Arc::new(FileIo));
     let next_len = next.encoded_len() as u64;
     log.append(&mut next).unwrap();
 
@@ -273,12 +277,12 @@ fn append_at_uses_reconciled_frontier_floor() {
 /// log's later reads, not the write.
 #[test]
 fn a_replicated_batch_is_not_held_to_the_decompressed_record_limit() {
-    let (_dir, mut log) = crate::log::test_support::configured_test_log(LogConfig {
+    let (_dir, mut log) = configured_test_log(LogConfig {
         max_decompressed_record: Some(bytes(100)),
         ..LogConfig::default()
     });
     let mut batch = test_batch_at(0);
-    crate::log::test_support::gzip_value(&mut batch, 1_000);
+    gzip_value(&mut batch, 1_000);
 
     log.append_at(&mut batch, Offset(0)).unwrap();
 
@@ -329,7 +333,7 @@ fn successor_overflow_is_rejected_before_log_mutation() {
 
 #[test]
 fn sidecar_failure_rolls_back_bytes_frontiers_and_allows_retry() {
-    let (_dir, mut log) = crate::log::test_support::stamped_test_log(100, 1);
+    let (_dir, mut log) = stamped_test_log(100, 1);
     log.stamp_indexes.clear();
 
     let error = log.append(&mut sample_batch(1)).unwrap_err();
@@ -347,7 +351,7 @@ fn sidecar_failure_rolls_back_bytes_frontiers_and_allows_retry() {
 
 #[test]
 fn segment_bytes_are_synced_before_durable_sidecars() {
-    let (_dir, mut stamped_log) = crate::log::test_support::stamped_test_log(100, 1);
+    let (_dir, mut stamped_log) = stamped_test_log(100, 1);
     let stamp_syncs = std::sync::Arc::new(CountSync(std::sync::atomic::AtomicUsize::new(0)));
     stamped_log.test_set_io(stamp_syncs.clone());
 
@@ -366,12 +370,12 @@ fn segment_bytes_are_synced_before_durable_sidecars() {
 
 #[test]
 fn post_roll_failure_restores_the_previous_active_segment() {
-    let (_dir, mut log) = crate::log::test_support::configured_test_log(LogConfig {
+    let (_dir, mut log) = configured_test_log(LogConfig {
         flush_on_append: true,
         ..tiny_segments()
     });
     log.append(&mut sample_batch(1)).unwrap();
-    crate::log::test_support::install_stamps(&mut log, 100, 1);
+    install_stamps(&mut log, 100, 1);
     let io = std::sync::Arc::new(FailSyncAt {
         calls: std::sync::atomic::AtomicUsize::new(0),
         fail_at: 2,
@@ -402,7 +406,7 @@ fn post_roll_partial_write_restores_the_previous_active_segment() {
     assert!(matches!(error, LogError::Io(_)));
     assert_only_active(&log, Offset(1), Offset(0));
 
-    log.test_set_io(std::sync::Arc::new(crate::io::FileIo));
+    log.test_set_io(std::sync::Arc::new(FileIo));
     assert!(log.append(&mut sample_batch(1)).unwrap().0 == Offset(1));
     assert!(log.log_end_offset() == Offset(2));
 }
@@ -479,7 +483,7 @@ fn append_at_past_the_log_end_offset_leaves_a_hole() {
 #[test]
 fn segment_rolls_when_bytes_exceeded() {
     // tiny so we roll fast
-    let (dir, _log) = crate::log::test_support::sample_log(
+    let (dir, _log) = sample_log(
         LogConfig {
             segment_size: bytes(200),
             ..LogConfig::default()
@@ -488,7 +492,7 @@ fn segment_rolls_when_bytes_exceeded() {
         2,
     );
     // Multiple .log files should exist now.
-    let log_files = crate::test_support::log_file_count(dir.path());
+    let log_files = log_file_count(dir.path());
     assert2::assert!(log_files >= 2);
 }
 
@@ -525,7 +529,7 @@ fn segment_ms_rolls_against_the_incoming_batch_timestamp() {
         ),
     ];
     for (segment_ms, first_ts, incoming_ts, expect_roll, label) in cases {
-        let (_dir, mut log) = crate::log::test_support::configured_test_log(LogConfig {
+        let (_dir, mut log) = configured_test_log(LogConfig {
             segment_size: gibibytes(1),
             segment_roll_interval: millis(segment_ms),
             ..LogConfig::default()
@@ -552,7 +556,7 @@ fn segment_ms_rolls_against_the_incoming_batch_timestamp() {
 fn an_idle_partition_never_rolls() {
     use krabka_units::prelude::millis;
 
-    let (_dir, mut log) = crate::log::test_support::configured_test_log(LogConfig {
+    let (_dir, mut log) = configured_test_log(LogConfig {
         segment_roll_interval: millis(1),
         ..LogConfig::default()
     });
@@ -607,7 +611,7 @@ fn a_full_offset_or_time_index_rolls_the_segment() {
         ),
     ];
     for (label, segment_index_size, rising, expected) in cases {
-        let (_dir, mut log) = crate::log::test_support::configured_test_log(LogConfig {
+        let (_dir, mut log) = configured_test_log(LogConfig {
             index_interval: bytes(1),
             segment_index_size,
             ..LogConfig::default()
@@ -637,7 +641,7 @@ fn a_full_offset_or_time_index_rolls_the_segment() {
 fn roll_reopens_stampindex_for_new_segment() {
     let dir = tempdir().unwrap();
     let mut log = rolling_test_log(dir.path());
-    crate::log::test_support::install_stamps(&mut log, 100, 5);
+    install_stamps(&mut log, 100, 5);
 
     log.append(&mut sample_batch(1)).unwrap(); // offset 0, segment 0, stamp 100
     log.append(&mut sample_batch(1)).unwrap(); // rolls: segment @ base 1, stamp 105
@@ -707,11 +711,11 @@ fn log_append_time_stamps_the_batch_and_leaves_the_producer_timestamps_alone() {
     let mut produced = test_batch_at(0);
     produced.base_timestamp = 1_000;
     produced.max_timestamp = 1_000;
-    let before = crate::retention::now_ms(std::time::SystemTime::now());
+    let before = now_ms(std::time::SystemTime::now());
 
     let (base_offset, stamp) = log.append(&mut produced).unwrap();
 
-    let after = crate::retention::now_ms(std::time::SystemTime::now());
+    let after = now_ms(std::time::SystemTime::now());
     let stamp = stamp.expect("a LogAppendTime log reports the stamp it wrote");
     check!(base_offset == Offset(0));
     check!((before..=after).contains(&stamp));
@@ -767,7 +771,7 @@ fn offset_for_timestamp_answers_in_append_time() {
 
     let (_base_offset, stamp) = log.append(&mut produced).unwrap();
 
-    let stamp = crate::log::test_support::check_append_time_lookup(&log, stamp);
+    let stamp = check_append_time_lookup(&log, stamp);
     check!(log.offset_for_timestamp(stamp) == Some((Offset(0), stamp)));
     check!(log.offset_for_timestamp(stamp + 1) == None);
     drop(dir);
@@ -775,12 +779,12 @@ fn offset_for_timestamp_answers_in_append_time() {
 
 /// A log on a topic with `delivery.mode=scheduled` and, when `monotonic`,
 /// `delivery.schedule.monotonic=true`.
-fn scheduled_log(monotonic: crate::config::ScheduleOrder) -> (tempfile::TempDir, Log) {
+fn scheduled_log(monotonic: ScheduleOrder) -> (tempfile::TempDir, Log) {
     let dir = tempdir().unwrap();
     let log = Log::open(
         dir.path(),
         LogConfig {
-            delivery_policy: crate::config::DeliveryPolicy::Scheduled,
+            delivery_policy: DeliveryPolicy::Scheduled,
             schedule_order: monotonic,
             ..LogConfig::default()
         },
@@ -815,7 +819,7 @@ fn a_monotonic_scheduled_log_refuses_a_batch_that_precedes_its_schedule() {
 
     for (delivery_ms, refused, label) in CASES {
         for verbatim in [false, true] {
-            let (dir, mut log) = scheduled_log(crate::config::ScheduleOrder::Monotonic);
+            let (dir, mut log) = scheduled_log(ScheduleOrder::Monotonic);
             for seeded in [1_000, 2_000] {
                 log.append(&mut batch_delivered_at(seeded))
                     .expect("seed the partition schedule");
@@ -853,7 +857,7 @@ fn a_monotonic_scheduled_log_refuses_a_batch_that_precedes_its_schedule() {
 /// admit the batch that the case above refuses.
 #[test]
 fn only_a_monotonic_scheduled_log_reads_the_schedule() {
-    let (dir, mut log) = scheduled_log(crate::config::ScheduleOrder::Unordered);
+    let (dir, mut log) = scheduled_log(ScheduleOrder::Unordered);
     log.append(&mut batch_delivered_at(2_000)).unwrap();
     check!(log.append(&mut batch_delivered_at(0)).is_ok());
     drop(dir);

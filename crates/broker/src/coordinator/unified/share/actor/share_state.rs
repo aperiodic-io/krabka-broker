@@ -30,7 +30,10 @@ use crate::{
             state::ShareGroupState,
         },
     },
-    share_coordinator::coordinator::UNINITIALIZED_START_OFFSET,
+    share_coordinator::{
+        coordinator::UNINITIALIZED_START_OFFSET, persister_client::SharePersister,
+    },
+    time_util::duration_millis,
 };
 
 /// The share partitions that a heartbeat initializes, and the group epoch
@@ -61,7 +64,7 @@ pub(super) fn prepare_initialize(
 ) -> Option<(ShareGroupStatePartitionMetadataValue, Initialize)> {
     coordinator.share_persister()?;
     let input = coordinator.metadata.snapshot();
-    let retry_ms = crate::time_util::duration_millis(config.initialize_retry_interval);
+    let retry_ms = duration_millis(config.initialize_retry_interval);
     let to_init = partitions_to_initialize(state, &input, now_ms, retry_ms);
     if to_init.is_empty() {
         return None;
@@ -228,7 +231,7 @@ struct InitializeCall {
 /// loads the group next retries the partitions that are still initializing,
 /// once `initialize_retry_interval` has passed.
 fn spawn_initialize(
-    persister: std::sync::Arc<crate::share_coordinator::persister_client::SharePersister>,
+    persister: std::sync::Arc<SharePersister>,
     actors: std::sync::Arc<dashmap::DashMap<String, std::sync::Arc<super::ShareGroupActorHandle>>>,
     group_id: String,
     state_epoch: i32,
@@ -391,6 +394,7 @@ mod tests {
             },
             test_support::{fixed_source, make_share_persister},
         },
+        test_support::PartitionCount,
     };
 
     /// Kafka's `subscribedTopicsChangeMap`: every partition of a subscribed
@@ -458,7 +462,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_heartbeat_does_not_wait_for_the_persister() {
         let (coordinator, log, topic_id) = unavailable_persister_coordinator(TopicMetadataSetup {
-            partitions: crate::test_support::PartitionCount(2),
+            partitions: PartitionCount(2),
             ..Default::default()
         });
         let handle = coordinator.get_or_create_share("g");
@@ -510,7 +514,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_initialize_outcome_moves_each_partition() {
         let (metadata, topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: crate::test_support::PartitionCount(3),
+            partitions: PartitionCount(3),
             ..Default::default()
         });
         let (coordinator, _log) = make_coordinator(metadata);
@@ -559,7 +563,7 @@ mod tests {
     #[test]
     fn every_partition_initializes_at_the_uninitialized_start_offset() {
         let (metadata, topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: crate::test_support::PartitionCount(2),
+            partitions: PartitionCount(2),
             ..Default::default()
         });
         let (coordinator, _log) = make_coordinator(metadata);

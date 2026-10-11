@@ -15,13 +15,16 @@ use super::{
     TOPIC,
     state::{CgcState, MemberProj},
 };
-use crate::coordinator::unified::{
-    actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
-    consumer_state::GroupState,
+use crate::coordinator::{
+    test_support::sorted_epoch_pairs,
+    unified::{
+        actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
+        consumer_state::GroupState,
+    },
 };
 
 fn epochs_of(map: &HashMap<Uuid, HashMap<i32, i32>>) -> Vec<(i32, i32)> {
-    crate::coordinator::test_support::sorted_epoch_pairs(map.get(&TOPIC))
+    sorted_epoch_pairs(map.get(&TOPIC))
 }
 
 fn epochs_to_map(epochs: &[(i32, i32)]) -> HashMap<Uuid, HashMap<i32, i32>> {

@@ -18,7 +18,9 @@ use crate::coordinator::unified::{
     actor::{
         GroupActorHandle, GroupActorMessage,
         test_support::{
-            decode_assignment, rpc, rpc::consumer_request_as_client as heartbeat, seed_and_upgrade,
+            decode_assignment,
+            rpc::{self, consumer_request_as_client as heartbeat},
+            seed_and_upgrade,
         },
     },
     config::{ConsumerGroupMigrationPolicy, NextGenConfig},
@@ -26,7 +28,10 @@ use crate::coordinator::unified::{
     reconciler::ReconcileInput,
     share::config::ShareGroupConfig,
     streams::config::StreamsGroupConfig,
-    test_support::{SwitchableMetadata, make_coord_with_metadata, proto_uuid, snapshot_of},
+    test_support::{
+        ConsumerJoinSetup, SwitchableMetadata, assignment_interval_fixture, consumer_join_request,
+        make_coord_with_metadata, proto_uuid, snapshot_of,
+    },
 };
 
 async fn metadata_update(handle: &GroupActorHandle, topics: &[&str]) {
@@ -41,12 +46,10 @@ async fn metadata_update(handle: &GroupActorHandle, topics: &[&str]) {
 
 /// The first heartbeat of member `m1`, which subscribes to `orders`.
 fn join() -> ConsumerGroupHeartbeatRequest {
-    crate::coordinator::unified::test_support::consumer_join_request(
-        crate::coordinator::unified::test_support::ConsumerJoinSetup {
-            topics: &["orders"],
-            ..Default::default()
-        },
-    )
+    consumer_join_request(ConsumerJoinSetup {
+        topics: &["orders"],
+        ..Default::default()
+    })
 }
 
 /// A later heartbeat of `m1`, which sends only what changed, as Kafka's
@@ -327,8 +330,7 @@ async fn the_written_metadata_hash_is_kafkas() {
 async fn the_replayed_assignment_timestamp_holds_the_interval() {
     use crate::coordinator::unified::{GroupSeed, wall_clock_ms};
 
-    let (rows, mut cases) =
-        crate::coordinator::unified::test_support::assignment_interval_fixture();
+    let (rows, mut cases) = assignment_interval_fixture();
 
     for (case, ago, wanted) in rows {
         let coordinator = Arc::new(GroupCoordinator::new(

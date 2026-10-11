@@ -62,6 +62,7 @@ use self::{
     universe::{EXPIRES_AT, ProposalSpec, Request},
 };
 use super::state_model::config;
+use crate::model_check::check_model;
 
 mod properties;
 mod transitions;
@@ -83,7 +84,7 @@ const PINNED_UNIQUE_STATES_PARTITION_LOOKALIKE: usize = 432;
 const PINNED_UNIQUE_STATES_BOTH_COVER: usize = 432;
 
 fn run(model: CrossSpendModel, label: &str, pinned_unique_states: usize) {
-    crate::model_check::check_model(
+    check_model(
         model,
         label,
         (MAX_DEPTH, TARGET_STATE_COUNT, MAX_UNIQUE_STATES),

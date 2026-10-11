@@ -10,22 +10,20 @@ use krabka_protocol::owned::{
     delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
 };
 
-use crate::{
-    support,
-    support::topics::{creatable_topic, create_topic_request},
+use crate::support::{
+    self,
+    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
 };
 
 #[tokio::test]
 async fn create_then_delete_topic_round_trip() {
     let p = support::start().await;
 
-    let create = create_topic_request(creatable_topic(
-        crate::support::topics::ConfiguredTopicSetup {
-            name: ("alpha").into(),
-            partitions: crate::support::topics::TopicPartitionCount(2),
-            ..Default::default()
-        },
-    ));
+    let create = create_topic_request(creatable_topic(ConfiguredTopicSetup {
+        name: ("alpha").into(),
+        partitions: TopicPartitionCount(2),
+        ..Default::default()
+    }));
     let resp = p.client.send(create).await.expect("CreateTopics");
     assert!(resp.topics.len() == 1);
     check!(resp.topics[0].error_code == 0);
@@ -50,13 +48,11 @@ async fn create_then_delete_topic_round_trip() {
 #[tokio::test]
 async fn create_topic_with_zero_partitions_errors() {
     let p = support::start().await;
-    let create = create_topic_request(creatable_topic(
-        crate::support::topics::ConfiguredTopicSetup {
-            name: ("zero").into(),
-            partitions: crate::support::topics::TopicPartitionCount(0),
-            ..Default::default()
-        },
-    ));
+    let create = create_topic_request(creatable_topic(ConfiguredTopicSetup {
+        name: ("zero").into(),
+        partitions: TopicPartitionCount(0),
+        ..Default::default()
+    }));
     let resp = p.client.send(create).await.expect("CreateTopics");
     assert!(resp.topics[0].error_code == 37); // INVALID_PARTITIONS
     p.broker.shutdown().await;
@@ -66,12 +62,10 @@ async fn create_topic_with_zero_partitions_errors() {
 async fn duplicate_create_returns_topic_already_exists() {
     let p = support::start().await;
     let req = || {
-        create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
-                name: ("dup").into(),
-                ..Default::default()
-            },
-        ))
+        create_topic_request(creatable_topic(ConfiguredTopicSetup {
+            name: ("dup").into(),
+            ..Default::default()
+        }))
     };
     let r1 = p.client.send(req()).await.expect("CreateTopics 1");
     assert!(r1.topics[0].error_code == 0);

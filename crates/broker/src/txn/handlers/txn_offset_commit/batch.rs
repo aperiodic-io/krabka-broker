@@ -25,6 +25,7 @@ use crate::{
     },
     error::BrokerError,
     metadata_source::MetadataSource,
+    partition::ProducerAppendCheck,
     partition_registry::PartitionRegistry,
 };
 
@@ -68,7 +69,7 @@ pub(super) async fn append_txn_batch(
         &std::collections::HashSet<String>,
         &std::collections::HashSet<(String, i32)>,
     ),
-    (producer_check, record_topic_ids): (crate::partition::ProducerAppendCheck, bool),
+    (producer_check, record_topic_ids): (ProducerAppendCheck, bool),
 ) -> Result<Option<(AppendedTxnOffsets, LeaderAppend)>, i16> {
     let mut batch = RecordBatch {
         attributes: Attributes::default().with_transactional(true),
@@ -186,8 +187,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        coordinator::bootstrap::{OFFSETS_PARTITION, OFFSETS_TOPIC},
-        test_support::{FakeMetadataSource, open_partition},
+        coordinator::{
+            bootstrap::{OFFSETS_PARTITION, OFFSETS_TOPIC},
+            test_support::offsets_partition_image,
+        },
+        partition::{Partition, ProducerAppendCheck},
+        test_support::{FakeMetadataSource, StandalonePartitionSetup, open_partition},
         txn::handlers::txn_offset_commit::{test_support::request, verification::offset_batch},
     };
 
@@ -203,10 +208,7 @@ mod tests {
 
     /// An image in which `leader` leads the offsets partition at `epoch`.
     fn offsets_image(leader: NodeId, epoch: i32) -> MetadataImage {
-        crate::coordinator::test_support::offsets_partition_image(
-            (OFFSETS_PARTITION, leader, epoch),
-            &[leader],
-        )
+        offsets_partition_image((OFFSETS_PARTITION, leader, epoch), &[leader])
     }
 
     /// Metadata in which this broker leads the offsets partition.
@@ -222,7 +224,7 @@ mod tests {
             PartitionIndex(OFFSETS_PARTITION),
             open_partition(
                 dir.path(),
-                crate::test_support::StandalonePartitionSetup {
+                StandalonePartitionSetup {
                     topic: OFFSETS_TOPIC,
                     partition: krabka_ids::PartitionIndex(OFFSETS_PARTITION),
                     ..Default::default()
@@ -232,7 +234,7 @@ mod tests {
         (dir, registry)
     }
 
-    fn offsets_partition(registry: &PartitionRegistry) -> Arc<crate::partition::Partition> {
+    fn offsets_partition(registry: &PartitionRegistry) -> Arc<Partition> {
         registry
             .get(OFFSETS_TOPIC, PartitionIndex(OFFSETS_PARTITION))
             .expect("offsets partition")
@@ -271,14 +273,14 @@ mod tests {
     async fn verified(
         registry: &PartitionRegistry,
         req: &TxnOffsetCommitRequest,
-    ) -> crate::partition::ProducerAppendCheck {
+    ) -> ProducerAppendCheck {
         let part = offsets_partition(registry);
         let batch = offset_batch(req);
         let guard = part
             .start_transaction_verification(batch, false, (0, i64::MAX))
             .await
             .expect("verification starts");
-        crate::partition::ProducerAppendCheck { batch, guard }
+        ProducerAppendCheck { batch, guard }
     }
 
     async fn append_here(
@@ -354,7 +356,7 @@ mod tests {
     async fn append_txn_batch_returns_not_coordinator_when_offsets_partition_missing() {
         let registry = Arc::new(PartitionRegistry::new());
         let req = request();
-        let unverified = crate::partition::ProducerAppendCheck {
+        let unverified = ProducerAppendCheck {
             batch: offset_batch(&req),
             guard: krabka_log::VerificationGuard::SENTINEL,
         };
@@ -527,7 +529,7 @@ mod tests {
             ("an unverified producer", other, codes::INVALID_TXN_STATE),
         ];
         for (label, req, expected) in cases {
-            let unverified = crate::partition::ProducerAppendCheck {
+            let unverified = ProducerAppendCheck {
                 batch: offset_batch(&req),
                 guard: krabka_log::VerificationGuard::SENTINEL,
             };

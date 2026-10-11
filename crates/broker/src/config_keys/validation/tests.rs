@@ -16,6 +16,10 @@ use super::{
     },
     *,
 };
+use crate::{
+    test_support::config_map,
+    throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_REPLICAS_KEY},
+};
 
 /// A name Kafka has no `TopicConfig` entry for, which its own `LogConfig`
 /// refuses with `Unknown topic config name`. The probe every unknown-key test
@@ -604,7 +608,7 @@ fn tiered_storage_rules_follow_kafkas_log_config() {
         ),
     ];
     for (tier_on, pairs, want) in cases {
-        let map = crate::test_support::config_map(&pairs);
+        let map = config_map(&pairs);
         check!(
             canonical_topic_config_map(
                 &map,
@@ -723,7 +727,7 @@ fn cross_key_rules_read_the_cluster_broker_defaults() {
                 },
             ));
         }
-        let map = crate::test_support::config_map(&topic);
+        let map = config_map(&topic);
         check!(
             canonical_topic_config_map(
                 &map,
@@ -1001,8 +1005,8 @@ fn the_disable_refusal_names_both_ways_out() {
 /// which is `ConfigDef.convertToString` of the parsed value.
 #[test]
 fn values_are_parsed_the_way_kafkas_config_def_parses_them() {
-    let leader = crate::throttle::LEADER_THROTTLED_REPLICAS_KEY;
-    let follower = crate::throttle::FOLLOWER_THROTTLED_REPLICAS_KEY;
+    let leader = LEADER_THROTTLED_REPLICAS_KEY;
+    let follower = FOLLOWER_THROTTLED_REPLICAS_KEY;
     let cases = [
         (PREALLOCATE, "TRUE", Some("true")),
         (REMOTE_LOG_COPY_DISABLE, " false ", Some("false")),
@@ -1125,7 +1129,7 @@ fn refusals_carry_kafkas_config_exception_text() {
              more than 1",
         ),
         (
-            crate::throttle::FOLLOWER_THROTTLED_REPLICAS_KEY,
+            FOLLOWER_THROTTLED_REPLICAS_KEY,
             "0 : 1",
             "Invalid value [0 : 1] for configuration follower.replication.throttled.replicas: \
              follower.replication.throttled.replicas must be the literal '*' or a list of \
@@ -1194,7 +1198,7 @@ fn a_config_value_longer_than_short_max_value_is_refused_before_any_key_check() 
     );
     // A list that fits validates as its own format says, and one that does not
     // fit is refused for its size on the per-key path too.
-    let key = crate::throttle::LEADER_THROTTLED_REPLICAS_KEY;
+    let key = LEADER_THROTTLED_REPLICAS_KEY;
     check!(validate_topic_config(key, &fits) == Ok(()));
     check!(validate_topic_config(key, &too_long) == Err(MESSAGE.to_owned()));
 }

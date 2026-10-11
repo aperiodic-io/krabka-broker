@@ -29,7 +29,9 @@ use krabka_protocol::owned::{
 };
 use krabka_units::convert::TimeExt as _;
 
-use crate::support::{client::connect_client, discovery::topic_metadata_request};
+use crate::support::{
+    client::connect_client, discovery::topic_metadata_request, registered_cluster, shutdown_cluster,
+};
 
 mod support;
 
@@ -48,7 +50,7 @@ const FENCING_DEADLINE: Duration = Duration::from_secs(30);
 async fn a_non_controller_node_stops_advertising_a_broker_that_died() {
     support::init_tracing();
 
-    let mut cluster = crate::support::registered_cluster(3).await;
+    let mut cluster = registered_cluster(3).await;
 
     // The node under test must not be the one holding the heartbeat registry,
     // or the answer could come from local state rather than from the log.
@@ -128,7 +130,7 @@ async fn a_non_controller_node_stops_advertising_a_broker_that_died() {
         "the observer must still be a follower for this test to mean anything"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 fn node_id_of(handle: &BrokerHandle) -> i32 {

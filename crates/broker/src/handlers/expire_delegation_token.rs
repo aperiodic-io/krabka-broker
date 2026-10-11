@@ -32,7 +32,9 @@ use krabka_security::SecretBytes;
 use krabka_verified::{TokenExpireDecision, delegation_token::TokenApi, expire_token_deadline};
 
 use crate::{
+    codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH, INVALID_REQUEST},
     handlers::{ErrorCodeResponse as _, renew_delegation_token::admit_token_request},
+    metadata_source::MetadataSource,
     network::auth::ConnectionAuth,
     time_util::now_ms,
 };
@@ -47,7 +49,7 @@ pub(crate) async fn handle(
     req: &ExpireDelegationTokenRequest,
     auth: &ConnectionAuth,
     secret_key: Option<&SecretBytes>,
-    controller: &dyn crate::metadata_source::MetadataSource,
+    controller: &dyn MetadataSource,
 ) -> ExpireDelegationTokenResponse {
     let (principal, token) = match admit_token_request(
         TokenApi::Expire,
@@ -67,7 +69,7 @@ pub(crate) async fn handle(
     let caller = principal.to_kafka();
 
     if token.owner != caller && !token.renewers.contains(&caller) {
-        return ExpireDelegationTokenResponse::error(crate::codes::DELEGATION_TOKEN_OWNER_MISMATCH);
+        return ExpireDelegationTokenResponse::error(DELEGATION_TOKEN_OWNER_MISMATCH);
     }
 
     let now = now_ms();
@@ -79,7 +81,7 @@ pub(crate) async fn handle(
         token.max_timestamp_ms,
     ) {
         TokenExpireDecision::Expired => {
-            return ExpireDelegationTokenResponse::error(crate::codes::DELEGATION_TOKEN_EXPIRED);
+            return ExpireDelegationTokenResponse::error(DELEGATION_TOKEN_EXPIRED);
         }
         TokenExpireDecision::Delete => (DelegationTokenMutation::Delete { expected }, now),
         TokenExpireDecision::Update(new_expiry) => {
@@ -101,7 +103,7 @@ pub(crate) async fn handle(
         .await
     {
         tracing::warn!(error = %e, "ExpireDelegationToken: submit_change failed");
-        return ExpireDelegationTokenResponse::error(crate::codes::INVALID_REQUEST);
+        return ExpireDelegationTokenResponse::error(INVALID_REQUEST);
     }
 
     ExpireDelegationTokenResponse {
@@ -118,13 +120,14 @@ mod tests {
 
     use super::*;
     use crate::{
+        codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH},
         handlers::delegation_token_test_support::{
             DAY_MS, MutationSeedSetup, OwnershipRefusalSetup, TokenExpiryRule, TokenExpirySetup,
             TokenMutationIndex, TokenMutationRefusalSetup, TokenPeriodMillis, TokenPersistence,
             authed, in_mutation_window, mutation_credential_refusals, ownership_refusal,
             stored_expiry, test_controller,
         },
-        test_support::UnixMillis,
+        test_support::{KafkaErrorCode, UnixMillis},
     };
 
     /// Refusals come in Kafka's order, carry Kafka's expiry, and leave the
@@ -178,16 +181,14 @@ mod tests {
                 authentication: authed("eve"),
                 hmac: expired.0.clone(),
                 period: TokenPeriodMillis(0),
-                error: crate::test_support::KafkaErrorCode(
-                    crate::codes::DELEGATION_TOKEN_OWNER_MISMATCH,
-                ),
+                error: KafkaErrorCode(DELEGATION_TOKEN_OWNER_MISMATCH),
                 ..Default::default()
             },
             TokenMutationRefusalSetup {
                 name: "owner, expired token",
                 hmac: expired.0.clone(),
                 period: TokenPeriodMillis(0),
-                error: crate::test_support::KafkaErrorCode(crate::codes::DELEGATION_TOKEN_EXPIRED),
+                error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
                 ..Default::default()
             },
             TokenMutationRefusalSetup {
@@ -195,7 +196,7 @@ mod tests {
                 authentication: authed("bob"),
                 hmac: expired.0.clone(),
                 period: TokenPeriodMillis(1_000),
-                error: crate::test_support::KafkaErrorCode(crate::codes::DELEGATION_TOKEN_EXPIRED),
+                error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
                 ..Default::default()
             },
         ]);

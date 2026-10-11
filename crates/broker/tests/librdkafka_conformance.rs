@@ -21,7 +21,10 @@ use std::{
 use assert2::assert;
 use krabka_client_admin::AdminClient;
 
-use crate::jvm_acceptance::{broker0_advertised, start_host_broker, start_host_broker_with};
+use crate::{
+    jvm_acceptance::{broker0_advertised, start_host_broker, start_host_broker_with},
+    support::admin::topic_spec,
+};
 
 /// One librdkafka client this suite runs the whole round trip against.
 struct ClientCase {
@@ -167,7 +170,7 @@ async fn round_trip_group_join_and_api_versions_with_kcat() {
         let topic = format!("librdkafka-conformance-{index}");
         admin
             .create_topics(
-                &[crate::support::admin::topic_spec(topic.clone(), 1, 1)],
+                &[topic_spec(topic.clone(), 1, 1)],
                 krabka_client_admin::TopicMutationOptions::with_timeout(krabka_units::secs(5)),
             )
             .await
@@ -287,7 +290,7 @@ async fn next_gen_group_topic_ids_and_telemetry_with_librdkafka_2x() {
     let topic = "librdkafka-2x-next-gen";
     admin
         .create_topics(
-            &[crate::support::admin::topic_spec(topic.to_string(), 1, 1)],
+            &[topic_spec(topic.to_string(), 1, 1)],
             krabka_client_admin::TopicMutationOptions::with_timeout(krabka_units::secs(5)),
         )
         .await

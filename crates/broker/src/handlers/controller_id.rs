@@ -85,11 +85,12 @@ mod tests {
     use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord, NodeId};
 
     use super::*;
+    use crate::test_support::broker_registration;
 
     fn broker_record(node_id: NodeId) -> BrokerRegistrationRecord {
         BrokerRegistrationRecord {
             host: "broker-host".into(),
-            ..crate::test_support::broker_registration(node_id)
+            ..broker_registration(node_id)
         }
     }
 

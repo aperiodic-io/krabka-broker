@@ -143,6 +143,7 @@ mod tests {
     use krabka_security::ListenerProtocol;
 
     use super::*;
+    use crate::test_support::principal;
 
     crate::test_support::context_helper!(client_id = "controller");
 
@@ -171,7 +172,7 @@ mod tests {
                 crate::authorizer::AllowAllAuthorizer,
             ))
         );
-        let principal = crate::test_support::principal("controller");
+        let principal = principal("controller");
         let peer: SocketAddr = "127.0.0.1:9093".parse().unwrap();
         let ctx = test_context(&principal, &peer);
         let version = krabka_protocol::owned::controller_registration_request::MAX_VERSION;

@@ -13,7 +13,7 @@ use bytes::Bytes;
 use krabka_log::{Offset, ProducerId};
 use krabka_protocol::records::{Attributes, Record, RecordBatch};
 
-use crate::{codes, error::BrokerError};
+use crate::{codes, error::BrokerError, txn::util::now_millis};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkerType {
@@ -165,7 +165,7 @@ pub fn build_marker_batch(
     // with the broker's clock. The marker's timestamp becomes the producer's
     // `ProducerStateEntry.lastTimestamp`, which `producer.id.expiration.ms`
     // ages the producer by.
-    let now = crate::txn::util::now_millis();
+    let now = now_millis();
     RecordBatch {
         attributes: attrs,
         base_offset: base_offset.0,

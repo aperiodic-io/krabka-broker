@@ -10,6 +10,8 @@
 //! One fenced block at the end of this file holds the krabka-private codes at
 //! 1000 and above. A broker returns those only on a krabka-private api key.
 
+use crate::error::BrokerError;
+
 #[cfg(test)]
 mod tests;
 
@@ -636,7 +638,7 @@ pub(crate) fn coordinator_operation_code(code: i16) -> i16 {
 /// internal errors map to `UNKNOWN_SERVER_ERROR`. Specific variants map to
 /// more meaningful codes.
 #[must_use]
-pub fn from_broker_error(err: &crate::error::BrokerError) -> i16 {
+pub fn from_broker_error(err: &BrokerError) -> i16 {
     use crate::error::BrokerError;
     match err {
         // KFC-1 `delivery.schedule.monotonic`. The log refuses a batch whose

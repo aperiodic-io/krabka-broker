@@ -11,7 +11,14 @@ use krabka_protocol::{
 };
 
 use super::*;
-use crate::test_support::{PartitionCount, ReplicationFactor};
+use crate::{
+    barrier::STATE_TOPIC,
+    coordinator::bootstrap::OFFSETS_TOPIC,
+    share_coordinator::bootstrap::TOPIC as SHARE_TOPIC,
+    test_support::{PartitionCount, ReplicationFactor, start_broker_no_audit},
+    time_util::now_ms,
+    txn::bootstrap::TOPIC as TXN_TOPIC,
+};
 
 fn configs(pairs: &[(&str, &str)]) -> Vec<CreatableTopicConfig> {
     pairs
@@ -93,9 +100,9 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
         (
             "__consumer_offsets",
             &config,
-            crate::coordinator::bootstrap::OFFSETS_TOPIC,
+            OFFSETS_TOPIC,
             topic(AutoTopicSetup {
-                name: crate::coordinator::bootstrap::OFFSETS_TOPIC,
+                name: OFFSETS_TOPIC,
                 num_partitions: PartitionCount(11),
                 replication_factor: ReplicationFactor(3),
                 configs: configs(&[
@@ -108,9 +115,9 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
         (
             "__transaction_state",
             &config,
-            crate::txn::bootstrap::TOPIC,
+            TXN_TOPIC,
             topic(AutoTopicSetup {
-                name: crate::txn::bootstrap::TOPIC,
+                name: TXN_TOPIC,
                 num_partitions: PartitionCount(12),
                 replication_factor: ReplicationFactor(2),
                 configs: configs(&[
@@ -125,9 +132,9 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
         (
             "__share_group_state",
             &config,
-            crate::share_coordinator::bootstrap::TOPIC,
+            SHARE_TOPIC,
             topic(AutoTopicSetup {
-                name: crate::share_coordinator::bootstrap::TOPIC,
+                name: SHARE_TOPIC,
                 num_partitions: PartitionCount(13),
                 replication_factor: ReplicationFactor(4),
                 configs: configs(&[
@@ -142,9 +149,9 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
         (
             "__barrier_state",
             &config,
-            crate::barrier::STATE_TOPIC,
+            STATE_TOPIC,
             topic(AutoTopicSetup {
-                name: crate::barrier::STATE_TOPIC,
+                name: STATE_TOPIC,
                 num_partitions: PartitionCount(14),
                 replication_factor: ReplicationFactor(5),
                 configs: configs(&[("cleanup.policy", "compact")]),
@@ -195,7 +202,7 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
 #[tokio::test]
 async fn an_unbound_request_creates_nothing() {
     let creation = Arc::new(AutoTopicCreation::default());
-    creation.request(crate::coordinator::bootstrap::OFFSETS_TOPIC);
+    creation.request(OFFSETS_TOPIC);
     check!(creation.started() == 0);
     check!(!creation.is_in_flight(crate::coordinator::bootstrap::OFFSETS_TOPIC));
 }
@@ -392,7 +399,7 @@ fn a_finished_streams_creation_caches_kafkas_errors() {
 /// only when some topic is left.
 #[tokio::test]
 async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
-    let (handle, _dir) = crate::test_support::start_broker_no_audit().await;
+    let (handle, _dir) = start_broker_no_audit().await;
     let broker = handle.broker_arc_for_test();
     let creation = &broker.auto_topic_creation;
     let identity = ForwardedIdentity {
@@ -401,12 +408,9 @@ async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
         client_id: "streams-client".to_owned(),
         correlation_id: 1,
     };
-    creation.errors.put(
-        "backed-off",
-        "no brokers".into(),
-        60_000,
-        crate::time_util::now_ms(),
-    );
+    creation
+        .errors
+        .put("backed-off", "no brokers".into(), 60_000, now_ms());
     assert!(creation.hold_for_test("in-flight"));
 
     creation.create_streams_internal_topics(

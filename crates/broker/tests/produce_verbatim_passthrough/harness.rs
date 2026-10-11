@@ -21,8 +21,11 @@ use krabka_protocol::{
 pub use crate::support::topic_id_for;
 use crate::support::{
     client::connect_client,
-    fetch::{fetch_partition, single_partition_fetch},
-    produce::single_partition_produce,
+    fetch::{
+        FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+        SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+    },
+    produce::{SinglePartitionProduceSetup, single_partition_produce},
     records::value_record,
 };
 
@@ -121,14 +124,12 @@ pub async fn produce_payload(
     records: RecordsPayload,
 ) -> Result<i64, i16> {
     let resp = client
-        .send(single_partition_produce(
-            crate::support::produce::SinglePartitionProduceSetup {
-                topic: (topic).into(),
-                topic_id,
-                records: Some(records),
-                ..Default::default()
-            },
-        ))
+        .send(single_partition_produce(SinglePartitionProduceSetup {
+            topic: (topic).into(),
+            topic_id,
+            records: Some(records),
+            ..Default::default()
+        }))
         .await
         .expect("Produce");
     let pr = &resp.responses[0].partition_responses[0];
@@ -156,16 +157,16 @@ pub async fn fetch_first_batch(
     let resp = client
         .send(FetchRequest {
             replica_id: -1,
-            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+            ..single_partition_fetch(SinglePartitionFetchSetup {
                 topic: topic.into(),
                 topic_id,
-                partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
-                    maximum: crate::support::fetch::FetchByteLimit(8 << 20),
+                partition: fetch_partition(FetchPartitionSetup {
+                    maximum: FetchByteLimit(8 << 20),
                     ..Default::default()
                 }),
-                limits: crate::support::fetch::FetchLimits::wait_for_data_with_maximum(
-                    crate::support::fetch::RequestWaitMillis(1_000),
-                    crate::support::fetch::FetchByteLimit(8 << 20),
+                limits: FetchLimits::wait_for_data_with_maximum(
+                    RequestWaitMillis(1_000),
+                    FetchByteLimit(8 << 20),
                 ),
             })
         })

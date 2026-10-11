@@ -62,6 +62,8 @@ const SHARE_STATE_PARTITIONS: i32 = 50;
 
 use support::share::coordinator_key as share_coordinator_key;
 
+use crate::support::{share::ShareProduceSetup, topics::CreateTopicSetup};
+
 /// Boots one broker bound to `0.0.0.0:9092` that advertises
 /// `host.docker.internal:9092`. The Docker container's connect after Metadata
 /// then targets a hostname it can resolve. This mirrors
@@ -84,7 +86,7 @@ async fn create_topic(broker: &BrokerHandle, client: &Client, topic: &str) -> uu
     support::client::create_led_topic(
         broker,
         client,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic,
             ..Default::default()
         },
@@ -153,7 +155,7 @@ async fn produce_at(
             records,
             ..Default::default()
         },
-        crate::support::share::ShareProduceSetup {
+        ShareProduceSetup {
             topic,
             topic_id: tid,
             ..Default::default()

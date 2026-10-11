@@ -152,7 +152,8 @@ mod tests {
     use crate::{
         message::attrs_with_compression,
         set::{
-            encode_compressed_message_set, encode_flat_message_set, test_support::sample_records_v1,
+            encode_compressed_message_set, encode_flat_message_set,
+            test_support::{compressed_bytes, decode_bytes, sample_records_v1},
         },
     };
 
@@ -292,9 +293,8 @@ mod tests {
             key: None,
             value: Some(Bytes::from(big.clone())),
         }];
-        let buf =
-            crate::set::test_support::compressed_bytes(&recs, Magic::V1, CompressionType::Gzip);
-        let decoded = crate::set::test_support::decode_bytes(&buf);
+        let buf = compressed_bytes(&recs, Magic::V1, CompressionType::Gzip);
+        let decoded = decode_bytes(&buf);
         assert2::assert!(decoded == recs);
     }
 
@@ -328,7 +328,7 @@ mod tests {
         ];
         encode_compressed_message_set(&inner, Magic::V1, CompressionType::Gzip, &mut buf).unwrap();
 
-        let decoded = crate::set::test_support::decode_bytes(&buf);
+        let decoded = decode_bytes(&buf);
         let expected = std::iter::once(flat).chain(inner).collect::<Vec<_>>();
         assert2::assert!(decoded == expected);
     }

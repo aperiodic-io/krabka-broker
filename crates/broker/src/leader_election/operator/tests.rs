@@ -8,9 +8,12 @@ use krabka_metadata::{LeaderEpoch, MetadataImage};
 use uuid::Uuid;
 
 use super::*;
-use crate::leader_election::test_support::{
-    ElectionSetup, ExpectedPartitionSetup, alive_set, img_with_partition, no_witnesses,
-    register_broker_with_dirs, witnesses,
+use crate::{
+    leader_election::test_support::{
+        ElectionSetup, ExpectedPartitionSetup, alive_set, expected_partition, img_with_partition,
+        no_witnesses, register_broker_with_dirs, witnesses,
+    },
+    test_support::replica_nodes,
 };
 
 #[tokio::test]
@@ -30,17 +33,16 @@ async fn preferred_happy_path() {
         ElectionType::Preferred,
     )
     .expect("should elect");
-    let expected =
-        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
-            topic: "foo",
-            leader: krabka_raft::NodeId(1),
-            isr: &[
-                krabka_raft::NodeId(1),
-                krabka_raft::NodeId(2),
-                krabka_raft::NodeId(3),
-            ],
-            ..Default::default()
-        });
+    let expected = expected_partition(ExpectedPartitionSetup {
+        topic: "foo",
+        leader: krabka_raft::NodeId(1),
+        isr: &[
+            krabka_raft::NodeId(1),
+            krabka_raft::NodeId(2),
+            krabka_raft::NodeId(3),
+        ],
+        ..Default::default()
+    });
     assert!(new_pr == expected);
 }
 
@@ -93,7 +95,7 @@ async fn preferred_election_error_cases() {
         let img = img_with_partition(ElectionSetup {
             topic: "foo",
             leader: krabka_raft::NodeId(leader),
-            isr: &crate::test_support::replica_nodes(isr),
+            isr: &replica_nodes(isr),
             ..Default::default()
         });
         let l = alive_set(alive);
@@ -125,12 +127,11 @@ async fn unclean_happy_path() {
     let new_pr =
         select_new_leader_for_partition(&img, &l, &no_witnesses(), "foo", 0, ElectionType::Unclean)
             .expect("unclean should elect");
-    let expected =
-        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
-            topic: "foo",
-            isr: &[krabka_raft::NodeId(2)],
-            ..Default::default()
-        });
+    let expected = expected_partition(ExpectedPartitionSetup {
+        topic: "foo",
+        isr: &[krabka_raft::NodeId(2)],
+        ..Default::default()
+    });
     assert!(new_pr == expected);
 }
 
@@ -220,13 +221,12 @@ async fn operator_unclean_election_skips_a_witness_replica() {
         ElectionType::Unclean,
     )
     .expect("unclean should elect the data replica");
-    let expected =
-        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
-            topic: "foo",
-            leader: krabka_raft::NodeId(3),
-            isr: &[krabka_raft::NodeId(3)],
-            ..Default::default()
-        });
+    let expected = expected_partition(ExpectedPartitionSetup {
+        topic: "foo",
+        leader: krabka_raft::NodeId(3),
+        isr: &[krabka_raft::NodeId(3)],
+        ..Default::default()
+    });
     assert!(new_pr == expected);
 }
 
@@ -324,7 +324,7 @@ async fn elections_skip_a_replica_on_a_dead_log_dir() {
         let mut img = img_with_partition(ElectionSetup {
             topic: "foo",
             leader: krabka_raft::NodeId(leader),
-            isr: &crate::test_support::replica_nodes(isr),
+            isr: &replica_nodes(isr),
             dirs: &dirs,
             ..Default::default()
         });

@@ -15,14 +15,14 @@ pub(crate) use crate::support::topic_id_for;
 use crate::support::{
     client::connect_client,
     records::value_record,
-    topics::{creatable_topic, create_topic_request},
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
 
 pub(crate) async fn create_topic(broker: &BrokerHandle, bootstrap: &str, name: &str) {
     let client = connect_client(bootstrap.to_string(), None).await;
     let _ = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (name).into(),
                 ..Default::default()
             },

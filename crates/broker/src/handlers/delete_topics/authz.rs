@@ -26,6 +26,7 @@ use crate::{
     authorizer::{AuthorizationResult, authorize_topics},
     broker::Broker,
     codes,
+    handlers::{RequestContext, cluster_shortcut_denied},
 };
 
 /// The topics of one request that the principal may describe and may delete.
@@ -67,10 +68,10 @@ impl TopicAccess {
 pub(super) fn topic_access<'a>(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     names: impl IntoIterator<Item = &'a str> + Clone,
 ) -> TopicAccess {
-    if !crate::handlers::cluster_shortcut_denied(broker, image, context, AclOperation::Delete) {
+    if !cluster_shortcut_denied(broker, image, context, AclOperation::Delete) {
         return TopicAccess::Cluster;
     }
     TopicAccess::Topics {
@@ -161,7 +162,7 @@ pub(super) fn admit_row(
 fn allowed<'a>(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     operation: AclOperation,
     names: impl IntoIterator<Item = &'a str>,
 ) -> HashSet<String> {

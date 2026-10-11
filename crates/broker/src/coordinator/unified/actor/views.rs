@@ -259,11 +259,17 @@ mod tests {
 
     use crate::{
         codes,
-        coordinator::unified::actor::{
-            GroupActorMessage,
-            test_support::{
-                make_coordinator, make_coordinator_with_topic_policy, rpc, seed_and_upgrade,
+        coordinator::unified::{
+            actor::{
+                GroupActorMessage,
+                test_support::{
+                    make_coordinator, make_coordinator_with_topic_policy, marked_classic_handle,
+                    rpc, seed_and_upgrade,
+                },
             },
+            config::ConsumerGroupMigrationPolicy,
+            consumer_state::{GroupState, test_support::member},
+            regex_resolver::no_topic_regex_resolver,
         },
     };
 
@@ -282,11 +288,9 @@ mod tests {
             (vec![Some("uniform"), Some("range")], Some("range")),
         ];
         for (assignors, expected) in rows {
-            let mut state = crate::coordinator::unified::consumer_state::GroupState::new("g");
+            let mut state = GroupState::new("g");
             for (i, assignor) in assignors.iter().enumerate() {
-                let mut m = crate::coordinator::unified::consumer_state::test_support::member(
-                    &format!("m{i}"),
-                );
+                let mut m = member(&format!("m{i}"));
                 m.server_assignor = assignor.map(str::to_string);
                 state.members.insert(m.member_id.clone(), m);
             }
@@ -303,8 +307,7 @@ mod tests {
     async fn classic_admin_surface_and_immediate_join() {
         use krabka_protocol::owned::join_group_request::JoinGroupRequest;
         let (coord, log) = make_coordinator();
-        let handle =
-            crate::coordinator::unified::actor::test_support::marked_classic_handle(&coord, "g");
+        let handle = marked_classic_handle(&coord, "g");
 
         // Empty member_id → immediate MEMBER_ID_REQUIRED (no member added).
         let rx = rpc::begin(&handle, |tx| GroupActorMessage::ClassicJoin {
@@ -323,7 +326,7 @@ mod tests {
             version: 4,
             client_id: "client-a".into(),
             client_host: String::new(),
-            regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
+            regex_resolver: no_topic_regex_resolver(),
             reply: tx,
         })
         .await;
@@ -358,11 +361,8 @@ mod tests {
         // Pin `Upgrade` policy so the transient native member's leave in
         // `seed_and_upgrade` does NOT downgrade the group back to classic —
         // we want it to STAY consumer-kind for this test.
-        let (coord, _log) = make_coordinator_with_topic_policy(
-            "t",
-            2,
-            crate::coordinator::unified::config::ConsumerGroupMigrationPolicy::Upgrade,
-        );
+        let (coord, _log) =
+            make_coordinator_with_topic_policy("t", 2, ConsumerGroupMigrationPolicy::Upgrade);
         // Seed classic "m-classic" subscribed to "t", then upgrade in place via a
         // native consumer heartbeat. The group is now consumer-kind, hosting the
         // classic member (the native member left in the helper).

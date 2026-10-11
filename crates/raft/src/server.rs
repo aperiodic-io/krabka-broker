@@ -60,13 +60,17 @@ use self::{
         API_KEY_UPDATE_RAFT_VOTER, kip853_admin_response,
     },
 };
-use crate::{ListenerLimits, error::RaftError, kraft::KraftController};
+use crate::{
+    ClusterGrants, ConnectionLimiter, ControllerAdminRouter, ControllerApiVersions, ListenerLimits,
+    RaftHandshakeError, RaftListenerHandshake, RaftShardRouter, UnstableApiVersions,
+    error::RaftError, kraft::KraftController,
+};
 
 /// The listener's own `ApiVersions` answer, handed to the handshake for the
 /// requests that arrive before SASL authentication.
 struct ListenerApiVersions {
     engine: KraftController,
-    admin_router: Option<Arc<dyn crate::ControllerAdminRouter>>,
+    admin_router: Option<Arc<dyn ControllerAdminRouter>>,
     unstable: Unstable,
 }
 
@@ -78,15 +82,15 @@ struct ListenerApiVersions {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Unstable {
     /// `unstable.api.versions.enable`.
-    pub(crate) api_versions: crate::UnstableApiVersions,
+    pub(crate) api_versions: UnstableApiVersions,
 }
 
-impl crate::ControllerApiVersions for ListenerApiVersions {
+impl ControllerApiVersions for ListenerApiVersions {
     fn respond(
         &self,
         request_version: i16,
         request_body: &[u8],
-    ) -> Result<bytes::Bytes, crate::RaftHandshakeError> {
+    ) -> Result<bytes::Bytes, RaftHandshakeError> {
         answer_api_versions(
             &self.engine,
             self.admin_router.as_deref(),
@@ -94,7 +98,7 @@ impl crate::ControllerApiVersions for ListenerApiVersions {
             request_version,
             request_body,
         )
-        .map_err(|error| crate::RaftHandshakeError::Protocol(error.to_string()))
+        .map_err(|error| RaftHandshakeError::Protocol(error.to_string()))
     }
 }
 
@@ -102,7 +106,7 @@ impl crate::ControllerApiVersions for ListenerApiVersions {
 /// state, before or after SASL authentication alike.
 fn answer_api_versions(
     engine: &KraftController,
-    admin_router: Option<&dyn crate::ControllerAdminRouter>,
+    admin_router: Option<&dyn ControllerAdminRouter>,
     unstable: Unstable,
     request_version: i16,
     request_body: &[u8],
@@ -128,7 +132,7 @@ struct ConnectionContext {
     principal: Option<krabka_security::Principal>,
     authenticated_via_token: bool,
     expires_at_ms: Option<i64>,
-    grants: Arc<dyn crate::ClusterGrants>,
+    grants: Arc<dyn ClusterGrants>,
     /// Kafka's `unstable.*.enable` settings for this listener.
     unstable: Unstable,
     /// The request-size and idle limits of this listener.
@@ -139,9 +143,9 @@ pub(crate) async fn run(
     listener: TcpListener,
     engine: KraftController,
     shutdown: CancellationToken,
-    handshake: Option<Arc<dyn crate::RaftListenerHandshake>>,
-    shard_router: Option<Arc<dyn crate::RaftShardRouter>>,
-    admin_router: Option<Arc<dyn crate::ControllerAdminRouter>>,
+    handshake: Option<Arc<dyn RaftListenerHandshake>>,
+    shard_router: Option<Arc<dyn RaftShardRouter>>,
+    admin_router: Option<Arc<dyn ControllerAdminRouter>>,
     (unstable, limits): (Unstable, ListenerLimits),
 ) {
     match listener.local_addr() {
@@ -151,8 +155,7 @@ pub(crate) async fn run(
     // Kafka's `ControllerServer` builds its own `SocketServer`, whose
     // `ConnectionQuotas` counts this listener's connections apart from any
     // broker listener's.
-    let connections =
-        crate::ConnectionLimiter::new(limits.max_connections, limits.max_connections_per_ip);
+    let connections = ConnectionLimiter::new(limits.max_connections, limits.max_connections_per_ip);
     loop {
         tokio::select! {
             () = shutdown.cancelled() => break,
@@ -266,8 +269,8 @@ async fn handle_conn<S>(
     mut stream: S,
     engine: KraftController,
     shutdown: CancellationToken,
-    shard_router: Option<Arc<dyn crate::RaftShardRouter>>,
-    admin_router: Option<Arc<dyn crate::ControllerAdminRouter>>,
+    shard_router: Option<Arc<dyn RaftShardRouter>>,
+    admin_router: Option<Arc<dyn ControllerAdminRouter>>,
     context: ConnectionContext,
     clock_ms: impl Fn() -> i64 + Send,
 ) -> Result<(), RaftError>

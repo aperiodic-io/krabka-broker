@@ -35,6 +35,8 @@ use krabka_protocol::owned::{
     list_groups_response::{ListGroupsResponse, ListedGroup},
 };
 
+#[cfg(test)]
+use crate::authorizer::SimpleAclAuthorizer;
 use crate::{
     broker::Broker,
     codes,
@@ -262,7 +264,12 @@ mod tests {
     use krabka_metadata::{AclOperation, MetadataRecord, ResourceType};
 
     use super::*;
-    use crate::{coordinator::unified::classic_state::GroupState, test_support::test_ctx};
+    use crate::{
+        authorizer::AllowAllAuthorizer,
+        coordinator::unified::classic_state::GroupState,
+        handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+        test_support::{AllowAclSetup, allow_acl, start_broker_no_audit_with, test_ctx},
+    };
 
     const VERSION: i16 = krabka_protocol::owned::list_groups_response::MAX_VERSION;
 
@@ -287,8 +294,8 @@ mod tests {
     /// consumer, share or streams group reports `Empty`.
     #[tokio::test]
     async fn handler_lists_each_kind_with_its_state_and_protocol_type() {
-        let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
-            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+            cfg.authorizer = Arc::new(AllowAllAuthorizer);
         })
         .await;
         let broker = broker_handle.broker_arc_for_test();
@@ -320,14 +327,12 @@ mod tests {
     }
 
     fn acl(resource_type: ResourceType, name: &str, user: &str) -> MetadataRecord {
-        MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-            crate::test_support::AllowAclSetup {
-                resource_type,
-                resource_name: name,
-                principal: &format!("User:{user}"),
-                operation: AclOperation::Describe,
-            },
-        ))
+        MetadataRecord::V1AccessControlEntry(allow_acl(AllowAclSetup {
+            resource_type,
+            resource_name: name,
+            principal: &format!("User:{user}"),
+            operation: AclOperation::Describe,
+        }))
     }
 
     /// Kafka's `handleListGroupsRequest`: cluster `Describe` lists every group
@@ -335,7 +340,7 @@ mod tests {
     /// may `Describe` are listed.
     #[tokio::test]
     async fn handler_authorizes_by_cluster_describe_then_group_describe() {
-        let cluster = crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME;
+        let cluster = CLUSTER_RESOURCE_NAME;
         let both = vec![
             group("g-a", "", "Empty", "classic"),
             group("g-b", "", "Empty", "classic"),
@@ -357,10 +362,10 @@ mod tests {
         ];
 
         for (user, acls, expected_groups) in rows {
-            let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
-                cfg.authorizer = Arc::new(crate::authorizer::SimpleAclAuthorizer::new(
-                    HashSet::from(["admin".to_string()]),
-                ));
+            let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+                cfg.authorizer = Arc::new(SimpleAclAuthorizer::new(HashSet::from([
+                    "admin".to_string()
+                ])));
             })
             .await;
             let broker = broker_handle.broker_arc_for_test();

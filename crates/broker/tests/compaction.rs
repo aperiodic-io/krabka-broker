@@ -18,7 +18,8 @@ use krabka_broker::metrics::PartitionLabel;
 use crate::{
     compaction_cluster::start_broker_with_fast_cleaner,
     compaction_records::{assert_latest_records_survive, fetch_all},
-    compaction_rpc::{create_topic_with_configs, get_topic_id, produce_record},
+    compaction_rpc::{ProduceRecordSetup, create_topic_with_configs, get_topic_id, produce_record},
+    support::topics::CreateTopicSetup,
 };
 
 mod kafka_wire;
@@ -56,7 +57,7 @@ async fn compaction_dedupes_via_native_client() {
     // Create the compacted topic.
     create_topic_with_configs(
         addr,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "compacted",
             configs: &[
                 ("cleanup.policy", "compact"),
@@ -102,7 +103,7 @@ async fn compaction_dedupes_via_native_client() {
             let value = format!("v{round}-{key}");
             produce_record(
                 addr,
-                crate::compaction_rpc::ProduceRecordSetup {
+                ProduceRecordSetup {
                     topic_id,
                     key: key.as_bytes(),
                     value: value.as_bytes(),
@@ -145,7 +146,7 @@ async fn compaction_dedupes_via_native_client() {
         let value = format!("v10-{key}");
         produce_record(
             addr,
-            crate::compaction_rpc::ProduceRecordSetup {
+            ProduceRecordSetup {
                 topic_id,
                 key: key.as_bytes(),
                 value: value.as_bytes(),
@@ -169,7 +170,7 @@ async fn compaction_dedupes_via_native_client() {
         let value = format!("padding-{round}");
         produce_record(
             addr,
-            crate::compaction_rpc::ProduceRecordSetup {
+            ProduceRecordSetup {
                 topic_id,
                 key: b"__pad__",
                 value: value.as_bytes(),

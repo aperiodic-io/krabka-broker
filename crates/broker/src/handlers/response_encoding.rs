@@ -7,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use krabka_protocol::{Decode, Encode};
 
 use super::wire_types::ApiVersion;
-use crate::error::BrokerError;
+use crate::{codes::NONE, error::BrokerError};
 
 /// Decode one request body at the supplied version. As at the wire entry
 /// points, bytes beyond that body are left unread.
@@ -119,7 +119,7 @@ pub(crate) fn stamp_unset<'a, R: ErrorRow + 'a>(
     error_message: &str,
 ) {
     for row in rows {
-        if row.error_code() == crate::codes::NONE {
+        if row.error_code() == NONE {
             row.set_error(error_code, Some(error_message.to_owned()));
         }
     }
@@ -159,11 +159,12 @@ mod tests {
     };
 
     use super::*;
+    use crate::codes::{NONE, NOT_CONTROLLER};
 
     #[test]
     fn encode_response_round_trips_protocol_body() {
         let resp = ApiVersionsResponse {
-            error_code: crate::codes::NONE,
+            error_code: NONE,
             api_keys: vec![ApiVersion {
                 api_key: 18,
                 min_version: 0,
@@ -206,11 +207,7 @@ mod tests {
             ),
         ];
 
-        stamp_unset(
-            &mut rows,
-            crate::codes::NOT_CONTROLLER,
-            "submit failed: not controller",
-        );
+        stamp_unset(&mut rows, NOT_CONTROLLER, "submit failed: not controller");
 
         let expected = vec![
             row(

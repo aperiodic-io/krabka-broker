@@ -25,7 +25,7 @@ use crate::{
         self,
         registry::{self, ConfigScope, ConfigType},
     },
-    topic_policy::TopicPolicy,
+    topic_policy::{TopicPolicy, check as check_topic_policy},
 };
 
 /// Kafka's `ConfigurationControlManager` APPEND and SUBTRACT: a `LIST` key's
@@ -146,7 +146,7 @@ pub(super) fn topic_config_record(
     // factor, so neither is passed here. It runs after the built-in
     // validators, as `ConfigAdminManager` does: a config the broker itself
     // refuses never reaches the policy.
-    crate::topic_policy::check(policy, topic, None, None, &merged)
+    check_topic_policy(policy, topic, None, None, &merged)
         .map_err(|reason| (codes::POLICY_VIOLATION, reason))?;
     Ok(MetadataRecord::V1TopicConfig(TopicConfigRecord {
         topic: resource.resource_name.clone(),
@@ -160,8 +160,15 @@ mod tests {
     use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
 
     use super::*;
-    use crate::handlers::incremental_alter_configs::test_support::{
-        image_with_topic_config, make_del_cfg, make_set_cfg, make_topic_resource,
+    use crate::{
+        handlers::{
+            incremental_alter_configs::test_support::{
+                image_with_topic_config, make_del_cfg, make_set_cfg, make_topic_resource,
+            },
+            test_support::check_config_result,
+        },
+        test_support::string_pairs,
+        throttle::LEADER_THROTTLED_REPLICAS_KEY,
     };
 
     /// The record builder under the empty policy, which is the state of a
@@ -369,12 +376,7 @@ mod tests {
 
             let result = topic_config_record(&make_topic_resource("orders", ops), &img);
 
-            crate::handlers::test_support::check_config_result(
-                result,
-                want_ok,
-                label,
-                config_keys::DISKLESS,
-            );
+            check_config_result(result, want_ok, label, config_keys::DISKLESS);
         }
     }
 
@@ -490,11 +492,11 @@ mod tests {
             value: Some(value.into()),
             ..Default::default()
         };
-        let leader = crate::throttle::LEADER_THROTTLED_REPLICAS_KEY;
+        let leader = LEADER_THROTTLED_REPLICAS_KEY;
         let record = |pairs: &[(&str, &str)]| {
             Ok(MetadataRecord::V1TopicConfig(TopicConfigRecord {
                 topic: "orders".into(),
-                overrides: crate::test_support::string_pairs(pairs),
+                overrides: string_pairs(pairs),
             }))
         };
         let cases = [

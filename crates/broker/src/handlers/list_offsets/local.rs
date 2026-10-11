@@ -8,6 +8,8 @@
 
 use krabka_log::DeliveryPolicy;
 
+use crate::partition::Partition;
+
 /// The offset the `LATEST` sentinel reports for one partition, before the
 /// fetchable bound is applied to it.
 ///
@@ -38,11 +40,7 @@ use krabka_log::DeliveryPolicy;
 /// adds, and [`resolve_partition`](super::resolve::resolve_partition) takes the
 /// lower of the two, so on every topic that does not schedule delivery the
 /// answer is Kafka's.
-pub(super) fn latest_offset(
-    partition: &crate::partition::Partition,
-    policy: DeliveryPolicy,
-    local_end: i64,
-) -> i64 {
+pub(super) fn latest_offset(partition: &Partition, policy: DeliveryPolicy, local_end: i64) -> i64 {
     if policy == DeliveryPolicy::Scheduled {
         partition
             .delivery
@@ -53,7 +51,7 @@ pub(super) fn latest_offset(
     }
 }
 
-pub(super) fn leader_epoch_for_offset(partition: &crate::partition::Partition, offset: i64) -> i32 {
+pub(super) fn leader_epoch_for_offset(partition: &Partition, offset: i64) -> i32 {
     let log = partition.log.lock().expect("log mutex poisoned");
     log.epoch_checkpoint()
         .epoch_for_offset(krabka_log::Offset(offset))
@@ -68,7 +66,7 @@ pub(super) fn leader_epoch_for_offset(partition: &crate::partition::Partition, o
 /// KIP-207 reads this to decide whether the high watermark has caught up to
 /// the epoch it is supposed to bound: see
 /// [`resolve_partition`](super::resolve::resolve_partition).
-pub(super) fn epoch_start_offset(partition: &crate::partition::Partition) -> Option<i64> {
+pub(super) fn epoch_start_offset(partition: &Partition) -> Option<i64> {
     let current = partition
         .current_leader_epoch
         .load(std::sync::atomic::Ordering::Acquire);
@@ -92,18 +90,27 @@ mod tests {
 
     use super::*;
     use crate::{
-        broker::Broker,
+        broker::{Broker, BrokerHandle},
         codes,
-        delivery::test_support::{BOUND_MS, NOW_MS, wall_at},
-        handlers::list_offsets::{
-            handle,
-            sentinels::{
-                EARLIEST_LOCAL_TIMESTAMP, EARLIEST_PENDING_UPLOAD_TIMESTAMP, EARLIEST_TIMESTAMP,
-                LATEST_TIERED_TIMESTAMP, LATEST_TIMESTAMP, MAX_TIMESTAMP, UNKNOWN_TIMESTAMP,
-            },
-            test_support::{decode_response, encode_request, test_context},
+        delivery::test_support::{
+            BOUND_MS, NOW_MS, ScheduleSetup, register, scheduled_partition, wall_at,
         },
-        test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx},
+        handlers::{
+            RequestContext,
+            list_offsets::{
+                handle,
+                sentinels::{
+                    EARLIEST_LOCAL_TIMESTAMP, EARLIEST_PENDING_UPLOAD_TIMESTAMP,
+                    EARLIEST_TIMESTAMP, LATEST_TIERED_TIMESTAMP, LATEST_TIMESTAMP, MAX_TIMESTAMP,
+                    UNKNOWN_TIMESTAMP,
+                },
+                test_support::{decode_response, encode_request, test_context},
+            },
+            test_support::{ReplicatedPartitionSetup, replicated_partition},
+        },
+        test_support::{
+            UnixMillis, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+        },
     };
 
     // Activation time of a batch that has long since come due.
@@ -124,28 +131,24 @@ mod tests {
     // `NOT_LEADER_OR_FOLLOWER`/`UNKNOWN_TOPIC_OR_PARTITION` before it ever
     // reaches the delivery-watermark logic under test.
     async fn register_delivery_partition(
-        broker_handle: &crate::broker::BrokerHandle,
+        broker_handle: &BrokerHandle,
         broker: &Broker,
         logs: &tempfile::TempDir,
         topic: &str,
         policy: DeliveryPolicy,
     ) {
         let clock: Arc<dyn qubit_clock::WallClock> = Arc::new(qubit_clock::StdWallClock::new());
-        let partition = crate::delivery::test_support::scheduled_partition(
+        let partition = scheduled_partition(
             logs,
             &clock,
-            crate::delivery::test_support::ScheduleSetup {
+            ScheduleSetup {
                 topic,
                 policy,
-                activations: ACTIVATIONS
-                    .iter()
-                    .copied()
-                    .map(crate::test_support::UnixMillis)
-                    .collect(),
+                activations: ACTIVATIONS.iter().copied().map(UnixMillis).collect(),
                 leader: krabka_ids::NodeId(broker.config.node_id.get()),
             },
         );
-        crate::delivery::test_support::register(&broker.partitions, &partition);
+        register(&broker.partitions, &partition);
         install_partition_leader_record(broker_handle, topic, broker.config.node_id.get()).await;
     }
 
@@ -153,11 +156,7 @@ mod tests {
     /// partition, so the `ListOffsets` leadership gate admits a request this
     /// node answers from a locally spawned test fixture rather than from the
     /// real topic-creation path.
-    async fn install_partition_leader_record(
-        handle: &crate::broker::BrokerHandle,
-        topic: &str,
-        leader: u64,
-    ) {
+    async fn install_partition_leader_record(handle: &BrokerHandle, topic: &str, leader: u64) {
         handle
             .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1Topic(
                 krabka_metadata::TopicRecord {
@@ -173,14 +172,12 @@ mod tests {
             .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1Partition(
                 krabka_metadata::PartitionRecord {
                     directories: vec![uuid::Uuid::nil()],
-                    ..crate::handlers::test_support::replicated_partition(
-                        crate::handlers::test_support::ReplicatedPartitionSetup {
-                            topic,
-                            leader: krabka_audit::NodeId(leader),
-                            replicas: &[krabka_audit::NodeId(leader)],
-                            ..Default::default()
-                        },
-                    )
+                    ..replicated_partition(ReplicatedPartitionSetup {
+                        topic,
+                        leader: krabka_audit::NodeId(leader),
+                        replicas: &[krabka_audit::NodeId(leader)],
+                        ..Default::default()
+                    })
                 },
             ))
             .await
@@ -191,7 +188,7 @@ mod tests {
         broker: &Broker,
         topic: &str,
         timestamp: i64,
-        ctx: &crate::handlers::RequestContext<'_>,
+        ctx: &RequestContext<'_>,
     ) -> ListOffsetsPartitionResponse {
         let version = krabka_protocol::owned::list_offsets_response::MAX_VERSION;
         let req = encode_request(
@@ -300,10 +297,10 @@ mod tests {
         let logs = tempfile::tempdir().expect("log root");
         let timeline = qubit_clock::ManualMonotonicClock::new_shared();
         let clock: Arc<dyn qubit_clock::WallClock> = timeline.new_wall_clock(wall_at(NOW_MS));
-        let partition = crate::delivery::test_support::scheduled_partition(
+        let partition = scheduled_partition(
             &logs,
             &clock,
-            crate::delivery::test_support::ScheduleSetup {
+            ScheduleSetup {
                 topic: TOPIC,
                 activations: vec![
                     crate::test_support::UnixMillis(NOW_MS - 60_000),
@@ -313,7 +310,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        crate::delivery::test_support::register(&broker.partitions, &partition);
+        register(&broker.partitions, &partition);
         install_partition_leader_record(&broker_handle, TOPIC, broker.config.node_id.get()).await;
         partition
             .install_leader_change(broker.config.node_id.get(), 0)

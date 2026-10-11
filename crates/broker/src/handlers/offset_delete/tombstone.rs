@@ -50,6 +50,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
+    use crate::test_support::COORDINATOR_WRITE_ERROR_CASES;
 
     #[test]
     fn write_errors_map_as_kafka_handle_operation_exception() {
@@ -65,7 +66,7 @@ mod tests {
             (codes::CORRUPT_MESSAGE, codes::CORRUPT_MESSAGE),
         ]
         .into_iter()
-        .chain(crate::test_support::COORDINATOR_WRITE_ERROR_CASES)
+        .chain(COORDINATOR_WRITE_ERROR_CASES)
         {
             check!(operation_error_code(write) == want, "{write}");
         }

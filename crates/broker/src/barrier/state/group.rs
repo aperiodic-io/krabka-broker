@@ -11,7 +11,10 @@ use std::collections::BTreeMap;
 use krabka_units::Time;
 
 use super::NO_EPOCH_YET;
-use crate::barrier::persistence::{CutValue, GroupValue, InjectionStartValue};
+use crate::{
+    barrier::persistence::{CutValue, GroupValue, InjectionStartValue},
+    metadata_epoch::next_i64,
+};
 
 /// The definition a caller supplies for a barrier group.
 ///
@@ -102,7 +105,7 @@ impl GroupEntry {
 
 /// The next epoch of a group.
 pub(crate) fn next_epoch(last_epoch: i64) -> Option<i64> {
-    crate::metadata_epoch::next_i64(last_epoch)
+    next_i64(last_epoch)
 }
 
 #[cfg(test)]

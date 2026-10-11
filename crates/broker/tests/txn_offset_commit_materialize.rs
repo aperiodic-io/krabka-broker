@@ -27,10 +27,10 @@ use assert2::assert;
 
 use crate::support::{
     offsets::{offset_commit_topic, offset_fetch_group, offset_fetch_request, offset_fetch_topic},
-    topics::{creatable_topic, create_topic_request},
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
     transactions::{
-        EndTransactionSetup, ProducerIdentity, TransactionOutcome, end_transaction_request,
-        init_producer_request, txn_offset_partition, txn_offset_topic,
+        EndTransactionSetup, InitProducerSetup, ProducerIdentity, TransactionOutcome,
+        end_transaction_request, init_producer_request, txn_offset_partition, txn_offset_topic,
     },
 };
 
@@ -74,7 +74,7 @@ const TOPIC: &str = "src";
 async fn create_topic(client: &krabka_client_core::Client) {
     let resp = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (TOPIC).into(),
                 ..Default::default()
             },
@@ -145,12 +145,10 @@ async fn begin_and_commit_offsets(
     let deadline = Instant::now() + Duration::from_secs(30);
     let (pid, epoch) = loop {
         let init = client
-            .send(init_producer_request(
-                crate::support::transactions::InitProducerSetup {
-                    transactional_id: Some(tid.into()),
-                    ..Default::default()
-                },
-            ))
+            .send(init_producer_request(InitProducerSetup {
+                transactional_id: Some(tid.into()),
+                ..Default::default()
+            }))
             .await
             .expect("init producer id");
         if init.error_code == 0 {

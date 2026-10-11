@@ -6,7 +6,10 @@ use krabka_log::{LogConfig, Offset};
 use tempfile::tempdir;
 
 use super::*;
-use crate::partition_writer::test_support::{sample_batch, spawn_default_writer};
+use crate::{
+    partition_writer::test_support::{sample_batch, spawn_default_writer},
+    test_support::{EmptyPayloadBatchSetup, RecordCount},
+};
 
 #[tokio::test]
 async fn writer_set_log_config_swaps_config() {
@@ -42,11 +45,9 @@ async fn writer_trim_to_offset_advances_log_start() {
     for _ in 0..2 {
         log.lock()
             .expect("lock")
-            .append(&mut sample_batch(
-                crate::test_support::EmptyPayloadBatchSetup {
-                    count: crate::test_support::RecordCount(2),
-                },
-            ))
+            .append(&mut sample_batch(EmptyPayloadBatchSetup {
+                count: RecordCount(2),
+            }))
             .expect("append");
     }
 
@@ -95,11 +96,9 @@ async fn writer_flush_timer_runs_after_a_live_config_change_without_another_appe
         let flushed = std::sync::Arc::new(tokio::sync::Notify::new());
         {
             let mut log = log.lock().unwrap();
-            log.append(&mut sample_batch(
-                crate::test_support::EmptyPayloadBatchSetup {
-                    count: crate::test_support::RecordCount(2),
-                },
-            ))
+            log.append(&mut sample_batch(EmptyPayloadBatchSetup {
+                count: RecordCount(2),
+            }))
             .unwrap();
             log.test_set_io(std::sync::Arc::new(ObserveFlush(flushed.clone())));
         }

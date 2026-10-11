@@ -8,8 +8,9 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    KAFKA_IMAGE, KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool,
-    docker_run_kafka_tool_with_image, nc_check_connectivity, start_host_broker,
+    KAFKA_IMAGE, KAFKA_IMAGE_TXN, assert_console_values, broker0_advertised,
+    describe_console_group, docker_run_kafka_tool, docker_run_kafka_tool_with_image,
+    nc_check_connectivity, produce_console_checked, start_console_broker, start_host_broker,
 };
 
 // Same multi-thread runtime caveat as `console_producer_round_trip`:
@@ -20,11 +21,11 @@ use crate::jvm_acceptance::{
 async fn console_consumer_with_group_round_trip() {
     const TOPIC: &str = "krabka-broker-grp-itest";
 
-    let (broker, _dir) = crate::jvm_acceptance::start_console_broker(TOPIC, 1).await;
+    let (broker, _dir) = start_console_broker(TOPIC, 1).await;
 
     // 2. Produce records via kafka-console-producer over stdin.
 
-    crate::jvm_acceptance::produce_console_checked(KAFKA_IMAGE, TOPIC, b"x\ny\nz\n");
+    produce_console_checked(KAFKA_IMAGE, TOPIC, b"x\ny\nz\n");
 
     // 3. Consume WITHOUT --partition. The default `console-consumer`
     //    group will JoinGroup → SyncGroup → Heartbeat → Fetch through
@@ -44,7 +45,7 @@ async fn console_consumer_with_group_round_trip() {
         "20000",
     ]);
     let s = String::from_utf8_lossy(&consumer_out.stdout);
-    crate::jvm_acceptance::assert_console_values(&s, &["x", "y", "z"], "consumer didn't emit");
+    assert_console_values(&s, &["x", "y", "z"], "consumer didn't emit");
 
     broker.shutdown().await;
 }
@@ -63,11 +64,11 @@ async fn console_consumer_with_static_membership() {
     const GROUP: &str = "krabka-static-grp";
     const INSTANCE: &str = "client-static-1";
 
-    let (broker, _dir) = crate::jvm_acceptance::start_console_broker(TOPIC, 1).await;
+    let (broker, _dir) = start_console_broker(TOPIC, 1).await;
 
     // Produce three records.
 
-    crate::jvm_acceptance::produce_console_checked(KAFKA_IMAGE, TOPIC, b"a\nb\nc\n");
+    produce_console_checked(KAFKA_IMAGE, TOPIC, b"a\nb\nc\n");
 
     // Consume with `group.instance.id` set. The JVM consumer sends this
     // as `group_instance_id` in JoinGroup v5+ / SyncGroup v3+ / Heartbeat
@@ -90,12 +91,12 @@ async fn console_consumer_with_static_membership() {
         "20000",
     ]);
     let s = String::from_utf8_lossy(&consumer_out.stdout);
-    crate::jvm_acceptance::assert_console_values(&s, &["a", "b", "c"], "consumer didn't emit");
+    assert_console_values(&s, &["a", "b", "c"], "consumer didn't emit");
 
     // `kafka-consumer-groups --describe` exercises the broker's
     // DescribeGroups path. The output should mention the instance id so
     // operators can correlate static slots back to pods.
-    let desc_out = crate::jvm_acceptance::describe_console_group(GROUP);
+    let desc_out = describe_console_group(GROUP);
     let s = String::from_utf8_lossy(&desc_out.stdout);
     assert!(s.contains(TOPIC), "describe missing topic {TOPIC}: {s}");
 
@@ -135,7 +136,7 @@ async fn cooperative_sticky_kafka_console_consumer() {
 
     // 2. Produce 3 records via stdin.
 
-    crate::jvm_acceptance::produce_console_checked(KAFKA_IMAGE, TOPIC, b"alpha\nbravo\ncharlie\n");
+    produce_console_checked(KAFKA_IMAGE, TOPIC, b"alpha\nbravo\ncharlie\n");
 
     // 3. Consume via kafka-console-consumer with CooperativeStickyAssignor.
     //    Use cp-kafka:7.5.0 (Kafka 3.5) — cooperative-sticky in 2.7 had

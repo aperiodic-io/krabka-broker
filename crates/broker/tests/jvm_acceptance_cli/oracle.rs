@@ -41,7 +41,10 @@ use std::{
 
 use assert2::assert;
 
-use crate::support;
+use crate::{
+    jvm_acceptance::{broker0_advertised, nc_check_connectivity, start_host_broker},
+    support::{self, docker_exec, docker_logs, remove_container},
+};
 
 /// The release both halves of every differential run: the oracle broker is
 /// this image, and so is the client aimed at krabka.
@@ -328,7 +331,9 @@ fn host_tempfile(contents: &str) -> tempfile::NamedTempFile {
     std::fs::write(tmp.path(), contents).expect("write tool file");
     #[cfg(unix)]
     {
-        crate::support::chmod_for_container(tmp.path(), 0o644, "chmod tool file");
+        use crate::support::chmod_for_container;
+
+        chmod_for_container(tmp.path(), 0o644, "chmod tool file");
     }
     tmp
 }
@@ -421,7 +426,7 @@ impl Oracle {
 
     /// Run a command inside the container and hand back what it did.
     pub(crate) fn exec(&self, args: &[&str]) -> Output {
-        crate::support::docker_exec(&self.name, args)
+        docker_exec(&self.name, args)
     }
 
     /// Run `<tool>.sh <args>` inside the container.
@@ -509,13 +514,13 @@ impl Oracle {
 
     /// The container's own logs, for the panic message when it never came up.
     fn logs(&self) -> String {
-        crate::support::docker_logs(&self.name)
+        docker_logs(&self.name)
     }
 }
 
 impl Drop for Oracle {
     fn drop(&mut self) {
-        crate::support::remove_container(&self.name);
+        remove_container(&self.name);
     }
 }
 
@@ -526,7 +531,7 @@ pub(crate) struct DetachedTool {
 
 impl Drop for DetachedTool {
     fn drop(&mut self) {
-        crate::support::remove_container(&self.name);
+        remove_container(&self.name);
     }
 }
 
@@ -543,9 +548,9 @@ impl OracleComparison {
         let oracle = tokio::task::spawn_blocking(move || Oracle::start(label))
             .await
             .expect("oracle boot");
-        let (broker, dir) = crate::jvm_acceptance::start_host_broker().await;
-        crate::jvm_acceptance::nc_check_connectivity();
-        let bootstrap = crate::jvm_acceptance::broker0_advertised().to_owned();
+        let (broker, dir) = start_host_broker().await;
+        nc_check_connectivity();
+        let bootstrap = broker0_advertised().to_owned();
         Self {
             bootstrap,
             _dir: dir,

@@ -121,6 +121,14 @@ This is the rustfmt `imports_granularity = "Crate"` layout. `rustfmt.toml` also 
 
 **Keep `use` at module scope.** Imports belong at the top of the file or of the `mod` block, never inside a function body. A reader should find every path a function depends on in one place. A function-local `use` hides where a name really comes from, and an alias hides it most of all.
 
+**Import items before using them in code.** Do not use `crate::...` paths in a
+function or type declaration. Add a module-scope `use` for the item (or its
+containing module when several items are used) and refer to the imported name,
+with at most `module::item` in the body. CI enforces this with
+`aspect check-imported-paths`.
+The check skips imports, documentation, attributes, and macro bodies, where
+paths have different resolution rules.
+
 **Name child modules through `self::`** when you import or re-export from them: `use self::foo::Foo;` and `pub use self::foo::Foo;`. The explicit `self::` separates the child module from a dependency of the same name. A crate called `foo` added later then cannot change what the path resolves to.
 
 ```rust

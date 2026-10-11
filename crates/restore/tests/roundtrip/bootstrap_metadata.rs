@@ -18,7 +18,11 @@ use krabka_metadata::{
 use krabka_protocol::owned::describe_acls_request::DescribeAclsRequest;
 use uuid::Uuid;
 
-use crate::fixture::{Fixture, build_fixture};
+use crate::{
+    fixture::{Fixture, build_fixture},
+    restored::{fresh_restore, restore_for_controller},
+    topic_configuration::check_topic_configuration,
+};
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
 
@@ -29,7 +33,7 @@ krabka_macros::single_replica_partition_fixture!(single_replica_partition);
 #[tokio::test]
 async fn restored_bootstrap_metadata_carries_the_archived_topic_ids_and_partition_counts() {
     let fixture = build_fixture();
-    let restored = crate::restored::fresh_restore(fixture.archive_root.path()).await;
+    let restored = fresh_restore(fixture.archive_root.path()).await;
     check!(restored.report.cluster_id == restored.cluster_id);
 
     let meta = krabka_format::MetaProperties::read(&restored.log_dir)
@@ -154,7 +158,7 @@ async fn restored_snapshot_reaches_describe_configs_and_describe_acls() {
     )
     .expect("write metadata snapshot");
 
-    let (_target, log_dir, mut controller, report) = crate::restored::restore_for_controller(
+    let (_target, log_dir, mut controller, report) = restore_for_controller(
         fixture.archive_root.path(),
         &["--metadata-snapshot", &snapshot_path.display().to_string()],
     )
@@ -179,13 +183,7 @@ async fn restored_snapshot_reaches_describe_configs_and_describe_acls() {
         .await
         .expect("client");
 
-    crate::topic_configuration::check_topic_configuration(
-        &client,
-        ORDERS,
-        "cleanup.policy",
-        "compact",
-    )
-    .await;
+    check_topic_configuration(&client, ORDERS, "cleanup.policy", "compact").await;
 
     let acls = client
         .send(DescribeAclsRequest {

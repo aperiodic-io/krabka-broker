@@ -260,6 +260,7 @@ mod tests {
     use super::{TOPIC_AUTHORIZATION_FAILED_MESSAGE, handle, top_level};
     use crate::{
         authorizer::{AuthorizationResult, Authorizer},
+        broker::BrokerHandle,
         codes,
         coordinator::unified::{
             ShareGroupSeed,
@@ -268,7 +269,11 @@ mod tests {
                 persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
             },
         },
-        test_support::{DenyAll, test_ctx},
+        handlers::{RequestContext, create_topics::handle as create_topics_handle},
+        share_coordinator::{
+            handlers::test_support::lead_share_state_partitions, persister_client::SharePersister,
+        },
+        test_support::{DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx},
     };
 
     /// Denies `Read` on the named topics and allows everything else, so group
@@ -311,8 +316,8 @@ mod tests {
     }
 
     async fn create_topics(
-        broker_handle: &crate::broker::BrokerHandle,
-        ctx: &crate::handlers::RequestContext<'_>,
+        broker_handle: &BrokerHandle,
+        ctx: &RequestContext<'_>,
         setup: ShareTopicsSetup<'_>,
     ) {
         let broker = broker_handle.broker_arc_for_test();
@@ -331,7 +336,7 @@ mod tests {
             timeout_ms: 5_000,
             ..Default::default()
         };
-        let response = crate::handlers::create_topics::handle(&broker, request, version, ctx)
+        let response = create_topics_handle(&broker, request, version, ctx)
             .await
             .expect("create topics");
         assert!(
@@ -361,14 +366,13 @@ mod tests {
     }
 
     async fn create_share_topics(
-        handle: &crate::broker::BrokerHandle,
-        ctx: &crate::handlers::RequestContext<'_>,
+        handle: &BrokerHandle,
+        ctx: &RequestContext<'_>,
         setup: ShareTopicsSetup<'_>,
-    ) -> Arc<crate::share_coordinator::persister_client::SharePersister> {
+    ) -> Arc<SharePersister> {
         let broker = handle.broker_arc_for_test();
         create_topics(handle, ctx, setup).await;
-        crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
-            .await;
+        lead_share_state_partitions(&broker).await;
         broker
             .group_coordinator
             .share_persister()
@@ -381,7 +385,7 @@ mod tests {
         type Case<'a> = (
             &'a str,
             Arc<dyn Authorizer>,
-            crate::test_support::ShareApiSupport,
+            ShareApiSupport,
             Vec<&'a str>,
             DeleteShareGroupOffsetsResponse,
         );
@@ -664,9 +668,9 @@ mod tests {
 
         for (case, denied_names) in cases {
             let denied: HashSet<&'static str> = denied_names.iter().copied().collect();
-            let (broker_handle, _dir) = crate::test_support::start_share_broker(
+            let (broker_handle, _dir) = start_share_broker(
                 Arc::new(DenyReadOnTopics(denied.clone())),
-                crate::test_support::ShareBrokerSetup::default(),
+                ShareBrokerSetup::default(),
             )
             .await;
             let broker = broker_handle.broker_arc_for_test();

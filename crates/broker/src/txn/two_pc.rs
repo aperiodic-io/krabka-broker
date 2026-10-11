@@ -27,6 +27,7 @@
 use krabka_verified::transaction::{IdleTransactionState, should_abort_idle_transaction};
 
 use super::state::TxnState;
+use crate::codes::INVALID_TRANSACTION_TIMEOUT;
 
 /// Persisted 2PC timeout sentinel.
 pub(crate) const NO_TIMEOUT_MS: i32 = krabka_verified::transaction::NO_TRANSACTION_TIMEOUT_MS;
@@ -59,7 +60,7 @@ pub(crate) fn resolve_txn_timeout(
         return Ok(NO_TIMEOUT_MS);
     }
     if requested_ms <= 0 || requested_ms > max_timeout_ms {
-        return Err(crate::codes::INVALID_TRANSACTION_TIMEOUT);
+        return Err(INVALID_TRANSACTION_TIMEOUT);
     }
     Ok(requested_ms)
 }
@@ -118,6 +119,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::codes::INVALID_TRANSACTION_TIMEOUT;
 
     #[test]
     fn resolve_timeout_2pc_is_sentinel_regardless_of_request() {
@@ -133,7 +135,7 @@ mod tests {
     /// Kafka `validateTransactionTimeoutMs`.
     #[test]
     fn resolve_timeout_refuses_what_kafka_refuses() {
-        let refused = Err(crate::codes::INVALID_TRANSACTION_TIMEOUT);
+        let refused = Err(INVALID_TRANSACTION_TIMEOUT);
         for (requested, want) in [
             (1, Ok(1)),
             (5_000, Ok(5_000)),

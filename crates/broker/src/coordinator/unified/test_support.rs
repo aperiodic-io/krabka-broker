@@ -15,7 +15,19 @@ use super::{
     share::{self, config::ShareGroupConfig},
     streams::{self, config::StreamsGroupConfig},
 };
-use crate::test_support::string_pairs;
+use crate::{
+    codes::{COORDINATOR_LOAD_IN_PROGRESS, COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR},
+    coordinator::unified::offsets_log::fake::InMemoryOffsetsLog,
+    error::BrokerError,
+    metadata_source::MetadataSource,
+    network::client::InterBrokerClient,
+    partition_registry::PartitionRegistry,
+    share_coordinator::{
+        config::ShareCoordinatorConfig, coordinator::ShareCoordinator,
+        persister_client::SharePersister,
+    },
+    test_support::{FakeMetadataSource, KafkaErrorCode, UnixMillis, string_pairs},
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MemberEpoch(pub i32);
@@ -45,10 +57,7 @@ pub(crate) fn make_coord() -> Arc<GroupCoordinator> {
     make_coord_with_log().0
 }
 
-pub(crate) fn make_coord_with_log() -> (
-    Arc<GroupCoordinator>,
-    Arc<crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog>,
-) {
+pub(crate) fn make_coord_with_log() -> (Arc<GroupCoordinator>, Arc<InMemoryOffsetsLog>) {
     use crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog;
     let metadata: Arc<dyn MetadataProvider> = Arc::new(ImageMetadatalessProvider);
     let offsets_log = Arc::new(InMemoryOffsetsLog::default());
@@ -115,45 +124,37 @@ pub(crate) fn make_coord_with_metadata(
         NextGenConfig::assigning_at_once(),
         ShareGroupConfig::assigning_at_once(),
         metadata,
-        Arc::new(crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog::default()),
+        Arc::new(InMemoryOffsetsLog::default()),
         StreamsGroupConfig::default(),
     ))
 }
 
 /// A metadata source over `image`, with node 1 reported as the controller
 /// leader.
-pub(super) fn fixed_source(
-    image: krabka_metadata::MetadataImage,
-) -> Arc<dyn crate::metadata_source::MetadataSource> {
+pub(super) fn fixed_source(image: krabka_metadata::MetadataImage) -> Arc<dyn MetadataSource> {
     Arc::new(
-        crate::test_support::FakeMetadataSource::builder()
+        FakeMetadataSource::builder()
             .image(image)
             .leader(Some(krabka_raft::NodeId(1)))
             .build(),
     )
 }
 
-pub(super) fn make_share_persister(
-    source: Arc<dyn crate::metadata_source::MetadataSource>,
-) -> Arc<crate::share_coordinator::persister_client::SharePersister> {
-    let share_coordinator = Arc::new(
-        crate::share_coordinator::coordinator::ShareCoordinator::new(
-            krabka_metadata::NodeId(1),
-            Arc::new(crate::partition_registry::PartitionRegistry::new()),
-            crate::share_coordinator::config::ShareCoordinatorConfig::default(),
-        ),
-    );
-    Arc::new(
-        crate::share_coordinator::persister_client::SharePersister::new(
-            krabka_metadata::NodeId(1),
-            share_coordinator,
-            source,
-            Arc::default(),
-            Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
-            krabka_security::ListenerProtocol::Plaintext,
-            "PLAINTEXT".into(),
-        ),
-    )
+pub(super) fn make_share_persister(source: Arc<dyn MetadataSource>) -> Arc<SharePersister> {
+    let share_coordinator = Arc::new(ShareCoordinator::new(
+        krabka_metadata::NodeId(1),
+        Arc::new(PartitionRegistry::new()),
+        ShareCoordinatorConfig::default(),
+    ));
+    Arc::new(SharePersister::new(
+        krabka_metadata::NodeId(1),
+        share_coordinator,
+        source,
+        Arc::default(),
+        Arc::new(InterBrokerClient::new(None, None)),
+        krabka_security::ListenerProtocol::Plaintext,
+        "PLAINTEXT".into(),
+    ))
 }
 
 pub(super) fn proto_uuid(byte: u8) -> krabka_protocol::primitives::uuid::Uuid {
@@ -350,14 +351,14 @@ pub(crate) fn wire_bytes(fields: &[&str]) -> Vec<u8> {
 
 pub(crate) struct HeartbeatWriteFailure {
     label: &'static str,
-    failure: Option<crate::error::BrokerError>,
-    expected: crate::test_support::KafkaErrorCode,
+    failure: Option<BrokerError>,
+    expected: KafkaErrorCode,
 }
 
 pub(crate) struct FailedHeartbeatFixture {
     pub coordinator: std::sync::Arc<super::GroupCoordinator>,
     pub log: std::sync::Arc<super::offsets_log::fake::InMemoryOffsetsLog>,
-    pub expected: crate::test_support::KafkaErrorCode,
+    pub expected: KafkaErrorCode,
     pub label: &'static str,
 }
 
@@ -389,34 +390,28 @@ impl HeartbeatWriteFailure {
 
 /// The three independent failure expectations for a heartbeat's durable write.
 pub(crate) fn heartbeat_write_failures() -> [HeartbeatWriteFailure; 3] {
-    let uncommitted =
-        |code| Some(crate::error::BrokerError::CoordinatorWriteUncommitted { partition: 0, code });
+    let uncommitted = |code| Some(BrokerError::CoordinatorWriteUncommitted { partition: 0, code });
     [
         HeartbeatWriteFailure {
             label: "the partition writer is gone",
             failure: None,
-            expected: crate::test_support::KafkaErrorCode(
-                crate::codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
+            expected: KafkaErrorCode(COORDINATOR_LOAD_IN_PROGRESS),
         },
         HeartbeatWriteFailure {
             label: "the leadership moved before the write committed",
-            failure: uncommitted(crate::codes::NOT_COORDINATOR),
-            expected: crate::test_support::KafkaErrorCode(crate::codes::NOT_COORDINATOR),
+            failure: uncommitted(NOT_COORDINATOR),
+            expected: KafkaErrorCode(NOT_COORDINATOR),
         },
         HeartbeatWriteFailure {
             label: "the write did not commit in time",
-            failure: uncommitted(crate::codes::COORDINATOR_NOT_AVAILABLE),
-            expected: crate::test_support::KafkaErrorCode(crate::codes::COORDINATOR_NOT_AVAILABLE),
+            failure: uncommitted(COORDINATOR_NOT_AVAILABLE),
+            expected: KafkaErrorCode(COORDINATOR_NOT_AVAILABLE),
         },
     ]
 }
 
 /// A successful leave appends exactly one batch containing a tombstone.
-pub(crate) async fn assert_next_tombstone_batch(
-    log: &crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog,
-    pre_leave: usize,
-) {
+pub(crate) async fn assert_next_tombstone_batch(log: &InMemoryOffsetsLog, pre_leave: usize) {
     let batches = log.batches().await;
     assert2::assert!(batches.len() == pre_leave + 1);
     let leave_batch = &batches[batches.len() - 1];
@@ -603,7 +598,7 @@ pub(crate) fn updated_seed<S>(mut seed: S, update: &dyn Fn(&mut S)) -> S {
 /// Replay a complete case, observing the seed only after successful replay.
 pub(crate) fn replay_outcome<R, S>(
     records: &[R],
-    replay: impl FnMut(&R) -> Result<(), crate::error::BrokerError>,
+    replay: impl FnMut(&R) -> Result<(), BrokerError>,
     seed: impl FnOnce() -> Option<S>,
 ) -> Result<Option<S>, String> {
     records
@@ -611,7 +606,7 @@ pub(crate) fn replay_outcome<R, S>(
         .try_for_each(replay)
         .map(|()| seed())
         .map_err(|error| match error {
-            crate::error::BrokerError::Startup(message) => message,
+            BrokerError::Startup(message) => message,
             other => other.to_string(),
         })
 }
@@ -642,7 +637,7 @@ pub(crate) fn deletion_replay_cases<R: Clone, S>(
 /// Each protocol checks both its replay result and the cache populated by replay.
 pub(crate) fn check_replay_cases<R, S: PartialEq + std::fmt::Debug>(
     rows: &[ReplayCase<'_, R, S>],
-    replay: impl Fn(&GroupCoordinator, &R) -> Result<(), crate::error::BrokerError>,
+    replay: impl Fn(&GroupCoordinator, &R) -> Result<(), BrokerError>,
     seed: impl Fn(&GroupCoordinator) -> Option<S>,
     cached: impl Fn(&GroupCoordinator) -> Option<S>,
 ) {
@@ -721,7 +716,7 @@ pub(crate) struct TargetAssignmentEpoch(pub i32);
 pub(crate) struct AssignmentMetadataGoldenCase {
     pub description: &'static str,
     pub epoch: TargetAssignmentEpoch,
-    pub timestamp: crate::test_support::UnixMillis,
+    pub timestamp: UnixMillis,
     pub bytes: &'static [u8],
 }
 
@@ -738,13 +733,13 @@ pub(crate) fn assignment_metadata_golden_cases(
         AssignmentMetadataGoldenCase {
             description: setup.unknown_time_description,
             epoch: TargetAssignmentEpoch(12),
-            timestamp: crate::test_support::UnixMillis(0),
+            timestamp: UnixMillis(0),
             bytes: b"\x00\x00\x00\x00\x00\x0c\x00",
         },
         AssignmentMetadataGoldenCase {
             description: "an assignment that finished at 2026-10-07T00:00:00Z",
             epoch: TargetAssignmentEpoch(12),
-            timestamp: crate::test_support::UnixMillis(1_791_331_200_000),
+            timestamp: UnixMillis(1_791_331_200_000),
             bytes: b"\x00\x00\x00\x00\x00\x0c\x01\x00\x08\x00\x00\x01\xa1\x13\xa8\xec\x00",
         },
     ]

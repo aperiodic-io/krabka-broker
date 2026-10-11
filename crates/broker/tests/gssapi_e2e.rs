@@ -58,6 +58,8 @@ const BOOTSTRAP: &str = "host.docker.internal:9092";
 /// `alice.keytab`.
 use support::{free_port, manifest_dir};
 
+use crate::support::init_tracing_with;
+
 fn kdc_fixtures() -> PathBuf {
     manifest_dir().join("tests/fixtures/security/kdc")
 }
@@ -73,7 +75,7 @@ fn gssapi_fixtures() -> PathBuf {
 /// The broker has one `SASL_PLAINTEXT` listener that advertises `GSSAPI`. The
 /// KDC fixture's `kafka.keytab` backs that listener.
 async fn start_host_gssapi_broker() -> (BrokerHandle, tempfile::TempDir) {
-    crate::support::init_tracing_with("krabka_broker=debug,info");
+    init_tracing_with("krabka_broker=debug,info");
 
     let kdc_url =
         std::env::var("SSPI_KDC_URL").unwrap_or_else(|_| "tcp://localhost:88".to_string());

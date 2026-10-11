@@ -2,29 +2,32 @@ mod support;
 
 use krabka_client_consumer::{AutoOffsetReset, Consumer};
 
+use crate::support::{
+    admin::{standalone_admin, topic_spec},
+    producer::{ProducerRecordSetup, default_producer, producer_record},
+};
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lists_groups_and_committed_offsets() {
     // `ListGroups` goes to every broker of the metadata, as Kafka's
     // `KafkaAdminClient.listGroups` does, so it depends on the broker
     // advertising a real, dialable port for itself.
-    let (_dir, _broker, bootstrap, mut admin) = crate::support::admin::standalone_admin().await;
+    let (_dir, _broker, bootstrap, mut admin) = standalone_admin().await;
     admin
         .create_topics(
-            &[crate::support::admin::topic_spec("t1", 1, 1)],
+            &[topic_spec("t1", 1, 1)],
             krabka_client_admin::TopicMutationOptions::with_timeout(krabka_units::secs(5)),
         )
         .await
         .unwrap();
 
-    let producer = crate::support::producer::default_producer(&bootstrap).await;
+    let producer = default_producer(&bootstrap).await;
     producer
-        .send(crate::support::producer::producer_record(
-            crate::support::producer::ProducerRecordSetup {
-                topic: ("t1").into(),
-                value: Some("v".into()),
-                ..Default::default()
-            },
-        ))
+        .send(producer_record(ProducerRecordSetup {
+            topic: ("t1").into(),
+            value: Some("v".into()),
+            ..Default::default()
+        }))
         .await
         .unwrap();
     producer.flush().await.unwrap();

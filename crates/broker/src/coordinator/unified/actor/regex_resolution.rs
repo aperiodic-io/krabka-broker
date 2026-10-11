@@ -23,6 +23,8 @@ use std::{
 };
 
 use super::pending_records::PendingRecords;
+#[cfg(test)]
+use crate::coordinator::unified::regex_resolver::{NoTopicRegexResolver, TEST_NOW_MS};
 use crate::{
     coordinator::unified::{
         config::NextGenConfig,
@@ -82,7 +84,7 @@ impl RegexResolution<'static> {
     /// for the tests that do not exercise regular expressions.
     pub(crate) fn none() -> Self {
         Self {
-            resolver: &crate::coordinator::unified::regex_resolver::NoTopicRegexResolver,
+            resolver: &NoTopicRegexResolver,
             refresh_version: -1,
             now_ms: 0,
             refresh_interval: Duration::from_mins(10),
@@ -94,7 +96,7 @@ impl RegexResolution<'static> {
 #[cfg(test)]
 impl<'a> RegexResolution<'a> {
     /// The time that [`Self::with`] puts a heartbeat at.
-    pub(crate) const TEST_NOW_MS: i64 = crate::coordinator::unified::regex_resolver::TEST_NOW_MS;
+    pub(crate) const TEST_NOW_MS: i64 = TEST_NOW_MS;
 
     /// A resolution by `resolver` at [`Self::TEST_NOW_MS`], with no image
     /// change to refresh for and the default refresh interval.

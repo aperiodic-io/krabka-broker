@@ -61,6 +61,7 @@ use uuid::Uuid;
 use crate::{
     args::ControllerListener,
     fixture::{Fixture, PartitionFixture, build_fixture},
+    restored::restore_for_controller,
 };
 
 /// `ListOffsetsRequest.EARLIEST_TIMESTAMP`.
@@ -100,7 +101,7 @@ impl RestoredCluster {
 
     async fn start_with(fixture: Fixture, extra: &[&str]) -> Self {
         let (target, log_dir, mut controller, report) =
-            crate::restored::restore_for_controller(fixture.archive_root.path(), extra).await;
+            restore_for_controller(fixture.archive_root.path(), extra).await;
 
         let (broker, client) =
             boot(&mut controller, BrokerConfig::for_tests(log_dir.clone())).await;

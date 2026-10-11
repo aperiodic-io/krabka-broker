@@ -91,12 +91,16 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::remote_reader::test_support::tp;
+    use crate::{
+        remote_log_manager::test_support::local_backends,
+        remote_reader::test_support::{
+            not_ready_reader, reader_with_metadata as assigned_reader_with_metadata, tp,
+        },
+    };
 
     fn reader_with_metadata() -> (RemoteReader, tempfile::TempDir) {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) =
-            crate::remote_log_manager::test_support::local_backends(remote_dir.path());
+        let (rsm, rlmm) = local_backends(remote_dir.path());
         (RemoteReader::new(rsm, rlmm), remote_dir)
     }
 
@@ -272,8 +276,7 @@ mod tests {
     #[tokio::test]
     async fn earliest_offset_returns_none_when_no_finished_segments() {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) =
-            crate::remote_log_manager::test_support::local_backends(remote_dir.path());
+        let (rsm, rlmm) = local_backends(remote_dir.path());
         let reader = RemoteReader::new(rsm, rlmm);
         assert!(reader.earliest_offset(&tp()).await.unwrap() == None);
     }
@@ -326,7 +329,7 @@ mod tests {
 
     #[tokio::test]
     async fn earliest_offset_propagates_not_ready() {
-        let (_remote_dir, reader) = crate::remote_reader::test_support::not_ready_reader();
+        let (_remote_dir, reader) = not_ready_reader();
         let err = reader.earliest_offset(&tp()).await.unwrap_err();
         assert!(matches!(err, RemoteStorageError::NotReady { .. }));
         let err = reader.latest_tiered_offset(&tp()).await.unwrap_err();
@@ -441,8 +444,7 @@ mod tests {
         )
         .unwrap();
 
-        let (_remote_dir, reader) =
-            crate::remote_reader::test_support::reader_with_metadata(|| m.clone());
+        let (_remote_dir, reader) = assigned_reader_with_metadata(|| m.clone());
 
         // Unowned partition (never assigned) → the list path treats it as a
         // genuine miss: empty, not an error.

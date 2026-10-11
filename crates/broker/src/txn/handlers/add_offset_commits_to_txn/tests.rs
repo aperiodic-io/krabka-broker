@@ -3,7 +3,13 @@ use std::sync::Arc;
 use assert2::{assert, check};
 
 use super::*;
-use crate::txn::bootstrap;
+use crate::{
+    partition::Partition,
+    partition_registry::PartitionRegistry,
+    producer_id_manager::ProducerIdManager,
+    test_support::{StandalonePartitionSetup, open_partition},
+    txn::bootstrap,
+};
 
 const TID: &str = "tid-offsets";
 const NOW: i64 = 1_000_000;
@@ -159,19 +165,17 @@ fn a_new_entry_has_no_start_time() {
     check!(TxnEntry::new_empty(TID.into(), ProducerId(7), 0, 60_000, NOW).start_ms == -1);
 }
 
-fn coordinator_with_log(
-    directory: &std::path::Path,
-) -> (Arc<TxnCoordinator>, Arc<crate::partition::Partition>) {
+fn coordinator_with_log(directory: &std::path::Path) -> (Arc<TxnCoordinator>, Arc<Partition>) {
     let coordinator = Arc::new(TxnCoordinator::new(
         krabka_metadata::NodeId(1),
-        Arc::new(crate::partition_registry::PartitionRegistry::new()),
-        Arc::new(crate::producer_id_manager::ProducerIdManager::new()),
+        Arc::new(PartitionRegistry::new()),
+        Arc::new(ProducerIdManager::new()),
         1,
         krabka_units::mebibytes(1),
     ));
-    let partition = crate::test_support::open_partition(
+    let partition = open_partition(
         directory,
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic: bootstrap::TOPIC,
             ..Default::default()
         },

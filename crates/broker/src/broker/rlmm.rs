@@ -8,11 +8,16 @@ use std::sync::Arc;
 use krabka_units::convert::TimeExt as _;
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::BrokerConfig, host_port::parse_advertised_host_port};
+use crate::{
+    config::{BrokerConfig, KafkaRlmmConfig, RlmmKind},
+    host_port::parse_advertised_host_port,
+    metrics::BrokerMetrics,
+    network::client::to_client_creds,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct KafkaSwapKickoff {
-    pub(super) cfg: crate::config::KafkaRlmmConfig,
+    pub(super) cfg: KafkaRlmmConfig,
     pub(super) broker_id: i32,
     pub(super) bootstrap_backoff_initial: std::time::Duration,
     pub(super) bootstrap_backoff_max: std::time::Duration,
@@ -20,7 +25,7 @@ pub(super) struct KafkaSwapKickoff {
 }
 
 #[cfg(test)]
-pub(super) fn test_kickoff(cfg: crate::config::KafkaRlmmConfig) -> KafkaSwapKickoff {
+pub(super) fn test_kickoff(cfg: KafkaRlmmConfig) -> KafkaSwapKickoff {
     KafkaSwapKickoff {
         cfg,
         broker_id: 1,
@@ -36,9 +41,9 @@ pub(super) fn kafka_swap_kickoff(config: &BrokerConfig) -> Option<KafkaSwapKicko
     // KIP-405 RLMM itself into its in-memory implementation.
     let default_metadata_config;
     let metadata_config = match &config.remote_log_metadata {
-        crate::config::RlmmKind::TopicBacked(metadata_config) => metadata_config,
-        crate::config::RlmmKind::InMemory => {
-            default_metadata_config = crate::config::KafkaRlmmConfig::default();
+        RlmmKind::TopicBacked(metadata_config) => metadata_config,
+        RlmmKind::InMemory => {
+            default_metadata_config = KafkaRlmmConfig::default();
             &default_metadata_config
         }
     };
@@ -71,7 +76,7 @@ pub(super) fn kafka_swap_kickoff(config: &BrokerConfig) -> Option<KafkaSwapKicko
             sasl: config
                 .inter_broker_credentials
                 .as_ref()
-                .map(crate::network::client::to_client_creds),
+                .map(to_client_creds),
             sasl_host: protocol.requires_sasl().then(|| advertised_host.clone()),
         })
     });
@@ -86,7 +91,7 @@ pub(super) fn kafka_swap_kickoff(config: &BrokerConfig) -> Option<KafkaSwapKicko
         loopback_bootstrap(config.listen_addr)
     };
     Some(KafkaSwapKickoff {
-        cfg: crate::config::KafkaRlmmConfig {
+        cfg: KafkaRlmmConfig {
             dispatch_queue_capacity: config.client_dispatch_queue_capacity,
             frame_max: config.client_frame_max,
             bootstrap,
@@ -183,7 +188,7 @@ pub(super) async fn rlmm_bootstrap_backoff(
 /// the fail-closed [`krabka_remote_storage_topic::NotReadyRlmm`] placeholder
 /// until then.
 pub(super) fn metadata_log_config(
-    config: &crate::config::KafkaRlmmConfig,
+    config: &KafkaRlmmConfig,
     topic: String,
     client_id: String,
 ) -> krabka_remote_storage_topic::KafkaMetadataLogConfig {
@@ -211,7 +216,7 @@ pub(super) async fn bootstrap_topic_rlmm(
     swap: Arc<krabka_remote_storage_topic::SwappableRlmm>,
     cfg: KafkaSwapKickoff,
     runtime: tokio::runtime::Handle,
-    metrics: crate::metrics::BrokerMetrics,
+    metrics: BrokerMetrics,
     node_id: krabka_metadata::NodeId,
     mut image_rx: tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>>,
     shutdown: CancellationToken,

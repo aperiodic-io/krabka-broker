@@ -1,8 +1,19 @@
 //! Ordered tiered-topic configuration shared by the tiered-storage suites.
 use krabka_protocol::owned::create_topics_request::CreatableTopicConfig;
 
+use crate::support::{
+    client::{BatchProduceSetup, produce_batch},
+    produce::ProduceTimeoutMillis,
+    records::batch_from_records,
+    topics::{
+        AssignedTopicSetup, ConfiguredTopicSetup, CreateTopicRequestSetup,
+        CreateTopicsTimeoutMillis, assigned_topic, creatable_topic, create_topic_request,
+        create_topic_request_with_setup, topic_configs,
+    },
+};
+
 pub fn tiered_configs(segment_bytes: Option<&str>) -> Vec<CreatableTopicConfig> {
-    crate::support::topics::topic_configs(
+    topic_configs(
         std::iter::once(("remote.storage.enable", "true"))
             .chain(segment_bytes.map(|value| ("internal.segment.bytes", value)))
             .chain([
@@ -20,15 +31,13 @@ pub async fn create_configured_topic(
     configs: Vec<CreatableTopicConfig>,
 ) {
     let response = client
-        .send(crate::support::topics::create_topic_request(
+        .send(create_topic_request(
             krabka_protocol::owned::create_topics_request::CreatableTopic {
                 configs,
-                ..crate::support::topics::creatable_topic(
-                    crate::support::topics::ConfiguredTopicSetup {
-                        name: (topic).into(),
-                        ..Default::default()
-                    },
-                )
+                ..creatable_topic(ConfiguredTopicSetup {
+                    name: (topic).into(),
+                    ..Default::default()
+                })
             },
         ))
         .await
@@ -42,7 +51,7 @@ pub async fn create_configured_topic(
 
 #[derive(krabka_macros::FieldDefaults)]
 pub struct AssignedTieredTopicSetup<'a> {
-    pub topic: crate::support::topics::AssignedTopicSetup,
+    pub topic: AssignedTopicSetup,
     pub segment_bytes: Option<&'a str>,
 }
 
@@ -52,13 +61,13 @@ pub async fn create_assigned_topic(
     setup: AssignedTieredTopicSetup<'_>,
 ) {
     let response = client
-        .send(crate::support::topics::create_topic_request_with_setup(
+        .send(create_topic_request_with_setup(
             krabka_protocol::owned::create_topics_request::CreatableTopic {
                 configs: tiered_configs(setup.segment_bytes),
-                ..crate::support::topics::assigned_topic(setup.topic)
+                ..assigned_topic(setup.topic)
             },
-            crate::support::topics::CreateTopicRequestSetup {
-                timeout: crate::support::topics::CreateTopicsTimeoutMillis(10_000),
+            CreateTopicRequestSetup {
+                timeout: CreateTopicsTimeoutMillis(10_000),
             },
         ))
         .await
@@ -117,18 +126,17 @@ pub async fn produce_records(
     setup: TieredRecordsSetup<'_>,
 ) {
     for index in 0..setup.count.0 {
-        let batch =
-            crate::support::records::batch_from_records(vec![krabka_protocol::records::Record {
-                value: Some(value(TieredRecordIndex(index))),
-                ..Default::default()
-            }]);
-        let response = crate::support::client::produce_batch(
+        let batch = batch_from_records(vec![krabka_protocol::records::Record {
+            value: Some(value(TieredRecordIndex(index))),
+            ..Default::default()
+        }]);
+        let response = produce_batch(
             client,
             batch,
-            crate::support::client::BatchProduceSetup {
+            BatchProduceSetup {
                 topic: setup.topic,
                 topic_id: setup.topic_id,
-                timeout: crate::support::produce::ProduceTimeoutMillis(10_000),
+                timeout: ProduceTimeoutMillis(10_000),
                 ..Default::default()
             },
         )

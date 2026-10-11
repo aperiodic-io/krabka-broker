@@ -42,8 +42,10 @@ use krabka_protocol::{
 };
 
 use crate::{
+    api_catalog::UnstableApiVersions,
     codes,
     handlers::{ApiKeyCode, ApiVersion, CorrelationId},
+    network::{request::parse_request, response_header_v1},
 };
 
 /// A failure serving one `Envelope`, and the `EnvelopeResponse.error_code`
@@ -149,15 +151,10 @@ pub(crate) fn is_forwardable(api_key: ApiKeyCode) -> bool {
 /// `StopReplica`, `UpdateMetadata` and `ControlledShutdown` (keys 4 to 7) have
 /// no valid version. Trunk's own keys are known while
 /// `unstable.api.versions.enable` is on.
-fn is_known_api_key(
-    api_key: ApiKeyCode,
-    unstable: crate::api_catalog::UnstableApiVersions,
-) -> bool {
+fn is_known_api_key(api_key: ApiKeyCode, unstable: UnstableApiVersions) -> bool {
     match unstable {
-        crate::api_catalog::UnstableApiVersions::Disabled => {
-            krabka_raft::kafka_4_3_1_api(api_key).is_some()
-        }
-        crate::api_catalog::UnstableApiVersions::Enabled => {
+        UnstableApiVersions::Disabled => krabka_raft::kafka_4_3_1_api(api_key).is_some(),
+        UnstableApiVersions::Enabled => {
             krabka_protocol::api_key::ApiKey::from_i16(api_key).is_some()
         }
     }
@@ -362,7 +359,7 @@ pub(crate) fn unwrap_response(
         });
     }
     let correlation_id = cur.get_i32();
-    if crate::network::response_header_v1(api_key, body_flexible) {
+    if response_header_v1(api_key, body_flexible) {
         read_tagged_fields(&mut cur, |_, _| Ok(false))?;
     }
     Ok((correlation_id, response_data.slice_ref(cur)))
@@ -399,13 +396,13 @@ pub(crate) fn decode_request(body: &[u8], version: i16) -> Result<EnvelopeReques
 pub(crate) fn unwrap_request<F>(
     request_data: &Bytes,
     flexible_for: F,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 ) -> Result<ForwardedRequest, EnvelopeError>
 where
     F: Fn(ApiKeyCode, ApiVersion) -> bool,
 {
-    let parsed = crate::network::request::parse_request(request_data, flexible_for)
-        .map_err(|_| EnvelopeError::UnsupportedVersion)?;
+    let parsed =
+        parse_request(request_data, flexible_for).map_err(|_| EnvelopeError::UnsupportedVersion)?;
     if !is_known_api_key(parsed.api_key, unstable) {
         return Err(EnvelopeError::UnsupportedVersion);
     }
@@ -435,7 +432,7 @@ where
 /// the forwarded header, so the bytes this returns are byte-identical to what
 /// the client would have received had it reached the controller itself.
 pub(crate) fn wrap_response(forwarded: &ForwardedRequest, body: &[u8]) -> Bytes {
-    let header_v1 = crate::network::response_header_v1(forwarded.api_key, forwarded.body_flexible);
+    let header_v1 = response_header_v1(forwarded.api_key, forwarded.body_flexible);
     let mut out = BytesMut::with_capacity(4 + usize::from(header_v1) + body.len());
     out.put_i32(forwarded.correlation_id);
     if header_v1 {
@@ -498,6 +495,7 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
+    use crate::api_catalog::UnstableApiVersions;
 
     /// `DefaultKafkaPrincipalBuilder.serialize(new KafkaPrincipal("User",
     /// "alice"))` in `mirror.gcr.io/apache/kafka:4.3.1`, captured verbatim:
@@ -525,8 +523,7 @@ mod tests {
         body.to_vec()
     }
 
-    const UNSTABLE_OFF: crate::api_catalog::UnstableApiVersions =
-        crate::api_catalog::UnstableApiVersions::Disabled;
+    const UNSTABLE_OFF: UnstableApiVersions = UnstableApiVersions::Disabled;
 
     /// The bytes a real JVM forwarder puts in `request_principal` decode into
     /// the identity that JVM meant. These buffers are the oracle: they were

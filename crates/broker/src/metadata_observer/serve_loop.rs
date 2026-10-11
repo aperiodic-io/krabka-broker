@@ -292,8 +292,10 @@ mod tests {
 
     use super::*;
     use crate::{
+        health::metadata_progress,
         metadata_observer::test_support::{api_versions_response_v0, observer_config},
-        test_support::{BrokenTimer, TimerFailure},
+        metadata_source::{MetadataWriter, ObserverSource},
+        test_support::{BrokenTimer, TimerFailure, mock_request_broker, single_partition_topic},
     };
 
     /// A write side for an `ObserverSource` built only to read offsets
@@ -301,7 +303,7 @@ mod tests {
     struct NoWrites;
 
     #[async_trait::async_trait]
-    impl crate::metadata_source::MetadataWriter for NoWrites {
+    impl MetadataWriter for NoWrites {
         async fn submit_change(
             &self,
             _records: Vec<krabka_metadata::MetadataRecord>,
@@ -530,7 +532,7 @@ mod tests {
     async fn run_loop_sleeps_after_empty_fetch() {
         let fetches = Arc::new(AtomicUsize::new(0));
         let fetches_for_mock = fetches.clone();
-        let mock = crate::test_support::mock_request_broker(
+        let mock = mock_request_broker(
             krabka_raft::API_KEY_METADATA_FETCH,
             move || {
                 fetches_for_mock.fetch_add(1, Ordering::SeqCst);
@@ -642,7 +644,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut image = krabka_metadata::MetadataImage::new(Uuid::nil());
         image.apply(&krabka_metadata::MetadataRecord::V1Topic(
-            crate::test_support::single_partition_topic("survives-the-restart", Uuid::new_v4()),
+            single_partition_topic("survives-the-restart", Uuid::new_v4()),
         ));
         ObserverStore::open(dir.path(), 1).maybe_checkpoint(&image, 12);
 
@@ -715,7 +717,7 @@ mod tests {
         // is the third place the loop parks. The record of that answered fetch
         // — the applied offset and the leader hint — survives the shutdown,
         // which is what separates this exit from the unreachable-voter one.
-        let mock = crate::test_support::mock_request_broker(
+        let mock = mock_request_broker(
             krabka_raft::API_KEY_METADATA_FETCH,
             move || metadata_fetch_response_body(MetadataFetchResponseSetup::default()),
             api_versions_response_v0,
@@ -773,7 +775,7 @@ mod tests {
     /// cannot be armed, so the loop stops at its first park. Returns the
     /// observer, read through the `ObserverSource` the broker reads it
     /// through, and the number of parks it tried.
-    async fn serve_once(records: Bytes) -> (crate::metadata_source::ObserverSource, usize) {
+    async fn serve_once(records: Bytes) -> (ObserverSource, usize) {
         let served = Arc::new(AtomicUsize::new(0));
         let mock = metadata_broker(
             Arc::clone(&served),
@@ -788,10 +790,7 @@ mod tests {
         )
         .await;
         let (observer, parks) = observe_with_broken_timer(mock).await;
-        (
-            crate::metadata_source::ObserverSource::new(observer, Arc::new(NoWrites)),
-            parks,
-        )
+        (ObserverSource::new(observer, Arc::new(NoWrites)), parks)
     }
 
     /// One row per outcome of a fetched response. A record that does not
@@ -960,7 +959,7 @@ mod tests {
     /// records ahead.
     #[tokio::test]
     async fn the_quorums_committed_offset_is_read_past_a_lagging_responder() {
-        let mock = crate::test_support::mock_request_broker(
+        let mock = mock_request_broker(
             krabka_raft::API_KEY_METADATA_FETCH,
             move || {
                 // A follower holding 5 of the quorum's 10 000 records.
@@ -1001,11 +1000,8 @@ mod tests {
         // differ -- so it is where the mapping is pinned. Swapped, or both
         // taken from one side, a node 10 000 records behind would report no
         // lag at all and `/readyz` would answer 200 for it.
-        let source = Arc::new(crate::metadata_source::ObserverSource::new(
-            observer.clone(),
-            Arc::new(NoWrites),
-        ));
-        let progress = crate::health::metadata_progress(source);
+        let source = Arc::new(ObserverSource::new(observer.clone(), Arc::new(NoWrites)));
+        let progress = metadata_progress(source);
         assert!(progress.node_metadata_offset() == -1);
         assert!(progress.quorum_committed_offset() == 9_999);
 

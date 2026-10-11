@@ -184,9 +184,12 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::server::{
-        api_versions::api_versions_response_body,
-        test_support::{decoded, test_engine_with_voters, voter},
+    use crate::{
+        UnstableApiVersions,
+        server::{
+            api_versions::{ApiVersionsView, api_versions_response_body},
+            test_support::{decoded, test_engine_with_voters, voter},
+        },
     };
 
     /// The controller registrations of a case: each node id and its
@@ -446,11 +449,11 @@ mod tests {
         let image = MetadataImage::new(Uuid::nil());
         let av = api_versions_response_body(
             4,
-            crate::server::api_versions::ApiVersionsView {
+            ApiVersionsView {
                 image: &image,
                 metadata_offset: -1,
                 admin_router: None,
-                unstable: crate::UnstableApiVersions::Disabled,
+                unstable: UnstableApiVersions::Disabled,
             },
         );
         let avr = decoded::<ApiVersionsResponse>(&av, 4);

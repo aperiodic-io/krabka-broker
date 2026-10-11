@@ -29,7 +29,7 @@ use super::{
     registry::ShardId,
     wire::{QuorumGroup, fetch_request},
 };
-use crate::codes;
+use crate::{codes, replicator::ReplicationConnectionConfig};
 
 pub(crate) struct Config {
     pub(crate) node_id: NodeId,
@@ -43,7 +43,7 @@ pub(crate) struct Config {
     pub(crate) storage: LogConfig,
     pub(crate) client_id: String,
     pub(crate) shutdown: CancellationToken,
-    pub(crate) connection: crate::replicator::ReplicationConnectionConfig,
+    pub(crate) connection: ReplicationConnectionConfig,
 }
 
 pub(crate) async fn run(config: Config) {
@@ -187,6 +187,8 @@ mod tests {
     use super::*;
     use crate::{
         config::ReplicationRuntimeConfig,
+        network::client::InterBrokerClient,
+        replicator::ReplicationConnectionConfig,
         wal::{
             WalStore as _,
             quorum::{
@@ -212,10 +214,8 @@ mod tests {
             storage: LogConfig::default(),
             client_id: "wal-follower-test".into(),
             shutdown,
-            connection: crate::replicator::ReplicationConnectionConfig {
-                inter_broker_client: Arc::new(crate::network::client::InterBrokerClient::new(
-                    None, None,
-                )),
+            connection: ReplicationConnectionConfig {
+                inter_broker_client: Arc::new(InterBrokerClient::new(None, None)),
                 inter_broker_listener_protocol: ListenerProtocol::Plaintext,
                 inter_broker_server_name: "localhost".into(),
                 replication: ReplicationRuntimeConfig::default(),

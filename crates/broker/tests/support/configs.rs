@@ -177,20 +177,18 @@ pub async fn alter_topic_config(
         value,
     } = setup;
     let response = client
-        .send(incremental_request(
-            crate::support::configs::IncrementalConfigsSetup {
-                resources: vec![incremental_resource(
-                    2,
-                    topic.to_owned(),
-                    vec![incremental_config(
-                        name.to_owned(),
-                        value.map(ToOwned::to_owned),
-                        operation,
-                    )],
+        .send(incremental_request(IncrementalConfigsSetup {
+            resources: vec![incremental_resource(
+                2,
+                topic.to_owned(),
+                vec![incremental_config(
+                    name.to_owned(),
+                    value.map(ToOwned::to_owned),
+                    operation,
                 )],
-                ..Default::default()
-            },
-        ))
+            )],
+            ..Default::default()
+        }))
         .await
         .expect("IncrementalAlterConfigs");
     let row = &response.responses[0];

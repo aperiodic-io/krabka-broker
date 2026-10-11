@@ -5,9 +5,11 @@ use moxy::{
     token::{Span, TokenStream, TokenTree},
 };
 
+use crate::meta::{item_body, no_arguments};
+
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::meta::no_arguments(meta, "object_ops")?;
-    let (mut tokens, body) = crate::meta::item_body(item, "object_ops", |token| {
+    no_arguments(meta, "object_ops")?;
+    let (mut tokens, body) = item_body(item, "object_ops", |token| {
         token.is_keyword_trait() || token.is_keyword_impl()
     })?;
     let TokenTree::Group(group) = &mut tokens[body] else {
@@ -77,6 +79,7 @@ mod tests {
     use assert2::assert;
 
     use super::expand;
+    use crate::meta::compact;
 
     #[test]
     fn preserves_declaration_docs_and_implementation_body() {
@@ -85,7 +88,7 @@ mod tests {
             "#[async_trait] impl Ops for Client { put_from_path!({ self.upload(key, src, threshold, chunk_size, req).await }); }",
         ] {
             let output = expand("".parse().unwrap(), item.parse().unwrap()).unwrap();
-            let output = crate::meta::compact(&output);
+            let output = compact(&output);
             assert!(output.contains("asyncfnput_from_path(&self,key:&Path,src:&std::path::Path,threshold:u64,chunk_size:usize,req:PutRequest,)"));
             assert!(!output.contains("put_from_path!"));
         }

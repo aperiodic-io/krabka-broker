@@ -12,6 +12,7 @@ use krabka_remote_storage::{
 use tracing::{debug, warn};
 
 use super::{archive::ArchiveMode, now_ms, rlmm::rlmm_mutate};
+use crate::blocking::spawn_blocking;
 
 /// KIP-405: cascade the
 /// [`DeletePartitionMarked` → `DeletePartitionStarted` →
@@ -158,8 +159,7 @@ pub(super) async fn delete_one_segment(
             let rsm_del = rsm.clone();
             let md_del = md.clone();
             let delete_result =
-                crate::blocking::spawn_blocking(move || rsm_del.delete_log_segment_data(&md_del))
-                    .await;
+                spawn_blocking(move || rsm_del.delete_log_segment_data(&md_del)).await;
             match delete_result {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {

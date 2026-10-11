@@ -22,7 +22,8 @@ use krabka_broker::{BrokerConfig, BrokerHandle};
 use crate::support::{
     client::connect_client,
     discovery::topic_metadata_request,
-    topics::{creatable_topic, create_topic_request},
+    shutdown_cluster,
+    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
 };
 
 mod support;
@@ -63,7 +64,7 @@ async fn three_node_cluster_elects_leader() {
         leaders.len() == 1 && !leaders.contains(&krabka_broker::NodeId(0)),
         "leader not converged: {leaders:?}"
     );
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -76,9 +77,9 @@ async fn create_topic_on_any_node_propagates() {
     let c = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
     let resp = c
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("prop").into(),
-                partitions: crate::support::topics::TopicPartitionCount(3),
+                partitions: TopicPartitionCount(3),
                 ..Default::default()
             },
         )))
@@ -97,7 +98,7 @@ async fn create_topic_on_any_node_propagates() {
         "topic 'prop' not visible to node 2"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -143,7 +144,7 @@ async fn leader_kill_recovers() {
     let c = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
     let resp = c
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("post-kill").into(),
                 ..Default::default()
             },
@@ -152,7 +153,7 @@ async fn leader_kill_recovers() {
         .unwrap();
     assert!(resp.topics[0].error_code == 0);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -174,7 +175,7 @@ async fn follower_forwards_create_topic() {
     let c = connect_client(cluster[follower_idx].1.listen_addr.to_string(), None).await;
     let resp = c
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("via-follower").into(),
                 ..Default::default()
             },
@@ -183,7 +184,7 @@ async fn follower_forwards_create_topic() {
         .unwrap();
     assert!(resp.topics[0].error_code == 0);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 // macOS-gated for the same reason quorum.rs is windows-gated at the
@@ -216,8 +217,10 @@ async fn concurrent_topic_creates_one_wins() {
     let mut joins = Vec::new();
     for c in clients {
         joins.push(tokio::spawn(async move {
+            use crate::support::topics::ConfiguredTopicSetup;
+
             c.send(create_topic_request(creatable_topic(
-                crate::support::topics::ConfiguredTopicSetup {
+                ConfiguredTopicSetup {
                     name: ("race").into(),
                     ..Default::default()
                 },
@@ -248,5 +251,5 @@ async fn concurrent_topic_creates_one_wins() {
         "two losers see TOPIC_ALREADY_EXISTS, got zero={zero} already={already}"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

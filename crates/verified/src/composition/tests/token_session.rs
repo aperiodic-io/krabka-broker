@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     authz::{sasl_session_expiry, session_expired_for_request},
-    delegation_token::TokenApi,
+    delegation_token::{TokenApi, TokenApiAdmission},
 };
 
 fn session_oracle(now: i64, credential: Option<i64>, cap: Option<i64>) -> (Option<i64>, i64) {
@@ -47,7 +47,7 @@ fn check_trace(times: [i64; 4], periods: [i64; 4], api: i16, token_api: TokenApi
                 at,
                 window,
                 matches!(api, 17 | 36) || times[3] < at,
-                crate::delegation_token::TokenApiAdmission::Reject,
+                TokenApiAdmission::Reject,
             ))
         }
     };

@@ -22,6 +22,7 @@ mod per_listener_config_tests {
     use krabka_security::ListenerProtocol;
 
     use super::*;
+    use crate::SslPrincipalMapper;
 
     fn test_listener_spec(
         protocol: ListenerProtocol,
@@ -34,7 +35,7 @@ mod per_listener_config_tests {
             protocol,
             tls_config: None,
             sasl_mechanisms: sasl,
-            principal_mapper: crate::SslPrincipalMapper::default(),
+            principal_mapper: SslPrincipalMapper::default(),
         }
     }
 

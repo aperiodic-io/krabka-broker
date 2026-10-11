@@ -20,6 +20,16 @@ use krabka_units::{Time, convert::TimeExt as _, fmt::Human as _, millis, secs};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
+use crate::{
+    codes::{CLUSTER_AUTHORIZATION_FAILED, NONE, NOT_CONTROLLER},
+    controller_endpoint::leader_endpoint,
+    cordoned_log_dirs::CordonedLogDirs,
+    log_dir_id::LogDirIds,
+    log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource,
+    network::client::InterBrokerClient,
+};
+
 /// Where this broker's first unfencing stands: Kafka's
 /// `BrokerLifecycleManager.initialUnfenceFuture`, which broker startup waits
 /// on.
@@ -44,14 +54,14 @@ pub(crate) struct Config {
     /// as `STALE_BROKER_EPOCH`.
     pub broker_epoch: i64,
     pub interval: Time,
-    pub controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    pub controller: Arc<dyn MetadataSource>,
     pub shutdown: CancellationToken,
     /// Shared outbound dialer that reaches the controller leader. It runs
     /// TLS / SASL when the controller listener needs them. If not, it uses
     /// plain TCP. This is the same dialer the raft transport uses to reach
     /// its peers, so a heartbeat travels the channel the quorum already
     /// authenticates on.
-    pub outbound_client: Arc<crate::network::client::InterBrokerClient>,
+    pub outbound_client: Arc<InterBrokerClient>,
     pub controller_listener_protocol: ListenerProtocol,
     /// SNI and SASL server name for the controller listener, matching the one
     /// the raft dialer presents.
@@ -74,9 +84,9 @@ pub(crate) struct Config {
     pub unfenced: tokio::sync::watch::Sender<InitialUnfence>,
     /// Per-log-dir health registry. Each heartbeat reports the offline dirs
     /// to the controller as `offline_log_dirs` UUIDs (KIP-858).
-    pub log_dir_status: crate::log_dir_status::LogDirRegistry,
+    pub log_dir_status: LogDirRegistry,
     /// Stable per-log-dir UUIDs, to translate offline dir paths to ids.
-    pub log_dir_ids: crate::log_dir_id::LogDirIds,
+    pub log_dir_ids: LogDirIds,
     /// All configured log dirs. When every one of them is offline, the
     /// broker shuts itself down (KIP-112).
     pub all_log_dirs: Vec<std::path::PathBuf>,
@@ -85,13 +95,13 @@ pub(crate) struct Config {
     pub supervisor_shutdown: tokio_util::sync::CancellationToken,
     /// KIP-1066: the log directories this broker holds cordoned. Heartbeats
     /// report their ids once the broker has caught up with the metadata.
-    pub cordoned_log_dirs: crate::cordoned_log_dirs::CordonedLogDirs,
+    pub cordoned_log_dirs: CordonedLogDirs,
 }
 
 /// UUIDs of the currently-offline log dirs, for the heartbeat's `offline_log_dirs`.
 fn offline_dir_uuids(
-    status: &crate::log_dir_status::LogDirRegistry,
-    ids: &crate::log_dir_id::LogDirIds,
+    status: &LogDirRegistry,
+    ids: &LogDirIds,
 ) -> Vec<krabka_protocol::primitives::uuid::Uuid> {
     status
         .offline()
@@ -103,10 +113,7 @@ fn offline_dir_uuids(
 
 /// True when every configured log dir is offline. The broker then shuts itself
 /// down.
-fn all_dirs_offline(
-    all_log_dirs: &[std::path::PathBuf],
-    status: &crate::log_dir_status::LogDirRegistry,
-) -> bool {
+fn all_dirs_offline(all_log_dirs: &[std::path::PathBuf], status: &LogDirRegistry) -> bool {
     !all_log_dirs.is_empty() && all_log_dirs.iter().all(|d| status.is_offline(d))
 }
 
@@ -140,8 +147,8 @@ fn heartbeat_connection_options(broker_id: i32, interval: Time) -> ConnectionOpt
 fn cordoned_dir_uuids(
     caught_up: bool,
     image: &krabka_metadata::MetadataImage,
-    cordoned: &crate::cordoned_log_dirs::CordonedLogDirs,
-    ids: &crate::log_dir_id::LogDirIds,
+    cordoned: &CordonedLogDirs,
+    ids: &LogDirIds,
 ) -> Option<Vec<krabka_protocol::primitives::uuid::Uuid>> {
     let supported = image.finalized_metadata_version().is_some_and(|level| {
         level >= krabka_metadata::metadata_version::CORDONED_LOG_DIRS_MIN_LEVEL
@@ -285,11 +292,8 @@ pub(crate) async fn run(mut cfg: Config) {
             continue;
         };
         let image = cfg.controller.current_image();
-        let Some((host, port)) = crate::controller_endpoint::leader_endpoint(
-            &image,
-            &cfg.controller_quorum_voters,
-            leader_id,
-        ) else {
+        let Some((host, port)) = leader_endpoint(&image, &cfg.controller_quorum_voters, leader_id)
+        else {
             debug!(
                 leader = leader_id.0,
                 "heartbeat: controller leader has no known controller endpoint yet"
@@ -340,12 +344,12 @@ pub(crate) async fn run(mut cfg: Config) {
         .await;
         match resp {
             Ok(Ok(r)) => {
-                if r.error_code == crate::codes::NOT_CONTROLLER {
+                if r.error_code == NOT_CONTROLLER {
                     open.connection.close();
                 } else {
                     channel = Some(open);
                 }
-                if r.error_code == crate::codes::CLUSTER_AUTHORIZATION_FAILED {
+                if r.error_code == CLUSTER_AUTHORIZATION_FAILED {
                     cfg.unfenced.send_if_modified(|state| {
                         let pending = *state == InitialUnfence::Pending;
                         if pending {
@@ -354,7 +358,7 @@ pub(crate) async fn run(mut cfg: Config) {
                         pending
                     });
                 }
-                if r.error_code != crate::codes::NONE {
+                if r.error_code != NONE {
                     warn!(
                         error_code = r.error_code,
                         "heartbeat rejected by controller"
@@ -420,7 +424,15 @@ mod tests {
     };
 
     use super::*;
-    use crate::test_support::FakeMetadataSource;
+    use crate::{
+        codes::{NONE, NOT_CONTROLLER},
+        cordoned_log_dirs::CordonedLogDirs,
+        features::METADATA_VERSION,
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        test_support::{FakeMetadataSource, broker_registration, two_log_dirs},
+    };
 
     // How a fake controller answers a heartbeat.
     #[derive(Debug, Clone, Copy)]
@@ -486,8 +498,8 @@ mod tests {
                 }
                 seen.heartbeats += 1;
                 let error_code = match std::mem::replace(&mut seen.next_answer, Answer::Accept) {
-                    Answer::Accept => crate::codes::NONE,
-                    Answer::NotController => crate::codes::NOT_CONTROLLER,
+                    Answer::Accept => NONE,
+                    Answer::NotController => NOT_CONTROLLER,
                     Answer::Silent => return MockReply::Silent,
                     Answer::Close => return MockReply::Close,
                 };
@@ -545,7 +557,7 @@ mod tests {
                     BrokerRegistrationRecord {
                         broker_epoch: 11,
                         host: "localhost".into(),
-                        ..crate::test_support::broker_registration(krabka_raft::NodeId(7))
+                        ..broker_registration(krabka_raft::NodeId(7))
                     },
                 )])
                 .leader(Some(krabka_raft::NodeId(1)))
@@ -558,9 +570,9 @@ mod tests {
             broker_id: 7,
             broker_epoch: 11,
             interval: millis(20),
-            controller: Arc::clone(&source) as Arc<dyn crate::metadata_source::MetadataSource>,
+            controller: Arc::clone(&source) as Arc<dyn MetadataSource>,
             shutdown: shutdown.clone(),
-            outbound_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
+            outbound_client: Arc::new(InterBrokerClient::new(None, None)),
             controller_listener_protocol: ListenerProtocol::Plaintext,
             controller_server_name: "localhost".into(),
             controller_quorum_voters: vec![
@@ -570,11 +582,11 @@ mod tests {
             want_shutdown,
             should_shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             unfenced: tokio::sync::watch::channel(InitialUnfence::Pending).0,
-            log_dir_status: crate::log_dir_status::LogDirRegistry::probe(&no_dirs),
-            log_dir_ids: crate::log_dir_id::LogDirIds::resolve(&no_dirs),
+            log_dir_status: LogDirRegistry::probe(&no_dirs),
+            log_dir_ids: LogDirIds::resolve(&no_dirs),
             all_log_dirs: no_dirs.clone(),
             supervisor_shutdown: CancellationToken::new(),
-            cordoned_log_dirs: crate::cordoned_log_dirs::CordonedLogDirs::default(),
+            cordoned_log_dirs: CordonedLogDirs::default(),
         }));
 
         // The dials each fake has taken after each step, compared at the end.
@@ -609,9 +621,9 @@ mod tests {
 
     #[test]
     fn offline_dir_uuids_maps_offline_paths() {
-        let (a, _b, paths) = crate::test_support::two_log_dirs();
-        let ids = crate::log_dir_id::LogDirIds::resolve(&paths);
-        let status = crate::log_dir_status::LogDirRegistry::probe(&paths);
+        let (a, _b, paths) = two_log_dirs();
+        let ids = LogDirIds::resolve(&paths);
+        let status = LogDirRegistry::probe(&paths);
 
         // Initially no dirs are offline.
         assert!(offline_dir_uuids(&status, &ids).is_empty());
@@ -626,8 +638,8 @@ mod tests {
 
     #[test]
     fn all_dirs_offline_true_only_when_every_dir_offline() {
-        let (a, b, paths) = crate::test_support::two_log_dirs();
-        let status = crate::log_dir_status::LogDirRegistry::probe(&paths);
+        let (a, b, paths) = two_log_dirs();
+        let status = LogDirRegistry::probe(&paths);
 
         // Empty all_log_dirs: always false.
         assert!(!all_dirs_offline(&[], &status));
@@ -699,8 +711,8 @@ mod tests {
     /// `metadata.version` `4.3-IV0`, and an empty set is still sent.
     #[test]
     fn heartbeats_carry_cordoned_dirs_once_caught_up_on_a_supporting_version() {
-        let (_a, b, paths) = crate::test_support::two_log_dirs();
-        let ids = crate::log_dir_id::LogDirIds::resolve(&paths);
+        let (_a, b, paths) = two_log_dirs();
+        let ids = LogDirIds::resolve(&paths);
         let wire = |dir: &std::path::Path| {
             krabka_protocol::primitives::uuid::Uuid(*ids.id_for(dir).unwrap().as_bytes())
         };
@@ -709,18 +721,15 @@ mod tests {
             if let Some(level) = level {
                 image.apply(&MetadataRecord::V1FeatureLevel(
                     krabka_metadata::FeatureLevelRecord {
-                        name: crate::features::METADATA_VERSION.into(),
+                        name: METADATA_VERSION.into(),
                         level,
                     },
                 ));
             }
             image
         };
-        let one = crate::cordoned_log_dirs::CordonedLogDirs::new(
-            paths.clone(),
-            Some(b.path().display().to_string()),
-        );
-        let none = crate::cordoned_log_dirs::CordonedLogDirs::new(paths.clone(), None);
+        let one = CordonedLogDirs::new(paths.clone(), Some(b.path().display().to_string()));
+        let none = CordonedLogDirs::new(paths.clone(), None);
         let cases = [
             ("not caught up", false, Some(30), &one, None),
             (

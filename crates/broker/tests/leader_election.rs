@@ -13,7 +13,13 @@ use krabka_metadata::{LeaderRecoveryState, MetadataRecord, TopicConfigRecord};
 use support::{cluster_lock, durability::produce_acks};
 use tempfile::TempDir;
 
-use crate::support::client::connect_client;
+use crate::support::{
+    client::{BatchProduceSetup, connect_client},
+    discovery::named_topic_metadata,
+    durability::{ReplicatedTopicSetup, replicated_topic_fixture},
+    produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
+    shutdown_cluster,
+};
 
 mod support;
 
@@ -51,12 +57,10 @@ async fn wait_for_controller_leader_other_than(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn broker_death_elects_new_leader() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, _bootstrap_1) = crate::support::durability::replicated_topic_fixture(
-        crate::support::durability::ReplicatedTopicSetup {
-            topic: "elect",
-            ..Default::default()
-        },
-    )
+    let (mut cluster, _bootstrap_1) = replicated_topic_fixture(ReplicatedTopicSetup {
+        topic: "elect",
+        ..Default::default()
+    })
     .await;
 
     // Kill broker 1 (the partition leader by round-robin).
@@ -74,7 +78,7 @@ async fn broker_death_elects_new_leader() {
         .await;
     let client = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
     let resp = client
-        .send(crate::support::discovery::named_topic_metadata("elect"))
+        .send(named_topic_metadata("elect"))
         .await
         .expect("metadata");
     let t = resp
@@ -91,18 +95,16 @@ async fn broker_death_elects_new_leader() {
     assert!(new_epoch > 0, "leader_epoch should bump after election");
 
     // Clean up surviving brokers.
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unclean_failover_recovers_after_a_real_broker_restart() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, _bootstrap) = crate::support::durability::replicated_topic_fixture(
-        crate::support::durability::ReplicatedTopicSetup {
-            topic: "kip704-restart",
-            ..Default::default()
-        },
-    )
+    let (mut cluster, _bootstrap) = replicated_topic_fixture(ReplicatedTopicSetup {
+        topic: "kip704-restart",
+        ..Default::default()
+    })
     .await;
 
     cluster[0]
@@ -166,18 +168,16 @@ async fn unclean_failover_recovers_after_a_real_broker_restart() {
 
     reborn.shutdown().await;
     drop(dead_dir);
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn acks_all_completes_after_isr_shrink() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, bootstrap_1) = crate::support::durability::replicated_topic_fixture(
-        crate::support::durability::ReplicatedTopicSetup {
-            topic: "shrink2",
-            ..Default::default()
-        },
-    )
+    let (mut cluster, bootstrap_1) = replicated_topic_fixture(ReplicatedTopicSetup {
+        topic: "shrink2",
+        ..Default::default()
+    })
     .await;
 
     // Freeze broker 3 by shutting it down.
@@ -191,10 +191,10 @@ async fn acks_all_completes_after_isr_shrink() {
     let offset = produce_acks(
         &bootstrap_1,
         &["a", "b", "c"],
-        crate::support::client::BatchProduceSetup {
+        BatchProduceSetup {
             topic: "shrink2",
-            acknowledgements: crate::support::produce::ProduceAcknowledgements::AllReplicas,
-            timeout: crate::support::produce::ProduceTimeoutMillis(15_000),
+            acknowledgements: ProduceAcknowledgements::AllReplicas,
+            timeout: ProduceTimeoutMillis(15_000),
             ..Default::default()
         },
     )
@@ -207,18 +207,16 @@ async fn acks_all_completes_after_isr_shrink() {
         "shrink should be quick on for_tests config; took {elapsed:?}"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn isr_expand_on_catchup() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, _bootstrap_1) = crate::support::durability::replicated_topic_fixture(
-        crate::support::durability::ReplicatedTopicSetup {
-            topic: "expand",
-            ..Default::default()
-        },
-    )
+    let (mut cluster, _bootstrap_1) = replicated_topic_fixture(ReplicatedTopicSetup {
+        topic: "expand",
+        ..Default::default()
+    })
     .await;
 
     // 1. Find the controller leader so we can activate dynamic membership.
@@ -293,18 +291,16 @@ async fn isr_expand_on_catchup() {
     cluster[0].0.wait_until_isr_len("expand", 0, 3).await;
 
     reborn.shutdown().await;
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn produce_during_leader_failover() {
     let _g = cluster_lock().lock().await;
-    let (mut cluster, bootstrap_1) = crate::support::durability::replicated_topic_fixture(
-        crate::support::durability::ReplicatedTopicSetup {
-            topic: "failover",
-            ..Default::default()
-        },
-    )
+    let (mut cluster, bootstrap_1) = replicated_topic_fixture(ReplicatedTopicSetup {
+        topic: "failover",
+        ..Default::default()
+    })
     .await;
 
     // Produce 5 records with acks=1, kill broker 1 mid-burst, produce 5
@@ -314,7 +310,7 @@ async fn produce_during_leader_failover() {
         produce_acks(
             &bootstrap_1,
             &[v],
-            crate::support::client::BatchProduceSetup {
+            BatchProduceSetup {
                 topic: "failover",
                 ..Default::default()
             },
@@ -341,7 +337,7 @@ async fn produce_during_leader_failover() {
         let res = produce_acks(
             &bootstrap_2,
             &[v],
-            crate::support::client::BatchProduceSetup {
+            BatchProduceSetup {
                 topic: "failover",
                 ..Default::default()
             },
@@ -352,5 +348,5 @@ async fn produce_during_leader_failover() {
         let _ = res;
     }
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

@@ -7,7 +7,10 @@ use krabka_protocol::{
 };
 
 use super::{TIERED_TOPIC, out_of_range_at, tiered_broker, tiered_topic_id};
-use crate::remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier};
+use crate::{
+    broker::spawn_partition,
+    remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier},
+};
 
 fn data_batch(transactional: bool) -> RecordBatch {
     RecordBatch {
@@ -89,7 +92,7 @@ async fn remote_fetch_reports_an_abort_in_a_later_segment_or_the_local_tail() {
         log.delete_local_segments_through(if retain_marker { Offset(1) } else { copied_end })
             .unwrap();
         assert!(log.local_log_start_offset() > Offset(0));
-        let part = crate::broker::spawn_partition(
+        let part = spawn_partition(
             TIERED_TOPIC.into(),
             PartitionIndex(0),
             dir.path().to_path_buf(),

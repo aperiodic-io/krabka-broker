@@ -11,6 +11,8 @@ use std::path::Path;
 use krabka_ids::Offset;
 
 use super::Log;
+#[cfg(unix)]
+use crate::io::LogIo;
 use crate::{error::LogError, segment::Segment};
 
 #[cfg(test)]
@@ -81,7 +83,7 @@ impl Log {
     }
 
     #[cfg(unix)]
-    fn sync_log_dir(io: &dyn crate::io::LogIo, dir: &Path) -> Result<(), LogError> {
+    fn sync_log_dir(io: &dyn LogIo, dir: &Path) -> Result<(), LogError> {
         io.sync_dir(dir)?;
         #[cfg(test)]
         sync_observer::record_dir_sync(dir.to_path_buf());
@@ -116,18 +118,21 @@ mod tests {
     use krabka_ids::Offset;
 
     use super::*;
-    use crate::log::test_support::{rolling_test_log, sample_batch};
+    use crate::{
+        log::test_support::{rolling_test_log, sample_batch},
+        test_support::open_log,
+    };
 
     #[test]
     fn sync_persists_appended_records() {
         let dir = tempfile::tempdir().unwrap();
         {
-            let mut log = crate::test_support::open_log(dir.path());
+            let mut log = open_log(dir.path());
             log.append(&mut sample_batch(3)).unwrap();
             log.sync().unwrap(); // fsync without relying on flush_on_append
         }
         // Reopen from disk: the synced records are present.
-        let log = crate::test_support::open_log(dir.path());
+        let log = open_log(dir.path());
         assert2::assert!(log.log_end_offset() == Offset(3));
     }
 
@@ -147,10 +152,12 @@ mod tests {
         ] {
             let dir = tempfile::tempdir().unwrap();
             let mut log = match case {
-                Case::InitialCreation => crate::test_support::open_log(dir.path()),
+                Case::InitialCreation => open_log(dir.path()),
                 Case::ReopenBeforePriorSync => {
-                    drop(crate::test_support::open_log(dir.path()));
-                    crate::test_support::open_log(dir.path())
+                    use crate::test_support::open_log;
+
+                    drop(open_log(dir.path()));
+                    open_log(dir.path())
                 }
                 Case::Rollover => {
                     let mut log = rolling_test_log(dir.path());

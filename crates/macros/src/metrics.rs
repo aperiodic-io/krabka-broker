@@ -5,7 +5,7 @@ use moxy::{
     token::{Ident, LitStr, TokenStream},
 };
 
-use crate::meta::{Tokens, field_ident, named_fields};
+use crate::meta::{Tokens, field_ident, impl_block, named_fields};
 
 /// The arguments of one `#[metric(...)]` field attribute.
 #[derive(Default, moxy::FromMeta)]
@@ -107,7 +107,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         .map(metric)
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(crate::meta::impl_block(
+    Ok(impl_block(
         item,
         &TokenStream::new(),
         &moxy::template! {

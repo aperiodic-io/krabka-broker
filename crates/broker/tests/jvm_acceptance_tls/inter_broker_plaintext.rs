@@ -8,7 +8,9 @@
 //! assertion is not reliable on this network topology.
 
 use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE, nc_check_connectivity, start_two_sasl_brokers,
+    ADMIN, ADMIN_PASS, KAFKA_IMAGE, assert_console_produced, create_console_topic,
+    nc_check_connectivity, numbered_payload, produce_console, start_two_sasl_brokers,
+    write_plain_props,
 };
 
 /// JVM-driven 2-broker test for the `SASL_PLAINTEXT` inter-broker
@@ -59,20 +61,14 @@ async fn jvm_inter_broker_replication_authed() {
     broker1.wait_until_brokers_registered(2).await;
 
     // JVM client config: SASL_PLAINTEXT + PLAIN as the admin (super-user).
-    let props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
+    let props = write_plain_props(ADMIN, ADMIN_PASS);
     let mount = props.mount_str();
 
     // Create an rf=1 topic (see test doc-comment — JVM-driven rf=2
     // assertion isn't reliable under WSL networking). Single replica is
     // enough to prove the JVM client → broker SASL handshake works in
     // both directions across the two-broker cluster's controller layer.
-    crate::jvm_acceptance::create_console_topic(
-        crate::jvm_acceptance::KAFKA_IMAGE,
-        &[&mount],
-        TOPIC,
-        1,
-        1,
-    );
+    create_console_topic(KAFKA_IMAGE, &[&mount], TOPIC, 1, 1);
 
     // Wait for the topic to materialize in a broker's metadata image (either
     // broker; committed metadata converges on both).
@@ -84,15 +80,9 @@ async fn jvm_inter_broker_replication_authed() {
     // Produce 50 records via `kafka-console-producer`. The metadata
     // response steers the producer to whichever broker leads partition 0.
 
-    let payload = crate::jvm_acceptance::numbered_payload("rec", 50);
-    let producer_out = crate::jvm_acceptance::produce_console(
-        KAFKA_IMAGE,
-        &[&mount],
-        TOPIC,
-        false,
-        payload.as_bytes(),
-    );
-    crate::jvm_acceptance::assert_console_produced(&producer_out);
+    let payload = numbered_payload("rec", 50);
+    let producer_out = produce_console(KAFKA_IMAGE, &[&mount], TOPIC, false, payload.as_bytes());
+    assert_console_produced(&producer_out);
 
     // Verify the leader has 50 records on disk. We don't know in advance
     // which broker leads partition 0 (raft picks one), so wait for whichever

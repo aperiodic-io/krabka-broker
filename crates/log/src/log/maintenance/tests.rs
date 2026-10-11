@@ -10,7 +10,8 @@ use krabka_units::{Time, millis};
 
 use super::*;
 use crate::{
-    LogConfig,
+    Log, LogConfig, SegmentAllocation,
+    io::{FileIo, IoTarget, LogIo, file_io},
     log::{
         sync::sync_observer,
         test_support::{
@@ -151,8 +152,8 @@ fn repeated_replacement_of_one_base_keeps_each_retired_generation() {
 
 #[derive(Debug)]
 struct FailUnlink;
-impl crate::io::LogIo for FailUnlink {
-    fn remove_file(&self, _: crate::io::IoTarget, _: &std::path::Path) -> std::io::Result<()> {
+impl LogIo for FailUnlink {
+    fn remove_file(&self, _: IoTarget, _: &std::path::Path) -> std::io::Result<()> {
         Err(std::io::Error::other("injected deletion failure"))
     }
 }
@@ -167,17 +168,14 @@ fn a_failed_deferred_unlink_is_reported_and_retried() {
     log.test_set_io(Arc::new(FailUnlink));
     check!(log.maintain(deadline).is_err());
     check!(!log.pending_deletes.is_empty());
-    log.test_set_io(crate::io::file_io());
+    log.test_set_io(file_io());
     log.maintain(deadline).unwrap();
     check!(log.pending_deletes.is_empty());
 }
 
 #[test]
 fn owned_gzip_batches_use_the_live_level_and_verbatim_keeps_producer_bytes() {
-    for allocation in [
-        crate::SegmentAllocation::OnWrite,
-        crate::SegmentAllocation::Preallocate,
-    ] {
+    for allocation in [SegmentAllocation::OnWrite, SegmentAllocation::Preallocate] {
         let (_dir, mut log) = test_log();
         for level in [1, 9] {
             log.set_config(LogConfig {
@@ -284,15 +282,15 @@ struct RejectRetirement {
     fault: RetirementFault,
 }
 
-impl crate::io::LogIo for RejectRetirement {
+impl LogIo for RejectRetirement {
     fn rename(
         &self,
-        target: crate::io::IoTarget,
+        target: IoTarget,
         from: &std::path::Path,
         to: &std::path::Path,
     ) -> std::io::Result<()> {
         if matches!(self.fault, RetirementFault::IndexRename)
-            && target == crate::io::IoTarget::SegmentDeletion
+            && target == IoTarget::SegmentDeletion
             && from
                 .extension()
                 .is_some_and(|extension| extension == "index")
@@ -306,7 +304,7 @@ impl crate::io::LogIo for RejectRetirement {
         if matches!(self.fault, RetirementFault::DirectorySync) {
             Err(std::io::ErrorKind::StorageFull.into())
         } else {
-            crate::io::FileIo.sync_dir(dir)
+            FileIo.sync_dir(dir)
         }
     }
 }
@@ -333,11 +331,11 @@ fn failed_active_retirement_preserves_a_writable_recoverable_log() {
                         .exists()
                 );
             }
-            log.test_set_io(crate::io::file_io());
+            log.test_set_io(file_io());
             log.append(&mut sample_batch(1)).unwrap();
             log.sync().unwrap();
             drop(log);
-            let reopened = crate::Log::open(dir.path(), LogConfig::default()).unwrap();
+            let reopened = Log::open(dir.path(), LogConfig::default()).unwrap();
             check!(reopened.log_end_offset() == Offset(2));
         }
     }

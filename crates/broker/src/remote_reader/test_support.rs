@@ -29,7 +29,11 @@ pub fn tp() -> TopicIdPartition {
     TopicIdPartition::new(Uuid::from_u128(1), "orders", 0)
 }
 
-use crate::test_support::keyed_records_batch as batch_of;
+use crate::{
+    remote_log_manager::{ProducerSnapshotExport, export_epoch_map, export_segment_data},
+    remote_reader::{ReaderPool, RemoteReaderLimits},
+    test_support::{KeyedBatchSetup, KeyedRecordCount, keyed_records_batch as batch_of},
+};
 
 krabka_macros::timestamped_batch!(timestamped_batch_at);
 
@@ -145,9 +149,9 @@ pub fn caching_sparse_remote_segment_reader() -> (
     let cached = RemoteReader::with_limits(
         counting,
         Arc::clone(&reader.rlmm),
-        crate::remote_reader::RemoteReaderLimits {
+        RemoteReaderLimits {
             index_cache: Arc::new(cache),
-            pool: crate::remote_reader::ReaderPool::new(10, 100),
+            pool: ReaderPool::new(10, 100),
         },
     );
     (
@@ -350,8 +354,8 @@ fn populated_log(log_dir: &std::path::Path) -> Log {
     )
     .unwrap();
     for _ in 0..12 {
-        let mut b = batch_of(crate::test_support::KeyedBatchSetup {
-            records: crate::test_support::KeyedRecordCount(2),
+        let mut b = batch_of(KeyedBatchSetup {
+            records: KeyedRecordCount(2),
             ..Default::default()
         });
         log.append(&mut b).unwrap();
@@ -374,7 +378,7 @@ fn copy_log_to_reader(log: &Log, remote_dir: &std::path::Path) -> RemoteReader {
         let id = krabka_remote_storage::RemoteLogSegmentId::new(tp(), Uuid::new_v4());
         // Unwrap the log-layer `Offset`s into the remote-storage metadata's
         // `i64` world at the seam.
-        let epochs = crate::remote_log_manager::export_epoch_map(ex, LeaderEpoch(0));
+        let epochs = export_epoch_map(ex, LeaderEpoch(0));
         let md = RemoteLogSegmentMetadata::new(
             id.clone(),
             ex.base_offset.0,
@@ -397,11 +401,9 @@ fn copy_log_to_reader(log: &Log, remote_dir: &std::path::Path) -> RemoteReader {
         for (e, st) in &epochs {
             let _ = writeln!(s, "{e} {st}");
         }
-        let data = crate::remote_log_manager::export_segment_data(
-            ex,
-            crate::remote_log_manager::ProducerSnapshotExport::Omit,
-            || bytes::Bytes::from(s.into_bytes()),
-        );
+        let data = export_segment_data(ex, ProducerSnapshotExport::Omit, || {
+            bytes::Bytes::from(s.into_bytes())
+        });
         rsm.copy_log_segment_data(&md, &data).unwrap();
         rlmm.update_remote_log_segment_metadata(
             krabka_remote_storage::RemoteLogSegmentMetadataUpdate {

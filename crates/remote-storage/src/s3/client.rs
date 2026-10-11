@@ -187,7 +187,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::S3RemoteStorage;
-    use crate::{s3::test_support::worm_config, worm::WormConfig};
+    use crate::{
+        s3::test_support::{WormAccess, worm_config},
+        worm::WormConfig,
+    };
 
     /// The multipart tunables cross two seams: in from
     /// [`krabka_object_store`]'s primitive config, and back out to the
@@ -218,10 +221,7 @@ mod tests {
 
         let error = S3RemoteStorage::from_s3_config(&s3)
             .unwrap()
-            .with_worm(&worm_config(
-                keys.path(),
-                crate::s3::test_support::WormAccess::ReadWrite,
-            ))
+            .with_worm(&worm_config(keys.path(), WormAccess::ReadWrite))
             .unwrap_err();
 
         check!(error.to_string().contains("conditional_put = true"));

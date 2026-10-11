@@ -15,7 +15,9 @@ use krabka_protocol::owned::{
 use krabka_units::convert::TimeExt as _;
 
 use crate::{
-    codes, coordinator::unified::actor::GroupActorMessage, handlers::ErrorCodeResponse as _,
+    codes,
+    coordinator::unified::actor::GroupActorMessage,
+    handlers::{ApiVersion, ErrorCodeResponse as _},
     task_util::ask,
 };
 
@@ -71,10 +73,7 @@ context_handler! {
 
 /// Kafka's `SyncGroupRequest.areMandatoryProtocolTypeAndNamePresent`: from v5
 /// the request must name both its protocol type and its protocol name.
-fn mandatory_protocol_type_and_name_present(
-    req: &SyncGroupRequest,
-    version: crate::handlers::ApiVersion,
-) -> bool {
+fn mandatory_protocol_type_and_name_present(req: &SyncGroupRequest, version: ApiVersion) -> bool {
     version < 5 || (req.protocol_type.is_some() && req.protocol_name.is_some())
 }
 
@@ -92,23 +91,22 @@ mod tests {
     };
     use krabka_security::Principal;
 
-    use crate::{broker::Broker, test_support::DenyAll};
+    use crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::Broker,
+        handlers::{RequestContext, join_group::handle as join_group_handle},
+        test_support::{DenyAll, request_context, start_group_broker_no_audit},
+    };
 
     const GROUP: &str = "sync-group-unit";
     const PROTOCOL_TYPE: &str = "consumer";
     const PROTOCOL_NAME: &str = "range";
 
-    fn context<'a>(
-        principal: &'a Principal,
-        peer: &'a SocketAddr,
-    ) -> crate::handlers::RequestContext<'a> {
-        crate::test_support::request_context(principal, peer, "sync-group-client")
+    fn context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext<'a> {
+        request_context(principal, peer, "sync-group-client")
     }
 
-    async fn bootstrap_member(
-        broker: &Broker,
-        ctx: &crate::handlers::RequestContext<'_>,
-    ) -> (String, i32) {
+    async fn bootstrap_member(broker: &Broker, ctx: &RequestContext<'_>) -> (String, i32) {
         let version = join_group_response::MAX_VERSION;
         let join = |member_id: String| JoinGroupRequest {
             group_id: GROUP.into(),
@@ -124,16 +122,15 @@ mod tests {
             ..Default::default()
         };
 
-        let r1 = crate::handlers::join_group::handle(broker, join(String::new()), version, ctx)
+        let r1 = join_group_handle(broker, join(String::new()), version, ctx)
             .await
             .expect("JoinGroup bootstrap");
         assert!(r1.error_code == codes::MEMBER_ID_REQUIRED, "{r1:?}");
         assert!(!r1.member_id.is_empty());
 
-        let r2 =
-            crate::handlers::join_group::handle(broker, join(r1.member_id.clone()), version, ctx)
-                .await
-                .expect("JoinGroup rejoin");
+        let r2 = join_group_handle(broker, join(r1.member_id.clone()), version, ctx)
+            .await
+            .expect("JoinGroup rejoin");
         assert!(
             (
                 r2.error_code,
@@ -234,12 +231,9 @@ mod tests {
                 want: codes::GROUP_AUTHORIZATION_FAILED,
             },
         ];
-        let (denied_handle, _denied_dir) =
-            crate::test_support::start_group_broker_no_audit(Arc::new(DenyAll)).await;
-        let (allowed_handle, _allowed_dir) = crate::test_support::start_group_broker_no_audit(
-            Arc::new(crate::authorizer::AllowAllAuthorizer),
-        )
-        .await;
+        let (denied_handle, _denied_dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
+        let (allowed_handle, _allowed_dir) =
+            start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
         request_identity!((principal, peer, ctx), principal("alice"), context);
 
         for r in rows {
@@ -274,8 +268,7 @@ mod tests {
     #[tokio::test]
     async fn handle_denies_group_read_and_preserves_error_response_shape() {
         let version = sync_group_response::MAX_VERSION;
-        let (broker_handle, _dir) =
-            crate::test_support::start_group_broker_no_audit(Arc::new(DenyAll)).await;
+        let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((principal, peer, ctx), principal("alice"), context);
         let req = SyncGroupRequest {

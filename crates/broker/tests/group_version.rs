@@ -14,6 +14,8 @@ use krabka_protocol::owned::{
     update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
 };
 
+use crate::support::consumer_groups::joining_consumer;
+
 const UNSUPPORTED_VERSION: i16 = 35;
 
 fn heartbeat(group: &str) -> ConsumerGroupHeartbeatRequest {
@@ -23,11 +25,7 @@ fn heartbeat(group: &str) -> ConsumerGroupHeartbeatRequest {
     // decode, so this reaches it regardless of whether the topic exists.
     ConsumerGroupHeartbeatRequest {
         subscribed_topic_names: Some(vec!["t".into()]),
-        ..crate::support::consumer_groups::joining_consumer(
-            group,
-            uuid::Uuid::new_v4().to_string(),
-            30_000,
-        )
+        ..joining_consumer(group, uuid::Uuid::new_v4().to_string(), 30_000)
     }
 }
 

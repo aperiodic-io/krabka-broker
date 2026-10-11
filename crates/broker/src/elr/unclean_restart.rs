@@ -71,7 +71,10 @@
 
 use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
 
-use crate::features::{ELR_VERSION, feature_enabled};
+use crate::{
+    elr::{TopicElr, state::without_legacy_elr},
+    features::{ELR_VERSION, feature_enabled},
+};
 
 /// The `V1PartitionElr` records that take `node` out of every ELR it is named
 /// in, cluster-wide.
@@ -100,7 +103,7 @@ pub(crate) fn withdraw_elr_membership(image: &MetadataImage, node: NodeId) -> Ve
         .collect();
     topics
         .into_iter()
-        .flat_map(|topic| crate::elr::TopicElr::of_topic(image, topic).records(topic))
+        .flat_map(|topic| TopicElr::of_topic(image, topic).records(topic))
         .filter_map(|record| {
             let MetadataRecord::V1PartitionElr(mut record) = record else {
                 unreachable!()
@@ -143,7 +146,7 @@ pub(crate) fn clear_published_elr_for_topic(
         .collect();
     let mut records = Vec::new();
     for topic in topics {
-        for record in crate::elr::TopicElr::of_topic(image, topic).records(topic) {
+        for record in TopicElr::of_topic(image, topic).records(topic) {
             let MetadataRecord::V1PartitionElr(mut record) = record else {
                 unreachable!()
             };
@@ -151,7 +154,7 @@ pub(crate) fn clear_published_elr_for_topic(
             record.last_known_elr.clear();
             records.push(MetadataRecord::V1PartitionElr(record));
         }
-        if let Some(record) = crate::elr::state::without_legacy_elr(image, topic, None) {
+        if let Some(record) = without_legacy_elr(image, topic, None) {
             records.push(record);
         }
     }

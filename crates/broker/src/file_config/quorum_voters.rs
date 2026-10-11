@@ -54,7 +54,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::file_config::FileConfig;
+    use crate::file_config::{FileConfig, test_support::configured_unwrap_parse};
 
     #[test]
     fn quorum_voters_keep_wire_order_and_hosts_without_dns_resolution() {
@@ -78,7 +78,7 @@ mod tests {
             ),
         ];
         for (source, expected) in cases {
-            let cfg = crate::file_config::test_support::configured_unwrap_parse(source).unwrap();
+            let cfg = configured_unwrap_parse(source).unwrap();
             let expected: Vec<(krabka_raft::NodeId, String)> = expected
                 .into_iter()
                 .map(|(node, host)| (node, host.to_string()))

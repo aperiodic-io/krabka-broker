@@ -154,6 +154,7 @@ mod tests {
         ALL_ACTIONS, action_from_name, action_from_wire, action_name, action_targets_partition,
         action_to_wire,
     };
+    use crate::config::DEFAULT_BREAK_GLASS_SIGNED_ACTIONS;
 
     #[test]
     fn every_action_round_trips_through_its_wire_value() {
@@ -188,7 +189,7 @@ mod tests {
 
     #[test]
     fn the_default_signed_actions_name_actions_that_exist() {
-        for name in crate::config::DEFAULT_BREAK_GLASS_SIGNED_ACTIONS {
+        for name in DEFAULT_BREAK_GLASS_SIGNED_ACTIONS {
             check!(
                 ALL_ACTIONS.iter().any(|a| action_name(*a) == *name),
                 "signed action {name}"

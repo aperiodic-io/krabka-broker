@@ -25,6 +25,8 @@ use crate::{
             delete_records_partition, delete_records_request, delete_records_topic,
             list_offset_partition, single_partition_list_offsets,
         },
+        records::record_count,
+        start_n_node_client,
     },
 };
 
@@ -37,7 +39,7 @@ const EARLIEST_TIMESTAMP: i64 = -2;
 /// `log_start_offset` moves forward.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_records_trims_log_start() {
-    let (cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
     let broker = &cluster[0].0;
 
     create_topic_helper(&client, "t-dr", 1).await;
@@ -228,7 +230,7 @@ async fn trimmed_view(
         earliest_offset: earliest.offset,
         fetch_error_code: fetched.error_code,
         fetch_log_start_offset: fetched.log_start_offset,
-        fetched_records: crate::support::records::record_count(fetched.records.as_ref()),
+        fetched_records: record_count(fetched.records.as_ref()),
     }
 }
 

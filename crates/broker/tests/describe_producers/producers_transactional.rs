@@ -11,7 +11,14 @@ use crate::{
     producers_harness::{
         create_topic, init_transactional_producer, topic_id_for, transactional_batch,
     },
-    support,
+    support::{
+        self,
+        admin::describe_producers_request,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{ProducerSequence, ProducerValuesSetup},
+        topics::CreateTopicSetup,
+        transactions::ProducerEpoch,
+    },
 };
 
 #[tokio::test]
@@ -19,7 +26,7 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
     let p = support::start().await;
     create_topic(
         &p.client,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "transactions",
             ..Default::default()
         },
@@ -32,9 +39,9 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
         .client
         .send(transaction_values_request(
             topic_id,
-            crate::support::records::ProducerValuesSetup {
+            ProducerValuesSetup {
                 pid: krabka_ids::ProducerId(pid),
-                epoch: crate::support::transactions::ProducerEpoch(epoch),
+                epoch: ProducerEpoch(epoch),
                 values: &["first"],
                 ..Default::default()
             },
@@ -79,10 +86,10 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
         .client
         .send(transaction_values_request(
             topic_id,
-            crate::support::records::ProducerValuesSetup {
+            ProducerValuesSetup {
                 pid: krabka_ids::ProducerId(pid),
-                epoch: crate::support::transactions::ProducerEpoch(epoch),
-                base_seq: crate::support::records::ProducerSequence(1),
+                epoch: ProducerEpoch(epoch),
+                base_seq: ProducerSequence(1),
                 values: &["second"],
             },
         ))
@@ -106,10 +113,7 @@ async fn check_transaction_state(
     expected: (i64, i32),
 ) {
     let describe = client
-        .send(crate::support::admin::describe_producers_request(
-            "transactions".into(),
-            vec![0],
-        ))
+        .send(describe_producers_request("transactions".into(), vec![0]))
         .await
         .expect(context);
     let producer_row = &describe.topics[0].partitions[0].active_producers[0];
@@ -119,16 +123,16 @@ async fn check_transaction_state(
 
 fn transaction_values_request(
     topic_id: krabka_protocol::primitives::uuid::Uuid,
-    values: crate::support::records::ProducerValuesSetup<'_>,
+    values: ProducerValuesSetup<'_>,
 ) -> ProduceRequest {
     ProduceRequest {
         transactional_id: Some("describe-producers-tid".into()),
-        ..crate::support::produce::batch_request(
+        ..batch_request(
             transactional_batch(values),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("transactions").into(),
                 topic_id,
-                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                ..SinglePartitionProduceSetup::replicated()
             },
         )
     }

@@ -7,7 +7,15 @@ use std::net::SocketAddr;
 use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
 
 use super::{ControllerHandle, connection_options};
-use crate::{error::RaftError, types::NodeId};
+use crate::{
+    error::RaftError,
+    kraft::MetadataFetchSlice,
+    types::NodeId,
+    wire::{
+        API_KEY_METADATA_FETCH, KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse,
+        PRIVATE_UNSUPPORTED_VERSION, private_request_version,
+    },
+};
 
 impl ControllerHandle {
     /// Read committed `__cluster_metadata` entries starting at `fetch_offset`,
@@ -17,12 +25,12 @@ impl ControllerHandle {
         &self,
         fetch_offset: u64,
         max_size: ByteSize,
-    ) -> crate::kraft::MetadataFetchSlice {
+    ) -> MetadataFetchSlice {
         let off = i64::try_from(fetch_offset).unwrap_or(i64::MAX);
         self.engine
             .metadata_fetch(off, max_size, None)
             .await
-            .unwrap_or(crate::kraft::MetadataFetchSlice {
+            .unwrap_or(MetadataFetchSlice {
                 records: bytes::Bytes::new(),
                 snapshot_id: None,
                 log_start_offset: 0,
@@ -42,8 +50,8 @@ impl ControllerHandle {
         addr: SocketAddr,
         fetch_offset: u64,
         max_size: ByteSize,
-    ) -> Result<crate::wire::KrabkaMetadataFetchResponse, RaftError> {
-        let req = crate::wire::KrabkaMetadataFetchRequest {
+    ) -> Result<KrabkaMetadataFetchResponse, RaftError> {
+        let req = KrabkaMetadataFetchRequest {
             fetch_offset: i64::try_from(fetch_offset).unwrap_or(i64::MAX),
             // `max_bytes` is the KIP-595-shaped `int32` on the Krabka observer
             // wire; the quantity converts here and nowhere deeper.
@@ -54,7 +62,7 @@ impl ControllerHandle {
         };
         // Negotiated from `krabka.version`; every level this build knows
         // gives v0, the body below.
-        let version = crate::wire::private_request_version(
+        let version = private_request_version(
             krabka_metadata::PrivateRpc::MetadataFetch,
             Some(&self.current_image()),
         );
@@ -72,21 +80,17 @@ impl ControllerHandle {
             .await
             .map_err(RaftError::Network)?;
         let resp_body = conn
-            .raw_request(
-                crate::wire::API_KEY_METADATA_FETCH,
-                version,
-                bytes::Bytes::from(body),
-            )
+            .raw_request(API_KEY_METADATA_FETCH, version, bytes::Bytes::from(body))
             .await
             .map_err(RaftError::Network)?;
         conn.close();
 
         let mut cur: &[u8] = &resp_body;
-        let response = crate::wire::KrabkaMetadataFetchResponse::decode_v0(&mut cur)
-            .map_err(RaftError::Protocol)?;
-        if response.error_code == crate::wire::PRIVATE_UNSUPPORTED_VERSION {
+        let response =
+            KrabkaMetadataFetchResponse::decode_v0(&mut cur).map_err(RaftError::Protocol)?;
+        if response.error_code == PRIVATE_UNSUPPORTED_VERSION {
             return Err(RaftError::UnsupportedPrivateVersion {
-                api_key: crate::wire::API_KEY_METADATA_FETCH,
+                api_key: API_KEY_METADATA_FETCH,
                 version,
             });
         }
@@ -110,7 +114,8 @@ mod tests {
             Controller,
             test_support::{
                 FAST_ELECTION_TIMEOUT, RecordingDialer, TEST_OP_TIMEOUT, UNBOUNDED_FETCH,
-                committable_topic_record, submit_change_with_timeout, wait_for_leader,
+                bootstrap_controller, committable_topic_record, submit_change_with_timeout,
+                wait_for_leader,
             },
         },
     };
@@ -139,7 +144,7 @@ mod tests {
     }
 
     async fn committed_topic(name: &str, label: &str) -> (TempDir, ControllerHandle) {
-        let (dir, ctrl) = crate::controller::test_support::bootstrap_controller("bootstrap").await;
+        let (dir, ctrl) = bootstrap_controller("bootstrap").await;
         wait_for_leader(&ctrl).await;
         submit_change_with_timeout(&ctrl, vec![committable_topic_record(name)], label)
             .await

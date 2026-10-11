@@ -17,7 +17,7 @@ use krabka_protocol::owned::fetch_snapshot_request::{
     FetchSnapshotRequest, PartitionSnapshot, SnapshotId, TopicSnapshot,
 };
 
-use crate::support::topics::{creatable_topic, create_topic_request};
+use crate::support::topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request};
 
 mod support;
 
@@ -85,7 +85,7 @@ async fn fetch_snapshot_serves_the_named_metadata_snapshot() {
     // Make the metadata image non-empty so the snapshot has real content.
     let resp = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("snap-topic").into(),
                 ..Default::default()
             },

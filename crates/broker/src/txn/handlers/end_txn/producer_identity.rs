@@ -7,6 +7,7 @@ use krabka_log::ProducerId;
 
 use crate::{
     error::BrokerError,
+    producer_id_manager::ProducerIdManager,
     txn::{state::TxnEntry, version::TxnVersion},
 };
 
@@ -24,7 +25,7 @@ pub(crate) async fn next_producer_identity(
     txnv: TxnVersion,
     pid: ProducerId,
     epoch: i16,
-    ids: &crate::producer_id_manager::ProducerIdManager,
+    ids: &ProducerIdManager,
 ) -> Result<(ProducerId, i16), BrokerError> {
     let fresh = if txnv.verified() && epoch >= i16::MAX - 1 {
         Some(ids.allocate().await?.0)
@@ -61,7 +62,7 @@ fn next_identity_with_fresh(
 pub(crate) async fn next_recovery_producer_identity(
     pid: ProducerId,
     epoch: i16,
-    ids: &crate::producer_id_manager::ProducerIdManager,
+    ids: &ProducerIdManager,
 ) -> Result<(ProducerId, i16), BrokerError> {
     let fresh = if epoch == i16::MAX {
         Some(ids.allocate().await?.0)
@@ -99,7 +100,7 @@ fn completion_needs_fresh_producer_id(entry: &TxnEntry, txnv: TxnVersion) -> boo
 pub(crate) async fn prepare_completion_identities(
     entry: &mut TxnEntry,
     txnv: TxnVersion,
-    ids: &crate::producer_id_manager::ProducerIdManager,
+    ids: &ProducerIdManager,
 ) -> Result<(), BrokerError> {
     let fresh = if completion_needs_fresh_producer_id(entry, txnv) {
         Some(ids.allocate().await?.0)
@@ -118,7 +119,7 @@ pub(crate) async fn prepare_completion_identities(
 pub(crate) async fn prepare_server_abort_identities(
     entry: &mut TxnEntry,
     server_version: TxnVersion,
-    ids: &crate::producer_id_manager::ProducerIdManager,
+    ids: &ProducerIdManager,
 ) -> Result<(), BrokerError> {
     let fresh = if completion_needs_fresh_producer_id(entry, server_version) {
         Some(ids.allocate().await?.0)
@@ -205,12 +206,15 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::txn::{handlers::end_txn::test_support::entry, state::TxnState};
+    use crate::txn::{
+        coordinator::completion::apply_completion, handlers::end_txn::test_support::entry,
+        state::TxnState,
+    };
 
     #[tokio::test]
     async fn epoch_bumps_only_at_tv2() {
         use crate::txn::version::TxnVersion;
-        let ids = crate::producer_id_manager::ProducerIdManager::new();
+        let ids = ProducerIdManager::new();
         let cases = [
             // Below TV_2 (Classic, Flexible): pid + epoch unchanged.
             (TxnVersion::Classic, (ProducerId(7), 3)),
@@ -232,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn epoch_overflow_at_tv2_allocates_new_pid_at_epoch_zero() {
         use crate::txn::version::TxnVersion;
-        let ids = crate::producer_id_manager::ProducerIdManager::new();
+        let ids = ProducerIdManager::new();
         // MAX is reserved for the marker epoch, so the client rotates at
         // MAX-1 and receives a fresh producer_id at epoch 0.
         let (new_pid, new_epoch) =
@@ -258,7 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn normal_completion_rotates_before_the_reserved_marker_epoch() {
-        let ids = crate::producer_id_manager::ProducerIdManager::new();
+        let ids = ProducerIdManager::new();
         let mut entry = entry(7, i16::MAX - 1, TxnState::PrepareCommit);
 
         prepare_completion_identities(&mut entry, TxnVersion::Verified, &ids)
@@ -273,7 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn legacy_completion_does_not_allocate_at_the_tv2_boundary() {
-        let ids = crate::producer_id_manager::ProducerIdManager::new();
+        let ids = ProducerIdManager::new();
         let mut entry = entry(7, i16::MAX - 1, TxnState::PrepareCommit);
 
         prepare_completion_identities(&mut entry, TxnVersion::Classic, &ids)
@@ -381,12 +385,7 @@ mod tests {
         assert!(ongoing.producer_epoch == 3, "the epoch was already raised");
 
         let identity = completion_producer_identity(&ongoing);
-        crate::txn::coordinator::completion::apply_completion(
-            &mut ongoing,
-            TxnState::CompleteAbort,
-            identity,
-            1,
-        );
+        apply_completion(&mut ongoing, TxnState::CompleteAbort, identity, 1);
         assert!(!ongoing.has_failed_epoch_fence);
 
         ongoing.state = TxnState::Ongoing;
@@ -399,7 +398,7 @@ mod tests {
 
     #[tokio::test]
     async fn prepared_recovery_uses_marker_identity_and_fences_the_recovery_client() {
-        let ids = crate::producer_id_manager::ProducerIdManager::new();
+        let ids = ProducerIdManager::new();
         let mut entry = entry(7, 3, TxnState::PrepareCommit);
         entry.next_producer_id = ProducerId(7);
         entry.next_producer_epoch = 4;
@@ -415,7 +414,7 @@ mod tests {
 
     #[tokio::test]
     async fn prepared_recovery_can_use_max_epoch_before_rotating() {
-        let ids = crate::producer_id_manager::ProducerIdManager::new();
+        let ids = ProducerIdManager::new();
         let mut entry = entry(7, i16::MAX - 1, TxnState::PrepareCommit);
         entry.next_producer_id = ProducerId(11);
         entry.next_producer_epoch = i16::MAX - 1;

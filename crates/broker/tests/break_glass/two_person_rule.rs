@@ -13,7 +13,7 @@ use krabka_protocol::krabka::break_glass::{
 };
 
 use crate::{
-    cluster::boot,
+    cluster::{Cluster, boot},
     principals::{ALICE, BOB, CAROL, MALLORY, principal},
     proposals::{ACTION_DELETE_TOPIC, TTL_CONFIGURED, approve, open, propose, stored},
     support,
@@ -99,7 +99,7 @@ async fn a_proposal_two_approvals_and_the_transition_they_authorize() {
 }
 
 async fn proposed_delete_fixture() -> (
-    crate::cluster::Cluster,
+    Cluster,
     krabka_client_core::Client,
     krabka_client_core::Client,
     krabka_protocol::primitives::uuid::Uuid,

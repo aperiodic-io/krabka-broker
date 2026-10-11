@@ -8,8 +8,14 @@ use assert2::assert;
 
 use crate::{
     harness::{create_topic, topic_id_for},
-    support,
-    support::records::producer_values_batch as one_batch_with_producer,
+    support::{
+        self,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{
+            ProducerSequence, ProducerValuesSetup, producer_values_batch as one_batch_with_producer,
+        },
+        transactions::claim_idempotent_producer,
+    },
 };
 
 #[tokio::test]
@@ -19,19 +25,19 @@ async fn idempotent_produce_dedups_duplicate_batch() {
     create_topic(&p, "idem", 1).await;
     let idem_id = topic_id_for(&p.client, "idem").await;
 
-    let init = crate::support::transactions::claim_idempotent_producer(&p.client).await;
+    let init = claim_idempotent_producer(&p.client).await;
     let pid = init.producer_id;
 
-    let req = crate::support::produce::batch_request(
-        one_batch_with_producer(crate::support::records::ProducerValuesSetup {
+    let req = batch_request(
+        one_batch_with_producer(ProducerValuesSetup {
             pid: krabka_ids::ProducerId(pid),
             values: &["a", "b", "c"],
             ..Default::default()
         }),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("idem").into(),
             topic_id: idem_id,
-            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            ..SinglePartitionProduceSetup::replicated()
         },
     );
 
@@ -54,21 +60,21 @@ async fn out_of_order_returns_45() {
     create_topic(&p, "ooo", 1).await;
     let ooo_id = topic_id_for(&p.client, "ooo").await;
 
-    let init = crate::support::transactions::claim_idempotent_producer(&p.client).await;
+    let init = claim_idempotent_producer(&p.client).await;
     let pid = init.producer_id;
 
     let mk = |base_seq: i32| {
-        crate::support::produce::batch_request(
-            one_batch_with_producer(crate::support::records::ProducerValuesSetup {
+        batch_request(
+            one_batch_with_producer(ProducerValuesSetup {
                 pid: krabka_ids::ProducerId(pid),
-                base_seq: crate::support::records::ProducerSequence(base_seq),
+                base_seq: ProducerSequence(base_seq),
                 values: &["x", "y"],
                 ..Default::default()
             }),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("ooo").into(),
                 topic_id: ooo_id,
-                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                ..SinglePartitionProduceSetup::replicated()
             },
         )
     };

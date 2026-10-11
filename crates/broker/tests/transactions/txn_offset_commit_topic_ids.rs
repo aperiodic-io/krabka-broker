@@ -14,7 +14,10 @@ use assert2::assert;
 use krabka_client_admin::AdminClient;
 use krabka_client_producer::{ConsumerGroupMetadata, ProducerError};
 
-use crate::txn_harness::{boot_single_trunk, create_topic};
+use crate::{
+    support::producer::transactional_producer,
+    txn_harness::{boot_single_trunk, create_topic},
+};
 
 /// `GROUP_ID_NOT_FOUND`. Kafka's `validateTransactionalOffsetCommit` answers
 /// it at v6 for a generation of a group the coordinator does not hold, and
@@ -31,8 +34,7 @@ async fn send_offsets_to_transaction_commits_by_topic_id() {
     let (broker, bootstrap, _dir) = boot_single_trunk().await;
     create_topic(&bootstrap, "v6-in").await;
 
-    let producer =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "v6-tid").await;
+    let producer = transactional_producer(bootstrap.clone(), "v6-tid").await;
 
     let txn = producer.begin_transaction().await.unwrap();
     let gone = ConsumerGroupMetadata {

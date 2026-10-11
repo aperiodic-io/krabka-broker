@@ -20,6 +20,8 @@ use crate::{
         state::{TopicPartition, TxnEntry, TxnState},
     },
 };
+#[cfg(test)]
+use crate::{log_dir_status::LogDirRegistry, producer_state::ProducerState};
 
 const UNKNOWN_COORDINATOR_EPOCH: i32 = -1;
 
@@ -160,7 +162,10 @@ mod tests {
     use krabka_log::{Log, LogConfig, ProducerId};
 
     use super::*;
-    use crate::txn::coordinator::test_support::test_coordinator;
+    use crate::{
+        broker::spawn_partition, log_dir::partition_dir,
+        txn::coordinator::test_support::test_coordinator,
+    };
 
     #[test]
     fn local_marker_uses_the_unknown_coordinator_epoch_sentinel() {
@@ -228,15 +233,15 @@ mod tests {
     async fn a_written_marker_removes_its_partition_from_the_prepared_transaction() {
         let coordinator = test_coordinator();
         let dir = tempfile::tempdir().expect("temp dir");
-        let part_dir = crate::log_dir::partition_dir(dir.path(), "a", 0);
+        let part_dir = partition_dir(dir.path(), "a", 0);
         std::fs::create_dir_all(&part_dir).expect("partition dir");
-        let local = crate::broker::spawn_partition(
+        let local = spawn_partition(
             "a".to_string(),
             PartitionIndex(0),
             dir.path().to_path_buf(),
             Log::open(&part_dir, LogConfig::default()).expect("open log"),
-            crate::log_dir_status::LogDirRegistry::default(),
-            Arc::new(crate::producer_state::ProducerState::new()),
+            LogDirRegistry::default(),
+            Arc::new(ProducerState::new()),
             false,
         );
         // The metadata reconcile installs this broker as the leader.

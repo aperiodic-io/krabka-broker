@@ -24,7 +24,10 @@ use std::sync::Arc;
 
 use tracing::{debug, info};
 
-use crate::{metadata_source::MetadataSource, txn::coordinator::TxnCoordinator};
+use crate::{
+    metadata_source::MetadataSource,
+    txn::{coordinator::TxnCoordinator, util::now_millis, version::resolve_txn_version},
+};
 
 super::util::reaper_task! {
     /// Entry point of the spawned task. It returns when `shutdown` is cancelled.
@@ -42,14 +45,14 @@ super::util::reaper_task! {
 /// leader-partition view, then aborts any expired transactions.
 async fn sweep_once(coord: &Arc<TxnCoordinator>, controller: &dyn MetadataSource) {
     let image = controller.current_image();
-    let txnv = crate::txn::version::resolve_txn_version(&image);
+    let txnv = resolve_txn_version(&image);
     // The sweep is a background task, so it waits for the loads it starts.
     coord
         .refresh_leader_partitions(&image)
         .await
         .finished()
         .await;
-    let now_ms = crate::txn::util::now_millis();
+    let now_ms = now_millis();
     let aborted = coord.sweep_expired(now_ms, txnv).await;
     if aborted.is_empty() {
         debug!("txn reaper: no timed-out transactions");

@@ -28,6 +28,8 @@ use tokio_rustls::{
     },
 };
 
+use crate::support::tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config};
+
 const DEV_CERT_A: &str = include_str!("fixtures/security/dev_cert.pem");
 const DEV_KEY_A: &str = include_str!("fixtures/security/dev_key.pem");
 const DEV_CERT_B: &str = include_str!("fixtures/security/dev_cert_alt.pem");
@@ -42,12 +44,9 @@ fn write(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
 fn pinned_client_config(pinned: CertificateDer<'static>) -> Arc<ClientConfig> {
     let cfg = ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(crate::support::tls::PinnedCertVerifier {
+        .with_custom_certificate_verifier(Arc::new(PinnedCertVerifier {
             pinned,
-            schemes: crate::support::tls::fixture_signature_schemes()
-                .into_iter()
-                .take(6)
-                .collect(),
+            schemes: fixture_signature_schemes().into_iter().take(6).collect(),
             mismatch: "presented server cert does not match pinned cert",
         }))
         .with_no_client_auth();
@@ -185,7 +184,7 @@ fn cert_fixture() -> (
     let cert_path = write(pem_dir.path(), "cert.pem", DEV_CERT_A);
     let key_path = write(pem_dir.path(), "key.pem", DEV_KEY_A);
 
-    let cfg = crate::support::tls::ssl_config(
+    let cfg = ssl_config(
         log_dir.path().to_path_buf(),
         TlsConfig {
             cert_chain_path: cert_path.clone(),

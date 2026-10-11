@@ -103,8 +103,7 @@ pub fn sasl_plaintext_with_users(
     super_user: &str,
     users: &[(&str, &str)],
 ) -> BrokerConfig {
-    let mut cfg =
-        crate::support::sasl::sasl_plaintext_mechanisms(log_dir, vec![SaslMechanism::Plain]);
+    let mut cfg = sasl_plaintext_mechanisms(log_dir, vec![SaslMechanism::Plain]);
     cfg.plain_credentials = users
         .iter()
         .map(|(name, pass)| ((*name).to_string(), (*pass).to_string()))

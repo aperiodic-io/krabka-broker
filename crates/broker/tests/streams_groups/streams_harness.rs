@@ -15,13 +15,13 @@ use krabka_protocol::owned::{
     streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
 };
 
+use crate::support::streams::{ElectionReadiness, boot as boot_streams, streams_join_and_converge};
 pub use crate::support::streams::{
     active_partition_count, finalize_streams_version, first_join, follow_up, topology,
 };
 
 pub async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    crate::support::streams::boot(crate::support::streams::ElectionReadiness::CoordinatorReady)
-        .await
+    boot_streams(ElectionReadiness::CoordinatorReady).await
 }
 
 pub use crate::support::client::{connect_c1 as connect, create_topic};
@@ -74,13 +74,5 @@ pub async fn join_and_converge(
     want_active: usize,
     tries: usize,
 ) -> (String, StreamsGroupHeartbeatResponse) {
-    crate::support::streams::streams_join_and_converge(
-        client,
-        group,
-        topo,
-        want_active,
-        tries,
-        true,
-    )
-    .await
+    streams_join_and_converge(client, group, topo, want_active, tries, true).await
 }

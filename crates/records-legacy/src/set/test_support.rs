@@ -8,6 +8,7 @@ use bytes::Bytes;
 use krabka_ids::Offset;
 
 use super::ParsedRecord;
+use crate::Magic;
 
 pub(super) fn sample_records_v1() -> Vec<ParsedRecord> {
     sample_records_v1_at(100, [1_700_000_000, 1_700_000_010, 1_700_000_020])
@@ -37,7 +38,7 @@ pub(crate) fn decode_bytes(wire: &[u8]) -> Vec<ParsedRecord> {
 
 pub(super) fn compressed_bytes(
     records: &[ParsedRecord],
-    magic: crate::Magic,
+    magic: Magic,
     codec: krabka_compression::CompressionType,
 ) -> bytes::BytesMut {
     let mut wire = bytes::BytesMut::new();

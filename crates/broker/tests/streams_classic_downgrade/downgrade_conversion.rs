@@ -13,7 +13,10 @@ use crate::{
         rejoin_config, topic_id_for,
     },
     downgrade_streams_join::{streams_join_and_converge, streams_leave, topology},
-    support::offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic},
+    support::{
+        client::start_client,
+        offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic},
+    },
 };
 
 /// A drained streams group with a committed offset converts to classic on a
@@ -148,8 +151,7 @@ async fn downgrade_survives_restart() {
         broker.shutdown().await;
     }
     {
-        let (broker, _bootstrap, client) =
-            crate::support::client::start_client(rejoin_config(log_dir), Some("c1")).await;
+        let (broker, _bootstrap, client) = start_client(rejoin_config(log_dir), Some("c1")).await;
         let cc = std::sync::Arc::new(client);
         // Replay must reconstruct g4 as a classic actor from the committed
         // offset. Offset-only groups are Kafka-typeless, so they do not carry a

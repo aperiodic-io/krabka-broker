@@ -17,7 +17,9 @@ use super::answer;
 use crate::{
     authorizer::Authorizer,
     broker::{Broker, BrokerHandle},
-    test_support::{peer, principal},
+    features::{ELR_VERSION, METADATA_VERSION},
+    handlers::RequestContext,
+    test_support::{peer, principal, request_context, start_broker_no_audit_with},
 };
 
 pub(super) const VERSION: i16 = 1;
@@ -36,11 +38,11 @@ pub(super) fn named_update(name: &str, level: i16, upgrade_type: i8) -> FeatureU
 }
 
 pub(super) fn metadata_update(level: i16, upgrade_type: i8) -> FeatureUpdateKey {
-    feature_update(crate::features::METADATA_VERSION, level, upgrade_type)
+    feature_update(METADATA_VERSION, level, upgrade_type)
 }
 
 pub(super) fn elr_update(level: i16, upgrade_type: i8) -> FeatureUpdateKey {
-    feature_update(crate::features::ELR_VERSION, level, upgrade_type)
+    feature_update(ELR_VERSION, level, upgrade_type)
 }
 
 pub(super) fn validate_only(updates: Vec<FeatureUpdateKey>) -> UpdateFeaturesRequest {
@@ -59,17 +61,14 @@ pub(super) fn apply_request(updates: Vec<FeatureUpdateKey>) -> UpdateFeaturesReq
     }
 }
 
-pub(super) fn context<'a>(
-    principal: &'a Principal,
-    peer: &'a SocketAddr,
-) -> crate::handlers::RequestContext<'a> {
-    crate::test_support::request_context(principal, peer, "update-features-client")
+pub(super) fn context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext<'a> {
+    request_context(principal, peer, "update-features-client")
 }
 
 pub(super) async fn start_broker(
     authorizer: Arc<dyn Authorizer>,
 ) -> (BrokerHandle, tempfile::TempDir) {
-    crate::test_support::start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await
+    start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await
 }
 
 pub(super) async fn call_with(

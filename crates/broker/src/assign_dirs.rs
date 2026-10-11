@@ -14,6 +14,11 @@ use krabka_protocol::owned::assign_replicas_to_dirs_request::{
     AssignReplicasToDirsRequest, DirectoryData, PartitionData, TopicData,
 };
 
+use crate::{
+    controller_endpoint::{ControllerDialer, current_leader_endpoint},
+    metadata_source::MetadataSource,
+};
+
 /// Kafka sentinel for "broker epoch unknown" in `AssignReplicasToDirs`, sent
 /// only when this broker's own epoch is not yet known (for example, before
 /// registration has landed in the image). `check_broker_epoch` treats it as
@@ -110,21 +115,13 @@ pub(crate) fn build_request(
 /// - the send or the receive failed
 /// - the response carries a non-zero `error_code`
 pub(crate) async fn send_assignments(
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
-    dialer: &crate::controller_endpoint::ControllerDialer,
+    controller: &Arc<dyn MetadataSource>,
+    dialer: &ControllerDialer,
     client_id: &str,
     req: AssignReplicasToDirsRequest,
 ) -> Result<(), String> {
-    let leader_id = *controller.watch_leader().borrow();
-    let Some(leader_id) = leader_id else {
-        return Err("no controller leader".into());
-    };
-    let image = controller.current_image();
-    let Some((host, port)) =
-        crate::controller_endpoint::leader_endpoint(&image, &dialer.quorum_voters, leader_id)
-    else {
-        return Err("controller leader has no known controller endpoint".into());
-    };
+    let (leader_id, _, host, port) =
+        current_leader_endpoint(controller.as_ref(), &dialer.quorum_voters)?;
 
     let connection = dialer
         .outbound_client
@@ -187,7 +184,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::test_support::FakeMetadataSource;
+    use crate::{BrokerHandle, metadata_source::MetadataSource, test_support::FakeMetadataSource};
 
     #[test]
     fn build_request_groups_correctly() {
@@ -268,14 +265,17 @@ mod tests {
         }
     }
 
-    use crate::test_support::plaintext_controller_dialer_with_voters as plaintext_dialer;
+    use crate::test_support::{
+        VoterImageSetup, plaintext_controller_dialer_with_voters as plaintext_dialer,
+        start_controller as start_test_controller, voter_image,
+    };
 
     /// What a broker-only node sees of a controller-only leader: a voter with a
     /// CONTROLLER endpoint, and no broker registration anywhere in the image.
     /// `register_broker` skips a node whose `process.roles` exclude `broker`,
     /// so `image.broker(leader)` stays empty however long the cluster runs.
     fn voter_only_image(leader: NodeId, controller_addr: SocketAddr) -> MetadataImage {
-        crate::test_support::voter_image(crate::test_support::VoterImageSetup {
+        voter_image(VoterImageSetup {
             node: leader,
             endpoints: vec![krabka_metadata::VoterEndpoint {
                 name: "CONTROLLER".to_owned(),
@@ -287,8 +287,8 @@ mod tests {
 
     /// Boot a single-node broker that leads the metadata quorum, and hand back
     /// the address of the controller listener KIP-919 puts api key 73 on.
-    async fn start_controller() -> (crate::BrokerHandle, SocketAddr, tempfile::TempDir) {
-        crate::test_support::start_controller().await
+    async fn start_controller() -> (BrokerHandle, SocketAddr, tempfile::TempDir) {
+        start_test_controller().await
     }
 
     #[tokio::test]
@@ -304,7 +304,7 @@ mod tests {
             ),
         ];
         for (leader, expected) in cases {
-            let source: Arc<dyn crate::metadata_source::MetadataSource> = Arc::new(
+            let source: Arc<dyn MetadataSource> = Arc::new(
                 FakeMetadataSource::builder()
                     .image(MetadataImage::new(uuid::Uuid::nil()))
                     .leader(leader)
@@ -324,9 +324,7 @@ mod tests {
         }
     }
 
-    fn voter_only_source(
-        controller_addr: std::net::SocketAddr,
-    ) -> Arc<dyn crate::metadata_source::MetadataSource> {
+    fn voter_only_source(controller_addr: std::net::SocketAddr) -> Arc<dyn MetadataSource> {
         Arc::new(
             FakeMetadataSource::builder()
                 .image(voter_only_image(NodeId(1), controller_addr))

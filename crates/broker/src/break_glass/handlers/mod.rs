@@ -49,7 +49,11 @@ use uuid::Uuid;
 // beside its `Alter` twin, so the break-glass control plane does not reach into
 // another subsystem for an ACL gate.
 pub(crate) use crate::handlers::cluster_describe_denied;
-use crate::{codes, handlers::RequestContext};
+use crate::{
+    codes::{self, POLICY_VIOLATION},
+    handlers::RequestContext,
+    time_util::now_ms,
+};
 
 /// The audited action name of a request whose wire action names no transition.
 pub(crate) const UNKNOWN_ACTION: &str = "unknown";
@@ -203,7 +207,7 @@ pub(crate) async fn admit_privileged_request(
         .await
         .map_err(|error| {
             Refusal::new(
-                crate::codes::POLICY_VIOLATION,
+                POLICY_VIOLATION,
                 format!("privileged action refused: {error}"),
             )
         })
@@ -256,7 +260,7 @@ pub(crate) fn privileged_event(
             port: ctx.peer.port(),
         },
         reason: event.reason.to_owned(),
-        time_ms: crate::time_util::now_ms(),
+        time_ms: now_ms(),
     }
 }
 
@@ -266,9 +270,10 @@ pub(crate) mod tests {
     use krabka_security::Principal;
 
     use super::*;
+    use crate::test_support::sasl_principal;
 
     pub(crate) fn principal(name: &str) -> Principal {
-        crate::test_support::sasl_principal(name)
+        sasl_principal(name)
     }
 
     pub(crate) fn peer() -> std::net::SocketAddr {

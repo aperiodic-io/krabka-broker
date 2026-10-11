@@ -17,6 +17,7 @@ pub use crate::network::{codec::KafkaCodec, response_header_len, response_header
 use crate::{
     error::BrokerError,
     handlers::{ApiKeyCode, CorrelationId},
+    network::codec::codec as production_codec,
 };
 
 /// Prepend the response header to `body`, exactly as the dispatch loop does.
@@ -38,7 +39,7 @@ pub fn encode_response(
 /// with, for requests of up to `max_request_bytes`.
 #[must_use]
 pub fn codec(max_request_bytes: usize) -> KafkaCodec {
-    crate::network::codec::codec(max_request_bytes)
+    production_codec(max_request_bytes)
 }
 
 #[cfg(test)]

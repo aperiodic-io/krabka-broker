@@ -16,8 +16,8 @@ use crate::{
     compact::{
         build_offset_map,
         test_support::{
-            RETENTION, control_batch, make_record, rewrite_all, rewrite_with_map, round_over,
-            transactional_record, write_sealed_batches,
+            RETENTION, TransactionalRecordSetup, control_batch, make_record, rewrite_all,
+            rewrite_with_map, round_over, transactional_record, write_sealed_batches,
         },
     },
     txn_index::{AbortedTxn, TxnIndex},
@@ -59,20 +59,20 @@ fn rewrite_at(
 #[test]
 fn an_aborted_transactions_records_are_dropped_and_the_committed_value_survives() {
     let dir = tempfile::tempdir().unwrap();
-    let committed = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
-        offset: crate::Offset(5),
+    let committed = transactional_record(TransactionalRecordSetup {
+        offset: Offset(5),
         payload: (b"k", b"committed"),
         ..Default::default()
     });
     let commit_marker = control_batch(6, 1000, 1 /* COMMIT */);
-    let aborted_k = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
-        offset: crate::Offset(10),
-        producer: crate::ProducerId(2000),
+    let aborted_k = transactional_record(TransactionalRecordSetup {
+        offset: Offset(10),
+        producer: ProducerId(2000),
         payload: (b"k", b"aborted"),
     });
-    let aborted_j = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
-        offset: crate::Offset(11),
-        producer: crate::ProducerId(2000),
+    let aborted_j = transactional_record(TransactionalRecordSetup {
+        offset: Offset(11),
+        producer: ProducerId(2000),
         payload: (b"j", b"aborted"),
     });
     let abort_marker = control_batch(12, 2000, 0 /* ABORT */);
@@ -121,8 +121,8 @@ fn an_aborted_transactions_records_are_dropped_and_the_committed_value_survives(
 #[test]
 fn an_aborted_transaction_spanning_two_groups_keeps_its_marker_and_index_entry() {
     let dir = tempfile::tempdir().unwrap();
-    let aborted = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
-        producer: crate::ProducerId(2000),
+    let aborted = transactional_record(TransactionalRecordSetup {
+        producer: ProducerId(2000),
         payload: (b"k", b"aborted"),
         ..Default::default()
     });
@@ -187,8 +187,8 @@ fn a_marker_ages_out_once_its_own_transactions_data_is_gone() {
             old_marker.base_timestamp = horizon;
             old_marker.attributes = old_marker.attributes.with_delete_horizon(true);
         }
-        let live = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
-            offset: crate::Offset(1),
+        let live = transactional_record(TransactionalRecordSetup {
+            offset: Offset(1),
             payload: (b"k1", b"v2"),
             ..Default::default()
         });
@@ -212,7 +212,7 @@ fn a_marker_ages_out_once_its_own_transactions_data_is_gone() {
 #[test]
 fn a_marker_is_stamped_the_pass_after_its_data_is_removed() {
     let dir = tempfile::tempdir().unwrap();
-    let superseded = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+    let superseded = transactional_record(TransactionalRecordSetup {
         payload: (b"k", b"old"),
         ..Default::default()
     });

@@ -14,11 +14,12 @@ use super::{
         positive_u64, whole_bytes_u64, whole_millis_i32_time, whole_millis_i64_time,
     },
 };
+use crate::config::BrokerConfig;
 
 impl RuntimeFileConfig {
     pub(super) fn apply_broker_policy(
         &mut self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
         set_runtime! {

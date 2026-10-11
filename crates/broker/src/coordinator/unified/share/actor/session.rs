@@ -10,11 +10,14 @@ use super::{
     records::{chrono_now_ms, flush_pending},
     share_state::cleanup_deleted_topics,
 };
-use crate::coordinator::unified::{
-    GroupCoordinator,
-    actor::MetadataProvider,
-    offsets_log::OffsetsLog,
-    share::{config::ShareGroupConfig, state::ShareGroupState},
+use crate::{
+    coordinator::unified::{
+        GroupCoordinator,
+        actor::MetadataProvider,
+        offsets_log::OffsetsLog,
+        share::{config::ShareGroupConfig, state::ShareGroupState},
+    },
+    error::BrokerError,
 };
 
 /// Called on every heartbeat-interval tick. Each member whose session
@@ -30,13 +33,11 @@ pub(super) async fn handle_session_tick(
     metadata: &dyn MetadataProvider,
     offsets_log: &dyn OffsetsLog,
     coordinator: &GroupCoordinator,
-) -> Result<(), crate::error::BrokerError> {
+) -> Result<(), BrokerError> {
     let expired = state.expired_members(Instant::now(), config.session_timeout);
     for member_id in expired {
         let Some(pending) = fence_member(state, metadata, &member_id) else {
-            return Err(crate::error::BrokerError::Share(
-                "group epoch is exhausted".to_owned(),
-            ));
+            return Err(BrokerError::Share("group epoch is exhausted".to_owned()));
         };
         if let Err(e) =
             flush_pending(state, pending, offsets_log, coordinator, chrono_now_ms()).await
@@ -60,19 +61,22 @@ mod tests {
     use assert2::check;
 
     use super::*;
-    use crate::coordinator::unified::{
-        config::NextGenConfig,
-        share::{
-            actor::{
-                records::PendingShareRecords,
-                test_support::{
-                    TopicMetadataSetup, make_coordinator_with_config, metadata_with_topic,
+    use crate::{
+        coordinator::unified::{
+            config::NextGenConfig,
+            share::{
+                actor::{
+                    records::PendingShareRecords,
+                    test_support::{
+                        TopicMetadataSetup, make_coordinator_with_config, metadata_with_topic,
+                    },
                 },
+                persistence::ShareGroupMetadataValue,
+                state::ShareMemberState,
             },
-            persistence::ShareGroupMetadataValue,
-            state::ShareMemberState,
+            test_support::{check_two_members_expired, expired_session_last_seen},
         },
-        test_support::check_two_members_expired,
+        test_support::PartitionCount,
     };
 
     /// Kafka runs a session timer per member, and each one that fires runs
@@ -94,7 +98,7 @@ mod tests {
         let mut state = ShareGroupState::new("g");
         for member_id in ["m1", "m2"] {
             let mut m = ShareMemberState::joining(member_id, "c", "h", ["t".to_owned()].into());
-            m.last_seen = crate::coordinator::unified::test_support::expired_session_last_seen();
+            m.last_seen = expired_session_last_seen();
             state.add_or_update_member(m);
         }
         state.group_epoch = 2;
@@ -143,7 +147,7 @@ mod tests {
         };
 
         let (metadata, topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: crate::test_support::PartitionCount(2),
+            partitions: PartitionCount(2),
             ..Default::default()
         });
         let config = ShareGroupConfig::default();

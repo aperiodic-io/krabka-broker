@@ -23,6 +23,10 @@ use krabka_protocol::owned::{
     describe_cluster_response::{DescribeClusterBroker, DescribeClusterResponse},
 };
 
+#[cfg(test)]
+use crate::authorizer::SimpleAclAuthorizer;
+#[cfg(test)]
+use crate::handlers::RequestContext;
 use crate::{
     codes,
     handlers::{
@@ -187,8 +191,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        authorizer::{AllowAllAuthorizer, Authorizer},
         broker::{Broker, BrokerHandle},
-        test_support::{DenyAll, peer, principal},
+        test_support::{ControllerPeerAllowed, DenyAll, broker_registration, peer, principal},
     };
 
     const VERSION: i16 = 2;
@@ -234,10 +239,7 @@ mod tests {
     /// gated below by `the_authorized_operations_bitfield` table.
     #[tokio::test]
     async fn a_principal_without_describe_still_gets_full_cluster_data() {
-        let (broker_handle, _dir) = start_broker(Arc::new(
-            crate::test_support::ControllerPeerAllowed(DenyAll),
-        ))
-        .await;
+        let (broker_handle, _dir) = start_broker(Arc::new(ControllerPeerAllowed(DenyAll))).await;
         seed_broker(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "alice");
@@ -257,8 +259,7 @@ mod tests {
 
     #[tokio::test]
     async fn broker_endpoint_response_preserves_non_default_fields() {
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_broker(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "admin");
@@ -371,7 +372,7 @@ mod tests {
     /// singleton `Cluster` resource.
     #[tokio::test]
     async fn the_authorized_operations_bitfield_is_filled_only_on_opt_in() {
-        let authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        let authorizer = Arc::new(AllowAllAuthorizer);
         broker_fixture!(
             (broker_handle, _dir, broker),
             start_broker(Arc::clone(&authorizer) as _)
@@ -401,11 +402,9 @@ mod tests {
     /// does -- it never falls through to computing a partial mask.
     #[tokio::test]
     async fn cluster_authorized_operations_reads_zero_without_describe_even_with_other_acls() {
-        let authorizer = Arc::new(crate::authorizer::SimpleAclAuthorizer::new(
-            std::collections::HashSet::new(),
-        ));
+        let authorizer = Arc::new(SimpleAclAuthorizer::new(std::collections::HashSet::new()));
         let (broker_handle, _dir) =
-            start_broker(Arc::clone(&authorizer) as Arc<dyn crate::authorizer::Authorizer>).await;
+            start_broker(Arc::clone(&authorizer) as Arc<dyn Authorizer>).await;
         broker_handle
             .broker_arc_for_test()
             .controller
@@ -440,8 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn fenced_brokers_require_explicit_opt_in() {
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_broker(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
         broker.liveness.record_fenced_heartbeat(42).await;
@@ -483,7 +481,7 @@ mod tests {
                     protocol: ListenerProtocol::Plaintext,
                 })
                 .collect(),
-            ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+            ..broker_registration(krabka_raft::NodeId(node_id))
         }
     }
 
@@ -516,8 +514,7 @@ mod tests {
             ),
         ];
 
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         broker_handle
             .broker_arc_for_test()
             .controller
@@ -531,7 +528,7 @@ mod tests {
         request_identity!((p, peer), principal("admin"));
 
         for (listener, expected_brokers, controllers) in cases {
-            let ctx = crate::handlers::RequestContext::new(
+            let ctx = RequestContext::new(
                 &p,
                 &peer,
                 "admin-client",

@@ -12,7 +12,9 @@ use krabka_protocol::owned::{
 };
 
 use super::*;
-use crate::test_support::test_ctx;
+use crate::test_support::{
+    ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with, test_ctx,
+};
 
 crate::test_support::context_helper!(client_id = "streams-client");
 
@@ -96,11 +98,9 @@ async fn handle_answers_as_a_trunk_broker_without_a_plugin() {
         ),
     ];
     for (case, enable, streams_version, grants, want) in rows {
-        let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
+        let (broker_handle, _dir) = start_broker_with(|cfg| {
             cfg.streams_group.enable = enable;
-            cfg.authorizer = Arc::new(crate::test_support::ControllerPeerAllowed(
-                crate::test_support::GrantsInPrincipalName,
-            ));
+            cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
         })
         .await;
         let broker = broker_handle.broker_arc_for_test();
@@ -125,11 +125,9 @@ async fn handle_answers_as_a_trunk_broker_without_a_plugin() {
 async fn handle_refuses_what_a_trunk_broker_with_a_plugin_refuses() {
     use crate::coordinator::unified::streams::description::TopologyDescriptionPlugin;
 
-    let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
+    let (broker_handle, _dir) = start_broker_with(|cfg| {
         cfg.streams_group.topology_description_plugin = TopologyDescriptionPlugin::InMemory;
-        cfg.authorizer = Arc::new(crate::test_support::ControllerPeerAllowed(
-            crate::test_support::GrantsInPrincipalName,
-        ));
+        cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
     })
     .await;
     broker_handle.wait_until_group_coordinator_ready().await;

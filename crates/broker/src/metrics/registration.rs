@@ -3,7 +3,7 @@
 //! `#[metric(buckets = ...)]` attributes on [`BrokerMetrics`] name, and the
 //! entry point that runs the derived constructor and registration.
 
-use crate::metrics::BrokerMetrics;
+use crate::metrics::{BrokerMetrics, FetchDrainPath, FetchDrainPathLabel};
 
 #[cfg(test)]
 mod tests;
@@ -64,10 +64,10 @@ impl BrokerMetrics {
         // without this a dashboard panel or an alert that names `sendfile` has
         // no series to read until the first zero-copy fetch — or, on Windows,
         // ever.
-        for path in crate::metrics::FetchDrainPath::ALL {
+        for path in FetchDrainPath::ALL {
             let _ = metrics
                 .fetch_response_drain
-                .get_or_create(&crate::metrics::FetchDrainPathLabel { path });
+                .get_or_create(&FetchDrainPathLabel { path });
         }
         metrics
     }

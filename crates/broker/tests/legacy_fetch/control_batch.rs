@@ -15,7 +15,10 @@ use krabka_protocol::{
 
 use crate::{
     harness::{create_topic, fetch_legacy_raw_at},
-    support,
+    support::{
+        self,
+        producer::{ProducerRecordSetup, producer_record},
+    },
 };
 
 /// Control batches, that is txn markers, have no representation in the v0 and
@@ -44,13 +47,11 @@ async fn fetch_v3_drops_control_batch() {
     producer.init_transactions().await.unwrap();
     let transaction = producer.begin_transaction().await.unwrap();
     producer
-        .send(crate::support::producer::producer_record(
-            crate::support::producer::ProducerRecordSetup {
-                topic: ("legacy_fetch_ctrl").into(),
-                value: Some(Bytes::from_static(b"data-before-marker")),
-                ..Default::default()
-            },
-        ))
+        .send(producer_record(ProducerRecordSetup {
+            topic: ("legacy_fetch_ctrl").into(),
+            value: Some(Bytes::from_static(b"data-before-marker")),
+            ..Default::default()
+        }))
         .await
         .expect("transactional produce");
     transaction.commit().await.expect("commit transaction");

@@ -6,7 +6,7 @@ use krabka_units::prelude::{Time, TimeExt as _};
 use tokio::time::{Duration, Instant};
 
 use crate::kraft::{
-    core::QuorumStateMachine,
+    core::{QuorumStateMachine, election_jitter_ms},
     role::Role,
     types::{Epoch, NodeId, SimInstant},
 };
@@ -51,7 +51,7 @@ pub fn initial_election_at(
             // re-election timers, so the first election round is staggered
             // across closely-synchronized voters.
             let base_ms = election_timeout_ms(election_timeout);
-            let jitter = crate::kraft::core::election_jitter_ms(me, initial_epoch, base_ms);
+            let jitter = election_jitter_ms(me, initial_epoch, base_ms);
             let delay_ms = base_ms.saturating_add(jitter);
             Some(
                 clock_base

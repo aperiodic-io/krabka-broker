@@ -39,7 +39,7 @@ use krabka_protocol::{
 use stateright::{Checker, Model, Property};
 
 use super::{CachedPartitionState, FetchSessionKey, apply_incremental};
-use crate::model_check::run_bfs;
+use crate::model_check::{assert_pinned_count, run_bfs};
 
 // Exhaustiveness is bounded on UNIQUE states (memory-proportional). The combined
 // forget×sub action cross-product makes the *generated* (visited-edge) count
@@ -300,11 +300,7 @@ fn run(model: FsModel, label: &str, pinned_unique_states: usize) {
         "[{label}] unique-state bound exceeded ({})",
         checker.unique_state_count()
     );
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
-        label,
-    );
+    assert_pinned_count(checker.unique_state_count(), pinned_unique_states, label);
     checker.assert_properties();
 }
 

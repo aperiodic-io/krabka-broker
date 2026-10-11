@@ -14,15 +14,19 @@ use krabka_units::bytes;
 use tempfile::tempdir;
 
 use crate::{
-    Log, LogConfig, LogError, LogIo,
-    log::test_support::{sample_batch, tiny_segments, verbatim_from},
-    name, producer_snapshot,
+    Log, LogConfig, LogError, LogIo, Segment,
+    log::test_support::{
+        append_samples, install_stamps, sample_batch, tiny_segments, verbatim_from,
+    },
+    name,
+    producer_snapshot::{self, ProducerSnapshotEntry},
+    test_support::open_log,
 };
 
 fn check_boundary_snapshot(
     log: &Log,
     directory: &std::path::Path,
-    expected: &[crate::producer_snapshot::ProducerSnapshotEntry],
+    expected: &[ProducerSnapshotEntry],
 ) {
     let copy = tempdir().unwrap();
     std::fs::copy(
@@ -213,7 +217,7 @@ fn buffered_rollovers_allow_appends_reads_and_idle_maintenance_during_disk_sync(
     );
     assert!(log.tierable_segments().len() == 2);
     drop(log);
-    let recovered = crate::test_support::open_log(dir.path());
+    let recovered = open_log(dir.path());
     assert!(recovered.log_end_offset() == Offset(3));
     assert!(
         recovered
@@ -230,7 +234,7 @@ fn stamped_appends_wait_for_earlier_rollovers_in_both_append_paths() {
         let dir = tempdir().unwrap();
         let mut log = first_append(dir.path(), false);
         let (gate, began) = begin_gated_rollover(&mut log);
-        crate::log::test_support::install_stamps(&mut log, 100, 1);
+        install_stamps(&mut log, 100, 1);
         let (writer, rx) = spawn_writer(log, move |log| {
             if verbatim {
                 let (_, batch) = verbatim_from(&sample_batch(1), krabka_ids::LeaderEpoch(1));
@@ -347,7 +351,7 @@ fn reset_and_truncation_wait_and_cannot_recreate_stale_snapshots() {
         assert!(log.log_end_offset() == Offset(0));
         assert!(producer_snapshot::list(dir.path()).unwrap().is_empty());
         drop(log);
-        let recovered = crate::test_support::open_log(dir.path());
+        let recovered = open_log(dir.path());
         assert!(recovered.producer_state_snapshot().is_empty());
     }
 }
@@ -448,7 +452,7 @@ fn sealed_segment_flush_survives_each_post_roll_setup_failure() {
         let mut log = first_append(dir.path(), false);
         let first_state = log.producer_state_snapshot();
         if extension == "stampindex" {
-            crate::log::test_support::install_stamps(&mut log, 100, 1);
+            install_stamps(&mut log, 100, 1);
         }
         let blocked = dir.path().join(format!("{:020}.{extension}", 1));
         std::fs::create_dir(&blocked).unwrap();
@@ -461,7 +465,7 @@ fn sealed_segment_flush_survives_each_post_roll_setup_failure() {
             assert!(log.tierable_segments().len() == 1);
             std::fs::remove_dir(&blocked).unwrap();
             // A retry and another roll must not leave a gap in the archive.
-            crate::log::test_support::append_samples(&mut log, 2, 1);
+            append_samples(&mut log, 2, 1);
             log.sync().unwrap();
             assert!(log.tierable_segments().len() == 2);
         }
@@ -473,9 +477,9 @@ fn synchronous_rollovers_do_not_clone_flush_handles_and_clone_failure_does_not_s
     for strict in [false, true] {
         let dir = tempdir().unwrap();
         let mut log = first_append(dir.path(), strict);
-        crate::Segment::test_fail_flush_handles(true);
+        Segment::test_fail_flush_handles(true);
         let result = log.append(&mut sample_batch(1));
-        crate::Segment::test_fail_flush_handles(false);
+        Segment::test_fail_flush_handles(false);
         if strict {
             result.unwrap();
             check_flushed_boundary(&log, dir.path());

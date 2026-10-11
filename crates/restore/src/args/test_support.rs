@@ -3,7 +3,10 @@
 
 use clap::Parser as _;
 
-use crate::args::{PartitionRef, RestoreArgs};
+use crate::{
+    Cli,
+    args::{PartitionRef, RestoreArgs},
+};
 
 pub(crate) fn partition(topic: &str, index: i32) -> PartitionRef {
     PartitionRef {
@@ -23,5 +26,5 @@ pub(crate) fn args_from(extra: &[&str]) -> Result<RestoreArgs, clap::Error> {
         "/target",
     ];
     argv.extend_from_slice(extra);
-    crate::Cli::try_parse_from(argv).map(|cli| cli.args)
+    Cli::try_parse_from(argv).map(|cli| cli.args)
 }

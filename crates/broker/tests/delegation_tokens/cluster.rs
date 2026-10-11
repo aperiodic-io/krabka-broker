@@ -11,6 +11,10 @@ use krabka_broker::{Broker, BrokerHandle};
 use krabka_security::SaslMechanism;
 use tempfile::TempDir;
 
+use crate::support::sasl::{
+    delegation_token_defaults, sasl_temp_config, start_broker as start_sasl_broker,
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cluster bring-up.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -24,10 +28,8 @@ use tempfile::TempDir;
 ///   - `delegation_token_secret_key = Some("e2e-master-key")`, which gates
 ///     the four delegation-token RPCs and the SCRAM token-fallback lookup
 pub(crate) async fn start_broker() -> (BrokerHandle, TempDir, SocketAddr) {
-    let (log_dir, mut cfg) = crate::support::sasl::sasl_temp_config(vec![
-        SaslMechanism::Plain,
-        SaslMechanism::ScramSha256,
-    ]);
+    let (log_dir, mut cfg) =
+        sasl_temp_config(vec![SaslMechanism::Plain, SaslMechanism::ScramSha256]);
     cfg.plain_credentials
         .insert("alice".to_string(), "wonderland".to_string());
     cfg.plain_credentials
@@ -46,7 +48,7 @@ pub(crate) async fn start_broker() -> (BrokerHandle, TempDir, SocketAddr) {
     // and max = issue + 7d as separate values, so Renew can extend the
     // expiry well past its initial value (and the lifecycle test asserts
     // strict-monotonic extension below).
-    crate::support::sasl::delegation_token_defaults(&mut cfg, b"e2e-master-key");
+    delegation_token_defaults(&mut cfg, b"e2e-master-key");
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
@@ -69,10 +71,8 @@ pub(crate) fn start_broker_with_super_users(
     plain_creds: &[(&str, &str)],
     super_users: &[&str],
 ) -> impl std::future::Future<Output = (BrokerHandle, TempDir, SocketAddr)> {
-    let (log_dir, mut cfg) = crate::support::sasl::sasl_temp_config(vec![
-        SaslMechanism::Plain,
-        SaslMechanism::ScramSha256,
-    ]);
+    let (log_dir, mut cfg) =
+        sasl_temp_config(vec![SaslMechanism::Plain, SaslMechanism::ScramSha256]);
     for (user, password) in plain_creds {
         cfg.plain_credentials
             .insert((*user).to_string(), (*password).to_string());
@@ -97,9 +97,9 @@ pub(crate) fn start_broker_with_super_users(
         username: (*ib_user).to_string(),
         password: (*ib_pw).to_string(),
     });
-    crate::support::sasl::delegation_token_defaults(&mut cfg, b"act-as-master-key");
+    delegation_token_defaults(&mut cfg, b"act-as-master-key");
 
-    Box::pin(crate::support::sasl::start_broker(cfg, log_dir))
+    Box::pin(start_sasl_broker(cfg, log_dir))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

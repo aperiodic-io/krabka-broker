@@ -9,7 +9,11 @@ use krabka_metadata::MetadataImage;
 use tracing::warn;
 
 use super::TopicPartition;
-use crate::partition_registry::PartitionRegistry;
+use crate::{
+    api_catalog::UnstableApiVersions,
+    config_keys::{dynamic_log_base, log_max_decompressed_record},
+    partition_registry::PartitionRegistry,
+};
 
 /// Push topic-config overrides onto every locally-hosted partition in
 /// `desired`. The call is idempotent, because the same `LogConfig` sent twice
@@ -35,9 +39,9 @@ pub(crate) async fn push_topic_configs(
     image: &MetadataImage,
     base: &LogConfig,
     node: krabka_metadata::NodeId,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 ) {
-    let base = &crate::config_keys::dynamic_log_base(image, node, base);
+    let base = &dynamic_log_base(image, node, base);
     let empty: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     for (topic, partition) in desired {
         let Some(part) = partitions.get(topic, PartitionIndex(*partition)) else {
@@ -47,9 +51,7 @@ pub(crate) async fn push_topic_configs(
         // `apply_to_log_config` leaves the field alone, so the topic's own
         // limit travels in the base it merges over.
         let topic_base = LogConfig {
-            max_decompressed_record: crate::config_keys::log_max_decompressed_record(
-                image, node, topic, unstable,
-            ),
+            max_decompressed_record: log_max_decompressed_record(image, node, topic, unstable),
             ..base.clone()
         };
         if let Err(e) = part
@@ -78,7 +80,8 @@ mod tests {
     use crate::{
         api_catalog::UnstableApiVersions,
         replicator_supervisor::test_support::{
-            await_until, materialized_partition_with_config, single_partition_image,
+            MaterializeSetup, await_until, materialized_partition_with_config,
+            single_partition_image,
         },
     };
 
@@ -92,8 +95,7 @@ mod tests {
     impl Default for PushedConfigSetup<'_> {
         fn default() -> Self {
             Self {
-                base: crate::replicator_supervisor::test_support::MaterializeSetup::default()
-                    .log_config,
+                base: MaterializeSetup::default().log_config,
                 unstable: UnstableApiVersions::Disabled,
                 what: "log config updated",
             }

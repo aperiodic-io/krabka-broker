@@ -12,6 +12,7 @@ use super::{
     copy_segment::{CopyOutcome, copy_one},
     local_retention::remote_covered_through,
 };
+use crate::config_keys::RemoteCopyLag;
 
 /// KIP-1241's delayed copy: how long a sealed segment may wait before this
 /// pass copies it.
@@ -57,7 +58,7 @@ impl CopyDelay {
     /// `local.retention.ms` / `local.retention.bytes`, which is `retention.*`
     /// unless the topic sets its own, and `-1` again when that is unlimited.
     pub(crate) fn resolve(
-        lag: crate::config_keys::RemoteCopyLag,
+        lag: RemoteCopyLag,
         log_config: &krabka_log::LogConfig,
         now_ms: i64,
         active_bytes: u64,
@@ -384,9 +385,10 @@ mod tests {
     use crate::{
         metrics::BrokerMetrics,
         remote_log_manager::{
-            ArchiveMode, test_support as fixtures,
+            ArchiveMode,
+            local_retention::finished_segment_ranges,
             test_support::{
-                FakeWormArchive, archived_backends, copy_exports, local_backends,
+                self as fixtures, FakeWormArchive, archived_backends, copy_exports, local_backends,
                 missing_remote_reads, stuck_started_segment, synth_export, three_exports, tier, tp,
             },
         },
@@ -961,9 +963,7 @@ mod tests {
     /// Every finished range the metadata manager holds for `tp()`, ascending.
     fn finished_ranges(rlmm: &Arc<dyn RemoteLogMetadataManager>) -> Vec<(i64, i64)> {
         let mut ranges: Vec<(i64, i64)> =
-            crate::remote_log_manager::local_retention::finished_segment_ranges(
-                &rlmm.list_remote_log_segments(&tp()).unwrap(),
-            );
+            finished_segment_ranges(&rlmm.list_remote_log_segments(&tp()).unwrap());
         ranges.sort_unstable();
         ranges
     }

@@ -31,6 +31,7 @@ use super::{
     },
 };
 use crate::{
+    api_catalog::UnstableApiVersions,
     codes,
     config_keys::{
         self, broker_dynamic, kafka_broker,
@@ -75,7 +76,7 @@ pub(super) struct ServingBroker<'a> {
     /// Kafka's `unstable.api.versions.enable`, which decides whether a group
     /// resource carries Kafka trunk's group keys, a topic resource Kafka
     /// trunk's topic keys, and a broker resource their broker synonyms.
-    pub(super) unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    pub(super) unstable_api_versions: UnstableApiVersions,
 }
 
 /// Dispatches one resource entry from a `DescribeConfigs` request.
@@ -260,7 +261,7 @@ pub(crate) fn effective_topic_configs(
     node: krabka_metadata::NodeId,
     topic: &str,
     overrides: &std::collections::BTreeMap<String, String>,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
     statics: &std::collections::BTreeMap<&'static str, String>,
 ) -> Vec<DescribeConfigsResourceResult> {
     topic_configs_with_overrides(
@@ -311,7 +312,7 @@ struct TopicBrokerLayers<'a> {
     /// The static settings of the answering node, by broker key: a topic key
     /// reports its broker synonym here at `STATIC_BROKER_CONFIG`.
     statics: &'a std::collections::BTreeMap<&'static str, String>,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 }
 
 /// [`topic_configs`] against a caller-supplied override map, which is what a
@@ -594,10 +595,7 @@ const EMITTED_ELSEWHERE: &[&str] = &[
 /// Kafka's `KafkaConfig` default of a broker key krabka reports: its own
 /// registry row's, the one its topic-key synonym family gives it on a broker
 /// serving `unstable`, or the roster's.
-fn broker_default(
-    key: &str,
-    unstable: crate::api_catalog::UnstableApiVersions,
-) -> Option<&'static str> {
+fn broker_default(key: &str, unstable: UnstableApiVersions) -> Option<&'static str> {
     if let Some(row) = registry::lookup(ConfigScope::Broker, key) {
         return row.default;
     }
@@ -686,7 +684,7 @@ fn group_configs(
     group: &str,
     (statics, unstable): (
         &std::collections::BTreeMap<&'static str, String>,
-        crate::api_catalog::UnstableApiVersions,
+        UnstableApiVersions,
     ),
     wanted: &impl Fn(&str) -> bool,
     options: EntryOptions,

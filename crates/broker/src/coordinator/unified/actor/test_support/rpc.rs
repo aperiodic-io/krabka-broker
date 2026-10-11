@@ -26,6 +26,7 @@ use crate::{
         },
         classic_state::OffsetEntry,
         group::GroupOffsets,
+        regex_resolver::no_topic_regex_resolver,
     },
     task_util::ask,
 };
@@ -118,7 +119,7 @@ pub fn classic_join_message(
         version: 4,
         client_id: "client-a".into(),
         client_host: "127.0.0.1".into(),
-        regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
+        regex_resolver: no_topic_regex_resolver(),
         reply,
     }
 }
@@ -247,7 +248,7 @@ pub async fn consumer_request_from(
         request,
         client_id: client.0.into(),
         client_host: client.1.into(),
-        regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
+        regex_resolver: no_topic_regex_resolver(),
         reply,
     })
     .await

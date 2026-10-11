@@ -17,7 +17,10 @@ use tracing::info;
 
 use crate::{
     metadata_source::MetadataSource,
-    txn::coordinator::{TxnCoordinator, completion::CompletionAttempt},
+    txn::{
+        coordinator::{TxnCoordinator, completion::CompletionAttempt},
+        version::resolve_txn_version,
+    },
 };
 
 /// The wait before a failed completion runs again.
@@ -66,7 +69,7 @@ pub(crate) async fn complete_once(
     queued: BTreeSet<String>,
 ) -> BTreeSet<String> {
     let image = controller.current_image();
-    let txnv = crate::txn::version::resolve_txn_version(&image);
+    let txnv = resolve_txn_version(&image);
     // A load queues its own `Prepare*` transactions when it ends, so the task
     // does not wait for the loads it starts.
     drop(coordinator.refresh_leader_partitions(&image).await);

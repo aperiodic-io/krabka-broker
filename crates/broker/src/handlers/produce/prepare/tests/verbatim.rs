@@ -13,6 +13,7 @@ use krabka_protocol::records::{
 use super::super::{DecodeEnv, PartitionPayload, PreparedSource, prepare_batch};
 use crate::{
     handlers::produce::{append::build_produce_data, topic_settings::TimestampPolicy},
+    metrics::BrokerMetrics,
     partition::ProduceData,
 };
 
@@ -122,7 +123,7 @@ fn dispatch_slice(
     topic_compression: Option<CompressionType>,
     leader_epoch: i32,
 ) -> ProduceData {
-    let m = crate::metrics::BrokerMetrics::new();
+    let m = BrokerMetrics::new();
     let prepared =
         prepare_for_topic!(PartitionPayload::Slice(slice), topic_compression, &m, 13).unwrap();
     build_produce_data(prepared, leader_epoch)
@@ -160,7 +161,7 @@ fn passthrough_when_target_codec_equals_current() {
 #[test]
 fn fallback_when_null_field() {
     // A wire-null records field is rejected as INVALID_REQUEST.
-    let m = crate::metrics::BrokerMetrics::new();
+    let m = BrokerMetrics::new();
     let err = prepare_for_topic!(PartitionPayload::Null, None, &m, 13).unwrap_err();
     assert!(err == crate::codes::INVALID_REQUEST);
 }
@@ -516,7 +517,7 @@ fn header_fields_drive_dedup_on_verbatim_path() {
     b.attributes = b.attributes.with_compression(CompressionType::Lz4);
     let wire = encode(&b);
 
-    let m = crate::metrics::BrokerMetrics::new();
+    let m = BrokerMetrics::new();
     let prepared = prepare_for_topic!(PartitionPayload::Slice(wire.clone()), None, &m, 13).unwrap();
     assert!(matches!(prepared.source, PreparedSource::Verbatim(_)));
     check!(prepared.producer_id == 4242);

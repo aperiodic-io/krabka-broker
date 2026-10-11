@@ -160,7 +160,7 @@ mod tests {
             dlq::{DlqError, DlqRequest, DlqSink, test_support::RecordingDlq},
             manager::test_support::manager_with_dlq,
             state::{
-                AckType, AcquisitionState, DlqCause, RecordState,
+                AckType, AcquisitionState, DlqCause, DlqRange, RecordState,
                 test_support::{
                     AcquiredWindowSetup, DeadLetterQueue, DeliveryCount, DlqRangeSetup,
                     acquire_window, dlq_range as range,
@@ -237,7 +237,7 @@ mod tests {
         mgr: &super::SharePartitionLeaderManager,
         key: &super::LeaderKey,
         cell: &Arc<tokio::sync::Mutex<AcquisitionState>>,
-        ranges: Vec<crate::share_partition::state::DlqRange>,
+        ranges: Vec<DlqRange>,
         done: impl Fn(&[(i64, RecordState)]) -> bool,
     ) -> Vec<(i64, RecordState)> {
         mgr.dispatch_dead_letters(key, cell, ranges);

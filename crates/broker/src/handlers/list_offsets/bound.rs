@@ -6,6 +6,8 @@
 //! lands at or above it. [`fetch_bound`] makes that choice from the request,
 //! and [`last_fetchable_offset`] reads the offset it names.
 
+use crate::partition::Partition;
+
 /// Request `replica_id` (-1) that marks an ordinary client. Kafka's
 /// `ListOffsetsRequest.CONSUMER_REPLICA_ID`. A follower sends its own node id
 /// and the offset-debugging path sends -2.
@@ -68,10 +70,7 @@ impl FetchBound {
 ///
 /// The high watermark lives behind an async mutex of its own, so this is called
 /// before the log mutex is taken and never under it.
-pub(super) async fn last_fetchable_offset(
-    partition: &crate::partition::Partition,
-    bound: FetchBound,
-) -> Option<i64> {
+pub(super) async fn last_fetchable_offset(partition: &Partition, bound: FetchBound) -> Option<i64> {
     fetchable_offsets(partition, bound)
         .await
         .map(|offsets| offsets.last_fetchable)
@@ -97,7 +96,7 @@ pub(super) struct FetchableOffsets {
 /// Reads the [`FetchableOffsets`] of `partition` for `bound`, or `None` when
 /// an offset is malformed. See [`last_fetchable_offset`] for the bound.
 pub(super) async fn fetchable_offsets(
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     bound: FetchBound,
 ) -> Option<FetchableOffsets> {
     let high_watermark = partition.high_watermark().await;

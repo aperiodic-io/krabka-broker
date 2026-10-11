@@ -36,7 +36,10 @@ use crate::{
         GroupType,
         streams::actor::{DescriptionPush, PushAnswer, StreamsGroupActorMessage},
     },
-    handlers::{ErrorResponse as _, RequestContext, group_read_denied},
+    handlers::{
+        ErrorResponse as _, RequestContext, group_coordinator_error, group_read_denied,
+        streams_protocol_enabled,
+    },
     task_util::{AskError, ask},
 };
 
@@ -66,7 +69,7 @@ async fn answer(
     let invalid = |message: &str| (codes::INVALID_REQUEST, Some(message.to_owned()));
     {
         let image = broker.controller.current_image();
-        if !crate::handlers::streams_protocol_enabled(broker, &image) {
+        if !streams_protocol_enabled(broker, &image) {
             return (codes::UNSUPPORTED_VERSION, None);
         }
         if group_read_denied(
@@ -95,7 +98,7 @@ async fn answer(
     if req.group_id.is_empty() {
         return invalid("GroupId can't be empty.");
     }
-    if let Some(error_code) = crate::handlers::group_coordinator_error(broker, &req.group_id) {
+    if let Some(error_code) = group_coordinator_error(broker, &req.group_id) {
         return (error_code, None);
     }
     let coordinator = &broker.group_coordinator;

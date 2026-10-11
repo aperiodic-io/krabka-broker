@@ -41,7 +41,11 @@ use krabka_protocol::{
 use krabka_security::{ListenerProtocol, SaslMechanism, SecretBytes};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-use crate::support::acl::ClusterAclSetup;
+use crate::support::{
+    acl::{ClusterAclSetup, cluster_acl_record},
+    start_with_bound_listeners,
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+};
 
 mod support;
 
@@ -87,7 +91,7 @@ async fn start_broker_with(
     customize: impl FnOnce(&mut BrokerConfig),
 ) -> (BrokerHandle, tempfile::TempDir) {
     support::init_tracing();
-    crate::support::start_with_bound_listeners(customize).await
+    start_with_bound_listeners(customize).await
 }
 
 /// Let the plaintext forwarding peer pass the outer gate, preserving inner-principal authorization.
@@ -195,12 +199,10 @@ async fn send_envelope_on(
 fn embedded_create_topics(topic: &str) -> Bytes {
     let version = krabka_protocol::owned::create_topics_request::MAX_VERSION;
     let body = encode(
-        &crate::support::topics::create_topic_request(crate::support::topics::creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
-                name: (topic).into(),
-                ..Default::default()
-            },
-        )),
+        &create_topic_request(creatable_topic(ConfiguredTopicSetup {
+            name: (topic).into(),
+            ..Default::default()
+        })),
         version,
     );
     // The length prefix belongs to the outer connection, not to `request_data`
@@ -431,13 +433,11 @@ async fn a_forwarded_request_authorizes_against_the_embedded_client_host() {
 
     for (principal, host) in [("User:alice", "10.1.2.3"), ("User:bob", "127.0.0.1")] {
         broker
-            .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(
-                ClusterAclSetup {
-                    principal,
-                    host,
-                    operation: AclOperation::Create,
-                },
-            ))
+            .submit_metadata_record_for_test(cluster_acl_record(ClusterAclSetup {
+                principal,
+                host,
+                operation: AclOperation::Create,
+            }))
             .await
             .expect("seed host ACL");
     }
@@ -528,9 +528,7 @@ async fn a_forwarded_allocate_producer_ids_needs_cluster_action_for_the_embedded
     let (broker, _dir) = start_forwarder().await;
     broker.wait_until_brokers_registered(1).await;
     broker
-        .submit_metadata_record_for_test(crate::support::acl::cluster_acl_record(
-            ClusterAclSetup::default(),
-        ))
+        .submit_metadata_record_for_test(cluster_acl_record(ClusterAclSetup::default()))
         .await
         .expect("seed ClusterAction ACL");
 
@@ -660,12 +658,10 @@ async fn an_embedded_version_the_broker_does_not_serve_is_refused() {
         client_id: Some("adminclient-1".as_bytes()),
         tagged: Some(&[0]),
         body: &encode(
-            &crate::support::topics::create_topic_request(crate::support::topics::creatable_topic(
-                crate::support::topics::ConfiguredTopicSetup {
-                    name: (TOPIC).into(),
-                    ..Default::default()
-                },
-            )),
+            &create_topic_request(creatable_topic(ConfiguredTopicSetup {
+                name: (TOPIC).into(),
+                ..Default::default()
+            })),
             krabka_protocol::owned::create_topics_request::MAX_VERSION,
         ),
     })

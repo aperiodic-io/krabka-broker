@@ -206,18 +206,22 @@ mod tests {
     use assert2::check;
 
     use super::*;
-    use crate::log::test_support::life;
+    use crate::{
+        NodeId,
+        log::test_support::{emit_lifecycle, life},
+        spool::FILE_HEADER_LEN,
+    };
 
     #[tokio::test]
     async fn close_ends_stream_for_every_log_clone_after_queued_events() {
         let (log, mut rx) = AuditLog::new(16);
         let clone = Arc::clone(&log);
-        log.emit(life(crate::NodeId(1)));
+        log.emit(life(NodeId(1)));
 
         clone.close();
-        log.emit(life(crate::NodeId(2)));
+        log.emit(life(NodeId(2)));
 
-        check!(rx.recv().await == Some(life(crate::NodeId(1))));
+        check!(rx.recv().await == Some(life(NodeId(1))));
         check!(rx.recv().await.is_none());
         check!(log.dropped() == 0);
     }
@@ -225,7 +229,7 @@ mod tests {
     #[test]
     fn disabled_log_drops_without_panicking() {
         let log = AuditLog::disabled();
-        log.emit(life(crate::NodeId(1)));
+        log.emit(life(NodeId(1)));
         check!(log.dropped() == 0);
     }
 
@@ -233,7 +237,7 @@ mod tests {
     async fn full_queue_increments_dropped_and_pending_loss() {
         let (log, rx) = AuditLog::new(1);
         for i in 0..10 {
-            log.emit(life(crate::NodeId(i)));
+            log.emit(life(NodeId(i)));
         }
         check!(log.dropped() == 9);
         check!(rx.pending_losses.count() == 9);
@@ -244,10 +248,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let spool = Spool::open(dir.path(), krabka_units::prelude::bytes(0)).unwrap();
         let (log, _rx) = AuditLog::new_with_mode_and_spool(1, AuditMode::FailOpen, &spool);
-        crate::log::test_support::emit_lifecycle(&log, &[crate::NodeId(1), crate::NodeId(2)]);
+        emit_lifecycle(&log, &[NodeId(1), NodeId(2)]);
 
         let state = std::fs::read(dir.path().join("audit.losses")).unwrap();
-        let count = &state[crate::spool::FILE_HEADER_LEN + 8..];
+        let count = &state[FILE_HEADER_LEN + 8..];
         check!(u64::from_be_bytes(count.try_into().unwrap()) == 0);
         check!(log.dropped() == 1);
     }
@@ -255,8 +259,8 @@ mod tests {
     #[tokio::test]
     async fn fail_closed_refuses_queue_backpressure() {
         let (log, _rx) = AuditLog::new_with_mode(1, AuditMode::FailClosed);
-        log.emit(life(crate::NodeId(0)));
-        let error = log.emit_required(life(crate::NodeId(1))).await.unwrap_err();
+        log.emit(life(NodeId(0)));
+        let error = log.emit_required(life(NodeId(1))).await.unwrap_err();
         check!(error.to_string().contains("queue is full"));
     }
 

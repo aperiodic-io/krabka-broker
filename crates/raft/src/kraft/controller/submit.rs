@@ -901,7 +901,11 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::types::NodeId;
+    use crate::{
+        kraft::controller::test_support::EngineSetup,
+        test_support::{single_partition_topic, single_replica_partition},
+        types::NodeId,
+    };
 
     fn principal(name: &str) -> KafkaPrincipal {
         KafkaPrincipal {
@@ -984,27 +988,20 @@ mod tests {
     fn rebase_partition_directories_copies_image_directories() {
         let mut image = MetadataImage::default();
         let topic_id = Uuid::from_u128(42);
-        image.apply(&MetadataRecord::V1Topic(
-            crate::test_support::single_partition_topic("test-topic", topic_id),
-        ));
+        image.apply(&MetadataRecord::V1Topic(single_partition_topic(
+            "test-topic",
+            topic_id,
+        )));
         let dir_id = Uuid::from_u128(99);
         image.apply(&MetadataRecord::V1Partition(PartitionRecord {
             directories: vec![dir_id],
-            ..crate::test_support::single_replica_partition(
-                "test-topic",
-                krabka_ids::PartitionIndex(0),
-                NodeId(1),
-            )
+            ..single_replica_partition("test-topic", krabka_ids::PartitionIndex(0), NodeId(1))
         }));
 
         let new_part = PartitionRecord {
             leader_epoch: krabka_metadata::LeaderEpoch(1),
             partition_epoch: 1,
-            ..crate::test_support::single_replica_partition(
-                "test-topic",
-                krabka_ids::PartitionIndex(0),
-                NodeId(1),
-            )
+            ..single_replica_partition("test-topic", krabka_ids::PartitionIndex(0), NodeId(1))
         };
 
         let rebased = rebase_partition_directories(&image, &MetadataRecord::V1Partition(new_part));
@@ -1018,10 +1015,7 @@ mod tests {
     #[test]
     fn created_topic_names_lists_only_names_absent_from_the_image() {
         let topic = |name: &str, id: u128| {
-            MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-                name,
-                Uuid::from_u128(id),
-            ))
+            MetadataRecord::V1Topic(single_partition_topic(name, Uuid::from_u128(id)))
         };
         let mut image = MetadataImage::default();
         image.apply(&topic("existing", 1));
@@ -1058,11 +1052,10 @@ mod tests {
 
         use crate::kraft::controller::test_support::{build_engine_only, one_offset_batch};
 
-        let (mut engine, _dir) =
-            build_engine_only(crate::kraft::controller::test_support::EngineSetup {
-                ids: &[NodeId(1)],
-                ..Default::default()
-            });
+        let (mut engine, _dir) = build_engine_only(EngineSetup {
+            ids: &[NodeId(1)],
+            ..Default::default()
+        });
         let t1 = DelegationTokenRecord {
             token_id: "tok1".into(),
             owner: principal("alice"),
@@ -1091,11 +1084,10 @@ mod tests {
         assert2::assert!(matches!(res_exists, Err(RaftError::ChangeRejected(_))));
 
         // Token create when hwm < log_end_offset (uncommitted tail) is rejected
-        let (mut engine2, _dir2) =
-            build_engine_only(crate::kraft::controller::test_support::EngineSetup {
-                ids: &[NodeId(1)],
-                ..Default::default()
-            });
+        let (mut engine2, _dir2) = build_engine_only(EngineSetup {
+            ids: &[NodeId(1)],
+            ..Default::default()
+        });
         let t2 = DelegationTokenRecord {
             token_id: "tok2".into(),
             owner: principal("bob"),

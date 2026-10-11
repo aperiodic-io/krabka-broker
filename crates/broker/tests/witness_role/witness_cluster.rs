@@ -16,8 +16,9 @@ use krabka_client_core::Client;
 use tempfile::TempDir;
 
 use crate::{
-    BROKER_WITNESS, SITE_A, SITE_C, SITES, STRETCH_PREFERRED_LEADER_SITE, support,
-    support::client::connect_owned, within,
+    BROKER_WITNESS, SITE_A, SITE_C, SITES, STRETCH_PREFERRED_LEADER_SITE,
+    support::{self, client::connect_owned, shutdown_cluster},
+    within,
 };
 
 fn stretch_profile() -> StretchProfile {
@@ -77,5 +78,5 @@ pub(crate) async fn client_at(addr: &str) -> Client {
 }
 
 pub(crate) async fn shutdown(cluster: Vec<(BrokerHandle, BrokerConfig, TempDir)>) {
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

@@ -17,9 +17,11 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::{
+    config::BrokerConfig,
     partition::{ProduceData, ProduceJob},
     replica_state::ReplicaState,
     test_support::UnixMillis,
+    time_util::now_ms,
     txn::marker::{MarkerType, build_marker_batch},
 };
 
@@ -361,7 +363,7 @@ async fn compacted(role: Role, history: &History, now_ms: i64) -> Vec<Kept> {
     if matches!(history.expiry, ProducerExpiry::Swept) {
         // The maintenance loop sweeps the tracker and the log of every
         // hosted partition (`spawn_producer_expiry`).
-        let expiration = crate::config::BrokerConfig::default().producer_id_expiration;
+        let expiration = BrokerConfig::default().producer_id_expiration;
         let later = now_ms + expiration.millis_i64();
         producer_state.expire_older_than(later, expiration).await;
         log.lock()
@@ -396,7 +398,7 @@ async fn compacted(role: Role, history: &History, now_ms: i64) -> Vec<Kept> {
 /// therefore keeps the same batches as its leader.
 #[tokio::test]
 async fn compaction_keeps_the_last_record_of_each_active_producer_on_every_replica() {
-    let now_ms = crate::time_util::now_ms();
+    let now_ms = now_ms();
     for history in histories(UnixMillis(now_ms)) {
         for role in [Role::Leader, Role::Follower] {
             let kept = compacted(role, &history, now_ms).await;

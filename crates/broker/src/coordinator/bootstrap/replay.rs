@@ -28,6 +28,7 @@ use crate::{
         GroupCoordinator,
         persistence::{self, GroupMetadataValue, Key, OffsetCommitValue, RecordKey},
         unified::{
+            actor::GroupActorMessage,
             classic_state::{ClassicGroup as ClassicState, OffsetEntry},
             group::{CoordinatorGroup, GroupKind},
         },
@@ -486,12 +487,7 @@ pub(super) async fn finalize(coordinator: &Arc<GroupCoordinator>, mut replayed: 
             let (tx, _rx) = tokio::sync::oneshot::channel();
             if handle
                 .tx
-                .send(
-                    crate::coordinator::unified::actor::GroupActorMessage::UpdateCommitted {
-                        entries,
-                        reply: tx,
-                    },
-                )
+                .send(GroupActorMessage::UpdateCommitted { entries, reply: tx })
                 .await
                 .is_err()
             {
@@ -512,14 +508,12 @@ pub(super) async fn finalize(coordinator: &Arc<GroupCoordinator>, mut replayed: 
                 let (tx, _rx) = tokio::sync::oneshot::channel();
                 if handle
                     .tx
-                    .send(
-                        crate::coordinator::unified::actor::GroupActorMessage::AddPendingTxnOffsets {
-                            producer_id,
-                            written_at: pending.written_at,
-                            keys: pending.keys.into_iter().collect(),
-                            reply: tx,
-                        },
-                    )
+                    .send(GroupActorMessage::AddPendingTxnOffsets {
+                        producer_id,
+                        written_at: pending.written_at,
+                        keys: pending.keys.into_iter().collect(),
+                        reply: tx,
+                    })
                     .await
                     .is_err()
                 {

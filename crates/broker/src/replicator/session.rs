@@ -29,7 +29,9 @@ use krabka_protocol::{
 
 use crate::{
     codes,
-    fetch_session::{FetchSessionEpoch, FetchSessionId, INITIAL_EPOCH, INVALID_SESSION_ID},
+    fetch_session::{
+        FetchSessionEpoch, FetchSessionId, INITIAL_EPOCH, INVALID_SESSION_ID, next_epoch,
+    },
 };
 
 /// The identity a session row is keyed by. `topic_id` is the KIP-516 identity
@@ -195,7 +197,7 @@ impl FollowerFetchSession {
             self.reset();
         } else {
             self.session_id = session_id;
-            self.next_epoch = crate::fetch_session::next_epoch(self.next_epoch);
+            self.next_epoch = next_epoch(self.next_epoch);
         }
         SessionOutcome::Usable
     }

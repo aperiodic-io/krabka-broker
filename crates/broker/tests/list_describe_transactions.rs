@@ -26,7 +26,8 @@ use tempfile::TempDir;
 pub use crate::support::boot_single;
 use crate::support::{
     client::connect_client,
-    topics::{creatable_topic, create_topic_request},
+    producer::string_record,
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
 
 /// `ListTransactions`, retried while the coordinator loads its state
@@ -103,7 +104,7 @@ async fn create_topic(bootstrap: &str, name: &str) {
     let client = connect_client(bootstrap, None).await;
     let cr = client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (name).into(),
                 ..Default::default()
             },
@@ -118,7 +119,7 @@ async fn create_topic(bootstrap: &str, name: &str) {
 }
 
 fn rec(topic: &str, v: &str) -> ProducerRecord {
-    crate::support::producer::string_record(topic, v)
+    string_record(topic, v)
 }
 
 async fn admin_client(bootstrap: &str) -> krabka_client_core::Client {

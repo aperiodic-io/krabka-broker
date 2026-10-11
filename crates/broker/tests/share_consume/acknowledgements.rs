@@ -7,8 +7,19 @@
 use assert2::{assert, check};
 
 use crate::{
-    harness::{broker_config, broker_test_permit, join, produce_n},
-    share_rpc::{acquired_count, fetch_until_acquired, share_fetch},
+    harness::{
+        ConsumptionFixture, broker_config, broker_test_permit, consumption_fixture,
+        initialize_consumption, join, produce_n,
+    },
+    share_rpc::{
+        AcquiredRecordCount, acquired_count, fetch_count, fetch_empty, fetch_until_acquired,
+        share_fetch,
+    },
+    support::share::{
+        ConsumptionSetup, RefetchSetup, RetryEpochs, ShareAck, ShareRecordCount,
+        ShareRecordSeedSetup, ShareRecordsSetup, ShareSessionEpoch, ShareSessionSetup,
+        ShareTopicSetup, acknowledge_success, refetch_while_empty, rejoin_group, start_topic,
+    },
 };
 
 /// Acquire 3 records, Accept them all, and observe the SPSO advance. The test
@@ -22,29 +33,22 @@ async fn consume_accept_restart() {
 
     let tid;
     {
-        let (broker, client, topic) = crate::support::share::start_topic(
-            broker_config(log_dir.clone()),
-            crate::support::share::ShareTopicSetup::default(),
-        )
-        .await;
+        let (broker, client, topic) =
+            start_topic(broker_config(log_dir.clone()), ShareTopicSetup::default()).await;
         tid = topic;
-        let (member, _) = crate::harness::initialize_consumption(
+        let (member, _) = initialize_consumption(
             &broker,
             &client,
-            crate::support::share::ConsumptionSetup {
+            ConsumptionSetup {
                 topic_id: tid,
                 ..Default::default()
             },
         )
         .await;
-        let session = crate::support::share::ShareSessionSetup::joined(&member, tid);
+        let session = ShareSessionSetup::joined(&member, tid);
 
         // First fetch (epoch 0 opens the session): acquire offsets 0..2.
-        let row = fetch_until_acquired(
-            &client,
-            session.with_epoch(crate::support::share::ShareSessionEpoch(0)),
-        )
-        .await;
+        let row = fetch_until_acquired(&client, session.with_epoch(ShareSessionEpoch(0))).await;
         check!(
             acquired_count(&row) == 3,
             "must acquire all 3 offsets, got {:?}",
@@ -61,18 +65,14 @@ async fn consume_accept_restart() {
         );
 
         // Accept offsets 0..2 (session epoch is now 1 after the open).
-        crate::support::share::acknowledge_success(
+        acknowledge_success(
             &client,
-            crate::support::share::ShareAck::prefix_for(&member, tid, krabka_ids::Offset(2)),
+            ShareAck::prefix_for(&member, tid, krabka_ids::Offset(2)),
         )
         .await;
 
         // Next fetch (epoch 2): the SPSO advanced past 2 — nothing left.
-        crate::share_rpc::fetch_empty(
-            &client,
-            session.fetch_at(crate::support::share::ShareSessionEpoch(2)),
-        )
-        .await;
+        fetch_empty(&client, session.fetch_at(ShareSessionEpoch(2))).await;
 
         // Wait until the persister has landed the advanced SPSO (>= 3, past
         // offset 2) in __share_group_state before shutting down, so the
@@ -82,20 +82,16 @@ async fn consume_accept_restart() {
     }
 
     {
-        let (broker, client) = crate::support::share::rejoin_group(log_dir, "g1").await;
+        let (broker, client) = rejoin_group(log_dir, "g1").await;
 
         // A fresh member rejoins the recovered group; a fresh-session fetch
         // must observe the recovered SPSO (past offset 2) — zero acquired.
         // Wait until the share state is recovered on the new broker, then
         // assert in a single fetch (no timing guess needed).
         let (member, _) = join(&client, "g1", "t").await;
-        let session = crate::support::share::ShareSessionSetup::joined(&member, tid);
+        let session = ShareSessionSetup::joined(&member, tid);
         broker.wait_for_share_state_summary("g1", tid, 0).await;
-        let row = share_fetch(
-            &client,
-            session.fetch_at(crate::support::share::ShareSessionEpoch(0)),
-        )
-        .await;
+        let row = share_fetch(&client, session.fetch_at(ShareSessionEpoch(0))).await;
         let acquired = acquired_count(&row);
         assert!(
             acquired == 0,
@@ -113,22 +109,17 @@ async fn release_redelivers() {
     assert!(row.acquired_records.iter().all(|r| r.delivery_count == 1));
 
     // Release offsets 0..1 (epoch 1).
-    crate::support::share::acknowledge_success(
+    acknowledge_success(
         &fixture.client,
-        crate::support::share::ShareAck::prefix_for(
-            &fixture.member,
-            fixture.tid,
-            krabka_ids::Offset(1),
-        )
-        .release(),
+        ShareAck::prefix_for(&fixture.member, fixture.tid, krabka_ids::Offset(1)).release(),
     )
     .await;
 
     // Next fetch (epoch 2): the same offsets are re-acquired at delivery_count 2.
-    let row2 = crate::share_rpc::fetch_count(
+    let row2 = fetch_count(
         &fixture.client,
-        session.fetch_at(crate::support::share::ShareSessionEpoch(2)),
-        crate::share_rpc::AcquiredRecordCount(2),
+        session.fetch_at(ShareSessionEpoch(2)),
+        AcquiredRecordCount(2),
     )
     .await;
     assert!(
@@ -147,50 +138,37 @@ async fn reject_archives() {
     let session = fixture.session();
 
     // Reject offsets 0..1 (epoch 1) → archived.
-    crate::support::share::acknowledge_success(
+    acknowledge_success(
         &fixture.client,
-        crate::support::share::ShareAck::prefix_for(
-            &fixture.member,
-            fixture.tid,
-            krabka_ids::Offset(1),
-        )
-        .reject(),
+        ShareAck::prefix_for(&fixture.member, fixture.tid, krabka_ids::Offset(1)).reject(),
     )
     .await;
 
     // Next fetch (epoch 2): nothing re-acquired.
-    crate::share_rpc::fetch_empty(
-        &fixture.client,
-        session.fetch_at(crate::support::share::ShareSessionEpoch(2)),
-    )
-    .await;
+    fetch_empty(&fixture.client, session.fetch_at(ShareSessionEpoch(2))).await;
 
     // Produce one more (offset 2). The SPSO advanced past the rejected pair, so
     // only the new offset is acquired — proving the rejected ones were skipped.
     produce_n(
         &fixture.client,
-        crate::support::share::ShareRecordsSetup {
+        ShareRecordsSetup {
             topic_id: fixture.tid,
             ..Default::default()
         },
     )
     .await;
-    let row3 = share_fetch(
-        &fixture.client,
-        session.fetch_at(crate::support::share::ShareSessionEpoch(3)),
-    )
-    .await;
-    let row3 = crate::support::share::refetch_while_empty(
+    let row3 = share_fetch(&fixture.client, session.fetch_at(ShareSessionEpoch(3))).await;
+    let row3 = refetch_while_empty(
         &fixture.client,
         row3,
-        crate::support::share::RefetchSetup {
-            session: crate::support::share::ShareSessionSetup {
+        RefetchSetup {
+            session: ShareSessionSetup {
                 member: &fixture.member,
                 topic_id: fixture.tid,
                 ..Default::default()
             },
-            epochs: crate::support::share::RetryEpochs {
-                start: crate::support::share::ShareSessionEpoch(4),
+            epochs: RetryEpochs {
+                start: ShareSessionEpoch(4),
                 ..Default::default()
             },
         },
@@ -209,16 +187,15 @@ async fn reject_archives() {
 }
 
 struct AcquiredPair {
-    fixture: crate::harness::ConsumptionFixture,
+    fixture: ConsumptionFixture,
     row: krabka_protocol::owned::share_fetch_response::PartitionData,
 }
 
 async fn acquired_pair() -> AcquiredPair {
-    let fixture =
-        crate::harness::consumption_fixture(crate::support::share::ShareRecordSeedSetup {
-            count: crate::support::share::ShareRecordCount(2),
-        })
-        .await;
+    let fixture = consumption_fixture(ShareRecordSeedSetup {
+        count: ShareRecordCount(2),
+    })
+    .await;
     let row = acquire_both(&fixture.client, &fixture.member, fixture.tid).await;
     AcquiredPair { fixture, row }
 }
@@ -228,11 +205,7 @@ async fn acquire_both(
     member: &str,
     tid: uuid::Uuid,
 ) -> krabka_protocol::owned::share_fetch_response::PartitionData {
-    let row = fetch_until_acquired(
-        client,
-        crate::support::share::ShareSessionSetup::opening(member, tid),
-    )
-    .await;
+    let row = fetch_until_acquired(client, ShareSessionSetup::opening(member, tid)).await;
     assert!(acquired_count(&row) == 2, "acquire both offsets");
     row
 }

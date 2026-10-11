@@ -80,10 +80,10 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::*;
+    use crate::partition::test_support::test_partition as make_test_partition;
 
     fn test_partition() -> (Partition, tempfile::TempDir) {
-        let (mut partition, dir) =
-            crate::partition::test_support::test_partition(Arc::new(Notify::new()));
+        let (mut partition, dir) = make_test_partition(Arc::new(Notify::new()));
         partition.topic = "__audit".into();
         (partition, dir)
     }

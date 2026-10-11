@@ -65,6 +65,9 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
+    use crate::quota::test_support::{
+        QuotaRecordSetup, QuotaValue, image_with_quotas, quota_record,
+    };
 
     crate::quota::test_support::image_builder!(img_with_quota, "request_percentage");
 
@@ -155,19 +158,17 @@ mod tests {
     /// empty one skips the pair level and pays the user quota (#1241).
     #[test]
     fn a_null_client_id_is_shadowed_by_a_user_default_client_quota() {
-        let img = crate::quota::test_support::image_with_quotas(
+        let img = image_with_quotas(
             [
                 vec![("user", Some("alice"))],
                 vec![("user", Some("alice")), ("client-id", None)],
             ]
             .map(|entity| {
-                crate::quota::test_support::quota_record(
-                    crate::quota::test_support::QuotaRecordSetup {
-                        entity,
-                        key: "request_percentage",
-                        value: crate::quota::test_support::QuotaValue(0.001),
-                    },
-                )
+                quota_record(QuotaRecordSetup {
+                    entity,
+                    key: "request_percentage",
+                    value: QuotaValue(0.001),
+                })
             })
             .to_vec(),
         );

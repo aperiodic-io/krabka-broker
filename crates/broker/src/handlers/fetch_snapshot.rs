@@ -119,6 +119,13 @@ mod tests {
     use krabka_raft::SnapshotRange;
 
     use super::*;
+    use crate::{
+        authorizer::AllowAllAuthorizer,
+        test_support::{
+            GrantsInPrincipalName, decode_response, encode_request, peer,
+            start_broker_no_audit_with,
+        },
+    };
 
     /// A request for partition 0 of the metadata topic, at the given id,
     /// leader epoch and position.
@@ -201,8 +208,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_snapshot_needs_cluster_action() {
-        let (handle, _dir) = crate::test_support::start_broker_no_audit_with(|config| {
-            config.authorizer = Arc::new(crate::test_support::GrantsInPrincipalName);
+        let (handle, _dir) = start_broker_no_audit_with(|config| {
+            config.authorizer = Arc::new(GrantsInPrincipalName);
         })
         .await;
         let broker = handle.broker_arc_for_test();
@@ -211,7 +218,7 @@ mod tests {
             ..Default::default()
         };
 
-        let address = crate::test_support::peer();
+        let address = peer();
         for version in [
             fetch_snapshot_response::MIN_VERSION,
             fetch_snapshot_response::MAX_VERSION,
@@ -233,8 +240,7 @@ mod tests {
                 version,
                 address
             );
-            let served =
-                crate::test_support::decode_response::<FetchSnapshotResponse>(&bytes, version);
+            let served = decode_response::<FetchSnapshotResponse>(&bytes, version);
             check!(served.error_code == codes::NONE, "v{version}");
             check!(served.topics.len() == 1, "v{version}");
         }
@@ -246,8 +252,8 @@ mod tests {
     #[tokio::test]
     async fn the_broker_listener_answers_as_kafkas_raft_client_does() {
         let version = fetch_snapshot_response::MAX_VERSION;
-        let (handle, _dir) = crate::test_support::start_broker_no_audit_with(|config| {
-            config.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        let (handle, _dir) = start_broker_no_audit_with(|config| {
+            config.authorizer = Arc::new(AllowAllAuthorizer);
         })
         .await;
         let broker = handle.broker_arc_for_test();
@@ -369,16 +375,10 @@ mod tests {
         {
             let mut req = request(snapshot, leader_epoch, 0);
             edit(&mut req);
-            let bytes = super::handle(
-                &broker,
-                version,
-                &crate::test_support::encode_request(&req, version),
-                &ctx,
-            )
-            .await
-            .expect("handle");
-            let resp =
-                crate::test_support::decode_response::<FetchSnapshotResponse>(&bytes, version);
+            let bytes = super::handle(&broker, version, &encode_request(&req, version), &ctx)
+                .await
+                .expect("handle");
+            let resp = decode_response::<FetchSnapshotResponse>(&bytes, version);
 
             check!(resp.error_code == top_level, "{what}: top-level code");
             if top_level != codes::NONE {

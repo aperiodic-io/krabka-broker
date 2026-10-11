@@ -8,36 +8,45 @@ use std::sync::Arc;
 use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::BrokerConfig, error::BrokerError, partition_registry::PartitionRegistry};
+use crate::{
+    config::{BrokerConfig, RemoteStorageBackend, RlmmKind},
+    diskless::{read::DisklessReadHandle, wal_index::WalIndexCache},
+    error::BrokerError,
+    metadata_source::MetadataSource,
+    metrics::{BrokerMetrics, RemoteReaderLevels, RemoteReaderTotals},
+    partition_registry::PartitionRegistry,
+    remote_log_manager::{
+        ArchiveMode, RemoteLogManagerConfig, RemoteLogManagerContext, SweepConcurrency, run,
+    },
+    remote_reader::{ReaderPool, RemoteReader, RemoteReaderLimits},
+};
 
 #[derive(Default)]
 pub(super) struct RemoteStorageStartup {
-    pub(super) reader: Option<Arc<crate::remote_reader::RemoteReader>>,
+    pub(super) reader: Option<Arc<RemoteReader>>,
     pub(super) swap_target: Option<Arc<krabka_remote_storage_topic::SwappableRlmm>>,
-    pub(super) diskless_read: Option<Arc<crate::diskless::read::DisklessReadHandle>>,
+    pub(super) diskless_read: Option<Arc<DisklessReadHandle>>,
 }
 
 fn build_diskless_read_handle(
-    backend: &crate::config::RemoteStorageBackend,
-) -> Result<Arc<crate::diskless::read::DisklessReadHandle>, BrokerError> {
+    backend: &RemoteStorageBackend,
+) -> Result<Arc<DisklessReadHandle>, BrokerError> {
     let store_config = match backend {
-        crate::config::RemoteStorageBackend::Local { dir } => {
+        RemoteStorageBackend::Local { dir } => {
             krabka_object_store::ObjectStoreConfig::Local { root: dir.clone() }
         }
-        crate::config::RemoteStorageBackend::S3(config) => {
+        RemoteStorageBackend::S3(config) => {
             krabka_object_store::ObjectStoreConfig::S3(config.clone())
         }
-        crate::config::RemoteStorageBackend::Gcs(config) => {
+        RemoteStorageBackend::Gcs(config) => {
             krabka_object_store::ObjectStoreConfig::Gcs(config.clone())
         }
     };
     let store = krabka_object_store::build_object_store(&store_config).map_err(|error| {
         BrokerError::Startup(format!("diskless object store builder failed: {error}"))
     })?;
-    Ok(Arc::new(crate::diskless::read::DisklessReadHandle::new(
-        Arc::new(tokio::sync::Mutex::new(
-            crate::diskless::wal_index::WalIndexCache::default(),
-        )),
+    Ok(Arc::new(DisklessReadHandle::new(
+        Arc::new(tokio::sync::Mutex::new(WalIndexCache::default())),
         store,
     )))
 }
@@ -45,8 +54,8 @@ fn build_diskless_read_handle(
 pub(super) fn start_remote_storage(
     config: &BrokerConfig,
     partitions: &Arc<PartitionRegistry>,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
-    metrics: &crate::metrics::BrokerMetrics,
+    controller: &Arc<dyn MetadataSource>,
+    metrics: &BrokerMetrics,
     shutdown: &CancellationToken,
 ) -> Result<RemoteStorageStartup, BrokerError> {
     let Some(backend) = config.remote_storage_backend.clone() else {
@@ -57,7 +66,7 @@ pub(super) fn start_remote_storage(
     // backend of its own. `BrokerConfig::validate` already rejects the
     // local pairing, so the arm below only fires for a config built in code.
     let worm = config.remote_storage_worm.as_ref();
-    let archive = crate::remote_log_manager::ArchiveMode::from_worm(worm);
+    let archive = ArchiveMode::from_worm(worm);
     let with_worm = |store: krabka_remote_storage::S3RemoteStorage| match worm {
         Some(worm) => store.with_worm(worm).map_err(|error| {
             BrokerError::Startup(format!("remote_storage.worm setup failed: {error}"))
@@ -65,7 +74,7 @@ pub(super) fn start_remote_storage(
         None => Ok(store),
     };
     let storage: Arc<dyn krabka_remote_storage::RemoteStorageManager> = match backend {
-        crate::config::RemoteStorageBackend::Local { dir } => {
+        RemoteStorageBackend::Local { dir } => {
             // Fail loudly rather than archive without manifests: a local
             // directory cannot enforce write-once, so a WORM deployment that
             // silently ran on one would produce an archive no auditor can
@@ -79,12 +88,12 @@ pub(super) fn start_remote_storage(
             }
             Arc::new(krabka_remote_storage::LocalTieredStorage::new(dir))
         }
-        crate::config::RemoteStorageBackend::S3(s3) => Arc::new(with_worm(
+        RemoteStorageBackend::S3(s3) => Arc::new(with_worm(
             krabka_remote_storage::S3RemoteStorage::from_s3_config(&s3).map_err(|error| {
                 BrokerError::Startup(format!("remote_storage.s3 builder failed: {error}"))
             })?,
         )?),
-        crate::config::RemoteStorageBackend::Gcs(gcs) => Arc::new(with_worm(
+        RemoteStorageBackend::Gcs(gcs) => Arc::new(with_worm(
             krabka_remote_storage::S3RemoteStorage::from_gcs_config(&gcs).map_err(|error| {
                 BrokerError::Startup(format!("remote_storage.gcs builder failed: {error}"))
             })?,
@@ -94,12 +103,12 @@ pub(super) fn start_remote_storage(
         Arc<dyn krabka_remote_storage::RemoteLogMetadataManager>,
         Option<Arc<krabka_remote_storage_topic::SwappableRlmm>>,
     ) = match &config.remote_log_metadata {
-        crate::config::RlmmKind::TopicBacked(_) => {
+        RlmmKind::TopicBacked(_) => {
             let not_ready = Arc::new(krabka_remote_storage_topic::NotReadyRlmm::new());
             let swap = Arc::new(krabka_remote_storage_topic::SwappableRlmm::new(not_ready));
             (swap.clone(), Some(swap))
         }
-        crate::config::RlmmKind::InMemory => (
+        RlmmKind::InMemory => (
             Arc::new(krabka_remote_storage::InmemoryRemoteLogMetadataManager::new()),
             None,
         ),
@@ -123,8 +132,8 @@ pub(super) fn start_remote_storage(
         }
     };
     let index_cache = Arc::new(index_cache);
-    tokio::spawn(crate::remote_log_manager::run(
-        crate::remote_log_manager::RemoteLogManagerContext {
+    tokio::spawn(run(
+        RemoteLogManagerContext {
             partitions: Arc::clone(partitions),
             controller: Arc::clone(controller),
             archive,
@@ -135,10 +144,10 @@ pub(super) fn start_remote_storage(
             node_id: config.node_id,
             broker_id: config.broker_id,
         },
-        crate::remote_log_manager::RemoteLogManagerConfig {
+        RemoteLogManagerConfig {
             interval: config.remote_log_manager_interval,
             copy_timeout: config.remote_copy_timeout,
-            concurrency: crate::remote_log_manager::SweepConcurrency {
+            concurrency: SweepConcurrency {
                 copier: config.remote_copier_threads,
                 expiration: config.remote_expiration_threads,
             },
@@ -146,12 +155,12 @@ pub(super) fn start_remote_storage(
         },
         shutdown.child_token(),
     ));
-    let reader = Arc::new(crate::remote_reader::RemoteReader::with_limits(
+    let reader = Arc::new(RemoteReader::with_limits(
         storage,
         metadata,
-        crate::remote_reader::RemoteReaderLimits {
+        RemoteReaderLimits {
             index_cache,
-            pool: crate::remote_reader::ReaderPool::new(
+            pool: ReaderPool::new(
                 config.remote_reader_threads,
                 config.remote_reader_max_pending_tasks,
             ),
@@ -179,21 +188,21 @@ pub(super) fn start_remote_storage(
 /// reader does not exist until this module has built the backend, which is
 /// after that updater is spawned.
 fn spawn_remote_reader_gauges(
-    reader: Arc<crate::remote_reader::RemoteReader>,
-    metrics: crate::metrics::BrokerMetrics,
+    reader: Arc<RemoteReader>,
+    metrics: BrokerMetrics,
     poll_interval: krabka_units::Time,
     shutdown: CancellationToken,
 ) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(poll_interval.to_std());
-        let mut reported = crate::metrics::RemoteReaderTotals::default();
+        let mut reported = RemoteReaderTotals::default();
         loop {
             tokio::select! {
                 _ = tick.tick() => {}
                 () = shutdown.cancelled() => return,
             }
             let stats = reader.index_cache.stats();
-            let current = crate::metrics::RemoteReaderTotals {
+            let current = RemoteReaderTotals {
                 index_cache_hits: stats.hits,
                 index_cache_misses: stats.misses,
                 index_cache_evictions: stats.evictions,
@@ -202,7 +211,7 @@ fn spawn_remote_reader_gauges(
             metrics.observe_remote_reader(
                 &reported,
                 current,
-                crate::metrics::RemoteReaderLevels {
+                RemoteReaderLevels {
                     task_queue_size: u64::try_from(reader.pool.queue_size()).unwrap_or(u64::MAX),
                     idle_percent: reader.pool.idle_percent(),
                     index_cache_bytes: stats.bytes,

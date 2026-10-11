@@ -7,8 +7,9 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    KAFKA_IMAGE, broker0_advertised, docker_run_kafka_tool, nc_check_connectivity,
-    start_host_broker,
+    KAFKA_IMAGE, assert_console_values, broker0_advertised, consume_console_partition,
+    create_console_topic, docker_run_kafka_tool, nc_check_connectivity, produce_console_checked,
+    start_console_broker, start_host_broker,
 };
 
 // `flavor = "multi_thread"` is essential here. The test bodies make
@@ -23,20 +24,16 @@ use crate::jvm_acceptance::{
 async fn console_producer_round_trip() {
     const TOPIC: &str = "krabka-broker-itest";
 
-    let (broker, _dir) = crate::jvm_acceptance::start_console_broker(TOPIC, 1).await;
+    let (broker, _dir) = start_console_broker(TOPIC, 1).await;
 
     // 2. Produce 3 records via stdin.
 
-    crate::jvm_acceptance::produce_console_checked(KAFKA_IMAGE, TOPIC, b"alpha\nbravo\ncharlie\n");
+    produce_console_checked(KAFKA_IMAGE, TOPIC, b"alpha\nbravo\ncharlie\n");
 
     // 3. Consume them back via --partition 0 (bypasses groups entirely).
-    let consumer_out = crate::jvm_acceptance::consume_console_partition(TOPIC, 3, 10000, &[]);
+    let consumer_out = consume_console_partition(TOPIC, 3, 10000, &[]);
     let s = String::from_utf8_lossy(&consumer_out.stdout);
-    crate::jvm_acceptance::assert_console_values(
-        &s,
-        &["alpha", "bravo", "charlie"],
-        "consumer didn't emit",
-    );
+    assert_console_values(&s, &["alpha", "bravo", "charlie"], "consumer didn't emit");
 
     broker.shutdown().await;
 }
@@ -54,13 +51,7 @@ async fn rust_producer_to_console_consumer() {
     let (broker, _dir) = start_host_broker().await;
 
     // 1. Create the topic.
-    crate::jvm_acceptance::create_console_topic(
-        crate::jvm_acceptance::KAFKA_IMAGE,
-        &[],
-        TOPIC,
-        1,
-        1,
-    );
+    create_console_topic(KAFKA_IMAGE, &[], TOPIC, 1, 1);
 
     // 2. Build a Rust producer pointed at the host broker and produce 3 records.
     let producer = Producer::builder()
@@ -86,9 +77,9 @@ async fn rust_producer_to_console_consumer() {
     producer.close().await.expect("close");
 
     // 3. Consume via kafka-console-consumer --partition 0.
-    let consumer_out = crate::jvm_acceptance::consume_console_partition(TOPIC, 3, 20000, &[]);
+    let consumer_out = consume_console_partition(TOPIC, 3, 20000, &[]);
     let s = String::from_utf8_lossy(&consumer_out.stdout);
-    crate::jvm_acceptance::assert_console_values(&s, &["x", "y", "z"], "missing");
+    assert_console_values(&s, &["x", "y", "z"], "missing");
 
     broker.shutdown().await;
 }
@@ -138,14 +129,10 @@ async fn console_consumer_prints_log_append_time() {
         broker0_advertised(),
     ]);
 
-    crate::jvm_acceptance::produce_console_checked(KAFKA_IMAGE, TOPIC, b"stamped\n");
+    produce_console_checked(KAFKA_IMAGE, TOPIC, b"stamped\n");
 
-    let consumer_out = crate::jvm_acceptance::consume_console_partition(
-        TOPIC,
-        1,
-        20000,
-        &["--property", "print.timestamp=true"],
-    );
+    let consumer_out =
+        consume_console_partition(TOPIC, 1, 20000, &["--property", "print.timestamp=true"]);
     let printed = String::from_utf8_lossy(&consumer_out.stdout);
     // The default formatter prints `<timestampType>:<ms>\t<value>`.
     let line = printed

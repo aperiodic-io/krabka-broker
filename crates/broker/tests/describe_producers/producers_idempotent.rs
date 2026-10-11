@@ -6,7 +6,14 @@ use assert2::{assert, check};
 
 use crate::{
     producers_harness::{batch, create_topic, init_producer, topic_id_for},
-    support,
+    support::{
+        self,
+        admin::describe_producers_request,
+        produce::{SinglePartitionProduceSetup, send_batch},
+        records::ProducerValuesSetup,
+        topics::CreateTopicSetup,
+        transactions::ProducerEpoch,
+    },
 };
 
 #[tokio::test]
@@ -14,7 +21,7 @@ async fn empty_partition_returns_no_active_producers() {
     let p = support::start().await;
     create_topic(
         &p.client,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "fresh",
             ..Default::default()
         },
@@ -23,10 +30,7 @@ async fn empty_partition_returns_no_active_producers() {
 
     let resp = p
         .client
-        .send(crate::support::admin::describe_producers_request(
-            "fresh".into(),
-            vec![0],
-        ))
+        .send(describe_producers_request("fresh".into(), vec![0]))
         .await
         .expect("DescribeProducers");
 
@@ -53,7 +57,7 @@ async fn after_idempotent_produce_describe_returns_the_producer() {
     let p = support::start().await;
     create_topic(
         &p.client,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "t",
             ..Default::default()
         },
@@ -66,26 +70,23 @@ async fn after_idempotent_produce_describe_returns_the_producer() {
 
     produce_values(
         &p.client,
-        crate::support::records::ProducerValuesSetup {
+        ProducerValuesSetup {
             pid: krabka_ids::ProducerId(pid),
-            epoch: crate::support::transactions::ProducerEpoch(epoch),
+            epoch: ProducerEpoch(epoch),
             values: &["a", "b", "c"],
             ..Default::default()
         },
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("t").into(),
             topic_id,
-            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            ..SinglePartitionProduceSetup::replicated()
         },
     )
     .await;
 
     let resp = p
         .client
-        .send(crate::support::admin::describe_producers_request(
-            "t".into(),
-            vec![0],
-        ))
+        .send(describe_producers_request("t".into(), vec![0]))
         .await
         .expect("DescribeProducers");
 
@@ -115,7 +116,7 @@ async fn multiple_producers_on_same_partition_all_surfaced() {
     let p = support::start().await;
     create_topic(
         &p.client,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "shared",
             ..Default::default()
         },
@@ -133,16 +134,16 @@ async fn multiple_producers_on_same_partition_all_surfaced() {
     for (pid, epoch) in [(pid_a, epoch_a), (pid_b, epoch_b)] {
         produce_values(
             &p.client,
-            crate::support::records::ProducerValuesSetup {
+            ProducerValuesSetup {
                 pid: krabka_ids::ProducerId(pid),
-                epoch: crate::support::transactions::ProducerEpoch(epoch),
+                epoch: ProducerEpoch(epoch),
                 values: &["x"],
                 ..Default::default()
             },
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("shared").into(),
                 topic_id,
-                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                ..SinglePartitionProduceSetup::replicated()
             },
         )
         .await;
@@ -150,10 +151,7 @@ async fn multiple_producers_on_same_partition_all_surfaced() {
 
     let resp = p
         .client
-        .send(crate::support::admin::describe_producers_request(
-            "shared".into(),
-            vec![0],
-        ))
+        .send(describe_producers_request("shared".into(), vec![0]))
         .await
         .expect("DescribeProducers");
 
@@ -171,9 +169,9 @@ async fn multiple_producers_on_same_partition_all_surfaced() {
 /// The common successful idempotent append; the snapshot assertions stay in each scenario.
 async fn produce_values(
     client: &krabka_client_core::Client,
-    values: crate::support::records::ProducerValuesSetup<'_>,
-    setup: crate::support::produce::SinglePartitionProduceSetup,
+    values: ProducerValuesSetup<'_>,
+    setup: SinglePartitionProduceSetup,
 ) {
-    let response = crate::support::produce::send_batch(client, batch(values), setup).await;
+    let response = send_batch(client, batch(values), setup).await;
     assert!(response.responses[0].partition_responses[0].error_code == 0);
 }

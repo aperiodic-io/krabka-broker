@@ -274,7 +274,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::metadata_source::test_support::topic_record;
+    use crate::{metadata_source::test_support::topic_record, test_support::mock_request_broker};
 
     fn voters() -> Vec<(krabka_raft::NodeId, String)> {
         vec![
@@ -344,7 +344,7 @@ mod tests {
     /// voter set.
     #[tokio::test]
     async fn quorum_forwarder_reaches_the_quorum_through_a_bootstrap_server() {
-        let mock = crate::test_support::mock_request_broker(
+        let mock = mock_request_broker(
             krabka_raft::API_KEY_SUBMIT_CHANGE,
             move || submit_change_response_body(0, -1),
             api_versions_response_v0,
@@ -408,7 +408,7 @@ mod tests {
     async fn quorum_forwarder_applied_response_returns_ok_and_sends_client_id() {
         let submit_requests = Arc::new(AtomicUsize::new(0));
         let submit_requests_for_mock = submit_requests.clone();
-        let mock = crate::test_support::mock_request_broker(
+        let mock = mock_request_broker(
             krabka_raft::API_KEY_SUBMIT_CHANGE,
             move || {
                 submit_requests_for_mock.fetch_add(1, Ordering::SeqCst);
@@ -492,7 +492,7 @@ mod tests {
     }
 
     async fn rejected_submission(code: i16, leader: i64, topic: &str) -> RaftError {
-        let mock = crate::test_support::mock_request_broker(
+        let mock = mock_request_broker(
             krabka_raft::API_KEY_SUBMIT_CHANGE,
             move || submit_change_response_body(code, leader),
             api_versions_response_v0,

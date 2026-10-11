@@ -24,6 +24,8 @@ use krabka_protocol::owned::{
 
 use super::super::add_partitions_to_txn::test_support::seed_topic;
 use crate::{
+    api_catalog::UnstableApiVersions,
+    broker::{Broker, BrokerHandle},
     codes,
     coordinator::{
         bootstrap::OFFSETS_TOPIC,
@@ -38,9 +40,16 @@ use crate::{
             },
         },
     },
+    handlers::RequestContext,
     test_support::{
-        GrantsInPrincipalName, decode_response, dispatch_context, encode_request, peer, principal,
-        request_context, start_broker_no_audit_with,
+        ControllerPeerAllowed, GrantsInPrincipalName, configure_single_partition_transactions,
+        decode_response, dispatch_context, encode_request, peer, principal, request_context,
+        start_broker_no_audit_with, start_transaction_grant_broker,
+    },
+    txn::{
+        state::{TopicPartition, TxnEntry, TxnState},
+        util::now_millis,
+        version::resolve_txn_version,
     },
 };
 
@@ -58,14 +67,14 @@ macro_rules! read_context {
 
 /// Adds topic `a` with one partition, led by this broker, to the metadata
 /// image.
-pub(super) async fn seed_topic_a(broker: &crate::broker::Broker) {
+pub(super) async fn seed_topic_a(broker: &Broker) {
     seed_topic(broker, "a", 1).await;
 }
 
 /// Starts a broker that grants what the principal name says, waits until its
 /// group and transaction coordinators serve, and seeds topic `a`.
-async fn start_seeded_broker() -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-    let (handle, dir) = crate::test_support::start_transaction_grant_broker().await;
+async fn start_seeded_broker() -> (BrokerHandle, tempfile::TempDir) {
+    let (handle, dir) = start_transaction_grant_broker().await;
     wait_for_coordinators(&handle).await;
     seed_topic_a(&handle.broker_arc_for_test()).await;
     (handle, dir)
@@ -74,7 +83,7 @@ async fn start_seeded_broker() -> (crate::broker::BrokerHandle, tempfile::TempDi
 /// Waits until the group coordinator serves `__consumer_offsets` and the
 /// transaction coordinator has loaded `__transaction_state`, which KIP-890
 /// makes every `TxnOffsetCommit` ask.
-pub(super) async fn wait_for_coordinators(handle: &crate::broker::BrokerHandle) {
+pub(super) async fn wait_for_coordinators(handle: &BrokerHandle) {
     handle.wait_until_controller_leader().await;
     handle.wait_until_brokers_registered(1).await;
     handle.wait_until_transaction_coordinator_ready().await;
@@ -88,17 +97,14 @@ pub(super) struct TransactionSeedSetup<'a> {
     pub transactional_id: &'a str,
     pub producer: super::test_support::TxnCommitProducer,
     #[default(crate::txn::state::TxnState::Ongoing)]
-    pub state: crate::txn::state::TxnState,
+    pub state: TxnState,
     pub group_id: Option<&'a str>,
 }
 
-pub(super) async fn seed_transaction(
-    broker: &crate::broker::Broker,
-    setup: TransactionSeedSetup<'_>,
-) {
+pub(super) async fn seed_transaction(broker: &Broker, setup: TransactionSeedSetup<'_>) {
     let image = broker.controller.current_image();
-    let now_ms = crate::txn::util::now_millis();
-    let mut entry = crate::txn::state::TxnEntry::new_empty(
+    let now_ms = now_millis();
+    let mut entry = TxnEntry::new_empty(
         setup.transactional_id.to_owned(),
         setup.producer.id,
         setup.producer.epoch.0,
@@ -108,14 +114,14 @@ pub(super) async fn seed_transaction(
     entry.state = setup.state;
     entry.start_ms = now_ms;
     if let Some(group_id) = setup.group_id {
-        entry.partitions.insert(crate::txn::state::TopicPartition {
+        entry.partitions.insert(TopicPartition {
             topic: OFFSETS_TOPIC.to_owned(),
             partition: PartitionIndex(partition_for_group(&image, group_id)),
         });
     }
     broker
         .txn_coordinator
-        .put(entry, crate::txn::version::resolve_txn_version(&image))
+        .put(entry, resolve_txn_version(&image))
         .await
         .unwrap_or_else(|error| {
             panic!("seed a transaction for {}: {error}", setup.transactional_id)
@@ -124,7 +130,7 @@ pub(super) async fn seed_transaction(
 
 /// Seed the open transaction and its held group partition before building its commit.
 async fn open_commit_request(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     setup: super::test_support::TxnCommitSetup<'_>,
 ) -> TxnOffsetCommitRequest {
     seed_transaction(
@@ -167,7 +173,7 @@ fn topic_a_by_id(topic_id: krabka_protocol::primitives::uuid::Uuid) -> TxnOffset
 
 /// Inspect the real offsets log while retaining its guard through the callback.
 fn with_offsets_log<T>(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     group_id: &str,
     inspect: impl FnOnce(&krabka_log::ReadOutput) -> T,
 ) -> Option<T> {
@@ -198,12 +204,7 @@ fn records_with_key(
 /// to `(group_id, topic, partition)`. Reads the real log the handler wrote
 /// to, rather than trusting the response alone, so the test also catches a
 /// response that claims success without a durable append (or the reverse).
-pub(super) fn log_holds_key(
-    broker: &crate::broker::Broker,
-    group_id: &str,
-    topic: &str,
-    partition: i32,
-) -> bool {
+pub(super) fn log_holds_key(broker: &Broker, group_id: &str, topic: &str, partition: i32) -> bool {
     with_offsets_log(broker, group_id, |read| {
         let wanted = OffsetCommitValue::encode_key(group_id, topic, partition).unwrap();
         records_with_key(read, wanted).next().is_some()
@@ -367,7 +368,7 @@ async fn unknown_rows_survive_a_group_fencing_failure() {
 
 /// The `OffsetCommitValue` the log holds for `(group_id, topic, partition)`.
 fn logged_value(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     group_id: &str,
     topic: &str,
     partition: i32,
@@ -438,7 +439,7 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
     };
 
     let (handle, _dir) = start_broker_no_audit_with(|cfg| {
-        crate::test_support::configure_single_partition_transactions(cfg, Arc::new(DeniesReadOnB));
+        configure_single_partition_transactions(cfg, Arc::new(DeniesReadOnB));
     })
     .await;
     wait_for_coordinators(&handle).await;
@@ -784,7 +785,7 @@ async fn an_older_member_epoch_commits_a_partition_assigned_before_it() {
 
 /// The transaction the coordinator holds for one verification case: its state,
 /// its producer epoch, and whether it holds the group's offsets partition.
-type HeldTransaction = (crate::txn::state::TxnState, i16, bool);
+type HeldTransaction = (TxnState, i16, bool);
 
 struct VerificationCase {
     name: &'static str,
@@ -991,15 +992,12 @@ async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
     // (unstable api versions on, the topic id the offset records)
     for (unstable, recorded) in [(false, false), (true, true)] {
         let (handle, _dir) = start_broker_no_audit_with(|cfg| {
-            crate::test_support::configure_single_partition_transactions(
+            configure_single_partition_transactions(
                 cfg,
-                Arc::new(crate::test_support::ControllerPeerAllowed(
-                    GrantsInPrincipalName,
-                )),
+                Arc::new(ControllerPeerAllowed(GrantsInPrincipalName)),
             );
             if unstable {
-                cfg.features.unstable_api_versions =
-                    crate::api_catalog::UnstableApiVersions::Enabled;
+                cfg.features.unstable_api_versions = UnstableApiVersions::Enabled;
             }
         })
         .await;
@@ -1047,11 +1045,11 @@ async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
 }
 
 async fn commit_topic_a_without_membership(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     transactional_id: &str,
     group_id: &str,
     producer: (i64, i16),
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
 ) -> TxnOffsetCommitResponse {
     let request = TxnOffsetCommitRequest {
         generation_id_or_member_epoch: -1,
@@ -1066,10 +1064,10 @@ async fn commit_topic_a_without_membership(
 }
 
 async fn commit_response(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     request: &TxnOffsetCommitRequest,
     version: i16,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
 ) -> TxnOffsetCommitResponse {
     let bytes = dispatch_context(
         broker,

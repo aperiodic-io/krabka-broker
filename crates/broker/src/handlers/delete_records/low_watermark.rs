@@ -19,7 +19,9 @@ use krabka_log::Offset;
 use krabka_protocol::owned::delete_records_response::DeleteRecordsTopicResult;
 
 use super::response::{error_partition_result, partition_result};
-use crate::{broker::Broker, codes, partition::Partition};
+use crate::{
+    broker::Broker, codes, handlers::offline_replicas::live_brokers, partition::Partition,
+};
 
 /// How often a waiting request reads the followers' progress again. A
 /// follower reports its new log start in its next Fetch, which a caught-up
@@ -46,7 +48,7 @@ pub(super) struct Waiting {
 /// Kafka's `MetadataCache.hasAliveBroker`.
 pub(super) async fn current(broker: &Broker, part: &Partition) -> Offset {
     let image = broker.controller.current_image();
-    let alive = crate::handlers::offline_replicas::live_brokers(broker, &image).await;
+    let alive = live_brokers(broker, &image).await;
     // The assignment comes from the image: a broker that just became leader
     // publishes its leadership before it installs the replica set in
     // `ReplicaState`, and a trim in that gap must still wait for the

@@ -14,7 +14,10 @@ use krabka_protocol::owned::{
     describe_configs_request::DescribeConfigsRequest,
 };
 
-use crate::{RESOURCE_TYPE_TOPIC, support::configs::describe_resource};
+use crate::{
+    RESOURCE_TYPE_TOPIC,
+    support::{configs::describe_resource, start_n_node_client},
+};
 
 /// `ConfigSource.DYNAMIC_TOPIC_CONFIG`, the source a value the create request
 /// carried reports.
@@ -27,7 +30,7 @@ type ConfigEntry = (String, Option<String>, i8, bool, bool);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_topics_returns_the_configs_describe_configs_reports() {
-    let (_cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (_cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
 
     let create = CreateTopicsRequest {
         topics: vec![crate::support::topics::creatable_topic_with_configs(

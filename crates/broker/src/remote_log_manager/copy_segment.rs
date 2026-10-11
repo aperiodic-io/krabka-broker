@@ -21,7 +21,7 @@ use super::{
     leader_epoch::leader_epoch_index_bytes,
     rlmm::rlmm_mutate,
 };
-use crate::{metrics::RemoteTierPath, time_util::now_ms};
+use crate::{blocking::spawn_blocking, metrics::RemoteTierPath, time_util::now_ms};
 
 /// What one [`copy_one`] attempt left behind.
 #[derive(Debug)]
@@ -171,7 +171,7 @@ async fn copy_one_inner(
     let md_copy = metadata.clone();
     let copy_result = tokio::time::timeout(
         tier.copy_timeout.to_std(),
-        crate::blocking::spawn_blocking(move || rsm_copy.copy_log_segment_data(&md_copy, &data)),
+        spawn_blocking(move || rsm_copy.copy_log_segment_data(&md_copy, &data)),
     )
     .await;
 
@@ -299,9 +299,7 @@ async fn rollback(
         ArchiveMode::Mutable => {
             let rsm_del = rsm.clone();
             let md_del = metadata.clone();
-            let _ =
-                crate::blocking::spawn_blocking(move || rsm_del.delete_log_segment_data(&md_del))
-                    .await;
+            let _ = spawn_blocking(move || rsm_del.delete_log_segment_data(&md_del)).await;
         }
         ArchiveMode::WriteOnce => {
             debug!(topic = %id.topic_id_partition.topic,

@@ -8,9 +8,23 @@ use krabka_units::convert::TimeExt as _;
 
 use super::{ACKS_ALL, INVALID_OFFSET, durability_frontier, prepare::PreparedBatch};
 use crate::{
+    api_catalog::UnstableApiVersions,
+    broker::Broker,
     codes,
-    txn::coordinator::produce_verification::{
-        partition_verification_enabled, skips_coordinator_verification,
+    error::BrokerError,
+    partition::{Partition, ProducerAppendCheck},
+    producer_state::{Checked, Decision, ProducerState, SequenceContext},
+    time_util::now_ms,
+    txn::{
+        coordinator::{
+            TxnCoordinator,
+            produce_verification::{
+                INTERNAL_REGISTRATION_VERSION, TransactionCheck, partition_verification_enabled,
+                skips_coordinator_verification,
+            },
+        },
+        state::TopicPartition,
+        version::resolve_txn_version,
     },
 };
 
@@ -52,7 +66,7 @@ impl<'a> TransactionRequest<'a> {
     /// The fields of a `Produce` request that `broker` reads from its own
     /// configuration and from `image`.
     pub(super) fn new(
-        broker: &crate::broker::Broker,
+        broker: &Broker,
         image: &krabka_metadata::MetadataImage,
         (transactional_id, version): (Option<&'a str>, i16),
     ) -> Self {
@@ -87,11 +101,11 @@ const CONCURRENT_TRANSACTIONS_RETRY: std::time::Duration = std::time::Duration::
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Verification {
     /// The append runs this check, and no coordinator call is needed.
-    Settled(Option<crate::partition::ProducerAppendCheck>),
+    Settled(Option<ProducerAppendCheck>),
     /// The coordinator of the request's `transactional_id` has to add or
     /// verify the partition first. The check holds the guard the log
     /// started.
-    Coordinator(crate::partition::ProducerAppendCheck),
+    Coordinator(ProducerAppendCheck),
 }
 
 /// KIP-890 part 1: find out whether a batch starts a transaction the
@@ -120,7 +134,7 @@ pub(super) enum Verification {
 /// not append.
 pub(super) async fn verify_transactional_produce(
     batch: &PreparedBatch,
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     request: TransactionRequest<'_>,
 ) -> Result<Verification, (i16, Option<String>)> {
     let is_transactional = batch.attributes.is_transactional();
@@ -138,7 +152,7 @@ pub(super) async fn verify_transactional_produce(
         is_transactional,
         is_control: batch.attributes.is_control_batch(),
     };
-    let unverified = crate::partition::ProducerAppendCheck {
+    let unverified = ProducerAppendCheck {
         batch: transactional_batch,
         guard: krabka_log::VerificationGuard::SENTINEL,
     };
@@ -150,15 +164,12 @@ pub(super) async fn verify_transactional_produce(
         .start_transaction_verification(
             transactional_batch,
             supports_epoch_bump,
-            (
-                crate::time_util::now_ms(),
-                request.producer_id_expiration_ms,
-            ),
+            (now_ms(), request.producer_id_expiration_ms),
         )
         .await
         .map_err(|refusal| {
             (
-                codes::from_broker_error(&crate::error::BrokerError::TransactionAppend(refusal)),
+                codes::from_broker_error(&BrokerError::TransactionAppend(refusal)),
                 None,
             )
         })?;
@@ -167,7 +178,7 @@ pub(super) async fn verify_transactional_produce(
         // the append then refuses the batch with INVALID_TXN_STATE.
         return Ok(Verification::Settled(Some(unverified)));
     }
-    let check = crate::partition::ProducerAppendCheck {
+    let check = ProducerAppendCheck {
         batch: transactional_batch,
         guard,
     };
@@ -192,12 +203,12 @@ pub(super) async fn verify_transactional_produce(
 /// `add.partitions.to.txn.retry.backoff.max.ms` has passed, as
 /// `maybeRetryOnConcurrentTransactions` does.
 pub(super) async fn verify_with_coordinator(
-    coordinator: &std::sync::Arc<crate::txn::coordinator::TxnCoordinator>,
+    coordinator: &std::sync::Arc<TxnCoordinator>,
     image: &krabka_metadata::MetadataImage,
     request: TransactionRequest<'_>,
     (producer_id, producer_epoch): (krabka_log::ProducerId, i16),
-    partitions: Vec<crate::txn::state::TopicPartition>,
-) -> Vec<(crate::txn::state::TopicPartition, i16)> {
+    partitions: Vec<TopicPartition>,
+) -> Vec<(TopicPartition, i16)> {
     let Some(transactional_id) = request.transactional_id else {
         return partitions
             .into_iter()
@@ -205,22 +216,18 @@ pub(super) async fn verify_with_coordinator(
             .collect();
     };
     let supports_epoch_bump = request.version >= FIRST_ADD_PARTITION_PRODUCE_VERSION;
-    let check = crate::txn::coordinator::produce_verification::TransactionCheck {
+    let check = TransactionCheck {
         transactional_id,
         producer_id,
         producer_epoch,
         partitions,
         verify_only: !supports_epoch_bump,
     };
-    let txnv = crate::txn::version::resolve_txn_version(image);
+    let txnv = resolve_txn_version(image);
     let retry_until = std::time::Instant::now() + CONCURRENT_TRANSACTIONS_RETRY;
     loop {
         let answers = coordinator
-            .add_or_verify_partitions(
-                check.clone(),
-                txnv,
-                crate::txn::coordinator::produce_verification::INTERNAL_REGISTRATION_VERSION,
-            )
+            .add_or_verify_partitions(check.clone(), txnv, INTERNAL_REGISTRATION_VERSION)
             .await;
         if supports_epoch_bump
             && answers
@@ -294,20 +301,20 @@ pub(super) fn produce_verification_code(code: i16, version: i16) -> (i16, Option
 /// `LogAppendResult.errorMessage` gives none for it.
 pub(super) async fn handle_duplicate(
     batch: &PreparedBatch,
-    producer_state: &crate::producer_state::ProducerState,
-    partition: &crate::partition::Partition,
+    producer_state: &ProducerState,
+    partition: &Partition,
     (topic_name, partition_index): (&str, i32),
     acks: i16,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
 ) -> DedupOutcome {
     if batch.producer_id < 0 {
         return DedupOutcome::Append;
     }
-    let context = crate::producer_state::SequenceContext {
+    let context = SequenceContext {
         log_empty: partition.log_end_offset() == Offset(0),
         unstable,
     };
-    let crate::producer_state::Checked {
+    let Checked {
         decision,
         duplicate,
     } = producer_state
@@ -332,7 +339,7 @@ pub(super) async fn handle_duplicate(
     // `unknownLogAppendInfoWithLogStartOffset`, so a client can tell a real
     // sequence gap from producer state that a `DeleteRecords` dropped.
     let (error_code, base_offset, log_append_time_ms, log_start_offset) = match decision {
-        crate::producer_state::Decision::Duplicate { base_offset } => {
+        Decision::Duplicate { base_offset } => {
             let Some(target) = durability_frontier(base_offset, batch.last_offset_delta) else {
                 return DedupOutcome::Answered(PartitionProduceResponse {
                     index: partition_index,
@@ -360,19 +367,19 @@ pub(super) async fn handle_duplicate(
                 partition.log_start_offset().0,
             )
         }
-        crate::producer_state::Decision::OutOfOrder => (
+        Decision::OutOfOrder => (
             codes::OUT_OF_ORDER_SEQUENCE_NUMBER,
             INVALID_OFFSET,
             super::NO_LOG_APPEND_TIME,
             partition.log_start_offset().0,
         ),
-        crate::producer_state::Decision::Fenced => (
+        Decision::Fenced => (
             codes::INVALID_PRODUCER_EPOCH,
             INVALID_OFFSET,
             super::NO_LOG_APPEND_TIME,
             partition.log_start_offset().0,
         ),
-        crate::producer_state::Decision::Append => return DedupOutcome::Append,
+        Decision::Append => return DedupOutcome::Append,
     };
     DedupOutcome::Answered(PartitionProduceResponse {
         index: partition_index,
@@ -397,8 +404,14 @@ mod tests {
         codes,
         handlers::produce::{
             framing::PartitionPayload,
-            pipeline::{PartitionInput, PartitionServices, process_partition},
-            test_support::{encode_batch, image_with_topic},
+            leadership::current_effective_min_isr,
+            pipeline::{PartitionInput, PartitionOutcome, PartitionServices, process_partition},
+            prepare::PreparedSource,
+            test_support::{encode_batch, image_with_topic, pipeline_input},
+        },
+        test_support::{
+            RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup, repeated_records_batch,
+            spawn_standalone_partition,
         },
     };
 
@@ -412,7 +425,7 @@ mod tests {
             base_sequence: 0,
             keyless_records: Vec::new(),
             invalid_timestamp_records: Vec::new(),
-            source: crate::handlers::produce::prepare::PreparedSource::Owned(RecordBatch::default()),
+            source: PreparedSource::Owned(RecordBatch::default()),
         }
     }
 
@@ -430,11 +443,11 @@ mod tests {
     #[tokio::test]
     async fn transactional_produce_rejects_malformed_producers() {
         let directory = tempfile::tempdir().expect("tempdir");
-        let partition = crate::test_support::spawn_standalone_partition(
+        let partition = spawn_standalone_partition(
             directory.path(),
             krabka_log::Log::open(directory.path(), krabka_log::LogConfig::default())
                 .expect("open log"),
-            crate::test_support::StandalonePartitionSetup::default(),
+            StandalonePartitionSetup::default(),
         );
 
         for producer_id in [-1, i64::MIN] {
@@ -498,10 +511,7 @@ mod tests {
                         producer_id_expiration_ms: 86_400_000,
                         verification_enabled,
                     },
-                    ..crate::handlers::produce::test_support::pipeline_input(
-                        "orders",
-                        PartitionPayload::Slice(payload),
-                    )
+                    ..pipeline_input("orders", PartitionPayload::Slice(payload))
                 },
                 fixture.services(&image),
             )
@@ -633,12 +643,10 @@ mod tests {
         let part = fixture.partition(dir.path(), "orders", &image).await;
         // Push LEO to 3 so the HW can be clamped to 2 (one below the target).
         {
-            let mut batch = crate::test_support::repeated_records_batch(
-                crate::test_support::RepeatedRecordsSetup {
-                    count: crate::test_support::RecordCount(3),
-                    ..Default::default()
-                },
-            );
+            let mut batch = repeated_records_batch(RepeatedRecordsSetup {
+                count: RecordCount(3),
+                ..Default::default()
+            });
             part.log
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -671,21 +679,16 @@ mod tests {
             producer_id: pid,
             producer_epoch: 0,
             base_sequence: 0,
-            ..crate::test_support::repeated_records_batch(
-                crate::test_support::RepeatedRecordsSetup {
-                    count: crate::test_support::RecordCount(3),
-                    ..Default::default()
-                },
-            )
+            ..repeated_records_batch(RepeatedRecordsSetup {
+                count: RecordCount(3),
+                ..Default::default()
+            })
         });
 
         let outcome = process_partition(
             PartitionInput {
                 acks: -1,
-                ..crate::handlers::produce::test_support::pipeline_input(
-                    "orders",
-                    PartitionPayload::Slice(payload),
-                )
+                ..pipeline_input("orders", PartitionPayload::Slice(payload))
             },
             fixture.services(&image),
         )
@@ -696,11 +699,11 @@ mod tests {
         // wait rather than blocking inside `process_partition`, so the row is
         // decided here, the way `await_durability` decides it for a request.
         let resp: PartitionProduceResponse = match outcome {
-            crate::handlers::produce::pipeline::PartitionOutcome::AwaitingHighWatermark(ack) => {
+            PartitionOutcome::AwaitingHighWatermark(ack) => {
                 ack.finish(
                     std::time::Instant::now() + Duration::from_millis(50),
                     |partition, admitted_topic_id| {
-                        crate::handlers::produce::leadership::current_effective_min_isr(
+                        current_effective_min_isr(
                             &image,
                             (&partition.topic, partition.index.0),
                             admitted_topic_id,
@@ -710,7 +713,7 @@ mod tests {
                 )
                 .await
             }
-            crate::handlers::produce::pipeline::PartitionOutcome::Done(response) => {
+            PartitionOutcome::Done(response) => {
                 panic!("an acks=-1 duplicate must wait on the high watermark, got {response:?}")
             }
         };
@@ -762,10 +765,7 @@ mod tests {
             let image = &image;
             async move {
                 process_partition(
-                    crate::handlers::produce::test_support::pipeline_input(
-                        "orders",
-                        PartitionPayload::Slice(payload),
-                    ),
+                    pipeline_input("orders", PartitionPayload::Slice(payload)),
                     fixture.services(image),
                 )
                 .await
@@ -906,18 +906,13 @@ mod tests {
                     producer_id: PRODUCER_ID,
                     producer_epoch: 0,
                     base_sequence,
-                    ..crate::test_support::repeated_records_batch(
-                        crate::test_support::RepeatedRecordsSetup::default(),
-                    )
+                    ..repeated_records_batch(RepeatedRecordsSetup::default())
                 });
                 let fixture = &fixture;
                 let image = &image;
                 async move {
                     process_partition(
-                        crate::handlers::produce::test_support::pipeline_input(
-                            "orders",
-                            PartitionPayload::Slice(payload),
-                        ),
+                        pipeline_input("orders", PartitionPayload::Slice(payload)),
                         PartitionServices {
                             unstable_api_versions: unstable,
                             ..fixture.services(image)
@@ -932,12 +927,10 @@ mod tests {
             match history {
                 History::NeverAppended => {}
                 History::HasRecords => {
-                    let mut batch = crate::test_support::repeated_records_batch(
-                        crate::test_support::RepeatedRecordsSetup {
-                            count: crate::test_support::RecordCount(3),
-                            ..Default::default()
-                        },
-                    );
+                    let mut batch = repeated_records_batch(RepeatedRecordsSetup {
+                        count: RecordCount(3),
+                        ..Default::default()
+                    });
                     part_handle
                         .log
                         .lock()

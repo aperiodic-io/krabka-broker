@@ -31,8 +31,11 @@ use krabka_protocol::owned::{
 use tempfile::TempDir;
 
 use crate::support::{
-    client::connect_client, configs::feature_update, discovery::api_versions_request_for,
-    transactions::init_producer_request,
+    client::connect_client,
+    configs::feature_update,
+    discovery::api_versions_request_for,
+    transactions::{InitProducerSetup, TransactionTimeoutMillis, init_producer_request},
+    wire::At,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -52,13 +55,13 @@ struct TwoPhaseInitSetup<'a> {
 /// Pin the unstable v6 wire version and preserve both two-phase commit flags.
 fn two_phase_init(
     setup: TwoPhaseInitSetup<'_>,
-) -> crate::support::wire::At<InitProducerIdRequest, { init_producer_id_request::MAX_VERSION }> {
-    crate::support::wire::At(InitProducerIdRequest {
+) -> At<InitProducerIdRequest, { init_producer_id_request::MAX_VERSION }> {
+    At(InitProducerIdRequest {
         enable2_pc: true,
         keep_prepared_txn: matches!(setup.recovery, PreparedTransactionRecovery::Keep),
-        ..init_producer_request(crate::support::transactions::InitProducerSetup {
+        ..init_producer_request(InitProducerSetup {
             transactional_id: Some(setup.transactional_id.into()),
-            timeout: crate::support::transactions::TransactionTimeoutMillis(30_000),
+            timeout: TransactionTimeoutMillis(30_000),
             ..Default::default()
         })
     })

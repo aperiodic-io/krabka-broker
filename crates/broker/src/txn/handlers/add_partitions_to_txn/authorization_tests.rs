@@ -32,7 +32,7 @@ use crate::{
     authorizer::AuthorizationResult,
     codes,
     coordinator::bootstrap::OFFSETS_TOPIC,
-    test_support::{peer, principal, request_context},
+    test_support::{ControllerPeerAllowed, peer, principal, request_context},
 };
 
 /// A broker principal: `ClusterAction` on the cluster and nothing else.
@@ -248,8 +248,7 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
         },
     ];
 
-    let (handle_, _dir) =
-        start_coordinator(Arc::new(crate::test_support::ControllerPeerAllowed(Grants))).await;
+    let (handle_, _dir) = start_coordinator(Arc::new(ControllerPeerAllowed(Grants))).await;
     let broker = handle_.broker_arc_for_test();
 
     let address = peer();

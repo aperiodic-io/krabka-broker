@@ -19,12 +19,15 @@ use super::{
     },
     views::preferred_server_assignor,
 };
-use crate::coordinator::unified::{
-    ClientIdentity,
-    assignor::Assignor,
-    config::NextGenConfig,
-    consumer_state::{GroupState, MemberState},
-    reconciler,
+use crate::{
+    coordinator::unified::{
+        ClientIdentity,
+        assignor::Assignor,
+        config::NextGenConfig,
+        consumer_state::{GroupState, MemberState},
+        reconciler, wall_clock_ms,
+    },
+    re2j::check,
 };
 
 /// The partitions a member reports that it owns in its heartbeat, or `None`
@@ -65,7 +68,7 @@ pub(super) fn reported_owned(
 /// topic names, whose legal alphabet is `[a-zA-Z0-9._-]`, so the ASCII and
 /// Unicode readings of `\d`, `\w`, `\s` and `\b` cannot differ here.
 pub(super) fn check_subscribed_topic_regex(pattern: &str) -> Result<(), String> {
-    crate::re2j::check(pattern).map_err(|detail| {
+    check(pattern).map_err(|detail| {
         format!("SubscribedTopicRegex `{pattern}` is not a valid regular expression: {detail}.")
     })
 }
@@ -267,17 +270,14 @@ pub(super) fn maybe_update_target(
     metadata: &dyn MetadataProvider,
 ) -> Option<Vec<String>> {
     if !state.target_is_stale()
-        || state.assignment_delayed(
-            config.assignment_interval,
-            crate::coordinator::unified::wall_clock_ms(),
-        )
+        || state.assignment_delayed(config.assignment_interval, wall_clock_ms())
     {
         return None;
     }
     let input = metadata.snapshot();
     let assignor = pick_assignor(state, config);
     let changed = reconciler::compute_target(state, &input, &*assignor);
-    state.record_assignment(crate::coordinator::unified::wall_clock_ms());
+    state.record_assignment(wall_clock_ms());
     Some(changed)
 }
 
@@ -352,12 +352,16 @@ mod tests {
 
     use super::*;
     use crate::coordinator::unified::{
+        ClientIdentity,
         actor::{
             heartbeat::step_heartbeat,
             regex_resolution::apply_regex_result,
-            test_support::{StaticMetadata, empty_metadata},
+            test_support::{
+                StaticMetadata, coordinator_with_log, empty_metadata, rpc::consumer_request,
+            },
         },
         assignor::{Assignment, GroupSpec, TopicMetadata},
+        consumer_state::GroupState,
         offsets_log::fake::InMemoryOffsetsLog,
         persistence_next_gen::MemberAssignmentState,
         reconciler::ReconcileInput,
@@ -404,7 +408,7 @@ mod tests {
                 rebalance_timeout_ms: 60_000,
                 ..Default::default()
             },
-            crate::coordinator::unified::ClientIdentity {
+            ClientIdentity {
                 id: "client",
                 host: "host",
             },
@@ -941,11 +945,11 @@ mod tests {
     #[test]
     fn pick_assignor_skips_unregistered_member_preference() {
         let config = NextGenConfig::assigning_at_once();
-        let mut state = crate::coordinator::unified::consumer_state::GroupState::new("g");
+        let mut state = GroupState::new("g");
         let mut m = build_member(
             "m1",
             &ConsumerGroupHeartbeatRequest::default(),
-            crate::coordinator::unified::ClientIdentity {
+            ClientIdentity {
                 id: "client-a",
                 host: "h",
             },
@@ -1021,14 +1025,10 @@ mod tests {
             .unwrap();
 
         let log = Arc::new(InMemoryOffsetsLog::default());
-        let coord = crate::coordinator::unified::actor::test_support::coordinator_with_log(
-            config,
-            empty_metadata(),
-            log,
-        );
+        let coord = coordinator_with_log(config, empty_metadata(), log);
         let handle = coord.get_or_create_consumer("g");
 
-        let resp = crate::coordinator::unified::actor::test_support::rpc::consumer_request(
+        let resp = consumer_request(
             &handle,
             ConsumerGroupHeartbeatRequest {
                 group_id: "g".into(),

@@ -26,8 +26,11 @@ use super::{
     unstable,
 };
 use crate::{
-    authorizer::AuthorizationResult, broker::Broker, codes,
+    authorizer::AuthorizationResult,
+    broker::Broker,
+    codes,
     coordinator::unified::group::GroupOffsets,
+    handlers::{RequestContext, requested_topic_name},
 };
 
 /// Per-group fetch for v8 and above.
@@ -48,7 +51,7 @@ pub(super) async fn handle_groups(
     broker: &Broker,
     version: i16,
     req: &OffsetFetchRequest,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> OffsetFetchResponse {
     let mut groups_out: Vec<OffsetFetchResponseGroup> = Vec::with_capacity(req.groups.len());
 
@@ -142,7 +145,7 @@ const FIRST_TOPIC_ID_VERSION: i16 = 10;
 /// follow them, as Kafka appends `errorTopics` after the coordinator's rows.
 fn group_named_topics(
     broker: &Broker,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     version: i16,
     image: &krabka_metadata::MetadataImage,
     requested: &[krabka_protocol::owned::offset_fetch_request::OffsetFetchRequestTopics],
@@ -154,7 +157,7 @@ fn group_named_topics(
         .iter()
         // Below v10 a row carries only `name`, from v10 only `topic_id`.
         .map(|topic| {
-            let name = crate::handlers::requested_topic_name(image, &topic.name, topic.topic_id);
+            let name = requested_topic_name(image, &topic.name, topic.topic_id);
             (topic, name)
         })
         .collect();
@@ -218,7 +221,7 @@ fn group_named_topics(
 /// it cannot be written without one. The topics come in name order.
 fn group_fetch_all(
     broker: &Broker,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     version: i16,
     image: &krabka_metadata::MetadataImage,
     offsets: &GroupOffsets,

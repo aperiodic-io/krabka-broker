@@ -13,9 +13,15 @@ use futures_util::future::BoxFuture;
 use krabka_units::convert::TimeExt as _;
 
 use crate::{
+    authorizer::{AuthorizationRequest, AuthorizationResult},
     broker::Broker,
+    codes::{CLUSTER_AUTHORIZATION_FAILED, NONE},
     error::BrokerError,
-    handlers::{ApiVersion, CorrelationId},
+    handlers::{
+        ApiVersion, CorrelationId, acl_wire::CLUSTER_RESOURCE_NAME, alter_replica_log_dirs::handle,
+        audit_admin_for, encode_response,
+    },
+    network::auth::ConnectionAuth,
 };
 
 pub(super) fn alter_replica_log_dirs_adapter<'a>(
@@ -23,7 +29,7 @@ pub(super) fn alter_replica_log_dirs_adapter<'a>(
     version: ApiVersion,
     correlation_id: CorrelationId,
     body: &'a [u8],
-    auth: &'a crate::network::auth::ConnectionAuth,
+    auth: &'a ConnectionAuth,
     peer: &'a std::net::SocketAddr,
 ) -> BoxFuture<'a, Result<Bytes, BrokerError>> {
     Box::pin(async move {
@@ -53,14 +59,14 @@ pub(super) fn alter_replica_log_dirs_adapter<'a>(
         let image = broker.controller.current_image();
         let authorized = broker.config.authorizer.authorize(
             &*image,
-            &crate::authorizer::AuthorizationRequest {
+            &AuthorizationRequest {
                 principal,
                 host: peer,
                 resource_type: krabka_metadata::ResourceType::Cluster,
-                resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+                resource_name: CLUSTER_RESOURCE_NAME,
                 operation: krabka_metadata::AclOperation::Alter,
             },
-        ) == crate::authorizer::AuthorizationResult::Allow;
+        ) == AuthorizationResult::Allow;
 
         if !authorized {
             let mut cur = body;
@@ -81,7 +87,7 @@ pub(super) fn alter_replica_log_dirs_adapter<'a>(
                         .into_iter()
                         .map(|partition_index| AlterReplicaLogDirPartitionResult {
                             partition_index,
-                            error_code: crate::codes::CLUSTER_AUTHORIZATION_FAILED,
+                            error_code: CLUSTER_AUTHORIZATION_FAILED,
                             ..Default::default()
                         })
                         .collect(),
@@ -93,10 +99,10 @@ pub(super) fn alter_replica_log_dirs_adapter<'a>(
                 results,
                 ..Default::default()
             };
-            return crate::handlers::encode_response(&resp, version);
+            return encode_response(&resp, version);
         }
 
-        crate::handlers::alter_replica_log_dirs::handle(broker, version, correlation_id, body).await
+        handle(broker, version, correlation_id, body).await
     })
 }
 
@@ -225,13 +231,13 @@ token_adapter!(
 
 fn audit_token_mutation(
     broker: &Broker,
-    auth: &crate::network::auth::ConnectionAuth,
+    auth: &ConnectionAuth,
     peer: &std::net::SocketAddr,
     operation: &str,
     token_id: Option<&str>,
     error_code: i16,
 ) {
-    if error_code == crate::codes::NONE
+    if error_code == NONE
         && let Some(token_id) = token_id
     {
         audit_token_operation(broker, auth, peer, operation, token_id);
@@ -261,13 +267,13 @@ fn token_id_for_hmac(broker: &Broker, hmac: &[u8]) -> Option<String> {
 /// for one.
 fn audit_token_operation(
     broker: &Broker,
-    auth: &crate::network::auth::ConnectionAuth,
+    auth: &ConnectionAuth,
     peer: &std::net::SocketAddr,
     operation: &str,
     token_id: &str,
 ) {
-    if let crate::network::auth::ConnectionAuth::Authenticated { principal, .. } = auth {
-        crate::handlers::audit_admin_for(
+    if let ConnectionAuth::Authenticated { principal, .. } = auth {
+        audit_admin_for(
             broker.audit_log.as_ref(),
             principal,
             peer,
@@ -297,14 +303,14 @@ mod tests {
     use crate::{
         codes::CLUSTER_AUTHORIZATION_FAILED,
         network::auth::ConnectionAuth,
-        test_support::{DenyAll, codec_helpers, peer, start_broker_with_authorizer},
+        test_support::{DenyAll, codec_helpers, peer, principal, start_broker_with_authorizer},
     };
 
     codec_helpers!(AlterReplicaLogDirsRequest, AlterReplicaLogDirsResponse);
 
     fn authed(name: &str) -> ConnectionAuth {
         ConnectionAuth::Authenticated {
-            principal: crate::test_support::principal(name),
+            principal: principal(name),
             mechanism: SaslMechanism::Plain,
             expires_at_ms: None,
             authenticated_via_token: false,

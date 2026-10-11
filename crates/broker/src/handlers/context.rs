@@ -6,6 +6,14 @@ use std::net::SocketAddr;
 use krabka_security::Principal;
 
 use super::CorrelationId;
+use crate::{
+    broker::Broker,
+    client_metrics::manager::ClientAttributes,
+    metrics::QuotaCharge,
+    quota::{
+        ControllerMutationQuota, QuotaDelay, QuotaRequest, ThrottleSlot, consume_request_quota,
+    },
+};
 
 /// Per-request connection metadata. Constructed once per frame in
 /// `network::dispatch` from the authenticated `ConnectionAuth`, the
@@ -49,7 +57,7 @@ pub(crate) struct RequestContext<'a> {
     /// [`RequestContext::take_throttle`] once the response is on the wire and
     /// mutes the connection for that long. Handlers that charge no quota leave
     /// it at zero.
-    pub throttle: crate::quota::ThrottleSlot,
+    pub throttle: ThrottleSlot,
     /// Set by an `acks=0` `Produce` whose response carries an error on any
     /// partition. `KafkaApis.handleProduceRequest` closes the connection in
     /// that case instead of muting it, because a suppressed response is the
@@ -99,7 +107,7 @@ impl<'a> RequestContext<'a> {
             connection_id,
             sendfile_capable,
             connection_listener_name,
-            throttle: crate::quota::ThrottleSlot::default(),
+            throttle: ThrottleSlot::default(),
             close_after_response: std::sync::atomic::AtomicBool::new(false),
             request_size: 0,
             pre_authentication: false,
@@ -132,11 +140,11 @@ impl<'a> RequestContext<'a> {
     /// Opens this caller's controller-mutation quota with the API version's strictness.
     pub(crate) fn controller_mutation_quota(
         &self,
-        broker: &crate::broker::Broker,
+        broker: &Broker,
         image: &krabka_metadata::MetadataImage,
         strict: bool,
-    ) -> crate::quota::ControllerMutationQuota {
-        crate::quota::ControllerMutationQuota::new(&crate::quota::QuotaRequest {
+    ) -> ControllerMutationQuota {
+        ControllerMutationQuota::new(&QuotaRequest {
             image,
             buckets: &broker.quota_buckets,
             principal: self.principal.name.as_str(),
@@ -149,13 +157,13 @@ impl<'a> RequestContext<'a> {
     /// Charges the request's elapsed handler time against its request quota.
     pub(crate) fn charge_request_quota(
         &self,
-        broker: &crate::broker::Broker,
+        broker: &Broker,
         image: &krabka_metadata::MetadataImage,
         start: std::time::Instant,
-    ) -> crate::quota::QuotaDelay {
+    ) -> QuotaDelay {
         let elapsed_micros = u64::try_from(start.elapsed().as_micros().min(u128::from(u64::MAX)))
             .expect("elapsed microseconds clamped to u64");
-        crate::quota::consume_request_quota(
+        consume_request_quota(
             image,
             &broker.quota_buckets,
             &self.principal.name,
@@ -175,7 +183,7 @@ impl<'a> RequestContext<'a> {
     /// Leaves a quota charge for the dispatch loop to resolve with the request
     /// quota in one metrics call, and records its window. See
     /// [`crate::quota::ThrottleSlot::defer`].
-    pub(crate) fn defer_quota_charge(&self, charge: crate::metrics::QuotaCharge) {
+    pub(crate) fn defer_quota_charge(&self, charge: QuotaCharge) {
         self.throttle.defer(charge);
     }
 
@@ -239,11 +247,8 @@ impl<'a> TelemetryContext<'a> {
     }
 
     /// The subscription identity and source fields shared by both telemetry APIs.
-    pub(crate) fn client_attributes(
-        &self,
-        instance: uuid::Uuid,
-    ) -> crate::client_metrics::manager::ClientAttributes {
-        crate::client_metrics::manager::ClientAttributes {
+    pub(crate) fn client_attributes(&self, instance: uuid::Uuid) -> ClientAttributes {
+        ClientAttributes {
             connection_id: self.connection_id.to_string(),
             client_instance_id: instance,
             client_id: self.client_id.to_string(),

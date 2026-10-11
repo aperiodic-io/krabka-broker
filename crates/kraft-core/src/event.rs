@@ -2,7 +2,7 @@
 
 use uuid::Uuid;
 
-use crate::types::{Epoch, NodeId};
+use crate::types::{Epoch, LogOffsetMetadata, NodeId};
 
 /// Where a replica stands in a resigning leader's `EndQuorumEpoch`
 /// `PreferredCandidates` list.
@@ -100,6 +100,6 @@ pub enum Event {
         leader_id: NodeId,
         leader_epoch: Epoch,
         /// Holds a value when the leader signalled log divergence.
-        diverging: Option<crate::types::LogOffsetMetadata>,
+        diverging: Option<LogOffsetMetadata>,
     },
 }

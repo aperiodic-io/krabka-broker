@@ -36,7 +36,12 @@ use krabka_protocol::{
 use support::cluster_lock;
 use tempfile::TempDir;
 
-use crate::support::{client::connect_client, fetch::fetch_topic_row};
+use crate::support::{
+    client::{ValueBatchSetup, ValueRecordCount, connect_client},
+    fetch::fetch_topic_row,
+    produce::{SinglePartitionProduceSetup, send_batch},
+    shutdown_cluster,
+};
 
 mod support;
 
@@ -235,15 +240,15 @@ async fn rack_aware_consumer_is_redirected_to_same_rack_follower() {
 
     // Step 3: produce N records to the leader with acks=all so they commit.
     let producer = connect_client(leader_addr.clone(), None).await;
-    let prod = crate::support::produce::send_batch(
+    let prod = send_batch(
         &producer,
-        record_batch(crate::support::client::ValueBatchSetup {
-            records: crate::support::client::ValueRecordCount(N_RECORDS),
+        record_batch(ValueBatchSetup {
+            records: ValueRecordCount(N_RECORDS),
         }),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("t").into(),
             topic_id,
-            ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+            ..SinglePartitionProduceSetup::replicated()
         },
     )
     .await;
@@ -287,5 +292,5 @@ async fn rack_aware_consumer_is_redirected_to_same_rack_follower() {
     // (same rack as the leader) yields no redirect.
     assert_leader_serves_same_rack(&leader_client, topic_id).await;
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

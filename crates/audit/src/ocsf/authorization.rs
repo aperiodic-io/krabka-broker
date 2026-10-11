@@ -5,10 +5,11 @@
 use serde_json::json;
 
 use super::{ProductInfo, envelope::metadata};
+use crate::event::{AuditEndpoint, AuditPrincipal};
 
 pub(super) fn ocsf_authorization_denied(
-    principal: &crate::event::AuditPrincipal,
-    source: &crate::event::AuditEndpoint,
+    principal: &AuditPrincipal,
+    source: &AuditEndpoint,
     resource_type: &str,
     resource_name: &str,
     operation: &str,

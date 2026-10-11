@@ -18,8 +18,14 @@ use krabka_security::ListenerProtocol;
 
 use super::Config;
 use crate::{
-    config::ReplicationRuntimeConfig, partition_registry::PartitionRegistry,
-    test_support::FakeMetadataSource, throttle::ThrottleState,
+    config::ReplicationRuntimeConfig,
+    log_dir_status::LogDirRegistry,
+    metrics::BrokerMetrics,
+    network::client::InterBrokerClient,
+    partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
+    test_support::FakeMetadataSource,
+    throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, ThrottleState},
 };
 pub(super) const TOPIC: &str = "orders";
 pub(super) const PARTITION: i32 = 0;
@@ -67,7 +73,7 @@ pub(super) fn image_with_follower_throttle(value: &str) -> MetadataImage {
     let mut image = image_with_leader(LEADER_ID);
     let mut overrides = BTreeMap::new();
     overrides.insert(
-        crate::throttle::FOLLOWER_THROTTLED_REPLICAS_KEY.to_string(),
+        FOLLOWER_THROTTLED_REPLICAS_KEY.to_string(),
         value.to_string(),
     );
     image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
@@ -93,18 +99,16 @@ pub(super) fn test_config(image: MetadataImage) -> (Config, tempfile::TempDir) {
         log_settings: LogConfig::default(),
         client_id: "replica-test".into(),
         connection: super::ReplicationConnectionConfig {
-            inter_broker_client: Arc::new(crate::network::client::InterBrokerClient::new(
-                None, None,
-            )),
+            inter_broker_client: Arc::new(InterBrokerClient::new(None, None)),
             inter_broker_listener_protocol: ListenerProtocol::Plaintext,
             inter_broker_server_name: "localhost".into(),
             replication: ReplicationRuntimeConfig::default(),
         },
         throttle_state: Arc::new(ThrottleState::new()),
         controller: Arc::new(static_source(image)),
-        log_dir_status: crate::log_dir_status::LogDirRegistry::default(),
-        producer_state: Arc::new(crate::producer_state::ProducerState::new()),
-        metrics: crate::metrics::BrokerMetrics::default(),
+        log_dir_status: LogDirRegistry::default(),
+        producer_state: Arc::new(ProducerState::new()),
+        metrics: BrokerMetrics::default(),
         lag: super::ReplicaLag::default(),
     };
     (cfg, log_dir)

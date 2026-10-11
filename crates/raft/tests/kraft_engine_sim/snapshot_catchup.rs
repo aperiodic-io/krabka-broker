@@ -17,7 +17,10 @@ use krabka_raft::kraft::{
 };
 
 use crate::{
-    harness::{STAGGERED_TIMEOUTS, await_single_leader, await_until, build_engine, topic_record},
+    harness::{
+        STAGGERED_TIMEOUTS, SimEngineSetup, SnapshotRecordCount, await_single_leader, await_until,
+        build_engine, shutdown_nodes, three_voter_network, topic_record,
+    },
     sim_net::SimNet,
 };
 
@@ -33,12 +36,12 @@ fn start_snapshot_pair(
             let idx = usize::try_from(id.0 - 1).unwrap();
             let (ctrl, dir) = build_engine(
                 net,
-                crate::harness::SimEngineSetup {
+                SimEngineSetup {
                     me: id,
                     ids: voters,
                     cluster_id: cid,
                     election_timeout: STAGGERED_TIMEOUTS[idx],
-                    snapshot_interval_records: crate::harness::SnapshotRecordCount(interval),
+                    snapshot_interval_records: SnapshotRecordCount(interval),
                 },
             );
             net.register(id, ctrl);
@@ -123,7 +126,7 @@ fn checkpoint_names(dir: &std::path::Path) -> BTreeSet<String> {
 ///    converge to the leader's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lagging_follower_catches_up_via_snapshot() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(500);
     // Snapshot after every 5 committed records past the last checkpoint.
     let interval = 5u64;
@@ -167,12 +170,12 @@ async fn lagging_follower_catches_up_via_snapshot() {
     // fetching the snapshot.
     let (lag_ctrl, lag_dir) = build_engine(
         &net,
-        crate::harness::SimEngineSetup {
+        SimEngineSetup {
             me: NodeId(3),
             ids: &ids,
             cluster_id: cid,
             election_timeout: STAGGERED_TIMEOUTS[2],
-            snapshot_interval_records: crate::harness::SnapshotRecordCount(interval),
+            snapshot_interval_records: SnapshotRecordCount(interval),
         },
     );
     net.register(NodeId(3), lag_ctrl);
@@ -194,7 +197,7 @@ async fn lagging_follower_catches_up_via_snapshot() {
     let lag_snap = lag.quorum_snapshot();
     assert2::assert!(lag_snap.log_start_offset > 0);
 
-    crate::harness::shutdown_nodes(&net, &ids).await;
+    shutdown_nodes(&net, &ids).await;
 }
 
 /// Every voter snapshots and prunes on its own (#364): a follower that never
@@ -207,7 +210,7 @@ async fn lagging_follower_catches_up_via_snapshot() {
 /// the follower's own serve path from election/discovery timing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn follower_that_pruned_independently_redirects_a_lagging_fetch_to_the_leader() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(501);
     let interval = 5u64;
 
@@ -325,7 +328,7 @@ async fn follower_that_pruned_independently_redirects_a_lagging_fetch_to_the_lea
 /// exact rather than a race.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_snapshot_fetch_in_flight_survives_the_leader_rolling_to_a_new_checkpoint() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(502);
     let interval = 5u64;
 

@@ -18,8 +18,16 @@ use super::{
     test_support::{empty_super_users, super_users_with, token_acl},
     *,
 };
-use crate::handlers::delegation_token_test_support::{
-    DAY_MS as RENEW_24H_MS, anonymous, authed, test_controller, token_authed,
+use crate::{
+    codes::{
+        DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_AUTHORIZATION_FAILED,
+        DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_PRINCIPAL_TYPE, INVALID_REQUEST, NONE,
+        UNKNOWN_SERVER_ERROR,
+    },
+    handlers::delegation_token_test_support::{
+        DAY_MS as RENEW_24H_MS, SecretProvision, anonymous, authed, test_controller, token_authed,
+    },
+    test_support::{KafkaErrorCode, UnixMillis},
 };
 
 fn principal(principal_type: &str, name: &str) -> KafkaPrincipal {
@@ -55,13 +63,13 @@ fn act_as(principal_type: &str, name: &str) -> CreateDelegationTokenRequest {
 /// controller).
 #[derive(krabka_macros::FieldDefaults)]
 struct TokenRefusalSetup {
-    code: crate::test_support::KafkaErrorCode,
+    code: KafkaErrorCode,
     #[default(user("alice"))]
     owner: KafkaPrincipal,
     #[default(user("alice"))]
     requester: KafkaPrincipal,
     #[default(crate::test_support::UnixMillis(-1))]
-    timestamp: crate::test_support::UnixMillis,
+    timestamp: UnixMillis,
 }
 
 fn refusal(setup: TokenRefusalSetup) -> CreateDelegationTokenResponse {
@@ -100,15 +108,15 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         owner_principal_type: None,
         ..self_mint.clone()
     };
-    let unbuildable_owner = crate::codes::UNKNOWN_SERVER_ERROR;
-    let not_allowed = crate::codes::DELEGATION_TOKEN_REQUEST_NOT_ALLOWED;
-    let unauthorized = crate::codes::DELEGATION_TOKEN_AUTHORIZATION_FAILED;
-    let bad_renewer = crate::codes::INVALID_PRINCIPAL_TYPE;
-    let disabled = crate::codes::DELEGATION_TOKEN_AUTH_DISABLED;
+    let unbuildable_owner = UNKNOWN_SERVER_ERROR;
+    let not_allowed = DELEGATION_TOKEN_REQUEST_NOT_ALLOWED;
+    let unauthorized = DELEGATION_TOKEN_AUTHORIZATION_FAILED;
+    let bad_renewer = INVALID_PRINCIPAL_TYPE;
+    let disabled = DELEGATION_TOKEN_AUTH_DISABLED;
 
     // (case, requester, tokens enabled, request, super users, response)
     let unbuildable_owner_response = refusal(TokenRefusalSetup {
-        code: crate::test_support::KafkaErrorCode(unbuildable_owner),
+        code: KafkaErrorCode(unbuildable_owner),
         owner: user("ANONYMOUS"),
         requester: user("ANONYMOUS"),
         ..Default::default()
@@ -120,7 +128,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         (
             "owner name without a type",
             token_authed("admin"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Configured,
+            SecretProvision::Configured,
             name_only.clone(),
             super_users_with(&["admin"]),
             unbuildable_owner_response.clone(),
@@ -128,7 +136,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         (
             "owner name without a type, super user",
             authed("admin"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Configured,
+            SecretProvision::Configured,
             name_only,
             super_users_with(&["admin"]),
             unbuildable_owner_response.clone(),
@@ -136,22 +144,22 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         (
             "token-authenticated requester",
             token_authed("alice"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Configured,
+            SecretProvision::Configured,
             self_mint.clone(),
             empty_super_users(),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(not_allowed),
+                code: KafkaErrorCode(not_allowed),
                 ..Default::default()
             }),
         ),
         (
             "token-authenticated super user acting as another owner",
             token_authed("admin"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Configured,
+            SecretProvision::Configured,
             act_as("User", "alice"),
             super_users_with(&["admin"]),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(not_allowed),
+                code: KafkaErrorCode(not_allowed),
                 requester: user("admin"),
                 ..Default::default()
             }),
@@ -159,11 +167,11 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         (
             "anonymous requester",
             anonymous(),
-            crate::handlers::delegation_token_test_support::SecretProvision::Configured,
+            SecretProvision::Configured,
             self_mint.clone(),
             empty_super_users(),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(not_allowed),
+                code: KafkaErrorCode(not_allowed),
                 owner: user("ANONYMOUS"),
                 requester: user("ANONYMOUS"),
                 ..Default::default()
@@ -172,22 +180,22 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         (
             "token-authenticated requester with tokens disabled",
             token_authed("alice"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Absent,
+            SecretProvision::Absent,
             self_mint.clone(),
             empty_super_users(),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(not_allowed),
+                code: KafkaErrorCode(not_allowed),
                 ..Default::default()
             }),
         ),
         (
             "another owner without authorization",
             authed("bob"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Configured,
+            SecretProvision::Configured,
             act_as("User", "alice"),
             super_users_with(&["admin"]),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(unauthorized),
+                code: KafkaErrorCode(unauthorized),
                 requester: user("bob"),
                 ..Default::default()
             }),
@@ -195,11 +203,11 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         (
             "another owner of another type without authorization, tokens disabled",
             authed("bob"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Absent,
+            SecretProvision::Absent,
             act_as("Group", "eng"),
             empty_super_users(),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(unauthorized),
+                code: KafkaErrorCode(unauthorized),
                 owner: principal("Group", "eng"),
                 requester: user("bob"),
                 ..Default::default()
@@ -208,34 +216,34 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
         (
             "renewer that is not a User",
             authed("alice"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Configured,
+            SecretProvision::Configured,
             group_renewer.clone(),
             empty_super_users(),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(bad_renewer),
+                code: KafkaErrorCode(bad_renewer),
                 ..Default::default()
             }),
         ),
         (
             "renewer that is not a User, tokens disabled",
             authed("alice"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Absent,
+            SecretProvision::Absent,
             group_renewer,
             empty_super_users(),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(bad_renewer),
+                code: KafkaErrorCode(bad_renewer),
                 ..Default::default()
             }),
         ),
         (
             "tokens disabled",
             authed("alice"),
-            crate::handlers::delegation_token_test_support::SecretProvision::Absent,
+            SecretProvision::Absent,
             act_as("User", "alice"),
             empty_super_users(),
             refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(disabled),
-                timestamp: crate::test_support::UnixMillis(0),
+                code: KafkaErrorCode(disabled),
+                timestamp: UnixMillis(0),
                 ..Default::default()
             }),
         ),
@@ -427,10 +435,10 @@ async fn mints_for_the_resolved_owner_with_kafka_deadlines() {
             token_id: resp.token_id.clone(),
             hmac: resp.hmac.clone(),
             ..refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(crate::codes::NONE),
+                code: KafkaErrorCode(NONE),
                 owner: owner.clone(),
                 requester: user(requester),
-                timestamp: crate::test_support::UnixMillis(0),
+                timestamp: UnixMillis(0),
             })
         };
         assert!(resp == expected, "{case}");
@@ -566,8 +574,8 @@ async fn non_positive_configured_periods_mint_nothing() {
         )
         .await;
         let expected = refusal(TokenRefusalSetup {
-            code: crate::test_support::KafkaErrorCode(crate::codes::INVALID_REQUEST),
-            timestamp: crate::test_support::UnixMillis(0),
+            code: KafkaErrorCode(INVALID_REQUEST),
+            timestamp: UnixMillis(0),
             ..Default::default()
         });
         assert!(resp == expected, "ceiling {ceiling_ms} renew {renew_ms}");

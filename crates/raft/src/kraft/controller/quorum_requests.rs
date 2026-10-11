@@ -28,10 +28,13 @@ use super::{
     Engine,
     checkpoint::{BOOTSTRAP_SNAPSHOT_ID, load_checkpoint_by_id},
 };
-use crate::kraft::{
-    event::{Event, LogEnd, SuccessorRank},
-    transport::wire,
-    types::{Epoch, NodeId, ReplicaKey},
+use crate::{
+    kraft::{
+        event::{Event, LogEnd, SuccessorRank},
+        transport::wire,
+        types::{Epoch, NodeId, ReplicaKey},
+    },
+    snapshot::SnapshotReader,
 };
 
 const UNKNOWN_TOPIC_OR_PARTITION: i16 = 3;
@@ -489,7 +492,7 @@ impl Engine {
         // the checkpoint, and a negative `MaxBytes` reads nothing.
         let max = usize::try_from(request.max_bytes.max(0)).unwrap_or(0);
         let position = usize::try_from(partition.position).unwrap_or(0);
-        let chunk = crate::snapshot::SnapshotReader::byte_range(&bytes, position, max);
+        let chunk = SnapshotReader::byte_range(&bytes, position, max);
         Some(wire::encode_fetch_snapshot_answer(
             0,
             Some(wire::FetchSnapshotPartition {

@@ -19,7 +19,11 @@ use crate::{
     rlmm_cluster::{await_activation, build_client, start_broker_with_topic_rlmm},
     rlmm_round_trip::remote_log_files,
     run_broker_test,
-    support::offsets::{list_offset_partition, single_partition_list_offsets},
+    support::{
+        offsets::{list_offset_partition, single_partition_list_offsets},
+        topics::topic_configs,
+    },
+    topic_fixture::create_configured_topic,
 };
 
 const TOPIC: &str = "tiered-idle-partition-itest";
@@ -76,10 +80,10 @@ async fn an_idle_tiered_partition_leaves_local_disk_through_its_last_record_case
 // newest timestamp is 0. `retention.ms=-1` keeps the remote tier from
 // deleting them for the same reason.
 async fn create_idle_tiered_topic(client: &Client) {
-    crate::topic_fixture::create_configured_topic(
+    create_configured_topic(
         client,
         TOPIC,
-        crate::support::topics::topic_configs([
+        topic_configs([
             ("remote.storage.enable", "true"),
             ("local.retention.ms", "1000"),
             ("retention.ms", "-1"),

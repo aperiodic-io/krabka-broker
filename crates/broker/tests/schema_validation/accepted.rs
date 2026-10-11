@@ -7,14 +7,13 @@
 
 use assert2::check;
 
-use crate::harness::{KNOWN_ID, VALIDATED, framed};
+use crate::harness::{KNOWN_ID, VALIDATED, check_value_append, framed, mock_topic_fixture};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_record_framed_with_a_bound_schema_id_is_accepted() {
-    let (_registry, broker, client, _dir, id) =
-        crate::harness::mock_topic_fixture("validated", VALIDATED).await;
+    let (_registry, broker, client, _dir, id) = mock_topic_fixture("validated", VALIDATED).await;
 
-    crate::harness::check_value_append(
+    check_value_append(
         &broker,
         &client,
         "validated",
@@ -36,15 +35,14 @@ async fn a_record_framed_with_a_bound_schema_id_is_accepted() {
 /// actual produce through the validator.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_cache_counters_move_on_a_validated_produce() {
-    let (_registry, broker, client, _dir, id) =
-        crate::harness::mock_topic_fixture("validated", VALIDATED).await;
+    let (_registry, broker, client, _dir, id) = mock_topic_fixture("validated", VALIDATED).await;
 
     // The first produce loads the schema; the next is served within its TTL.
     for (misses, hits) in [(0, 0), (1, 0), (1, 1)] {
         check!(broker.metrics().schema_validation_cache_misses.get() == misses);
         check!(broker.metrics().schema_validation_cache_hits.get() == hits);
         if hits == 0 {
-            crate::harness::check_value_append(
+            check_value_append(
                 &broker,
                 &client,
                 "validated",
@@ -61,12 +59,11 @@ async fn the_cache_counters_move_on_a_validated_produce() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tombstone_is_accepted_on_a_validated_topic() {
-    let (_registry, broker, client, _dir, id) =
-        crate::harness::mock_topic_fixture("validated", VALIDATED).await;
+    let (_registry, broker, client, _dir, id) = mock_topic_fixture("validated", VALIDATED).await;
 
     // A null value is a tombstone. Rejecting it would make schema validation
     // and compaction mutually exclusive.
-    crate::harness::check_value_append(&broker, &client, "validated", id, None, (0, Some(1))).await;
+    check_value_append(&broker, &client, "validated", id, None, (0, Some(1))).await;
 
     broker.shutdown().await;
 }

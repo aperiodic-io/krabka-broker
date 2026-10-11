@@ -13,8 +13,10 @@ use crate::{
         FREEZE_REASON, FROZEN_TARGET, PROPOSE_REASON, SignedFreeze, THAW_REASON,
         boot_workflow_cluster, now_ms, propose_thaw, send_signed_freeze, settle_proposal,
     },
-    support,
-    support::topics::{creatable_topic, create_topic_request},
+    support::{
+        self,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
 };
 
 /// Verifies that the KFC-9 metric families move on a real request.
@@ -116,7 +118,7 @@ async fn the_kfc9_gauges_and_counters_move_on_real_requests() {
     // A gated Kafka transition with no approval behind it.
     let created = alice
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("doomed").into(),
                 ..Default::default()
             },

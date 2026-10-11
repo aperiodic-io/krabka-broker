@@ -5,8 +5,13 @@ use moxy::{
     token::{Span, Spanner, TokenStream, TokenTree},
 };
 
+use crate::{
+    fixtures::{name, named_arguments},
+    meta::{arguments, item_body, named_body},
+};
+
 pub(crate) fn flag_metadata_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         fn {{ name }}(arg: &::clap::Arg) -> (&str, String, Vec<String>) {
             let long = arg.get_long().unwrap_or_default();
@@ -18,7 +23,7 @@ pub(crate) fn flag_metadata_fixture(input: TokenStream) -> Result<TokenStream, P
 }
 
 pub(crate) fn bind_retry_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let (name, mut arguments) = crate::fixtures::named_arguments(input, 2)?;
+    let (name, mut arguments) = named_arguments(input, 2)?;
     let timeout = arguments.next().unwrap();
     Ok(moxy::template! {
         pub(super) async fn {{ name }}(addr: ::std::net::SocketAddr) -> ::tokio::net::TcpListener {
@@ -38,7 +43,7 @@ pub(crate) fn bind_retry_fixture(input: TokenStream) -> Result<TokenStream, Pars
 }
 
 pub(crate) fn dispatch_capacity_parser(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         fn {{ name }}(value: &str) -> Result<usize, String> {
             let value = value.parse::<usize>().map_err(|error| error.to_string())?;
@@ -63,8 +68,7 @@ pub(crate) fn argv_entrypoint(
     item: TokenStream,
 ) -> Result<TokenStream, ParseError> {
     no_options(meta)?;
-    let (tokens, body_index) =
-        crate::meta::item_body(item, "argv_entrypoint", TokenTree::is_keyword_fn)?;
+    let (tokens, body_index) = item_body(item, "argv_entrypoint", TokenTree::is_keyword_fn)?;
     let function = tokens.iter().position(TokenTree::is_keyword_fn).unwrap();
     let declaration = &tokens[function + 1..body_index];
     let [
@@ -107,7 +111,7 @@ pub(crate) fn bootstrap_cli_fields(
     item: TokenStream,
 ) -> Result<TokenStream, ParseError> {
     no_options(meta)?;
-    let (mut tokens, body) = crate::meta::named_body(item, "bootstrap_cli_fields")?;
+    let (mut tokens, body) = named_body(item, "bootstrap_cli_fields")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };
@@ -130,7 +134,7 @@ pub(crate) fn bootstrap_cli_fields(
 }
 
 pub(crate) fn duration_cases(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         fn {{ name }}(cases: &[(&str, Option<i64>)]) {
             for &(raw, expected) in cases {
@@ -141,7 +145,7 @@ pub(crate) fn duration_cases(input: TokenStream) -> Result<TokenStream, ParseErr
 }
 
 pub(crate) fn directory_tree(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let (name, mut arguments) = crate::fixtures::named_arguments(input, 4)?;
+    let (name, mut arguments) = named_arguments(input, 4)?;
     let element = arguments.next().unwrap();
     let docs = arguments.next().unwrap().into_iter().collect::<Vec<_>>();
     let [TokenTree::Group(docs)] = docs.as_slice() else {
@@ -209,7 +213,7 @@ pub(crate) fn parsed_cli_entrypoint(input: TokenStream) -> Result<TokenStream, P
 }
 
 pub(crate) fn duration_parser_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input, 2)?.into_iter();
+    let mut arguments = arguments(input, 2)?.into_iter();
     let docs = documentation(arguments.next().unwrap())?;
     let cases: Vec<_> = arguments.next().unwrap().into_iter().collect();
     let [TokenTree::Group(cases)] = cases.as_slice() else {
@@ -238,7 +242,7 @@ pub(crate) fn duration_parser_fixture(input: TokenStream) -> Result<TokenStream,
 }
 
 pub(crate) fn bootstrap_parser_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input, 2)?.into_iter();
+    let mut arguments = arguments(input, 2)?.into_iter();
     let refused = arguments.next().unwrap();
     let accepted = arguments.next().unwrap();
     Ok(moxy::template! {
@@ -254,7 +258,7 @@ pub(crate) fn bootstrap_parser_fixture(input: TokenStream) -> Result<TokenStream
 }
 
 pub(crate) fn snapshot_node_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         fn {{ name }}() -> ::tempfile::TempDir {
             let log_dir = ::tempfile::tempdir().expect("log dir");
@@ -267,7 +271,7 @@ pub(crate) fn snapshot_node_fixture(input: TokenStream) -> Result<TokenStream, P
 }
 
 pub(crate) fn connect_cli_client(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input, 3)?.into_iter();
+    let mut arguments = arguments(input, 3)?.into_iter();
     let bootstrap = arguments.next().unwrap();
     let client_id = arguments.next().unwrap();
     let unreachable = arguments.next().unwrap();
@@ -286,7 +290,7 @@ pub(crate) fn connect_cli_client(input: TokenStream) -> Result<TokenStream, Pars
 }
 
 pub(crate) fn format_directories_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         fn {{ name }}() -> (::tempfile::TempDir, ::std::path::PathBuf, ::std::path::PathBuf) {
             let dir = ::tempfile::tempdir().expect("tempdir");

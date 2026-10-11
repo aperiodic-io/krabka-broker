@@ -14,7 +14,10 @@ use super::{
 use crate::{
     action::Action,
     event::Event,
-    simulation_support::SimulationTimer as SimTimer,
+    simulation_support::{
+        SimulationTimer as SimTimer, StableFingerprint, clear_timer, earliest_timer, fingerprint,
+        reconcile_timers,
+    },
     types::{Epoch, NodeId},
 };
 
@@ -24,14 +27,7 @@ impl Sim {
     fn fingerprint(&self) -> Vec<(NodeId, &'static str, Epoch, usize, i64)> {
         self.nodes
             .values()
-            .map(|n| {
-                crate::simulation_support::fingerprint(
-                    n.id,
-                    &n.machine,
-                    n.log.record_count(),
-                    n.high_watermark,
-                )
-            })
+            .map(|n| fingerprint(n.id, &n.machine, n.log.record_count(), n.high_watermark))
             .collect()
     }
 
@@ -41,7 +37,7 @@ impl Sim {
     /// Both the curated scenarios and the playground's "settle" button call
     /// this method.
     pub fn run_until_stable(&mut self, max_ticks: usize) {
-        let mut stability = crate::simulation_support::StableFingerprint::new(self.fingerprint());
+        let mut stability = StableFingerprint::new(self.fingerprint());
         for _ in 0..max_ticks {
             if let Some(msg) = self.queue.pop_front() {
                 self.deliver(&msg);
@@ -58,7 +54,7 @@ impl Sim {
     }
 
     pub(super) fn fire_next_timer(&mut self) -> bool {
-        let best = crate::simulation_support::earliest_timer(self.nodes.values().map(|node| {
+        let best = earliest_timer(self.nodes.values().map(|node| {
             (
                 node.id,
                 [
@@ -77,7 +73,7 @@ impl Sim {
         }
         {
             let node = self.nodes.get_mut(&id).unwrap();
-            crate::simulation_support::clear_timer(
+            clear_timer(
                 kind,
                 &mut node.election_deadline,
                 &mut node.fetch_deadline,
@@ -138,7 +134,7 @@ impl Sim {
 
     pub(super) fn reconcile_timers_for_role(&mut self, id: NodeId) {
         let node = self.nodes.get_mut(&id).unwrap();
-        crate::simulation_support::reconcile_timers(
+        reconcile_timers(
             node.machine.role(),
             &mut node.election_deadline,
             &mut node.fetch_deadline,

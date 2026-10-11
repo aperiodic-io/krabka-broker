@@ -247,8 +247,9 @@ mod tests {
 
     use super::{HostCheck, has_filter_only_element, has_unknown_element};
     use crate::{
-        codes,
+        codes::{self, INVALID_REQUEST, UNSUPPORTED_VERSION},
         handlers::create_acls::test_support::{OPERATION_READ, creation, validate},
+        test_support::{AllowAclSetup, allow_acl},
     };
 
     #[test]
@@ -304,7 +305,7 @@ mod tests {
                     c.resource_name = "User:bob".into();
                     c.operation = 13;
                 },
-                crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+                allow_acl(AllowAclSetup {
                     resource_type: ResourceType::User,
                     resource_name: "User:bob",
                     operation: AclOperation::CreateTokens,
@@ -419,7 +420,7 @@ mod tests {
                 "10.0.0.0/8",
                 false,
                 Some((
-                    crate::codes::UNSUPPORTED_VERSION,
+                    UNSUPPORTED_VERSION,
                     "CIDR-based ACL host patterns require metadata version 4.4-IV1 or higher.",
                 )),
             ),
@@ -427,7 +428,7 @@ mod tests {
                 "10.0.0.0/33",
                 true,
                 Some((
-                    crate::codes::INVALID_REQUEST,
+                    INVALID_REQUEST,
                     "Invalid CIDR notation '10.0.0.0/33': Value [33] not in range [0,32]",
                 )),
             ),
@@ -435,18 +436,12 @@ mod tests {
             (
                 "",
                 true,
-                Some((
-                    crate::codes::INVALID_REQUEST,
-                    "Host pattern cannot be null or empty",
-                )),
+                Some((INVALID_REQUEST, "Host pattern cannot be null or empty")),
             ),
             (
                 "",
                 false,
-                Some((
-                    crate::codes::INVALID_REQUEST,
-                    "Host pattern cannot be null or empty",
-                )),
+                Some((INVALID_REQUEST, "Host pattern cannot be null or empty")),
             ),
         ];
         for (host, cidr_hosts_supported, expected_err) in cases {

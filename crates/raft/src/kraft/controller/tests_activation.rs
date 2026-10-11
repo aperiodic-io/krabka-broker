@@ -19,8 +19,12 @@ use crate::{
         activation::{Activation, activation_records, check_bootstrap_records},
         checkpoint::write_checkpoint,
         records::metadata_record_batch,
-        test_support::{EngineSetup, await_leader, build_engine_only, voter_set},
+        test_support::{
+            ControllerOpenSetup, EngineSetup, await_leader, build_engine_only,
+            open_test_controller_with, voter_set,
+        },
     },
+    serialize_bootstrap_snapshot,
 };
 
 /// A `metadata.version` level below the latest production one, which an
@@ -323,14 +327,14 @@ fn bootstrap_metadata_without_a_metadata_version_is_refused() {
 async fn the_records_of_the_bootstrap_checkpoint_reach_the_image_through_the_log() {
     let dir = tempfile::tempdir().expect("tempdir");
     let voters = voter_set(&[NodeId(1)]);
-    let bytes = crate::serialize_bootstrap_snapshot(1, &voters, &bootstrap_records(), 0)
-        .expect("serialize");
+    let bytes =
+        serialize_bootstrap_snapshot(1, &voters, &bootstrap_records(), 0).expect("serialize");
     write_checkpoint(dir.path(), 0, 0, &bytes).expect("write the bootstrap checkpoint");
 
     // The election timeout is long, so only the injected timeout elects.
-    let ctrl = crate::kraft::controller::test_support::open_test_controller_with(
+    let ctrl = open_test_controller_with(
         dir.path().to_path_buf(),
-        crate::kraft::controller::test_support::ControllerOpenSetup {
+        ControllerOpenSetup {
             voters: voters.clone(),
             election_timeout: secs(60),
             activation: Activation {

@@ -4,7 +4,11 @@ use assert2::{assert, check};
 use krabka_metadata::{BrokerRegistrationRecord, MetadataError};
 
 use super::*;
-use crate::{config::NodeRole, coordinator::AUDIT_TOPIC, test_support::FakeMetadataSource};
+use crate::{
+    config::NodeRole,
+    coordinator::AUDIT_TOPIC,
+    test_support::{FakeMetadataSource, broker_registration},
+};
 
 // The isolated controller of the Kafka system tests that surfaced the defect.
 const CONTROLLER: NodeId = NodeId(3001);
@@ -25,7 +29,7 @@ fn registration(node_id: u64) -> MetadataRecord {
     MetadataRecord::V1BrokerRegistration(BrokerRegistrationRecord {
         fenced: true,
         incarnation_id: uuid::Uuid::from_u128(u128::from(node_id)),
-        ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+        ..broker_registration(krabka_raft::NodeId(node_id))
     })
 }
 

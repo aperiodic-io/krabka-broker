@@ -39,7 +39,10 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::handlers::produce::framing::{FramedPartition, PartitionPayload};
+    use crate::{
+        codes::UNKNOWN_TOPIC_ID,
+        handlers::produce::framing::{FramedPartition, PartitionPayload},
+    };
 
     #[test]
     fn build_topic_error_response_preserves_topic_and_partition_fields() {
@@ -62,7 +65,7 @@ mod tests {
             ],
         };
 
-        let resp = build_topic_error_response(&topic, crate::codes::UNKNOWN_TOPIC_ID);
+        let resp = build_topic_error_response(&topic, UNKNOWN_TOPIC_ID);
 
         let error_partition = |index: i32| {
             tagged_wire!(PartitionProduceResponse {

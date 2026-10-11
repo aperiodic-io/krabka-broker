@@ -2,14 +2,14 @@
 
 /// Authorize registration before refusing a node that is not the active controller.
 pub(super) fn registration_refusal(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     image: &krabka_metadata::MetadataImage,
     ctx: &super::RequestContext<'_>,
 ) -> Option<i16> {
     if super::cluster_action_denied(broker.config.authorizer.as_ref(), image, ctx) {
-        Some(crate::codes::CLUSTER_AUTHORIZATION_FAILED)
+        Some(CLUSTER_AUTHORIZATION_FAILED)
     } else if !super::forward_to_controller::is_active_controller(broker) {
-        Some(crate::codes::NOT_CONTROLLER)
+        Some(NOT_CONTROLLER)
     } else {
         None
     }
@@ -53,3 +53,8 @@ macro_rules! decode {
 }
 
 pub(super) use decode;
+
+use crate::{
+    broker::Broker,
+    codes::{CLUSTER_AUTHORIZATION_FAILED, NOT_CONTROLLER},
+};

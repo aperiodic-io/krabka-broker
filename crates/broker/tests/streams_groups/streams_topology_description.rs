@@ -23,8 +23,11 @@ use krabka_protocol::owned::{
     streams_group_topology_description_update_response::StreamsGroupTopologyDescriptionUpdateResponse,
 };
 
-use crate::streams_harness::{
-    connect, create_topic, finalize_streams_version, first_join, follow_up, topology,
+use crate::{
+    streams_harness::{
+        connect, create_topic, finalize_streams_version, first_join, follow_up, topology,
+    },
+    support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
 };
 
 /// The `[server_properties]` that the system-test adapter passes through.
@@ -158,10 +161,10 @@ async fn one_member_is_asked_and_its_push_is_described() {
     );
     for member in [&first, &second] {
         let again = client
-            .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            .send(follow_up(StreamsFollowUpSetup {
                 group: GROUP,
                 member_id: &member.member_id,
-                epoch: crate::support::streams::StreamsMemberEpoch(member.member_epoch),
+                epoch: StreamsMemberEpoch(member.member_epoch),
                 ..Default::default()
             }))
             .await
@@ -196,10 +199,10 @@ async fn a_deleted_and_recreated_group_is_asked_again() {
         .expect("StreamsGroupTopologyDescriptionUpdate");
     assert!(pushed.error_code == 0, "{pushed:?}");
     let left = client
-        .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+        .send(follow_up(StreamsFollowUpSetup {
             group: GROUP,
             member_id: &member.member_id,
-            epoch: crate::support::streams::StreamsMemberEpoch(-1),
+            epoch: StreamsMemberEpoch(-1),
             ..Default::default()
         }))
         .await

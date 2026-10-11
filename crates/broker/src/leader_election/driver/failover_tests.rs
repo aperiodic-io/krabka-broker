@@ -10,16 +10,19 @@ use super::*;
 use crate::{
     heartbeat::controller_state::{LivenessTransition, TestClock},
     leader_election::test_support::{
-        ElectionSetup, ExpectedPartitionSetup, fake_source, img_with_partition,
+        ElectionSetup, ExpectedPartitionSetup, expected_partition, fake_source, img_with_partition,
         liveness_with_alive, liveness_with_dead, one_partition_change, recovery_handle_for_tests,
         register_brokers, stalled_fake_source,
     },
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    unclean_recovery::UncleanRecoveryHandle,
 };
 
 struct SweepFixture {
     liveness: Arc<ControllerLivenessState>,
-    metrics: crate::metrics::BrokerMetrics,
-    recovery: crate::unclean_recovery::UncleanRecoveryHandle,
+    metrics: BrokerMetrics,
+    recovery: UncleanRecoveryHandle,
     state: LivenessTickState,
 }
 
@@ -27,13 +30,13 @@ impl SweepFixture {
     async fn new(dead: &[u64], alive: &[u64]) -> Self {
         Self {
             liveness: liveness_with_dead(dead, alive).await,
-            metrics: crate::metrics::BrokerMetrics::new(),
+            metrics: BrokerMetrics::new(),
             recovery: recovery_handle_for_tests(),
             state: LivenessTickState::default(),
         }
     }
 
-    async fn sweep(&mut self, controller: &Arc<dyn crate::metadata_source::MetadataSource>) {
+    async fn sweep(&mut self, controller: &Arc<dyn MetadataSource>) {
         sweep_dead_leaders(
             controller,
             NodeId(7),
@@ -52,7 +55,7 @@ async fn on_broker_dead_submits_failover_when_this_controller_is_leader() {
         ..Default::default()
     });
     let source = fake_source(img, Some(NodeId(7)));
-    let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
+    let controller: Arc<dyn MetadataSource> = source.clone();
     let liveness = liveness_with_alive(&[2, 3]).await;
     let recovery = recovery_handle_for_tests();
 
@@ -61,7 +64,7 @@ async fn on_broker_dead_submits_failover_when_this_controller_is_leader() {
         NodeId(7),
         NodeId(1),
         &liveness,
-        &crate::metrics::BrokerMetrics::new(),
+        &BrokerMetrics::new(),
         &recovery,
     )
     .await
@@ -80,7 +83,7 @@ async fn on_broker_dead_bounds_a_stalled_commit() {
         ..Default::default()
     });
     let source = stalled_fake_source(img, Some(NodeId(7)));
-    let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
+    let controller: Arc<dyn MetadataSource> = source.clone();
     let liveness = liveness_with_alive(&[2, 3]).await;
     let recovery = recovery_handle_for_tests();
 
@@ -91,7 +94,7 @@ async fn on_broker_dead_bounds_a_stalled_commit() {
         NodeId(7),
         NodeId(1),
         &liveness,
-        &crate::metrics::BrokerMetrics::new(),
+        &BrokerMetrics::new(),
         &recovery,
     )
     .await;
@@ -109,13 +112,13 @@ async fn sweep_resolves_death_edge_that_found_no_alive_isr_member() {
         ..Default::default()
     });
     let source = fake_source(img, Some(NodeId(7)));
-    let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
+    let controller: Arc<dyn MetadataSource> = source.clone();
     let clock = TestClock::new();
     let liveness = Arc::new(ControllerLivenessState::with_test_clock(
         std::time::Duration::from_millis(10),
         &clock,
     ));
-    let metrics = crate::metrics::BrokerMetrics::new();
+    let metrics = BrokerMetrics::new();
     let recovery = recovery_handle_for_tests();
     let mut state = LivenessTickState::default();
 
@@ -169,11 +172,10 @@ async fn sweep_resolves_death_edge_that_found_no_alive_isr_member() {
     .await;
     let batches = source.submitted();
     assert!(batches.len() == 1);
-    let expected =
-        crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
-            isr: &[krabka_raft::NodeId(2)],
-            ..Default::default()
-        });
+    let expected = expected_partition(ExpectedPartitionSetup {
+        isr: &[krabka_raft::NodeId(2)],
+        ..Default::default()
+    });
     assert!(*one_partition_change(&batches[0]) == expected);
 }
 
@@ -190,7 +192,7 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
         alive: &'static [u64],
         expected: Option<PartitionRecord>,
     }
-    let base = crate::leader_election::test_support::expected_partition(ExpectedPartitionSetup {
+    let base = expected_partition(ExpectedPartitionSetup {
         leader: krabka_raft::NodeId(1),
         isr: &[],
         leader_epoch: LeaderEpoch(5),
@@ -261,7 +263,7 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
             ..Default::default()
         });
         let source = fake_source(img, case.controller_leader);
-        let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
+        let controller: Arc<dyn MetadataSource> = source.clone();
         let mut fixture = SweepFixture::new(case.dead, case.alive).await;
         fixture.sweep(&controller).await;
 
@@ -289,7 +291,7 @@ async fn sweep_walks_the_image_once_per_change_while_a_dead_broker_stays_resolve
     });
     register_brokers(&mut img, &[1, 2, 3]);
     let source = fake_source(img, Some(NodeId(7)));
-    let controller: Arc<dyn crate::metadata_source::MetadataSource> = source.clone();
+    let controller: Arc<dyn MetadataSource> = source.clone();
     let mut fixture = SweepFixture::new(&[1], &[2, 3]).await;
     fixture.sweep(&controller).await;
     let memo = fixture

@@ -50,6 +50,13 @@ use krabka_verified::delegation_token::{TokenApi, TokenApiAdmission};
 
 use crate::{
     authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+    codes::{
+        DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_AUTHORIZATION_FAILED,
+        DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_PRINCIPAL_TYPE, INVALID_REQUEST,
+        UNKNOWN_SERVER_ERROR, UNSUPPORTED_VERSION,
+    },
+    features::{METADATA_VERSION, require_feature},
+    metadata_source::MetadataSource,
     network::auth::ConnectionAuth,
     time_util::now_ms,
 };
@@ -105,7 +112,7 @@ pub(crate) async fn handle(
     secret_key: Option<&SecretBytes>,
     max_lifetime_ms: DurationMs,
     default_renew_period_ms: DurationMs,
-    controller: &dyn crate::metadata_source::MetadataSource,
+    controller: &dyn MetadataSource,
     acl: TokenAcl<'_>,
 ) -> CreateDelegationTokenResponse {
     let requester = auth
@@ -116,15 +123,11 @@ pub(crate) async fn handle(
     // ANONYMOUS as both principals.
     let Some(owner) = resolve_owner(req, &requester) else {
         let anonymous = anonymous_principal();
-        return broker_refusal(crate::codes::UNKNOWN_SERVER_ERROR, &anonymous, &anonymous);
+        return broker_refusal(UNKNOWN_SERVER_ERROR, &anonymous, &anonymous);
     };
 
     if auth.token_api_admission(TokenApi::Create) == TokenApiAdmission::Reject {
-        return broker_refusal(
-            crate::codes::DELEGATION_TOKEN_REQUEST_NOT_ALLOWED,
-            &owner,
-            &requester,
-        );
+        return broker_refusal(DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, &owner, &requester);
     }
     let image = controller.current_image();
     let authorize_create_tokens = |resource_name: &str| {
@@ -142,36 +145,28 @@ pub(crate) async fn handle(
         })
     };
     if !may_create_for(&owner, &requester, authorize_create_tokens) {
-        return broker_refusal(
-            crate::codes::DELEGATION_TOKEN_AUTHORIZATION_FAILED,
-            &owner,
-            &requester,
-        );
+        return broker_refusal(DELEGATION_TOKEN_AUTHORIZATION_FAILED, &owner, &requester);
     }
     if req
         .renewers
         .iter()
         .any(|renewer| renewer.principal_type != USER_PRINCIPAL_TYPE)
     {
-        return broker_refusal(crate::codes::INVALID_PRINCIPAL_TYPE, &owner, &requester);
+        return broker_refusal(INVALID_PRINCIPAL_TYPE, &owner, &requester);
     }
 
     let Some(secret_key) = secret_key else {
-        return controller_refusal(
-            crate::codes::DELEGATION_TOKEN_AUTH_DISABLED,
-            &owner,
-            &requester,
-        );
+        return controller_refusal(DELEGATION_TOKEN_AUTH_DISABLED, &owner, &requester);
     };
     // KIP-48/KIP-778: KRaft delegation tokens require metadata.version >= 3.6-IV2.
-    if crate::features::require_feature(
+    if require_feature(
         &image,
-        crate::features::METADATA_VERSION,
+        METADATA_VERSION,
         krabka_metadata::metadata_version::DELEGATION_TOKEN_MIN_LEVEL,
     )
     .is_err()
     {
-        return controller_refusal(crate::codes::UNSUPPORTED_VERSION, &owner, &requester);
+        return controller_refusal(UNSUPPORTED_VERSION, &owner, &requester);
     }
 
     let now = now_ms();
@@ -183,7 +178,7 @@ pub(crate) async fn handle(
     ) {
         TokenCreateDecision::Create(deadlines) => deadlines,
         TokenCreateDecision::Invalid => {
-            return controller_refusal(crate::codes::INVALID_REQUEST, &owner, &requester);
+            return controller_refusal(INVALID_REQUEST, &owner, &requester);
         }
     };
     let token_id = uuid::Uuid::new_v4().to_string();
@@ -213,7 +208,7 @@ pub(crate) async fn handle(
         .await
     {
         tracing::warn!(error = %e, "CreateDelegationToken: submit_change failed");
-        return controller_refusal(crate::codes::INVALID_REQUEST, &owner, &requester);
+        return controller_refusal(INVALID_REQUEST, &owner, &requester);
     }
 
     minted_response(&owner, &requester, now, &deadlines, token_id, hmac)

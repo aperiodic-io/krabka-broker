@@ -12,11 +12,16 @@ use bytes::Bytes;
 use krabka_metadata::MetadataImage;
 use krabka_protocol::{Decode, Encode};
 
-use crate::{broker::Broker, error::BrokerError, handlers::RequestContext};
+use crate::{
+    authorizer::Authorizer,
+    broker::Broker,
+    codes::CLUSTER_AUTHORIZATION_FAILED,
+    error::BrokerError,
+    handlers::{ErrorResponse, RequestContext, decode_request, encode_response},
+};
 
 /// A cluster ACL gate: `true` when the authorizer denies `ctx`'s principal.
-pub(super) type ClusterGate =
-    fn(&dyn crate::authorizer::Authorizer, &MetadataImage, &RequestContext<'_>) -> bool;
+pub(super) type ClusterGate = fn(&dyn Authorizer, &MetadataImage, &RequestContext<'_>) -> bool;
 
 /// The encoded, contextual entry point of each KIP-853 voter operation.
 macro_rules! handler {
@@ -142,13 +147,13 @@ pub(super) struct Refusals<R> {
     pub(super) not_leader: R,
 }
 
-impl<R: crate::handlers::ErrorResponse> Refusals<R> {
+impl<R: ErrorResponse> Refusals<R> {
     /// The add/remove leader-only refusals keep the caller's nullable messages.
     /// Kafka sets only the error code on a failed leader check, so those callers
     /// explicitly pass the generated empty-string default rather than null.
     pub(super) fn messages(denied: Option<String>, not_leader: Option<String>) -> Self {
         Self {
-            denied: R::error(crate::codes::CLUSTER_AUTHORIZATION_FAILED, denied),
+            denied: R::error(CLUSTER_AUTHORIZATION_FAILED, denied),
             not_leader: R::error(
                 krabka_raft::voter_requests::NOT_LEADER_OR_FOLLOWER,
                 not_leader,
@@ -176,12 +181,12 @@ pub(super) async fn prelude<Req: for<'a> Decode<'a>, Resp: Encode>(
     gate: ClusterGate,
     refusals: Refusals<Resp>,
 ) -> Result<ControlFlow<Bytes, Admitted<Req>>, BrokerError> {
-    let req = crate::handlers::decode_request::<Req>(req_bytes, version)?;
+    let req = decode_request::<Req>(req_bytes, version)?;
 
     let image = broker.controller.current_image();
 
     if gate(broker.config.authorizer.as_ref(), &image, ctx) {
-        return crate::handlers::encode_response(&refusals.denied, version).map(ControlFlow::Break);
+        return encode_response(&refusals.denied, version).map(ControlFlow::Break);
     }
 
     // Broker-only observer forward to the active controller quorum (#392)
@@ -196,8 +201,7 @@ pub(super) async fn prelude<Req: for<'a> Decode<'a>, Resp: Encode>(
     // The request checks, their order and their codes are the controller
     // listener's own (`krabka_raft::voter_requests`).
     let Some(quorum) = broker.controller.quorum_snapshot() else {
-        return crate::handlers::encode_response(&refusals.not_leader, version)
-            .map(ControlFlow::Break);
+        return encode_response(&refusals.not_leader, version).map(ControlFlow::Break);
     };
     Ok(ControlFlow::Continue(Admitted { req, image, quorum }))
 }
@@ -207,10 +211,10 @@ pub(super) async fn prelude<Req: for<'a> Decode<'a>, Resp: Encode>(
 /// # Errors
 ///
 /// Returns [`BrokerError`] when the response does not encode.
-pub(super) fn respond<R: crate::handlers::ErrorResponse + Encode>(
+pub(super) fn respond<R: ErrorResponse + Encode>(
     version: i16,
     error_code: i16,
     error_message: Option<String>,
 ) -> Result<Bytes, BrokerError> {
-    crate::handlers::encode_response(&R::error(error_code, error_message), version)
+    encode_response(&R::error(error_code, error_message), version)
 }

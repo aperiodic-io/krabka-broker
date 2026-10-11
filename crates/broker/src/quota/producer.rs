@@ -43,7 +43,7 @@ mod tests {
     use krabka_units::{Time, convert::TimeExt, millis, secs};
 
     use super::consume_producer_quota;
-    use crate::quota::QuotaBuckets;
+    use crate::quota::{QuotaBuckets, test_support::check_fractional_bandwidth};
 
     crate::quota::test_support::image_builder!(img_with_quota, "producer_byte_rate");
 
@@ -138,11 +138,8 @@ mod tests {
         // `(producer_byte_rate, request bytes, expected throttle)`. The
         // one-second window gives the bucket a burst of exactly its rate, and
         // the throttle is the shortfall over the rate.
-        crate::quota::test_support::check_fractional_bandwidth(
-            "producer_byte_rate",
-            |image, buckets, bytes| {
-                consume_producer_quota(image, buckets, "alice", Some("app"), bytes).delay
-            },
-        );
+        check_fractional_bandwidth("producer_byte_rate", |image, buckets, bytes| {
+            consume_producer_quota(image, buckets, "alice", Some("app"), bytes).delay
+        });
     }
 }

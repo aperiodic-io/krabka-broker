@@ -7,8 +7,8 @@
 use assert2::assert;
 
 use crate::support::{
-    fetch::fetch_request_for,
-    topics::{creatable_topic, create_topic_request},
+    fetch::{FetchLimits, RequestWaitMillis, fetch_request_for},
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
 mod support;
 
@@ -30,7 +30,7 @@ async fn fetch_unresolved_topic_id_returns_unknown_topic_id() {
     let p = support::start().await;
     p.client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("f_known").into(),
                 ..Default::default()
             },
@@ -63,9 +63,7 @@ async fn fetch_unresolved_topic_id_returns_unknown_topic_id() {
                     partitions: vec![partition(0), partition(1)],
                     ..Default::default()
                 }],
-                crate::support::fetch::FetchLimits::wait_for_data(
-                    crate::support::fetch::RequestWaitMillis(100),
-                ),
+                FetchLimits::wait_for_data(RequestWaitMillis(100)),
             ))
             .await
             .expect("fetch");

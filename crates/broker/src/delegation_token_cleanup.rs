@@ -21,7 +21,7 @@ use krabka_units::{Time, convert::TimeExt as _};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::task_util::run_every;
+use crate::{task_util::run_every, time_util::now_ms};
 
 /// Minimal controller surface for the sweep. [`crate::broker`] adapts the
 /// real [`krabka_raft::ControllerHandle`]. Tests inject a mock.
@@ -44,7 +44,7 @@ pub(crate) async fn run(
 }
 
 pub(crate) async fn sweep(controller: &dyn DelegationTokenController) {
-    let now = crate::time_util::now_ms();
+    let now = now_ms();
     let expired: Vec<DelegationTokenRecord> = controller
         .current_image()
         .all_delegation_tokens()

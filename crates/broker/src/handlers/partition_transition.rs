@@ -3,8 +3,15 @@
 use krabka_metadata::{BreakGlassAction, MetadataImage, MetadataRecord};
 
 use crate::{
-    break_glass::gate::{self, BreakGlassDenial},
+    break_glass::{
+        gate::{self, BreakGlassDenial},
+        handlers::audit::{GatedTransition, audit_transition},
+        metrics::record_refusal,
+    },
+    broker::Broker,
     config::BreakGlassConfig,
+    handlers::RequestContext,
+    time_util::now_ms,
 };
 
 pub(super) fn partition_target(topic: &str, partition: i32) -> String {
@@ -26,7 +33,7 @@ pub(super) fn authorize_partition(
         config,
         action,
         &partition_target(topic, partition),
-        crate::time_util::now_ms(),
+        now_ms(),
     )
     .map(Some)
 }
@@ -49,19 +56,19 @@ pub(super) use authorizer;
 
 /// Count a refusal before resolving its target and emitting the audit event.
 pub(super) fn audit_refusal<T: AsRef<str>>(
-    broker: &crate::broker::Broker,
-    context: &crate::handlers::RequestContext<'_>,
+    broker: &Broker,
+    context: &RequestContext<'_>,
     action: BreakGlassAction,
     target: impl FnOnce() -> T,
     denial: &BreakGlassDenial,
     reason: &str,
 ) {
-    crate::break_glass::metrics::record_refusal(&broker.metrics, denial.action);
-    crate::break_glass::handlers::audit::audit_transition(
+    record_refusal(&broker.metrics, denial.action);
+    audit_transition(
         &broker.audit_log,
         &broker.config.break_glass,
         context,
-        &crate::break_glass::handlers::audit::GatedTransition {
+        &GatedTransition {
             action,
             target: target().as_ref(),
             phase: krabka_audit::PrivilegedPhase::Refused,

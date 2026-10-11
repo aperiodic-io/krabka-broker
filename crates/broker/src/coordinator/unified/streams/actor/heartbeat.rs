@@ -31,11 +31,12 @@ use crate::{
         offsets_log::OffsetsLog,
         streams::{
             config::StreamsGroupConfig,
-            persistence::{PendingStreamsRecords, StreamsGroupTopologyValue},
-            state::{OwnedTasks, RoleTasks, StoredTopologyHandle},
+            persistence::{PendingStreamsRecords, StoredSubtopology, StreamsGroupTopologyValue},
+            state::{OwnedTasks, RoleTasks, StoredTopologyHandle, StreamsMemberState},
             topology,
         },
     },
+    error::BrokerError,
     metadata_source::MetadataSource,
 };
 
@@ -48,7 +49,7 @@ pub(super) async fn handle_session_tick(
     config: &StreamsGroupConfig,
     offsets_log: &dyn OffsetsLog,
     coordinator: &GroupCoordinator,
-) -> Result<(), crate::error::BrokerError> {
+) -> Result<(), BrokerError> {
     let now = Instant::now();
     let mut fenced = actor.state.expired_members(now, config.session_timeout);
     // A member that did not revoke its tasks within its rebalance timeout is
@@ -85,7 +86,7 @@ pub(super) async fn handle_heartbeat(
     coordinator: &GroupCoordinator,
     req: &StreamsGroupHeartbeatRequest,
     client: ClientIdentity<'_>,
-) -> Result<StreamsGroupHeartbeatResponse, crate::error::BrokerError> {
+) -> Result<StreamsGroupHeartbeatResponse, BrokerError> {
     let ClientIdentity {
         id: client_id,
         host: client_host,
@@ -288,7 +289,7 @@ struct MemberBefore {
 }
 
 impl MemberBefore {
-    fn of(member: &crate::coordinator::unified::streams::state::StreamsMemberState) -> Self {
+    fn of(member: &StreamsMemberState) -> Self {
         Self {
             user_endpoint: member.user_endpoint.clone(),
         }
@@ -464,9 +465,7 @@ fn same_topology(a: &StreamsGroupTopologyValue, b: &StreamsGroupTopologyValue) -
     a.epoch == b.epoch && subtopologies_by_id(a) == subtopologies_by_id(b)
 }
 
-fn subtopologies_by_id(
-    topology: &StreamsGroupTopologyValue,
-) -> BTreeMap<&str, &crate::coordinator::unified::streams::persistence::StoredSubtopology> {
+fn subtopologies_by_id(topology: &StreamsGroupTopologyValue) -> BTreeMap<&str, &StoredSubtopology> {
     topology
         .subtopologies
         .iter()
@@ -530,7 +529,7 @@ fn update_member_steady_state(
         }
         changed = true;
     }
-    let epoch_relevant = |m: &crate::coordinator::unified::streams::state::StreamsMemberState| {
+    let epoch_relevant = |m: &StreamsMemberState| {
         (
             m.topology_epoch,
             m.rack_id.clone(),
@@ -578,9 +577,7 @@ type MetadataFields = (
 );
 
 /// The fields whose replacement changes this member's durable metadata.
-fn metadata_fields(
-    m: &crate::coordinator::unified::streams::state::StreamsMemberState,
-) -> MetadataFields {
+fn metadata_fields(m: &StreamsMemberState) -> MetadataFields {
     (
         m.instance_id.clone(),
         m.rack_id.clone(),
@@ -597,10 +594,7 @@ fn metadata_fields(
 /// request carries replaces the stored value, and an absent field (or a
 /// rebalance timeout of -1) keeps it. A rejoin at epoch 0 sets the user
 /// endpoint also when the request has none. Returns `true` if a field changed.
-fn update_member_metadata(
-    m: &mut crate::coordinator::unified::streams::state::StreamsMemberState,
-    req: &StreamsGroupHeartbeatRequest,
-) -> bool {
+fn update_member_metadata(m: &mut StreamsMemberState, req: &StreamsGroupHeartbeatRequest) -> bool {
     let before = metadata_fields(m);
     if req.instance_id.is_some() {
         m.instance_id.clone_from(&req.instance_id);
@@ -635,7 +629,7 @@ async fn handle_leave(
     coordinator: &GroupCoordinator,
     req: &StreamsGroupHeartbeatRequest,
     now_ms: i64,
-) -> Result<StreamsGroupHeartbeatResponse, crate::error::BrokerError> {
+) -> Result<StreamsGroupHeartbeatResponse, BrokerError> {
     // Kafka's `streamsGroupLeave` records the shutdown request before it looks
     // the member up: an unknown member gets `UNKNOWN_MEMBER_ID`, and nothing
     // is written.
@@ -784,7 +778,7 @@ async fn leave_static_member(
     coordinator: &GroupCoordinator,
     req: &StreamsGroupHeartbeatRequest,
     now_ms: i64,
-) -> Result<StreamsGroupHeartbeatResponse, crate::error::BrokerError> {
+) -> Result<StreamsGroupHeartbeatResponse, BrokerError> {
     let recorder = StreamsRecorder::start(actor, &[req.member_id.as_str()]);
     if let Some(member) = actor.state.members.get_mut(&req.member_id) {
         member.member_epoch = LEAVE_GROUP_STATIC_MEMBER_EPOCH;

@@ -6,10 +6,15 @@ use assert2::{assert, check};
 use crate::support::{
     client::connect_client,
     discovery::{api_versions_request_for, topic_metadata_request},
-    fetch::single_partition_fetch,
+    fetch::{
+        FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
+        single_partition_fetch,
+    },
     offsets::{list_offset_partition, single_partition_list_offsets},
+    produce::{ProduceAcknowledgements, SinglePartitionProduceSetup, batch_request},
     records::value_record,
-    topics::{creatable_topic, create_topic_request},
+    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
+    wire::write_frame,
 };
 mod support;
 
@@ -79,7 +84,7 @@ async fn list_offsets_by_timestamp_local() {
 
     p.client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("by_ts").into(),
                 ..Default::default()
             },
@@ -90,9 +95,9 @@ async fn list_offsets_by_timestamp_local() {
 
     // Offsets 0..=2 with timestamps 100, 200, 300.
     p.client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             timestamped_batch(&[("a", 100), ("b", 200), ("c", 300)]),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("by_ts").into(),
                 topic_id,
                 ..Default::default()
@@ -146,7 +151,7 @@ async fn end_to_end_create_produce_fetch_delete() {
     let cr = p
         .client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("e2e").into(),
                 ..Default::default()
             },
@@ -163,9 +168,9 @@ async fn end_to_end_create_produce_fetch_delete() {
     // 4. Produce 3 records.
     let pr = p
         .client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             record_batch_with_values(&["a", "b", "c"]),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("e2e").into(),
                 topic_id,
                 ..Default::default()
@@ -197,19 +202,15 @@ async fn end_to_end_create_produce_fetch_delete() {
     // 6. Fetch and confirm 3 records are returned.
     let fr = p
         .client
-        .send(single_partition_fetch(
-            crate::support::fetch::SinglePartitionFetchSetup {
-                topic: "e2e".into(),
-                topic_id,
-                limits: crate::support::fetch::FetchLimits::one_mebibyte(
-                    crate::support::fetch::RequestWaitMillis(100),
-                ),
-                ..Default::default()
-            },
-        ))
+        .send(single_partition_fetch(SinglePartitionFetchSetup {
+            topic: "e2e".into(),
+            topic_id,
+            limits: FetchLimits::one_mebibyte(RequestWaitMillis(100)),
+            ..Default::default()
+        }))
         .await
         .unwrap();
-    crate::support::fetch::check_record_count(&fr.responses[0].partitions[0], 3);
+    check_record_count(&fr.responses[0].partitions[0], 3);
 
     p.broker.shutdown().await;
 }
@@ -220,7 +221,7 @@ async fn produce_acks_zero_sends_no_frame_and_keeps_connection_usable() {
     let create = p
         .client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("one-way-produce").into(),
                 ..Default::default()
             },
@@ -232,11 +233,11 @@ async fn produce_acks_zero_sends_no_frame_and_keeps_connection_usable() {
     let mut stream = tokio::net::TcpStream::connect(p.broker.listen_addr())
         .await
         .expect("connect raw client");
-    let produce = crate::support::produce::batch_request(
+    let produce = batch_request(
         record_batch_with_values(&["value"]),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("one-way-produce").into(),
-            acknowledgements: crate::support::produce::ProduceAcknowledgements::NoResponse,
+            acknowledgements: ProduceAcknowledgements::NoResponse,
             ..Default::default()
         },
     );
@@ -251,9 +252,7 @@ async fn produce_acks_zero_sends_no_frame_and_keeps_connection_usable() {
     frame.put_slice(client_id);
     frame.put_u8(0);
     frame.put_slice(&body);
-    crate::support::wire::write_frame(&mut stream, &frame, None)
-        .await
-        .unwrap();
+    write_frame(&mut stream, &frame, None).await.unwrap();
 
     let unexpected_response =
         tokio::time::timeout(Duration::from_millis(150), stream.readable()).await;
@@ -274,7 +273,7 @@ async fn produce_acks_zero_sends_no_frame_and_keeps_connection_usable() {
     metadata_frame.put_slice(client_id);
     metadata_frame.put_u8(0);
     metadata_frame.put_slice(&metadata_body);
-    crate::support::wire::write_frame(&mut stream, &metadata_frame, None)
+    write_frame(&mut stream, &metadata_frame, None)
         .await
         .unwrap();
 
@@ -309,9 +308,9 @@ async fn second_open_recovers_partitions_from_disk() {
         let client = connect_client(&bootstrap, Some("recovery-test")).await;
         let cr = client
             .send(create_topic_request(creatable_topic(
-                crate::support::topics::ConfiguredTopicSetup {
+                ConfiguredTopicSetup {
                     name: ("persisted").into(),
-                    partitions: crate::support::topics::TopicPartitionCount(2),
+                    partitions: TopicPartitionCount(2),
                     ..Default::default()
                 },
             )))

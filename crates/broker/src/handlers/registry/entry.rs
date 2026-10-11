@@ -9,7 +9,10 @@
 use krabka_protocol::api_key::ApiKey;
 
 use super::{AuthHandler, ContextHandler, ProduceHandler, TelemetryHandler};
-use crate::handlers::{ApiKeyCode, ApiVersion};
+use crate::{
+    api_catalog::dispatched_apis,
+    handlers::{ApiKeyCode, ApiVersion},
+};
 
 /// How the KIP-124 request quota reaches an api.
 ///
@@ -189,7 +192,7 @@ impl DispatchRegistry {
     }
 
     pub(crate) fn apply_api_catalog(&mut self) {
-        for api in crate::api_catalog::dispatched_apis() {
+        for api in dispatched_apis() {
             let entry = self
                 .table
                 .get_mut(&api.api_key)

@@ -23,7 +23,10 @@ use crate::{
         persister_client::SharePersister,
     },
     share_partition::dlq::{DlqSink, test_support::RecordingDlq},
-    test_support::FakeMetadataSource,
+    test_support::{
+        FakeMetadataSource, StandalonePartitionSetup, UnixMillis, open_partition,
+        static_records_batch,
+    },
 };
 
 pub(crate) const LOCK: Duration = Duration::from_secs(30);
@@ -155,7 +158,7 @@ fn build(
 /// One timestamped batch of data records.
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(crate) struct TimedValues<'a> {
-    pub timestamp: crate::test_support::UnixMillis,
+    pub timestamp: UnixMillis,
     #[default(&[b"v"])]
     pub values: &'a [&'static [u8]],
 }
@@ -181,9 +184,9 @@ pub(crate) async fn open_data_partition(
         batches,
         high_watermark,
     } = setup;
-    let part = crate::test_support::open_partition(
+    let part = open_partition(
         log_dir,
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic,
             partition,
             ..Default::default()
@@ -193,7 +196,7 @@ pub(crate) async fn open_data_partition(
         let mut batch = RecordBatch {
             partition_leader_epoch: 0,
             last_offset_delta: i32::try_from(values.len() - 1).expect("record count fits"),
-            ..crate::test_support::static_records_batch(values, timestamp)
+            ..static_records_batch(values, timestamp)
         };
         part.log
             .lock()

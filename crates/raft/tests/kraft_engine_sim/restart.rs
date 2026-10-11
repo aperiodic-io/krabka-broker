@@ -1,11 +1,9 @@
 //! Restart recovery: a follower that snapshots, dies, and is reopened over its
 //! own data dir rebuilds its metadata image from the checkpoint plus the log.
 
-use crate::{
-    harness as fixture,
-    harness::{
-        STAGGERED_TIMEOUTS, await_single_leader, await_until, metadata_log, topic_record, voter_set,
-    },
+use crate::harness::{
+    self as fixture, STAGGERED_TIMEOUTS, await_single_leader, await_until, metadata_log,
+    shutdown_nodes, start_cluster, three_voter_network, topic_record, voter_set,
 };
 
 /// 4. Restart recovery: commit, snapshot, drop one engine, reopen it over its
@@ -13,22 +11,11 @@ use crate::{
 ///    log.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn restart_recovers_image() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(400);
 
     // Keep per-node data dirs so we can reopen one.
-    let dirs: fixture::HashMap<_, _> = ids
-        .iter()
-        .copied()
-        .zip(crate::harness::start_engines(
-            &net,
-            crate::harness::SimClusterSetup {
-                ids: &ids,
-                cluster_id: cid,
-                ..Default::default()
-            },
-        ))
-        .collect();
+    let dirs = start_cluster(&net, &ids, cid);
 
     let (leader, _epoch) = await_single_leader(&net, &ids, fixture::Duration::from_secs(10)).await;
 
@@ -89,5 +76,5 @@ async fn restart_recovers_image() {
     assert2::assert!(reopened.current_image().topic("persistent").is_some());
     net.register(victim, reopened);
 
-    crate::harness::shutdown_nodes(&net, &ids).await;
+    shutdown_nodes(&net, &ids).await;
 }

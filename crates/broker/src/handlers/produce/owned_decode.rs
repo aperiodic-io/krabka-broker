@@ -7,7 +7,7 @@ use std::sync::Arc;
 use krabka_compression::RecordDecompressionPolicy;
 use krabka_protocol::records::{RecordBatch, RecordsPayload};
 
-use crate::codes;
+use crate::{codes, metrics::BrokerMetrics};
 
 /// Decode or up-convert a legacy or pre-decoded `RecordsPayload` into one
 /// owned record batch.
@@ -18,7 +18,7 @@ use crate::codes;
 pub(super) fn decode_owned_batch(
     payload: RecordsPayload,
     topic_name: &Arc<str>,
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
     policy: RecordDecompressionPolicy,
 ) -> Result<RecordBatch, i16> {
     krabka_macros::records_payload_match! { match payload {
@@ -38,7 +38,7 @@ pub(super) fn decode_owned_batch(
 fn decode_legacy_batch(
     bytes: &bytes::Bytes,
     topic_name: &Arc<str>,
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
     policy: RecordDecompressionPolicy,
 ) -> Result<RecordBatch, i16> {
     match krabka_records_legacy::legacy_to_v2_with_policy(bytes, policy) {
@@ -81,9 +81,13 @@ mod tests {
     use krabka_protocol::records::Record;
 
     use super::*;
-    use crate::handlers::produce::{
-        framing::PartitionPayload,
-        prepare::{DecodeEnv, PreparedSource, prepare_batch},
+    use crate::{
+        handlers::produce::{
+            framing::PartitionPayload,
+            hot_path::TimestampPolicy,
+            prepare::{DecodeEnv, PreparedSource, prepare_batch},
+        },
+        metrics::BrokerMetrics,
     };
 
     #[test]
@@ -109,7 +113,7 @@ mod tests {
         let decoded = decode_owned_batch(
             RecordsPayload::V2(vec![batch]),
             &Arc::from("orders"),
-            &crate::metrics::BrokerMetrics::new(),
+            &BrokerMetrics::new(),
             RecordDecompressionPolicy::default(),
         )
         .expect("decode owned batch");
@@ -129,7 +133,7 @@ mod tests {
         let err = decode_owned_batch(
             RecordsPayload::V2(Vec::new()),
             &Arc::from("orders"),
-            &crate::metrics::BrokerMetrics::new(),
+            &BrokerMetrics::new(),
             RecordDecompressionPolicy::default(),
         )
         .unwrap_err();
@@ -162,11 +166,11 @@ mod tests {
         let prepared = prepare_batch(
             PartitionPayload::Owned(RecordsPayload::Legacy(legacy.freeze())),
             None,
-            crate::handlers::produce::hot_path::TimestampPolicy::default(),
+            TimestampPolicy::default(),
             false,
             DecodeEnv {
                 topic_name: &Arc::from("orders"),
-                metrics: &crate::metrics::BrokerMetrics::new(),
+                metrics: &BrokerMetrics::new(),
                 policy: RecordDecompressionPolicy::default(),
             },
             13,

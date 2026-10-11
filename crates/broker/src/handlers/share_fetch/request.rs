@@ -10,8 +10,12 @@ use krabka_metadata::MetadataImage;
 use krabka_protocol::owned::share_fetch_request::{FetchPartition, ShareFetchRequest};
 
 use crate::{
-    broker::Broker, codes, coordinator::unified::share::config::ShareGroupConfig,
-    handlers::RequestContext, share_partition::group_settings::GroupShareSettings,
+    broker::Broker,
+    codes,
+    coordinator::unified::share::config::ShareGroupConfig,
+    features::share_groups_enabled,
+    handlers::{RequestContext, group_read_denied},
+    share_partition::group_settings::GroupShareSettings,
 };
 
 /// The authorized member and resolved group settings shared by fetch and ack.
@@ -32,11 +36,11 @@ pub(crate) fn resolve_share_identity(
     group_id: Option<&String>,
     member_id: Option<&String>,
 ) -> Result<ShareRequestIdentity, i16> {
-    if !crate::features::share_groups_enabled(image) {
+    if !share_groups_enabled(image) {
         return Err(codes::UNSUPPORTED_VERSION);
     }
     let group = group_id.cloned().ok_or(codes::INVALID_REQUEST)?;
-    if crate::handlers::group_read_denied(broker.config.authorizer.as_ref(), image, ctx, &group) {
+    if group_read_denied(broker.config.authorizer.as_ref(), image, ctx, &group) {
         return Err(codes::GROUP_AUTHORIZATION_FAILED);
     }
     let settings = GroupShareSettings::resolve(image, &group, defaults);

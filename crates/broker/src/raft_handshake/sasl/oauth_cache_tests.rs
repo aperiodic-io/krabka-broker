@@ -17,9 +17,12 @@ use tokio::{
 };
 
 use super::*;
-use crate::raft_handshake::test_support::{
-    HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
-    RequestFrameSetup, read_response_frame, request_frame, sasl_test_config,
+use crate::{
+    raft_handshake::test_support::{
+        HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
+        RequestFrameSetup, read_response_frame, request_frame, sasl_test_config,
+    },
+    time_util::now_ms,
 };
 
 struct NoApiVersions;
@@ -42,7 +45,7 @@ fn signed_token() -> (OAuthBearerValidator, String) {
     let mut validator = SignedJwsValidator::new(handle);
     validator.cache_expiry = Some(krabka_units::millis(60_000));
     let header = B64.encode(br#"{"alg":"ES256","kid":"controller"}"#);
-    let expiry = crate::time_util::now_ms() / 1000 + 3600;
+    let expiry = now_ms() / 1000 + 3600;
     let payload =
         B64.encode(serde_json::json!({"sub": "controller-peer", "exp": expiry}).to_string());
     let input = format!("{header}.{payload}");
@@ -111,16 +114,16 @@ async fn controller_signed_oauth_requires_a_fresh_published_cache() {
     let (validator, token) = signed_token();
     // Positive crypto control: rejection below cannot be attributed to a bad token.
     let expected_expiry = validator
-        .validate(&token, crate::time_util::now_ms())
+        .validate(&token, now_ms())
         .await
         .unwrap()
         .expires_at_ms;
     assert!(expected_expiry.is_some());
     for (generation, fetched, admitted) in [
-        (2, crate::time_util::now_ms(), true),
-        (2, 1, false),                          // installed keys with a stale timestamp
-        (0, 0, false), // installed keys with no successful-fetch publication
-        (3, crate::time_util::now_ms(), false), // in-flight writer
+        (2, now_ms(), true),
+        (2, 1, false),        // installed keys with a stale timestamp
+        (0, 0, false),        // installed keys with no successful-fetch publication
+        (3, now_ms(), false), // in-flight writer
     ] {
         let mut cfg = sasl_test_config();
         cfg.enabled_sasl_mechanisms = vec![SaslMechanism::OAuthBearer];

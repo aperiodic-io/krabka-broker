@@ -24,9 +24,11 @@ use krabka_raft::NodeId;
 
 use super::*;
 use crate::{
-    codes,
+    BrokerHandle, codes,
     isr_maintenance::test_support::{fake_source, reg_at, topic},
     metadata_source::MetadataSource,
+    network::{client::InterBrokerClient, request::parse_request},
+    test_support::start_controller as start_test_support_controller,
 };
 
 /// The node that leads the metadata quorum. As node 3001 of the Kafka system
@@ -39,7 +41,7 @@ const TOPIC_ID: uuid::Uuid = uuid::Uuid::from_u128(0x000A_11CE);
 
 fn plaintext_dialer(quorum_voters: Vec<(NodeId, String)>) -> ControllerDialer {
     ControllerDialer {
-        outbound_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
+        outbound_client: Arc::new(InterBrokerClient::new(None, None)),
         listener_protocol: krabka_security::ListenerProtocol::Plaintext,
         server_name: "localhost".to_owned(),
         quorum_voters,
@@ -194,7 +196,7 @@ impl ScriptedListener {
             frame.put_i16(version);
             frame.put_i32(correlation_id);
             frame.put_slice(body);
-            let parsed = crate::network::request::parse_request(&frame, |_, version| {
+            let parsed = parse_request(&frame, |_, version| {
                 alter_partition_request::is_flexible(version)
             })
             .expect("a request header");
@@ -474,8 +476,8 @@ async fn send_alter_partition_to_reports_transport_error_for_closed_port() {
 
 /// Boots a single-node broker that leads the metadata quorum, and returns the
 /// address of its controller listener.
-async fn start_controller() -> (crate::BrokerHandle, SocketAddr, tempfile::TempDir) {
-    crate::test_support::start_controller().await
+async fn start_controller() -> (BrokerHandle, SocketAddr, tempfile::TempDir) {
+    start_test_support_controller().await
 }
 
 /// A krabka controller advertises `AlterPartition` on its controller listener

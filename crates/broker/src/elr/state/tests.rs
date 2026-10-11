@@ -6,7 +6,7 @@ use krabka_metadata::{
 };
 
 use super::TopicElr;
-use crate::test_support::partition_elr as elr;
+use crate::test_support::{finalize_elr_version, partition_elr as elr};
 
 fn orders_partition_image() -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());
@@ -80,7 +80,7 @@ fn of_topic_reads_legacy_elr_until_it_is_migrated() {
     }));
 
     assert!(TopicElr::of_topic(&image, "orders").partition(0) == elr(&[], &[]));
-    crate::test_support::finalize_elr_version(&mut image);
+    finalize_elr_version(&mut image);
     assert!(TopicElr::of_topic(&image, "orders").partition(0) == elr(&[2, 3], &[4]));
 }
 

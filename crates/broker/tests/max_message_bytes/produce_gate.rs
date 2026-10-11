@@ -7,8 +7,8 @@ use crate::{
     support,
     wire::{
         COMPRESSION_TYPE, KAFKA_DEFAULT, MAX_MESSAGE_BYTES, SEGMENT_BYTES, accepted, create_topic,
-        gzip_batch, produce_batch, produce_batch_of_wire_len, record_list_too_large, too_large,
-        wire_len,
+        gzip_batch, orders_fixture, produce_batch, produce_batch_of_wire_len,
+        record_list_too_large, too_large, wire_len,
     },
 };
 
@@ -43,7 +43,7 @@ async fn check_exact_limit(
 /// 100-MiB batch the cap exists to keep out of the partition.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_batch_at_the_cap_appends_and_one_byte_over_it_is_refused() {
-    let (p, topic) = crate::wire::orders_fixture(&[(MAX_MESSAGE_BYTES, &CAP.to_string())]).await;
+    let (p, topic) = orders_fixture(&[(MAX_MESSAGE_BYTES, &CAP.to_string())]).await;
 
     check_exact_limit(&p, topic, CAP, too_large()).await;
 

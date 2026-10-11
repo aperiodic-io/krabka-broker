@@ -26,7 +26,9 @@ use krabka_protocol::{
 };
 use krabka_verified::isr::{AlterPartitionFacts, IsrAdmission, ProposedIsr, isr_admission};
 
-use crate::codes;
+#[cfg(test)]
+use crate::test_support::WireBrokerId;
+use crate::{codes, metadata_epoch::next_i32};
 
 /// Validates and applies the ISR proposal of one partition of the known topic
 /// `topic_name`, sent by broker `requester`. It returns the per-partition
@@ -135,8 +137,7 @@ pub(super) fn handle_partition_with_recovery(
         .collect();
 
     // Success: submit the ISR change.
-    let Some(new_partition_epoch) = crate::metadata_epoch::next_i32(part_rec.partition_epoch)
-    else {
+    let Some(new_partition_epoch) = next_i32(part_rec.partition_epoch) else {
         return error_part(partition_index, codes::INVALID_REQUEST);
     };
     changes.push(MetadataRecord::V1Partition(PartitionRecord {
@@ -201,7 +202,7 @@ struct PartitionRequestSetup<'a> {
     #[default(LeaderEpoch(5))]
     leader_epoch: LeaderEpoch,
     #[default(&[crate::test_support::WireBrokerId(1)])]
-    new_isr: &'a [crate::test_support::WireBrokerId],
+    new_isr: &'a [WireBrokerId],
     #[default(&[])]
     new_isr_with_epochs: &'a [krabka_protocol::owned::alter_partition_request::BrokerState],
 }
@@ -252,9 +253,13 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::handlers::alter_partition::test_support::{
-        ONE_REGISTERED_BROKER, PartitionFixture, THREE_REGISTERED_BROKERS, TWO_REGISTERED_BROKERS,
-        ThreeBrokerEpochsSetup, bs, image_with, image_with_partition, three_broker_states,
+    use crate::{
+        handlers::alter_partition::test_support::{
+            ONE_REGISTERED_BROKER, PartitionFixture, THREE_REGISTERED_BROKERS,
+            TWO_REGISTERED_BROKERS, ThreeBrokerEpochsSetup, bs, image_with, image_with_partition,
+            three_broker_states,
+        },
+        test_support::{BrokerEpoch, PartitionEpoch, WireBrokerId},
     };
 
     /// Kafka's `ReplicationControlManager.validateAlterPartitionData`, in its
@@ -444,21 +449,12 @@ mod tests {
                 ],
                 isr: &[krabka_metadata::NodeId(2), krabka_metadata::NodeId(4)],
                 leader_epoch: krabka_metadata::LeaderEpoch(9),
-                partition_epoch: crate::test_support::PartitionEpoch(11),
+                partition_epoch: PartitionEpoch(11),
             },
             &[
-                (
-                    krabka_metadata::NodeId(2),
-                    crate::test_support::BrokerEpoch(20),
-                ),
-                (
-                    krabka_metadata::NodeId(4),
-                    crate::test_support::BrokerEpoch(40),
-                ),
-                (
-                    krabka_metadata::NodeId(6),
-                    crate::test_support::BrokerEpoch(60),
-                ),
+                (krabka_metadata::NodeId(2), BrokerEpoch(20)),
+                (krabka_metadata::NodeId(4), BrokerEpoch(40)),
+                (krabka_metadata::NodeId(6), BrokerEpoch(60)),
             ],
         )
     }
@@ -473,10 +469,7 @@ mod tests {
             PartitionRequestSetup {
                 partition: krabka_ids::PartitionIndex(7),
                 leader_epoch: LeaderEpoch(9),
-                new_isr: &[
-                    crate::test_support::WireBrokerId(2),
-                    crate::test_support::WireBrokerId(4),
-                ],
+                new_isr: &[WireBrokerId(2), WireBrokerId(4)],
                 ..Default::default()
             },
         );
@@ -507,7 +500,7 @@ mod tests {
     #[test]
     fn rows_are_validated_in_kafkas_order() {
         let fixture = PartitionFixture {
-            partition_epoch: crate::test_support::PartitionEpoch(10),
+            partition_epoch: PartitionEpoch(10),
             ..Default::default()
         };
         let image = image_with_partition(&fixture, THREE_REGISTERED_BROKERS);
@@ -600,7 +593,7 @@ mod tests {
     fn a_stale_partition_epoch_cannot_overwrite_a_newer_isr() {
         let mut image = image_with_partition(
             &PartitionFixture {
-                partition_epoch: crate::test_support::PartitionEpoch(10),
+                partition_epoch: PartitionEpoch(10),
                 ..Default::default()
             },
             THREE_REGISTERED_BROKERS,
@@ -649,7 +642,7 @@ mod tests {
         let image = image_with_partition(
             &PartitionFixture {
                 replicas: &[krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-                partition_epoch: crate::test_support::PartitionEpoch(i32::MAX),
+                partition_epoch: PartitionEpoch(i32::MAX),
                 ..Default::default()
             },
             TWO_REGISTERED_BROKERS,
@@ -660,10 +653,7 @@ mod tests {
             &image,
             &mut changes,
             PartitionRequestSetup {
-                new_isr: &[
-                    crate::test_support::WireBrokerId(1),
-                    crate::test_support::WireBrokerId(2),
-                ],
+                new_isr: &[WireBrokerId(1), WireBrokerId(2)],
                 ..Default::default()
             },
         );
@@ -682,10 +672,7 @@ mod tests {
             PartitionRequestSetup {
                 partition: krabka_ids::PartitionIndex(7),
                 leader_epoch: LeaderEpoch(8),
-                new_isr: &[
-                    crate::test_support::WireBrokerId(2),
-                    crate::test_support::WireBrokerId(4),
-                ],
+                new_isr: &[WireBrokerId(2), WireBrokerId(4)],
                 ..Default::default()
             },
         );
@@ -707,14 +694,8 @@ mod tests {
             &image,
             &mut changes,
             PartitionRequestSetup {
-                new_isr: &[
-                    crate::test_support::WireBrokerId(1),
-                    crate::test_support::WireBrokerId(2),
-                ],
-                new_isr_with_epochs: &[bs(
-                    crate::test_support::WireBrokerId(3),
-                    crate::test_support::BrokerEpoch(30),
-                )],
+                new_isr: &[WireBrokerId(1), WireBrokerId(2)],
+                new_isr_with_epochs: &[bs(WireBrokerId(3), BrokerEpoch(30))],
                 ..Default::default()
             },
         );
@@ -793,7 +774,7 @@ mod tests {
                     new_isr: &(new_isr)
                         .iter()
                         .copied()
-                        .map(crate::test_support::WireBrokerId)
+                        .map(WireBrokerId)
                         .collect::<Vec<_>>(),
                     ..Default::default()
                 },
@@ -811,14 +792,8 @@ mod tests {
                 ..Default::default()
             },
             &[
-                (
-                    krabka_metadata::NodeId(0),
-                    crate::test_support::BrokerEpoch(0),
-                ),
-                (
-                    krabka_metadata::NodeId(1),
-                    crate::test_support::BrokerEpoch(10),
-                ),
+                (krabka_metadata::NodeId(0), BrokerEpoch(0)),
+                (krabka_metadata::NodeId(1), BrokerEpoch(10)),
             ],
         );
         let mut changes = Vec::new();
@@ -826,7 +801,7 @@ mod tests {
             &image,
             &mut changes,
             PartitionRequestSetup {
-                new_isr: &[crate::test_support::WireBrokerId(-1)],
+                new_isr: &[WireBrokerId(-1)],
                 ..Default::default()
             },
         );
@@ -929,11 +904,10 @@ mod tests {
             ),
         ];
         for (broker_2, expected) in cases {
-            let registered: &[(krabka_metadata::NodeId, crate::test_support::BrokerEpoch)] =
-                match broker_2 {
-                    Broker2::NotRegistered => ONE_REGISTERED_BROKER,
-                    _ => TWO_REGISTERED_BROKERS,
-                };
+            let registered: &[(krabka_metadata::NodeId, BrokerEpoch)] = match broker_2 {
+                Broker2::NotRegistered => ONE_REGISTERED_BROKER,
+                _ => TWO_REGISTERED_BROKERS,
+            };
             let mut image = image_with(registered);
             let registration_change = match broker_2 {
                 Broker2::RegistrationFenced => Some(RegistrationChange::FENCE),

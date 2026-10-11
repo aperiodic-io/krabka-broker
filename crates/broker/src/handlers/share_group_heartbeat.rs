@@ -7,11 +7,13 @@ use krabka_protocol::owned::{
     share_group_heartbeat_response::ShareGroupHeartbeatResponse,
 };
 
+#[cfg(test)]
+use crate::config::BrokerConfig;
 use crate::{
     broker::Broker,
     codes,
     coordinator::unified::{GroupCoordinator, GroupType, share::actor::ShareGroupActorMessage},
-    handlers::ErrorResponse as _,
+    handlers::{ErrorResponse as _, group_coordinator_error},
     task_util::{AskError, ask},
 };
 
@@ -189,8 +191,7 @@ fn reply(code: i16, message: Option<String>) -> ShareGroupHeartbeatResponse {
 /// client retries, and the retry starts a new actor from the committed state
 /// of the group.
 fn stopped_actor_code(broker: &Broker, group_id: &str) -> i16 {
-    crate::handlers::group_coordinator_error(broker, group_id)
-        .unwrap_or(codes::COORDINATOR_NOT_AVAILABLE)
+    group_coordinator_error(broker, group_id).unwrap_or(codes::COORDINATOR_NOT_AVAILABLE)
 }
 
 #[cfg(test)]
@@ -203,13 +204,21 @@ mod tests {
 
     use super::*;
     use crate::{
+        authorizer::AllowAllAuthorizer,
         handlers::{
+            encode_response,
             group_heartbeat_test_support::{
-                acl_authorizer, alice, describe_acl, group_read_acl, topic_with_partitions,
+                GroupTopicSetup, acl_authorizer, alice, describe_acl, grant_group_read,
+                group_read_acl, subscribed_names_describe_denied_table as denied_table_fixture,
+                topic_with_partitions,
             },
             group_read_denied,
         },
-        test_support::{peer, principal, start_broker_with_authorizer as start_broker, test_ctx},
+        task_util::ask,
+        test_support::{
+            ControllerPeerAllowed, PartitionCount, finalize_share_version, peer, principal,
+            request_context, start_broker_with_authorizer as start_broker, test_ctx,
+        },
     };
 
     const VERSION: i16 = share_group_heartbeat_response::MAX_VERSION;
@@ -232,7 +241,7 @@ mod tests {
             "g"
         ));
 
-        let bytes = crate::handlers::encode_response(
+        let bytes = encode_response(
             &ShareGroupHeartbeatResponse::error(codes::GROUP_AUTHORIZATION_FAILED, None),
             VERSION,
         )
@@ -270,10 +279,10 @@ mod tests {
     async fn handle_disabled_feature_returns_unsupported_version() {
         let version = VERSION;
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let cfg = crate::config::BrokerConfig::for_tests(dir.path().to_path_buf());
+        let cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
         let broker_handle = Broker::start(cfg).await.expect("start broker");
         let broker = broker_handle.broker_arc_for_test();
-        crate::test_support::finalize_share_version(&broker, 0).await;
+        finalize_share_version(&broker, 0).await;
         test_ctx!(ctx, "ANONYMOUS");
         let req = request("g1", vec!["t1"]);
 
@@ -298,7 +307,7 @@ mod tests {
             (broker_handle, _dir, broker),
             start_broker(Arc::new(acl_authorizer()))
         );
-        crate::test_support::finalize_share_version(&broker, 0).await;
+        finalize_share_version(&broker, 0).await;
         test_ctx!(ctx, "ANONYMOUS");
         let req = request("denied-group", vec!["t1"]);
 
@@ -343,7 +352,7 @@ mod tests {
             (broker_handle, _dir, broker),
             start_broker(Arc::new(acl_authorizer()))
         );
-        crate::handlers::group_heartbeat_test_support::grant_group_read(&broker, "g").await;
+        grant_group_read(&broker, "g").await;
         request_identity!(
             (principal, peer, ctx),
             alice(),
@@ -481,7 +490,7 @@ mod tests {
 
     #[test]
     fn subscribed_names_describe_denied_table() {
-        crate::handlers::group_heartbeat_test_support::subscribed_names_describe_denied_table();
+        denied_table_fixture();
     }
 
     // ── Explicit-name `Describe` checks (issue #720) ────────────────────
@@ -530,23 +539,19 @@ mod tests {
     /// heartbeat succeeds and creates a member.
     #[tokio::test]
     async fn handle_all_authorized_creates_member() {
-        let (broker_handle, _dir) = start_broker(Arc::new(
-            crate::test_support::ControllerPeerAllowed(acl_authorizer()),
-        ))
-        .await;
+        let (broker_handle, _dir) =
+            start_broker(Arc::new(ControllerPeerAllowed(acl_authorizer()))).await;
         broker_handle.wait_until_group_coordinator_ready().await;
         let broker = broker_handle.broker_arc_for_test();
         let allowed_id = uuid::Uuid::from_u128(1);
         let node = krabka_raft::NodeId(broker_handle.node_id());
         let mut records = vec![group_read_acl("g"), describe_acl("topic-a")];
-        records.extend(topic_with_partitions(
-            crate::handlers::group_heartbeat_test_support::GroupTopicSetup {
-                name: "topic-a",
-                topic_id: allowed_id,
-                partitions: crate::test_support::PartitionCount(1),
-                node,
-            },
-        ));
+        records.extend(topic_with_partitions(GroupTopicSetup {
+            name: "topic-a",
+            topic_id: allowed_id,
+            partitions: PartitionCount(1),
+            node,
+        }));
         broker
             .controller
             .submit_change(records)
@@ -574,8 +579,7 @@ mod tests {
     #[tokio::test]
     async fn handle_persists_request_client_identity() {
         let version = VERSION;
-        let (broker_handle, _dir) =
-            start_broker(std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(std::sync::Arc::new(AllowAllAuthorizer)).await;
         broker_handle.wait_until_group_coordinator_ready().await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((principal, peer, ctx), principal("ANONYMOUS"), test_context);
@@ -595,7 +599,7 @@ mod tests {
         let actor = broker
             .group_coordinator
             .get_or_create_share("identity-group");
-        let view = crate::task_util::ask(&actor.tx, |reply| ShareGroupActorMessage::Describe {
+        let view = ask(&actor.tx, |reply| ShareGroupActorMessage::Describe {
             reply,
         })
         .await
@@ -606,7 +610,7 @@ mod tests {
         assert!(view.members[0].client_host == "/127.0.0.1");
 
         let peer: SocketAddr = "127.0.0.2:9093".parse().unwrap();
-        let ctx = crate::test_support::request_context(&principal, &peer, "client-b");
+        let ctx = request_context(&principal, &peer, "client-b");
         let req = ShareGroupHeartbeatRequest {
             group_id: "identity-group".into(),
             member_id: view.members[0].member_id.clone(),
@@ -619,7 +623,7 @@ mod tests {
             .expect("ShareGroupHeartbeat identity refresh");
         assert!(resp.error_code == 0);
 
-        let view = crate::task_util::ask(&actor.tx, |reply| ShareGroupActorMessage::Describe {
+        let view = ask(&actor.tx, |reply| ShareGroupActorMessage::Describe {
             reply,
         })
         .await
@@ -639,8 +643,7 @@ mod tests {
         use crate::coordinator::unified::actor::GroupKindTag;
 
         let version = VERSION;
-        let (broker_handle, _dir) =
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         broker_handle.wait_until_group_coordinator_ready().await;
         let broker = broker_handle.broker_arc_for_test();
         let coordinator = &broker.group_coordinator;

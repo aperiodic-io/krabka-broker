@@ -10,32 +10,43 @@ use std::{net::SocketAddr, sync::Arc};
 
 use assert2::{assert, check};
 use bytes::Bytes;
-use krabka_metadata::{BreakGlassProposalRecord, MetadataRecord, UnregisterBrokerRecord};
+use krabka_metadata::{
+    BreakGlassAction as GatedAction, BreakGlassProposalRecord, MetadataRecord,
+    UnregisterBrokerRecord,
+};
 use krabka_protocol::owned::unregister_broker_response::{self, UnregisterBrokerResponse};
 use krabka_security::Principal;
 use uuid::Uuid;
 
 use super::*;
 use crate::{
+    authorizer::AllowAllAuthorizer,
     break_glass::gate::tests::{approved_proposal, image_of},
     broker::Broker,
     config::BreakGlassConfig,
-    test_support::{DenyAll, peer, principal},
+    handlers::{
+        RequestContext,
+        test_support::{ReplicatedPartitionSetup, replicated_partition as partition_fixture},
+    },
+    metrics::{BreakGlassAction as MetricBreakGlassAction, BreakGlassActionLabel, BrokerMetrics},
+    test_support::{
+        DenyAll, PartitionCount, PartitionEpoch, broker_registration,
+        decode_response as test_decode_response, encode_request as test_encode_request, peer,
+        principal, request_context,
+        start_broker_with_authorizer_no_audit as start_authorizer_broker,
+    },
 };
 
 fn encode_request(req: &UnregisterBrokerRequest, version: i16) -> Bytes {
-    crate::test_support::encode_request(req, version)
+    test_encode_request(req, version)
 }
 
 fn decode_response(bytes: &Bytes) -> UnregisterBrokerResponse {
-    crate::test_support::decode_response(bytes, unregister_broker_response::MAX_VERSION)
+    test_decode_response(bytes, unregister_broker_response::MAX_VERSION)
 }
 
-fn context<'a>(
-    principal: &'a Principal,
-    peer: &'a SocketAddr,
-) -> crate::handlers::RequestContext<'a> {
-    crate::test_support::request_context(principal, peer, "unregister-client")
+fn context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext<'a> {
+    request_context(principal, peer, "unregister-client")
 }
 
 #[test]
@@ -55,7 +66,7 @@ async fn handle_denies_cluster_alter_with_message_and_throttle() {
     let version = unregister_broker_response::MAX_VERSION;
     broker_fixture!(
         (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(DenyAll))
+        start_authorizer_broker(Arc::new(DenyAll))
     );
     let resp = answer(&broker, version, 1).await;
 
@@ -75,9 +86,7 @@ async fn handle_answers_broker_id_not_registered_for_unknown_ids() {
     let version = unregister_broker_response::MAX_VERSION;
     broker_fixture!(
         (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(
-            crate::authorizer::AllowAllAuthorizer
-        ),)
+        start_authorizer_broker(Arc::new(AllowAllAuthorizer),)
     );
     request_identity!((principal, peer, ctx), principal("admin"), context);
 
@@ -105,9 +114,7 @@ async fn handle_unregisters_registered_broker_with_success_shape() {
     let version = unregister_broker_response::MAX_VERSION;
     broker_fixture!(
         (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(
-            crate::authorizer::AllowAllAuthorizer
-        ),)
+        start_authorizer_broker(Arc::new(AllowAllAuthorizer),)
     );
     let resp = answer(&broker, version, 1).await;
 
@@ -139,7 +146,7 @@ fn an_unregistration_with_no_proposal_appends_nothing() {
     let denial = unregister_records(&image, &gated_config(), DOOMED, DOOMED_EPOCH, NOW_MS)
         .expect_err("no proposal covers broker 7");
 
-    check!(denial.action == BreakGlassAction::UnregisterBroker);
+    check!(denial.action == GatedAction::UnregisterBroker);
     check!(denial.target == "7");
     check!(
         denial.to_string()
@@ -149,7 +156,7 @@ fn an_unregistration_with_no_proposal_appends_nothing() {
 
 #[test]
 fn an_approved_unregistration_appends_the_consume_beside_the_unregister() {
-    let proposal = approved_proposal(BreakGlassAction::UnregisterBroker, "7");
+    let proposal = approved_proposal(GatedAction::UnregisterBroker, "7");
     let image = image_of(std::slice::from_ref(&proposal));
 
     let records = unregister_records(&image, &gated_config(), DOOMED, DOOMED_EPOCH, NOW_MS)
@@ -170,7 +177,7 @@ fn an_approved_unregistration_appends_the_consume_beside_the_unregister() {
 
 #[test]
 fn a_proposal_for_another_broker_does_not_cover_this_one() {
-    let image = image_of(&[approved_proposal(BreakGlassAction::UnregisterBroker, "8")]);
+    let image = image_of(&[approved_proposal(GatedAction::UnregisterBroker, "8")]);
 
     let denial = unregister_records(&image, &gated_config(), DOOMED, DOOMED_EPOCH, NOW_MS)
         .expect_err("a proposal for broker 8 authorizes nothing about broker 7");
@@ -199,11 +206,11 @@ fn a_broker_with_no_approver_set_gates_nothing() {
 }
 
 /// The `break_glass_refusals` count for this action.
-fn refusals(metrics: &crate::metrics::BrokerMetrics) -> u64 {
+fn refusals(metrics: &BrokerMetrics) -> u64 {
     metrics
         .break_glass_refusals
-        .get_or_create(&crate::metrics::BreakGlassActionLabel {
-            action: crate::metrics::BreakGlassAction(BreakGlassAction::UnregisterBroker),
+        .get_or_create(&BreakGlassActionLabel {
+            action: MetricBreakGlassAction(GatedAction::UnregisterBroker),
         })
         .get()
 }
@@ -258,7 +265,7 @@ fn registration(setup: RegistrationSetup) -> MetadataRecord {
         broker_epoch: -1,
         incarnation_id: Uuid::from_u128(u128::from(node_id.0)),
         host: format!("broker-{}", node_id.0),
-        ..crate::test_support::broker_registration(node_id)
+        ..broker_registration(node_id)
     })
 }
 
@@ -272,7 +279,7 @@ struct UnregisterPartitionSetup<'a> {
     isr: &'a [NodeId],
     #[default(krabka_metadata::LeaderEpoch(5))]
     leader_epoch: krabka_metadata::LeaderEpoch,
-    partition_epoch: crate::test_support::PartitionEpoch,
+    partition_epoch: PartitionEpoch,
 }
 
 fn replicated_partition(setup: UnregisterPartitionSetup<'_>) -> krabka_metadata::PartitionRecord {
@@ -287,19 +294,17 @@ fn replicated_partition(setup: UnregisterPartitionSetup<'_>) -> krabka_metadata:
         isr: isr.to_vec(),
         leader_epoch,
         partition_epoch: partition_epoch.0,
-        ..crate::handlers::test_support::replicated_partition(
-            crate::handlers::test_support::ReplicatedPartitionSetup {
-                topic: "t",
-                partition: index,
-                leader,
-                replicas: &[NodeId(1), NodeId(2)],
-            },
-        )
+        ..partition_fixture(ReplicatedPartitionSetup {
+            topic: "t",
+            partition: index,
+            leader,
+            replicas: &[NodeId(1), NodeId(2)],
+        })
     }
 }
 
 /// Topic `t`, with `partitions` partitions and a replication factor of 2.
-fn topic(partitions: crate::test_support::PartitionCount) -> MetadataRecord {
+fn topic(partitions: PartitionCount) -> MetadataRecord {
     MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
         name: "t".into(),
         topic_id: Uuid::from_u128(0x7),
@@ -319,16 +324,14 @@ async fn handle_removes_the_broker_from_every_isr_in_the_unregistering_append() 
     let version = unregister_broker_response::MAX_VERSION;
     broker_fixture!(
         (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(
-            crate::authorizer::AllowAllAuthorizer
-        ),),
+        crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer),),
         controller_leader
     );
     broker
         .controller
         .submit_change(vec![
             registration(RegistrationSetup::default()),
-            topic(crate::test_support::PartitionCount(3)),
+            topic(PartitionCount(3)),
             MetadataRecord::V1Partition(replicated_partition(UnregisterPartitionSetup::default())),
             MetadataRecord::V1Partition(replicated_partition(UnregisterPartitionSetup {
                 index: krabka_ids::PartitionIndex(1),
@@ -360,14 +363,14 @@ async fn handle_removes_the_broker_from_every_isr_in_the_unregistering_append() 
             leader: NodeId(2),
             isr: &[NodeId(2)],
             leader_epoch: krabka_metadata::LeaderEpoch(6),
-            partition_epoch: crate::test_support::PartitionEpoch(1),
+            partition_epoch: PartitionEpoch(1),
             ..Default::default()
         }),
         replicated_partition(UnregisterPartitionSetup {
             index: krabka_ids::PartitionIndex(1),
             leader: NodeId(2),
             isr: &[NodeId(2)],
-            partition_epoch: crate::test_support::PartitionEpoch(1),
+            partition_epoch: PartitionEpoch(1),
             ..Default::default()
         }),
         replicated_partition(UnregisterPartitionSetup {
@@ -429,14 +432,12 @@ async fn a_request_on_the_controller_listener_is_answered_in_place() {
     let version = unregister_broker_response::MAX_VERSION;
     broker_fixture!(
         (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(
-            crate::authorizer::AllowAllAuthorizer
-        ),),
+        start_authorizer_broker(Arc::new(AllowAllAuthorizer),),
         controller_leader
     );
     let principal = principal("admin");
     let peer: SocketAddr = "127.0.0.1:9093".parse().unwrap();
-    let ctx = crate::handlers::RequestContext::new(
+    let ctx = RequestContext::new(
         &principal,
         &peer,
         "unregister-client",
@@ -468,10 +469,8 @@ async fn a_request_on_the_controller_listener_is_answered_in_place() {
 /// record: the approval commits first, and the registration goes last.
 #[test]
 fn the_isr_departures_sit_between_the_consume_and_the_unregister_record() {
-    let consumed = MetadataRecord::V1BreakGlassProposal(approved_proposal(
-        BreakGlassAction::UnregisterBroker,
-        "7",
-    ));
+    let consumed =
+        MetadataRecord::V1BreakGlassProposal(approved_proposal(GatedAction::UnregisterBroker, "7"));
     let unregister = MetadataRecord::V1UnregisterBroker(UnregisterBrokerRecord {
         node_id: DOOMED,
         broker_epoch: DOOMED_EPOCH,
@@ -480,7 +479,7 @@ fn the_isr_departures_sit_between_the_consume_and_the_unregister_record() {
         leader: NodeId(2),
         isr: &[NodeId(2)],
         leader_epoch: krabka_metadata::LeaderEpoch(6),
-        partition_epoch: crate::test_support::PartitionEpoch(1),
+        partition_epoch: PartitionEpoch(1),
         ..Default::default()
     }));
 

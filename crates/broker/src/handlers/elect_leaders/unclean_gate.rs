@@ -11,7 +11,9 @@ use krabka_protocol::owned::elect_leaders_response::PartitionResult;
 
 use super::env::ElectionEnv;
 pub(super) use crate::break_glass::gate::consumed_proposal_id;
-use crate::{break_glass::gate::BreakGlassDenial, codes};
+use crate::{
+    break_glass::gate::BreakGlassDenial, codes, handlers::partition_transition::audit_refusal,
+};
 
 crate::handlers::partition_transition::authorizer! {
 /// KFC-9: find the approved proposal that authorizes an unclean election of one
@@ -37,7 +39,7 @@ pub(super) fn refuse_unclean(
     denial: &BreakGlassDenial,
 ) -> PartitionResult {
     let message = denial.to_string();
-    crate::handlers::partition_transition::audit_refusal(
+    audit_refusal(
         env.broker,
         env.ctx,
         BreakGlassAction::UncleanElectLeaders,

@@ -141,7 +141,7 @@ mod tests {
     use super::*;
     use crate::set::{
         decode_message_set,
-        test_support::{sample_records_v0, sample_records_v1},
+        test_support::{compressed_bytes, decode_bytes, sample_records_v0, sample_records_v1},
     };
 
     #[test]
@@ -179,7 +179,7 @@ mod tests {
         }];
         let mut buf = BytesMut::new();
         encode_flat_message_set(recs, Magic::V1, &mut buf);
-        let decoded = crate::set::test_support::decode_bytes(&buf);
+        let decoded = decode_bytes(&buf);
         assert2::assert!(
             decoded
                 == vec![ParsedRecord {
@@ -201,8 +201,7 @@ mod tests {
             key: None,
             value: Some(Bytes::from_static(b"v")),
         }];
-        let buf =
-            crate::set::test_support::compressed_bytes(&recs, Magic::V1, CompressionType::Gzip);
+        let buf = compressed_bytes(&recs, Magic::V1, CompressionType::Gzip);
 
         // Inspect the raw wrapper message's own timestamp before unwrapping.
         let mut cur: &[u8] = &buf[..];
@@ -210,7 +209,7 @@ mod tests {
         let wrapper_size = usize::try_from(cur.get_i32()).unwrap();
         let wrapper = Message::decode_from(&mut cur, wrapper_size).unwrap();
         // The inner record's timestamp survives the unwrap as -1.
-        let decoded = crate::set::test_support::decode_bytes(&buf);
+        let decoded = decode_bytes(&buf);
         assert2::assert!(wrapper.timestamp == Some(-1));
         assert2::assert!(decoded[0].timestamp == Some(-1));
     }

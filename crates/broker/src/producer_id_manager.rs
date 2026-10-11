@@ -17,7 +17,7 @@ use krabka_verified::{
 };
 use tokio::sync::Mutex;
 
-use crate::metadata_source::MetadataSource;
+use crate::{error::BrokerError, metadata_source::MetadataSource};
 
 /// Kafka's controller-assigned producer-ID block size.
 pub(crate) const PRODUCER_ID_BLOCK_SIZE: i32 = 1_000;
@@ -75,7 +75,7 @@ fn plan_block(
     }
 }
 
-impl From<ProducerIdAllocationError> for crate::error::BrokerError {
+impl From<ProducerIdAllocationError> for BrokerError {
     fn from(error: ProducerIdAllocationError) -> Self {
         Self::ProducerIdBlockUnavailable(error.to_string())
     }

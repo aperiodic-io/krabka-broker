@@ -9,9 +9,18 @@ use krabka_remote_storage_topic::MetadataEventLog;
 use krabka_units::{ByteSize, convert::ByteSizeExt as _};
 use tokio_util::sync::CancellationToken;
 
+#[cfg(test)]
+use crate::diskless::index_log::test_support::PacedReplayLog;
 use crate::{
     broker::rlmm::{KafkaSwapKickoff, metadata_log_config, rlmm_bootstrap_backoff},
+    config::KafkaRlmmConfig,
+    diskless::{
+        flusher::{FlushConfig, FlusherContext, FlusherExit, run},
+        index_log::{DISKLESS_WAL_INDEX_TOPIC, DisklessIndexLog},
+        wal_index::WalIndexCache,
+    },
     error::BrokerError,
+    metrics::BrokerMetrics,
     partition_registry::PartitionRegistry,
 };
 
@@ -45,20 +54,19 @@ pub(super) struct DisklessFlusherStartup {
     /// Where each new index log is published so `DeleteRecords` can write its
     /// floor through whichever incarnation is live. Cleared while the
     /// bootstrap is rebuilding one.
-    pub(super) index_log_slot:
-        Arc<arc_swap::ArcSwapOption<crate::diskless::index_log::DisklessIndexLog>>,
+    pub(super) index_log_slot: Arc<arc_swap::ArcSwapOption<DisklessIndexLog>>,
     pub(super) partitions: Arc<PartitionRegistry>,
     pub(super) image_rx: tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>>,
     pub(super) object_store: Arc<dyn object_store::ObjectStore>,
     pub(super) node_id: krabka_metadata::NodeId,
     pub(super) broker_id: i32,
-    pub(super) metrics: crate::metrics::BrokerMetrics,
-    pub(super) flush_config: crate::diskless::flusher::FlushConfig,
+    pub(super) metrics: BrokerMetrics,
+    pub(super) flush_config: FlushConfig,
     pub(super) ready: Arc<AtomicBool>,
 }
 
 pub(super) async fn bootstrap_diskless_index_log(
-    cache: Arc<tokio::sync::Mutex<crate::diskless::wal_index::WalIndexCache>>,
+    cache: Arc<tokio::sync::Mutex<WalIndexCache>>,
     config: KafkaSwapKickoff,
     flusher: DisklessFlusherStartup,
     shutdown: CancellationToken,
@@ -69,18 +77,18 @@ pub(super) async fn bootstrap_diskless_index_log(
     bootstrap_from_source(&source, cache, &config, &flusher, &shutdown).await;
 }
 
-fn index_event_max_bytes(config: &crate::config::KafkaRlmmConfig) -> usize {
+fn index_event_max_bytes(config: &KafkaRlmmConfig) -> usize {
     // Leave the other half of the frame for Kafka's request envelope.
     (config.frame_max.bytes() / 2).max(1)
 }
 
 fn index_log_config(
-    config: &crate::config::KafkaRlmmConfig,
+    config: &KafkaRlmmConfig,
     broker_id: i32,
 ) -> krabka_remote_storage_topic::KafkaMetadataLogConfig {
     let mut log_config = metadata_log_config(
         config,
-        crate::diskless::index_log::DISKLESS_WAL_INDEX_TOPIC.to_owned(),
+        DISKLESS_WAL_INDEX_TOPIC.to_owned(),
         format!("krabka-diskless-index-broker-{broker_id}"),
     );
     let fetch_max =
@@ -97,7 +105,7 @@ fn index_log_config(
 
 async fn bootstrap_from_source(
     source: &dyn IndexLogSource,
-    cache: Arc<tokio::sync::Mutex<crate::diskless::wal_index::WalIndexCache>>,
+    cache: Arc<tokio::sync::Mutex<WalIndexCache>>,
     config: &KafkaSwapKickoff,
     flusher: &DisklessFlusherStartup,
     shutdown: &CancellationToken,
@@ -111,12 +119,8 @@ async fn bootstrap_from_source(
         };
         let index_log = match opened {
             Ok(log) => {
-                crate::diskless::index_log::DisklessIndexLog::start_with_cache(
-                    log,
-                    Arc::clone(&cache),
-                    flusher.metrics.clone(),
-                )
-                .await
+                DisklessIndexLog::start_with_cache(log, Arc::clone(&cache), flusher.metrics.clone())
+                    .await
             }
             Err(error) => Err(error),
         };
@@ -131,8 +135,8 @@ async fn bootstrap_from_source(
                     .store(Some(Arc::new(index_log.clone())));
                 // `flusher.ready` flips inside `run`, once the projection has
                 // replayed the index topic and the first tick may fire.
-                let exit = crate::diskless::flusher::run(
-                    crate::diskless::flusher::FlusherContext {
+                let exit = run(
+                    FlusherContext {
                         partitions: Arc::clone(&flusher.partitions),
                         image_rx: flusher.image_rx.clone(),
                         object_store: Arc::clone(&flusher.object_store),
@@ -153,15 +157,15 @@ async fn bootstrap_from_source(
                     flusher.index_log_slot.store(None);
                 }
                 match exit {
-                    crate::diskless::flusher::FlusherExit::ShutDown => return,
-                    crate::diskless::flusher::FlusherExit::ReplayStalled => {
+                    FlusherExit::ShutDown => return,
+                    FlusherExit::ReplayStalled => {
                         tracing::warn!(
                             topic = crate::diskless::index_log::DISKLESS_WAL_INDEX_TOPIC,
                             backoff_ms = backoff.as_millis(),
                             "diskless WAL index replay stalled; rebuilding the index log"
                         );
                     }
-                    crate::diskless::flusher::FlusherExit::ProjectionUnavailable => {
+                    FlusherExit::ProjectionUnavailable => {
                         tracing::error!(
                             topic = crate::diskless::index_log::DISKLESS_WAL_INDEX_TOPIC,
                             backoff_ms = backoff.as_millis(),
@@ -187,6 +191,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::{
+        broker::rlmm::test_kickoff as kickoff_with_config,
+        config::KafkaRlmmConfig,
+        diskless::{
+            flusher::FlushConfig, index_log::test_support::ReplayPace, wal_index::WalFlushRecord,
+        },
+        metrics::BrokerMetrics,
+    };
 
     fn test_startup(ready: Arc<AtomicBool>) -> DisklessFlusherStartup {
         let (_image_tx, image_rx) = tokio::sync::watch::channel(Arc::new(
@@ -199,11 +211,11 @@ mod tests {
             object_store: Arc::new(object_store::memory::InMemory::new()),
             node_id: krabka_raft::NodeId(7),
             broker_id: 1,
-            metrics: crate::metrics::BrokerMetrics::new(),
-            flush_config: crate::diskless::flusher::FlushConfig {
+            metrics: BrokerMetrics::new(),
+            flush_config: FlushConfig {
                 interval: std::time::Duration::from_millis(1),
                 index_projection_timeout: std::time::Duration::from_millis(50),
-                ..crate::diskless::flusher::FlushConfig::default()
+                ..FlushConfig::default()
             },
             ready,
         }
@@ -211,7 +223,7 @@ mod tests {
 
     fn test_kickoff() -> KafkaSwapKickoff {
         KafkaSwapKickoff {
-            cfg: crate::config::KafkaRlmmConfig::default(),
+            cfg: KafkaRlmmConfig::default(),
             broker_id: 1,
             bootstrap_backoff_initial: std::time::Duration::from_millis(1),
             bootstrap_backoff_max: std::time::Duration::from_millis(5),
@@ -221,10 +233,10 @@ mod tests {
 
     #[test]
     fn index_replay_fetch_stays_within_the_event_frame_budget() {
-        let mut config = crate::config::KafkaRlmmConfig {
+        let mut config = KafkaRlmmConfig {
             frame_max: krabka_client_core::ClientFrameMax::try_from(krabka_units::kibibytes(32))
                 .unwrap(),
-            ..crate::config::KafkaRlmmConfig::default()
+            ..KafkaRlmmConfig::default()
         };
 
         assert!(index_log_config(&config, 1).fetch_max_bytes == krabka_units::kibibytes(16));
@@ -235,7 +247,7 @@ mod tests {
 
     #[test]
     fn index_topic_keeps_the_cluster_default_min_isr() {
-        let config = crate::config::KafkaRlmmConfig::default();
+        let config = KafkaRlmmConfig::default();
 
         assert!(index_log_config(&config, 1).min_isr.is_none());
     }
@@ -254,12 +266,10 @@ mod tests {
                 .attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if attempt == 0 {
-                return Ok(
-                    crate::diskless::index_log::test_support::PacedReplayLog::new(
-                        Arc::clone(&self.inner),
-                        crate::diskless::index_log::test_support::ReplayPace::Never,
-                    ),
-                );
+                return Ok(PacedReplayLog::new(
+                    Arc::clone(&self.inner),
+                    ReplayPace::Never,
+                ));
             }
             Ok(Arc::clone(&self.inner))
         }
@@ -271,12 +281,12 @@ mod tests {
         // replay and its silent stream really does stall.
         let event_log: Arc<dyn MetadataEventLog> =
             krabka_remote_storage_topic::InProcessMetadataEventLog::new(1);
-        let seed = crate::diskless::index_log::DisklessIndexLog::start(Arc::clone(&event_log))
+        let seed = DisklessIndexLog::start(Arc::clone(&event_log))
             .await
             .unwrap();
-        seed.publish_flush(&crate::diskless::wal_index::WalFlushRecord {
+        seed.publish_flush(&WalFlushRecord {
             object_key: "diskless-wal/1/seed.ckwl".into(),
-            format_version: crate::diskless::wal_index::WalFlushRecord::FORMAT_VERSION,
+            format_version: WalFlushRecord::FORMAT_VERSION,
             entries: vec![crate::diskless::wal_index::WalIndexEntry {
                 topic_id: uuid::Uuid::from_u128(11),
                 partition: 0,
@@ -301,9 +311,7 @@ mod tests {
         let startup = test_startup(Arc::clone(&ready));
         let bootstrap = bootstrap_from_source(
             &source,
-            Arc::new(tokio::sync::Mutex::new(
-                crate::diskless::wal_index::WalIndexCache::default(),
-            )),
+            Arc::new(tokio::sync::Mutex::new(WalIndexCache::default())),
             &kickoff,
             &startup,
             &shutdown,
@@ -340,22 +348,20 @@ mod tests {
         drop(listener);
 
         let snapshot_dir = tempdir().unwrap();
-        let kickoff = crate::broker::rlmm::test_kickoff(crate::config::KafkaRlmmConfig {
+        let kickoff = kickoff_with_config(KafkaRlmmConfig {
             bootstrap,
             num_partitions: 1,
             replication: 1,
             snapshot_dir: snapshot_dir.path().to_path_buf(),
-            ..crate::config::KafkaRlmmConfig::default()
+            ..KafkaRlmmConfig::default()
         });
         let flusher = DisklessFlusherStartup {
-            flush_config: crate::diskless::flusher::FlushConfig::default(),
+            flush_config: FlushConfig::default(),
             ..test_startup(Arc::new(AtomicBool::new(false)))
         };
         let shutdown = CancellationToken::new();
         let bootstrap = bootstrap_diskless_index_log(
-            Arc::new(tokio::sync::Mutex::new(
-                crate::diskless::wal_index::WalIndexCache::default(),
-            )),
+            Arc::new(tokio::sync::Mutex::new(WalIndexCache::default())),
             kickoff,
             flusher,
             shutdown.clone(),

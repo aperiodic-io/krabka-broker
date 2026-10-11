@@ -17,10 +17,11 @@ use krabka_protocol::{
 
 use super::super::{PartitionInput, process_partition};
 use crate::{
+    codes::{INVALID_TOPIC_EXCEPTION, NONE},
     config::BrokerConfig,
     handlers::produce::{
         framing::PartitionPayload,
-        test_support::{encode_batch, image_with_topic},
+        test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
     },
     internal_topics::{is_internal_topic, produce_internal_topics_allowed},
 };
@@ -115,8 +116,7 @@ async fn a_denied_internal_topic_is_refused_and_its_log_end_offset_does_not_move
     let config = BrokerConfig::for_tests(PathBuf::from("/nonexistent"));
     let image = Arc::new(image_with_topic("__consumer_offsets", &[1]));
 
-    let fixture =
-        crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(1));
+    let fixture = PipelineFixture::new(krabka_ids::NodeId(1));
 
     let part = fixture
         .partition(dir.path(), "__consumer_offsets", &image)
@@ -138,7 +138,7 @@ async fn a_denied_internal_topic_is_refused_and_its_log_end_offset_does_not_move
             "my-app",
             PartitionProduceResponse {
                 index: 0,
-                error_code: crate::codes::INVALID_TOPIC_EXCEPTION,
+                error_code: INVALID_TOPIC_EXCEPTION,
                 base_offset: -1,
                 ..Default::default()
             },
@@ -148,7 +148,7 @@ async fn a_denied_internal_topic_is_refused_and_its_log_end_offset_does_not_move
             "__admin_client",
             PartitionProduceResponse {
                 index: 0,
-                error_code: crate::codes::NONE,
+                error_code: NONE,
                 base_offset: 1,
                 log_start_offset: 0,
                 ..Default::default()
@@ -164,7 +164,7 @@ async fn a_denied_internal_topic_is_refused_and_its_log_end_offset_does_not_move
                     "__consumer_offsets",
                     client_id,
                 ),
-                ..crate::handlers::produce::test_support::pipeline_input(
+                ..pipeline_input(
                     "__consumer_offsets",
                     PartitionPayload::Slice(encode_batch(&seed_batch())),
                 )

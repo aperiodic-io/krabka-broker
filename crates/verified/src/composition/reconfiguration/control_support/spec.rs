@@ -2,7 +2,7 @@ use creusot_std::prelude::*;
 
 use super::super::spec::{expected_member, grant_count, has_node, membership_matches_change};
 use crate::reconfiguration::{
-    ReconfigurationState, TargetVoter, VoterChangeKind, VoterChangeRequest,
+    CurrentVoterSet, ReconfigurationState, TargetVoter, VoterChangeKind, VoterChangeRequest,
 };
 
 open_logic! {
@@ -94,10 +94,10 @@ pub fn prefix_grants_agree(
 #[logic(open)]
 pub fn control_request_admitted(
     old: Seq<u64>,
-    state: crate::reconfiguration::ReconfigurationState,
-    request: crate::reconfiguration::VoterChangeRequest,
+    state: ReconfigurationState,
+    request: VoterChangeRequest,
     node: u64,
-    target: crate::reconfiguration::TargetVoter,
+    target: TargetVoter,
 ) -> bool {
     pearlite! {
         super::super::spec::valid_old(old)
@@ -111,7 +111,7 @@ pub fn control_request_admitted(
 #[logic(open)]
 pub(super) fn control_inputs_coherent(
     old: Seq<u64>,
-    context: crate::reconfiguration::CurrentVoterSet,
+    context: CurrentVoterSet,
     reports: Seq<(i64, i64)>,
 ) -> bool {
     pearlite! { context.voter_count@ == old.len() && reports.len() == old.len() + 1 }

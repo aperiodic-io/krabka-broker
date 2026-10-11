@@ -2,6 +2,8 @@
 
 use krabka_metadata::MetadataImage;
 
+use crate::handlers::metadata::pick_endpoint_host_port;
+
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -35,7 +37,7 @@ pub(crate) fn leader_endpoints<R: From<LeaderEndpoint>>(
         .into_iter()
         .filter_map(|node_id| {
             let record = image.broker(krabka_metadata::NodeId(u64::try_from(node_id).ok()?))?;
-            let (host, port) = crate::handlers::metadata::pick_endpoint_host_port(
+            let (host, port) = pick_endpoint_host_port(
                 record,
                 connection_listener_name,
                 inter_broker_listener_name,

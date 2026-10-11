@@ -18,7 +18,19 @@ use super::{
         broker_resource, client_metrics_resource, drive_many, drive_one, group_resource, resource,
     },
 };
-use crate::{codes, test_support::DenyAll};
+use crate::{
+    authorizer::AllowAllAuthorizer,
+    codes,
+    coordinator::unified::streams::config::{
+        KEY_NUM_STANDBY_REPLICAS, KEY_TASK_OFFSET_INTERVAL_MS,
+    },
+    handlers::alter_configs::test_support::{
+        image_with_client_metrics_config, image_with_group_config, image_with_topic_config,
+        topic_resource,
+    },
+    test_support::DenyAll,
+    throttle::LEADER_THROTTLED_RATE_KEY,
+};
 
 macro_rules! invalid_config_row {
     (($response:ident, $row:ident), $request:expr) => {
@@ -32,7 +44,7 @@ macro_rules! invalid_config_row {
 #[tokio::test]
 async fn handle_preserves_resource_identity_for_unsupported_type() {
     let resp = Box::pin(drive_one(
-        Arc::new(crate::authorizer::AllowAllAuthorizer),
+        Arc::new(AllowAllAuthorizer),
         resource(77, "mystery"),
     ))
     .await;
@@ -112,14 +124,8 @@ async fn client_metrics_resource_denial_uses_cluster_authorization_error_with_me
 #[tokio::test]
 async fn authorized_group_resource_is_applied() {
     let resp = Box::pin(drive_one(
-        Arc::new(crate::authorizer::AllowAllAuthorizer),
-        group_resource(
-            "streams-app",
-            &[(
-                crate::coordinator::unified::streams::config::KEY_NUM_STANDBY_REPLICAS,
-                "1",
-            )],
-        ),
+        Arc::new(AllowAllAuthorizer),
+        group_resource("streams-app", &[(KEY_NUM_STANDBY_REPLICAS, "1")]),
     ))
     .await;
 
@@ -137,7 +143,7 @@ async fn authorized_group_resource_is_applied() {
 #[tokio::test]
 async fn authorized_client_metrics_resource_is_applied() {
     let resp = Box::pin(drive_one(
-        Arc::new(crate::authorizer::AllowAllAuthorizer),
+        Arc::new(AllowAllAuthorizer),
         client_metrics_resource("sub-a", &[("interval.ms", "60000")]),
     ))
     .await;
@@ -266,8 +272,8 @@ async fn broker_resource_denial_uses_cluster_authorization_error() {
 #[tokio::test]
 async fn authorized_broker_resource_is_applied() {
     let resp = Box::pin(drive_one(
-        Arc::new(crate::authorizer::AllowAllAuthorizer),
-        broker_resource("1", &[(crate::throttle::LEADER_THROTTLED_RATE_KEY, "2048")]),
+        Arc::new(AllowAllAuthorizer),
+        broker_resource("1", &[(LEADER_THROTTLED_RATE_KEY, "2048")]),
     ))
     .await;
 
@@ -339,13 +345,9 @@ fn a_topic_replacement_audits_every_key_whose_value_moves() {
     ];
 
     for (label, stored, replacement, expected) in cases {
-        let image =
-            crate::handlers::alter_configs::test_support::image_with_topic_config("orders", stored);
+        let image = image_with_topic_config("orders", stored);
 
-        let audited = super::audit_resources_for(
-            &crate::handlers::alter_configs::test_support::topic_resource("orders", replacement),
-            &image,
-        );
+        let audited = super::audit_resources_for(&topic_resource("orders", replacement), &image);
 
         assert!(audited == expected, "{label}");
     }
@@ -359,27 +361,15 @@ fn a_topic_replacement_audits_every_key_whose_value_moves() {
 fn a_group_or_client_metrics_replacement_audits_a_key_it_drops_by_omission() {
     use crate::handlers::audit_resource;
 
-    let group_image = crate::handlers::alter_configs::test_support::image_with_group_config(
+    let group_image = image_with_group_config(
         "streams-app",
         &[
-            (
-                crate::coordinator::unified::streams::config::KEY_NUM_STANDBY_REPLICAS,
-                "1",
-            ),
-            (
-                crate::coordinator::unified::streams::config::KEY_TASK_OFFSET_INTERVAL_MS,
-                "5000",
-            ),
+            (KEY_NUM_STANDBY_REPLICAS, "1"),
+            (KEY_TASK_OFFSET_INTERVAL_MS, "5000"),
         ],
     );
     let group_audited = super::audit_resources_for(
-        &crate::handlers::alter_configs::test_support::group_resource(
-            "streams-app",
-            &[(
-                crate::coordinator::unified::streams::config::KEY_NUM_STANDBY_REPLICAS,
-                "1",
-            )],
-        ),
+        &group_resource("streams-app", &[(KEY_NUM_STANDBY_REPLICAS, "1")]),
         &group_image,
     );
     assert!(
@@ -394,15 +384,9 @@ fn a_group_or_client_metrics_replacement_audits_a_key_it_drops_by_omission() {
     );
 
     let client_metrics_image =
-        crate::handlers::alter_configs::test_support::image_with_client_metrics_config(
-            "sub1",
-            &[("interval.ms", "30000"), ("metrics", "*")],
-        );
+        image_with_client_metrics_config("sub1", &[("interval.ms", "30000"), ("metrics", "*")]);
     let client_metrics_audited = super::audit_resources_for(
-        &crate::handlers::alter_configs::test_support::client_metrics_resource(
-            "sub1",
-            &[("interval.ms", "30000")],
-        ),
+        &client_metrics_resource("sub1", &[("interval.ms", "30000")]),
         &client_metrics_image,
     );
     assert!(
@@ -503,7 +487,7 @@ async fn a_config_value_past_short_max_value_is_invalid_config() {
     ];
     for (label, value, want_code, want_message) in cases {
         let resp = Box::pin(drive_one(
-            Arc::new(crate::authorizer::AllowAllAuthorizer),
+            Arc::new(AllowAllAuthorizer),
             broker_resource("1", &[("custom.setting", &value)]),
         ))
         .await;

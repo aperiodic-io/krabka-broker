@@ -12,7 +12,10 @@ use super::records::{
 };
 use crate::coordinator::unified::{
     ShareGroupSeed,
-    share::state::{ShareGroupState, ShareMemberState},
+    share::{
+        persistence::TopicPartitionsInfo,
+        state::{ShareGroupState, ShareMemberState},
+    },
 };
 
 pub(super) fn apply_seed(state: &mut ShareGroupState, seed: ShareGroupSeed) {
@@ -72,7 +75,7 @@ pub(super) fn apply_seed(state: &mut ShareGroupState, seed: ShareGroupSeed) {
 /// Restore every topic name before applying its partition lifecycle action.
 fn restore_named_partitions(
     state: &mut ShareGroupState,
-    topics: &[crate::coordinator::unified::share::persistence::TopicPartitionsInfo],
+    topics: &[TopicPartitionsInfo],
     mut restore: impl FnMut(&mut ShareGroupState, (Uuid, i32)),
 ) {
     for topic in topics {

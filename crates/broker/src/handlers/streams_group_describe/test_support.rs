@@ -24,13 +24,21 @@ use krabka_security::Principal;
 use super::handle;
 use crate::{
     authorizer::Authorizer,
-    broker::Broker,
+    broker::{Broker, BrokerHandle},
+    codes::GROUP_ID_NOT_FOUND,
     coordinator::unified::{
         StreamsGroupSeed,
         streams::{
             actor::{StreamsDescribeMember, StreamsGroupActorMessage},
             persistence::{StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue},
         },
+    },
+    handlers::{
+        streams_group_heartbeat::handle as heartbeat_handle, test_support::single_replica_partition,
+    },
+    test_support::{
+        controller_peer_allowed, dispatch_wire, peer, principal, request_context,
+        start_group_broker_with,
     },
 };
 
@@ -41,10 +49,8 @@ fn request(group_ids: &[&str]) -> StreamsGroupDescribeRequest {
     }
 }
 
-pub(super) async fn start_broker(
-    streams_enabled: bool,
-) -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-    crate::test_support::start_group_broker_with(|cfg| {
+pub(super) async fn start_broker(streams_enabled: bool) -> (BrokerHandle, tempfile::TempDir) {
+    start_group_broker_with(|cfg| {
         cfg.streams_group.enable = streams_enabled;
     })
     .await
@@ -55,10 +61,10 @@ pub(super) async fn start_broker(
 /// rather than allow everything.
 pub(super) async fn start_broker_with_authorizer(
     authorizer: Arc<dyn Authorizer>,
-) -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-    crate::test_support::start_group_broker_with(|cfg| {
+) -> (BrokerHandle, tempfile::TempDir) {
+    start_group_broker_with(|cfg| {
         cfg.streams_group.enable = true;
-        cfg.authorizer = crate::test_support::controller_peer_allowed(authorizer);
+        cfg.authorizer = controller_peer_allowed(authorizer);
     })
     .await
 }
@@ -119,7 +125,7 @@ pub(super) async fn unfinalize_streams_version(broker: &Broker) {
 use crate::handlers::test_support::set_streams_version;
 
 pub(super) async fn describe(broker: &Broker, group_ids: &[&str]) -> StreamsGroupDescribeResponse {
-    let principal = crate::test_support::principal("admin");
+    let principal = principal("admin");
     describe_as(broker, &principal, group_ids, false).await
 }
 
@@ -136,8 +142,8 @@ pub(super) async fn describe_as(
         include_authorized_operations,
         ..request(group_ids)
     };
-    let peer = crate::test_support::peer();
-    let ctx = crate::test_support::request_context(principal, &peer, "admin-client");
+    let peer = peer();
+    let ctx = request_context(principal, &peer, "admin-client");
     handle(broker, req, response_mod::MAX_VERSION, &ctx)
         .await
         .expect("handle describe")
@@ -153,16 +159,16 @@ pub(super) async fn describe_at(
 ) -> StreamsGroupDescribeResponse {
     request_identity!(
         (principal, peer, ctx),
-        crate::test_support::principal("admin"),
+        principal("admin"),
         client_id = "admin-client",
-        address = crate::test_support::peer()
+        address = peer()
     );
     let req = StreamsGroupDescribeRequest {
         include_topology_description,
         ..request(group_ids)
     };
     // Over the wire: the fields `version` lacks must not reach the answer.
-    crate::test_support::dispatch_wire(
+    dispatch_wire(
         broker,
         krabka_protocol::owned::streams_group_describe_request::API_KEY,
         version,
@@ -247,7 +253,7 @@ fn expected_key_value(key: &str, value: &str) -> KeyValue {
 pub(super) fn error_group(group_id: &str, error_code: i16) -> DescribedGroup {
     tagged_wire!(DescribedGroup {
         error_code,
-        error_message: (error_code == crate::codes::GROUP_ID_NOT_FOUND)
+        error_message: (error_code == GROUP_ID_NOT_FOUND)
             .then(|| format!("Streams group {group_id} not found.")),
         group_id: group_id.into(),
         group_state: String::new(),
@@ -276,7 +282,7 @@ pub(super) async fn create_topic(broker: &Broker, name: &str, partitions: i32) {
         replication_factor: 1,
     })];
     records.extend((0..partitions).map(|partition| {
-        MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
+        MetadataRecord::V1Partition(single_replica_partition(
             name,
             krabka_ids::PartitionIndex(partition),
             node_id,
@@ -299,11 +305,11 @@ pub(super) async fn heartbeat(
 
     request_identity!(
         (principal, peer, ctx),
-        crate::test_support::principal("admin"),
+        principal("admin"),
         client_id = "streams-client",
-        address = crate::test_support::peer()
+        address = peer()
     );
-    crate::handlers::streams_group_heartbeat::handle(broker, req.clone(), MAX_VERSION, &ctx)
+    heartbeat_handle(broker, req.clone(), MAX_VERSION, &ctx)
         .await
         .expect("handle heartbeat")
 }

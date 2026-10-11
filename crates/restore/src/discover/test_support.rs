@@ -13,6 +13,7 @@ use krabka_remote_storage_topic::Snapshot;
 use uuid::Uuid;
 
 use crate::{
+    Cli,
     args::RestoreArgs,
     backend::ArchiveStore,
     discover::{ArchiveObject, SegmentInventory},
@@ -41,7 +42,7 @@ pub(super) fn args_from(archive_dir: &std::path::Path, extra: &[&str]) -> Restor
         archive_dir.display().to_string(),
     ];
     argv.extend(extra.iter().map(|s| (*s).to_owned()));
-    crate::Cli::parse_from(argv).args
+    Cli::parse_from(argv).args
 }
 
 /// The directory-naming identity of one partition, factored out of

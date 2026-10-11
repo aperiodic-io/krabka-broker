@@ -37,9 +37,11 @@ use crate::{
     authorizer::AuthorizationResult,
     broker::BrokerHandle,
     codes,
+    handlers::test_support::{ClientTopicSetup, create_topic as create_topic_from_test_support},
+    share_partition::session::FetchPartitions,
     test_support::{
         decode_response, encode_request, peer, principal, request_context,
-        start_broker_no_audit_with,
+        start_broker_no_audit_with, try_dispatch_context,
     },
 };
 
@@ -114,9 +116,9 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "share-group-authorization-test",
             name,
             ..Default::default()
@@ -198,7 +200,7 @@ async fn share_fetch_checks_group_read_before_topic_read() {
                 }],
                 ..Default::default()
             };
-            let response = crate::test_support::try_dispatch_context(
+            let response = try_dispatch_context(
                 &shared,
                 krabka_protocol::owned::share_fetch_request::API_KEY,
                 version,
@@ -263,7 +265,7 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
                     (GROUP, &member),
                     ctx.connection_id,
                     0,
-                    crate::share_partition::session::FetchPartitions {
+                    FetchPartitions {
                         requested: &[(topic, 0)],
                         forgotten: &std::collections::HashSet::new(),
                     },
@@ -284,7 +286,7 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
                 }],
                 ..Default::default()
             };
-            let response = crate::test_support::try_dispatch_context(
+            let response = try_dispatch_context(
                 &shared,
                 krabka_protocol::owned::share_acknowledge_request::API_KEY,
                 version,

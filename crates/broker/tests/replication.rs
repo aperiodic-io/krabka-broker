@@ -18,10 +18,15 @@ use support::{client::scrape_metrics as scrape, cluster_lock};
 use tempfile::TempDir;
 
 use crate::support::{
-    client::connect_client,
+    client::{ValueBatchSetup, ValueRecordCount, connect_client},
     offsets::{delete_records_partition, delete_records_request, delete_records_topic},
+    produce::{SinglePartitionProduceSetup, batch_request},
     records::{batch_from_records, value_record},
-    topics::create_topic_request,
+    registered_cluster, shutdown_cluster,
+    topics::{
+        AssignedTopicSetup, CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor,
+        create_topic_request,
+    },
 };
 
 mod support;
@@ -65,10 +70,10 @@ async fn metrics_cluster(topic: &str) -> (Cluster, std::net::SocketAddr) {
     let admin = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
     support::client::create_topic_with(
         &admin,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic,
-            num_partitions: crate::support::topics::TopicPartitionCount(12),
-            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            num_partitions: TopicPartitionCount(12),
+            replication_factor: TopicReplicationFactor(3),
             ..Default::default()
         },
     )
@@ -88,13 +93,13 @@ async fn metrics_cluster(topic: &str) -> (Cluster, std::net::SocketAddr) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn replication_factor_three_propagates_to_all_followers() {
     let _g = cluster_lock().lock().await;
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
     let (leader_addr, topic_id) =
         create_replicated_partition(&cluster, support::topic_on("repl", &[&[1, 2, 3]])).await;
 
     let producer = connect_client(leader_addr, None).await;
-    let batch = support::client::value_batch(crate::support::client::ValueBatchSetup {
-        records: crate::support::client::ValueRecordCount(20),
+    let batch = support::client::value_batch(ValueBatchSetup {
+        records: ValueRecordCount(20),
     });
     produce_replicated(&producer, "repl", topic_id, batch).await;
 
@@ -103,13 +108,13 @@ async fn replication_factor_three_propagates_to_all_followers() {
         h.wait_until_local_log_end_offset("repl", 0, 20).await;
     }
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn out_of_range_truncates_and_recovers() {
     let _g = cluster_lock().lock().await;
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
     let (leader_addr, topic_id) =
         create_replicated_partition(&cluster, support::topic_on("oor", &[&[1, 2, 3]])).await;
 
@@ -162,7 +167,7 @@ async fn out_of_range_truncates_and_recovers() {
         .wait_until_local_log_end_offset("oor", 0, 50)
         .await;
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// A follower that catches up across sealed segments copies every batch of the
@@ -224,7 +229,7 @@ async fn a_follower_that_catches_up_across_segments_copies_every_batch() {
     assert!(leader.local_batch_base_offsets_for_test("seams", 0) == Some(every_batch.clone()));
     assert!(follower.local_batch_base_offsets_for_test("seams", 0) == Some(every_batch));
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// KIP-107 (#746): `DeleteRecords` moves the log start offset on every
@@ -248,13 +253,13 @@ async fn delete_records_moves_every_replica_log_start_before_it_answers() {
     let client = connect_client(leader_addr, None).await;
     let topic_id = support::topics::create_assigned_partition(
         &client,
-        crate::support::topics::AssignedTopicSetup::three_replicas("trimmed"),
+        AssignedTopicSetup::three_replicas("trimmed"),
         cluster.iter().map(|(broker, _, _)| broker),
     )
     .await;
 
-    let batch = support::client::value_batch(crate::support::client::ValueBatchSetup {
-        records: crate::support::client::ValueRecordCount(20),
+    let batch = support::client::value_batch(ValueBatchSetup {
+        records: ValueRecordCount(20),
     });
     produce_replicated(&client, "trimmed", topic_id, batch).await;
     for (h, _, _) in &cluster {
@@ -288,7 +293,7 @@ async fn delete_records_moves_every_replica_log_start_before_it_answers() {
         .collect();
     assert!(log_starts == vec![Some(10); 3]);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// KIP-227 + `num.replica.fetchers`: a follower folds every partition it
@@ -325,7 +330,7 @@ async fn a_follower_batches_every_partition_of_one_leader_into_one_session() {
         "one incremental fetch session per follower, not per partition; got {sessions}"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// The batching's other half: a caught-up follower's request *rate* is bounded
@@ -363,7 +368,7 @@ async fn a_caught_up_follower_fetches_a_few_times_a_second_whatever_it_follows()
         "a caught-up follower must not busy-fetch; leader saw {per_second:.1} Fetch/s"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// Reads one labelled counter out of a broker's `/metrics` body, summed over
@@ -392,12 +397,12 @@ async fn produce_replicated(
     batch: RecordBatch,
 ) {
     let response = client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             batch,
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: (topic).into(),
                 topic_id,
-                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                ..SinglePartitionProduceSetup::replicated()
             },
         ))
         .await

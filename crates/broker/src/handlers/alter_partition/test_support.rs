@@ -18,7 +18,7 @@ use krabka_protocol::{
 
 use crate::{
     broker::Broker,
-    test_support::{BrokerEpoch, WireBrokerId},
+    test_support::{BrokerEpoch, PartitionEpoch, WireBrokerId, broker_registration},
 };
 
 const TOPIC_ID_BYTES: [u8; 16] = [7; 16];
@@ -55,7 +55,7 @@ fn reg(node_id: krabka_metadata::NodeId, epoch: BrokerEpoch) -> MetadataRecord {
     MetadataRecord::V1BrokerRegistration(BrokerRegistrationRecord {
         broker_epoch: epoch.0,
         host: "h".into(),
-        ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id.0))
+        ..broker_registration(krabka_raft::NodeId(node_id.0))
     })
 }
 
@@ -70,7 +70,7 @@ pub(super) struct PartitionFixture<'a> {
     pub(super) isr: &'a [krabka_metadata::NodeId],
     #[default(krabka_metadata::LeaderEpoch(5))]
     pub(super) leader_epoch: krabka_metadata::LeaderEpoch,
-    pub(super) partition_epoch: crate::test_support::PartitionEpoch,
+    pub(super) partition_epoch: PartitionEpoch,
 }
 
 /// An image with the topic "t" and one partition. `epochs` gives the

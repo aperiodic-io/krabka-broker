@@ -7,6 +7,8 @@
 
 use krabka_broker::BrokerConfig;
 
+use crate::jvm_acceptance::SaslClusterSetup;
+
 /// Like [`start_three_broker_sasl_plaintext_jvm_cluster_with_users`] but
 /// also enables `SCRAM-SHA-256` on the listener and installs the given
 /// `secret_key` as the HMAC master for KIP-48 delegation tokens on every
@@ -36,7 +38,7 @@ pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster_with_delegatio
     use krabka_security::{SaslMechanism, SecretBytes};
 
     super::three_broker_cluster::start_three_broker_sasl_plaintext_jvm_cluster_configured(
-        crate::jvm_acceptance::SaslClusterSetup {
+        SaslClusterSetup {
             admin,
             admin_pass,
             ..Default::default()

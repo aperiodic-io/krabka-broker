@@ -8,7 +8,7 @@
 use stateright::Checker;
 
 use super::model::DpModel;
-use crate::model_check::run_bfs;
+use crate::model_check::{assert_pinned_count, run_bfs};
 
 const TARGET_STATE_COUNT: usize = 60_000_000;
 const MAX_UNIQUE_STATES: usize = 8_000_000;
@@ -43,10 +43,6 @@ pub(super) fn run(model: DpModel, label: &str, pinned_unique_states: usize) {
         "[{label}] unique bound exceeded ({})",
         checker.unique_state_count()
     );
-    crate::model_check::assert_pinned_count(
-        checker.unique_state_count(),
-        pinned_unique_states,
-        label,
-    );
+    assert_pinned_count(checker.unique_state_count(), pinned_unique_states, label);
     checker.assert_properties();
 }

@@ -8,7 +8,7 @@
 
 use krabka_protocol::owned::streams_group_heartbeat_request::Topology;
 
-use crate::broker::Broker;
+use crate::{broker::Broker, internal_topics::is_internal_topic};
 
 /// Generate the same topic-name traversal for wire and stored topology shapes.
 macro_rules! define_required_topics {
@@ -68,7 +68,7 @@ pub(super) fn invalid_topology_message(broker: &Broker, required: &[String]) -> 
     let prohibited: Vec<&str> = required
         .iter()
         .map(String::as_str)
-        .filter(|name| crate::internal_topics::is_internal_topic(&broker.config, name))
+        .filter(|name| is_internal_topic(&broker.config, name))
         .collect();
     if !prohibited.is_empty() {
         return Some(format!(

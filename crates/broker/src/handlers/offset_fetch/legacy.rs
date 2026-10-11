@@ -24,7 +24,7 @@ use super::{
 };
 use crate::{
     authorizer::AuthorizationResult, broker::Broker, codes,
-    coordinator::unified::group::GroupOffsets,
+    coordinator::unified::group::GroupOffsets, handlers::RequestContext,
 };
 
 /// Serves an `OffsetFetch` request in the pre-KIP-516 single-group shape.
@@ -40,7 +40,7 @@ use crate::{
 pub(super) async fn handle_legacy(
     broker: &Broker,
     req: &OffsetFetchRequest,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> OffsetFetchResponse {
     if let Some(error_code) = group_error(broker, ctx, &req.group_id) {
         return OffsetFetchResponse {
@@ -94,7 +94,7 @@ pub(super) async fn handle_legacy(
 /// `UNSTABLE_OFFSET_COMMIT` ahead of either of those.
 fn legacy_named_topics(
     broker: &Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     req_topics: &[OffsetFetchRequestTopic],
     offsets: &GroupOffsets,
     require_stable: bool,
@@ -150,7 +150,7 @@ fn legacy_named_topics(
 /// error. The topics come in name order.
 fn legacy_fetch_all(
     broker: &Broker,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     offsets: &GroupOffsets,
     require_stable: bool,
 ) -> Vec<OffsetFetchResponseTopic> {

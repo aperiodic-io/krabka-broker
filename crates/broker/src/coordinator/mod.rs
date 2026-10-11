@@ -23,6 +23,8 @@ pub(crate) mod persistence {
 
 pub(crate) use unified::GroupCoordinator;
 
+use crate::coordinator::unified::classic_state::GroupState;
+
 /// Result of [`GroupCoordinator::delete_group`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum DeleteGroupError {
@@ -44,7 +46,7 @@ pub enum DeleteGroupError {
 #[derive(Debug, Clone)]
 pub struct GroupSnapshot {
     pub group_id: String,
-    pub state: crate::coordinator::unified::classic_state::GroupState,
+    pub state: GroupState,
     pub protocol_type: Option<String>,
     /// The selected protocol NAME, which maps to the `DescribeGroups` field
     /// `protocol_data`. It is `None` for an empty or dead group.

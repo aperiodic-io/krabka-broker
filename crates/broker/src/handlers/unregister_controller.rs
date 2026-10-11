@@ -44,7 +44,7 @@ use crate::{
     error::BrokerError,
     features::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
     handlers::{
-        cluster_alter_denied,
+        cluster_alter_denied, encode_response,
         forward_to_controller::{to_active_controller, wrong_controller_message},
     },
 };
@@ -195,5 +195,5 @@ fn encode(
     error_code: i16,
     error_message: Option<&str>,
 ) -> Result<Bytes, BrokerError> {
-    crate::handlers::encode_response(&response(error_code, error_message), version)
+    encode_response(&response(error_code, error_message), version)
 }

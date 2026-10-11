@@ -7,7 +7,10 @@
 use object_store::path::Path as ObjectPath;
 
 use super::S3RemoteStorage;
-use crate::{metadata::RemoteLogSegmentMetadata, storage_manager::IndexType};
+use crate::{
+    metadata::RemoteLogSegmentMetadata,
+    storage_manager::{IndexType, partition_dir_name, segment_file_name},
+};
 
 impl S3RemoteStorage {
     pub(super) fn segment_key(
@@ -20,9 +23,9 @@ impl S3RemoteStorage {
             key.push_str(p);
             key.push('/');
         }
-        key.push_str(&crate::storage_manager::partition_dir_name(metadata));
+        key.push_str(&partition_dir_name(metadata));
         key.push('/');
-        key.push_str(&crate::storage_manager::segment_file_name(metadata, suffix));
+        key.push_str(&segment_file_name(metadata, suffix));
         ObjectPath::from(key)
     }
 

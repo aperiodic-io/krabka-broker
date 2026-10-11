@@ -15,7 +15,9 @@ use super::{
 };
 use crate::{
     codes,
-    coordinator::unified::{config::NextGenConfig, group::CoordinatorGroup},
+    coordinator::unified::{
+        config::NextGenConfig, group::CoordinatorGroup, regex_resolver::no_topic_regex_resolver,
+    },
     test_support::{BrokenTimer, TimerFailure},
 };
 
@@ -39,7 +41,7 @@ async fn actor_exits_on_append_error() {
             },
             client_id: "client-a".into(),
             client_host: String::new(),
-            regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
+            regex_resolver: no_topic_regex_resolver(),
             reply: tx,
         })
         .await;

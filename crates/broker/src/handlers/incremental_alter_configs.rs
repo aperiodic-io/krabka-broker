@@ -34,7 +34,10 @@ use krabka_protocol::owned::{
     },
 };
 
-use crate::handlers::response_encoding::ErrorRow as _;
+use crate::{
+    config_keys::{MIN_INSYNC_REPLICAS, clear_elr_records, group::GroupBounds},
+    handlers::{RequestContext, audit_resource, response_encoding::ErrorRow as _},
+};
 
 mod broker_logger_scope;
 mod broker_scope;
@@ -72,7 +75,7 @@ fn audit_resources_for(
     resource: &AlterConfigsResource,
     _image: &MetadataImage,
 ) -> Vec<krabka_audit::AuditResource> {
-    std::iter::once(crate::handlers::audit_resource(
+    std::iter::once(audit_resource(
         super::alter_configs::config_resource_type(resource.resource_type),
         resource.resource_name.clone(),
     ))
@@ -80,7 +83,7 @@ fn audit_resources_for(
         resource
             .configs
             .iter()
-            .map(|config| crate::handlers::audit_resource("ConfigKey", config.name.clone())),
+            .map(|config| audit_resource("ConfigKey", config.name.clone())),
     )
     .collect()
 }
@@ -117,7 +120,7 @@ fn validate_resource_shape(
 async fn process_resource(
     broker: &Broker,
     image: &MetadataImage,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     resource: AlterConfigsResource,
     validate_only: bool,
     is_duplicate: bool,
@@ -185,7 +188,7 @@ async fn process_resource(
             handle_group_scoped(
                 &resource,
                 image,
-                &crate::config_keys::group::GroupBounds::of(&broker.config),
+                &GroupBounds::of(&broker.config),
                 broker.config.features.unstable_api_versions,
                 &mut out,
                 &mut to_submit,
@@ -206,12 +209,12 @@ async fn process_resource(
             || resource
                 .configs
                 .iter()
-                .any(|item| item.name == crate::config_keys::MIN_INSYNC_REPLICAS);
+                .any(|item| item.name == MIN_INSYNC_REPLICAS);
         super::alter_configs::changes_min_isr(image, record, include_topic)
     }) {
         let topic = (resource.resource_type == RESOURCE_TYPE_TOPIC)
             .then_some(resource.resource_name.as_str());
-        to_submit.extend(crate::config_keys::clear_elr_records(image, topic));
+        to_submit.extend(clear_elr_records(image, topic));
     }
 
     if validate_only {

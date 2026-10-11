@@ -25,6 +25,8 @@ pub(crate) use krabka_metadata::metadata_version::SHARE_VERSION_FEATURE as SHARE
 /// with `feature_enabled`.
 pub(crate) use krabka_metadata::metadata_version::STREAMS_VERSION_FEATURE as STREAMS_VERSION;
 
+use crate::codes::UNSUPPORTED_VERSION;
+
 /// The `metadata.version` a self-bootstrapped cluster finalizes: Kafka 4.3's
 /// `MetadataVersion.LATEST_PRODUCTION`, `4.3-IV0`. It is the level
 /// `krabka format` picks when no release is named, and the two must agree.
@@ -108,7 +110,7 @@ pub(crate) fn require_feature(
 ) -> Result<(), i16> {
     let finalized = image.finalized_features().get(name).copied();
     if finalized.is_some_and(|level| level < required_level) {
-        Err(crate::codes::UNSUPPORTED_VERSION)
+        Err(UNSUPPORTED_VERSION)
     } else {
         Ok(())
     }
@@ -166,6 +168,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::codes::UNSUPPORTED_VERSION;
 
     #[test]
     fn feature_enabled_treats_absence_as_disabled() {
@@ -372,11 +375,7 @@ mod tests {
             name: METADATA_VERSION.to_string(),
             level: 10,
         }));
-        for (required_level, want) in [
-            (11, Err(crate::codes::UNSUPPORTED_VERSION)),
-            (10, Ok(())),
-            (7, Ok(())),
-        ] {
+        for (required_level, want) in [(11, Err(UNSUPPORTED_VERSION)), (10, Ok(())), (7, Ok(()))] {
             assert!(
                 require_feature(&image, METADATA_VERSION, required_level) == want,
                 "level {required_level}"

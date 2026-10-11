@@ -27,6 +27,10 @@ use crate::{
     authorizer::{AllowAllAuthorizer, Authorizer},
     broker::BrokerHandle,
     codes,
+    handlers::test_support::{
+        ClientTopicSetup, ShareWireSetup, create_topic as create_topic_from_test_support,
+        share_fetch_wire,
+    },
     test_support::start_broker_no_audit_with,
 };
 
@@ -55,9 +59,9 @@ async fn start(authorizer: Arc<dyn Authorizer>) -> (BrokerHandle, tempfile::Temp
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "share-fetch-resolution-test",
             name,
             ..Default::default()
@@ -135,10 +139,10 @@ async fn share_fetch(
     version: i16,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    crate::handlers::test_support::share_fetch_wire(
+    share_fetch_wire(
         broker,
         request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(version),
             ..Default::default()
         },

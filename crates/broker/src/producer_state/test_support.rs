@@ -1,6 +1,7 @@
 //! Defaulted inputs for non-transactional producer-state commits.
 
 use super::ProducerState;
+use crate::test_support::UnixMillis;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct ProducerEpoch(pub i16);
@@ -26,7 +27,7 @@ pub(super) struct ProducerCommitSetup<'a> {
     pub delta: SequenceDelta,
     pub offset: krabka_log::Offset,
     #[default(crate::test_support::UnixMillis(1))]
-    pub timestamp: crate::test_support::UnixMillis,
+    pub timestamp: UnixMillis,
 }
 
 pub(super) async fn commit_fixture(state: &ProducerState, setup: ProducerCommitSetup<'_>) {
@@ -57,7 +58,7 @@ pub(super) struct ProducerBatchSetup {
     pub sequence: ProducerSequence,
     #[default(SequenceDelta(0))]
     pub delta: SequenceDelta,
-    pub timestamp: crate::test_support::UnixMillis,
+    pub timestamp: UnixMillis,
     pub offsets: RecordOffsets,
 }
 

@@ -109,11 +109,13 @@ impl BrokerHandle {
         expected_leader: krabka_raft::NodeId,
         expected_voters: usize,
     ) -> bool {
+        use crate::wal::quorum::registry::ShardId;
+
         let image = self.broker.controller.current_image();
         let Some(topic_id) = image.topic(topic).map(|record| record.topic_id) else {
             return false;
         };
-        let shard = crate::wal::quorum::registry::ShardId {
+        let shard = ShardId {
             topic_id,
             partition: PartitionIndex(partition),
         };

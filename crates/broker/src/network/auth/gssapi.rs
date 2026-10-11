@@ -18,6 +18,7 @@ use super::{
     response::{fail_authenticate, sasl_ok},
     state::{ConnectionAuth, SaslExchange, session_expiry},
 };
+use crate::time_util::now_ms;
 
 /// Broker-side SASL/GSSAPI configuration.
 ///
@@ -183,8 +184,7 @@ fn finish_gssapi(
         Ok(s) => s,
         Err(e) => return fail_authenticate(&format!("GSSAPI principal mapping failed: {e}")),
     };
-    let (expires_at_ms, session_lifetime_ms) =
-        session_expiry(crate::time_util::now_ms(), None, max_reauth);
+    let (expires_at_ms, session_lifetime_ms) = session_expiry(now_ms(), None, max_reauth);
     *auth = ConnectionAuth::Authenticated {
         principal: Principal {
             name: short,

@@ -13,7 +13,9 @@ use crate::{
     NONE, RENEW,
     harness::wire,
     support::share::{
-        acknowledge_partition, acknowledge_request, acknowledge_topic, acknowledgement,
+        AcknowledgeRequestSetup, FetchSessionMode, RenewalMode, ShareAck, ShareFetchSetup,
+        ShareSessionEpoch, ShareSessionSetup, acknowledge_partition, acknowledge_request,
+        acknowledge_success, acknowledge_topic, acknowledgement, fetch_row,
     },
 };
 
@@ -24,12 +26,12 @@ use crate::{
 /// the (single) partition row.
 pub async fn share_fetch(
     client: &Client,
-    setup: crate::support::share::ShareFetchSetup<'_>,
+    setup: ShareFetchSetup<'_>,
 ) -> krabka_protocol::owned::share_fetch_response::PartitionData {
-    crate::support::share::fetch_row(
+    fetch_row(
         client,
         share_fetch_req(setup),
-        crate::support::share::FetchSessionMode::Incremental,
+        FetchSessionMode::Incremental,
     )
     .await
 }
@@ -39,7 +41,7 @@ pub struct AcquiredRecordCount(pub i64);
 
 pub async fn fetch_count(
     client: &Client,
-    setup: crate::support::share::ShareFetchSetup<'_>,
+    setup: ShareFetchSetup<'_>,
     expected: AcquiredRecordCount,
 ) -> krabka_protocol::owned::share_fetch_response::PartitionData {
     let row = share_fetch(client, setup).await;
@@ -52,14 +54,10 @@ pub async fn fetch_count(
 
 pub async fn acquire_count(
     client: &Client,
-    session: crate::support::share::ShareSessionSetup<'_>,
+    session: ShareSessionSetup<'_>,
     expected: AcquiredRecordCount,
 ) -> krabka_protocol::owned::share_fetch_response::PartitionData {
-    let row = fetch_until_acquired(
-        client,
-        session.with_epoch(crate::support::share::ShareSessionEpoch(0)),
-    )
-    .await;
+    let row = fetch_until_acquired(client, session.with_epoch(ShareSessionEpoch(0))).await;
     assert!(
         acquired_count(&row) == expected.0,
         "unexpected initial acquisition: {row:?}"
@@ -69,21 +67,21 @@ pub async fn acquire_count(
 
 pub async fn acquire_three_and_acknowledge<'a>(
     client: &Client,
-    setup: crate::support::share::ShareAck<'a>,
-) -> crate::support::share::ShareSessionSetup<'a> {
+    setup: ShareAck<'a>,
+) -> ShareSessionSetup<'a> {
     acquire_count(client, setup.session, AcquiredRecordCount(3)).await;
-    crate::support::share::acknowledge_success(client, setup).await;
+    acknowledge_success(client, setup).await;
     setup.session
 }
 
 pub async fn fetch_empty(
     client: &Client,
-    setup: crate::support::share::ShareFetchSetup<'_>,
+    setup: ShareFetchSetup<'_>,
 ) -> krabka_protocol::owned::share_fetch_response::PartitionData {
     fetch_count(client, setup, AcquiredRecordCount(0)).await
 }
 
-pub async fn fetch_redelivered(client: &Client, setup: crate::support::share::ShareFetchSetup<'_>) {
+pub async fn fetch_redelivered(client: &Client, setup: ShareFetchSetup<'_>) {
     let row = fetch_count(client, setup, AcquiredRecordCount(1)).await;
     assert!(
         row.acquired_records[0].delivery_count == 2,
@@ -93,7 +91,7 @@ pub async fn fetch_redelivered(client: &Client, setup: crate::support::share::Sh
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub struct ShareRenewSetup<'a> {
-    pub session: crate::support::share::ShareSessionSetup<'a>,
+    pub session: ShareSessionSetup<'a>,
     pub first: krabka_ids::Offset,
     pub last: krabka_ids::Offset,
 }
@@ -105,11 +103,11 @@ pub async fn share_renew(
     client: &Client,
     setup: ShareRenewSetup<'_>,
 ) -> krabka_protocol::owned::share_acknowledge_response::PartitionData {
-    let req = acknowledge_request(crate::support::share::AcknowledgeRequestSetup {
+    let req = acknowledge_request(AcknowledgeRequestSetup {
         group_id: Some(setup.session.group.into()),
         member_id: Some(setup.session.member.into()),
         epoch: setup.session.epoch,
-        mode: crate::support::share::RenewalMode::Renew,
+        mode: RenewalMode::Renew,
         topics: vec![acknowledge_topic(
             wire(setup.session.topic_id),
             vec![acknowledge_partition(

@@ -37,6 +37,7 @@ mod test_support;
 mod voter_updates;
 
 pub(crate) use self::{join_loop::run, voter_updates::run_voter_updates};
+use crate::{metadata_source::MetadataSource, network::client::InterBrokerClient};
 
 /// Everything the auto-join driver needs, pulled out of `BrokerConfig` +
 /// `Broker` so the loop can be spawned *before* the full `Broker` Arc exists.
@@ -63,6 +64,6 @@ pub(crate) struct AutoJoinParams {
     /// Protocol of the bootstrap server's controller listener.
     pub listener_protocol: krabka_security::ListenerProtocol,
     pub inter_broker_server_name: String,
-    pub controller: Arc<dyn crate::metadata_source::MetadataSource>,
-    pub inter_broker_client: Arc<crate::network::client::InterBrokerClient>,
+    pub controller: Arc<dyn MetadataSource>,
+    pub inter_broker_client: Arc<InterBrokerClient>,
 }

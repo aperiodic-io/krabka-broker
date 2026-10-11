@@ -9,7 +9,7 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use krabka_protocol::owned::find_coordinator_response::Coordinator;
 
-use crate::{broker::Broker, codes, host_port::parse_advertised_host_port};
+use crate::{broker::Broker, codes, host_port::parse_advertised_host_port, txn::bootstrap::TOPIC};
 
 /// What a coordinator lookup resolves against: one metadata image, the brokers
 /// that are fenced or dead in it, and the listener the request arrived on.
@@ -33,7 +33,7 @@ pub(super) fn resolve_transaction_keys(
     keys.into_iter()
         .map(|key| {
             let partition = broker.txn_coordinator.partition_for(&key).get();
-            resolve_partition_coordinator(target, crate::txn::bootstrap::TOPIC, partition, key)
+            resolve_partition_coordinator(target, TOPIC, partition, key)
         })
         .collect()
 }

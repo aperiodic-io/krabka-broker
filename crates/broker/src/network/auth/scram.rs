@@ -19,6 +19,7 @@ use super::{
     response::{fail_authenticate, fail_authenticate_with, sasl_ok},
     state::{ConnectionAuth, SaslExchange, session_expiry},
 };
+use crate::{metadata_source::MetadataSource, time_util::now_ms};
 
 /// SCRAM-SHA-256 and SCRAM-SHA-512 `SaslAuthenticate` handler. It runs the two RFC 5802 rounds
 /// over Kafka's `SaslAuthenticate` (`api_key` 36) wire envelope.
@@ -54,7 +55,7 @@ use super::{
 pub fn handle_authenticate_scram(
     req: &SaslAuthenticateRequest,
     auth: &mut ConnectionAuth,
-    controller: &dyn crate::metadata_source::MetadataSource,
+    controller: &dyn MetadataSource,
     secret_key: Option<&SecretBytes>,
     max_reauth: Option<Time>,
 ) -> SaslAuthenticateResponse {
@@ -97,7 +98,7 @@ pub fn handle_authenticate_scram(
             });
             let token_active = token.is_some_and(|(token, _)| {
                 krabka_verified::token_is_active(
-                    crate::time_util::now_ms(),
+                    now_ms(),
                     token.expiry_timestamp_ms,
                     token.max_timestamp_ms,
                 )
@@ -208,7 +209,7 @@ pub fn handle_authenticate_scram(
                     // `expires_at_ms` (the KIP-368 re-auth ceiling).
                     // For regular SCRAM, it's `None` and the
                     // session has no expiry.
-                    let now = crate::time_util::now_ms();
+                    let now = now_ms();
                     if pending_token_expiry_ms
                         .is_some_and(|e| !krabka_verified::token_is_active(now, e, e))
                     {

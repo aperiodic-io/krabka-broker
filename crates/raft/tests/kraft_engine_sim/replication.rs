@@ -6,18 +6,21 @@ use std::time::Duration;
 
 use krabka_raft::RaftError;
 
-use crate::harness::{await_single_leader, await_until, start_engines, topic_record};
+use crate::harness::{
+    SimClusterSetup, await_single_leader, await_until, start_engines, three_voter_network,
+    topic_record,
+};
 
 /// 2. `submit_change` on a follower forwards to the leader, commits through
 ///    record-carrying replication, and the topic appears in ALL three images.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn follower_submit_change_propagates() {
-    let (net, ids) = crate::harness::three_voter_network();
+    let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(200);
 
     let _dirs = start_engines(
         &net,
-        crate::harness::SimClusterSetup {
+        SimClusterSetup {
             ids: &ids,
             cluster_id: cid,
             ..Default::default()

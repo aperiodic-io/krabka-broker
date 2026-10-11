@@ -6,12 +6,16 @@
 
 use std::sync::Arc;
 
-use crate::{config::BrokerConfig, error::BrokerError};
+use crate::{
+    config::BrokerConfig,
+    error::BrokerError,
+    network::{client::InterBrokerClient, ktls_probe::probe_ktls_support},
+};
 
 pub(super) struct StartupTransport {
     pub(super) tls_dynamic: Option<Arc<krabka_security::DynamicServerConfig>>,
     pub(super) ktls_enabled: bool,
-    pub(super) inter_broker_client: Arc<crate::network::client::InterBrokerClient>,
+    pub(super) inter_broker_client: Arc<InterBrokerClient>,
 }
 
 pub(super) async fn prepare_startup_transport(
@@ -26,7 +30,7 @@ pub(super) async fn prepare_startup_transport(
         .transpose()
         .map_err(|error| BrokerError::Tls(error.to_string()))?;
     let ktls_enabled = if tls_dynamic.is_some() {
-        crate::network::ktls_probe::probe_ktls_support().await
+        probe_ktls_support().await
     } else {
         false
     };
@@ -46,7 +50,7 @@ pub(super) async fn prepare_startup_transport(
         .transpose()
         .map_err(|error| BrokerError::Tls(error.to_string()))?
         .map(tokio_rustls::TlsConnector::from);
-    let inter_broker_client = Arc::new(crate::network::client::InterBrokerClient::new_with_policy(
+    let inter_broker_client = Arc::new(InterBrokerClient::new_with_policy(
         tls_connector,
         config.inter_broker_credentials.clone(),
         config.client_dispatch_queue_capacity,

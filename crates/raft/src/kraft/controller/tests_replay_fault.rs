@@ -23,6 +23,7 @@ use krabka_protocol::{
 
 use super::*;
 use crate::{
+    MetadataLogConfig,
     error::MetadataReplayError,
     kraft::controller::{
         control_batch_image_records,
@@ -374,8 +375,7 @@ fn control_replay_stops_on_an_invalid_control_record() {
 
     for (case, mut batch, reason) in cases {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut log =
-            KraftLog::open(dir.path(), &crate::MetadataLogConfig::default()).expect("open log");
+        let mut log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open log");
         log.append(&mut batch, 0).expect("append the control batch");
         log.advance_hwm(log.log_end_offset());
         let mut state = QuorumState::bootstrap(uuid::Uuid::nil(), voter_set(&[NodeId(1)]));

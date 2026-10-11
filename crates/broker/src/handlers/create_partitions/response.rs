@@ -7,6 +7,8 @@ use krabka_protocol::owned::create_partitions_response::{
 };
 use krabka_units::Time;
 
+use crate::{handlers::RequestContext, metrics::QuotaType, quota::throttle_time_ms};
+
 pub(super) fn create_partitions_response(
     results: Vec<CreatePartitionsTopicResult>,
     throttle_time_ms: i32,
@@ -19,7 +21,7 @@ pub(super) fn create_partitions_response(
 }
 
 pub(super) fn finish_response(
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     delay: Time,
     results: Vec<CreatePartitionsTopicResult>,
 ) -> CreatePartitionsResponse {
@@ -29,6 +31,6 @@ pub(super) fn finish_response(
     // `sendResponseMaybeThrottleWithControllerQuota` does. The response
     // carries the controller-mutation delay now; the dispatch loop raises it
     // when the request quota asks for more.
-    context.defer_quota_charge((crate::metrics::QuotaType::ControllerMutation, delay).into());
-    create_partitions_response(results, crate::quota::throttle_time_ms(delay))
+    context.defer_quota_charge((QuotaType::ControllerMutation, delay).into());
+    create_partitions_response(results, throttle_time_ms(delay))
 }

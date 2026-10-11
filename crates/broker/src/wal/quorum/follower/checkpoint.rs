@@ -9,6 +9,8 @@ use std::{io::Write as _, path::Path};
 use krabka_ids::Offset;
 use krabka_log::Log;
 
+use crate::BrokerError;
+
 pub(super) const DURABLE_OFFSET_FILE: &str = "wal-durable-offset.checkpoint";
 const DURABLE_OFFSET_BACKUP_FILE: &str = "wal-durable-offset.checkpoint.bak";
 
@@ -78,7 +80,7 @@ fn decode_durable_offset(text: &str) -> Result<DurableRange, DurableOffsetDecode
     }
 }
 
-pub(super) fn recover_durable_offset(log: &mut Log, path: &Path) -> Result<(), crate::BrokerError> {
+pub(super) fn recover_durable_offset(log: &mut Log, path: &Path) -> Result<(), BrokerError> {
     let backup = path.with_file_name(DURABLE_OFFSET_BACKUP_FILE);
     let checkpoint = if path.exists() {
         Some(path)
@@ -100,7 +102,7 @@ pub(super) fn recover_durable_offset(log: &mut Log, path: &Path) -> Result<(), c
             // reason to fall back to the log start.
             let value = std::fs::read_to_string(checkpoint)?;
             decode_durable_offset(&value).map_err(|error| {
-                crate::BrokerError::Replication(format!(
+                BrokerError::Replication(format!(
                     "decode WAL durable offsets {}: {error}",
                     checkpoint.display()
                 ))
@@ -113,7 +115,7 @@ pub(super) fn recover_durable_offset(log: &mut Log, path: &Path) -> Result<(), c
         (start..=end).contains(&durable.start),
         (durable.start..=end).contains(&durable.end),
     ) else {
-        return Err(crate::BrokerError::Replication(format!(
+        return Err(BrokerError::Replication(format!(
             "WAL durable range {}..{} is outside recovered range {}..{}",
             durable.start.0, durable.end.0, start.0, end.0
         )));
@@ -136,7 +138,7 @@ pub(super) fn recover_durable_offset(log: &mut Log, path: &Path) -> Result<(), c
         durable.end.0,
         observed_last,
     ) {
-        return Err(crate::BrokerError::Replication(format!(
+        return Err(BrokerError::Replication(format!(
             "WAL durable range {}..{} does not end at a whole-batch boundary",
             durable.start.0, durable.end.0
         )));
@@ -152,10 +154,7 @@ pub(super) fn recover_durable_offset(log: &mut Log, path: &Path) -> Result<(), c
     Ok(())
 }
 
-pub(super) fn write_durable_offset(
-    path: &Path,
-    durable: DurableRange,
-) -> Result<(), crate::BrokerError> {
+pub(super) fn write_durable_offset(path: &Path, durable: DurableRange) -> Result<(), BrokerError> {
     let temporary = path.with_extension("checkpoint.tmp");
     let backup = path.with_file_name(DURABLE_OFFSET_BACKUP_FILE);
     let mut file = std::fs::File::create(&temporary)?;
@@ -203,6 +202,7 @@ mod tests {
     use krabka_protocol::records::{Record, RecordBatch};
 
     use super::*;
+    use crate::{test_support::RecordCount, wal::quorum::test_support::batch};
 
     /// The exact bytes a 1.x broker writes for the range `3..7`. A change
     /// here is a change to the 1.x on-disk contract.
@@ -215,11 +215,9 @@ mod tests {
         (dir, checkpoint, log)
     }
 
-    fn checkpoint_log(
-        records: crate::test_support::RecordCount,
-    ) -> (tempfile::TempDir, std::path::PathBuf, Log) {
+    fn checkpoint_log(records: RecordCount) -> (tempfile::TempDir, std::path::PathBuf, Log) {
         let (dir, checkpoint, mut log) = empty_checkpoint_log();
-        let mut batch = crate::wal::quorum::test_support::batch(records.0);
+        let mut batch = batch(records.0);
         log.append(&mut batch).unwrap();
         (dir, checkpoint, log)
     }
@@ -354,7 +352,7 @@ mod tests {
             (Some("0\n1 1\n"), true, 1, 1),
             (None, true, 1, 1),
         ] {
-            let (dir, checkpoint, mut log) = checkpoint_log(crate::test_support::RecordCount(3));
+            let (dir, checkpoint, mut log) = checkpoint_log(RecordCount(3));
             if let Some(value) = value {
                 std::fs::write(&checkpoint, value).unwrap();
             } else {
@@ -400,7 +398,7 @@ mod tests {
             ("0 1\n", "predates krabka 1.0"),
             ("1\n0 1\n", "unsupported checkpoint version \"1\""),
         ] {
-            let (_dir, checkpoint, mut log) = checkpoint_log(crate::test_support::RecordCount(1));
+            let (_dir, checkpoint, mut log) = checkpoint_log(RecordCount(1));
             log.sync().unwrap();
             std::fs::write(&checkpoint, checkpoint_value).unwrap();
 

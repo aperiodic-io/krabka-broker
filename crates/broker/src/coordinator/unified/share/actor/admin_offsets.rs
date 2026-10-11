@@ -13,6 +13,7 @@ use crate::{
     codes,
     coordinator::unified::{GroupCoordinator, share::state::ShareGroupState},
     error::BrokerError,
+    share_coordinator::persister_client::SharePersister,
 };
 
 /// One partition of an `AlterShareGroupOffsets` request whose topic and
@@ -89,7 +90,7 @@ struct MetadataSnapshot {
 fn empty_group_persister<'a>(
     state: &ShareGroupState,
     coordinator: &'a GroupCoordinator,
-) -> Result<&'a std::sync::Arc<crate::share_coordinator::persister_client::SharePersister>, i16> {
+) -> Result<&'a std::sync::Arc<SharePersister>, i16> {
     if !state.members.is_empty() {
         return Err(codes::NON_EMPTY_GROUP);
     }
@@ -366,6 +367,7 @@ mod tests {
             },
             test_support::{fixed_source, make_share_persister},
         },
+        test_support::PartitionCount,
     };
 
     /// `(key, value)` of every record appended to `__consumer_offsets`.
@@ -442,7 +444,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn alter_records_initializing_and_keeps_it_when_the_persister_fails() {
         let (coordinator, log, topic_id) = unavailable_persister_coordinator(TopicMetadataSetup {
-            partitions: crate::test_support::PartitionCount(2),
+            partitions: PartitionCount(2),
             ..Default::default()
         });
         let topic_uuid = uuid::Uuid::from_bytes(topic_id.0);
@@ -482,7 +484,7 @@ mod tests {
     #[tokio::test]
     async fn delete_without_state_answers_no_row() {
         let (metadata, _topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: crate::test_support::PartitionCount(2),
+            partitions: PartitionCount(2),
             ..Default::default()
         });
         let (coordinator, log) = make_coordinator(metadata);

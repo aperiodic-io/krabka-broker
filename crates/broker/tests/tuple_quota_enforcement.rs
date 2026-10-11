@@ -42,6 +42,7 @@ const CLIENT_ID: &str = "krabka-tuple-quota-test";
 use assert2::assert;
 
 use crate::{
+    kafka_wire::{PlainAuthenticationSetup, quotas::QuotaAlterSetup},
     tuple_quota_cluster::{
         create_topic_as_admin, seed_alice_write_acl, seed_compat_shim_disable_acl,
         start_single_broker_sasl_plaintext_with_users, wait_partition_exists,
@@ -112,9 +113,9 @@ async fn tuple_quota_throttles_only_matching_client_id() {
             ],
             vec![("producer_byte_rate".into(), 1024.0, false)],
         )],
-        &crate::kafka_wire::quotas::QuotaAlterSetup {
-            authentication: crate::kafka_wire::PlainAuthenticationSetup {
-                client_id: crate::CLIENT_ID,
+        &QuotaAlterSetup {
+            authentication: PlainAuthenticationSetup {
+                client_id: CLIENT_ID,
                 user: "admin",
                 password: admin_password.as_bytes().to_vec(),
             },

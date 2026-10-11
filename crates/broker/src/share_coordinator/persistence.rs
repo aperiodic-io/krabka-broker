@@ -288,8 +288,11 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::share_coordinator::coordinator::test_support::{
-        DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+    use crate::{
+        coordinator::unified::test_support::wire_bytes,
+        share_coordinator::coordinator::test_support::{
+            DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+        },
     };
 
     fn peek_type(buf: &[u8]) -> i16 {
@@ -299,9 +302,7 @@ mod tests {
 
     /// Bytes from a hex string that may hold spaces.
     fn hex(s: &str) -> Vec<u8> {
-        crate::coordinator::unified::test_support::wire_bytes(
-            &s.split_whitespace().collect::<Vec<_>>(),
-        )
+        wire_bytes(&s.split_whitespace().collect::<Vec<_>>())
     }
 
     #[test]

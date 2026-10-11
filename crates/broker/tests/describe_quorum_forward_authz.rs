@@ -24,7 +24,10 @@ use krabka_broker::{
 use krabka_metadata::AclOperation;
 use krabka_security::{ListenerProtocol, SaslMechanism};
 
-use crate::support::{sasl_client, start_n_node_with};
+use crate::support::{
+    quorum::{follower_config, two_node_leader},
+    sasl_client, shutdown_cluster, start_n_node_with,
+};
 
 const ALICE: &str = "alice";
 const ALICE_PASSWORD: &str = "alice-secret";
@@ -93,8 +96,8 @@ async fn a_describe_authorized_caller_succeeds_through_a_forwarding_follower() {
         .await
         .expect("describe_quorum from node 0");
     check!(first_resp.error_code == 0, "top-level error_code");
-    let leader_id = crate::support::quorum::two_node_leader(&first_resp, (1, 2));
-    let follower_cfg = crate::support::quorum::follower_config(&cluster, leader_id);
+    let leader_id = two_node_leader(&first_resp, (1, 2));
+    let follower_cfg = follower_config(&cluster, leader_id);
     let follower_client =
         sasl_client(&follower_cfg.listen_addr.to_string(), ALICE, ALICE_PASSWORD).await;
     let follower_resp = follower_client
@@ -112,5 +115,5 @@ async fn a_describe_authorized_caller_succeeds_through_a_forwarding_follower() {
     );
     check!(partition.leader_id == leader_id);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

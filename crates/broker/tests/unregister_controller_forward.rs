@@ -15,7 +15,11 @@ use krabka_protocol::owned::{
     update_features_request::UpdateFeaturesRequest,
 };
 
-use crate::support::{client::connect_owned, configs::feature_update, start_n_node_with};
+use crate::support::{
+    client::connect_owned,
+    configs::{controller_registration, feature_update},
+    shutdown_cluster, start_n_node_with,
+};
 
 /// Kafka trunk's `CONTROLLER_ID_NOT_REGISTERED`.
 const CONTROLLER_ID_NOT_REGISTERED: i16 = 136;
@@ -42,9 +46,7 @@ async fn a_follower_forwards_unregister_controller_to_the_active_controller() {
         .find(|(_, cfg, _)| i64::from(cfg.broker_id) == i64::try_from(leader.0).unwrap())
         .expect("the leader");
     leader_handle
-        .submit_metadata_record_for_test(crate::support::configs::controller_registration(
-            MetadataNodeId(7),
-        ))
+        .submit_metadata_record_for_test(controller_registration(MetadataNodeId(7)))
         .await
         .expect("seed the registration");
 
@@ -105,5 +107,5 @@ async fn a_follower_forwards_unregister_controller_to_the_active_controller() {
             .controller(MetadataNodeId(7))
             .is_none()
     );
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

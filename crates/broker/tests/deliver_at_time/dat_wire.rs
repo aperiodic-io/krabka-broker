@@ -18,10 +18,15 @@ use krabka_protocol::{
 
 use crate::{
     dat_fixtures::{Mode, Visible, now_ms},
-    support,
     support::{
-        fetch::single_partition_fetch,
+        self,
+        client::create_configured_topic,
+        fetch::{
+            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+        },
         offsets::{list_offset_partition, single_partition_list_offsets},
+        produce::{SinglePartitionProduceSetup, send_batch},
+        topics::CreateTopicSetup,
     },
 };
 
@@ -29,9 +34,9 @@ use crate::{
 const VISIBILITY_DEADLINE: Duration = Duration::from_secs(30);
 
 pub async fn create_topic(client: &Client, topic: &str, mode: Mode) {
-    crate::support::client::create_configured_topic(
+    create_configured_topic(
         client,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic,
             configs: &[("delivery.mode", mode.value)],
             ..Default::default()
@@ -71,10 +76,10 @@ pub async fn ready_topic(broker: &BrokerHandle, client: &Client, topic: &str, mo
 }
 
 pub async fn produce(client: &Client, topic: &str, topic_id: Uuid, batch: RecordBatch) {
-    let response = crate::support::produce::send_batch(
+    let response = send_batch(
         &client,
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: topic.to_owned(),
             topic_id,
             ..Default::default()
@@ -101,16 +106,12 @@ pub async fn fetch_values(
     max_wait_ms: i32,
 ) -> Vec<String> {
     let response = client
-        .send(single_partition_fetch(
-            crate::support::fetch::SinglePartitionFetchSetup {
-                topic: topic.to_owned(),
-                topic_id,
-                limits: crate::support::fetch::FetchLimits::one_mebibyte(
-                    crate::support::fetch::RequestWaitMillis(max_wait_ms),
-                ),
-                ..Default::default()
-            },
-        ))
+        .send(single_partition_fetch(SinglePartitionFetchSetup {
+            topic: topic.to_owned(),
+            topic_id,
+            limits: FetchLimits::one_mebibyte(RequestWaitMillis(max_wait_ms)),
+            ..Default::default()
+        }))
         .await
         .expect("Fetch");
     let served = response

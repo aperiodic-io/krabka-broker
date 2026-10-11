@@ -20,7 +20,11 @@ use assert2::assert;
 
 use crate::support::{
     client::create_topic,
-    fetch::{fetch_partition, single_partition_fetch},
+    fetch::{
+        FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+        SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+    },
+    produce::{SinglePartitionProduceSetup, send_batch},
     records::value_record,
 };
 mod support;
@@ -114,10 +118,10 @@ async fn large_message_fetch_round_trips_byte_exact() {
     // the Linux plaintext fetch goes zero-copy.
     let (batch, expected) = large_records(64, 2 * 1024);
 
-    let prod = crate::support::produce::send_batch(
+    let prod = send_batch(
         &p.client,
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: ("big").into(),
             topic_id: tid,
             ..Default::default()
@@ -133,16 +137,16 @@ async fn large_message_fetch_round_trips_byte_exact() {
         .send(FetchRequest {
             session_id: 0,
             session_epoch: -1,
-            ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+            ..single_partition_fetch(SinglePartitionFetchSetup {
                 topic: "big".into(),
                 topic_id: tid,
-                partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
-                    maximum: crate::support::fetch::FetchByteLimit(8 * 1024 * 1024),
+                partition: fetch_partition(FetchPartitionSetup {
+                    maximum: FetchByteLimit(8 * 1024 * 1024),
                     ..Default::default()
                 }),
-                limits: crate::support::fetch::FetchLimits::wait_for_data_with_maximum(
-                    crate::support::fetch::RequestWaitMillis(200),
-                    crate::support::fetch::FetchByteLimit(8 * 1024 * 1024),
+                limits: FetchLimits::wait_for_data_with_maximum(
+                    RequestWaitMillis(200),
+                    FetchByteLimit(8 * 1024 * 1024),
                 ),
             })
         })

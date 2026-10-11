@@ -10,8 +10,9 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-    docker_run_kafka_tool_with_image_and_mount,
+    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, SaslClusterSetup, broker0_advertised,
+    describe_console_entity, docker_run_kafka_tool_with_image_and_mount,
+    start_registered_sasl_cluster, write_plain_props,
 };
 
 /// JVM acceptance: `kafka-configs --entity-type users` client quota round-trip.
@@ -109,15 +110,13 @@ async fn quota_round_trip(case: QuotaCase<'_>) {
     } = case;
 
     let (h1, h2, h3, _cfg1, _cfg2, _cfg3, _d1, _d2, _d3) =
-        Box::pin(crate::jvm_acceptance::start_registered_sasl_cluster(
-            crate::jvm_acceptance::SaslClusterSetup {
-                extra_users: users,
-                ..Default::default()
-            },
-        ))
+        Box::pin(start_registered_sasl_cluster(SaslClusterSetup {
+            extra_users: users,
+            ..Default::default()
+        }))
         .await;
 
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     let admin_mount = admin_props.mount_str();
 
     // Set the user quota through the JVM admin client.
@@ -154,7 +153,7 @@ async fn quota_round_trip(case: QuotaCase<'_>) {
     // Describe — confirm visibility.
     // api_key 50 (DescribeUserScramCredentials) is implemented,
     // so the JVM tool exits 0 cleanly. Use the helper which asserts success.
-    let desc = crate::jvm_acceptance::describe_console_entity(&admin_mount, entity, name);
+    let desc = describe_console_entity(&admin_mount, entity, name);
     let stdout = String::from_utf8_lossy(&desc.stdout);
     assert!(
         stdout.contains(expected),

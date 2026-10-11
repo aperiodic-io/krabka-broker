@@ -14,7 +14,10 @@ use krabka_protocol::owned::common::{
 };
 
 use super::results::{per_topic_with_refusals, verify_partitions};
-use crate::{codes, txn::state::TopicPartition};
+use crate::{
+    codes,
+    txn::{coordinator::TxnCoordinator, state::TopicPartition, version::TxnVersion},
+};
 
 /// Processes one `transactional_id`, `producer_id`, and `producer_epoch`
 /// triple. It returns per-topic and per-partition result entries. A topic
@@ -36,7 +39,7 @@ pub(super) struct TransactionRequest<'a> {
     pub(super) response_topics: &'a [AddPartitionsToTxnTopic],
     pub(super) denied: &'a std::collections::HashSet<String>,
     pub(super) frozen: &'a std::collections::HashSet<String>,
-    pub(super) txnv: crate::txn::version::TxnVersion,
+    pub(super) txnv: TxnVersion,
     pub(super) verify_only: bool,
     /// The `AddPartitionsToTxn` request version, which selects between
     /// `PRODUCER_FENCED` and the legacy `INVALID_PRODUCER_EPOCH` on a
@@ -51,7 +54,7 @@ pub(super) struct TransactionRequest<'a> {
 // walks the request's topics and locks the entry.
 #[cfg_attr(test, mutants::skip)]
 pub(super) async fn process_one_txn(
-    coord: &crate::txn::coordinator::TxnCoordinator,
+    coord: &TxnCoordinator,
     request: TransactionRequest<'_>,
 ) -> Vec<AddPartitionsToTxnTopicResult> {
     let TransactionRequest {

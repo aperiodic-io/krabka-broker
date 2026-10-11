@@ -18,8 +18,12 @@ use tempfile::TempDir;
 use crate::{
     harness::admin_plain_password,
     support::{
+        ClusterNodeSetup, NodeIndex, broker_config,
         client::connect_client,
+        controller_voters, init_tracing_with,
+        produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
+        shutdown_cluster,
     },
 };
 
@@ -48,7 +52,7 @@ const DEFAULT_SASL_ENDPOINTS: [SocketAddr; 1] = [SocketAddr::V4(std::net::Socket
 
 #[derive(krabka_macros::FieldDefaults)]
 struct SaslNodeSetup<'a> {
-    cluster: crate::support::ClusterNodeSetup<'a>,
+    cluster: ClusterNodeSetup<'a>,
     #[default(&DEFAULT_SASL_ENDPOINTS)]
     sasl_addrs: &'a [SocketAddr],
 }
@@ -56,7 +60,7 @@ struct SaslNodeSetup<'a> {
 fn sasl_two_listener_config(log_dir: &std::path::Path, setup: SaslNodeSetup<'_>) -> BrokerConfig {
     let listen = setup.cluster.client_addrs[setup.cluster.index.0];
     let sasl = setup.sasl_addrs[setup.cluster.index.0];
-    let mut cfg = crate::support::broker_config(log_dir, setup.cluster);
+    let mut cfg = broker_config(log_dir, setup.cluster);
     cfg.listeners = vec![
         crate::support::listeners::listener("PLAINTEXT", listen, ListenerProtocol::Plaintext),
         crate::support::listeners::listener(
@@ -84,7 +88,7 @@ fn sasl_two_listener_config(log_dir: &std::path::Path, setup: SaslNodeSetup<'_>)
 /// triples in broker id order.
 async fn start_two_node_sasl() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    crate::support::init_tracing_with("warn");
+    init_tracing_with("warn");
 
     let (plaintext_addrs, plaintext_listeners) = reserve_listeners(2).await;
     let (sasl_addrs, sasl_listeners) = reserve_listeners(2).await;
@@ -97,10 +101,10 @@ async fn start_two_node_sasl() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
     let cfg0 = sasl_two_listener_config(
         dir0.path(),
         SaslNodeSetup {
-            cluster: crate::support::ClusterNodeSetup {
+            cluster: ClusterNodeSetup {
                 client_addrs: &plaintext_addrs,
                 controller_addrs: &controller_addrs,
-                voters: crate::support::controller_voters(&voters),
+                voters: controller_voters(&voters),
                 ..Default::default()
             },
             sasl_addrs: &sasl_addrs,
@@ -110,11 +114,11 @@ async fn start_two_node_sasl() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
     let cfg1 = sasl_two_listener_config(
         dir1.path(),
         SaslNodeSetup {
-            cluster: crate::support::ClusterNodeSetup {
-                index: crate::support::NodeIndex(1),
+            cluster: ClusterNodeSetup {
+                index: NodeIndex(1),
                 client_addrs: &plaintext_addrs,
                 controller_addrs: &controller_addrs,
-                voters: crate::support::controller_voters(&voters),
+                voters: controller_voters(&voters),
                 ..Default::default()
             },
             sasl_addrs: &sasl_addrs,
@@ -188,12 +192,12 @@ async fn two_broker_sasl_plaintext_replication() {
         )
     };
     let prod = producer
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             batch,
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("sasl-repl").into(),
                 topic_id,
-                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                ..SinglePartitionProduceSetup::replicated()
             },
         ))
         .await
@@ -208,5 +212,5 @@ async fn two_broker_sasl_plaintext_replication() {
         h.wait_until_local_log_end_offset("sasl-repl", 0, 10).await;
     }
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

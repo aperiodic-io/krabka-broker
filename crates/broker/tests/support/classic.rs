@@ -22,7 +22,7 @@ const ERR_NONE: i16 = 0;
 pub fn join_request(group_id: &str, member_id: &str) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: None,
-        ..classic_join_request(crate::support::classic::ClassicJoinSetup {
+        ..classic_join_request(ClassicJoinSetup {
             group_id: group_id.to_string(),
             member_id: member_id.to_string(),
             protocol_type: "consumer".to_string(),
@@ -200,7 +200,7 @@ pub fn empty_range_join(
     member: impl Into<String>,
     timeouts: ClassicTimeouts,
 ) -> JoinGroupRequest {
-    classic_join_request(crate::support::classic::ClassicJoinSetup {
+    classic_join_request(ClassicJoinSetup {
         group_id: (group).into(),
         member_id: (member).into(),
         timeouts,

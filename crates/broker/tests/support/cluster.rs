@@ -13,6 +13,11 @@ use assert2::assert;
 use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHandle, NodeId};
 use tempfile::TempDir;
 
+use crate::support::{
+    AddressedNodeSetup, addressed_node_config, client::connect_owned, start_n_node,
+    wait_for_all_brokers_registered,
+};
+
 /// Set the one-based broker and node identities without changing cluster policy.
 ///
 /// # Panics
@@ -62,12 +67,12 @@ pub async fn await_broker_start(
 /// auto-join, because KIP-853 dynamic reconfiguration is a separate work stream.
 #[derive(krabka_macros::FieldDefaults)]
 struct StaticVoterSetup {
-    node: crate::support::AddressedNodeSetup,
+    node: AddressedNodeSetup,
     voters: Vec<(NodeId, String)>,
 }
 
 fn static_voter_broker_config(log_dir: &std::path::Path, setup: StaticVoterSetup) -> BrokerConfig {
-    let mut cfg = crate::support::addressed_node_config(log_dir, setup.node);
+    let mut cfg = addressed_node_config(log_dir, setup.node);
     // Bind a concrete (pre-bound) client port. The broker self-registers its
     // `advertised_listener` host:port into the controller image *before* it
     // binds its listeners and rewrites a `:0` advertised port to the real one
@@ -149,12 +154,12 @@ pub async fn start_n_node_with(
         let mut cfg = static_voter_broker_config(
             dir.path(),
             StaticVoterSetup {
-                node: crate::support::AddressedNodeSetup {
+                node: AddressedNodeSetup {
                     node: NodeId(u64::try_from((i) + 1).expect("one-based node id")),
                     client: client_addrs[i],
                     controller: controller_addrs[i],
                 },
-                voters: crate::support::controller_voters(&voters),
+                voters: controller_voters(&voters),
             },
         )
         .with_internal_topics_for(n_usize);
@@ -222,8 +227,8 @@ pub async fn start_n_node_client(
     Vec<(BrokerHandle, BrokerConfig, TempDir)>,
     krabka_client_core::Client,
 ) {
-    let cluster = crate::support::start_n_node(n).await.expect("start_n_node");
-    let client = crate::support::client::connect_owned(
+    let cluster = start_n_node(n).await.expect("start_n_node");
+    let client = connect_owned(
         format!("127.0.0.1:{}", cluster[0].1.listen_addr.port()),
         client_id,
         "client build",
@@ -253,6 +258,6 @@ pub async fn fixed_internal_isr_cluster(
     })
     .await
     .expect("start the cluster");
-    crate::support::wait_for_all_brokers_registered(&cluster, 3).await;
+    wait_for_all_brokers_registered(&cluster, 3).await;
     cluster
 }

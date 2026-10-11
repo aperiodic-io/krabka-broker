@@ -2,7 +2,7 @@ use assert2::check;
 
 use super::*;
 use crate::{
-    core::test_support::{FakeLog, machine, three_voter_machine, voters},
+    core::test_support::{FakeLog, check_prevote_started, machine, three_voter_machine, voters},
     event::{Event, LogEnd},
 };
 
@@ -151,7 +151,7 @@ fn election_timeout_starts_prevote_prospective() {
     let mut m = three_voter_machine();
     let log = FakeLog::new(5, 1);
     let actions = m.on_event(Event::ElectionTimeout, &log, SimInstant(2000));
-    crate::core::test_support::check_prevote_started(&m, &actions);
+    check_prevote_started(&m, &actions);
     check!(m.quorum_state().leader_epoch == 0); // pre-vote: epoch not bumped yet
 }
 

@@ -26,7 +26,17 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use krabka_log::Offset;
 use krabka_protocol::primitives::{fixed, string_bytes};
 
-use crate::error::BrokerError;
+use crate::{
+    coordinator::unified::{
+        classic_state::OffsetEntry,
+        persistence_next_gen::{
+            NextGenKey, encode_key as encode_next_gen_key, parse_key as parse_next_gen_key,
+        },
+        share::persistence::{ShareGroupKey, encode_share_key, parse_share_key},
+        streams::persistence::{StreamsGroupKey, encode_streams_key, parse_streams_key},
+    },
+    error::BrokerError,
+};
 
 pub(crate) mod flex;
 
@@ -156,12 +166,12 @@ pub enum Key {
     /// Just `group_id`. The value carries the whole `GroupMetadataValue`.
     GroupMetadata { group_id: String },
     /// KIP-848 next-gen consumer group record types, versions 3–8 and 16.
-    NextGen(crate::coordinator::unified::persistence_next_gen::NextGenKey),
+    NextGen(NextGenKey),
     /// KIP-932 share-group record types, versions 10–15.
-    Share(crate::coordinator::unified::share::persistence::ShareGroupKey),
+    Share(ShareGroupKey),
     /// KIP-1071 streams-group record types, versions 17 and 19–23. Kafka 4.3.1
     /// defines no type 18.
-    Streams(crate::coordinator::unified::streams::persistence::StreamsGroupKey),
+    Streams(StreamsGroupKey),
 }
 
 /// A `__consumer_offsets` record key as the coordinator loader reads it.
@@ -230,15 +240,9 @@ pub fn parse_record_key(mut buf: &[u8]) -> Result<RecordKey, BrokerError> {
             let group_id = get_string(&mut buf)?;
             Key::GroupMetadata { group_id }
         }
-        3..=8 | 16 => Key::NextGen(
-            crate::coordinator::unified::persistence_next_gen::parse_key(version, buf)?,
-        ),
-        10..=15 => Key::Share(
-            crate::coordinator::unified::share::persistence::parse_share_key(version, buf)?,
-        ),
-        17 | 19..=23 => Key::Streams(
-            crate::coordinator::unified::streams::persistence::parse_streams_key(version, buf)?,
-        ),
+        3..=8 | 16 => Key::NextGen(parse_next_gen_key(version, buf)?),
+        10..=15 => Key::Share(parse_share_key(version, buf)?),
+        17 | 19..=23 => Key::Streams(parse_streams_key(version, buf)?),
         unknown => return Ok(RecordKey::UnknownType(unknown)),
     };
     Ok(RecordKey::Known(key))
@@ -261,9 +265,9 @@ pub fn encode_key(key: &Key) -> Result<Bytes, BrokerError> {
             partition,
         } => OffsetCommitValue::encode_key(group_id, topic, *partition),
         Key::GroupMetadata { group_id } => GroupMetadataValue::encode_key(group_id),
-        Key::NextGen(k) => crate::coordinator::unified::persistence_next_gen::encode_key(k),
-        Key::Share(k) => crate::coordinator::unified::share::persistence::encode_share_key(k),
-        Key::Streams(k) => crate::coordinator::unified::streams::persistence::encode_streams_key(k),
+        Key::NextGen(k) => encode_next_gen_key(k),
+        Key::Share(k) => encode_share_key(k),
+        Key::Streams(k) => encode_streams_key(k),
     }
 }
 
@@ -365,7 +369,7 @@ impl OffsetCommitValue {
     }
 }
 
-impl From<OffsetCommitValue> for crate::coordinator::unified::classic_state::OffsetEntry {
+impl From<OffsetCommitValue> for OffsetEntry {
     fn from(value: OffsetCommitValue) -> Self {
         Self {
             offset: value.offset,
@@ -378,8 +382,8 @@ impl From<OffsetCommitValue> for crate::coordinator::unified::classic_state::Off
     }
 }
 
-impl From<&crate::coordinator::unified::classic_state::OffsetEntry> for OffsetCommitValue {
-    fn from(entry: &crate::coordinator::unified::classic_state::OffsetEntry) -> Self {
+impl From<&OffsetEntry> for OffsetCommitValue {
+    fn from(entry: &OffsetEntry) -> Self {
         Self {
             offset: entry.offset,
             leader_epoch: entry.leader_epoch,

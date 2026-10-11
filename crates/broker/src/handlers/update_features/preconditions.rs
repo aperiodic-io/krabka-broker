@@ -138,6 +138,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::test_support::broker_registration;
 
     const LOCAL: LocalController = LocalController {
         node_id: NodeId(1),
@@ -208,7 +209,7 @@ mod tests {
             host: String::new(),
             port: 0,
             features,
-            ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+            ..broker_registration(krabka_raft::NodeId(node_id))
         })
     }
 

@@ -7,7 +7,8 @@
 //! from the RFC 7628 client initial response.
 
 use crate::jvm_acceptance::{
-    KAFKA_IMAGE, nc_check_connectivity, oauthbearer_jaas, start_oauthbearer_broker,
+    KAFKA_IMAGE, console_round_trip_with_props, nc_check_connectivity, oauthbearer_jaas,
+    start_oauthbearer_broker,
 };
 
 /// End-to-end `SASL_PLAINTEXT` + OAUTHBEARER drive of the JVM
@@ -33,8 +34,7 @@ async fn jvm_sasl_oauthbearer_produce_consume() {
          sasl.jaas.config={}\n",
         oauthbearer_jaas(USER),
     );
-    let _props_file =
-        crate::jvm_acceptance::console_round_trip_with_props(KAFKA_IMAGE, TOPIC, &props);
+    let _props_file = console_round_trip_with_props(KAFKA_IMAGE, TOPIC, &props);
 
     broker.shutdown().await;
 }

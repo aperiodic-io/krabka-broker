@@ -228,19 +228,22 @@ macro_rules! context_bytes_handler {
             body: &'a [u8],
             ctx: &'a crate::RequestContext<'a>,
         ) -> crate::BoxFuture<'a, Result<crate::Bytes, crate::BrokerError>> {
-            Box::pin(std::future::ready(crate::reply(&[
+            use crate::{reply, text};
+
+            Box::pin(std::future::ready(reply(&[
                 &$name,
                 &broker.name,
                 &version,
                 &ctx.correlation_id,
                 &ctx.client_id,
-                &crate::text(body),
+                &text(body),
             ])))
         }
     };
 }
 
 mod handlers {
+    use super::reply;
     use crate::{ApiVersion, BrokerError, Bytes, krabka_protocol::Decode};
 
     /// The `typed` adapters' encoder: the response, then the version it was
@@ -271,7 +274,7 @@ mod handlers {
     /// Renders what a typed handler received, failing on an empty body like
     /// [`crate::reply`].
     fn typed_reply(parts: &[&dyn std::fmt::Display]) -> Result<String, BrokerError> {
-        crate::reply(parts).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        reply(parts).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
     }
 
     macro_rules! typed_handlers {
@@ -356,7 +359,7 @@ mod handlers {
     }
 
     pub mod describe_configs {
-        use crate::{ApiVersion, Broker, BrokerError, Bytes, RequestContext};
+        use crate::{ApiVersion, Broker, BrokerError, Bytes, RequestContext, reply, text};
 
         pub fn handle(
             broker: &Broker,
@@ -364,19 +367,21 @@ mod handlers {
             body: &[u8],
             ctx: &RequestContext<'_>,
         ) -> Result<Bytes, BrokerError> {
-            crate::reply(&[
+            reply(&[
                 &"describe_configs",
                 &broker.name,
                 &version,
                 &ctx.correlation_id,
                 &ctx.client_id,
-                &crate::text(body),
+                &text(body),
             ])
         }
     }
 
     pub mod push_telemetry {
-        use crate::{ApiVersion, Broker, BrokerError, Bytes, CorrelationId, TelemetryContext};
+        use crate::{
+            ApiVersion, Broker, BrokerError, Bytes, CorrelationId, TelemetryContext, reply, text,
+        };
 
         pub fn handle(
             broker: &Broker,
@@ -385,13 +390,13 @@ mod handlers {
             body: &[u8],
             ctx: &TelemetryContext<'_>,
         ) -> Result<Bytes, BrokerError> {
-            crate::reply(&[
+            reply(&[
                 &"push_telemetry",
                 &broker.name,
                 &version,
                 &correlation_id,
                 &ctx.client_instance,
-                &crate::text(body),
+                &text(body),
             ])
         }
     }

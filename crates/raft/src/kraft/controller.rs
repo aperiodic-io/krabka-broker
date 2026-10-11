@@ -66,7 +66,7 @@ use crate::{
         ControllerFetchMissLimit, DEFAULT_METADATA_RAFT_FETCH_MAX, MetadataLogConfig,
         MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax,
     },
-    error::RaftError,
+    error::{MetadataReplayError, RaftError},
     kraft::{
         action::{Action, TimerKind},
         core::QuorumStateMachine,
@@ -80,6 +80,7 @@ use crate::{
         },
         types::{Epoch, LogView, NodeId, QuorumState, ReplicaKey, SimInstant},
     },
+    reconfig::ReconfigOutcome,
 };
 
 mod activation;
@@ -324,7 +325,7 @@ struct Engine {
     activation_fault: Option<String>,
     /// The committed record this node could not replay, which stops the
     /// engine. `None` while every committed record has replayed.
-    replay_fault: Option<crate::error::MetadataReplayError>,
+    replay_fault: Option<MetadataReplayError>,
 }
 
 #[derive(Clone)]
@@ -344,7 +345,7 @@ struct KraftControlState {
 
 struct PendingReconfig {
     need_offset: Offset,
-    reply: Option<oneshot::Sender<Result<crate::reconfig::ReconfigOutcome, RaftError>>>,
+    reply: Option<oneshot::Sender<Result<ReconfigOutcome, RaftError>>>,
     removed_local_leader: bool,
 }
 

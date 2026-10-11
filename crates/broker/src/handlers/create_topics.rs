@@ -49,7 +49,20 @@ pub(crate) use self::{
         validate_manual_partition_assignment,
     },
 };
-use crate::{authorizer::AuthorizationResult, broker::Broker, codes};
+use crate::{
+    api_catalog::UnstableApiVersions,
+    authorizer::AuthorizationResult,
+    broker::Broker,
+    codes,
+    config::BrokerConfig,
+    handlers::{
+        RequestContext,
+        describe_configs::{effective_topic_configs, static_settings},
+        request_names::duplicate_names as find_duplicate_names,
+    },
+    metadata_source::MetadataSource,
+    wal::quorum::placement::select_voters_from_sorted_racks,
+};
 
 /// Leader epoch that a freshly created partition starts at. The committed
 /// `PartitionRecord` and the handler-side leader-cache install must agree.
@@ -57,7 +70,7 @@ pub(crate) const INITIAL_LEADER_EPOCH: i32 = 0;
 
 pub(crate) fn diskless_wal_placement_error(
     image: &krabka_metadata::MetadataImage,
-    config: &crate::config::BrokerConfig,
+    config: &BrokerConfig,
     first_partition: i32,
     leaderships: &[InitialLeadership],
 ) -> Option<String> {
@@ -76,10 +89,7 @@ pub(crate) fn diskless_wal_placement_error(
         .enumerate()
         .find_map(|(offset, leadership)| {
             let leader = leadership.leader;
-            let available = crate::wal::quorum::placement::select_voters_from_sorted_racks(
-                &brokers, leader, required,
-            )
-            .len();
+            let available = select_voters_from_sorted_racks(&brokers, leader, required).len();
             (available != required).then(|| {
                 let partition =
                     first_partition.saturating_add(i32::try_from(offset).unwrap_or(i32::MAX));
@@ -261,10 +271,10 @@ const TOO_MANY_PARTITIONS_4_3_1: &str = "Excessively large number of partitions 
 const TOO_MANY_PARTITIONS_TRUNK: &str = "Too many partitions in request.";
 
 /// The message of the whole-request refusal for too many partitions.
-fn too_many_partitions_message(unstable: crate::api_catalog::UnstableApiVersions) -> &'static str {
+fn too_many_partitions_message(unstable: UnstableApiVersions) -> &'static str {
     match unstable {
-        crate::api_catalog::UnstableApiVersions::Enabled => TOO_MANY_PARTITIONS_TRUNK,
-        crate::api_catalog::UnstableApiVersions::Disabled => TOO_MANY_PARTITIONS_4_3_1,
+        UnstableApiVersions::Enabled => TOO_MANY_PARTITIONS_TRUNK,
+        UnstableApiVersions::Disabled => TOO_MANY_PARTITIONS_4_3_1,
     }
 }
 
@@ -275,7 +285,7 @@ const THROTTLING_QUOTA_EXCEEDED_MESSAGE: &str = "The throttling quota has been e
 /// The names that more than one request row carries, in the order of their
 /// first row.
 fn duplicate_names(topics: &[CreatableTopic]) -> Vec<String> {
-    crate::handlers::request_names::duplicate_names(topics.iter().map(|topic| topic.name.as_str()))
+    find_duplicate_names(topics.iter().map(|topic| topic.name.as_str()))
 }
 
 /// The partitions a request asks for, as Kafka's
@@ -348,14 +358,14 @@ fn resolve_default<T: From<i8> + PartialEq>(requested: T, default: T) -> T {
 /// assignment the row's counts come from, and the override map the request
 /// carried.
 struct CreatedTopic<'a> {
-    controller: &'a std::sync::Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &'a std::sync::Arc<dyn MetadataSource>,
     assignments: &'a [Vec<krabka_raft::NodeId>],
     overrides: &'a std::collections::BTreeMap<String, String>,
 }
 
 fn disclose_created_topic(
     broker: &Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     image: &krabka_metadata::MetadataImage,
     version: i16,
     created: &CreatedTopic<'_>,
@@ -384,16 +394,14 @@ fn disclose_created_topic(
             // `computeEffectiveTopicConfigs(creationConfigs)`: it builds
             // the row from the request's own map, and `validateOnly`
             // discards the records alone.
-            result.configs = Some(creatable_topic_configs(
-                crate::handlers::describe_configs::effective_topic_configs(
-                    &created.controller.current_image(),
-                    broker.config.node_id,
-                    &result.name,
-                    created.overrides,
-                    broker.config.features.unstable_api_versions,
-                    &crate::handlers::describe_configs::static_settings(&broker.config),
-                ),
-            ));
+            result.configs = Some(creatable_topic_configs(effective_topic_configs(
+                &created.controller.current_image(),
+                broker.config.node_id,
+                &result.name,
+                created.overrides,
+                broker.config.features.unstable_api_versions,
+                &static_settings(&broker.config),
+            )));
         }
     } else {
         // Kafka leaves the partition count and the replication factor

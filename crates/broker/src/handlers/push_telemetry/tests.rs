@@ -22,7 +22,7 @@ use crate::{
         },
     },
     handlers::push_telemetry::test_support::{gauge_metric, metrics_data},
-    test_support::{KafkaErrorCode, peer},
+    test_support::{KafkaErrorCode, peer, start_broker_with},
 };
 
 crate::test_support::codec_helpers!(
@@ -169,7 +169,7 @@ async fn push_after_get_follows_kafkas_payload_checks() {
 }
 
 async fn push_after_get_checks(unstable: UnstableApiVersions) {
-    let (broker_handle, _dir) = crate::test_support::start_broker_with(|cfg| {
+    let (broker_handle, _dir) = start_broker_with(|cfg| {
         cfg.client_metrics_telemetry_max = krabka_units::kibibytes(1);
         cfg.features.unstable_api_versions = unstable;
     })

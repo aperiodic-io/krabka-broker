@@ -240,8 +240,12 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::replicator_supervisor::test_support::{
-        await_until, broker_record, image_with, partition_record, supervisor_fixture, topic_record,
+    use crate::{
+        replicator_supervisor::test_support::{
+            SupervisorPartitionSetup, SupervisorTopicSetup, await_until, broker_record, image_with,
+            partition_record, reconciled_supervisor, supervisor_fixture, topic_record,
+        },
+        test_support::PartitionCount,
     };
 
     /// The `(topic, partition)` keys one fetcher follows, in key order.
@@ -305,14 +309,12 @@ mod tests {
             },
         )];
         records.extend(followed.iter().map(|&partition| {
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    partition: krabka_ids::PartitionIndex(partition),
-                    replicas: vec![NodeId(1), NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(epoch),
-                    ..Default::default()
-                },
-            )
+            partition_record(SupervisorPartitionSetup {
+                partition: krabka_ids::PartitionIndex(partition),
+                replicas: vec![NodeId(1), NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(epoch),
+                ..Default::default()
+            })
         }));
         records.push(MetadataRecord::V1BrokerRegistration(broker_record(NodeId(
             1,
@@ -325,8 +327,7 @@ mod tests {
     #[tokio::test]
     async fn every_partition_of_one_leader_lands_on_one_fetcher() {
         let img = followed_image(3, &[0, 1, 2], 8);
-        let (supervisor, _partitions, _reporter, _dir) =
-            crate::replicator_supervisor::test_support::reconciled_supervisor(&img).await;
+        let (supervisor, _partitions, _reporter, _dir) = reconciled_supervisor(&img).await;
 
         check!(supervisor.tasks.len() == 1);
         check!(
@@ -348,8 +349,7 @@ mod tests {
     #[tokio::test]
     async fn a_replica_on_an_offline_log_directory_is_not_followed() {
         let img = followed_image(1, &[0], 8);
-        let (supervisor, _partitions, _reporter, dir) =
-            crate::replicator_supervisor::test_support::reconciled_supervisor(&img).await;
+        let (supervisor, _partitions, _reporter, dir) = reconciled_supervisor(&img).await;
         let followed_while_online = followed_keys(&supervisor, (NodeId(1), 0));
 
         supervisor
@@ -367,33 +367,26 @@ mod tests {
         // The fixture broker is node 2, so it follows the two partitions that
         // nodes 1 and 3 lead.
         let img = image_with(&[
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    partitions: crate::test_support::PartitionCount(2),
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    replicas: vec![NodeId(1), NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(8),
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    partition: krabka_ids::PartitionIndex(1),
-                    leader: NodeId(3),
-                    replicas: vec![NodeId(3), NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(8),
-                    ..Default::default()
-                },
-            ),
+            topic_record(SupervisorTopicSetup {
+                partitions: PartitionCount(2),
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                replicas: vec![NodeId(1), NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(8),
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup {
+                partition: krabka_ids::PartitionIndex(1),
+                leader: NodeId(3),
+                replicas: vec![NodeId(3), NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(8),
+                ..Default::default()
+            }),
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(1))),
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(3))),
         ]);
-        let (supervisor, _partitions, _reporter, _dir) =
-            crate::replicator_supervisor::test_support::reconciled_supervisor(&img).await;
+        let (supervisor, _partitions, _reporter, _dir) = reconciled_supervisor(&img).await;
 
         check!(supervisor.tasks.len() == 2);
         check!(followed_keys(&supervisor, (NodeId(1), 0)) == vec![("t".to_string(), 0)]);
@@ -417,14 +410,12 @@ mod tests {
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(1))),
         ];
         for partition in 0..16 {
-            records.push(partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    partition: krabka_ids::PartitionIndex(partition),
-                    replicas: vec![NodeId(1), NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(8),
-                    ..Default::default()
-                },
-            ));
+            records.push(partition_record(SupervisorPartitionSetup {
+                partition: krabka_ids::PartitionIndex(partition),
+                replicas: vec![NodeId(1), NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(8),
+                ..Default::default()
+            }));
         }
         let img = image_with(&records);
         let (mut supervisor, _partitions, _reporter, _dir) = supervisor_fixture(img.clone());
@@ -460,8 +451,7 @@ mod tests {
     #[tokio::test]
     async fn a_removed_partition_leaves_the_map_and_the_fetcher_keeps_running() {
         let two = followed_image(2, &[0, 1], 8);
-        let (supervisor, _partitions, _reporter, _dir) =
-            crate::replicator_supervisor::test_support::reconciled_supervisor(&two).await;
+        let (supervisor, _partitions, _reporter, _dir) = reconciled_supervisor(&two).await;
         let token = supervisor
             .tasks
             .get(&(NodeId(1), 0))
@@ -558,17 +548,14 @@ mod tests {
                 partitions: 1,
                 replication_factor: 2,
             }),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    replicas: vec![NodeId(1), NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(8),
-                    ..Default::default()
-                },
-            ),
+            partition_record(SupervisorPartitionSetup {
+                replicas: vec![NodeId(1), NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(8),
+                ..Default::default()
+            }),
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(1))),
         ]);
-        let (supervisor, _partitions, _reporter, _dir) =
-            crate::replicator_supervisor::test_support::reconciled_supervisor(&before).await;
+        let (supervisor, _partitions, _reporter, _dir) = reconciled_supervisor(&before).await;
 
         let recreated_id = Uuid::new_v4();
         let after = image_with(&[
@@ -578,13 +565,11 @@ mod tests {
                 partitions: 1,
                 replication_factor: 2,
             }),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    replicas: vec![NodeId(1), NodeId(2)],
-                    epoch: krabka_metadata::LeaderEpoch(9),
-                    ..Default::default()
-                },
-            ),
+            partition_record(SupervisorPartitionSetup {
+                replicas: vec![NodeId(1), NodeId(2)],
+                epoch: krabka_metadata::LeaderEpoch(9),
+                ..Default::default()
+            }),
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(1))),
         ]);
         supervisor.reconcile(&after).await;

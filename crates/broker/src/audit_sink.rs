@@ -11,7 +11,9 @@ use krabka_audit::{AuditError, AuditRecord, AuditSink};
 use krabka_ids::PartitionIndex;
 use krabka_protocol::records::{Record, RecordBatch, RecordHeader};
 
-use crate::{metrics::BrokerMetrics, partition_registry::PartitionRegistry};
+use crate::{
+    metrics::BrokerMetrics, partition::ProduceBatchError, partition_registry::PartitionRegistry,
+};
 
 /// Writes audit records to a single partition of the audit topic that this
 /// broker leads.
@@ -94,12 +96,8 @@ impl AuditSink for KafkaTopicAuditSink {
         if let Err(error) = result {
             self.metrics.audit_write_failures.inc();
             return Err(match error {
-                crate::partition::ProduceBatchError::Rejected(error) => {
-                    AuditError::Sink(error.to_string())
-                }
-                crate::partition::ProduceBatchError::Indeterminate(error) => {
-                    AuditError::Indeterminate(error)
-                }
+                ProduceBatchError::Rejected(error) => AuditError::Sink(error.to_string()),
+                ProduceBatchError::Indeterminate(error) => AuditError::Indeterminate(error),
             });
         }
         self.metrics.audit_events.inc();
@@ -116,15 +114,16 @@ mod tests {
     use krabka_units::mebibytes;
 
     use super::*;
-    use crate::test_support::open_partition as fixture_partition;
+    use crate::{
+        partition::Partition,
+        test_support::{StandalonePartitionSetup, open_partition as fixture_partition},
+    };
 
-    fn audit_partition(
-        path: &std::path::Path,
-    ) -> (Arc<crate::partition::Partition>, Arc<PartitionRegistry>) {
+    fn audit_partition(path: &std::path::Path) -> (Arc<Partition>, Arc<PartitionRegistry>) {
         let partitions = Arc::new(PartitionRegistry::new());
         let partition = fixture_partition(
             path,
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: "__audit",
                 ..Default::default()
             },

@@ -18,9 +18,10 @@ use super::{
     response::no_node_row,
 };
 use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult},
+    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
     broker::Broker,
     codes,
+    handlers::{RequestContext, acl_wire::CLUSTER_RESOURCE_NAME},
 };
 
 pub(super) enum KeySlot {
@@ -33,7 +34,7 @@ pub(super) enum KeySlot {
 pub(super) fn cluster_action_allowed(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
 ) -> bool {
     broker.config.authorizer.authorize(
         image,
@@ -41,7 +42,7 @@ pub(super) fn cluster_action_allowed(
             principal: context.principal,
             host: context.peer,
             resource_type: ResourceType::Cluster,
-            resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+            resource_name: CLUSTER_RESOURCE_NAME,
             operation: AclOperation::ClusterAction,
         },
     ) == AuthorizationResult::Allow
@@ -55,7 +56,7 @@ pub(super) fn cluster_action_allowed(
 /// key parses. Unsupported SHARE versions, unknown key types, and malformed
 /// SHARE keys fail closed without consulting the authorizer.
 fn key_admission(
-    authorizer: &dyn crate::authorizer::Authorizer,
+    authorizer: &dyn Authorizer,
     image: &krabka_metadata::MetadataImage,
     principal: &krabka_security::Principal,
     host: &std::net::SocketAddr,
@@ -88,7 +89,7 @@ fn key_admission(
 pub(super) fn authorize_keys(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     api_version: i16,
     key_type: i8,
     keys: Vec<String>,
@@ -127,16 +128,19 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::test_support::peer;
+    use crate::{
+        authorizer::SimpleAclAuthorizer,
+        test_support::{peer, principal},
+    };
 
     const SHARE_KEY: &str = "share-group:AAAAAAAAAAAAAAAAAAAAAA:0";
 
-    fn deny_authorizer() -> crate::authorizer::SimpleAclAuthorizer {
-        crate::authorizer::SimpleAclAuthorizer::new(std::collections::HashSet::new())
+    fn deny_authorizer() -> SimpleAclAuthorizer {
+        SimpleAclAuthorizer::new(std::collections::HashSet::new())
     }
 
     fn anon() -> krabka_security::Principal {
-        crate::test_support::principal("ANONYMOUS")
+        principal("ANONYMOUS")
     }
 
     /// (version, key type, key, expected admission) under an authorizer that

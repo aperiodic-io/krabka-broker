@@ -11,8 +11,14 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::{
+    partition::Partition,
     partition_registry::PartitionRegistry,
+    producer_id_manager::ProducerIdManager,
+    test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
     txn::{
+        coordinator::test_support::StateImageSetup,
+        log_record::{encode_key, encode_value},
+        partitioner::partition_for_tid,
         state::{TopicPartition, TxnEntry, TxnState},
         version::TxnVersion,
     },
@@ -22,20 +28,18 @@ const TID: &str = "tid-moved";
 const P0: PartitionIndex = PartitionIndex(0);
 
 fn image(leader: NodeId, leader_epoch: krabka_metadata::LeaderEpoch) -> MetadataImage {
-    super::super::test_support::state_image(
-        crate::txn::coordinator::test_support::StateImageSetup {
-            leader,
-            leader_epoch,
-            replicas: &[NodeId(1), NodeId(2)],
-            ..Default::default()
-        },
-    )
+    super::super::test_support::state_image(StateImageSetup {
+        leader,
+        leader_epoch,
+        replicas: &[NodeId(1), NodeId(2)],
+        ..Default::default()
+    })
 }
 
-fn open_state_partition(dir: &Path) -> Arc<crate::partition::Partition> {
-    crate::test_support::open_partition(
+fn open_state_partition(dir: &Path) -> Arc<Partition> {
+    open_partition(
         dir,
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic: bootstrap::TOPIC,
             ..Default::default()
         },
@@ -62,7 +66,7 @@ fn coordinator_persisting_last_epoch(
     let mut coordinator = super::super::test_support::coordinator_with_registry(
         node,
         Arc::clone(partitions),
-        crate::test_support::PartitionCount(1),
+        PartitionCount(1),
     );
     coordinator.set_persist_last_producer_epoch(matches!(
         persist_last_epoch,
@@ -305,7 +309,7 @@ async fn load_view(
     let coordinator = Arc::new(TxnCoordinator::new(
         NodeId(1),
         Arc::clone(&partitions),
-        Arc::new(crate::producer_id_manager::ProducerIdManager::new()),
+        Arc::new(ProducerIdManager::new()),
         2,
         krabka_units::mebibytes(1),
     ));
@@ -342,7 +346,7 @@ async fn a_bad_record_loads_the_transactions_before_it_and_serves_them() {
     let tid_in = |partition: i32, skip: usize| {
         (0..1_000)
             .map(|n| format!("tid-{n}"))
-            .filter(|tid| crate::txn::partitioner::partition_for_tid(tid, 2) == partition)
+            .filter(|tid| partition_for_tid(tid, 2) == partition)
             .nth(skip)
             .expect("a transactional id in that partition")
     };
@@ -355,14 +359,10 @@ async fn a_bad_record_loads_the_transactions_before_it_and_serves_them() {
         }],
         ..RecordBatch::default()
     };
-    let key = |tid: &str| Some(crate::txn::log_record::encode_key(tid).unwrap());
+    let key = |tid: &str| Some(encode_key(tid).unwrap());
     let value = |tid: &str, producer_id: i64| {
         let entry = TxnEntry::new_empty(tid.to_owned(), ProducerId(producer_id), 0, 60_000, 0);
-        Some(crate::txn::log_record::encode_value(
-            &entry,
-            TxnVersion::Verified,
-            false,
-        ))
+        Some(encode_value(&entry, TxnVersion::Verified, false))
     };
     let tids = [first.as_str(), second.as_str(), misplaced.as_str()];
     let good = |tid: &str, producer_id: i64| record(key(tid), value(tid, producer_id));

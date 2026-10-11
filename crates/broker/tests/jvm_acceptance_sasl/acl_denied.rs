@@ -9,8 +9,10 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, nc_check_connectivity, plain_jaas,
-    start_sasl_plaintext_broker_with_super_user, write_client_props,
+    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, add_console_acl, create_console_topic,
+    denied_console_consumer, nc_check_connectivity, plain_jaas, produce_console,
+    start_plain_acl_topic_with_ops, start_sasl_plaintext_broker_with_super_user,
+    write_client_props, write_plain_props,
 };
 
 /// JVM acceptance: produce by an unauthorized principal must fail.
@@ -42,15 +44,15 @@ async fn jvm_unauthorized_produce_fails() {
     nc_check_connectivity();
 
     // ---- Admin step: pre-create topic + provision alice (not bob).
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     let admin_mount = admin_props.mount_str();
 
-    crate::jvm_acceptance::create_console_topic(KAFKA_IMAGE_TXN, &[&admin_mount], TOPIC, 1, 1);
+    create_console_topic(KAFKA_IMAGE_TXN, &[&admin_mount], TOPIC, 1, 1);
 
     // alice gets Read+Write — proves that the broker has ACLs configured
     // (i.e. the empty-ACL ALLOW shim is not active). ACL implications grant
     // Describe from Read/Write so no explicit Describe ACL is needed.
-    crate::jvm_acceptance::add_console_acl(
+    add_console_acl(
         KAFKA_IMAGE_TXN,
         &[&admin_mount],
         "User:alice",
@@ -72,13 +74,7 @@ async fn jvm_unauthorized_produce_fails() {
     let bob_mount = bob_props.mount_str();
 
     let payload = b"unauth-msg\n";
-    let bob_out = crate::jvm_acceptance::produce_console(
-        KAFKA_IMAGE_TXN,
-        &[&bob_mount],
-        TOPIC,
-        false,
-        payload,
-    );
+    let bob_out = produce_console(KAFKA_IMAGE_TXN, &[&bob_mount], TOPIC, false, payload);
     let stderr = String::from_utf8_lossy(&bob_out.stderr);
     let stdout = String::from_utf8_lossy(&bob_out.stdout);
     eprintln!(
@@ -110,19 +106,13 @@ async fn jvm_unauthorized_consumer_fails_group_check() {
     const GROUP: &str = "cg-other";
 
     let (broker, _dir, _admin_props) =
-        crate::jvm_acceptance::start_plain_acl_topic_with_ops(TOPIC, ALICE, ALICE_PASS, &["Read"])
-            .await;
+        start_plain_acl_topic_with_ops(TOPIC, ALICE, ALICE_PASS, &["Read"]).await;
 
     // ---- Alice consumer using --group cg-other. Expect group-denied stderr.
-    let alice_props = crate::jvm_acceptance::write_plain_props(ALICE, ALICE_PASS);
+    let alice_props = write_plain_props(ALICE, ALICE_PASS);
     let alice_mount = alice_props.mount_str();
 
-    let out = crate::jvm_acceptance::denied_console_consumer(
-        &alice_mount,
-        TOPIC,
-        GROUP,
-        "spawn alice consumer",
-    );
+    let out = denied_console_consumer(&alice_mount, TOPIC, GROUP, "spawn alice consumer");
     let stderr = String::from_utf8_lossy(&out.stderr);
     let stdout = String::from_utf8_lossy(&out.stdout);
     eprintln!(

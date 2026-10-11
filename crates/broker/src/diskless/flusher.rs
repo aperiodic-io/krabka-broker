@@ -19,7 +19,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{index_log::DisklessIndexLog, wal_index::WalFlushRecord};
-use crate::{partition::Partition, partition_registry::PartitionRegistry};
+use crate::{
+    error::BrokerError, metrics::BrokerMetrics, partition::Partition,
+    partition_registry::PartitionRegistry, time_util::now_ms,
+};
 
 mod config;
 mod object_flush;
@@ -48,7 +51,7 @@ pub(crate) struct FlusherContext {
     pub(crate) index_log: DisklessIndexLog,
     pub(crate) node_id: NodeId,
     pub(crate) broker_id: i32,
-    pub(crate) metrics: crate::metrics::BrokerMetrics,
+    pub(crate) metrics: BrokerMetrics,
     /// Set once the first tick is allowed to fire, which is after the index
     /// projection has replayed the index topic.
     pub(crate) ready: Arc<AtomicBool>,
@@ -163,12 +166,11 @@ async fn flush_tick(
     context: &FlusherContext,
     config: &FlushConfig,
     rotation: usize,
-) -> Result<Option<WalFlushRecord>, crate::error::BrokerError> {
+) -> Result<Option<WalFlushRecord>, BrokerError> {
     let image = context.image_rx.borrow().clone();
     tombstone_deleted_topics(context, &image).await?;
     let mut partitions = flushable_partitions(&context.partitions, &image, context.node_id).await;
-    expire_retention_breached_ranges(context, &image, &partitions, crate::time_util::now_ms())
-        .await?;
+    expire_retention_breached_ranges(context, &image, &partitions, now_ms()).await?;
     if !partitions.is_empty() {
         let start = rotation % partitions.len();
         partitions.rotate_left(start);
@@ -189,7 +191,7 @@ async fn flush_tick(
 async fn tombstone_deleted_topics(
     context: &FlusherContext,
     image: &MetadataImage,
-) -> Result<(), crate::error::BrokerError> {
+) -> Result<(), BrokerError> {
     let topic_ids = context.index_log.cache().lock().await.topic_ids();
     for topic_id in topic_ids {
         if image.topic_by_id(&topic_id).is_none() {
@@ -233,7 +235,7 @@ async fn expire_retention_breached_ranges(
     image: &MetadataImage,
     partitions: &[FlushPartition],
     now_ms: i64,
-) -> Result<(), crate::error::BrokerError> {
+) -> Result<(), BrokerError> {
     for partition in partitions {
         if matches!(
             crate::freeze::resolve::resolve_freeze_mutation(
@@ -405,8 +407,14 @@ mod tests {
         *,
     };
     use crate::{
-        diskless::index_log::test_support::{PacedReplayLog, ReplayPace},
-        test_support::FreezeSetup,
+        diskless::{
+            flusher::test_support::FlusherPartitionSetup,
+            index_log::test_support::{PacedReplayLog, ReplayPace, WalFlushSetup},
+            wal_index::WalIndexCache,
+        },
+        test_support::{
+            FreezeSetup, StorageMode, UnixMillis, single_partition_topic, topic_freeze_record,
+        },
     };
 
     // Keep field evaluation order, including metrics and readiness allocation.
@@ -500,7 +508,7 @@ mod tests {
     }
 
     async fn wait_for_frontier(
-        cache: &Arc<tokio::sync::Mutex<crate::diskless::wal_index::WalIndexCache>>,
+        cache: &Arc<tokio::sync::Mutex<WalIndexCache>>,
         topic_id: Uuid,
         partition: i32,
         frontier: i64,
@@ -543,7 +551,7 @@ mod tests {
                 krabka_ids::PartitionIndex(partition),
                 test_partition(
                     root,
-                    crate::diskless::flusher::test_support::FlusherPartitionSetup {
+                    FlusherPartitionSetup {
                         partition: krabka_ids::PartitionIndex(partition),
                         ..Default::default()
                     },
@@ -618,8 +626,8 @@ mod tests {
     }
 
     async fn wait_for_cache(
-        cache: &Arc<tokio::sync::Mutex<crate::diskless::wal_index::WalIndexCache>>,
-        predicate: impl Fn(&crate::diskless::wal_index::WalIndexCache) -> bool,
+        cache: &Arc<tokio::sync::Mutex<WalIndexCache>>,
+        predicate: impl Fn(&WalIndexCache) -> bool,
     ) {
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
@@ -634,7 +642,7 @@ mod tests {
     }
 
     async fn wait_for_object(
-        cache: &Arc<tokio::sync::Mutex<crate::diskless::wal_index::WalIndexCache>>,
+        cache: &Arc<tokio::sync::Mutex<WalIndexCache>>,
         topic_id: Uuid,
         object_key: &str,
     ) {
@@ -660,13 +668,11 @@ mod tests {
         let cache = index.cache();
         for key in ["diskless-wal/9/old.ckwl", "diskless-wal/7/new.ckwl"] {
             index
-                .publish_flush(&flush_record(
-                    crate::diskless::index_log::test_support::WalFlushSetup {
-                        topic_id,
-                        object_key: key,
-                        ..crate::diskless::index_log::test_support::WalFlushSetup::three_records()
-                    },
-                ))
+                .publish_flush(&flush_record(WalFlushSetup {
+                    topic_id,
+                    object_key: key,
+                    ..WalFlushSetup::three_records()
+                }))
                 .await
                 .unwrap();
             wait_for_object(&cache, topic_id, key).await;
@@ -719,13 +725,11 @@ mod tests {
         let index = test_index_log().await;
         let cache = index.cache();
         index
-            .publish_flush(&flush_record(
-                crate::diskless::index_log::test_support::WalFlushSetup {
-                    topic_id,
-                    object_key,
-                    ..crate::diskless::index_log::test_support::WalFlushSetup::three_records()
-                },
-            ))
+            .publish_flush(&flush_record(WalFlushSetup {
+                topic_id,
+                object_key,
+                ..WalFlushSetup::three_records()
+            }))
             .await
             .unwrap();
         wait_for_object(&cache, topic_id, object_key).await;
@@ -775,12 +779,12 @@ mod tests {
                 .put(&Path::from(object_key), PutPayload::from_static(b"object"))
                 .await
                 .unwrap();
-            let record = flush_record(crate::diskless::index_log::test_support::WalFlushSetup {
+            let record = flush_record(WalFlushSetup {
                 topic_id,
                 object_key,
                 first_offset: krabka_log::Offset(first_offset),
                 last_offset: krabka_log::Offset(last_offset),
-                max_timestamp: crate::test_support::UnixMillis(max_timestamp_ms),
+                max_timestamp: UnixMillis(max_timestamp_ms),
                 byte_len: krabka_units::bytes(6),
             });
             index.publish_flush(&record).await.unwrap();
@@ -791,9 +795,9 @@ mod tests {
             );
         }
         let mut image = MetadataImage::new(Uuid::nil());
-        image.apply(&MetadataRecord::V1Topic(
-            crate::test_support::single_partition_topic("orders", topic_id),
-        ));
+        image.apply(&MetadataRecord::V1Topic(single_partition_topic(
+            "orders", topic_id,
+        )));
         let (_, image_rx) = tokio::sync::watch::channel(Arc::new(image.clone()));
         (
             test_context!(partitions, image_rx, Arc::clone(&store), index),
@@ -870,13 +874,13 @@ mod tests {
     async fn a_write_freeze_holds_the_retention_pass() {
         retention_fixture!(dir, topic_id, context, store, handle; mut image);
         set_retention(&handle, krabka_units::millis(1));
-        image.apply(&MetadataRecord::V1TopicFreeze(
-            crate::test_support::topic_freeze_record(FreezeSetup {
+        image.apply(&MetadataRecord::V1TopicFreeze(topic_freeze_record(
+            FreezeSetup {
                 pattern_type: krabka_metadata::PatternType::Literal,
                 reason: "a cutover is in flight",
                 ..Default::default()
-            }),
-        ));
+            },
+        )));
         let partitions = [flush_partition(topic_id, &handle)];
 
         // The same clock and retention that expire the aged range in
@@ -1058,16 +1062,14 @@ mod tests {
         let seed = DisklessIndexLog::start(Arc::clone(&event_log))
             .await
             .unwrap();
-        seed.publish_flush(&flush_record(
-            crate::diskless::index_log::test_support::WalFlushSetup {
-                topic_id,
-                object_key: "diskless-wal/7/seed.ckwl",
-                first_offset: krabka_log::Offset(0),
-                last_offset: krabka_log::Offset(2),
-                max_timestamp: crate::test_support::UnixMillis(0),
-                ..Default::default()
-            },
-        ))
+        seed.publish_flush(&flush_record(WalFlushSetup {
+            topic_id,
+            object_key: "diskless-wal/7/seed.ckwl",
+            first_offset: krabka_log::Offset(0),
+            last_offset: krabka_log::Offset(2),
+            max_timestamp: UnixMillis(0),
+            ..Default::default()
+        }))
         .await
         .unwrap();
 
@@ -1206,9 +1208,10 @@ mod tests {
             let dir = tempdir().unwrap();
             let partitions = led_orders_partition(dir.path());
             let mut image = MetadataImage::new(Uuid::nil());
-            image.apply(&MetadataRecord::V1Topic(
-                crate::test_support::single_partition_topic("orders", Uuid::from_u128(11)),
-            ));
+            image.apply(&MetadataRecord::V1Topic(single_partition_topic(
+                "orders",
+                Uuid::from_u128(11),
+            )));
             let (_, image_rx) = tokio::sync::watch::channel(Arc::new(image));
             let store = Arc::new(FaultInjectingStore::new(
                 Arc::new(InMemory::new()),
@@ -1257,7 +1260,7 @@ mod tests {
         let led = orders_partition(dir.path());
         let follower = test_partition(
             dir.path(),
-            crate::diskless::flusher::test_support::FlusherPartitionSetup {
+            FlusherPartitionSetup {
                 partition: krabka_ids::PartitionIndex(1),
                 leader: NodeId(2),
                 ..Default::default()
@@ -1265,9 +1268,9 @@ mod tests {
         );
         let local = test_partition(
             dir.path(),
-            crate::diskless::flusher::test_support::FlusherPartitionSetup {
+            FlusherPartitionSetup {
                 partition: krabka_ids::PartitionIndex(2),
-                storage: crate::test_support::StorageMode::Local,
+                storage: StorageMode::Local,
                 ..Default::default()
             },
         );

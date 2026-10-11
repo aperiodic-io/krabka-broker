@@ -15,7 +15,10 @@
 
 use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
 
-use crate::{broker::Broker, heartbeat::controller_state::replicated_registrations};
+use crate::{
+    broker::Broker, heartbeat::controller_state::replicated_registrations,
+    leader_election::compute_failover_changes,
+};
 
 /// The partition changes that make `node_id` leave every ISR and every
 /// leadership another replica can take, as `image` holds them, on the active
@@ -43,12 +46,7 @@ pub(super) async fn leave_isrs(
             replicated_registrations(image),
         )
         .await;
-    crate::leader_election::compute_failover_changes(
-        image,
-        node_id,
-        &broker.liveness,
-        &broker.metrics,
-    )
-    .await
-    .changes
+    compute_failover_changes(image, node_id, &broker.liveness, &broker.metrics)
+        .await
+        .changes
 }

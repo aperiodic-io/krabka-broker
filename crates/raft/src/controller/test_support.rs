@@ -9,11 +9,14 @@ use krabka_units::prelude::{ByteSize, Time, TimeExt as _, gibibytes, millis, sec
 use uuid::Uuid;
 
 use crate::{
+    SubmitChangeResult,
     config::{BootstrapMode, ControllerConfig},
     controller::{Controller, ControllerHandle},
     error::RaftError,
     network::OutboundDialer,
+    test_support::single_partition_topic,
     types::NodeId,
+    wire::KrabkaSubmitChangeResponse,
 };
 
 pub(super) const TEST_OP_TIMEOUT: Time = secs(2);
@@ -25,17 +28,11 @@ pub(super) const FAST_ELECTION_TIMEOUT: Time = millis(200);
 pub(super) const UNBOUNDED_FETCH: ByteSize = gibibytes(1);
 
 pub(super) fn topic_record(name: &str) -> krabka_metadata::MetadataRecord {
-    krabka_metadata::MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-        name,
-        Uuid::nil(),
-    ))
+    krabka_metadata::MetadataRecord::V1Topic(single_partition_topic(name, Uuid::nil()))
 }
 
 pub(super) fn committable_topic_record(name: &str) -> krabka_metadata::MetadataRecord {
-    krabka_metadata::MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-        name,
-        Uuid::new_v4(),
-    ))
+    krabka_metadata::MetadataRecord::V1Topic(single_partition_topic(name, Uuid::new_v4()))
 }
 
 pub(super) async fn bootstrap_controller(context: &str) -> (tempfile::TempDir, ControllerHandle) {
@@ -115,12 +112,11 @@ impl OutboundDialer for RecordingDialer {
 
 pub(super) fn submit_change_response_bytes(error_code: i16, leader_hint: i64) -> bytes::Bytes {
     let mut out = Vec::new();
-    let result =
-        <serde_wincode::SerdeCompat<crate::SubmitChangeResult> as wincode::Serialize>::serialize(
-            &crate::SubmitChangeResult::default(),
-        )
-        .expect("serialize result");
-    crate::wire::KrabkaSubmitChangeResponse {
+    let result = <serde_wincode::SerdeCompat<SubmitChangeResult> as wincode::Serialize>::serialize(
+        &SubmitChangeResult::default(),
+    )
+    .expect("serialize result");
+    KrabkaSubmitChangeResponse {
         error_code,
         leader_hint,
         result: bytes::Bytes::from(result),

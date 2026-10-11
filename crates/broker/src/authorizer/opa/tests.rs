@@ -17,9 +17,10 @@ use uuid::Uuid;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
 use super::*;
+use crate::test_support::sasl_principal;
 
 fn test_principal(name: &str) -> Principal {
-    crate::test_support::sasl_principal(name)
+    sasl_principal(name)
 }
 
 fn img() -> MetadataImage {

@@ -13,8 +13,14 @@ use super::{
     persistence::{flush_classic_metadata, flush_pending},
     waiters::settle_removed_classic_waiters,
 };
-use crate::coordinator::unified::{
-    classic_state::ClassicGroup as ClassicState, group::CoordinatorGroup,
+#[cfg(test)]
+use crate::coordinator::unified::share::config::ShareGroupConfig;
+#[cfg(test)]
+use crate::coordinator::unified::streams::config::StreamsGroupConfig;
+use crate::{
+    coordinator::unified::{classic_state::ClassicGroup as ClassicState, group::CoordinatorGroup},
+    error::BrokerError,
+    metadata_epoch::next_i32,
 };
 
 pub(super) async fn handle_actor_tick(
@@ -93,7 +99,7 @@ async fn settle_classic_removal(
     services: ActorServices<'_>,
 ) -> bool {
     if state.members.is_empty() && !removed.is_empty() {
-        let Some(generation_id) = crate::metadata_epoch::next_i32(state.generation_id) else {
+        let Some(generation_id) = next_i32(state.generation_id) else {
             *state = previous;
             tracing::warn!(group = %state.group_id,
                 "classic expiration stopped because the generation is exhausted");
@@ -121,7 +127,7 @@ async fn settle_classic_removal(
 async fn handle_session_tick(
     group: &mut CoordinatorGroup,
     services: ActorServices<'_>,
-) -> Result<(), crate::error::BrokerError> {
+) -> Result<(), BrokerError> {
     let now = Instant::now();
     let Some(state) = group.as_consumer_mut() else {
         return Ok(());
@@ -177,12 +183,13 @@ mod tests {
     use crate::{
         codes,
         coordinator::unified::{
-            GroupCoordinator,
+            ClientIdentity, GroupCoordinator,
             actor::{
                 GroupActorMessage, GroupKindTag, PendingRecords, RegexResolution,
                 test_support::{
-                    completing_classic_group, empty_metadata, last_classic_metadata,
-                    make_coordinator, parked_follower, rpc, subscribed_member,
+                    ConsumerMemberSetup, completing_classic_group, empty_metadata,
+                    last_classic_metadata, make_coordinator, parked_follower, rpc,
+                    subscribed_member,
                 },
             },
             classic_state::GroupState as ClassicGroupState,
@@ -190,7 +197,10 @@ mod tests {
             consumer_state::GroupState,
             group::GroupKind,
             offsets_log::fake::InMemoryOffsetsLog,
-            test_support::check_two_members_expired,
+            persistence_next_gen::GroupMetadataValue,
+            reconciler::ReconcileInput,
+            regex_resolver::no_topic_regex_resolver,
+            test_support::{check_two_members_expired, expired_session_last_seen},
         },
     };
 
@@ -232,18 +242,16 @@ mod tests {
         let metadata = empty_metadata();
         let mut state = GroupState::new("g");
         for member_id in ["m1", "m2"] {
-            let mut m = subscribed_member(
-                crate::coordinator::unified::actor::test_support::ConsumerMemberSetup {
-                    member_id,
-                    client: crate::coordinator::unified::ClientIdentity {
-                        id: "client-a",
-                        host: "h",
-                    },
-                    now: Instant::now(),
-                    ..Default::default()
+            let mut m = subscribed_member(ConsumerMemberSetup {
+                member_id,
+                client: ClientIdentity {
+                    id: "client-a",
+                    host: "h",
                 },
-            );
-            m.last_seen = crate::coordinator::unified::test_support::expired_session_last_seen();
+                now: Instant::now(),
+                ..Default::default()
+            });
+            m.last_seen = expired_session_last_seen();
             state.add_or_update_member(m);
         }
         state.group_epoch = 2;
@@ -270,12 +278,10 @@ mod tests {
                 member_metadata: member_tombstones(member_id),
                 target_per_member: member_tombstones(member_id),
                 current_per_member: member_tombstones(member_id),
-                group_metadata: Some(
-                    crate::coordinator::unified::persistence_next_gen::GroupMetadataValue {
-                        epoch,
-                        metadata_hash: 0,
-                    },
-                ),
+                group_metadata: Some(GroupMetadataValue {
+                    epoch,
+                    metadata_hash: 0,
+                }),
                 ..PendingRecords::default()
             }
             .to_batch("g", 0)
@@ -350,7 +356,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        let client = crate::coordinator::unified::ClientIdentity { id: "c", host: "h" };
+        let client = ClientIdentity { id: "c", host: "h" };
         let owned = |partitions: Vec<i32>| {
             Some(vec![TopicPartitions {
                 topic_id: topic,
@@ -461,16 +467,16 @@ mod tests {
                 session_expiry_tick: Duration::from_hours(1),
                 ..NextGenConfig::assigning_at_once()
             },
-            crate::coordinator::unified::share::config::ShareGroupConfig::assigning_at_once(),
+            ShareGroupConfig::assigning_at_once(),
             Arc::new(StaticMetadata {
-                input: crate::coordinator::unified::reconciler::ReconcileInput {
+                input: ReconcileInput {
                     topic_id_by_name: [("t".to_string(), topic)].into(),
                     partitions_per_topic: [(topic, 2)].into(),
                     ..Default::default()
                 },
             }),
             Arc::new(InMemoryOffsetsLog::default()),
-            crate::coordinator::unified::streams::config::StreamsGroupConfig::default(),
+            StreamsGroupConfig::default(),
         ));
         let handle = coord.get_or_create_consumer("g");
         let heartbeat = |member_id: &'static str,
@@ -498,8 +504,7 @@ mod tests {
                     client_id: "c".into(),
                     client_host: "h".into(),
                     reply,
-                    regex_resolver:
-                        crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
+                    regex_resolver: no_topic_regex_resolver(),
                 })
                 .await;
                 response.await.unwrap()
@@ -557,10 +562,10 @@ mod tests {
                 session_expiry_tick: tick_interval,
                 ..NextGenConfig::assigning_at_once()
             },
-            crate::coordinator::unified::share::config::ShareGroupConfig::assigning_at_once(),
+            ShareGroupConfig::assigning_at_once(),
             empty_metadata(),
             log.clone(),
-            crate::coordinator::unified::streams::config::StreamsGroupConfig::default(),
+            StreamsGroupConfig::default(),
         ));
 
         let handle = coord.get_or_create_group("g", GroupKindTag::Classic);

@@ -1,6 +1,8 @@
 //! Construction of the KIP-595 static controller voter set from configured
 //! endpoint text, and selection of a broker's registered listener.
 
+use crate::host_port::parse_host_port;
+
 /// Build the KIP-595 static controller [`VoterSet`](krabka_metadata::VoterSet)
 /// from the configured `controller_quorum_voters` (`(id, "<host>:<port>")`).
 ///
@@ -48,8 +50,7 @@ pub(super) fn static_controller_voter_set(
             // per dial). `file_config` (`parse_quorum_voter`) validates the
             // shape, so a parse miss here is not expected; fall back to port 0
             // rather than panicking.
-            let (host, port) = crate::host_port::parse_host_port(host_port)
-                .unwrap_or_else(|| (host_port.clone(), 0));
+            let (host, port) = parse_host_port(host_port).unwrap_or_else(|| (host_port.clone(), 0));
             let directory_id = if *node_id == self_node_id {
                 self_directory_id
             } else {

@@ -196,7 +196,10 @@ mod tests {
     use super::*;
     use crate::{
         config::LogConfig,
-        log::test_support::{rolled_log, rolling_test_log, sample_batch, test_log, tiny_segments},
+        log::test_support::{
+            append_samples, install_stamps, rolled_log, rolling_test_log, sample_batch, test_log,
+            tiny_segments,
+        },
     };
 
     /// Retention may take the whole log, but it never leaves the log without a
@@ -216,7 +219,7 @@ mod tests {
             ..LogConfig::default()
         };
         let mut log = Log::open(dir.path(), config).unwrap();
-        crate::log::test_support::append_samples(&mut log, 40, 4);
+        append_samples(&mut log, 40, 4);
         check!(!log.segments.is_empty(), "the appends should have rolled");
 
         let end = log.log_end_offset();
@@ -455,7 +458,7 @@ mod tests {
             },
         )
         .unwrap();
-        crate::log::test_support::install_stamps(&mut log, 10, 1);
+        install_stamps(&mut log, 10, 1);
         for timestamp in [0, 0, 1_000] {
             let mut batch = sample_batch(1);
             batch.max_timestamp = timestamp;
@@ -499,7 +502,7 @@ mod tests {
         for (name, debt_halves, expected_sealed) in cases {
             let dir = tempdir().unwrap();
             let mut log = rolling_test_log(dir.path());
-            crate::log::test_support::append_samples(&mut log, 5, 1);
+            append_samples(&mut log, 5, 1);
             let segment = log.segments[0].size().bytes_u64();
             check!(
                 log.segments

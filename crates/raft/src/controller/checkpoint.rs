@@ -6,7 +6,14 @@
 //! of the handle.
 
 use super::ControllerHandle;
-use crate::error::RaftError;
+use crate::{
+    error::RaftError,
+    kraft::{
+        controller::checkpoint::{latest_checkpoint_id, load_checkpoint_by_id},
+        transport::Inbound,
+    },
+    snapshot::SnapshotReader,
+};
 
 /// A contiguous byte window of the latest metadata `.checkpoint`, returned by
 /// [`ControllerHandle::read_snapshot_range`].
@@ -50,7 +57,7 @@ impl ControllerHandle {
             return SnapshotRange::OutOfRange;
         };
         let max = usize::try_from(max_bytes.max(0)).unwrap_or(0);
-        let slice = crate::snapshot::SnapshotReader::byte_range(&bytes, pos, max);
+        let slice = SnapshotReader::byte_range(&bytes, pos, max);
         SnapshotRange::Slice(SnapshotSlice {
             end_offset: id.0,
             epoch: id.1,
@@ -81,7 +88,7 @@ impl ControllerHandle {
     ) -> Result<bytes::Bytes, RaftError> {
         let (reply, answer) = tokio::sync::oneshot::channel();
         self.engine
-            .deliver(crate::kraft::transport::Inbound::FetchSnapshot {
+            .deliver(Inbound::FetchSnapshot {
                 req: body,
                 version,
                 reply,
@@ -103,8 +110,8 @@ impl ControllerHandle {
 /// bytes. Matches the bare-checkpoint format the engine writes (no `.meta`
 /// sidecar).
 pub(super) fn load_latest_checkpoint(dir: &std::path::Path) -> Option<((i64, i32), Vec<u8>)> {
-    let id = crate::kraft::controller::checkpoint::latest_checkpoint_id(dir)?;
-    let bytes = crate::kraft::controller::checkpoint::load_checkpoint_by_id(dir, id.0, id.1)?;
+    let id = latest_checkpoint_id(dir)?;
+    let bytes = load_checkpoint_by_id(dir, id.0, id.1)?;
     Some((id, bytes))
 }
 
@@ -113,6 +120,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::{controller::test_support::joining_controller, metadata_partition_dir};
 
     #[test]
     fn load_latest_checkpoint_picks_highest_offset_then_epoch() {
@@ -148,8 +156,8 @@ mod tests {
 
     #[tokio::test]
     async fn read_snapshot_range_rejects_the_end_and_everything_past_it() {
-        let (dir, ctrl) = crate::controller::test_support::joining_controller("join start").await;
-        let checkpoint_dir = crate::metadata_partition_dir(dir.path());
+        let (dir, ctrl) = joining_controller("join start").await;
+        let checkpoint_dir = metadata_partition_dir(dir.path());
         std::fs::create_dir_all(&checkpoint_dir).unwrap();
         std::fs::write(
             checkpoint_dir.join("00000000000000000010-0000000004.checkpoint"),

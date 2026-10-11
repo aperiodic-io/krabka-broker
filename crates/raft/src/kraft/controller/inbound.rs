@@ -17,7 +17,7 @@ use crate::kraft::{
     event::Event,
     role::Role,
     transport::{Inbound, PeerApi, wire},
-    types::{Epoch, LogView as _, NodeId, ReplicaKey},
+    types::{Epoch, LogOffsetMetadata, LogView as _, NodeId, ReplicaKey},
 };
 
 /// The fields of one validated Fetch partition that answering it needs, kept
@@ -310,7 +310,7 @@ impl Engine {
         fetch_epoch: Epoch,
         fetch_offset: i64,
         replica_directory_id: uuid::Uuid,
-    ) -> Option<crate::kraft::types::LogOffsetMetadata> {
+    ) -> Option<LogOffsetMetadata> {
         let key = ReplicaKey {
             id: from,
             directory_id: replica_directory_id,
@@ -354,7 +354,7 @@ impl Engine {
         &self,
         fetch_epoch: Epoch,
         fetch_offset: i64,
-    ) -> Option<crate::kraft::types::LogOffsetMetadata> {
+    ) -> Option<LogOffsetMetadata> {
         if fetch_offset <= 0 {
             return None;
         }

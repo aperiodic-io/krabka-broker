@@ -17,7 +17,14 @@ use krabka_metadata::{GroupConfigRecord, MetadataRecord};
 
 use crate::{
     harness::{bootstrap_share_state, produce_n},
-    share_rpc::{acquired_count, share_fetch},
+    share_rpc::{acquired_count, fetch_empty, share_fetch},
+    support::{
+        producer::{ProducerRecordSetup, producer_record, transactional_producer},
+        share::{
+            ShareFetchSetup, ShareRecordsSetup, ShareSessionEpoch, ShareTopicSetup,
+            join_consume_member, permitted_topic_fixture, record_values,
+        },
+    },
 };
 
 /// Kafka's `GroupConfig.SHARE_ISOLATION_LEVEL_CONFIG` values.
@@ -56,11 +63,7 @@ async fn isolation_fixture(
     String,
 ) {
     let (permit, broker, client, dir, tid) =
-        Box::pin(crate::support::share::permitted_topic_fixture(
-            crate::support::share::ShareTopicSetup::default(),
-            |_| {},
-        ))
-        .await;
+        Box::pin(permitted_topic_fixture(ShareTopicSetup::default(), |_| {})).await;
     let bootstrap = broker.listen_addr().to_string();
     bootstrap_share_state(&broker, &client, "g1").await;
     if let Some(level) = level {
@@ -86,26 +89,20 @@ async fn read_committed_skips_open_txn_then_sees_committed() {
         isolation_fixture(Some(READ_COMMITTED)).await;
 
     // Open a transaction and send 3 records WITHOUT committing: HWM=3, LSO=0.
-    let producer =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "share-rc-tid").await;
+    let producer = transactional_producer(bootstrap.clone(), "share-rc-tid").await;
     let txn = producer.begin_transaction().await.unwrap();
     enqueue_transaction_values(&producer).await;
     // Flush the records to the log (advances HWM) but keep the txn OPEN (LSO=0).
     producer.flush().await.unwrap();
 
-    let (member, _member_epoch) =
-        crate::support::share::join_consume_member(&broker, &client, tid).await;
+    let (member, _member_epoch) = join_consume_member(&broker, &client, tid).await;
 
     // A read_committed share fetch must acquire NOTHING: every record is past
     // the LSO (still 0). Poll a few times to be sure it never spuriously acquires.
     for epoch in 0..6 {
-        crate::share_rpc::fetch_empty(
+        fetch_empty(
             &client,
-            crate::support::share::ShareFetchSetup::at_epoch(
-                &member,
-                tid,
-                crate::support::share::ShareSessionEpoch(epoch),
-            ),
+            ShareFetchSetup::at_epoch(&member, tid, ShareSessionEpoch(epoch)),
         )
         .await;
         // intentional: deliberately observe that nothing is acquired across a
@@ -124,17 +121,13 @@ async fn read_committed_skips_open_txn_then_sees_committed() {
     for epoch in 6..30 {
         let row = share_fetch(
             &client,
-            crate::support::share::ShareFetchSetup::at_epoch(
-                &member,
-                tid,
-                crate::support::share::ShareSessionEpoch(epoch),
-            ),
+            ShareFetchSetup::at_epoch(&member, tid, ShareSessionEpoch(epoch)),
         )
         .await;
         if acquired_count(&row) > 0
             && let Some(batches) = row.records.as_ref().and_then(|r| r.as_v2())
         {
-            values = crate::support::share::record_values(batches);
+            values = record_values(batches);
             values.sort();
             if values == vec!["a", "b", "c"] {
                 break;
@@ -225,9 +218,7 @@ async fn aborted_transaction_data_is_archived_under_read_committed() {
 async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) -> Seen {
     let (_permit, broker, client, _dir, tid, bootstrap) = isolation_fixture(isolation_level).await;
 
-    let producer =
-        crate::support::producer::transactional_producer(bootstrap.clone(), "share-aborted-tid")
-            .await;
+    let producer = transactional_producer(bootstrap.clone(), "share-aborted-tid").await;
     let txn = producer.begin_transaction().await.unwrap();
     enqueue_transaction_values(&producer).await;
     producer.flush().await.unwrap();
@@ -238,15 +229,14 @@ async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) ->
     }
     produce_n(
         &client,
-        crate::support::share::ShareRecordsSetup {
+        ShareRecordsSetup {
             topic_id: tid,
             ..Default::default()
         },
     )
     .await;
 
-    let (member, _member_epoch) =
-        crate::support::share::join_consume_member(&broker, &client, tid).await;
+    let (member, _member_epoch) = join_consume_member(&broker, &client, tid).await;
 
     // The member never acknowledges, so each offset is acquired at most once
     // while its lock holds. Fetch until the plain record at offset 4 arrives.
@@ -257,11 +247,7 @@ async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) ->
     for epoch in 0..30 {
         let row = share_fetch(
             &client,
-            crate::support::share::ShareFetchSetup::at_epoch(
-                &member,
-                tid,
-                crate::support::share::ShareSessionEpoch(epoch),
-            ),
+            ShareFetchSetup::at_epoch(&member, tid, ShareSessionEpoch(epoch)),
         )
         .await;
         let row_acquired: BTreeSet<i64> = row
@@ -300,13 +286,11 @@ async fn enqueue_transaction_values(producer: &Producer) {
     for v in ["a", "b", "c"] {
         drop(
             producer
-                .enqueue(crate::support::producer::producer_record(
-                    crate::support::producer::ProducerRecordSetup {
-                        topic: ("t").into(),
-                        value: Some(bytes::Bytes::from(v.to_string())),
-                        ..Default::default()
-                    },
-                ))
+                .enqueue(producer_record(ProducerRecordSetup {
+                    topic: ("t").into(),
+                    value: Some(bytes::Bytes::from(v.to_string())),
+                    ..Default::default()
+                }))
                 .await
                 .expect("record is queued"),
         );

@@ -55,7 +55,14 @@ use krabka_protocol::owned::{
     },
 };
 
-use crate::{broker::Broker, codes, partition::Partition};
+#[cfg(test)]
+use crate::test_support::StandalonePartitionSetup;
+use crate::{
+    broker::Broker,
+    codes,
+    handlers::{RequestContext, acl_denied, cluster_action_denied},
+    partition::Partition,
+};
 
 /// The two-state leader check Kafka's `ReplicaManager.lastOffsetForLeaderEpoch`
 /// applies via `Partition.getLocalLog(currentLeaderEpoch, fetchOnlyFromLeader
@@ -82,7 +89,7 @@ pub(crate) fn handle(
     broker: &Broker,
     req: &OffsetForLeaderEpochRequest,
     _version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> OffsetForLeaderEpochResponse {
     let partitions = broker.partitions.clone();
     // Test-only: count served OFLE requests so the KIP-320 proactive-validation
@@ -106,11 +113,8 @@ pub(crate) fn handle(
         // schema default for an unauthorized row), and authorized topics
         // proceed unchanged.
         let acl_image = broker.controller.current_image();
-        let cluster_action_allowed = !crate::handlers::cluster_action_denied(
-            broker.config.authorizer.as_ref(),
-            &acl_image,
-            ctx,
-        );
+        let cluster_action_allowed =
+            !cluster_action_denied(broker.config.authorizer.as_ref(), &acl_image, ctx);
 
         let mut authorized_out: Vec<OffsetForLeaderTopicResult> =
             Vec::with_capacity(req.topics.len());
@@ -118,7 +122,7 @@ pub(crate) fn handle(
 
         for topic in &req.topics {
             if !cluster_action_allowed
-                && crate::handlers::acl_denied(
+                && acl_denied(
                     broker.config.authorizer.as_ref(),
                     &acl_image,
                     ctx,
@@ -266,7 +270,15 @@ mod tests {
     use super::*;
     use crate::{
         authorizer::AuthorizationResult,
-        test_support::{peer, principal, start_broker_with_authorizer_no_audit},
+        broker::BrokerHandle,
+        handlers::{
+            produce::test_support::image_with_topic,
+            test_support::{ReplicatedTopicSetup, seed_partition_replicas},
+        },
+        test_support::{
+            append_partition_batch, peer, principal, start_broker_no_audit,
+            start_broker_with_authorizer_no_audit, temporary_partition,
+        },
     };
 
     const VERSION: i16 = offset_for_leader_epoch_response::MAX_VERSION;
@@ -434,11 +446,9 @@ mod tests {
     /// role locally yet, so the request must still be refused.
     #[tokio::test]
     async fn leader_check_needs_the_installed_role_and_the_image_to_name_this_node() {
-        let image = crate::handlers::produce::test_support::image_with_topic("orders", &[1, 2]);
+        let image = image_with_topic("orders", &[1, 2]);
 
-        let (_dir, partition) = crate::test_support::temporary_partition(
-            crate::test_support::StandalonePartitionSetup::default(),
-        );
+        let (_dir, partition) = temporary_partition(StandalonePartitionSetup::default());
 
         // (this node, installed leader, refused)
         let cases = [
@@ -490,7 +500,7 @@ mod tests {
     }
 
     async fn seeded_topic(
-        broker_handle: &crate::broker::BrokerHandle,
+        broker_handle: &BrokerHandle,
         setup: SeededEpochTopicSetup<'_>,
     ) -> std::sync::Arc<Partition> {
         let SeededEpochTopicSetup {
@@ -499,9 +509,9 @@ mod tests {
             leader,
             leader_epoch,
         } = setup;
-        crate::handlers::test_support::seed_partition_replicas(
+        seed_partition_replicas(
             broker_handle,
-            crate::handlers::test_support::ReplicatedTopicSetup {
+            ReplicatedTopicSetup {
                 topic,
                 topic_id,
                 leader,
@@ -540,7 +550,7 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        crate::test_support::append_partition_batch(&partition, &mut batch);
+        append_partition_batch(&partition, &mut batch);
         partition
     }
 
@@ -570,7 +580,7 @@ mod tests {
     }
 
     fn ofle(
-        broker_handle: &crate::broker::BrokerHandle,
+        broker_handle: &BrokerHandle,
         version: i16,
         request: &OffsetForLeaderEpochRequest,
     ) -> EpochEndOffset {
@@ -608,7 +618,7 @@ mod tests {
         use krabka_protocol::owned::offset_for_leader_epoch_request;
         use offset_for_leader_epoch_request::MAX_VERSION as VERSION;
 
-        let (broker, _dir) = crate::test_support::start_broker_no_audit().await;
+        let (broker, _dir) = start_broker_no_audit().await;
 
         let leader_topic = seeded_topic(
             &broker,
@@ -788,9 +798,9 @@ mod tests {
             .mark_offline(&offline.log_dir.load(), "test: EIO");
 
         // Node 1 is not a replica of this partition, so it never hosts it.
-        crate::handlers::test_support::seed_partition_replicas(
+        seed_partition_replicas(
             &broker,
-            crate::handlers::test_support::ReplicatedTopicSetup {
+            ReplicatedTopicSetup {
                 topic: "ofle-moved",
                 topic_id: uuid::Uuid::from_u128(9),
                 leader: krabka_audit::NodeId(2),

@@ -13,7 +13,17 @@ use krabka_verified::transaction::{
 };
 
 use super::TxnCoordinator;
-use crate::txn::{state::TxnState, util::PRODUCER_FENCED_MIN_VERSION, version::TxnVersion};
+use crate::{
+    codes::{
+        CONCURRENT_TRANSACTIONS, COORDINATOR_LOAD_IN_PROGRESS, INVALID_PRODUCER_EPOCH,
+        INVALID_PRODUCER_ID_MAPPING, INVALID_REQUEST, NONE, NOT_COORDINATOR, PRODUCER_FENCED,
+    },
+    txn::{
+        state::{TopicPartition, TxnState},
+        util::{PRODUCER_FENCED_MIN_VERSION, now_millis},
+        version::TxnVersion,
+    },
+};
 
 impl TxnCoordinator {
     /// Add partitions to the locally-coordinated transaction after validating
@@ -30,16 +40,14 @@ impl TxnCoordinator {
         tid: &str,
         producer_id: ProducerId,
         producer_epoch: i16,
-        partitions: Vec<crate::txn::state::TopicPartition>,
+        partitions: Vec<TopicPartition>,
         format_txnv: TxnVersion,
         version: i16,
     ) -> i16 {
         if tid.is_empty() {
-            return crate::codes::INVALID_REQUEST;
+            return INVALID_REQUEST;
         }
-        if let Some(code @ crate::codes::COORDINATOR_LOAD_IN_PROGRESS) =
-            self.coordinator_error(tid).await
-        {
+        if let Some(code @ COORDINATOR_LOAD_IN_PROGRESS) = self.coordinator_error(tid).await {
             return code;
         }
         let is_coordinator = self.is_coordinator_for(tid).await;
@@ -112,7 +120,7 @@ impl TxnCoordinator {
             // transaction does not qualify: `state_is_ongoing` in the facts
             // above rules it out, so those cases fall to `PersistRegistration`
             // below and still write.
-            TransactionRegistrationDecision::PersistRetry => return crate::codes::NONE,
+            TransactionRegistrationDecision::PersistRetry => return NONE,
             TransactionRegistrationDecision::PersistRegistration => {}
             other => return registration_code(other, version),
         }
@@ -133,10 +141,10 @@ impl TxnCoordinator {
         }
         snapshot.state = TxnState::Ongoing;
         if prior_state != TxnState::Ongoing {
-            snapshot.start_ms = crate::txn::util::now_millis();
+            snapshot.start_ms = now_millis();
         }
         snapshot.partitions.extend(partitions);
-        snapshot.last_update_ms = crate::txn::util::now_millis();
+        snapshot.last_update_ms = now_millis();
         // Kafka `prepareAddPartitions` stamps the request's transaction
         // version, whatever level the cluster has finalized.
         snapshot.client_transaction_version =
@@ -153,7 +161,7 @@ impl TxnCoordinator {
         {
             Ok(persisted) => {
                 *entry = persisted;
-                crate::codes::NONE
+                NONE
             }
             Err(error) => {
                 tracing::error!(tid, %error, "failed to persist registered transaction partitions");
@@ -175,22 +183,20 @@ impl TxnCoordinator {
 ///   (`KafkaApis.scala`).
 fn registration_code(decision: TransactionRegistrationDecision, version: i16) -> i16 {
     match decision {
-        TransactionRegistrationDecision::RejectNotCoordinator => crate::codes::NOT_COORDINATOR,
+        TransactionRegistrationDecision::RejectNotCoordinator => NOT_COORDINATOR,
         TransactionRegistrationDecision::RejectUnknownProducer
-        | TransactionRegistrationDecision::RejectProducerId => {
-            crate::codes::INVALID_PRODUCER_ID_MAPPING
-        }
+        | TransactionRegistrationDecision::RejectProducerId => INVALID_PRODUCER_ID_MAPPING,
         TransactionRegistrationDecision::RejectPendingTransition
-        | TransactionRegistrationDecision::RejectState => crate::codes::CONCURRENT_TRANSACTIONS,
+        | TransactionRegistrationDecision::RejectState => CONCURRENT_TRANSACTIONS,
         TransactionRegistrationDecision::RejectProducerEpoch => {
             if version < PRODUCER_FENCED_MIN_VERSION {
-                crate::codes::INVALID_PRODUCER_EPOCH
+                INVALID_PRODUCER_EPOCH
             } else {
-                crate::codes::PRODUCER_FENCED
+                PRODUCER_FENCED
             }
         }
         TransactionRegistrationDecision::PersistRetry
-        | TransactionRegistrationDecision::PersistRegistration => crate::codes::NONE,
+        | TransactionRegistrationDecision::PersistRegistration => NONE,
     }
 }
 
@@ -204,10 +210,18 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::{TxnCoordinator, TxnState, TxnVersion};
-    use crate::txn::{bootstrap, coordinator::test_support::test_coordinator, state::TxnEntry};
+    use crate::{
+        partition::Partition,
+        test_support::{StandalonePartitionSetup, open_partition},
+        txn::{
+            bootstrap,
+            coordinator::test_support::test_coordinator,
+            state::{TopicPartition, TxnEntry},
+        },
+    };
 
-    fn partition(topic: &str, index: i32) -> crate::txn::state::TopicPartition {
-        crate::txn::state::TopicPartition {
+    fn partition(topic: &str, index: i32) -> TopicPartition {
+        TopicPartition {
             topic: topic.to_string(),
             partition: PartitionIndex(index),
         }
@@ -227,11 +241,11 @@ mod tests {
         coordinator: &TxnCoordinator,
         directory: &std::path::Path,
         transactional_id: &str,
-    ) -> Arc<crate::partition::Partition> {
+    ) -> Arc<Partition> {
         let index = coordinator.partition_for(transactional_id);
-        let opened = crate::test_support::open_partition(
+        let opened = open_partition(
             directory,
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: bootstrap::TOPIC,
                 partition: krabka_ids::PartitionIndex(index.get()),
                 ..Default::default()
@@ -248,7 +262,7 @@ mod tests {
     async fn register_fixture(
         coordinator: &TxnCoordinator,
         producer: (ProducerId, i16),
-        partitions: Vec<crate::txn::state::TopicPartition>,
+        partitions: Vec<TopicPartition>,
         version: i16,
     ) -> i16 {
         coordinator

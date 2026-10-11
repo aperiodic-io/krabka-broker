@@ -37,7 +37,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::task_util::run_every;
+use crate::{task_util::run_every, time_util::now_ms};
 
 /// How long a proposal stays in the image after it expires.
 pub(crate) const PROPOSAL_RETENTION: Time = hours(24);
@@ -71,7 +71,7 @@ pub(crate) async fn run(
 
 /// Tombstone every proposal that fell out of retention.
 pub(crate) async fn sweep(controller: &dyn BreakGlassController, retention: Time) {
-    let now_ms = crate::time_util::now_ms();
+    let now_ms = now_ms();
     let reapable: Vec<Uuid> = reapable_ids(&controller.current_image(), retention, now_ms);
     if reapable.is_empty() {
         return;
@@ -118,7 +118,7 @@ mod tests {
     use krabka_units::{days, millis};
 
     use super::*;
-    use crate::break_glass::gate::tests::proposal;
+    use crate::break_glass::gate::tests::{image_of, proposal};
 
     struct MockController {
         image: Mutex<Arc<MetadataImage>>,
@@ -128,9 +128,7 @@ mod tests {
     impl MockController {
         fn holding(proposals: &[BreakGlassProposalRecord]) -> Arc<Self> {
             Arc::new(Self {
-                image: Mutex::new(Arc::new(crate::break_glass::gate::tests::image_of(
-                    proposals,
-                ))),
+                image: Mutex::new(Arc::new(image_of(proposals))),
                 submitted: Mutex::new(Vec::new()),
             })
         }
@@ -244,7 +242,7 @@ mod tests {
 
     #[test]
     fn a_proposal_is_reapable_one_retention_after_it_expires() {
-        let image = crate::break_glass::gate::tests::image_of(&[BreakGlassProposalRecord {
+        let image = image_of(&[BreakGlassProposalRecord {
             expires_at_ms: 1_000,
             ..proposal(1, BreakGlassAction::DeleteTopic, "doomed")
         }]);
@@ -274,7 +272,7 @@ mod tests {
 
     #[test]
     fn an_expiry_at_the_end_of_time_saturates_instead_of_wrapping() {
-        let image = crate::break_glass::gate::tests::image_of(&[BreakGlassProposalRecord {
+        let image = image_of(&[BreakGlassProposalRecord {
             expires_at_ms: i64::MAX,
             ..proposal(1, BreakGlassAction::DeleteTopic, "doomed")
         }]);

@@ -129,8 +129,9 @@ mod tests {
             },
         };
 
-        use crate::server::test_support::{
-            single_voter_engine, test_engine_with_voters, wait_for_leader,
+        use crate::{
+            NodeId,
+            server::test_support::{single_voter_engine, test_engine_with_voters, wait_for_leader},
         };
 
         let reg_req = |id: i32| {
@@ -216,7 +217,7 @@ mod tests {
         assert2::assert!(
             engine_leader
                 .current_image()
-                .controller(crate::NodeId(1))
+                .controller(NodeId(1))
                 .is_some()
         );
 

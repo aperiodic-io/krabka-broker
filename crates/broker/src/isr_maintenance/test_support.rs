@@ -11,7 +11,11 @@ use krabka_metadata::{
 };
 use krabka_raft::NodeId;
 
-use crate::{partition::Partition, test_support::FakeMetadataSource};
+use crate::{
+    partition::Partition,
+    replica_state::FollowerStats,
+    test_support::{FakeMetadataSource, PartitionEpoch, broker_registration},
+};
 
 pub(super) fn reg(id: NodeId) -> MetadataRecord {
     reg_at(id, &format!("b{id}"), 9092)
@@ -24,7 +28,7 @@ pub(super) fn reg_at(id: NodeId, host: &str, port: u16) -> MetadataRecord {
         broker_epoch: i64::try_from(id.0).unwrap(),
         host: host.to_string(),
         port,
-        ..crate::test_support::broker_registration(id)
+        ..broker_registration(id)
     })
 }
 
@@ -53,7 +57,7 @@ pub(super) struct IsrSetup<'a> {
     #[default(NodeId(1))]
     pub leader: NodeId,
     pub leader_epoch: LeaderEpoch,
-    pub partition_epoch: crate::test_support::PartitionEpoch,
+    pub partition_epoch: PartitionEpoch,
     pub stale_followers: &'a [(NodeId, Duration)],
 }
 
@@ -73,7 +77,7 @@ pub(super) async fn set_replica_state(part: &Partition, setup: IsrSetup<'_>) {
     for &(follower, last_caught_up_age) in stale_followers {
         st.per_follower.insert(
             follower,
-            crate::replica_state::FollowerStats {
+            FollowerStats {
                 leo: Offset(0),
                 last_fetch: None,
                 last_fetch_leader_leo: Offset(-1),

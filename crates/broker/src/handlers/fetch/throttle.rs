@@ -10,7 +10,16 @@ use krabka_protocol::{
 use krabka_units::{Time, convert::TimeExt};
 use num_traits::ToPrimitive as _;
 
-use crate::broker::Broker;
+use crate::{
+    broker::Broker,
+    handlers::RequestContext,
+    metrics::{BrokerMetrics, QuotaType},
+    quota::{
+        QuotaBuckets, QuotaDelay, debt_tokens, entity_field, lookup_quota_with_key,
+        throttle_time_ms,
+    },
+    throttle::{REPLICATION_QUOTA_WINDOW, TokenBucket, TopicThrottle},
+};
 
 pub(super) fn throttle_follower_responses(
     broker: &Broker,
@@ -52,8 +61,8 @@ pub(super) fn throttle_follower_responses(
 ///
 /// [`REPLICATION_QUOTA_WINDOW`]: crate::throttle::REPLICATION_QUOTA_WINDOW
 fn throttle_replica_traffic(
-    leader_out: &crate::throttle::TokenBucket,
-    metrics: &crate::metrics::BrokerMetrics,
+    leader_out: &TokenBucket,
+    metrics: &BrokerMetrics,
     image: &krabka_metadata::MetadataImage,
     (leader, follower): (krabka_metadata::NodeId, krabka_metadata::NodeId),
     responses: &mut [FetchableTopicResponse],
@@ -62,7 +71,7 @@ fn throttle_replica_traffic(
     let mut out_of_sync_bytes = 0_u64;
     let mut out_of_sync = Vec::new();
     for (topic_index, topic) in responses.iter().enumerate() {
-        let throttle = crate::throttle::TopicThrottle::for_topic(image, &topic.topic, leader);
+        let throttle = TopicThrottle::for_topic(image, &topic.topic, leader);
         for (partition_index, partition) in topic.partitions.iter().enumerate() {
             if !throttle.leader.contains(partition.partition_index) {
                 continue;
@@ -102,10 +111,7 @@ fn throttle_replica_traffic(
             if sent_out_of_sync < granted {
                 leader_out.refund(granted - sent_out_of_sync);
             } else if sent_out_of_sync > granted {
-                leader_out.record_bounded(
-                    sent_out_of_sync - granted,
-                    crate::throttle::REPLICATION_QUOTA_WINDOW,
-                );
+                leader_out.record_bounded(sent_out_of_sync - granted, REPLICATION_QUOTA_WINDOW);
             }
             // The bucket had less than the round asked for, so some of what
             // this follower was owed is held back. Kafka delays the fetch;
@@ -113,7 +119,7 @@ fn throttle_replica_traffic(
             metrics.record_replication_throttle_sleep();
         }
     }
-    leader_out.record_bounded(in_sync_bytes, crate::throttle::REPLICATION_QUOTA_WINDOW);
+    leader_out.record_bounded(in_sync_bytes, REPLICATION_QUOTA_WINDOW);
     // KIP-73: the measured leader-side throttled-replication rate, which
     // Kafka publishes as
     // `kafka.server:type=LeaderReplication,name=byte-rate`. It is what
@@ -134,9 +140,9 @@ fn throttle_replica_traffic(
 pub(super) fn consumer_quota_window_bytes(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
 ) -> usize {
-    let Some((_, rate)) = crate::quota::lookup_quota_with_key(
+    let Some((_, rate)) = lookup_quota_with_key(
         image,
         &context.principal.name,
         context.client_id,
@@ -155,7 +161,7 @@ pub(super) fn consumer_quota_window_bytes(
 
 /// The byte-rate charge a consumer fetch made, in bytes, which a throttled
 /// fetch gives back.
-pub(super) struct ConsumerCharge(Option<(std::sync::Arc<crate::throttle::TokenBucket>, u64)>);
+pub(super) struct ConsumerCharge(Option<(std::sync::Arc<TokenBucket>, u64)>);
 
 impl ConsumerCharge {
     /// Kafka's `quotas.fetch.unrecordQuotaSensor`: a throttled fetch sends
@@ -176,7 +182,7 @@ impl ConsumerCharge {
 pub(super) fn apply_consumer_fetch_quota(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     handler_start: std::time::Instant,
     response_bytes: u64,
 ) -> (i32, ConsumerCharge) {
@@ -194,8 +200,8 @@ pub(super) fn apply_consumer_fetch_quota(
     let delay = broker.metrics.record_applied_throttle(
         super::FETCH_API_KEY,
         &[
-            (crate::metrics::QuotaType::Fetch, data_delay).into(),
-            (crate::metrics::QuotaType::Request, request_delay).into(),
+            (QuotaType::Fetch, data_delay).into(),
+            (QuotaType::Request, request_delay).into(),
         ],
     );
     if delay <= <Time as TimeExt>::ZERO {
@@ -204,7 +210,7 @@ pub(super) fn apply_consumer_fetch_quota(
     // KIP-219: the window goes back to the connection loop, which mutes the
     // connection after the response is written.
     context.record_throttle(delay);
-    (crate::quota::throttle_time_ms(delay), charge)
+    (throttle_time_ms(delay), charge)
 }
 
 /// The encoded size of a whole Fetch response at `version`, which is what
@@ -267,21 +273,21 @@ fn truncate_throttled_responses(
 /// the bucket has enough capacity.
 fn consume_consumer_quota(
     image: &krabka_metadata::MetadataImage,
-    buckets: &crate::quota::QuotaBuckets,
+    buckets: &QuotaBuckets,
     principal: &str,
     client_id: Option<&str>,
     bytes: u64,
-) -> (crate::quota::QuotaDelay, ConsumerCharge) {
+) -> (QuotaDelay, ConsumerCharge) {
     let Some((entity_key, rate)) =
-        crate::quota::lookup_quota_with_key(image, principal, client_id, "consumer_byte_rate")
+        lookup_quota_with_key(image, principal, client_id, "consumer_byte_rate")
     else {
-        return (crate::quota::QuotaDelay::zero(), ConsumerCharge(None));
+        return (QuotaDelay::zero(), ConsumerCharge(None));
     };
     if !rate.is_finite() || rate <= 0.0 {
-        return (crate::quota::QuotaDelay::zero(), ConsumerCharge(None));
+        return (QuotaDelay::zero(), ConsumerCharge(None));
     }
-    let user = crate::quota::entity_field(&entity_key, "user");
-    let client_id_opt = crate::quota::entity_field(&entity_key, "client-id");
+    let user = entity_field(&entity_key, "user");
+    let client_id_opt = entity_field(&entity_key, "client-id");
     // Kafka holds the quota as a double (`ClientQuotaManager`), so the bucket
     // runs at the configured rate, fractional part included. Like the
     // producer path it records the whole response and turns the debt into the
@@ -289,17 +295,14 @@ fn consume_consumer_quota(
     let bucket = buckets.get_or_create("consumer_byte_rate", &entity_key, rate);
     let debt = bucket.record(bytes);
     let charge = ConsumerCharge(Some((std::sync::Arc::clone(&bucket), bytes)));
-    let Some(overage) = crate::quota::debt_tokens(debt) else {
-        return (crate::quota::QuotaDelay::zero(), charge);
+    let Some(overage) = debt_tokens(debt) else {
+        return (QuotaDelay::zero(), charge);
     };
     let delay_secs = overage / rate;
     // Kafka's `ClientQuotaManager.throttleTime` does not bound a byte-rate
     // throttle.
     let delay = Time::from_secs_f64(delay_secs);
-    (
-        crate::quota::QuotaDelay::new(delay, user, client_id_opt),
-        charge,
-    )
+    (QuotaDelay::new(delay, user, client_id_opt), charge)
 }
 
 #[cfg(test)]
@@ -307,18 +310,28 @@ mod tests {
     use assert2::{assert, check};
     use krabka_units::{Time, convert::TimeExt, millis, secs};
 
+    use crate::{
+        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+        metrics::BrokerMetrics,
+        quota::{
+            QuotaBuckets,
+            test_support::{
+                QuotaRecordSetup, QuotaValue, check_fractional_bandwidth, image_with_quota,
+            },
+        },
+        throttle::{LEADER_THROTTLED_REPLICAS_KEY, TokenBucket},
+    };
+
     #[test]
     fn consume_consumer_quota_tuple_match_overage_throttles() {
-        let img = crate::quota::test_support::image_with_quota(
-            crate::quota::test_support::QuotaRecordSetup {
-                entity: vec![("user", Some("alice")), ("client-id", Some("app-x"))],
-                key: "consumer_byte_rate",
-                value: crate::quota::test_support::QuotaValue(1024.0),
-            },
-        );
+        let img = image_with_quota(QuotaRecordSetup {
+            entity: vec![("user", Some("alice")), ("client-id", Some("app-x"))],
+            key: "consumer_byte_rate",
+            value: QuotaValue(1024.0),
+        });
         // A one-second window, so 4096 bytes at 1024 B/s is over the burst
         // rather than inside the default 11-second one.
-        let buckets = crate::quota::QuotaBuckets::with_window(secs(1));
+        let buckets = QuotaBuckets::with_window(secs(1));
         // 3072 bytes over at 1024 B/s is three seconds, reported whole: Kafka
         // does not bound a byte-rate throttle (#709).
         let (delay_match, _) =
@@ -327,7 +340,7 @@ mod tests {
             delay_match > millis(2_900) && delay_match <= secs(3),
             "tuple quota match should throttle for the whole overage; got {delay_match:?}"
         );
-        let buckets2 = crate::quota::QuotaBuckets::with_window(secs(1));
+        let buckets2 = QuotaBuckets::with_window(secs(1));
         let (delay_other, _) =
             super::consume_consumer_quota(&img, &buckets2, "alice", Some("other"), 4096);
         assert!(
@@ -342,22 +355,20 @@ mod tests {
     /// as it was. A throttled fetch that is not refunded stays charged.
     #[test]
     fn a_throttled_fetch_gives_the_whole_charge_back() {
-        let img = crate::quota::test_support::image_with_quota(
-            crate::quota::test_support::QuotaRecordSetup {
-                key: "consumer_byte_rate",
-                ..Default::default()
-            },
-        );
-        let consume = |buckets: &crate::quota::QuotaBuckets, bytes| {
+        let img = image_with_quota(QuotaRecordSetup {
+            key: "consumer_byte_rate",
+            ..Default::default()
+        });
+        let consume = |buckets: &QuotaBuckets, bytes| {
             super::consume_consumer_quota(&img, buckets, "alice", Some("app"), bytes)
         };
 
-        let refunded = crate::quota::QuotaBuckets::with_window(secs(1));
+        let refunded = QuotaBuckets::with_window(secs(1));
         let (throttle, charge) = consume(&refunded, 1_500);
         charge.refund();
         let (after_refund, _) = consume(&refunded, 1_000);
 
-        let kept = crate::quota::QuotaBuckets::with_window(secs(1));
+        let kept = QuotaBuckets::with_window(secs(1));
         let _ = consume(&kept, 1_500);
         let (after_kept, _) = consume(&kept, 1_000);
 
@@ -374,14 +385,11 @@ mod tests {
     fn a_fractional_consumer_byte_rate_throttles() {
         // `(consumer_byte_rate, response bytes, expected throttle)`. The
         // one-second window gives the bucket a burst of exactly its rate.
-        crate::quota::test_support::check_fractional_bandwidth(
-            "consumer_byte_rate",
-            |image, buckets, bytes| {
-                super::consume_consumer_quota(image, buckets, "alice", Some("app"), bytes)
-                    .0
-                    .delay
-            },
-        );
+        check_fractional_bandwidth("consumer_byte_rate", |image, buckets, bytes| {
+            super::consume_consumer_quota(image, buckets, "alice", Some("app"), bytes)
+                .0
+                .delay
+        });
     }
 
     /// The image of leader broker 1 with topic `t`, whose partition `i` has
@@ -405,24 +413,19 @@ mod tests {
                 } else {
                     vec![NodeId(1)]
                 },
-                ..crate::handlers::test_support::replicated_partition(
-                    crate::handlers::test_support::ReplicatedPartitionSetup {
-                        topic: "t",
-                        partition: krabka_ids::PartitionIndex(partition),
-                        leader: NodeId(1),
-                        replicas: &[NodeId(1), NodeId(2)],
-                    },
-                )
+                ..replicated_partition(ReplicatedPartitionSetup {
+                    topic: "t",
+                    partition: krabka_ids::PartitionIndex(partition),
+                    leader: NodeId(1),
+                    replicas: &[NodeId(1), NodeId(2)],
+                })
             }));
         }
         image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
             topic: "t".into(),
-            overrides: [(
-                crate::throttle::LEADER_THROTTLED_REPLICAS_KEY.to_owned(),
-                list.to_owned(),
-            )]
-            .into_iter()
-            .collect(),
+            overrides: [(LEADER_THROTTLED_REPLICAS_KEY.to_owned(), list.to_owned())]
+                .into_iter()
+                .collect(),
         }));
         image
     }
@@ -432,7 +435,7 @@ mod tests {
     /// records and with the follower in its ISR or not, and returns the bytes
     /// each row still carries.
     fn throttle_leader_fetch(
-        leader_out: &crate::throttle::TokenBucket,
+        leader_out: &TokenBucket,
         list: &str,
         partitions: &[(usize, bool)],
     ) -> Vec<usize> {
@@ -457,7 +460,7 @@ mod tests {
 
         super::throttle_replica_traffic(
             leader_out,
-            &crate::metrics::BrokerMetrics::new(),
+            &BrokerMetrics::new(),
             &image,
             (krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)),
             &mut responses,
@@ -475,8 +478,8 @@ mod tests {
             .collect()
     }
 
-    fn leader_bucket(rate: u32) -> crate::throttle::TokenBucket {
-        let bucket = crate::throttle::TokenBucket::new();
+    fn leader_bucket(rate: u32) -> TokenBucket {
+        let bucket = TokenBucket::new();
         bucket.set_byte_rate(krabka_units::bytes_per_sec(rate));
         bucket
     }
@@ -584,7 +587,7 @@ mod tests {
     #[test]
     fn an_in_sync_burst_is_forgotten_after_the_replication_window() {
         let clock = qubit_clock::ManualMonotonicClock::new_shared();
-        let bucket = crate::throttle::TokenBucket::with_clock(clock.clone());
+        let bucket = TokenBucket::with_clock(clock.clone());
         bucket.set_byte_rate(krabka_units::bytes_per_sec(1_000));
 
         throttle_leader_fetch(&bucket, "*", &[(100_000, true)]);
@@ -614,11 +617,7 @@ mod tests {
     /// A rate of zero is no throttle, in sync or not.
     #[test]
     fn an_unthrottled_leader_leaves_every_partition_alone() {
-        let kept = throttle_leader_fetch(
-            &crate::throttle::TokenBucket::new(),
-            "*",
-            &[(800, false), (800, true)],
-        );
+        let kept = throttle_leader_fetch(&TokenBucket::new(), "*", &[(800, false), (800, true)]);
 
         check!(kept == vec![800, 800]);
     }

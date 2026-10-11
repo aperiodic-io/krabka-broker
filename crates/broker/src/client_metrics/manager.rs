@@ -447,7 +447,7 @@ mod tests {
         test_support::{attrs, expect_assignment, img_with},
         *,
     };
-    use crate::client_metrics::config::INTERVAL_MS_DEFAULT;
+    use crate::{client_metrics::config::INTERVAL_MS_DEFAULT, test_support::KafkaErrorCode};
 
     fn manager() -> ClientMetricsManager {
         ClientMetricsManager::new(krabka_units::kibibytes(1), INTERVAL_MS_DEFAULT)
@@ -498,13 +498,13 @@ mod tests {
         }
     }
 
-    fn reject_get(error_code: crate::test_support::KafkaErrorCode) -> Outcome {
+    fn reject_get(error_code: KafkaErrorCode) -> Outcome {
         Outcome::Get(SubscriptionDecision::Reject {
             error_code: error_code.0,
         })
     }
 
-    fn reject_push(error_code: crate::test_support::KafkaErrorCode) -> Outcome {
+    fn reject_push(error_code: KafkaErrorCode) -> Outcome {
         Outcome::Push(PushDecision::Reject {
             error_code: error_code.0,
         })
@@ -535,33 +535,25 @@ mod tests {
                 "early push",
                 secs(2),
                 push(TelemetrySubscriptionId(right)),
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::THROTTLING_QUOTA_EXCEEDED,
-                )),
+                reject_push(KafkaErrorCode(codes::THROTTLING_QUOTA_EXCEEDED)),
             ),
             (
                 "early push with a wrong id is throttled first",
                 secs(3),
                 push(TelemetrySubscriptionId(wrong)),
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::THROTTLING_QUOTA_EXCEEDED,
-                )),
+                reject_push(KafkaErrorCode(codes::THROTTLING_QUOTA_EXCEEDED)),
             ),
             (
                 "timely push with a wrong id",
                 secs(61),
                 push(TelemetrySubscriptionId(wrong)),
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::UNKNOWN_SUBSCRIPTION_ID,
-                )),
+                reject_push(KafkaErrorCode(codes::UNKNOWN_SUBSCRIPTION_ID)),
             ),
             (
                 "the rejected push moved the push timestamp",
                 secs(62),
                 push(TelemetrySubscriptionId(right)),
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::THROTTLING_QUOTA_EXCEEDED,
-                )),
+                reject_push(KafkaErrorCode(codes::THROTTLING_QUOTA_EXCEEDED)),
             ),
             (
                 "unsupported compression",
@@ -571,9 +563,7 @@ mod tests {
                     payload_len: 4096,
                     ..push(TelemetrySubscriptionId(right))
                 },
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::UNSUPPORTED_COMPRESSION_TYPE,
-                )),
+                reject_push(KafkaErrorCode(codes::UNSUPPORTED_COMPRESSION_TYPE)),
             ),
             (
                 "oversized payload",
@@ -582,9 +572,7 @@ mod tests {
                     payload_len: 1025,
                     ..push(TelemetrySubscriptionId(right))
                 },
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::TELEMETRY_TOO_LARGE,
-                )),
+                reject_push(KafkaErrorCode(codes::TELEMETRY_TOO_LARGE)),
             ),
             (
                 "a payload of exactly telemetry.max.bytes",
@@ -608,7 +596,7 @@ mod tests {
                 "nothing is accepted after a terminating push",
                 secs(400),
                 push(TelemetrySubscriptionId(right)),
-                reject_push(crate::test_support::KafkaErrorCode(codes::INVALID_REQUEST)),
+                reject_push(KafkaErrorCode(codes::INVALID_REQUEST)),
             ),
         ];
         for (name, at, check, expected) in steps {
@@ -640,12 +628,8 @@ mod tests {
 
         // (seconds after the get, terminating, compression supported, outcome)
         type Move = (u64, bool, bool, Outcome);
-        let unsupported = || {
-            reject_push(crate::test_support::KafkaErrorCode(
-                codes::UNSUPPORTED_COMPRESSION_TYPE,
-            ))
-        };
-        let locked = || reject_push(crate::test_support::KafkaErrorCode(codes::INVALID_REQUEST));
+        let unsupported = || reject_push(KafkaErrorCode(codes::UNSUPPORTED_COMPRESSION_TYPE));
+        let locked = || reject_push(KafkaErrorCode(codes::INVALID_REQUEST));
         let rows: [(&str, UnstableApiVersions, [Move; 3]); 4] = [
             (
                 "4.3.1: a rejected terminating push locks the instance",
@@ -731,9 +715,7 @@ mod tests {
                 "other subscription id",
                 attrs.clone(),
                 current ^ 1,
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::UNKNOWN_SUBSCRIPTION_ID,
-                )),
+                reject_push(KafkaErrorCode(codes::UNKNOWN_SUBSCRIPTION_ID)),
             ),
             (
                 "zero instance id",
@@ -742,7 +724,7 @@ mod tests {
                     ..attrs.clone()
                 },
                 current,
-                reject_push(crate::test_support::KafkaErrorCode(codes::INVALID_REQUEST)),
+                reject_push(KafkaErrorCode(codes::INVALID_REQUEST)),
             ),
             (
                 "Uuid.ONE_UUID",
@@ -751,7 +733,7 @@ mod tests {
                     ..attrs.clone()
                 },
                 current,
-                reject_push(crate::test_support::KafkaErrorCode(codes::INVALID_REQUEST)),
+                reject_push(KafkaErrorCode(codes::INVALID_REQUEST)),
             ),
         ];
         for (name, attrs, id, expected) in rows {
@@ -801,18 +783,14 @@ mod tests {
                 &before,
                 secs(1),
                 Step::Get,
-                reject_get(crate::test_support::KafkaErrorCode(
-                    codes::THROTTLING_QUOTA_EXCEEDED,
-                )),
+                reject_get(KafkaErrorCode(codes::THROTTLING_QUOTA_EXCEEDED)),
             ),
             (
                 "push of the old id after the change",
                 &after,
                 secs(2),
                 Step::Push(push(TelemetrySubscriptionId(old.subscription_id))),
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::UNKNOWN_SUBSCRIPTION_ID,
-                )),
+                reject_push(KafkaErrorCode(codes::UNKNOWN_SUBSCRIPTION_ID)),
             ),
             (
                 "get after the change",
@@ -826,9 +804,7 @@ mod tests {
                 &after,
                 secs(4),
                 Step::Get,
-                reject_get(crate::test_support::KafkaErrorCode(
-                    codes::THROTTLING_QUOTA_EXCEEDED,
-                )),
+                reject_get(KafkaErrorCode(codes::THROTTLING_QUOTA_EXCEEDED)),
             ),
             (
                 "get after a second change",
@@ -863,11 +839,7 @@ mod tests {
             push_interval_ms: 100,
             metrics: vec!["*".into()],
         }));
-        let throttled = || {
-            reject_get(crate::test_support::KafkaErrorCode(
-                codes::THROTTLING_QUOTA_EXCEEDED,
-            ))
-        };
+        let throttled = || reject_get(KafkaErrorCode(codes::THROTTLING_QUOTA_EXCEEDED));
         let steps = [
             ("get at 99 ms", ms(99), Step::Get, throttled()),
             ("get at the interval", ms(100), Step::Get, assigned.clone()),
@@ -882,9 +854,7 @@ mod tests {
                 "push with a wrong id",
                 ms(260),
                 Step::Push(push(TelemetrySubscriptionId(id ^ 1))),
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::UNKNOWN_SUBSCRIPTION_ID,
-                )),
+                reject_push(KafkaErrorCode(codes::UNKNOWN_SUBSCRIPTION_ID)),
             ),
             ("early get after 117", ms(261), Step::Get, assigned.clone()),
             (
@@ -900,9 +870,7 @@ mod tests {
                     compression_supported: false,
                     ..push(TelemetrySubscriptionId(id))
                 }),
-                reject_push(crate::test_support::KafkaErrorCode(
-                    codes::UNSUPPORTED_COMPRESSION_TYPE,
-                )),
+                reject_push(KafkaErrorCode(codes::UNSUPPORTED_COMPRESSION_TYPE)),
             ),
             ("early get after 76", ms(401), Step::Get, assigned.clone()),
         ];
@@ -1035,7 +1003,7 @@ mod tests {
             let expected = if expired {
                 ACCEPT
             } else {
-                reject_push(crate::test_support::KafkaErrorCode(codes::INVALID_REQUEST))
+                reject_push(KafkaErrorCode(codes::INVALID_REQUEST))
             };
             assert!(next == expected, "row {name}");
         }

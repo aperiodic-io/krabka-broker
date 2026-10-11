@@ -6,6 +6,7 @@
 use super::ControllerHandle;
 use crate::{
     error::RaftError,
+    reconfig::{AddVoter, ReconfigOutcome, RemoveVoter, UpdateVoter, VoterChange},
     types::{Node, NodeId},
 };
 
@@ -33,7 +34,7 @@ impl ControllerHandle {
                     "voter {id} disappeared while preparing removal"
                 ))
             })?;
-            self.remove_voter(crate::reconfig::RemoveVoter {
+            self.remove_voter(RemoveVoter {
                 id: *id,
                 directory_id: voter.directory_id,
             })
@@ -50,7 +51,7 @@ impl ControllerHandle {
                         "voter {id} must be staged with add_learner first"
                     ))
                 })?;
-            self.add_voter(crate::reconfig::AddVoter {
+            self.add_voter(AddVoter {
                 voter: krabka_metadata::Voter {
                     id: *id,
                     directory_id: node.directory_id,
@@ -64,8 +65,8 @@ impl ControllerHandle {
             return Ok(());
         };
         match outcome {
-            crate::reconfig::ReconfigOutcome::Committed => Ok(()),
-            crate::reconfig::ReconfigOutcome::NotLeader { leader } => Err(RaftError::NotLeader {
+            ReconfigOutcome::Committed => Ok(()),
+            ReconfigOutcome::NotLeader { leader } => Err(RaftError::NotLeader {
                 current_leader: leader,
             }),
         }
@@ -95,13 +96,8 @@ impl ControllerHandle {
     ///
     /// # Errors
     /// Returns a validation, leadership, timeout, or storage error from Raft.
-    pub async fn add_voter(
-        &self,
-        req: crate::reconfig::AddVoter,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
-        self.engine
-            .reconfigure(crate::reconfig::VoterChange::Add(req))
-            .await
+    pub async fn add_voter(&self, req: AddVoter) -> Result<ReconfigOutcome, RaftError> {
+        self.engine.reconfigure(VoterChange::Add(req)).await
     }
 
     /// Run the leader-local admission checks of `AddVoterHandler` for `req`
@@ -111,49 +107,31 @@ impl ControllerHandle {
     /// Returns the refusal the same request would get from [`Self::add_voter`]
     /// for a pending change, an unset high watermark, `kraft.version` below 1,
     /// an uncommitted voters record or a duplicate voter id.
-    pub async fn check_add_voter(
-        &self,
-        req: crate::reconfig::AddVoter,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
-        self.engine
-            .reconfigure(crate::reconfig::VoterChange::CheckAdd(req))
-            .await
+    pub async fn check_add_voter(&self, req: AddVoter) -> Result<ReconfigOutcome, RaftError> {
+        self.engine.reconfigure(VoterChange::CheckAdd(req)).await
     }
 
     /// Remove the exact node/directory pair through the Raft control log.
     ///
     /// # Errors
     /// Returns a validation, leadership, timeout, or storage error from Raft.
-    pub async fn remove_voter(
-        &self,
-        req: crate::reconfig::RemoveVoter,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
-        self.engine
-            .reconfigure(crate::reconfig::VoterChange::Remove(req))
-            .await
+    pub async fn remove_voter(&self, req: RemoveVoter) -> Result<ReconfigOutcome, RaftError> {
+        self.engine.reconfigure(VoterChange::Remove(req)).await
     }
 
     /// Update the exact voter's endpoint and supported feature range.
     ///
     /// # Errors
     /// Returns a validation, leadership, timeout, or storage error from Raft.
-    pub async fn update_voter(
-        &self,
-        req: crate::reconfig::UpdateVoter,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
-        self.engine
-            .reconfigure(crate::reconfig::VoterChange::Update(req))
-            .await
+    pub async fn update_voter(&self, req: UpdateVoter) -> Result<ReconfigOutcome, RaftError> {
+        self.engine.reconfigure(VoterChange::Update(req)).await
     }
 
     /// Atomically append `KRaftVersionRecord` and the initial `VotersRecord`.
     ///
     /// # Errors
     /// Returns an unsupported-version, leadership, timeout, or storage error.
-    pub async fn finalize_kraft_version(
-        &self,
-        version: u16,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
+    pub async fn finalize_kraft_version(&self, version: u16) -> Result<ReconfigOutcome, RaftError> {
         self.engine.finalize_kraft_version(version).await
     }
 
@@ -162,10 +140,7 @@ impl ControllerHandle {
     /// # Errors
     /// Returns the error `finalize_kraft_version` would return for the same
     /// request.
-    pub async fn validate_kraft_version(
-        &self,
-        version: u16,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
+    pub async fn validate_kraft_version(&self, version: u16) -> Result<ReconfigOutcome, RaftError> {
         self.engine.validate_kraft_version(version).await
     }
 }
@@ -175,10 +150,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::controller::test_support::bootstrap_controller;
 
     #[tokio::test]
     async fn change_membership_validates_delta_count() {
-        let (_dir, ctrl) = crate::controller::test_support::bootstrap_controller("bootstrap").await;
+        let (_dir, ctrl) = bootstrap_controller("bootstrap").await;
 
         // 0 changes: current is {1}, target is {1} -> Ok(())
         let res_zero = ctrl.change_membership(BTreeSet::from([NodeId(1)])).await;

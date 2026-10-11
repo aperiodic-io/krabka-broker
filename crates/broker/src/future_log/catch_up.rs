@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use krabka_log::{Log, Offset};
 use krabka_units::{ByteSize, convert::ByteSizeExt as _};
 
-use crate::{error::BrokerError, partition::Partition};
+use crate::{error::BrokerError, partition::Partition, throttle::TokenBucket};
 
 /// One catch-up iteration. It reads whatever the future log is missing,
 /// up to `read_chunk`, and appends it. Returns `true` if the
@@ -26,7 +26,7 @@ pub(super) fn catch_up(
     part: &Arc<Partition>,
     future_log: &Arc<Mutex<Log>>,
     read_chunk: ByteSize,
-    throttle: &crate::throttle::TokenBucket,
+    throttle: &TokenBucket,
 ) -> Result<CatchUpProgress, BrokerError> {
     // Snapshot both source bounds under one lock so a retention update cannot
     // produce an internally inconsistent start/end pair.
@@ -121,28 +121,27 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::future_log::test_support::fixture_partition;
+    use crate::{
+        future_log::test_support::{
+            FutureSourceSetup, fixture_partition, open_future_log, source_fixture,
+        },
+        test_support::RecordCount,
+        throttle::TokenBucket,
+    };
 
     fn first_catch_up(
         part: &Arc<Partition>,
         target: &std::path::Path,
     ) -> (Arc<Mutex<Log>>, CatchUpProgress) {
-        let (_future_path, future) = crate::future_log::test_support::open_future_log(target);
-        let progress = catch_up(
-            part,
-            &future,
-            mebibytes(1),
-            &crate::throttle::TokenBucket::new(),
-        )
-        .expect("catch up");
+        let (_future_path, future) = open_future_log(target);
+        let progress =
+            catch_up(part, &future, mebibytes(1), &TokenBucket::new()).expect("catch up");
         (future, progress)
     }
 
     #[tokio::test]
     async fn catch_up_resets_after_source_retention_without_dropping_batch_data() {
-        let fixture = crate::future_log::test_support::source_fixture(
-            crate::future_log::test_support::FutureSourceSetup::default(),
-        );
+        let fixture = source_fixture(FutureSourceSetup::default());
         let _primary = fixture.primary;
         let target = fixture.target;
         let part = fixture.partition;
@@ -184,18 +183,15 @@ mod tests {
 
     #[tokio::test]
     async fn catch_up_waits_when_move_throttle_is_exhausted() {
-        let fixture = crate::future_log::test_support::source_fixture(
-            crate::future_log::test_support::FutureSourceSetup {
-                count: crate::test_support::RecordCount(1),
-                ..Default::default()
-            },
-        );
+        let fixture = source_fixture(FutureSourceSetup {
+            count: RecordCount(1),
+            ..Default::default()
+        });
         let _primary = fixture.primary;
         let target = fixture.target;
         let part = fixture.partition;
-        let (_future_path, future) =
-            crate::future_log::test_support::open_future_log(target.path());
-        let throttle = crate::throttle::TokenBucket::new();
+        let (_future_path, future) = open_future_log(target.path());
+        let throttle = TokenBucket::new();
         throttle
             .set_byte_rate_with_burst(krabka_units::bytes_per_sec(1024), krabka_units::bytes(0));
 

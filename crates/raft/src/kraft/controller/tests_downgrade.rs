@@ -6,13 +6,17 @@ use assert2::assert;
 use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
 
 use super::*;
-use crate::kraft::controller::{
-    checkpoint::{load_latest_checkpoint, write_checkpoint},
-    recovery::replay_committed,
-    test_support::{
-        EngineSetup, build_engine_only, elect_single_voter_engine, open_test_controller,
-        topic_record, voter_set,
+use crate::{
+    MetadataLogConfig,
+    kraft::controller::{
+        checkpoint::{load_latest_checkpoint, write_checkpoint},
+        recovery::replay_committed,
+        test_support::{
+            EngineSetup, build_engine_only, elect_single_voter_engine, open_test_controller,
+            topic_record, voter_set,
+        },
     },
+    snapshot::{SnapshotReader, SnapshotWriter},
 };
 
 fn metadata_version_update(level: i16) -> Vec<MetadataRecord> {
@@ -139,8 +143,7 @@ fn metadata_version_downgrade_retries_mandatory_snapshot_and_prune() {
     let checkpoint = load_latest_checkpoint(&engine.data_dir)
         .expect("read downgrade checkpoint")
         .expect("downgrade checkpoint exists");
-    let contents =
-        crate::snapshot::SnapshotReader::read(&checkpoint).expect("decode downgrade checkpoint");
+    let contents = SnapshotReader::read(&checkpoint).expect("decode downgrade checkpoint");
     let checkpoint_image =
         MetadataImage::from_records(engine.image.cluster_id(), &contents.metadata_records);
     assert2::assert!(checkpoint_image.finalized_metadata_version() == Some(16));
@@ -186,13 +189,13 @@ async fn restart_finishes_downgrade_checkpoint_before_exposing_the_image() {
             .is_some()
     );
     drop(controller);
-    let recovered_log = KraftLog::open(dir.path(), &crate::MetadataLogConfig::default())
-        .expect("inspect recovered log");
+    let recovered_log =
+        KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("inspect recovered log");
     assert2::assert!(recovered_log.log_start_offset() == downgrade_end);
     let checkpoint = load_latest_checkpoint(dir.path())
         .expect("read checkpoint")
         .expect("checkpoint exists");
-    let contents = crate::snapshot::SnapshotReader::read(&checkpoint).expect("decode checkpoint");
+    let contents = SnapshotReader::read(&checkpoint).expect("decode checkpoint");
     let checkpoint_image =
         MetadataImage::from_records(uuid::Uuid::nil(), &contents.metadata_records);
     assert2::assert!(checkpoint_image.finalized_metadata_version() == Some(16));
@@ -211,8 +214,7 @@ async fn restart_recovers_checkpoint_written_before_downgrade_prune() {
         .downgrade_snapshot_pending
         .clone()
         .expect("downgrade remains pending");
-    let bytes = crate::snapshot::SnapshotWriter::serialize(&pending.image, 0)
-        .expect("serialize pending image");
+    let bytes = SnapshotWriter::serialize(&pending.image, 0).expect("serialize pending image");
     write_checkpoint(dir.path(), pending.end_offset.0, pending.epoch, &bytes)
         .expect("simulate checkpoint-before-prune crash");
     assert2::assert!(engine.log.log_start_offset() < pending.end_offset);
@@ -222,8 +224,8 @@ async fn restart_recovers_checkpoint_written_before_downgrade_prune() {
         reopen_single_voter(data_dir).expect("restart finishes checkpoint-before-prune recovery");
     assert2::assert!(controller.current_image().finalized_metadata_version() == Some(16));
     drop(controller);
-    let recovered_log = KraftLog::open(dir.path(), &crate::MetadataLogConfig::default())
-        .expect("inspect recovered log");
+    let recovered_log =
+        KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("inspect recovered log");
     assert2::assert!(recovered_log.log_start_offset() == pending.end_offset);
 }
 

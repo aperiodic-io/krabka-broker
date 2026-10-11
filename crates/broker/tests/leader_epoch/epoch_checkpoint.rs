@@ -9,7 +9,10 @@ use assert2::check;
 
 use crate::{
     epoch_harness::{boot_single, create_topic, record, set_leader_epoch, topic_id_for},
-    support::client::connect_client,
+    support::{
+        client::connect_client,
+        produce::{SinglePartitionProduceSetup, batch_request},
+    },
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -21,9 +24,9 @@ async fn epoch_checkpoint_byte_compat() {
     let client = connect_client(bootstrap.clone(), None).await;
     let topic_id = topic_id_for(&client, "ckpt").await;
     client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             record("v0"),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("ckpt").into(),
                 topic_id,
                 ..Default::default()
@@ -35,9 +38,9 @@ async fn epoch_checkpoint_byte_compat() {
     // Bump epoch to 1 + produce another.
     set_leader_epoch(&broker, "ckpt", 1).await;
     client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             record("v1"),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("ckpt").into(),
                 topic_id,
                 ..Default::default()

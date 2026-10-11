@@ -15,7 +15,10 @@ use super::{
     projection::rebuild_group,
     state::{CgcState, EpochKind, committed_map, member},
 };
-use crate::coordinator::unified::actor::CommitFence;
+use crate::{
+    codes::{STALE_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
+    coordinator::unified::actor::CommitFence,
+};
 
 /// INDEPENDENT oracle for the `OffsetCommit` fence: the expected decision for a
 /// native member that presents `epoch` for partition `part`. It reads the
@@ -29,7 +32,7 @@ use crate::coordinator::unified::actor::CommitFence;
 /// member holds with an assignment epoch at or below the presented epoch.
 fn oracle_commit(s: &CgcState, id: &str, part: i32, epoch: i32) -> Result<(), i16> {
     let Some(m) = member(s, id) else {
-        return Err(crate::codes::UNKNOWN_MEMBER_ID);
+        return Err(UNKNOWN_MEMBER_ID);
     };
     let accepted = match epoch.cmp(&m.member_epoch) {
         Ordering::Equal => true,
@@ -45,7 +48,7 @@ fn oracle_commit(s: &CgcState, id: &str, part: i32, epoch: i32) -> Result<(), i1
     if accepted {
         Ok(())
     } else {
-        Err(crate::codes::STALE_MEMBER_EPOCH)
+        Err(STALE_MEMBER_EPOCH)
     }
 }
 

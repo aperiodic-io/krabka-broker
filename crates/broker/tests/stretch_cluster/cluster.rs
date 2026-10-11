@@ -11,6 +11,7 @@ use tempfile::TempDir;
 
 use crate::{
     NODE_A,
+    produce::initialize_sites,
     profile::{apply_stretch_config, wait_for_stretch_metadata},
     support, within,
 };
@@ -79,7 +80,6 @@ impl Cluster {
 /// Bring the cluster up with a topic and every replica in the ISR.
 pub async fn cluster_with_topic() -> (Cluster, WireUuid) {
     let cluster = Cluster::start().await;
-    let topic_id =
-        crate::produce::initialize_sites(cluster.addr(NODE_A), |node| cluster.handle(node)).await;
+    let topic_id = initialize_sites(cluster.addr(NODE_A), |node| cluster.handle(node)).await;
     (cluster, topic_id)
 }

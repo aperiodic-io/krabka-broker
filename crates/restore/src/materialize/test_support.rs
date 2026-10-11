@@ -12,6 +12,7 @@ use krabka_remote_storage::TopicIdPartition;
 use uuid::Uuid;
 
 use crate::{
+    Cli,
     args::RestoreArgs,
     bound::Predicates,
     discover::PartitionInventory,
@@ -30,9 +31,7 @@ pub(super) fn args_from(extra: &[&str], log_dir: &std::path::Path) -> RestoreArg
         log_dir.display().to_string(),
     ];
     argv.extend(extra.iter().map(|s| (*s).to_owned()));
-    crate::Cli::try_parse_from(argv)
-        .expect("valid command line")
-        .args
+    Cli::try_parse_from(argv).expect("valid command line").args
 }
 
 /// A fresh orders partition and its bound predicates, with the target kept alive.

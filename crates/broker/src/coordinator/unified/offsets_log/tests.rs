@@ -11,8 +11,12 @@ use krabka_protocol::records::{Attributes, Record, RecordBatch};
 
 use super::{LedTerm, OFFSETS_TOPIC, OffsetsLog, ProductionOffsetsLog, await_committed, led_epoch};
 use crate::{
-    codes, coordinator::test_support::read_batch_epochs as read_epochs, error::BrokerError,
-    metadata_source::MetadataSource, partition_registry::PartitionRegistry,
+    codes,
+    coordinator::test_support::{offsets_partition_image, read_batch_epochs as read_epochs},
+    error::BrokerError,
+    metadata_source::MetadataSource,
+    partition::test_support::{CommitPartitionSetup, commit_partition, test_partition_with_writer},
+    partition_registry::PartitionRegistry,
     test_support::FakeMetadataSource,
 };
 
@@ -22,7 +26,7 @@ const NODE: NodeId = NodeId(1);
 /// An image whose `__consumer_offsets` has one partition, led by `leader` at
 /// `epoch`.
 fn offsets_image(leader: u64, epoch: i32) -> MetadataImage {
-    crate::coordinator::test_support::offsets_partition_image(
+    offsets_partition_image(
         (0, NodeId(leader), epoch),
         &[NodeId(1), NodeId(2), NodeId(3)],
     )
@@ -97,12 +101,10 @@ async fn a_write_completes_only_when_committed_under_its_term() {
             .expected
             .kafka_error()
             .map_or(Ok(()), |code| Err((0, code.0)));
-        let (partition, _dir, hw_notify) = crate::partition::test_support::commit_partition(
-            crate::partition::test_support::CommitPartitionSetup {
-                high_watermark: Offset(case.hw_now),
-                ..Default::default()
-            },
-        )
+        let (partition, _dir, hw_notify) = commit_partition(CommitPartitionSetup {
+            high_watermark: Offset(case.hw_now),
+            ..Default::default()
+        })
         .await;
         let metadata = Arc::new(
             FakeMetadataSource::builder()
@@ -157,7 +159,7 @@ async fn an_append_writes_only_as_the_partition_leader() {
         },
     ];
     for case in cases {
-        let (partition, _dir) = crate::partition::test_support::test_partition_with_writer();
+        let (partition, _dir) = test_partition_with_writer();
         let log = Arc::clone(&partition.log);
         let partitions = Arc::new(PartitionRegistry::new());
         partitions.insert(

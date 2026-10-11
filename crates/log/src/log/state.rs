@@ -12,14 +12,17 @@ use krabka_units::prelude::{ByteSize, ByteSizeExt};
 use tracing::instrument;
 
 use super::Log;
+#[cfg(any(test, feature = "test-helpers"))]
+use crate::io::LogIo;
 use crate::{
+    RecoveredProducer,
     config::LogConfig,
     error::LogError,
     leader_epoch_checkpoint::LeaderEpochCheckpoint,
     log_start_offset_checkpoint,
     producer_snapshot::{self, ProducerSnapshotEntry},
     segment::Segment,
-    txn_index::TxnIndex,
+    txn_index::{AbortedTxn, TxnIndex},
 };
 
 impl Log {
@@ -368,10 +371,10 @@ impl Log {
     /// reopen they are the batches the replay past the loaded snapshot
     /// rebuilt.
     #[must_use]
-    pub fn recovered_producers(&self) -> Vec<crate::RecoveredProducer> {
+    pub fn recovered_producers(&self) -> Vec<RecoveredProducer> {
         self.producer_state
             .values()
-            .map(|entry| crate::RecoveredProducer {
+            .map(|entry| RecoveredProducer {
                 entry: *entry,
                 earlier: self
                     .earlier_batches
@@ -428,7 +431,7 @@ impl Log {
     /// functions take -- the producer snapshots, the compaction swap, and the
     /// segment deletions retention performs.
     #[cfg(any(test, feature = "test-helpers"))]
-    pub fn test_set_io(&mut self, io: std::sync::Arc<dyn crate::io::LogIo>) {
+    pub fn test_set_io(&mut self, io: std::sync::Arc<dyn LogIo>) {
         self.io = io.clone();
         for segment in &mut self.segments {
             segment.set_io(io.clone());
@@ -445,11 +448,7 @@ impl Log {
     /// Return all aborted transactions whose offset range overlaps
     /// `[start, end)`, including entries in sealed segments.
     #[must_use]
-    pub fn aborted_in_range(
-        &self,
-        start: Offset,
-        end: Offset,
-    ) -> Vec<crate::txn_index::AbortedTxn> {
+    pub fn aborted_in_range(&self, start: Offset, end: Offset) -> Vec<AbortedTxn> {
         let mut aborted = Vec::new();
         if let Some(first_base) = self
             .segments
@@ -513,8 +512,12 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::log::test_support::{
-        append_transaction, sample_batch, sample_batch_with_epoch, test_log, tiny_segments,
+    use crate::{
+        log::test_support::{
+            append_samples, append_transaction, rolled_sample_log, sample_batch,
+            sample_batch_with_epoch, test_log, tiny_segments,
+        },
+        test_support::open_log,
     };
 
     /// A hard reset leaves the log empty at the new base, with the last stable
@@ -526,7 +529,7 @@ mod tests {
     #[test]
     fn a_reset_puts_the_stable_offset_at_the_new_base() {
         let (_dir, mut log) = test_log();
-        crate::log::test_support::append_samples(&mut log, 3, 2);
+        append_samples(&mut log, 3, 2);
         check!(log.log_end_offset() == Offset(6));
 
         log.reset_to(Offset(50)).expect("reset");
@@ -616,7 +619,7 @@ mod tests {
         ];
         check!(log.epoch_checkpoint().entries() == &expected[..]);
         drop(log);
-        let reopened = crate::test_support::open_log(dir.path());
+        let reopened = open_log(dir.path());
         check!(reopened.epoch_checkpoint().entries() == &expected[..]);
     }
 
@@ -674,7 +677,7 @@ mod tests {
     #[test]
     fn log_size_sums_the_sealed_segments_and_the_active_one() {
         let dir = tempdir().unwrap();
-        let log = crate::log::test_support::rolled_sample_log(dir.path());
+        let log = rolled_sample_log(dir.path());
 
         let expected = log.segments.iter().map(Segment::size).fold(
             log.active.as_ref().map_or(ByteSize::ZERO, Segment::size),
@@ -723,7 +726,7 @@ mod tests {
         assert2::assert!(log.epoch_checkpoint().entries() == &[][..]);
         // The cleared state must survive a reopen (a restarted broker re-reads
         // the on-disk checkpoint file).
-        let reopened = crate::test_support::open_log(dir.path());
+        let reopened = open_log(dir.path());
         assert2::assert!(reopened.epoch_checkpoint().entries().is_empty());
     }
 

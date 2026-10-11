@@ -4,7 +4,7 @@
 
 use assert2::assert;
 
-use crate::polling::named_metadata_as_alice;
+use crate::{polling::named_metadata_as_alice, sasl_cluster::start_alice_topic_grant};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn implication_metadata_describes_after_read_acl() {
@@ -18,7 +18,7 @@ async fn implication_metadata_describes_after_write_acl() {
 
 async fn metadata_implication(operation: krabka_metadata::AclOperation) {
     // Read and Write each imply Describe without a separate Describe ACL.
-    let (handle, _dir, addr) = crate::sasl_cluster::start_alice_topic_grant(operation).await;
+    let (handle, _dir, addr) = start_alice_topic_grant(operation).await;
 
     // Wait for raft commit-then-apply, then ask Metadata for foo by name.
     // Pre-13b would have returned TOPIC_AUTHORIZATION_FAILED (29).

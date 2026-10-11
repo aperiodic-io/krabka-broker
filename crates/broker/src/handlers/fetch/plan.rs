@@ -15,7 +15,10 @@ use super::request::{EffectivePartition, EffectiveTopic, FetchAuthorization};
 use crate::{
     broker::Broker,
     codes,
+    config_keys::resolve_broker_witness,
     partition::{Partition, ReplicationTarget},
+    replica_selector::ReplicaView,
+    topic_resolve::resolve,
 };
 
 /// Resolved read for a single requested (topic, partition) tuple.
@@ -196,7 +199,7 @@ async fn preferred_read_replica(
     // mutex is never taken under it.
     let leader_log_end = partition.log_end_offset();
     let now = std::time::Instant::now();
-    let replicas: Vec<crate::replica_selector::ReplicaView> = {
+    let replicas: Vec<ReplicaView> = {
         let state = partition.replica_state.lock().await;
         record
             .replicas
@@ -210,11 +213,11 @@ async fn preferred_read_replica(
                 } else {
                     state.follower_progress(node_id)
                 };
-                crate::replica_selector::ReplicaView {
+                ReplicaView {
                     node_id: i32::try_from(node_id.0).unwrap_or(-1),
                     rack: image.broker(node_id).and_then(|broker| broker.rack.clone()),
                     in_isr: isr.contains(&node_id),
-                    is_witness: crate::config_keys::resolve_broker_witness(image, node_id),
+                    is_witness: resolve_broker_witness(image, node_id),
                     log_end_offset: log_end_offset.0,
                     time_since_caught_up: last_caught_up.map_or(std::time::Duration::MAX, |at| {
                         now.saturating_duration_since(at)
@@ -856,25 +859,24 @@ pub(super) async fn build_pending_reads(
         // every partition row when that gives no name. The zero id gives no
         // name, and the resolver sends it down the name path with an empty
         // name.
-        let (name, id, error) =
-            match crate::topic_resolve::resolve(context.image, &topic.topic, topic.topic_id) {
-                Ok(record) => (
-                    record.name.clone(),
-                    WireUuid(record.topic_id.into_bytes()),
-                    None,
-                ),
-                Err(codes::UNKNOWN_TOPIC_OR_PARTITION)
-                    if context.version < super::FIRST_TOPIC_ID_VERSION =>
-                {
-                    (topic.topic.clone(), topic.topic_id, None)
-                }
-                Err(codes::UNKNOWN_TOPIC_OR_PARTITION) => (
-                    topic.topic.clone(),
-                    topic.topic_id,
-                    Some(codes::UNKNOWN_TOPIC_ID),
-                ),
-                Err(error_code) => (topic.topic.clone(), topic.topic_id, Some(error_code)),
-            };
+        let (name, id, error) = match resolve(context.image, &topic.topic, topic.topic_id) {
+            Ok(record) => (
+                record.name.clone(),
+                WireUuid(record.topic_id.into_bytes()),
+                None,
+            ),
+            Err(codes::UNKNOWN_TOPIC_OR_PARTITION)
+                if context.version < super::FIRST_TOPIC_ID_VERSION =>
+            {
+                (topic.topic.clone(), topic.topic_id, None)
+            }
+            Err(codes::UNKNOWN_TOPIC_OR_PARTITION) => (
+                topic.topic.clone(),
+                topic.topic_id,
+                Some(codes::UNKNOWN_TOPIC_ID),
+            ),
+            Err(error_code) => (topic.topic.clone(), topic.topic_id, Some(error_code)),
+        };
         for partition in &topic.partitions {
             pending.push(plan_partition_read(context, &name, id, error, partition).await);
         }
@@ -891,7 +893,19 @@ mod tests {
     use krabka_ids::PartitionIndex;
     use krabka_log::{Log, LogConfig};
 
-    use crate::broker::Broker;
+    use crate::{
+        broker::{Broker, spawn_partition},
+        codes::{NONE, NOT_LEADER_OR_FOLLOWER, OFFSET_OUT_OF_RANGE},
+        config::{BrokerConfig, NodeRole},
+        config_keys::{BROKER_WITNESS, WITNESS_TRUE},
+        handlers::produce::test_support::image_with_topic,
+        partition::Partition,
+        producer_state::ProducerState,
+        test_support::{
+            StandalonePartitionSetup, broker_registration, spawn_standalone_partition,
+            temporary_partition,
+        },
+    };
 
     /// A three-site image: node 1 leads `orders` from `dc-a`, node 2 replicates
     /// it from `dc-b`, and both are in the ISR. Every node in `witness_ids`
@@ -899,21 +913,21 @@ mod tests {
     fn stretch_image(witness_ids: &[u64]) -> krabka_metadata::MetadataImage {
         use krabka_metadata::{BrokerConfigRecord, BrokerRegistrationRecord, MetadataRecord};
 
-        let mut image = crate::handlers::produce::test_support::image_with_topic("orders", &[1, 2]);
+        let mut image = image_with_topic("orders", &[1, 2]);
         for (node_id, rack) in [(1u64, "dc-a"), (2u64, "dc-b")] {
             image.apply(&MetadataRecord::V1BrokerRegistration(
                 BrokerRegistrationRecord {
                     incarnation_id: uuid::Uuid::from_u128(u128::from(node_id)),
                     rack: Some(rack.into()),
-                    ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+                    ..broker_registration(krabka_raft::NodeId(node_id))
                 },
             ));
         }
         for &node_id in witness_ids {
             image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
                 node_id: krabka_audit::NodeId(node_id),
-                config_name: crate::config_keys::BROKER_WITNESS.into(),
-                config_value: Some(crate::config_keys::WITNESS_TRUE.into()),
+                config_name: BROKER_WITNESS.into(),
+                config_value: Some(WITNESS_TRUE.into()),
             }));
         }
         image
@@ -944,8 +958,8 @@ mod tests {
         const TOPIC: &str = "witness-fetch";
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = crate::config::BrokerConfig::for_tests(dir.path().to_path_buf());
-        config.roles.push(crate::config::NodeRole::Witness);
+        let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
+        config.roles.push(NodeRole::Witness);
         let broker_handle = Broker::start(config).await.expect("start broker");
         let broker = broker_handle.broker_arc_for_test();
         let part_dir = dir.path().join(format!("{TOPIC}-0"));
@@ -953,7 +967,7 @@ mod tests {
         broker.partitions.insert(
             TOPIC.into(),
             PartitionIndex(0),
-            crate::broker::spawn_partition(
+            spawn_partition(
                 TOPIC.to_string(),
                 PartitionIndex(0),
                 dir.path().to_path_buf(),
@@ -981,13 +995,13 @@ mod tests {
                 "client fetch",
                 false,
                 -1,
-                super::refused_read(0, crate::codes::NOT_LEADER_OR_FOLLOWER),
+                super::refused_read(0, NOT_LEADER_OR_FOLLOWER),
             ),
             (
                 "follower fetch",
                 true,
                 2,
-                super::refused_read(0, crate::codes::NOT_LEADER_OR_FOLLOWER),
+                super::refused_read(0, NOT_LEADER_OR_FOLLOWER),
             ),
         ] {
             let context = super::PendingPlanContext {
@@ -1151,16 +1165,14 @@ mod tests {
     #[tokio::test]
     async fn a_read_needs_the_installed_role_and_the_image_to_name_this_node() {
         let image = stretch_image(&[]);
-        let (_dir, partition) = crate::test_support::temporary_partition(
-            crate::test_support::StandalonePartitionSetup::default(),
-        );
+        let (_dir, partition) = temporary_partition(StandalonePartitionSetup::default());
         let refused = |leader_id| super::PartitionData {
             current_leader: super::LeaderIdAndEpoch {
                 leader_id,
                 leader_epoch: 0,
                 ..Default::default()
             },
-            ..super::refused_read(0, crate::codes::NOT_LEADER_OR_FOLLOWER)
+            ..super::refused_read(0, NOT_LEADER_OR_FOLLOWER)
         };
         let cases = [
             ("installed and committed", 1, 1, None),
@@ -1200,18 +1212,18 @@ mod tests {
         log.append(&mut batch).expect("append").0.0
     }
 
-    fn epoch_checks_partition(dir: &std::path::Path) -> Arc<crate::partition::Partition> {
-        crate::test_support::spawn_standalone_partition(
+    fn epoch_checks_partition(dir: &std::path::Path) -> Arc<Partition> {
+        spawn_standalone_partition(
             dir,
             Log::open(dir, LogConfig::default()).expect("open partition log"),
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: "diverge",
                 ..Default::default()
             },
         )
     }
 
-    fn read_role(partition: &crate::partition::Partition) -> super::ReadRole<'_> {
+    fn read_role(partition: &Partition) -> super::ReadRole<'_> {
         super::ReadRole {
             partition,
             required_leader: None,
@@ -1302,7 +1314,7 @@ mod tests {
         // Both histories have HW/LSO 4 and start 0; epoch 0 ends at offset 2.
         let expected_history_divergence = || super::PartitionData {
             partition_index: 0,
-            error_code: crate::codes::NONE,
+            error_code: NONE,
             high_watermark: 4,
             last_stable_offset: 4,
             log_start_offset: 0,
@@ -1321,7 +1333,7 @@ mod tests {
                 0,
                 0,
                 true,
-                super::refused_read(0, crate::codes::OFFSET_OUT_OF_RANGE),
+                super::refused_read(0, OFFSET_OUT_OF_RANGE),
             ),
             (
                 "last_fetched_epoch above every recorded epoch: Kafka cannot \
@@ -1330,7 +1342,7 @@ mod tests {
                 5,
                 4,
                 true,
-                super::refused_read(0, crate::codes::OFFSET_OUT_OF_RANGE),
+                super::refused_read(0, OFFSET_OUT_OF_RANGE),
             ),
             (
                 "gap epoch diverges to the floor epoch and the next start",
@@ -1359,7 +1371,7 @@ mod tests {
                 0,
                 4,
                 true,
-                super::refused_read(0, crate::codes::OFFSET_OUT_OF_RANGE),
+                super::refused_read(0, OFFSET_OUT_OF_RANGE),
             ),
             (
                 "a true divergence still answers a diverging_epoch with epoch >= 0",
@@ -1393,7 +1405,7 @@ mod tests {
         // committed here, so the high watermark, LSO and log start are all 0.
         let diverge_to = |epoch, end_offset| super::PartitionData {
             partition_index: 0,
-            error_code: crate::codes::NONE,
+            error_code: NONE,
             high_watermark: 0,
             last_stable_offset: 0,
             log_start_offset: 0,
@@ -1408,7 +1420,7 @@ mod tests {
             partition_index: 0,
             ..Default::default()
         };
-        let out_of_range = super::refused_read(0, crate::codes::OFFSET_OUT_OF_RANGE);
+        let out_of_range = super::refused_read(0, OFFSET_OUT_OF_RANGE);
         // (name, promoted to epoch 3, last_fetched_epoch, fetch_offset,
         //  final, output)
         let cases = [
@@ -1466,12 +1478,7 @@ mod tests {
             }
             if promoted {
                 partition
-                    .install_local_leadership(
-                        &crate::producer_state::ProducerState::new(),
-                        None,
-                        1,
-                        3,
-                    )
+                    .install_local_leadership(&ProducerState::new(), None, 1, 3)
                     .await
                     .expect("promote");
             }
@@ -1585,7 +1592,7 @@ mod tests {
     }
     /// Exercise the epoch gate with the same wire row and caller-selected offline status.
     async fn epoch_check(
-        partition: &crate::partition::Partition,
+        partition: &Partition,
         last_fetched_epoch: i32,
         fetch_offset: i64,
         log_dir_offline: bool,
@@ -1613,7 +1620,7 @@ mod tests {
 
     async fn check_epoch_placement(
         name: &str,
-        partition: &crate::partition::Partition,
+        partition: &Partition,
         last_fetched_epoch: i32,
         fetch_offset: i64,
         want_final: bool,

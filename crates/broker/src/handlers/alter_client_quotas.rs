@@ -25,7 +25,7 @@ use self::{
     entries::{Alteration, alter_client_quotas},
     response::{apply_submit_error, err_entry, ok_entry, whole_request_error},
 };
-use crate::codes::CLUSTER_AUTHORIZATION_FAILED;
+use crate::{codes::CLUSTER_AUTHORIZATION_FAILED, quota::parse_ip_literal};
 
 context_handler! {
     AlterClientQuotasRequest => AlterClientQuotasResponse,
@@ -109,7 +109,7 @@ async fn resolve_ip_names(req: &AlterClientQuotasRequest) -> HashSet<String> {
             };
             if component.entity_type != "ip"
                 || name.is_empty()
-                || crate::quota::parse_ip_literal(name).is_some()
+                || parse_ip_literal(name).is_some()
                 || resolvable.contains(name)
             {
                 continue;

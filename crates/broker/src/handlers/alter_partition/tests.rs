@@ -16,7 +16,14 @@ use super::{
     test_support::{request_with_topics, seed_partition, wire_topic_id},
     *,
 };
-use crate::test_support::{DenyAll, start_broker_with_authorizer as start_broker, test_ctx};
+use crate::{
+    broker::Broker,
+    handlers::RequestContext,
+    test_support::{
+        DenyAll, KafkaErrorCode, dispatch_wire, start_broker_with_authorizer as start_broker,
+        test_ctx,
+    },
+};
 
 crate::test_support::context_helper!(client_id = "broker-client");
 
@@ -24,12 +31,12 @@ crate::test_support::context_helper!(client_id = "broker-client");
 struct EmptyAlterPartitionSetup {
     #[default(krabka_ids::ApiVersion(alter_partition_response::MAX_VERSION))]
     version: krabka_ids::ApiVersion,
-    expected: crate::test_support::KafkaErrorCode,
+    expected: KafkaErrorCode,
 }
 
 async fn check_empty_alter_partition(
-    broker: &crate::broker::Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
+    broker: &Broker,
+    ctx: &RequestContext<'_>,
     setup: EmptyAlterPartitionSetup,
 ) {
     let request = request_with_topics(broker, Vec::new());
@@ -54,7 +61,7 @@ async fn handle_denies_cluster_action_for_whole_request() {
         &broker,
         &ctx,
         EmptyAlterPartitionSetup {
-            expected: crate::test_support::KafkaErrorCode(codes::CLUSTER_AUTHORIZATION_FAILED),
+            expected: KafkaErrorCode(codes::CLUSTER_AUTHORIZATION_FAILED),
             ..Default::default()
         },
     )
@@ -183,7 +190,7 @@ async fn topic_row_error_follows_version_and_topic_id() {
                 ..Default::default()
             }],
         );
-        let resp = crate::test_support::dispatch_wire(
+        let resp = dispatch_wire(
             &broker,
             krabka_protocol::owned::alter_partition_request::API_KEY,
             version,

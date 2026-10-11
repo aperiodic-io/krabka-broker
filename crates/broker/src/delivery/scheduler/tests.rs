@@ -14,10 +14,11 @@ use crate::{
         PartitionDelivery,
         metrics::NoDeliveryMetrics,
         test_support::{
-            BOUND_MS, NOW_MS, RecordingMetrics, register, scheduled_partition, wait_parked,
-            wait_until, wall_at,
+            BOUND_MS, NOW_MS, RecordingMetrics, ScheduleSetup, register, scheduled_partition,
+            wait_parked, wait_until, wall_at,
         },
     },
+    partition::Partition,
     test_support::{BrokenTimer, TimerFailure},
 };
 
@@ -130,20 +131,14 @@ impl Harness {
         }
     }
 
-    fn with_partition(
-        setup: crate::delivery::test_support::ScheduleSetup<'_>,
-    ) -> (tempfile::TempDir, Self, Arc<crate::partition::Partition>) {
+    fn with_partition(setup: ScheduleSetup<'_>) -> (tempfile::TempDir, Self, Arc<Partition>) {
         let dir = tempfile::tempdir().expect("log root");
         let harness = Self::new();
         let partition = harness.scheduled(&dir, setup);
         (dir, harness, partition)
     }
 
-    fn scheduled(
-        &self,
-        dir: &tempfile::TempDir,
-        setup: crate::delivery::test_support::ScheduleSetup<'_>,
-    ) -> Arc<crate::partition::Partition> {
+    fn scheduled(&self, dir: &tempfile::TempDir, setup: ScheduleSetup<'_>) -> Arc<Partition> {
         let partition = scheduled_partition(dir, &self.clock, setup);
         register(&self.registry, &partition);
         partition
@@ -175,14 +170,13 @@ impl Harness {
 #[tokio::test]
 async fn a_batch_that_is_not_due_holds_the_watermark_and_then_releases_it() {
     // One batch that is already active, then one that comes due in 10s.
-    let (_dir, harness, partition) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            activations: vec![
-                crate::test_support::UnixMillis(NOW_MS - 60_000),
-                crate::test_support::UnixMillis(NOW_MS + 10_000),
-            ],
-            ..Default::default()
-        });
+    let (_dir, harness, partition) = Harness::with_partition(ScheduleSetup {
+        activations: vec![
+            crate::test_support::UnixMillis(NOW_MS - 60_000),
+            crate::test_support::UnixMillis(NOW_MS + 10_000),
+        ],
+        ..Default::default()
+    });
 
     let task = harness.spawn();
     check!(wait_parked(&harness.timeline, 1).await);
@@ -226,13 +220,12 @@ async fn a_batch_that_is_not_due_holds_the_watermark_and_then_releases_it() {
 
 #[tokio::test]
 async fn a_topic_that_delivers_immediately_reports_nothing() {
-    let (_dir, harness, immediate) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            topic: "immediate",
-            policy: DeliveryPolicy::Immediate,
-            activations: vec![crate::test_support::UnixMillis(NOW_MS + 10_000)],
-            ..Default::default()
-        });
+    let (_dir, harness, immediate) = Harness::with_partition(ScheduleSetup {
+        topic: "immediate",
+        policy: DeliveryPolicy::Immediate,
+        activations: vec![crate::test_support::UnixMillis(NOW_MS + 10_000)],
+        ..Default::default()
+    });
 
     let task = harness.spawn();
     check!(wait_parked(&harness.timeline, 1).await);
@@ -248,13 +241,12 @@ async fn a_topic_that_delivers_immediately_reports_nothing() {
 
 #[tokio::test]
 async fn a_partition_this_broker_does_not_lead_is_left_alone() {
-    let (_dir, harness, followed) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            topic: "followed",
-            activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
-            leader: krabka_ids::NodeId(THIS_BROKER + 1),
-            ..Default::default()
-        });
+    let (_dir, harness, followed) = Harness::with_partition(ScheduleSetup {
+        topic: "followed",
+        activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
+        leader: krabka_ids::NodeId(THIS_BROKER + 1),
+        ..Default::default()
+    });
 
     let task = harness.spawn();
     check!(wait_parked(&harness.timeline, 1).await);
@@ -270,12 +262,11 @@ async fn a_partition_this_broker_does_not_lead_is_left_alone() {
 
 #[tokio::test]
 async fn the_scheduler_adopts_a_leader_partition_so_a_produce_can_rearm_it() {
-    let (_dir, harness, partition) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            topic: "adopted",
-            activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
-            ..Default::default()
-        });
+    let (_dir, harness, partition) = Harness::with_partition(ScheduleSetup {
+        topic: "adopted",
+        activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
+        ..Default::default()
+    });
 
     let task = harness.spawn();
     check!(wait_parked(&harness.timeline, 1).await);
@@ -311,15 +302,14 @@ fn reported_sweep(
 
 #[tokio::test]
 async fn the_sweep_reports_the_watermark_and_the_pending_count() {
-    let (_dir, harness, _partition) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            topic: "reported",
-            activations: vec![
-                crate::test_support::UnixMillis(NOW_MS - 60_000),
-                crate::test_support::UnixMillis(NOW_MS + 10_000),
-            ],
-            ..Default::default()
-        });
+    let (_dir, harness, _partition) = Harness::with_partition(ScheduleSetup {
+        topic: "reported",
+        activations: vec![
+            crate::test_support::UnixMillis(NOW_MS - 60_000),
+            crate::test_support::UnixMillis(NOW_MS + 10_000),
+        ],
+        ..Default::default()
+    });
 
     let (mut heap, _waker) = reported_sweep(&harness, harness.metrics.as_ref());
 
@@ -341,12 +331,11 @@ async fn the_sweep_reports_the_watermark_and_the_pending_count() {
 
 #[tokio::test]
 async fn a_sweep_with_no_metrics_of_its_own_still_advances_the_watermark() {
-    let (_dir, harness, partition) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            topic: "quiet",
-            activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
-            ..Default::default()
-        });
+    let (_dir, harness, partition) = Harness::with_partition(ScheduleSetup {
+        topic: "quiet",
+        activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
+        ..Default::default()
+    });
 
     let (mut heap, _waker) = reported_sweep(&harness, &NoDeliveryMetrics);
 
@@ -366,12 +355,11 @@ async fn check_dead_start(
 
 #[tokio::test]
 async fn the_scheduler_stops_without_sweeping_when_the_first_deadline_is_refused() {
-    let (_dir, harness, _partition) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            topic: "unarmable",
-            activations: vec![crate::test_support::UnixMillis(NOW_MS + 10_000)],
-            ..Default::default()
-        });
+    let (_dir, harness, _partition) = Harness::with_partition(ScheduleSetup {
+        topic: "unarmable",
+        activations: vec![crate::test_support::UnixMillis(NOW_MS + 10_000)],
+        ..Default::default()
+    });
 
     let timer = BrokenTimer::dead(TimerFailure::Registration);
     let task = harness.spawn_on(timer.injectable());
@@ -395,12 +383,11 @@ async fn the_scheduler_stops_when_the_first_deadline_is_armed_but_never_complete
 
 #[tokio::test]
 async fn the_scheduler_sweeps_once_and_stops_when_the_next_sleep_cannot_be_armed() {
-    let (_dir, harness, partition) =
-        Harness::with_partition(crate::delivery::test_support::ScheduleSetup {
-            topic: "unrearmable",
-            activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
-            ..Default::default()
-        });
+    let (_dir, harness, partition) = Harness::with_partition(ScheduleSetup {
+        topic: "unrearmable",
+        activations: vec![crate::test_support::UnixMillis(NOW_MS - 60_000)],
+        ..Default::default()
+    });
 
     let timer = BrokenTimer::dead_after(1, TimerFailure::Registration);
     let task = harness.spawn_on(timer.injectable());

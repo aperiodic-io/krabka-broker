@@ -15,9 +15,11 @@ use qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer};
 
 use super::{AuditLog, AuditReceiver, AuditWriter, AuditWriterParams};
 use crate::{
+    AuditEventClass, FileEd25519Signer, NodeId,
+    chain::ChainState,
     event::{AuditEvent, LifecycleKind},
     ocsf::ProductInfo,
-    sink::{AuditRecord, AuditSink, MemorySink},
+    sink::{AuditError, AuditRecord, AuditSink, MemorySink},
     spool::Spool,
     stats::AuditStats,
 };
@@ -31,7 +33,7 @@ pub fn product() -> ProductInfo {
 }
 
 /// Lifecycle fixture for a node, with its identity also used as the timestamp.
-pub fn life(node: crate::NodeId) -> AuditEvent {
+pub fn life(node: NodeId) -> AuditEvent {
     let n = i64::try_from(node.0).expect("fixture node identity fits the audit record");
     AuditEvent::Lifecycle {
         kind: LifecycleKind::BrokerStarted,
@@ -41,7 +43,7 @@ pub fn life(node: crate::NodeId) -> AuditEvent {
 }
 
 /// Emit a lifecycle sequence in caller-specified node order.
-pub fn emit_lifecycle(log: &AuditLog, nodes: &[crate::NodeId]) {
+pub fn emit_lifecycle(log: &AuditLog, nodes: &[NodeId]) {
     for &node in nodes {
         log.emit(life(node));
     }
@@ -71,7 +73,7 @@ pub async fn finish_writer(log: Arc<AuditLog>, handle: tokio::task::JoinHandle<(
 pub async fn finish_lifecycle_writer(
     log: Arc<AuditLog>,
     handle: tokio::task::JoinHandle<()>,
-    nodes: &[crate::NodeId],
+    nodes: &[NodeId],
 ) {
     emit_lifecycle(&log, nodes);
     finish_writer(log, handle).await;
@@ -99,7 +101,7 @@ pub fn roomy_spool() -> (tempfile::TempDir, Spool) {
 pub fn record_sequences(records: &[AuditRecord]) -> Vec<String> {
     records
         .iter()
-        .filter(|record| record.class != crate::AuditEventClass::Checkpoint)
+        .filter(|record| record.class != AuditEventClass::Checkpoint)
         .map(|record| header(record, "seq").unwrap())
         .collect()
 }
@@ -152,28 +154,24 @@ impl FailableSink {
 
 #[async_trait::async_trait]
 impl AuditSink for FailableSink {
-    async fn write(
-        &self,
-        record: AuditRecord,
-        durable: bool,
-    ) -> Result<(), crate::sink::AuditError> {
+    async fn write(&self, record: AuditRecord, durable: bool) -> Result<(), AuditError> {
         if durable {
             self.durable_requests.fetch_add(1, SeqCst);
         }
         let indeterminate_after = self.indeterminate_after.load(SeqCst);
         if self.indeterminate.load(SeqCst) || indeterminate_after == 0 {
-            return Err(crate::sink::AuditError::Indeterminate("forced".into()));
+            return Err(AuditError::Indeterminate("forced".into()));
         }
         if indeterminate_after > 0 {
             self.indeterminate_after.fetch_sub(1, SeqCst);
         }
         if self.fail.load(SeqCst) {
-            return Err(crate::sink::AuditError::Sink("forced".into()));
+            return Err(AuditError::Sink("forced".into()));
         }
         let allow = self.allow.load(SeqCst);
         if allow >= 0 {
             if allow == 0 {
-                return Err(crate::sink::AuditError::Sink("budget exhausted".into()));
+                return Err(AuditError::Sink("budget exhausted".into()));
             }
             self.allow.fetch_sub(1, SeqCst);
         }
@@ -199,7 +197,7 @@ pub fn params(sink: Arc<dyn AuditSink>, spool: Spool, stats: Arc<AuditStats>) ->
         signer: None,
         checkpoint_every_n: 0,
         checkpoint_every: DORMANT,
-        chain: crate::chain::ChainState::new(),
+        chain: ChainState::new(),
         spool: Some(spool),
         stats,
         replay_every: REPLAY_EVERY,
@@ -233,7 +231,7 @@ pub enum CheckpointFrequency {
 pub struct CheckpointSetup {
     #[default(Arc::new(AuditStats::new()))]
     pub stats: Arc<AuditStats>,
-    pub signer: Option<Arc<crate::FileEd25519Signer>>,
+    pub signer: Option<Arc<FileEd25519Signer>>,
     pub frequency: CheckpointFrequency,
 }
 

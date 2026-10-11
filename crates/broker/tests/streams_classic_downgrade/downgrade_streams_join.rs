@@ -8,8 +8,10 @@ use krabka_protocol::owned::streams_group_heartbeat_request::{
     StreamsGroupHeartbeatRequest, Topology,
 };
 
+use crate::support::streams::topology as build_topology;
+
 pub(crate) fn topology(source_topic: &str) -> Topology {
-    crate::support::streams::topology(source_topic, vec![])
+    build_topology(source_topic, vec![])
 }
 
 /// Drives one streams member to convergence, which means at least

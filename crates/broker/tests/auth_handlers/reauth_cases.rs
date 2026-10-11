@@ -10,7 +10,10 @@ use tokio::net::TcpStream;
 
 use crate::{
     harness,
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    kafka_wire::{
+        ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, ScramAuthenticationSetup,
+        exchange,
+    },
     plain, scram,
     support::wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
 };
@@ -48,7 +51,7 @@ impl Session {
                 plain::plain_authenticate(
                     &mut self.stream,
                     &mut self.correlation,
-                    &crate::kafka_wire::PlainAuthenticationSetup {
+                    &PlainAuthenticationSetup {
                         client_id: "krabka-sasl-test",
                         user,
                         ..Default::default()
@@ -60,7 +63,7 @@ impl Session {
                 scram::scram_authenticate(
                     &mut self.stream,
                     &mut self.correlation,
-                    &crate::kafka_wire::ScramAuthenticationSetup {
+                    &ScramAuthenticationSetup {
                         client_id: "krabka-sasl-test",
                         user,
                         mechanism: self.mechanism,
@@ -77,7 +80,7 @@ impl Session {
         &mut self,
     ) -> std::io::Result<krabka_protocol::owned::metadata_response::MetadataResponse> {
         self.correlation.0 += 1;
-        crate::kafka_wire::exchange(
+        exchange(
             &mut self.stream,
             &krabka_protocol::owned::metadata_request::MetadataRequest::default(),
             WireExchangeSetup {

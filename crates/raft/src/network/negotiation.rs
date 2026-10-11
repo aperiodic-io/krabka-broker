@@ -107,7 +107,7 @@ mod tests {
     use super::*;
     use crate::kraft::transport::{
         api_key,
-        wire::{FETCH_VERSION, VOTE_VERSION},
+        wire::{FETCH_VERSION, METADATA_TOPIC_ID, VOTE_VERSION},
     };
 
     /// A peer whose range ends below the engine's version gets its maximum;
@@ -138,7 +138,7 @@ mod tests {
                 ..Default::default()
             },
             topics: vec![fetch_req::FetchTopic {
-                topic_id: crate::kraft::transport::wire::METADATA_TOPIC_ID,
+                topic_id: METADATA_TOPIC_ID,
                 partitions: vec![fetch_req::FetchPartition {
                     fetch_offset: 7,
                     high_watermark: 5,

@@ -17,7 +17,9 @@ use super::{
     persistence::{fences_the_partition, persister_error_code},
 };
 use crate::{
+    codes::{OFFSET_NOT_AVAILABLE, from_broker_error},
     coordinator::unified::streams::config::ShareAutoOffsetReset,
+    error::BrokerError,
     share_partition::state::AcquisitionState,
     time_util::{duration_millis, now_ms},
 };
@@ -197,15 +199,13 @@ impl SharePartitionLeaderManager {
                 // `InvalidRecordException` through
                 // `ReplicaManager.fetchOffsetForTimestamp` into the share
                 // partition's initialization.
-                let found = found.map_err(|error| {
-                    crate::codes::from_broker_error(&crate::error::BrokerError::from(error))
-                })?;
+                let found = found.map_err(|error| from_broker_error(&BrokerError::from(error)))?;
                 // Every record predates the window: Kafka's
                 // `ShareFetchUtils.offsetForTimestamp` throws, and the
                 // initialization of the share partition fails.
                 found
                     .map(|(offset, _)| offset.max(log_start))
-                    .ok_or(crate::codes::OFFSET_NOT_AVAILABLE)
+                    .ok_or(OFFSET_NOT_AVAILABLE)
             }
         }
     }
@@ -317,12 +317,15 @@ mod tests {
     use crate::{
         codes,
         coordinator::unified::streams::config::KEY_SHARE_AUTO_OFFSET_RESET,
+        partition_registry::PartitionRegistry,
         share_partition::{
             manager::test_support::{
-                manager, manager_with_image_and_partitions, open_data_partition,
+                DataPartitionSetup, manager, manager_with_image_and_partitions, open_data_partition,
             },
             state::AcquisitionState,
         },
+        test_support::append_partition_batch,
+        time_util::now_ms,
     };
 
     krabka_macros::single_replica_partition_fixture!(partition_record);
@@ -339,13 +342,13 @@ mod tests {
     async fn fresh_cell_starts_where_the_group_strategy_says() {
         let dir = tempfile::tempdir().expect("tempdir");
         let tid = uuid::Uuid::from_bytes([41; 16]);
-        let now = crate::time_util::now_ms();
+        let now = now_ms();
         let hour = 60 * 60 * 1_000;
-        let reg = std::sync::Arc::new(crate::partition_registry::PartitionRegistry::new());
+        let reg = std::sync::Arc::new(PartitionRegistry::new());
         open_data_partition(
             &reg,
             dir.path(),
-            crate::share_partition::manager::test_support::DataPartitionSetup {
+            DataPartitionSetup {
                 batches: vec![
                     crate::share_partition::manager::test_support::TimedValues {
                         timestamp: crate::test_support::UnixMillis(now - 3 * hour),
@@ -440,13 +443,13 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let tid = uuid::Uuid::from_bytes([42; 16]);
-        let now = crate::time_util::now_ms();
+        let now = now_ms();
         let hour = 60 * 60 * 1_000;
-        let reg = Arc::new(crate::partition_registry::PartitionRegistry::new());
+        let reg = Arc::new(PartitionRegistry::new());
         open_data_partition(
             &reg,
             dir.path(),
-            crate::share_partition::manager::test_support::DataPartitionSetup {
+            DataPartitionSetup {
                 high_watermark: Offset(2),
                 ..Default::default()
             },
@@ -467,7 +470,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            crate::test_support::append_partition_batch(&partition, &mut batch);
+            append_partition_batch(&partition, &mut batch);
         }
         let mgr = manager_with_image_and_partitions(
             image_with_strategies(

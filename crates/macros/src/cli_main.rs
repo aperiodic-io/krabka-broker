@@ -5,6 +5,8 @@ use moxy::{
     token::{TokenStream, TokenTree},
 };
 
+use crate::meta::required_tokens;
+
 /// Splits `tokens` at its first top-level comma into the crate path and the
 /// `#[tokio::main(...)]` arguments. A comma inside a group belongs to the
 /// group, so only the outermost one splits.
@@ -20,7 +22,7 @@ fn split(tokens: &[TokenTree]) -> (&[TokenTree], &[TokenTree]) {
 pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
     let tokens = Vec::from(tokens);
     let (path, runtime) = split(&tokens);
-    let path = crate::meta::required_tokens(
+    let path = required_tokens(
         TokenStream::from(path),
         "`cli_main!` needs the path of the crate whose `run_from_args` it calls",
     )?;

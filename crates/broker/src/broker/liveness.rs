@@ -8,7 +8,23 @@ use std::sync::Arc;
 use krabka_units::{Time, convert::TimeExt as _};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::BrokerConfig;
+use crate::{
+    config::BrokerConfig,
+    cordoned_log_dirs::CordonedLogDirs,
+    heartbeat::{
+        client::{Config, InitialUnfence, run},
+        controller_state::{ControllerLivenessState, replicated_registrations},
+    },
+    leader_election::{LivenessTickState, run_liveness_tick},
+    log_dir_id::LogDirIds,
+    log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    network::client::InterBrokerClient,
+    unclean_recovery::{
+        BackgroundRecovery, RecoveryPolicy, UncleanRecoveryHandle, UncleanRecoveryManager,
+    },
+};
 
 /// Drives broker-death failover from the liveness registry. Every
 /// `tick_interval` it runs [`crate::leader_election::run_liveness_tick`]. That
@@ -19,23 +35,23 @@ use crate::config::BrokerConfig;
 /// when no ISR replica was alive at that instant, or when the commit stalled
 /// and timed out.
 fn spawn_liveness_ticker(
-    controller: Arc<dyn crate::metadata_source::MetadataSource>,
-    liveness: Arc<crate::heartbeat::controller_state::ControllerLivenessState>,
+    controller: Arc<dyn MetadataSource>,
+    liveness: Arc<ControllerLivenessState>,
     node_id: krabka_metadata::NodeId,
-    metrics: crate::metrics::BrokerMetrics,
-    recovery: crate::unclean_recovery::UncleanRecoveryHandle,
+    metrics: BrokerMetrics,
+    recovery: UncleanRecoveryHandle,
     tick_interval: Time,
     shutdown: CancellationToken,
 ) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(tick_interval.to_std());
-        let mut state = crate::leader_election::LivenessTickState::default();
+        let mut state = LivenessTickState::default();
         loop {
             tokio::select! {
                 _ = tick.tick() => {}
                 () = shutdown.cancelled() => return,
             }
-            crate::leader_election::run_liveness_tick(
+            run_liveness_tick(
                 &controller,
                 node_id,
                 &liveness,
@@ -53,10 +69,10 @@ fn spawn_liveness_ticker(
 /// controller leader. The seed sits inside the change branch on purpose. A
 /// re-published identical leader must not reset every broker's death clock.
 async fn on_leadership_wake(
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
-    liveness: &crate::heartbeat::controller_state::ControllerLivenessState,
+    controller: &Arc<dyn MetadataSource>,
+    liveness: &ControllerLivenessState,
     node_id: krabka_metadata::NodeId,
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
     previous: &mut Option<krabka_metadata::NodeId>,
     current: Option<krabka_metadata::NodeId>,
 ) {
@@ -70,17 +86,17 @@ async fn on_leadership_wake(
         liveness
             .seed_term(
                 controller.current_controller_epoch(),
-                crate::heartbeat::controller_state::replicated_registrations(&image),
+                replicated_registrations(&image),
             )
             .await;
     }
 }
 
 fn spawn_leadership_watcher(
-    controller: Arc<dyn crate::metadata_source::MetadataSource>,
-    liveness: Arc<crate::heartbeat::controller_state::ControllerLivenessState>,
+    controller: Arc<dyn MetadataSource>,
+    liveness: Arc<ControllerLivenessState>,
     node_id: krabka_metadata::NodeId,
-    metrics: crate::metrics::BrokerMetrics,
+    metrics: BrokerMetrics,
     shutdown: CancellationToken,
 ) {
     let mut leaders = controller.watch_leader();
@@ -145,81 +161,68 @@ fn spawn_fatal_fault_watcher(
 }
 
 pub(super) struct LivenessStartup {
-    pub(super) liveness: Arc<crate::heartbeat::controller_state::ControllerLivenessState>,
+    pub(super) liveness: Arc<ControllerLivenessState>,
     pub(super) want_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     pub(super) should_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
-    pub(super) unclean_recovery: crate::unclean_recovery::UncleanRecoveryHandle,
+    pub(super) unclean_recovery: UncleanRecoveryHandle,
     /// Where this broker's first unfencing stands.
-    pub(super) initial_unfence:
-        tokio::sync::watch::Receiver<crate::heartbeat::client::InitialUnfence>,
+    pub(super) initial_unfence: tokio::sync::watch::Receiver<InitialUnfence>,
 }
 
 pub(super) fn start_liveness_services(
     config: &BrokerConfig,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
-    inter_broker_client: &Arc<crate::network::client::InterBrokerClient>,
+    controller: &Arc<dyn MetadataSource>,
+    inter_broker_client: &Arc<InterBrokerClient>,
     listener_protocol: krabka_security::ListenerProtocol,
     // The two places this subsystem reports to, paired the way `log_dirs`
     // pairs the two log-dir registries: the metric families, and the audit log
     // that a bypassed background unclean recovery writes its evidence to.
-    observability: (&crate::metrics::BrokerMetrics, &Arc<krabka_audit::AuditLog>),
+    observability: (&BrokerMetrics, &Arc<krabka_audit::AuditLog>),
     shutdown: &CancellationToken,
-    log_dirs: (
-        &crate::log_dir_status::LogDirRegistry,
-        &crate::log_dir_id::LogDirIds,
-        &crate::cordoned_log_dirs::CordonedLogDirs,
-    ),
+    log_dirs: (&LogDirRegistry, &LogDirIds, &CordonedLogDirs),
 ) -> LivenessStartup {
     let (metrics, audit_log) = observability;
-    let liveness = Arc::new(
-        crate::heartbeat::controller_state::ControllerLivenessState::new(config.heartbeat_timeout),
-    );
+    let liveness = Arc::new(ControllerLivenessState::new(config.heartbeat_timeout));
     let (want_shutdown, want_shutdown_rx) = tokio::sync::watch::channel(false);
     let (should_shutdown, _) = tokio::sync::watch::channel(false);
     let want_shutdown = Arc::new(want_shutdown);
     let should_shutdown = Arc::new(should_shutdown);
-    let (unfenced, initial_unfence) =
-        tokio::sync::watch::channel(crate::heartbeat::client::InitialUnfence::Pending);
-    tokio::spawn(crate::heartbeat::client::run(
-        crate::heartbeat::client::Config {
-            broker_id: config.broker_id,
-            broker_epoch: config.broker_epoch,
-            interval: config.heartbeat_interval,
-            controller: Arc::clone(controller),
-            shutdown: shutdown.child_token(),
-            outbound_client: Arc::clone(inter_broker_client),
-            controller_listener_protocol: config.controller_listener_protocol,
-            controller_server_name: config
-                .controller_server_name
-                .clone()
-                .unwrap_or_else(|| "localhost".to_owned()),
-            controller_quorum_voters: config.controller_quorum_voters.clone(),
-            want_shutdown: want_shutdown_rx,
-            should_shutdown: Arc::clone(&should_shutdown),
-            unfenced,
-            log_dir_status: log_dirs.0.clone(),
-            log_dir_ids: log_dirs.1.clone(),
-            all_log_dirs: config.all_log_dirs(),
-            supervisor_shutdown: shutdown.clone(),
-            cordoned_log_dirs: log_dirs.2.clone(),
-        },
-    ));
-    let unclean_recovery = crate::unclean_recovery::UncleanRecoveryManager::spawn(
+    let (unfenced, initial_unfence) = tokio::sync::watch::channel(InitialUnfence::Pending);
+    tokio::spawn(run(Config {
+        broker_id: config.broker_id,
+        broker_epoch: config.broker_epoch,
+        interval: config.heartbeat_interval,
+        controller: Arc::clone(controller),
+        shutdown: shutdown.child_token(),
+        outbound_client: Arc::clone(inter_broker_client),
+        controller_listener_protocol: config.controller_listener_protocol,
+        controller_server_name: config
+            .controller_server_name
+            .clone()
+            .unwrap_or_else(|| "localhost".to_owned()),
+        controller_quorum_voters: config.controller_quorum_voters.clone(),
+        want_shutdown: want_shutdown_rx,
+        should_shutdown: Arc::clone(&should_shutdown),
+        unfenced,
+        log_dir_status: log_dirs.0.clone(),
+        log_dir_ids: log_dirs.1.clone(),
+        all_log_dirs: config.all_log_dirs(),
+        supervisor_shutdown: shutdown.clone(),
+        cordoned_log_dirs: log_dirs.2.clone(),
+    }));
+    let unclean_recovery = UncleanRecoveryManager::spawn(
         Arc::clone(controller),
         Arc::clone(&liveness),
         config.node_id,
         Arc::clone(inter_broker_client),
         metrics.clone(),
-        crate::unclean_recovery::RecoveryPolicy {
+        RecoveryPolicy {
             aggressive_deadline: config.unclean_recovery_aggressive_deadline,
             balanced_deadline: config.unclean_recovery_balanced_deadline,
             queue_capacity: config.unclean_recovery_queue_capacity,
             listener_protocol,
             inter_broker_server_name: config.inter_broker_server_name.clone(),
-            background: crate::unclean_recovery::BackgroundRecovery::new(
-                &config.break_glass,
-                Arc::clone(audit_log),
-            ),
+            background: BackgroundRecovery::new(&config.break_glass, Arc::clone(audit_log)),
         },
         shutdown.child_token(),
     );
@@ -263,14 +266,17 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::broker::test_support::fake_source;
+    use crate::{
+        broker::test_support::fake_source, metadata_source::MetadataSource,
+        test_support::broker_registration,
+    };
 
     fn image_with_registered_broker(node_id: u64) -> krabka_metadata::MetadataImage {
         let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
         image.apply(&krabka_metadata::MetadataRecord::V1BrokerRegistration(
             krabka_metadata::BrokerRegistrationRecord {
                 incarnation_id: uuid::Uuid::from_u128(u128::from(node_id)),
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+                ..broker_registration(krabka_raft::NodeId(node_id))
             },
         ));
         image
@@ -282,12 +288,12 @@ mod tests {
             ControllerLivenessState, LivenessTransition, TestClock,
         };
         let me = krabka_raft::NodeId(7);
-        let controller: Arc<dyn crate::metadata_source::MetadataSource> =
+        let controller: Arc<dyn MetadataSource> =
             Arc::new(fake_source(image_with_registered_broker(1), Some(me)));
         let clock = TestClock::new();
         let liveness =
             ControllerLivenessState::with_test_clock(std::time::Duration::from_millis(10), &clock);
-        let metrics = crate::metrics::BrokerMetrics::new();
+        let metrics = BrokerMetrics::new();
 
         // Broker 1 dies while this node leads.
         liveness.record_heartbeat(1).await;
@@ -346,9 +352,9 @@ mod tests {
         use crate::heartbeat::controller_state::ControllerLivenessState;
         let me = krabka_raft::NodeId(7);
         let mock = Arc::new(fake_source(image_with_registered_broker(1), None));
-        let controller: Arc<dyn crate::metadata_source::MetadataSource> = mock.clone();
+        let controller: Arc<dyn MetadataSource> = mock.clone();
         let liveness = Arc::new(ControllerLivenessState::new(krabka_units::secs(60)));
-        let metrics = crate::metrics::BrokerMetrics::new();
+        let metrics = BrokerMetrics::new();
         let shutdown = CancellationToken::new();
         spawn_leadership_watcher(
             controller,
@@ -392,7 +398,7 @@ mod tests {
                 krabka_metadata::MetadataImage::new(uuid::Uuid::nil()),
                 None,
             ));
-            let controller: Arc<dyn crate::metadata_source::MetadataSource> = mock.clone();
+            let controller: Arc<dyn MetadataSource> = mock.clone();
             let latch = Arc::new(tokio::sync::watch::channel(false).0);
             let shutdown = CancellationToken::new();
             if published_before_the_watcher {

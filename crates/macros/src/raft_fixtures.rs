@@ -2,8 +2,10 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::{fixtures::name, meta::arguments};
+
 pub(crate) fn empty_endpoint_voters(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         pub(crate) fn {{ name }}(ids: &[::krabka_ids::NodeId]) -> ::krabka_metadata::voters::VoterSet {
             ::krabka_metadata::voters::VoterSet::from_voters(ids.iter().map(|&id| {
@@ -19,7 +21,7 @@ pub(crate) fn empty_endpoint_voters(input: TokenStream) -> Result<TokenStream, P
 }
 
 pub(crate) fn epoch_record_batch(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         pub(crate) fn {{ name }}(base: i64, epoch: i32, value: &[u8]) -> ::krabka_protocol::records::RecordBatch {
             ::krabka_protocol::records::RecordBatch {
@@ -46,10 +48,10 @@ pub(crate) fn epoch_record_batch(input: TokenStream) -> Result<TokenStream, Pars
 }
 
 pub(crate) fn epoch_log_view(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut arguments = crate::meta::arguments(input.clone(), 2)
-        .or_else(|_| crate::meta::arguments(input, 3))?
+    let mut arguments = arguments(input.clone(), 2)
+        .or_else(|_| arguments(input, 3))?
         .into_iter();
-    let name = crate::fixtures::name(arguments.next().unwrap())?;
+    let name = name(arguments.next().unwrap())?;
     let root = arguments.next().unwrap();
     let context = arguments
         .next()

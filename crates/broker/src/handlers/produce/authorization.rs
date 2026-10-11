@@ -7,6 +7,7 @@ use super::framing::ProduceFramed;
 use crate::{
     authorizer::{AuthorizationRequest, AuthorizationResult},
     broker::Broker,
+    handlers::{RequestContext, denied_topics, requested_topic_name},
 };
 
 /// Kafka's `produceRequest.transactionalId != null && authorize(WRITE,
@@ -27,7 +28,7 @@ use crate::{
 pub(super) fn is_authorized_transactional(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     transactional_id: Option<&str>,
 ) -> bool {
     let Some(id) = transactional_id else {
@@ -55,15 +56,15 @@ pub(super) fn is_authorized_transactional(
 pub(super) fn authorize_produce_topics(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     request: &ProduceFramed,
 ) -> std::collections::HashSet<String> {
     let topic_names: Vec<String> = request
         .topic_data
         .iter()
-        .map(|topic| crate::handlers::requested_topic_name(image, &topic.name, topic.topic_id))
+        .map(|topic| requested_topic_name(image, &topic.name, topic.topic_id))
         .collect();
-    crate::handlers::denied_topics(
+    denied_topics(
         broker.config.authorizer.as_ref(),
         image,
         context,

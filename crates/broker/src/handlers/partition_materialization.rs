@@ -7,7 +7,9 @@ use krabka_raft::NodeId;
 use crate::{
     broker::Broker,
     handlers::create_topics::{INITIAL_LEADER_EPOCH, InitialLeadership},
+    partition::PartitionRuntimeConfig,
     replicator_supervisor::{MaterializePartitionConfig, materialize_partition},
+    wal::{ControllerSequencer, OffsetSequencer},
 };
 
 /// Only assigned replicas open a local partition.
@@ -51,17 +53,15 @@ impl PartitionMaterialization<'_> {
                 log_config: &broker.config.log_config,
                 log_dir_status: &broker.log_dir_status,
                 producer_state: &broker.producer_state,
-                runtime: crate::partition::PartitionRuntimeConfig::from_broker(
+                runtime: PartitionRuntimeConfig::from_broker(
                     &broker.config,
                     self.diskless,
                     (
                         Some(broker.hot_tail.clone()),
                         Some(broker.wal_shards.clone()),
                         self.diskless.then(|| {
-                            std::sync::Arc::new(crate::wal::ControllerSequencer::new(
-                                broker.controller.clone(),
-                            ))
-                                as std::sync::Arc<dyn crate::wal::OffsetSequencer>
+                            std::sync::Arc::new(ControllerSequencer::new(broker.controller.clone()))
+                                as std::sync::Arc<dyn OffsetSequencer>
                         }),
                     ),
                 ),

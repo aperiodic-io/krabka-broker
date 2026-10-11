@@ -280,13 +280,22 @@ mod tests {
         primitives::uuid::Uuid,
     };
 
-    use super::handle;
+    use super::handle as alter_share_group_offsets_handle;
     use crate::{
         authorizer::{AuthorizationResult, Authorizer},
+        broker::BrokerHandle,
         codes,
         coordinator::unified::{GroupType, ShareGroupSeed, share::actor::ShareGroupActorMessage},
-        handlers::test_support::CreateTopicSetup,
-        test_support::{DenyAll, test_ctx},
+        handlers::{
+            RequestContext,
+            create_topics::handle as create_topics_handle,
+            test_support::{CreateTopicSetup, configured_topic_request},
+        },
+        share_coordinator::{
+            coordinator::message::UNKNOWN_TOPIC_OR_PARTITION,
+            handlers::test_support::lead_share_state_partitions,
+        },
+        test_support::{DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx},
     };
 
     macro_rules! joining_share_member {
@@ -312,8 +321,7 @@ mod tests {
         };
     }
 
-    const UNKNOWN_TOPIC_OR_PARTITION_MESSAGE: &str =
-        crate::share_coordinator::coordinator::message::UNKNOWN_TOPIC_OR_PARTITION;
+    const UNKNOWN_TOPIC_OR_PARTITION_MESSAGE: &str = UNKNOWN_TOPIC_OR_PARTITION;
 
     /// An authorizer with independently controllable answers for `Group`
     /// `Read`/`Alter` and per-topic `Read`, for the KIP-932
@@ -369,15 +377,15 @@ mod tests {
     crate::test_support::context_helper!(client_id = "admin-client");
 
     async fn create_topic(
-        broker_handle: &crate::broker::BrokerHandle,
-        ctx: &crate::handlers::RequestContext<'_>,
+        broker_handle: &BrokerHandle,
+        ctx: &RequestContext<'_>,
         setup: CreateTopicSetup<'_>,
     ) {
         let broker = broker_handle.broker_arc_for_test();
         let topic_name = setup.topic;
         let version = create_topics_response::MAX_VERSION;
-        let request = crate::handlers::test_support::configured_topic_request(setup);
-        let response = crate::handlers::create_topics::handle(&broker, request, version, ctx)
+        let request = configured_topic_request(setup);
+        let response = create_topics_handle(&broker, request, version, ctx)
             .await
             .expect("create topic");
         assert!(response.topics[0].error_code == codes::NONE, "{response:?}");
@@ -391,7 +399,7 @@ mod tests {
         type Case<'a> = (
             &'a str,
             Arc<dyn Authorizer>,
-            crate::test_support::ShareApiSupport,
+            ShareApiSupport,
             &'a str,
             Vec<i32>,
             AlterShareGroupOffsetsResponse,
@@ -453,7 +461,7 @@ mod tests {
         share_refusal_cases!(
             (case, authorizer, share_enabled, [topic_name, partitions], expected) in cases;
             (broker_handle, _dir, broker, ctx, resp);
-            handle(request("g1", topic_name, &partitions), version)
+            alter_share_group_offsets_handle(request("g1", topic_name, &partitions), version)
         );
     }
 
@@ -519,11 +527,8 @@ mod tests {
                     Vec::new()
                 },
             });
-            let (broker_handle, _dir) = crate::test_support::start_share_broker(
-                authorizer,
-                crate::test_support::ShareBrokerSetup::default(),
-            )
-            .await;
+            let (broker_handle, _dir) =
+                start_share_broker(authorizer, ShareBrokerSetup::default()).await;
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
             if topic_exists {
@@ -536,10 +541,7 @@ mod tests {
                     },
                 )
                 .await;
-                crate::share_coordinator::handlers::test_support::lead_share_state_partitions(
-                    &broker,
-                )
-                .await;
+                lead_share_state_partitions(&broker).await;
             }
             let topic_id_before = if topic_exists {
                 let topic_id = broker
@@ -559,7 +561,7 @@ mod tests {
                 None
             };
 
-            let resp = handle(
+            let resp = alter_share_group_offsets_handle(
                 &broker,
                 request("g-acl", topic_name, &[0]),
                 alter_share_group_offsets_response::MAX_VERSION,
@@ -608,7 +610,7 @@ mod tests {
             context(ctx, "alice")
         );
 
-        let empty_id_resp = handle(
+        let empty_id_resp = alter_share_group_offsets_handle(
             &broker,
             request("", "t", &[0]),
             alter_share_group_offsets_response::MAX_VERSION,
@@ -621,7 +623,7 @@ mod tests {
         let _ = broker.group_coordinator.get_or_create_classic("classic-g");
         broker.group_coordinator.mark_classic("classic-g");
         assert!(broker.group_coordinator.group_type("classic-g") == Some(GroupType::Classic));
-        let wrong_type_resp = handle(
+        let wrong_type_resp = alter_share_group_offsets_handle(
             &broker,
             request("classic-g", "t", &[0]),
             alter_share_group_offsets_response::MAX_VERSION,
@@ -658,8 +660,7 @@ mod tests {
             },
         )
         .await;
-        crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
-            .await;
+        lead_share_state_partitions(&broker).await;
         let topic_id = broker
             .controller
             .current_image()
@@ -669,7 +670,7 @@ mod tests {
 
         assert!(broker.group_coordinator.group_type("g-new").is_none());
 
-        let response = handle(
+        let response = alter_share_group_offsets_handle(
             &broker,
             request("g-new", "new-topic", &[0]),
             alter_share_group_offsets_response::MAX_VERSION,
@@ -744,7 +745,7 @@ mod tests {
         assert!(resp.error_code == codes::NONE, "{resp:?}");
 
         test_ctx!(ctx, "alice");
-        let response = handle(
+        let response = alter_share_group_offsets_handle(
             &broker,
             request("busy", "missing", &[0]),
             alter_share_group_offsets_response::MAX_VERSION,
@@ -780,8 +781,7 @@ mod tests {
             },
         )
         .await;
-        crate::share_coordinator::handlers::test_support::lead_share_state_partitions(&broker)
-            .await;
+        lead_share_state_partitions(&broker).await;
         let persister = broker
             .group_coordinator
             .share_persister()
@@ -816,7 +816,7 @@ mod tests {
 
         let reset_request = request("g-reset", "reset-topic", &[0, 9]);
         for _ in 0..2 {
-            let response = handle(
+            let response = alter_share_group_offsets_handle(
                 &broker,
                 reset_request.clone(),
                 alter_share_group_offsets_response::MAX_VERSION,

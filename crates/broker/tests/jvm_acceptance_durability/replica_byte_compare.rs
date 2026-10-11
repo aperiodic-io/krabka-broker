@@ -10,7 +10,11 @@ use std::{io::Write as _, process::Command};
 
 use assert2::assert;
 
-use crate::jvm_acceptance::KAFKA_IMAGE;
+use crate::{
+    jvm_acceptance::KAFKA_IMAGE,
+    prepare_replication_topic,
+    support::{init_jvm_tracing, jvm_acks_all_producer, start_jvm_cluster},
+};
 
 // Replication byte-compare: stand up a 3-broker Krabka cluster, create a
 // `replication-factor=3` topic, produce 100 records via the JVM
@@ -35,7 +39,7 @@ use crate::jvm_acceptance::KAFKA_IMAGE;
 async fn three_node_replication_byte_compare() {
     const TOPIC: &str = "krabka-replication-itest";
 
-    crate::support::init_jvm_tracing("krabka_broker=debug,info");
+    init_jvm_tracing("krabka_broker=debug,info");
 
     // Distinct ports from `three_node_jvm_round_trip` (which uses
     // 9192/9292/9392 + 9193/9293/9393). Linux's TIME_WAIT keeps the prior
@@ -46,18 +50,17 @@ async fn three_node_replication_byte_compare() {
     let client_ports = [9492u16, 9592, 9692];
     let controller_ports = [9493u16, 9593, 9693];
 
-    let cluster = crate::support::start_jvm_cluster(client_ports, controller_ports, |_| {}).await;
+    let cluster = start_jvm_cluster(client_ports, controller_ports, |_| {}).await;
 
     let (_bootstrap_1, bootstrap_all) =
-        crate::prepare_replication_topic(&cluster[0].0, TOPIC, &client_ports).await;
+        prepare_replication_topic(&cluster[0].0, TOPIC, &client_ports).await;
 
     // 3. Produce 100 records via kafka-console-producer with acks=all so
     //    each produce response gates on HW = LEO across the full ISR.
     //    Without this the producer returns after leader ack and we end up
     //    dumping followers before their replicators have caught up,
     //    making the byte-compare assert fail spuriously.
-    let mut producer_child =
-        crate::support::jvm_acks_all_producer(KAFKA_IMAGE, &bootstrap_all, TOPIC);
+    let mut producer_child = jvm_acks_all_producer(KAFKA_IMAGE, &bootstrap_all, TOPIC);
     {
         let stdin = producer_child.stdin.as_mut().expect("stdin");
         for i in 0..100 {

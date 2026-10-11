@@ -15,6 +15,7 @@ pub(super) use crate::test_support::{sample_data, sample_metadata, write_file};
 use crate::{
     metadata::RemoteLogSegmentMetadata,
     storage_manager::RemoteStorageManager,
+    test_support::TransactionIndex,
     worm::{ChainHead, ChainStamp, EpochId, ManifestSeq, WormChainRecord, WormConfig},
 };
 
@@ -46,7 +47,7 @@ pub(super) enum WormAccess {
 pub(super) struct SeededCopySetup {
     #[default(sample_metadata(Uuid::from_u128(10)))]
     pub(super) metadata: RemoteLogSegmentMetadata,
-    pub(super) transaction_index: crate::test_support::TransactionIndex,
+    pub(super) transaction_index: TransactionIndex,
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -62,7 +63,7 @@ pub(super) struct StampedMetadataSetup {
 impl SeededCopySetup {
     pub(super) fn without_transaction_index() -> Self {
         Self {
-            transaction_index: crate::test_support::TransactionIndex::Omitted,
+            transaction_index: TransactionIndex::Omitted,
             ..Default::default()
         }
     }

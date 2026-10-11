@@ -12,12 +12,15 @@ use assert2::check;
 use bytes::Bytes;
 
 use super::test_support::{classic_group_record, replay_log};
-use crate::coordinator::{
-    persistence::{GroupMetadataValue as ClassicGroupMetadataValue, OffsetCommitValue},
-    unified::{
-        persistence_next_gen::{GroupMetadataValue, NextGenKey, encode_key},
-        share::persistence::{ShareGroupKey, ShareGroupMetadataValue, encode_share_key},
+use crate::{
+    coordinator::{
+        persistence::{GroupMetadataValue as ClassicGroupMetadataValue, OffsetCommitValue},
+        unified::{
+            persistence_next_gen::{GroupMetadataValue, NextGenKey, encode_key},
+            share::persistence::{ShareGroupKey, ShareGroupMetadataValue, encode_share_key},
+        },
     },
+    error::BrokerError,
 };
 
 /// One replayed record: its key, and its value or `None` for a tombstone.
@@ -95,7 +98,7 @@ fn replay(records: Vec<LogRecord>) -> Held {
     let (coordinator, replayed) = replay_log(records);
     let replayed = match replayed {
         Ok(replayed) => replayed,
-        Err(crate::error::BrokerError::Startup(message)) => return Held::Failed(message),
+        Err(BrokerError::Startup(message)) => return Held::Failed(message),
         Err(other) => return Held::Failed(other.to_string()),
     };
     if coordinator.seeds.contains_key("g") {

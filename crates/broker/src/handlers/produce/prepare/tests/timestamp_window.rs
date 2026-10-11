@@ -24,8 +24,9 @@ use crate::{
         framing::PartitionPayload,
         prepare::{DecodeEnv, prepare_batch},
         test_support::{encode_batch, image_with_topic},
-        topic_settings::{TimestampPolicy, resolve_timestamp_policy},
+        topic_settings::{TimestampPolicy, kafka_stock_broker_default, resolve_timestamp_policy},
     },
+    metrics::BrokerMetrics,
 };
 
 /// An hour, the window every case configures.
@@ -49,11 +50,7 @@ fn policy(overrides: &[(&str, &str)]) -> TimestampPolicy {
         topic: "t".into(),
         overrides: map,
     }));
-    resolve_timestamp_policy(
-        &img,
-        "t",
-        crate::handlers::produce::topic_settings::kafka_stock_broker_default(),
-    )
+    resolve_timestamp_policy(&img, "t", kafka_stock_broker_default())
 }
 
 /// A two-record batch whose records carry `first_ms` and `second_ms`, stored
@@ -92,7 +89,7 @@ fn prepare(
     timestamps: TimestampPolicy,
     topic_compression: Option<CompressionType>,
 ) -> Result<(), i16> {
-    let metrics = crate::metrics::BrokerMetrics::new();
+    let metrics = BrokerMetrics::new();
     let prepared = prepare_batch(
         PartitionPayload::Slice(encode_batch(batch)),
         topic_compression,

@@ -29,6 +29,7 @@ use crate::{
         transport::wire,
         types::{Epoch, NodeId},
     },
+    snapshot::SnapshotReader,
 };
 
 pub fn should_serve_fetch_records(
@@ -391,7 +392,7 @@ impl Engine {
             ));
         }
         // Validate the bytes decode before mutating any durable state.
-        let contents = crate::snapshot::SnapshotReader::read(bytes)?;
+        let contents = SnapshotReader::read(bytes)?;
         if install == SnapshotInstallDecision::Stale {
             return Ok(()); // stale; we already advanced past this snapshot
         }

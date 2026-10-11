@@ -20,7 +20,7 @@ use krabka_protocol::{
 
 use crate::{
     authorizer::AllowAllAuthorizer, broker::BrokerHandle, codes,
-    test_support::start_broker_with_authorizer_no_audit,
+    handlers::test_support::produce_wire, test_support::start_broker_with_authorizer_no_audit,
 };
 
 /// Produce v12 names the topic and carries `record_errors` and
@@ -89,7 +89,7 @@ async fn produce(broker: &BrokerHandle, topic: &str, records: RecordsPayload) ->
         }],
         ..Default::default()
     };
-    crate::handlers::test_support::produce_wire(broker, VERSION, &request).await
+    produce_wire(broker, VERSION, &request).await
 }
 
 fn response(topic: &str, partition: PartitionProduceResponse) -> ProduceResponse {

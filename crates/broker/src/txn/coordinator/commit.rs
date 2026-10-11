@@ -28,7 +28,9 @@ use tokio::sync::watch;
 use super::{TxnCoordinator, leadership};
 use crate::{
     codes,
+    config_keys::node_min_insync_replicas,
     error::BrokerError,
+    metadata_source::wait_for_image_change,
     partition::{Partition, ProduceBatchError},
     txn::bootstrap,
 };
@@ -126,7 +128,7 @@ fn isr_below_min(image: &MetadataImage, node_id: NodeId, term: StateTerm) -> boo
     let Some(record) = image.partition(bootstrap::TOPIC, term.partition.get()) else {
         return false;
     };
-    let min_isr = crate::config_keys::node_min_insync_replicas(image, node_id, bootstrap::TOPIC)
+    let min_isr = node_min_insync_replicas(image, node_id, bootstrap::TOPIC)
         .map_or(1, |configured| usize::try_from(configured).unwrap_or(1))
         .min(record.replicas.len());
     record.isr.len() < min_isr
@@ -289,8 +291,7 @@ impl TxnCoordinator {
             if !self.term_is_current(term).await {
                 return Err(lost());
             }
-            let image_changed =
-                crate::metadata_source::wait_for_image_change(images.as_deref_mut());
+            let image_changed = wait_for_image_change(images.as_deref_mut());
             tokio::select! {
                 reached = &mut committed => {
                     if reached.is_err() {

@@ -113,7 +113,10 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::heartbeat::controller_state::{LivenessTransition, TestClock};
+    use crate::{
+        heartbeat::controller_state::{LivenessTransition, TestClock},
+        test_support::expired_broker_fixture,
+    };
 
     #[tokio::test]
     async fn fencing_removes_alive_broker_from_eligible_snapshot() {
@@ -128,7 +131,7 @@ mod tests {
 
     #[tokio::test]
     async fn unavailable_snapshot_includes_dead_but_not_unknown_brokers() {
-        let (_clock, liveness, _) = crate::test_support::expired_broker_fixture(2).await;
+        let (_clock, liveness, _) = expired_broker_fixture(2).await;
 
         let unavailable = liveness.unavailable_snapshot().await;
         assert!(unavailable.contains(&2));

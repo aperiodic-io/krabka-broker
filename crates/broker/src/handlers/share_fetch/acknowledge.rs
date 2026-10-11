@@ -196,11 +196,11 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::share_partition::state::RecordState;
+    use crate::share_partition::state::{AcquisitionState, RecordState};
 
     #[test]
     fn singleton_ack_type_applies_to_the_whole_range() {
-        let mut state = crate::share_partition::state::AcquisitionState::new(Offset(0));
+        let mut state = AcquisitionState::new(Offset(0));
         state.materialize(Offset(200), 200);
         assert!(
             state

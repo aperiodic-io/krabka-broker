@@ -16,7 +16,7 @@ use krabka_protocol::{
 use crate::{
     control_plane::freeze_scope,
     support::offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-    wire::{CONTROL, produce},
+    wire::{CONTROL, controlled_fixture, produce},
 };
 
 /// Trim `topic` up to `offset`, and hand back the partition row's error code.
@@ -60,7 +60,7 @@ async fn delete_topic(client: &Client, topic: &str) -> i16 {
 /// the control topic proves both paths still work when nothing is frozen.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_records_and_delete_topics_refuse_on_a_frozen_topic() {
-    let (p, frozen, control) = Box::pin(crate::wire::controlled_fixture("orders")).await;
+    let (p, frozen, control) = Box::pin(controlled_fixture("orders")).await;
     for _ in 0..2 {
         check!(produce(&p.client, "orders", frozen).await.error_code == codes::NONE);
         check!(produce(&p.client, CONTROL, control).await.error_code == codes::NONE);

@@ -6,6 +6,10 @@
 
 use krabka_broker::{Broker, BrokerConfig};
 
+use crate::support::{
+    JvmBrokerSetup, JvmListeners, controller_voters, init_jvm_tracing, jvm_broker_config,
+};
+
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(crate) struct SaslClusterSetup<'a> {
     #[default(super::sasl::ADMIN)]
@@ -63,7 +67,7 @@ pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster_with_users(
 }
 
 pub(crate) async fn start_sasl_cluster<const N: usize>(
-    listeners: [crate::support::JvmListeners; N],
+    listeners: [JvmListeners; N],
     setup: SaslClusterSetup<'_>,
     adjust: impl Fn(&mut BrokerConfig),
 ) -> (
@@ -79,7 +83,7 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
         admin_pass,
         extra_users,
     } = setup;
-    crate::support::init_jvm_tracing("krabka_broker=info");
+    init_jvm_tracing("krabka_broker=info");
     let _ = rustls::crypto::ring::default_provider().install_default();
     let dirs: [tempfile::TempDir; N] =
         std::array::from_fn(|_| tempfile::tempdir().expect("broker directory"));
@@ -95,14 +99,14 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
         .collect();
     let configs: [BrokerConfig; N] = std::array::from_fn(|index| {
         let listener = &listeners[index];
-        let mut config = crate::support::jvm_broker_config(
+        let mut config = jvm_broker_config(
             dirs[index].path().to_path_buf(),
-            crate::support::JvmBrokerSetup {
+            JvmBrokerSetup {
                 node: krabka_broker::NodeId(voters[index].0),
                 listen: listener.listen.parse().expect("client address"),
                 controller: voters[index].1,
                 advertised: listener.advertised.clone(),
-                voters: crate::support::controller_voters(&voters),
+                voters: controller_voters(&voters),
             },
         );
         config.listeners = vec![ListenerSpec {

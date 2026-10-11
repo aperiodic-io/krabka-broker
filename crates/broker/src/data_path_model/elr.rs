@@ -46,6 +46,7 @@ use super::{
 use crate::{
     config_keys::effective_min_insync_replicas,
     elr::{maintain::next_partition_elr, state::PartitionElr},
+    test_support::elr_model_image,
 };
 
 /// The one topic the modelled cluster holds.
@@ -62,7 +63,7 @@ pub(super) const PARTITION: i32 = 0;
 /// rule clears the set at and the one the watermark stops at cannot drift
 /// apart.
 pub(super) fn image(min_isr: usize) -> MetadataImage {
-    crate::test_support::elr_model_image(
+    elr_model_image(
         TOPIC,
         i16::try_from(NB).expect("the modelled cluster is tiny"),
         min_isr,

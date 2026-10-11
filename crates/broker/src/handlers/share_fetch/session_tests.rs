@@ -29,8 +29,17 @@ use crate::{
     authorizer::AllowAllAuthorizer,
     broker::BrokerHandle,
     codes,
+    handlers::test_support::{
+        ClientTopicSetup, ProduceRecordsSetup, ShareWireSetup, TopicPartitionCount,
+        acquired_share_records, create_topic as create_topic_from_test_support,
+        initialize_earliest_share, produce_records, share_fetch_topics, share_fetch_wire,
+        share_record_states,
+    },
     share_partition::state::RecordState::{self, Acquired, Available},
-    test_support::{decode_response, encode_request, peer, principal, start_broker_no_audit_with},
+    test_support::{
+        decode_response, encode_request, peer, principal, start_broker_no_audit_with,
+        try_dispatch_context,
+    },
 };
 
 const VERSION: i16 = 2;
@@ -46,12 +55,12 @@ async fn start(session_max: usize) -> (BrokerHandle, tempfile::TempDir) {
 
 /// Creates `topic` with `partitions` partitions and returns its id.
 async fn create_topic(broker: &BrokerHandle, topic: &str, partitions: i32) -> WireUuid {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "share-session-test",
             name: topic,
-            partitions: crate::handlers::test_support::TopicPartitionCount(partitions),
+            partitions: TopicPartitionCount(partitions),
         },
     )
     .await
@@ -59,9 +68,9 @@ async fn create_topic(broker: &BrokerHandle, topic: &str, partitions: i32) -> Wi
 
 /// Appends three records to `partition` of `topic`.
 async fn produce(broker: &BrokerHandle, topic: &str, partition: i32) {
-    crate::handlers::test_support::produce_records(
+    produce_records(
         broker,
-        crate::handlers::test_support::ProduceRecordsSetup {
+        ProduceRecordsSetup {
             topic,
             partition_index: krabka_ids::PartitionIndex(partition),
             ..Default::default()
@@ -72,13 +81,7 @@ async fn produce(broker: &BrokerHandle, topic: &str, partition: i32) {
 
 /// Starts `group` at the earliest offset of each partition of `topic_id`.
 async fn earliest(broker: &BrokerHandle, group: &str, topic_id: WireUuid, partitions: i32) {
-    crate::handlers::test_support::initialize_earliest_share(
-        broker,
-        group,
-        topic_id,
-        0..partitions,
-    )
-    .await;
+    initialize_earliest_share(broker, group, topic_id, 0..partitions).await;
 }
 
 /// One request row: `(partition, acknowledgement batches)`.
@@ -138,10 +141,10 @@ async fn share_fetch(broker: &BrokerHandle, fetch: &Fetch<'_>) -> ShareFetchResp
         },
         ..Default::default()
     };
-    crate::handlers::test_support::share_fetch_wire(
+    share_fetch_wire(
         broker,
         &request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(VERSION),
             ..Default::default()
         },
@@ -150,7 +153,7 @@ async fn share_fetch(broker: &BrokerHandle, fetch: &Fetch<'_>) -> ShareFetchResp
 }
 
 async fn states(broker: &BrokerHandle, group: &str, topic_id: WireUuid) -> Vec<RecordState> {
-    crate::handlers::test_support::share_record_states(broker, group, topic_id).await
+    share_record_states(broker, group, topic_id).await
 }
 
 /// `(partition, error_code, acknowledge_error_code, acquired ranges)` of one
@@ -168,7 +171,7 @@ fn rows(response: &ShareFetchResponse) -> Vec<RowOutcome> {
                 row.partition_index,
                 row.error_code,
                 row.acknowledge_error_code,
-                crate::handlers::test_support::acquired_share_records(row),
+                acquired_share_records(row),
             )
         })
         .collect()
@@ -410,10 +413,10 @@ async fn the_acquire_mode_and_batch_size_shape_the_acquired_rows() {
             }],
             ..Default::default()
         };
-        let response = crate::handlers::test_support::share_fetch_wire(
+        let response = share_fetch_wire(
             &broker,
             &request,
-            crate::handlers::test_support::ShareWireSetup {
+            ShareWireSetup {
                 version: krabka_ids::ApiVersion(version),
                 ..Default::default()
             },
@@ -452,7 +455,7 @@ async fn fetch_with_limits(
         max_wait_ms,
         max_records: 500,
         batch_size: 500,
-        topics: crate::handlers::test_support::share_fetch_topics(topic_id, partitions),
+        topics: share_fetch_topics(topic_id, partitions),
         ..Default::default()
     };
     let shared = broker.broker_arc_for_test();
@@ -462,7 +465,7 @@ async fn fetch_with_limits(
         client_id = "share-client"
     );
     let started = Instant::now();
-    let response = crate::test_support::try_dispatch_context(
+    let response = try_dispatch_context(
         &shared,
         krabka_protocol::owned::share_fetch_request::API_KEY,
         VERSION,
@@ -477,12 +480,7 @@ async fn fetch_with_limits(
         .responses
         .iter()
         .flat_map(|topic| &topic.partitions)
-        .map(|row| {
-            (
-                row.partition_index,
-                crate::handlers::test_support::acquired_share_records(row),
-            )
-        })
+        .map(|row| (row.partition_index, acquired_share_records(row)))
         .collect();
     rows.sort_unstable();
     (rows, took)

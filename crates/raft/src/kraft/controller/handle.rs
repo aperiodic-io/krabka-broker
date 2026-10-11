@@ -10,13 +10,14 @@ use tokio::sync::{oneshot, watch};
 
 use super::KraftController;
 use crate::{
-    SubmitChangeResult,
+    DelegationTokenMutation, SubmitChangeResult,
     error::RaftError,
     kraft::{
         event::Event,
         transport::{Command, Inbound, MetadataFetchSlice, QuorumStateSnapshot},
         types::{NodeId, ReplicaKey},
     },
+    reconfig::{ReconfigOutcome, VoterChange},
 };
 
 impl KraftController {
@@ -126,7 +127,7 @@ impl KraftController {
     /// Returns a leadership, shutdown, or mutation-rejection error.
     pub async fn submit_delegation_token_mutations(
         &self,
-        mutations: Vec<crate::DelegationTokenMutation>,
+        mutations: Vec<DelegationTokenMutation>,
     ) -> Result<SubmitChangeResult, RaftError> {
         self.ask(|reply| Command::SubmitDelegationTokenMutations { mutations, reply })
             .await?
@@ -135,8 +136,8 @@ impl KraftController {
     /// Submit one KIP-853 voter or kraft-version control operation.
     pub(crate) async fn reconfigure(
         &self,
-        change: crate::reconfig::VoterChange,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
+        change: VoterChange,
+    ) -> Result<ReconfigOutcome, RaftError> {
         self.ask(|reply| Command::Reconfigure { change, reply })
             .await?
     }
@@ -145,11 +146,8 @@ impl KraftController {
     ///
     /// # Errors
     /// Returns an unsupported-version, leadership, timeout, or storage error.
-    pub async fn finalize_kraft_version(
-        &self,
-        version: u16,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
-        self.reconfigure(crate::reconfig::VoterChange::FinalizeKraftVersion(version))
+    pub async fn finalize_kraft_version(&self, version: u16) -> Result<ReconfigOutcome, RaftError> {
+        self.reconfigure(VoterChange::FinalizeKraftVersion(version))
             .await
     }
 
@@ -159,11 +157,8 @@ impl KraftController {
     /// # Errors
     /// Returns the error `finalize_kraft_version` would return for the same
     /// request.
-    pub async fn validate_kraft_version(
-        &self,
-        version: u16,
-    ) -> Result<crate::reconfig::ReconfigOutcome, RaftError> {
-        self.reconfigure(crate::reconfig::VoterChange::ValidateKraftVersion(version))
+    pub async fn validate_kraft_version(&self, version: u16) -> Result<ReconfigOutcome, RaftError> {
+        self.reconfigure(VoterChange::ValidateKraftVersion(version))
             .await
     }
 

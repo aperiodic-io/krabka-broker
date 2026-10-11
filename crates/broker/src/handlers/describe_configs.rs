@@ -119,13 +119,13 @@ pub(crate) use self::{
         RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
     },
 };
-use crate::broker::Broker;
+use crate::{broker::Broker, handlers::RequestContext};
 
 pub(crate) fn handle(
     broker: &Broker,
     req: &DescribeConfigsRequest,
     _version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> DescribeConfigsResponse {
     let controller = broker.controller.clone();
 

@@ -10,12 +10,14 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 
 use crate::{
+    DelegationTokenMutation, SubmitChangeResult,
     error::RaftError,
     kraft::{
         event::Event,
         transport::PeerApi,
         types::{Epoch, NodeId, ReplicaKey},
     },
+    reconfig::{ReconfigOutcome, VoterChange},
 };
 
 /// An inbound KIP-595 RPC body, the request version its header carried, and a
@@ -162,18 +164,18 @@ pub enum Command {
     /// rejection.
     SubmitChange {
         records: Vec<krabka_metadata::MetadataRecord>,
-        reply: oneshot::Sender<Result<crate::SubmitChangeResult, RaftError>>,
+        reply: oneshot::Sender<Result<SubmitChangeResult, RaftError>>,
     },
     /// Handle op: compare and mutate delegation-token state in one engine turn.
     SubmitDelegationTokenMutations {
-        mutations: Vec<crate::DelegationTokenMutation>,
-        reply: oneshot::Sender<Result<crate::SubmitChangeResult, RaftError>>,
+        mutations: Vec<DelegationTokenMutation>,
+        reply: oneshot::Sender<Result<SubmitChangeResult, RaftError>>,
     },
     /// Handle op: append a KIP-853 control batch and optionally wait for it to
     /// commit under the new voter set.
     Reconfigure {
-        change: crate::reconfig::VoterChange,
-        reply: oneshot::Sender<Result<crate::reconfig::ReconfigOutcome, RaftError>>,
+        change: VoterChange,
+        reply: oneshot::Sender<Result<ReconfigOutcome, RaftError>>,
     },
     /// Handle op: snapshot the current image to a checkpoint.
     TriggerSnapshot {

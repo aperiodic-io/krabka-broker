@@ -347,7 +347,9 @@ mod tests {
     use crate::coordinator::unified::{
         actor::test_support::subscription_blob,
         classic_state::{ClassicGroup, Member, OffsetEntry},
-        consumer_state::{GroupState as ConsumerState, test_support::member},
+        consumer_state::{
+            GroupState as ConsumerState, ResolvedRegularExpression, test_support::member,
+        },
         persistence_next_gen::{NextGenKey, encode_key as encode_next_gen_key},
     };
 
@@ -589,7 +591,7 @@ mod tests {
                     for regex in ["b.*", "a.*"] {
                         group.set_resolved_regex(
                             regex.into(),
-                            crate::coordinator::unified::consumer_state::ResolvedRegularExpression {
+                            ResolvedRegularExpression {
                                 topics: std::collections::BTreeSet::new(),
                                 version: 1,
                                 timestamp_ms: 2,

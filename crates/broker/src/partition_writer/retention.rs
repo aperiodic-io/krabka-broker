@@ -53,7 +53,7 @@ mod tests {
         let log = Arc::new(Mutex::new(open_log_with_records(dir.path(), 5)));
         let log_dir = Arc::new(ArcSwap::from_pointee(dir.path().to_path_buf()));
         let log_dir_status = LogDirRegistry::default();
-        let replica_state = tokio::sync::Mutex::new(crate::replica_state::ReplicaState::new());
+        let replica_state = tokio::sync::Mutex::new(ReplicaState::new());
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
 
         handle_retention((&log, &log_dir, &log_dir_status), &replica_state, ack_tx).await;

@@ -11,8 +11,15 @@ use krabka_metadata::PartitionRecord;
 use krabka_units::convert::ByteSizeExt as _;
 
 use crate::{
-    broker::spawn_partition, config::BrokerConfig, coordinator::GroupCoordinator,
-    error::BrokerError, log_dir, partition_registry::PartitionRegistry,
+    broker::spawn_partition,
+    config::{BrokerConfig, DEFAULT_AUDIT_TOPIC},
+    coordinator::GroupCoordinator,
+    error::BrokerError,
+    log_dir,
+    log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource,
+    partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
 };
 
 mod apply;
@@ -60,7 +67,7 @@ pub const OFFSETS_NUM_PARTITIONS: i32 = 50;
 /// every code path that has to reach the live one reads
 /// `BrokerConfig::audit_topic` instead. Tests that boot a default broker use
 /// this.
-pub const AUDIT_TOPIC: &str = crate::config::DEFAULT_AUDIT_TOPIC;
+pub const AUDIT_TOPIC: &str = DEFAULT_AUDIT_TOPIC;
 
 /// The topic configs Kafka writes when it creates `__consumer_offsets`
 /// (`GroupCoordinatorService.groupMetadataTopicConfigs`). Offsets and group
@@ -94,11 +101,11 @@ pub(crate) fn offsets_topic_configs(config: &BrokerConfig) -> BTreeMap<String, S
 /// AFTER the controller has elected a leader. See `Broker::start`.
 pub async fn bootstrap(
     config: &BrokerConfig,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &Arc<dyn MetadataSource>,
     partitions: &Arc<PartitionRegistry>,
     coordinator: &Arc<GroupCoordinator>,
-    log_dir_status: &crate::log_dir_status::LogDirRegistry,
-    producer_state: &Arc<crate::producer_state::ProducerState>,
+    log_dir_status: &LogDirRegistry,
+    producer_state: &Arc<ProducerState>,
 ) -> Result<(), BrokerError> {
     // KIP-113 offline-dir handling: exclude dirs flagged offline by the
     // startup probe; placing `__consumer_offsets-N` on a known-bad dir

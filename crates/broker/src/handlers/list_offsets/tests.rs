@@ -22,8 +22,12 @@ use super::{
     test_support::{decode_response, encode_request},
 };
 use crate::{
+    authorizer::AllowAllAuthorizer,
     codes,
-    handlers::{list_offsets::test_support::test_context, test_support::CreateTopicSetup},
+    handlers::{
+        list_offsets::test_support::test_context,
+        test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+    },
     test_support::{
         DenyAll, peer, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
     },
@@ -246,16 +250,14 @@ async fn duplicate_partitions_get_invalid_request_on_every_row() {
 
     const TOPIC: &str = "list-offsets-duplicate";
 
-    let (broker_handle, _dir) = start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+    let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
     let client = client_for(&broker_handle).await;
     client
-        .send(crate::handlers::test_support::configured_topic_request(
-            CreateTopicSetup {
-                topic: TOPIC,
-                num_partitions: crate::handlers::test_support::TopicPartitionCount(2),
-                ..Default::default()
-            },
-        ))
+        .send(configured_topic_request(CreateTopicSetup {
+            topic: TOPIC,
+            num_partitions: TopicPartitionCount(2),
+            ..Default::default()
+        }))
         .await
         .expect("CreateTopics");
     broker_handle.wait_until_partition_present(TOPIC, 0).await;

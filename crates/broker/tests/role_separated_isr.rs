@@ -15,6 +15,12 @@ use assert2::assert;
 use krabka_broker::{BootstrapMode, BrokerConfig, BrokerHandle, config::NodeRole};
 use tempfile::TempDir;
 
+use crate::support::{
+    NodeIndex, RoleNodeSetup,
+    client::create_topic_for_broker,
+    topics::{CreateTopicSetup, TopicReplicationFactor},
+};
+
 mod support;
 
 /// A booted role-separated cluster: node 1 is the controller-only voter, and
@@ -50,7 +56,7 @@ async fn start_role_separated() -> RoleSeparated {
     let ctrl_dir = TempDir::new().unwrap();
     let ctrl_cfg = topology.config(
         ctrl_dir.path(),
-        crate::support::RoleNodeSetup {
+        RoleNodeSetup {
             role: NodeRole::Controller,
             ..Default::default()
         },
@@ -71,8 +77,8 @@ async fn start_role_separated() -> RoleSeparated {
         let dir = TempDir::new().unwrap();
         let cfg = topology.config(
             dir.path(),
-            crate::support::RoleNodeSetup {
-                index: crate::support::NodeIndex(index),
+            RoleNodeSetup {
+                index: NodeIndex(index),
                 mode: BootstrapMode::Join,
                 ..Default::default()
             },
@@ -113,11 +119,11 @@ async fn a_restarted_follower_rejoins_the_isr_when_the_controller_is_controller_
     support::init_tracing();
     let topic = "rolesep-isr";
     let mut cluster = start_role_separated().await;
-    crate::support::client::create_topic_for_broker(
+    create_topic_for_broker(
         &cluster.brokers[0],
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic,
-            replication_factor: crate::support::topics::TopicReplicationFactor(2),
+            replication_factor: TopicReplicationFactor(2),
             ..Default::default()
         },
     )

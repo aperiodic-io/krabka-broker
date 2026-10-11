@@ -7,7 +7,15 @@ use krabka_metadata::{DelegationTokenRecord, MetadataRecord};
 use krabka_raft::{Controller, ControllerConfig, ControllerHandle, NodeId};
 use krabka_security::{AuthMethod, KafkaPrincipal, Principal, SaslMechanism};
 
-use crate::network::auth::ConnectionAuth;
+use crate::{
+    codes::{
+        DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_NOT_FOUND,
+        DELEGATION_TOKEN_OWNER_MISMATCH, DELEGATION_TOKEN_REQUEST_NOT_ALLOWED,
+    },
+    network::auth::ConnectionAuth,
+    test_support::{KafkaErrorCode, UnixMillis, principal},
+    time_util::now_ms,
+};
 
 /// The controller, directory and HMAC secret used by token wire fixtures.
 macro_rules! token_fixture {
@@ -124,8 +132,8 @@ pub(super) struct TokenMutationRefusalSetup {
     pub hmac: Vec<u8>,
     #[default(TokenPeriodMillis(-1))]
     pub period: TokenPeriodMillis,
-    pub error: crate::test_support::KafkaErrorCode,
-    pub expiry: crate::test_support::UnixMillis,
+    pub error: KafkaErrorCode,
+    pub expiry: UnixMillis,
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -147,7 +155,7 @@ pub(super) fn ownership_refusal(
         authentication: authed(setup.caller),
         hmac: hmac.to_vec(),
         period: setup.period,
-        error: crate::test_support::KafkaErrorCode(crate::codes::DELEGATION_TOKEN_OWNER_MISMATCH),
+        error: KafkaErrorCode(DELEGATION_TOKEN_OWNER_MISMATCH),
         ..Default::default()
     }
 }
@@ -180,7 +188,7 @@ pub(super) fn mutation_credential_refusals(live_hmac: &[u8]) -> Vec<TokenMutatio
         authentication: authed_with_token("alice", CredentialSource::DelegationToken),
         secret,
         hmac: live_hmac.to_vec(),
-        error: KafkaErrorCode(crate::codes::DELEGATION_TOKEN_REQUEST_NOT_ALLOWED),
+        error: KafkaErrorCode(DELEGATION_TOKEN_REQUEST_NOT_ALLOWED),
         expiry: UnixMillis(-1),
         ..Default::default()
     });
@@ -190,19 +198,19 @@ pub(super) fn mutation_credential_refusals(live_hmac: &[u8]) -> Vec<TokenMutatio
                 name: "tokens disabled",
                 secret: SecretProvision::Absent,
                 hmac: live_hmac.to_vec(),
-                error: KafkaErrorCode(crate::codes::DELEGATION_TOKEN_AUTH_DISABLED),
+                error: KafkaErrorCode(DELEGATION_TOKEN_AUTH_DISABLED),
                 ..Default::default()
             },
             TokenMutationRefusalSetup {
                 name: "unknown hmac",
                 hmac: vec![0xFF; 32],
-                error: KafkaErrorCode(crate::codes::DELEGATION_TOKEN_NOT_FOUND),
+                error: KafkaErrorCode(DELEGATION_TOKEN_NOT_FOUND),
                 ..Default::default()
             },
             TokenMutationRefusalSetup {
                 name: "hmac computed under another secret key",
                 hmac: krabka_security::compute_token_hmac(b"other", "live"),
-                error: KafkaErrorCode(crate::codes::DELEGATION_TOKEN_NOT_FOUND),
+                error: KafkaErrorCode(DELEGATION_TOKEN_NOT_FOUND),
                 ..Default::default()
             },
         ])
@@ -261,7 +269,7 @@ pub(super) fn authed(name: &str) -> ConnectionAuth {
 /// Token APIs must refuse it.
 pub(super) fn anonymous() -> ConnectionAuth {
     ConnectionAuth::Authenticated {
-        principal: crate::test_support::principal("ANONYMOUS"),
+        principal: principal("ANONYMOUS"),
         mechanism: SaslMechanism::Plain,
         expires_at_ms: None,
         authenticated_via_token: false,
@@ -285,9 +293,9 @@ pub(super) struct TokenSetup<'a> {
     pub token_id: &'a str,
     pub owner: KafkaPrincipal,
     pub requester: Option<KafkaPrincipal>,
-    pub issued_at: crate::test_support::UnixMillis,
-    pub expires_at: crate::test_support::UnixMillis,
-    pub max_expires_at: crate::test_support::UnixMillis,
+    pub issued_at: UnixMillis,
+    pub expires_at: UnixMillis,
+    pub max_expires_at: UnixMillis,
     pub renewers: Vec<KafkaPrincipal>,
 }
 
@@ -297,9 +305,9 @@ impl Default for TokenSetup<'_> {
             token_id: "t-a",
             owner: kp("alice"),
             requester: None,
-            issued_at: crate::test_support::UnixMillis(1_000),
-            expires_at: crate::test_support::UnixMillis(2_000),
-            max_expires_at: crate::test_support::UnixMillis(3_000),
+            issued_at: UnixMillis(1_000),
+            expires_at: UnixMillis(2_000),
+            max_expires_at: UnixMillis(3_000),
             renewers: vec![],
         }
     }
@@ -310,7 +318,7 @@ impl TokenSetup<'_> {
     pub(super) fn for_mutation() -> Self {
         Self {
             requester: Some(kp("minter")),
-            issued_at: crate::test_support::UnixMillis(0),
+            issued_at: UnixMillis(0),
             renewers: vec![kp("bob")],
             ..Self::default()
         }
@@ -346,17 +354,17 @@ pub(super) async fn seed_token(controller: &ControllerHandle, setup: TokenSetup<
 pub(super) async fn refusal_tokens(
     controller: &ControllerHandle,
 ) -> ((Vec<u8>, i64), (Vec<u8>, i64)) {
-    let now = crate::time_util::now_ms();
+    let now = now_ms();
     let live = (hmac_for("live"), now + 60_000);
     let expired = (hmac_for("expired"), now - 1);
     for (token_id, (_, expiry)) in [("live", &live), ("expired", &expired)] {
         seed_token(
             controller,
-            crate::handlers::delegation_token_test_support::TokenSetup {
+            TokenSetup {
                 token_id,
-                expires_at: crate::test_support::UnixMillis(*expiry),
-                max_expires_at: crate::test_support::UnixMillis(now + DAY_MS),
-                ..crate::handlers::delegation_token_test_support::TokenSetup::for_mutation()
+                expires_at: UnixMillis(*expiry),
+                max_expires_at: UnixMillis(now + DAY_MS),
+                ..TokenSetup::for_mutation()
             },
         )
         .await;
@@ -366,17 +374,17 @@ pub(super) async fn refusal_tokens(
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct TokenMutationWindow {
-    before: crate::test_support::UnixMillis,
-    after: crate::test_support::UnixMillis,
+    before: UnixMillis,
+    after: UnixMillis,
 }
 
 /// Pin independent wall-clock bounds around execution of a token mutation.
 pub(super) async fn in_mutation_window<F: std::future::Future>(
     mutation: F,
 ) -> (TokenMutationWindow, F::Output) {
-    let before = crate::test_support::UnixMillis(crate::time_util::now_ms());
+    let before = UnixMillis(now_ms());
     let response = mutation.await;
-    let after = crate::test_support::UnixMillis(crate::time_util::now_ms());
+    let after = UnixMillis(now_ms());
     (TokenMutationWindow { before, after }, response)
 }
 
@@ -394,7 +402,7 @@ pub(super) enum TokenExpiryRule {
 }
 
 impl TokenExpiryRule {
-    pub fn with_cap(self, maximum: crate::test_support::UnixMillis) -> ExpiryExpectation {
+    pub fn with_cap(self, maximum: UnixMillis) -> ExpiryExpectation {
         match self {
             Self::RelativeToMutation(period) => ExpiryExpectation::RelativeToMutation(period),
             Self::LifetimeCap => ExpiryExpectation::LifetimeCap(maximum),
@@ -405,14 +413,11 @@ impl TokenExpiryRule {
 #[derive(Clone, Copy)]
 pub(super) enum ExpiryExpectation {
     RelativeToMutation(TokenPeriodMillis),
-    LifetimeCap(crate::test_support::UnixMillis),
+    LifetimeCap(UnixMillis),
 }
 
 impl ExpiryExpectation {
-    pub fn for_period(
-        period: Option<TokenPeriodMillis>,
-        maximum: crate::test_support::UnixMillis,
-    ) -> Self {
+    pub fn for_period(period: Option<TokenPeriodMillis>, maximum: UnixMillis) -> Self {
         match period {
             Some(period) => Self::RelativeToMutation(period),
             None => Self::LifetimeCap(maximum),
@@ -429,8 +434,8 @@ pub(super) struct TokenExpirySetup {
 
 #[derive(Clone, Copy)]
 pub(super) struct TokenMutationOutcome {
-    pub error: crate::test_support::KafkaErrorCode,
-    pub expiry: crate::test_support::UnixMillis,
+    pub error: KafkaErrorCode,
+    pub expiry: UnixMillis,
 }
 
 /// The expiry lies in the independently pinned clock window, or equals the lifetime cap.

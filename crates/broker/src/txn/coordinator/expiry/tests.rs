@@ -20,8 +20,17 @@ use crate::{
     codes,
     handlers::describe_transactions::transaction_state_row,
     partition_registry::PartitionRegistry,
-    test_support::FakeMetadataSource,
-    txn::{bootstrap, state::TxnEntry, two_pc::NO_TIMEOUT_MS, version::TxnVersion},
+    producer_id_manager::ProducerIdManager,
+    test_support::{FakeMetadataSource, StandalonePartitionSetup, open_partition},
+    txn::{
+        bootstrap,
+        coordinator::test_support::{StateImageSetup, state_image},
+        id_expiration::sweep_once,
+        log_record::decode_key,
+        state::TxnEntry,
+        two_pc::NO_TIMEOUT_MS,
+        version::TxnVersion,
+    },
 };
 
 const TID: &str = "tid-expiry";
@@ -130,14 +139,12 @@ fn prepared_two_pc_entry(last_update_ms: i64) -> TxnEntry {
 /// A metadata image where `__transaction_state` has one partition, led by
 /// `leader`.
 fn image_with_leader(leader: NodeId, leader_epoch: krabka_metadata::LeaderEpoch) -> MetadataImage {
-    crate::txn::coordinator::test_support::state_image(
-        crate::txn::coordinator::test_support::StateImageSetup {
-            leader,
-            leader_epoch,
-            replicas: &[leader],
-            ..Default::default()
-        },
-    )
+    state_image(StateImageSetup {
+        leader,
+        leader_epoch,
+        replicas: &[leader],
+        ..Default::default()
+    })
 }
 
 /// A coordinator that persisted `entry` as the leader of the single
@@ -150,9 +157,9 @@ async fn seeded_coordinator(entry: TxnEntry, leader: NodeId) -> (Arc<TxnCoordina
     partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),
-        crate::test_support::open_partition(
+        open_partition(
             dir.path(),
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: bootstrap::TOPIC,
                 ..Default::default()
             },
@@ -161,7 +168,7 @@ async fn seeded_coordinator(entry: TxnEntry, leader: NodeId) -> (Arc<TxnCoordina
     let coordinator = Arc::new(TxnCoordinator::new(
         NodeId(1),
         partitions,
-        Arc::new(crate::producer_id_manager::ProducerIdManager::new()),
+        Arc::new(ProducerIdManager::new()),
         1,
         mebibytes(1),
     ));
@@ -206,10 +213,8 @@ fn transaction_state_records(coordinator: &TxnCoordinator) -> Vec<(String, Optio
         }
         for batch in &read.batches {
             for record in &batch.records {
-                let key = crate::txn::log_record::decode_key(
-                    record.key.as_ref().expect("record carries a key"),
-                )
-                .expect("record carries a TransactionLogKey");
+                let key = decode_key(record.key.as_ref().expect("record carries a key"))
+                    .expect("record carries a TransactionLogKey");
                 out.push((key, record.value.as_ref().map(|v| v.to_vec())));
             }
             offset = Offset(batch.base_offset + i64::from(batch.last_offset_delta) + 1);
@@ -463,7 +468,7 @@ async fn a_sweep_tick_refreshes_leadership_before_expiring() {
             krabka_metadata::LeaderEpoch(2),
         ))
         .build();
-    crate::txn::id_expiration::sweep_once(
+    sweep_once(
         &coordinator,
         &source,
         <krabka_units::Time as krabka_units::convert::TimeExt>::from_millis(1),

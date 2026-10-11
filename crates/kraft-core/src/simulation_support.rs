@@ -2,7 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::{Action, Epoch, Event, LogEnd, NodeId, QuorumStateMachine, Role, SimInstant};
+use crate::{
+    Action, Epoch, Event, LogEnd, NodeId, QuorumStateMachine, Role, SimInstant, SuccessorRank,
+};
 
 /// Stop after two timer rounds leave the cluster fingerprint unchanged.
 pub struct StableFingerprint<F> {
@@ -92,7 +94,7 @@ pub fn action_messages(
                     Action::SendEndQuorumEpoch { epoch, .. } => Event::ReceiveEndQuorumEpoch {
                         leader_id: source,
                         leader_epoch: *epoch,
-                        successor_rank: crate::SuccessorRank::default(),
+                        successor_rank: SuccessorRank::default(),
                     },
                     _ => unreachable!("message action selected above"),
                 };

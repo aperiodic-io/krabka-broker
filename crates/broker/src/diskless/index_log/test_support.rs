@@ -18,6 +18,8 @@ use krabka_remote_storage_topic::{
     AssignmentHandle, MetadataEventLog, MetadataEventStream, PartitionStart,
 };
 
+use crate::{diskless::wal_index::WalFlushRecord, test_support::UnixMillis};
+
 /// How fast the wrapped log's subscription delivers what it replays.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ReplayPace {
@@ -123,7 +125,7 @@ pub(crate) struct WalFlushSetup<'a> {
     pub object_key: &'a str,
     pub first_offset: krabka_log::Offset,
     pub last_offset: krabka_log::Offset,
-    pub max_timestamp: crate::test_support::UnixMillis,
+    pub max_timestamp: UnixMillis,
     pub byte_len: krabka_units::ByteSize,
 }
 
@@ -134,7 +136,7 @@ impl Default for WalFlushSetup<'_> {
             object_key: "object-a",
             first_offset: krabka_log::Offset(0),
             last_offset: krabka_log::Offset(3),
-            max_timestamp: crate::test_support::UnixMillis(0),
+            max_timestamp: UnixMillis(0),
             byte_len: krabka_units::bytes(10),
         }
     }
@@ -161,7 +163,7 @@ impl WalFlushSetup<'_> {
     }
 }
 
-pub(crate) fn flush_record(setup: WalFlushSetup<'_>) -> crate::diskless::wal_index::WalFlushRecord {
+pub(crate) fn flush_record(setup: WalFlushSetup<'_>) -> WalFlushRecord {
     use krabka_units::convert::ByteSizeExt;
 
     use crate::diskless::wal_index::{WalFlushRecord, WalIndexEntry};

@@ -164,6 +164,7 @@ pub(super) fn build_initial_voters(
 mod tests {
 
     use super::*;
+    use crate::Cli;
 
     #[test]
     fn parses_initial_controller_spec() {
@@ -212,7 +213,7 @@ mod tests {
         use clap::Parser as _;
 
         for level in ["2", "-1", "9"] {
-            let cli = crate::Cli::try_parse_from([
+            let cli = Cli::try_parse_from([
                 "krabka-format",
                 "--log-dir",
                 "/data",
@@ -263,7 +264,7 @@ mod tests {
         let named: Vec<Vec<String>> = cases
             .iter()
             .map(|(quorum, name, _)| {
-                let cli = crate::Cli::try_parse_from(
+                let cli = Cli::try_parse_from(
                     ["krabka-format", "--log-dir", "/data", "--node-id", "3"]
                         .into_iter()
                         .chain(quorum.iter().copied())

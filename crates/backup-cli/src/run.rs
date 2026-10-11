@@ -24,6 +24,7 @@ use crate::{
     capture::{RLMM_SNAPSHOT_RELATIVE, capture_id, capture_key, newest_metadata_checkpoint},
     cli::{CaptureSigningArgs, CaptureTrustArgs, LATEST},
     connection::SecurityArgs,
+    diskless::capture_projection,
     error::BackupError,
     manifest::{
         Artifact, CAPTURE_ROOT, DISKLESS_WAL_INDEX, GROUP_OFFSETS, MANIFEST, MANIFEST_VERSION,
@@ -273,7 +274,7 @@ async fn capture_diskless_index(
     let log = KafkaMetadataEventLog::open_read_only(config)
         .await
         .map_err(|error| BackupError::Cluster(format!("diskless WAL index: {error}")))?;
-    let mut capture = crate::diskless::capture_projection(log.clone(), &topics, now_ms())
+    let mut capture = capture_projection(log.clone(), &topics, now_ms())
         .await
         .map_err(BackupError::Integrity)?;
     capture.metadata_snapshot_sha256 = metadata_snapshot_sha256;

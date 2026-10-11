@@ -43,6 +43,9 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
+    use crate::coordinator::unified::test_support::{
+        AssignmentMetadataGoldenSetup, assignment_metadata_golden_cases,
+    };
 
     /// `ConsumerGroupMetadataValue` as Kafka 4.3.1's generated writer lays it
     /// out: i16 version 0, i32 `Epoch`, then the tagged-field trailer, which
@@ -105,11 +108,9 @@ mod tests {
     /// 0 with an eight-byte payload unless it is the default 0.
     #[test]
     fn target_assignment_metadata_bytes_match_kafka_schema() {
-        let rows = crate::coordinator::unified::test_support::assignment_metadata_golden_cases(
-            crate::coordinator::unified::test_support::AssignmentMetadataGoldenSetup {
-                unknown_time_description: "a converted classic group: the time is unknown",
-            },
-        );
+        let rows = assignment_metadata_golden_cases(AssignmentMetadataGoldenSetup {
+            unknown_time_description: "a converted classic group: the time is unknown",
+        });
         for row in rows {
             let case = row.description;
             let bytes = row.bytes;

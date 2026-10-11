@@ -13,7 +13,15 @@ use krabka_protocol::owned::find_coordinator_response::FindCoordinatorResponse;
 use super::*;
 use crate::{
     authorizer::AuthorizationResult,
-    test_support::{DenyAll, peer, principal, start_broker_no_audit, start_broker_no_audit_with},
+    broker::{Broker, BrokerHandle},
+    coordinator::bootstrap::OFFSETS_TOPIC,
+    handlers::test_support::single_replica_partition,
+    share_coordinator::bootstrap::TOPIC,
+    test_support::{
+        DenyAll, KafkaErrorCode, broker_registration, dispatch_wire, peer, principal,
+        start_broker_no_audit, start_broker_no_audit_with,
+    },
+    txn::bootstrap::TOPIC as TXN_TOPIC,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -29,7 +37,7 @@ struct LookupSetup<'a> {
 }
 
 async fn check_lookup_versions(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     setup: LookupSetup<'_>,
     rows: Vec<(krabka_ids::ApiVersion, FindCoordinatorResponse)>,
 ) {
@@ -50,7 +58,7 @@ async fn check_lookup_versions(
 }
 
 fn legacy_coordinator_error(
-    code: crate::test_support::KafkaErrorCode,
+    code: KafkaErrorCode,
     message: Option<String>,
 ) -> FindCoordinatorResponse {
     FindCoordinatorResponse {
@@ -80,18 +88,10 @@ test_authorizer!(DenyOneTransaction, (self, _source, request), {
 });
 
 /// A malformed share lookup returns one refusal and never starts share-state bootstrap.
-fn check_invalid_share_lookup(
-    handle: &crate::broker::BrokerHandle,
-    response: &FindCoordinatorResponse,
-) {
+fn check_invalid_share_lookup(handle: &BrokerHandle, response: &FindCoordinatorResponse) {
     assert!(response.coordinators.len() == 1);
     assert!(response.coordinators[0].error_code == codes::INVALID_REQUEST);
-    assert!(
-        handle
-            .controller_image_for_test()
-            .topic(crate::share_coordinator::bootstrap::TOPIC)
-            .is_none()
-    );
+    assert!(handle.controller_image_for_test().topic(TOPIC).is_none());
 }
 
 #[tokio::test]
@@ -126,12 +126,10 @@ async fn configured_partition_count_controls_txn_topic_and_routing() {
         .expect("find transaction coordinator");
 
     let image = broker_handle.controller_image_for_test();
-    let topic = image
-        .topic(crate::txn::bootstrap::TOPIC)
-        .expect("transaction-state topic");
+    let topic = image.topic(TXN_TOPIC).expect("transaction-state topic");
     assert!(topic.partitions == 7);
     assert!(topic.replication_factor == 1);
-    assert!(image.partitions_of(crate::txn::bootstrap::TOPIC).count() == 7);
+    assert!(image.partitions_of(TXN_TOPIC).count() == 7);
     assert!(response.coordinators.len() == 1);
     assert!(response.coordinators[0].error_code == codes::NONE);
     assert!(response.coordinators[0].node_id == broker.config.broker_id);
@@ -186,7 +184,7 @@ async fn v4_empty_key_array_stays_empty_without_bootstrap() {
     assert!(
         broker_handle
             .controller_image_for_test()
-            .topic(crate::txn::bootstrap::TOPIC)
+            .topic(TXN_TOPIC)
             .is_none()
     );
     broker_handle.shutdown().await;
@@ -268,7 +266,7 @@ async fn malformed_share_key_is_invalid_without_bootstrap() {
 /// Serve `request` at `version` through the dispatch registry and decode the
 /// answer: below v4 the wire carries the one `key` and the top-level answer.
 async fn find(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     request: &FindCoordinatorRequest,
     version: i16,
     principal_name: &str,
@@ -278,7 +276,7 @@ async fn find(
         principal(principal_name),
         client_id = "find-client"
     );
-    crate::test_support::dispatch_wire(
+    dispatch_wire(
         broker,
         krabka_protocol::owned::find_coordinator_request::API_KEY,
         version,
@@ -345,7 +343,7 @@ async fn denied_share_request_answers_cluster_authorization_failed_on_every_key(
     assert!(
         broker_handle
             .controller_image_for_test()
-            .topic(crate::share_coordinator::bootstrap::TOPIC)
+            .topic(TOPIC)
             .is_none()
     );
     broker_handle.shutdown().await;
@@ -370,7 +368,7 @@ async fn denied_group_key_answers_kafka_row_shape_per_version() {
         (
             krabka_ids::ApiVersion(3),
             legacy_coordinator_error(
-                crate::test_support::KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED),
+                KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED),
                 Some("Group authorization failed.".into()),
             ),
         ),
@@ -437,10 +435,7 @@ async fn unknown_key_type_fails_the_whole_request() {
         ),
         (
             krabka_ids::ApiVersion(3),
-            legacy_coordinator_error(
-                crate::test_support::KafkaErrorCode(codes::INVALID_REQUEST),
-                message.clone(),
-            ),
+            legacy_coordinator_error(KafkaErrorCode(codes::INVALID_REQUEST), message.clone()),
         ),
     ];
     check_lookup_versions(
@@ -454,12 +449,8 @@ async fn unknown_key_type_fails_the_whole_request() {
     )
     .await;
     let image = broker_handle.controller_image_for_test();
-    assert!(image.topic(crate::txn::bootstrap::TOPIC).is_none());
-    assert!(
-        image
-            .topic(crate::share_coordinator::bootstrap::TOPIC)
-            .is_none()
-    );
+    assert!(image.topic(TXN_TOPIC).is_none());
+    assert!(image.topic(TOPIC).is_none());
     broker_handle.shutdown().await;
 }
 
@@ -500,7 +491,7 @@ fn resolve_image() -> krabka_metadata::MetadataImage {
         protocol: krabka_security::ListenerProtocol::Plaintext,
     };
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-    let topic = crate::coordinator::bootstrap::OFFSETS_TOPIC;
+    let topic = OFFSETS_TOPIC;
     image.apply(&MetadataRecord::V1Topic(TopicRecord {
         name: topic.into(),
         topic_id: uuid::Uuid::from_u128(7),
@@ -520,18 +511,16 @@ fn resolve_image() -> krabka_metadata::MetadataImage {
                 host: "legacy".into(),
                 port: 1000,
                 endpoints,
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
+                ..broker_registration(krabka_raft::NodeId(node))
             },
         ));
     }
     for (partition, leader) in [(0, 1), (1, 2), (2, 3), (3, 4)] {
-        image.apply(&MetadataRecord::V1Partition(
-            crate::handlers::test_support::single_replica_partition(
-                topic,
-                krabka_ids::PartitionIndex(partition),
-                NodeId(leader),
-            ),
-        ));
+        image.apply(&MetadataRecord::V1Partition(single_replica_partition(
+            topic,
+            krabka_ids::PartitionIndex(partition),
+            NodeId(leader),
+        )));
     }
     image
 }
@@ -577,12 +566,7 @@ fn resolve_answers_only_an_alive_leader_on_the_request_listener() {
             advertised: "local:9092",
             listener: "EXTERNAL",
         };
-        let got = resolve_partition_coordinator(
-            &target,
-            crate::coordinator::bootstrap::OFFSETS_TOPIC,
-            partition,
-            "k".into(),
-        );
+        let got = resolve_partition_coordinator(&target, OFFSETS_TOPIC, partition, "k".into());
         assert!(got == expected, "{label}");
     }
 }
@@ -635,17 +619,9 @@ async fn the_first_lookup_creates_the_state_topic_once_and_a_later_one_names_the
     const LOOKUPS: usize = 8;
     let share_key = format!("share-group:{KAFKA_TOPIC_ID}:0");
     let cases = [
-        (
-            KEY_TYPE_GROUP,
-            "group",
-            crate::coordinator::bootstrap::OFFSETS_TOPIC,
-        ),
-        (KEY_TYPE_TRANSACTION, "tid", crate::txn::bootstrap::TOPIC),
-        (
-            KEY_TYPE_SHARE,
-            share_key.as_str(),
-            crate::share_coordinator::bootstrap::TOPIC,
-        ),
+        (KEY_TYPE_GROUP, "group", OFFSETS_TOPIC),
+        (KEY_TYPE_TRANSACTION, "tid", TXN_TOPIC),
+        (KEY_TYPE_SHARE, share_key.as_str(), TOPIC),
     ];
     for (key_type, key, topic) in cases {
         let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
@@ -723,7 +699,7 @@ async fn a_lookup_with_too_few_brokers_creates_nothing_until_enough_register() {
     broker_handle.wait_until_controller_leader().await;
     broker_handle.wait_until_brokers_registered(1).await;
     let broker = broker_handle.broker_arc_for_test();
-    let topic = crate::coordinator::bootstrap::OFFSETS_TOPIC;
+    let topic = OFFSETS_TOPIC;
     let request = FindCoordinatorRequest {
         key_type: KEY_TYPE_GROUP,
         coordinator_keys: vec!["group".into()],
@@ -749,7 +725,7 @@ async fn a_lookup_with_too_few_brokers_creates_nothing_until_enough_register() {
                 broker_epoch: -1,
                 incarnation_id: uuid::Uuid::from_u128(2),
                 port: 9094,
-                ..crate::test_support::broker_registration(other)
+                ..broker_registration(other)
             },
         )])
         .await

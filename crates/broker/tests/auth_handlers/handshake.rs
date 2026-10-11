@@ -24,11 +24,14 @@ use tokio::{
 };
 
 use crate::{
-    harness::round_trip,
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
-    support::wire::{
-        CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-        SocketExchangeSetup,
+    harness::{alice_password, alice_plain_socket, round_trip},
+    kafka_wire::{ExchangeSetup as WireExchangeSetup, exchange},
+    support::{
+        sasl::sasl_plaintext_mechanisms,
+        wire::{
+            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+            SocketExchangeSetup, WireFrameSetup, request_frame, write_frame,
+        },
     },
 };
 
@@ -41,9 +44,9 @@ use crate::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn api_versions_reachable_pre_auth_on_sasl_listener() {
     let (_log_dir, handle, _addr, mut stream) =
-        crate::harness::alice_plain_socket("alice-secret".to_string()).await;
+        alice_plain_socket("alice-secret".to_string()).await;
 
-    let av_resp: ApiVersionsResponse = crate::kafka_wire::exchange(
+    let av_resp: ApiVersionsResponse = exchange(
         &mut stream,
         &ApiVersionsRequest::default(),
         WireExchangeSetup {
@@ -82,7 +85,7 @@ async fn api_versions_reachable_pre_auth_on_sasl_listener() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metadata_rejected_pre_auth_on_sasl_listener() {
     let (_log_dir, handle, _addr, mut stream) =
-        crate::harness::alice_plain_socket("alice-secret".to_string()).await;
+        alice_plain_socket("alice-secret".to_string()).await;
 
     // Send Metadata (api_key=3, v12, flexible) WITHOUT any auth.
     let md_req = MetadataRequest::default();
@@ -90,10 +93,10 @@ async fn metadata_rejected_pre_auth_on_sasl_listener() {
     md_req.encode(&mut md_body, 12).unwrap();
 
     // Build the frame manually: header + body, then length-prefix.
-    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+    let frame = request_frame(WireFrameSetup {
         api_key: krabka_ids::ApiKey(3),
         version: krabka_ids::ApiVersion(12),
-        header: crate::support::wire::HeaderEncoding::Flexible,
+        header: RequestHeaderEncoding::Flexible,
         client_id: "krabka-t19-test",
         body: &md_body,
         capacity: Some(
@@ -104,9 +107,7 @@ async fn metadata_rejected_pre_auth_on_sasl_listener() {
         ..Default::default()
     });
 
-    crate::support::wire::write_frame(&mut stream, &frame, None)
-        .await
-        .unwrap();
+    write_frame(&mut stream, &frame, None).await.unwrap();
 
     // The broker closes the connection instead of responding — any read
     // attempt must return an error (UnexpectedEof / connection reset).
@@ -125,8 +126,7 @@ async fn metadata_rejected_pre_auth_on_sasl_listener() {
 /// does. A new connection may then negotiate the supported mechanism, PLAIN.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unsupported_mechanism_answers_33_then_closes() {
-    let (_log_dir, handle, addr, mut stream) =
-        crate::harness::alice_plain_socket("alice-secret".to_string()).await;
+    let (_log_dir, handle, addr, mut stream) = alice_plain_socket("alice-secret".to_string()).await;
 
     // ── 1. SaslHandshake with "GSSAPI" (not in enabled list).
     let mut sh_body = BytesMut::new();
@@ -209,12 +209,9 @@ async fn unsupported_mechanism_answers_33_then_closes() {
 }
 
 async fn start_plain_sasl_broker(log_dir: &std::path::Path) -> krabka_broker::BrokerHandle {
-    let mut cfg = crate::support::sasl::sasl_plaintext_mechanisms(
-        log_dir.to_path_buf(),
-        vec![SaslMechanism::Plain],
-    );
+    let mut cfg = sasl_plaintext_mechanisms(log_dir.to_path_buf(), vec![SaslMechanism::Plain]);
     cfg.plain_credentials
-        .insert("alice".to_string(), crate::harness::alice_password());
+        .insert("alice".to_string(), alice_password());
     krabka_broker::Broker::start(cfg)
         .await
         .expect("broker must start")
@@ -265,7 +262,7 @@ async fn v0_handshake_runs_the_exchange_as_raw_tokens() {
     let mut token = vec![0_u8];
     token.extend_from_slice(b"alice");
     token.push(0);
-    token.extend_from_slice(crate::harness::alice_password().as_bytes());
+    token.extend_from_slice(alice_password().as_bytes());
     write_raw_frame(&mut stream, &token).await;
     let len = stream.read_u32().await.expect("raw server token");
     check!(len == 0, "PLAIN's server token is empty");

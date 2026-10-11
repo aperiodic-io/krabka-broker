@@ -16,19 +16,26 @@ use assert2::assert;
 use crate::{
     ERR_TOPIC_AUTHORIZATION_FAILED,
     client_api::{drive_fetch_as_plain, drive_produce_as_plain, single_record_produce_request},
+    framing::CLIENT_ID,
+    kafka_wire::PlainAuthenticationSetup,
     polling::retry_produce_until_allowed,
+    sasl_cluster::{start_alice_topic_grant, start_denied_foo},
+    support::{
+        fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
+        produce::single_partition_response,
+    },
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn produce_denied_without_topic_acl() {
-    let (handle, _dir, addr) = crate::sasl_cluster::start_denied_foo().await;
+    let (handle, _dir, addr) = start_denied_foo().await;
 
     // alice has NO Write-on-foo binding → Produce must return 29.
     let resp = drive_produce_as_plain(
         addr,
         single_record_produce_request("foo", 0, b"hello"),
-        &crate::kafka_wire::PlainAuthenticationSetup {
-            client_id: crate::framing::CLIENT_ID,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
             ..Default::default()
         },
     )
@@ -36,7 +43,7 @@ async fn produce_denied_without_topic_acl() {
     .expect("Produce must round-trip");
     handle.shutdown().await;
 
-    let p = crate::support::produce::single_partition_response(&resp);
+    let p = single_partition_response(&resp);
     assert!(
         p.error_code == ERR_TOPIC_AUTHORIZATION_FAILED,
         "alice has no Write ACL on foo, expected TOPIC_AUTHORIZATION_FAILED (29), got {p:?}"
@@ -46,8 +53,7 @@ async fn produce_denied_without_topic_acl() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn produce_allowed_with_topic_write_acl() {
     // Commit the literal Allow Write grant through the controller.
-    let (handle, _dir, addr) =
-        crate::sasl_cluster::start_alice_topic_grant(krabka_metadata::AclOperation::Write).await;
+    let (handle, _dir, addr) = start_alice_topic_grant(krabka_metadata::AclOperation::Write).await;
 
     // The ACL submit above is committed via the controller's raft path
     // then applied into the in-memory `MetadataImage` asynchronously, so
@@ -57,7 +63,7 @@ async fn produce_allowed_with_topic_write_acl() {
         .await
         .expect("Produce must round-trip");
 
-    let p = crate::support::produce::single_partition_response(&resp);
+    let p = single_partition_response(&resp);
     assert!(
         p.error_code == 0,
         "alice has Write ACL on foo, expected error_code=0, got {p:?}"
@@ -76,21 +82,16 @@ async fn produce_allowed_with_topic_write_acl() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fetch_denied_without_topic_read_acl() {
-    let (handle, _dir, addr) = crate::sasl_cluster::start_denied_foo().await;
+    let (handle, _dir, addr) = start_denied_foo().await;
 
     // alice has NO Read-on-foo binding → Fetch must return 29 on the
     // partition row.
-    let req = crate::support::fetch::named_topic_fetch(
-        "foo",
-        crate::support::fetch::FetchLimits::one_mebibyte(crate::support::fetch::RequestWaitMillis(
-            0,
-        )),
-    );
+    let req = named_topic_fetch("foo", FetchLimits::one_mebibyte(RequestWaitMillis(0)));
     let resp = drive_fetch_as_plain(
         addr,
         req,
-        &crate::kafka_wire::PlainAuthenticationSetup {
-            client_id: crate::framing::CLIENT_ID,
+        &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
             ..Default::default()
         },
     )

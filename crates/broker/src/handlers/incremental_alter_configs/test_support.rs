@@ -9,12 +9,13 @@ use krabka_protocol::owned::incremental_alter_configs_request::{
 };
 
 use super::{OP_DELETE, OP_SET, RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC};
+use crate::test_support::{broker_registration, string_pairs};
 
 pub(super) fn make_image_with_broker(node_id: NodeId) -> MetadataImage {
     let mut img = MetadataImage::new(uuid::Uuid::nil());
-    img.apply(&MetadataRecord::V1BrokerRegistration(
-        crate::test_support::broker_registration(node_id),
-    ));
+    img.apply(&MetadataRecord::V1BrokerRegistration(broker_registration(
+        node_id,
+    )));
     img
 }
 
@@ -57,7 +58,7 @@ pub(super) fn image_with_topic_config(name: &str, overrides: &[(&str, &str)]) ->
     }));
     img.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
         topic: name.into(),
-        overrides: crate::test_support::string_pairs(overrides),
+        overrides: string_pairs(overrides),
     }));
     img
 }

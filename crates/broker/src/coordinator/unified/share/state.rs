@@ -12,6 +12,10 @@ use std::{
 use krabka_protocol::primitives::uuid::Uuid;
 
 use super::super::INITIAL_GROUP_EPOCH;
+use crate::{
+    codes::{FENCED_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
+    coordinator::unified::{actor::MetadataProvider, member_helpers::new_target_assignment},
+};
 
 /// One member of a share group.
 #[derive(Debug, Clone)]
@@ -382,7 +386,7 @@ impl ShareGroupState {
     /// Returns the wire error code of a refused heartbeat.
     pub fn validate_member_epoch(&self, member_id: &str, requested_epoch: i32) -> Result<i32, i16> {
         let Some(member) = self.members.get(member_id) else {
-            return Err(crate::codes::UNKNOWN_MEMBER_ID);
+            return Err(UNKNOWN_MEMBER_ID);
         };
         if requested_epoch == 0
             || requested_epoch == member.member_epoch
@@ -390,7 +394,7 @@ impl ShareGroupState {
         {
             Ok(member.member_epoch)
         } else {
-            Err(crate::codes::FENCED_MEMBER_EPOCH)
+            Err(FENCED_MEMBER_EPOCH)
         }
     }
 
@@ -430,11 +434,8 @@ impl ShareGroupState {
         per_member: HashMap<String, HashMap<Uuid, Vec<i32>>>,
         now_ms: i64,
     ) -> Vec<String> {
-        let (target, changed) = crate::coordinator::unified::member_helpers::new_target_assignment(
-            self.members.keys(),
-            per_member,
-            &self.target.per_member,
-        );
+        let (target, changed) =
+            new_target_assignment(self.members.keys(), per_member, &self.target.per_member);
         self.target = ShareTargetAssignment {
             epoch: self.group_epoch,
             per_member: target,
@@ -453,7 +454,7 @@ impl ShareGroupState {
         &mut self,
         member_id: &str,
         has_subscription_changed: bool,
-        metadata: &dyn crate::coordinator::unified::actor::MetadataProvider,
+        metadata: &dyn MetadataProvider,
     ) {
         let target_epoch = self.target.epoch;
         let target = self

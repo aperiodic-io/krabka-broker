@@ -26,7 +26,10 @@ use krabka_protocol::{
 
 use crate::{
     error::BrokerError,
-    txn::state::{TopicPartition, TxnEntry, TxnState},
+    txn::{
+        state::{TopicPartition, TxnEntry, TxnState},
+        version::TxnVersion,
+    },
 };
 
 /// Tagged-field tags for `TransactionLogValue` v1.
@@ -71,11 +74,7 @@ fn group_partitions(partitions: &HashSet<TopicPartition>) -> Vec<(&str, Vec<i32>
 /// (KAFKA-20357). Kafka 4.3.1 defines tags 0 to 3 only, keeps the last epoch in
 /// memory and reloads it as `NO_PRODUCER_EPOCH`, so without the tag a v1 record
 /// carries exactly the tags 4.3.1 writes.
-pub(crate) fn encode_value(
-    entry: &TxnEntry,
-    txnv: crate::txn::version::TxnVersion,
-    last_epoch_tag: bool,
-) -> Vec<u8> {
+pub(crate) fn encode_value(entry: &TxnEntry, txnv: TxnVersion, last_epoch_tag: bool) -> Vec<u8> {
     let flexible = txnv.flexible_records();
     let version: i16 = i16::from(flexible);
     let mut buf = BytesMut::new();

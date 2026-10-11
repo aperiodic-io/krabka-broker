@@ -78,7 +78,7 @@ mod tests {
     use super::*;
     use crate::{
         storage_manager::{IndexType, RemoteStorageManager},
-        test_support::{sample_data, sample_metadata},
+        test_support::{TransactionIndex, sample_data, sample_metadata},
         worm::WormConfig,
     };
 
@@ -99,10 +99,7 @@ mod tests {
         let md = sample_metadata(uuid::Uuid::from_u128(10));
         tokio::task::spawn_blocking(move || {
             store
-                .copy_log_segment_data(
-                    &md,
-                    &sample_data(src.path(), crate::test_support::TransactionIndex::Omitted),
-                )
+                .copy_log_segment_data(&md, &sample_data(src.path(), TransactionIndex::Omitted))
                 .unwrap();
             assert!(store.fetch_log_segment(&md, 0, None).unwrap() == b"0123456789");
             assert!(store.fetch_index(&md, IndexType::Offset).unwrap() == b"OFFSET-IDX");

@@ -35,6 +35,8 @@ use super::{
 use crate::{
     authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
     codes,
+    config::BrokerConfig,
+    txn::{coordinator::TxnCoordinator, version::TxnVersion},
 };
 
 /// The request-independent collaborators both version paths need: the
@@ -42,15 +44,15 @@ use crate::{
 /// negotiated transaction version, and the caller's identity.
 #[derive(Clone, Copy)]
 pub(super) struct HandlerDependencies<'a> {
-    pub(super) coord: &'a crate::txn::coordinator::TxnCoordinator,
+    pub(super) coord: &'a TxnCoordinator,
     pub(super) image: &'a MetadataImage,
-    pub(super) txnv: crate::txn::version::TxnVersion,
+    pub(super) txnv: TxnVersion,
     pub(super) authorizer: &'a dyn Authorizer,
     pub(super) principal: &'a Principal,
     pub(super) peer: &'a SocketAddr,
     /// The broker config, which names the internal topics a client can never
     /// add.
-    pub(super) config: &'a crate::config::BrokerConfig,
+    pub(super) config: &'a BrokerConfig,
 }
 
 /// One transaction of a request, in the form both version paths share.
@@ -236,7 +238,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx},
+        test_support::{
+            ControllerPeerAllowed, DenyAll, start_broker_with_authorizer_no_audit as start_broker,
+            test_ctx,
+        },
         txn::handlers::add_partitions_to_txn::{
             handle,
             test_support::{enlisted, seed_transaction, start_coordinator, topic, topic_result},
@@ -361,10 +366,8 @@ mod tests {
             },
         ];
 
-        let (broker_handle, _dir) = start_coordinator(Arc::new(
-            crate::test_support::ControllerPeerAllowed(crate::test_support::DenyAll),
-        ))
-        .await;
+        let (broker_handle, _dir) =
+            start_coordinator(Arc::new(ControllerPeerAllowed(DenyAll))).await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "ANONYMOUS");
         for (index, case) in (0_i64..).zip(&cases) {

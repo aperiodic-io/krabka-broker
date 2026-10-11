@@ -23,10 +23,14 @@ use krabka_protocol::{
 
 use crate::{
     harness::{TOPIC, create_topic, scrape, test_lock},
-    support,
     support::{
+        self,
         client::connect_client,
-        fetch::{fetch_partition, single_partition_fetch},
+        fetch::{
+            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+        },
+        shutdown_cluster,
     },
 };
 
@@ -320,25 +324,23 @@ async fn rf_three_remote_leader_uses_committed_high_watermark() {
     )
     .await;
     let fetched: FetchResponse = data_client
-        .send(single_partition_fetch(
-            crate::support::fetch::SinglePartitionFetchSetup {
-                topic: TOPIC.into(),
-                topic_id: WireUuid(*topic_id.as_bytes()),
-                partition: FetchPartition {
-                    current_leader_epoch: leader_epoch.0,
-                    ..fetch_partition(crate::support::fetch::FetchPartitionSetup {
-                        partition: krabka_ids::PartitionIndex(data_partition),
-                        offset: krabka_ids::Offset(i64::MAX),
-                        maximum: crate::support::fetch::FetchByteLimit(0),
-                    })
-                },
-                limits: crate::support::fetch::FetchLimits {
-                    wait: crate::support::fetch::RequestWaitMillis(0),
-                    minimum: crate::support::fetch::FetchByteLimit(0),
-                    maximum: crate::support::fetch::FetchByteLimit(0),
-                },
+        .send(single_partition_fetch(SinglePartitionFetchSetup {
+            topic: TOPIC.into(),
+            topic_id: WireUuid(*topic_id.as_bytes()),
+            partition: FetchPartition {
+                current_leader_epoch: leader_epoch.0,
+                ..fetch_partition(FetchPartitionSetup {
+                    partition: krabka_ids::PartitionIndex(data_partition),
+                    offset: krabka_ids::Offset(i64::MAX),
+                    maximum: FetchByteLimit(0),
+                })
             },
-        ))
+            limits: FetchLimits {
+                wait: RequestWaitMillis(0),
+                minimum: FetchByteLimit(0),
+                maximum: FetchByteLimit(0),
+            },
+        }))
         .await
         .unwrap();
     let partition = &fetched.responses[0].partitions[0];
@@ -386,5 +388,5 @@ async fn rf_three_remote_leader_uses_committed_high_watermark() {
         }
     }
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

@@ -4,7 +4,7 @@
 
 use krabka_protocol::owned::end_txn_response::EndTxnResponse;
 
-use crate::codes;
+use crate::{codes, txn::util::producer_fenced_wire_code};
 
 /// Kafka wire sentinel: "no producer id" (`RecordBatch.NO_PRODUCER_ID`).
 /// Returned on `EndTxn` error responses, where the identity is meaningless.
@@ -17,7 +17,7 @@ pub(super) fn err_response(version: i16, error_code: i16) -> EndTxnResponse {
     // On the error path the producer_id/epoch fields are not meaningful;
     // leave them at the "no producer" wire sentinels.
     response(
-        crate::txn::util::producer_fenced_wire_code(version, error_code),
+        producer_fenced_wire_code(version, error_code),
         NO_PRODUCER_ID,
         NO_PRODUCER_EPOCH,
     )
@@ -49,11 +49,12 @@ mod tests {
     use krabka_protocol::UnknownTaggedFields;
 
     use super::*;
+    use crate::txn::util::producer_fenced_cases;
 
     #[test]
     fn producer_fenced_is_invalid_producer_epoch_below_version_2() {
         // (version, error code, expected code)
-        let cases = crate::txn::util::producer_fenced_cases(0);
+        let cases = producer_fenced_cases(0);
         for (version, error_code, expected) in cases {
             let expected = EndTxnResponse {
                 throttle_time_ms: 0,

@@ -24,6 +24,7 @@ use crate::txn::{
     handlers::end_txn::completion_producer_identity,
     marker::{MarkerType, classify_marker_failure},
     state::{TxnEntry, TxnState},
+    util::now_millis,
     version::TxnVersion,
 };
 
@@ -222,12 +223,7 @@ impl TxnCoordinator {
             CompletionDecision::Proceed => {
                 let mut completed = entry.clone();
                 let identity = completion_producer_identity(&completed);
-                apply_completion(
-                    &mut completed,
-                    complete,
-                    identity,
-                    crate::txn::util::now_millis(),
-                );
+                apply_completion(&mut completed, complete, identity, now_millis());
                 match self.put_under_state_partition_lock(completed, txnv).await {
                     Ok(_) => {
                         info!(

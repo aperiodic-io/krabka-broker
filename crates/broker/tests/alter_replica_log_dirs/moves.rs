@@ -14,15 +14,17 @@ use krabka_client_producer::Producer;
 
 use crate::{
     harness::{count_topic_dirs, wait_for_move_complete},
-    wire::alter_replica_log_dirs,
+    support::{producer::enqueue_unkeyed_values, topics::TopicPartitionCount},
+    two_dir_topic::{Setup, start},
+    wire::{CLIENT_ID, alter_replica_log_dirs},
 };
 
 #[tokio::test]
 async fn alter_replica_log_dirs_moves_partitions_to_target_dir() {
     let n: i32 = 2;
-    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
-        client_id: crate::wire::CLIENT_ID,
-        partitions: crate::support::topics::TopicPartitionCount(n),
+    let (handle, primary, extra, addr) = start(Setup {
+        client_id: CLIENT_ID,
+        partitions: TopicPartitionCount(n),
         ..Default::default()
     })
     .await;
@@ -99,8 +101,8 @@ async fn alter_replica_log_dirs_moves_partitions_to_target_dir() {
 /// `append_at` loop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_replica_log_dirs_preserves_records_across_move() {
-    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
-        client_id: crate::wire::CLIENT_ID,
+    let (handle, primary, extra, addr) = start(Setup {
+        client_id: CLIENT_ID,
         ..Default::default()
     })
     .await;
@@ -111,7 +113,7 @@ async fn alter_replica_log_dirs_preserves_records_across_move() {
         .build()
         .await
         .expect("producer build");
-    crate::support::producer::enqueue_unkeyed_values(
+    enqueue_unkeyed_values(
         &producer,
         "t",
         (0..50i32).map(|i| Bytes::from(format!("v{i}"))),

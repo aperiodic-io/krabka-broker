@@ -26,6 +26,8 @@
 use krabka_protocol::owned::api_versions_response::ApiVersion;
 pub use krabka_raft::UnstableApiVersions;
 
+use crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR;
+
 /// How far the broker takes one KIP.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KipStatus {
@@ -1332,7 +1334,7 @@ impl CatalogApi {
     /// switch to track, so its whole decodable range counts as released.
     #[must_use]
     pub const fn new(api_key: i16, min_version: i16, max_version: i16) -> Self {
-        let released = if api_key >= crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR {
+        let released = if api_key >= KRABKA_PRIVATE_API_KEY_FLOOR {
             Some(krabka_raft::ReleasedApi {
                 api_key,
                 min_version,

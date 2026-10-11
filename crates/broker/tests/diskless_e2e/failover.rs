@@ -24,12 +24,11 @@ use std::time::Duration;
 use assert2::assert;
 
 use crate::{
-    CLIENT_PRINCIPAL, PASSWORD, RECORDS, TOPIC,
+    RECORDS, TOPIC,
     cluster::{start_diskless_cluster, wait_for},
-    support,
-    topic::{await_wal_quorum, create_diskless_topic},
+    topic::seed_workload,
     voter_dir::{DurableRange, durable_bytes, durable_range, voter_dir},
-    wire::{assert_matches_produced, fetch_log, produce_all, value_at},
+    wire::{assert_matches_produced, fetch_log},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -44,24 +43,8 @@ async fn diskless_acks_all_append_survives_the_acking_broker() {
     .await;
     cluster.await_ready().await;
 
-    let admin = support::sasl_client(
-        &cluster.bootstrap_for_node(cluster.node_ids()[0]),
-        CLIENT_PRINCIPAL,
-        PASSWORD,
-    )
-    .await;
-    let topic_id = create_diskless_topic(&admin).await;
-    let leader = await_wal_quorum(&cluster).await;
+    let (admin, topic_id, leader, _values, producer) = seed_workload(&cluster).await;
     let topic_uuid = uuid::Uuid::from_bytes(topic_id.0);
-
-    let values: Vec<bytes::Bytes> = (0..RECORDS).map(value_at).collect();
-    let producer = support::sasl_client(
-        &cluster.bootstrap_for_node(leader),
-        CLIENT_PRINCIPAL,
-        PASSWORD,
-    )
-    .await;
-    produce_all(&producer, topic_id, &values).await;
 
     let committed = i64::try_from(RECORDS).expect("small count");
     let followers: Vec<_> = cluster

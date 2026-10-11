@@ -1,6 +1,7 @@
 use creusot_std::prelude::*;
 
 use super::{FetchWatermarks, WalFetchSupport, fetch_visibility, wal_voter_set_valid};
+use crate::consensus::{majority_size, recompute_high_watermark};
 
 /// A newly advanced consensus watermark gives every consumer fetch limit
 /// quorum support. An inherited, unchanged watermark needs prior-epoch evidence.
@@ -25,7 +26,7 @@ pub(super) fn quorum_commit_bounds_fetch(
     leader_counts: bool,
     w: FetchWatermarks,
 ) -> (i64, i64) {
-    let hw = crate::consensus::recompute_high_watermark(
+    let hw = recompute_high_watermark(
         w.log_end,
         followers,
         majority,
@@ -111,7 +112,7 @@ pub(super) fn installed_wal_quorum_bounds_fetch(
             == crate::consensus::count_ge(w.log_end@, ends@, v, false)
     });
     let floor = current.max(w.log_start);
-    let majority = crate::consensus::majority_size(voters.len());
+    let majority = majority_size(voters.len());
     let (hw, limit) = quorum_commit_bounds_fetch(&ends, majority, floor, floor, false, w);
     let mut supporters: Vec<(u64, i64)> = Vec::new();
     i = 0;

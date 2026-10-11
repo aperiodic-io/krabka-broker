@@ -7,7 +7,15 @@
 
 use assert2::{assert, check};
 
-use crate::support::fetch::{fetch_request_for, fetch_topic_row};
+use crate::support::{
+    client::create_topic as create_support_topic,
+    fetch::{
+        FetchByteLimit, FetchLimits, FetchSessionEpoch, FetchSessionId, FetchSessionSetup,
+        RequestWaitMillis, default_fetch_limits, empty_session_fetch, fetch_request_for,
+        fetch_topic_row, session_fetch_request,
+    },
+    produce::{SinglePartitionProduceSetup, batch_request},
+};
 mod support;
 
 use krabka_protocol::{
@@ -27,28 +35,23 @@ async fn incremental_after_produce(
 ) -> krabka_protocol::owned::fetch_response::FetchResponse {
     process
         .client
-        .send(crate::support::fetch::empty_session_fetch(
-            crate::support::fetch::FetchLimits::wait_for_data(
-                crate::support::fetch::RequestWaitMillis(200),
-            ),
-            crate::support::fetch::FetchSessionSetup::at_epoch(
-                crate::support::fetch::FetchSessionId(session),
-                crate::support::fetch::FetchSessionEpoch(2),
-            ),
+        .send(empty_session_fetch(
+            FetchLimits::wait_for_data(RequestWaitMillis(200)),
+            FetchSessionSetup::at_epoch(FetchSessionId(session), FetchSessionEpoch(2)),
         ))
         .await
         .expect("Fetch incremental after produce")
 }
 
 async fn create_topic(p: &support::InProcess, name: &str, num_partitions: i32) {
-    crate::support::client::create_topic(&p.client, name, num_partitions).await;
+    create_support_topic(&p.client, name, num_partitions).await;
 }
 
 async fn produce(p: &support::InProcess, topic: &str, partition: i32, records: i32) {
     let topic_id = topic_id_for(&p.client, topic).await;
-    let req = crate::support::produce::batch_request(
+    let req = batch_request(
         one_record_batch(records),
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: (topic).into(),
             topic_id,
             partition: krabka_ids::PartitionIndex(partition),
@@ -89,11 +92,9 @@ async fn new_session_then_incremental_filters_unchanged_partitions() {
     // (2) Immediate incremental: nothing changed → empty response.
     let r2 = p
         .client
-        .send(crate::support::fetch::empty_session_fetch(
-            crate::support::fetch::FetchLimits::immediate(),
-            crate::support::fetch::FetchSessionSetup::incremental(
-                crate::support::fetch::FetchSessionId(sid),
-            ),
+        .send(empty_session_fetch(
+            FetchLimits::immediate(),
+            FetchSessionSetup::incremental(FetchSessionId(sid)),
         ))
         .await
         .expect("Fetch incremental empty");
@@ -135,11 +136,11 @@ async fn forgotten_topics_drop_partitions_from_subscription() {
     // Forget t-1.
     let r2 = p
         .client
-        .send(crate::support::fetch::empty_session_fetch(
-            crate::support::fetch::FetchLimits::immediate(),
-            crate::support::fetch::FetchSessionSetup {
-                id: crate::support::fetch::FetchSessionId(sid),
-                epoch: crate::support::fetch::FetchSessionEpoch(1),
+        .send(empty_session_fetch(
+            FetchLimits::immediate(),
+            FetchSessionSetup {
+                id: FetchSessionId(sid),
+                epoch: FetchSessionEpoch(1),
                 forgotten: vec![ForgottenTopic {
                     topic: "t".into(),
                     topic_id: tid,
@@ -181,11 +182,9 @@ async fn unknown_session_id_returns_not_found() {
     let p = support::start().await;
     let r = p
         .client
-        .send(crate::support::fetch::empty_session_fetch(
-            crate::support::fetch::FetchLimits::immediate(),
-            crate::support::fetch::FetchSessionSetup::incremental(
-                crate::support::fetch::FetchSessionId(999_999),
-            ),
+        .send(empty_session_fetch(
+            FetchLimits::immediate(),
+            FetchSessionSetup::incremental(FetchSessionId(999_999)),
         ))
         .await
         .expect("Fetch unknown sid");
@@ -205,12 +204,9 @@ async fn stale_session_epoch_returns_invalid_epoch() {
     // Broker expects epoch=1; send 99.
     let r2 = p
         .client
-        .send(crate::support::fetch::empty_session_fetch(
-            crate::support::fetch::default_fetch_limits(),
-            crate::support::fetch::FetchSessionSetup::at_epoch(
-                crate::support::fetch::FetchSessionId(sid),
-                crate::support::fetch::FetchSessionEpoch(99),
-            ),
+        .send(empty_session_fetch(
+            default_fetch_limits(),
+            FetchSessionSetup::at_epoch(FetchSessionId(sid), FetchSessionEpoch(99)),
         ))
         .await
         .expect("stale epoch");
@@ -232,15 +228,12 @@ async fn close_session_drops_cache_entry() {
     // sessionless-style (session_id=0 in response) and removes the entry.
     let r2 = p
         .client
-        .send(crate::support::fetch::session_fetch_request(
+        .send(session_fetch_request(
             fetch_request_for(
                 vec![fetch_topic("t", tid, vec![fetch_partition(0, 0)])],
-                crate::support::fetch::default_fetch_limits(),
+                default_fetch_limits(),
             ),
-            crate::support::fetch::FetchSessionSetup::at_epoch(
-                crate::support::fetch::FetchSessionId(sid),
-                crate::support::fetch::FetchSessionEpoch(-1),
-            ),
+            FetchSessionSetup::at_epoch(FetchSessionId(sid), FetchSessionEpoch(-1)),
         ))
         .await
         .expect("close");
@@ -250,11 +243,9 @@ async fn close_session_drops_cache_entry() {
     // Re-using sid afterwards is NOT_FOUND.
     let r3 = p
         .client
-        .send(crate::support::fetch::empty_session_fetch(
-            crate::support::fetch::default_fetch_limits(),
-            crate::support::fetch::FetchSessionSetup::incremental(
-                crate::support::fetch::FetchSessionId(sid),
-            ),
+        .send(empty_session_fetch(
+            default_fetch_limits(),
+            FetchSessionSetup::incremental(FetchSessionId(sid)),
         ))
         .await
         .expect("after close");
@@ -270,10 +261,10 @@ async fn sessionless_zero_id_with_stray_epoch_is_session_id_not_found() {
     let p = support::start().await;
     let r = p
         .client
-        .send(crate::support::fetch::empty_session_fetch(
-            crate::support::fetch::default_fetch_limits(),
-            crate::support::fetch::FetchSessionSetup {
-                epoch: crate::support::fetch::FetchSessionEpoch(7),
+        .send(empty_session_fetch(
+            default_fetch_limits(),
+            FetchSessionSetup {
+                epoch: FetchSessionEpoch(7),
                 ..Default::default()
             },
         ))
@@ -295,15 +286,13 @@ async fn sessionless_full_fetch_round_trip() {
 
     let r = p
         .client
-        .send(crate::support::fetch::session_fetch_request(
+        .send(session_fetch_request(
             fetch_request_for(
                 vec![fetch_topic("t", tid, vec![fetch_partition(0, 0)])],
-                crate::support::fetch::FetchLimits::wait_for_data(
-                    crate::support::fetch::RequestWaitMillis(100),
-                ),
+                FetchLimits::wait_for_data(RequestWaitMillis(100)),
             ),
-            crate::support::fetch::FetchSessionSetup {
-                epoch: crate::support::fetch::FetchSessionEpoch(-1),
+            FetchSessionSetup {
+                epoch: FetchSessionEpoch(-1),
                 ..Default::default()
             },
         ))
@@ -329,21 +318,21 @@ async fn open_session(
     max_wait_ms: i32,
 ) -> krabka_protocol::owned::fetch_response::FetchResponse {
     client
-        .send(crate::support::fetch::session_fetch_request(
+        .send(session_fetch_request(
             fetch_request_for(
                 vec![fetch_topic(
                     "t",
                     tid,
                     (0..partitions).map(|p| fetch_partition(p, 0)).collect(),
                 )],
-                crate::support::fetch::FetchLimits {
-                    wait: crate::support::fetch::RequestWaitMillis(max_wait_ms),
-                    minimum: crate::support::fetch::FetchByteLimit(0),
+                FetchLimits {
+                    wait: RequestWaitMillis(max_wait_ms),
+                    minimum: FetchByteLimit(0),
                     ..Default::default()
                 },
             ),
-            crate::support::fetch::FetchSessionSetup {
-                epoch: crate::support::fetch::FetchSessionEpoch(0),
+            FetchSessionSetup {
+                epoch: FetchSessionEpoch(0),
                 ..Default::default()
             },
         ))

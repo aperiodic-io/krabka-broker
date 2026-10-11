@@ -185,6 +185,7 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
+    use crate::quota::QuotaDelay;
 
     crate::quota::test_support::image_builder!(img_with_quota, "controller_mutation_rate");
 
@@ -193,8 +194,7 @@ mod tests {
         let img = img_with_quota(vec![("user", Some("alice"))], 1.0);
         let buckets = QuotaBuckets::new();
         let delay = consume_controller_mutation_quota(&img, &buckets, "alice", Some(""), 0);
-        let expected =
-            crate::quota::QuotaDelay::new(<Time as TimeExt>::ZERO, Some("alice".into()), None);
+        let expected = QuotaDelay::new(<Time as TimeExt>::ZERO, Some("alice".into()), None);
         assert!(delay == expected);
     }
 

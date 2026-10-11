@@ -13,7 +13,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use super::{ConnectionContext, Unstable, handle_conn, run, test_support::single_voter_engine};
-use crate::{AllowAllGrants, ListenerLimits, RaftError};
+use crate::{AllowAllGrants, ListenerLimits, RaftError, kraft::KraftController};
 
 mod session_expiry;
 
@@ -43,7 +43,7 @@ fn context(limits: ListenerLimits) -> ConnectionContext {
 }
 
 fn duplex_connection(
-    engine: crate::kraft::KraftController,
+    engine: KraftController,
     limits: ListenerLimits,
 ) -> (
     tokio::io::DuplexStream,
@@ -57,7 +57,7 @@ fn duplex_connection(
         None,
         None,
         context(limits),
-        crate::kraft::KraftController::wall_clock_ms,
+        KraftController::wall_clock_ms,
     ));
     (client, connection)
 }

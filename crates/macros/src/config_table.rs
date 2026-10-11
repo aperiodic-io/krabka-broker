@@ -5,9 +5,11 @@ use moxy::{
     token::{TokenStream, TokenTree},
 };
 
+use crate::meta::{item_body, mode};
+
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
-    let mode = crate::meta::mode(meta, ["strict", "open"])?;
-    let (item, _) = crate::meta::item_body(item, "config_table", TokenTree::is_keyword_struct)?;
+    let mode = mode(meta, ["strict", "open"])?;
+    let (item, _) = item_body(item, "config_table", TokenTree::is_keyword_struct)?;
     let mut output = moxy::template! {
         #[derive(Debug, Clone, Default, ::serde::Deserialize, ::schemars::JsonSchema, PartialEq)]
     };

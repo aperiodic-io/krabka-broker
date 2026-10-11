@@ -11,45 +11,59 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    broker::adapters::ControllerAdapter, config::BrokerConfig,
+    blocking::spawn_blocking,
+    broker::adapters::ControllerAdapter,
+    cleaner::{CleanerConfig, run as run_cleaner},
+    config::BrokerConfig,
+    controller_endpoint::ControllerDialer,
+    disk_scanner::DiskScanner,
+    heartbeat::controller_state::ControllerLivenessState,
+    isr_maintenance::{Config, run as run_isr_maintenance},
+    leader_rebalance::{AutoRebalanceConfig, ControllerLike, run as run_leader_rebalance},
+    log_retention::{LogRetentionConfig, run as run_log_retention},
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    network::client::InterBrokerClient,
     partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
+    reassignment::{ReassignmentController, run as run_reassignment},
+    task_util::run_every,
+    time_util::now_ms,
 };
 
 pub(super) fn spawn_storage_security_maintenance(
     config: &BrokerConfig,
     partitions: &Arc<PartitionRegistry>,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
-    inter_broker_client: &Arc<crate::network::client::InterBrokerClient>,
-    metrics: &crate::metrics::BrokerMetrics,
+    controller: &Arc<dyn MetadataSource>,
+    inter_broker_client: &Arc<InterBrokerClient>,
+    metrics: &BrokerMetrics,
     shutdown: &CancellationToken,
 ) -> Option<JoinHandle<()>> {
-    tokio::spawn(crate::isr_maintenance::run(
-        crate::isr_maintenance::Config {
-            // Kafka sends `AlterPartition` to the active controller on its
-            // CONTROLLER listener, as it sends `BrokerHeartbeat`. An isolated
-            // controller has no broker listener at all.
-            dialer: crate::controller_endpoint::ControllerDialer {
-                outbound_client: Arc::clone(inter_broker_client),
-                listener_protocol: config.controller_listener_protocol,
-                server_name: config
-                    .controller_server_name
-                    .clone()
-                    .unwrap_or_else(|| "localhost".to_owned()),
-                quorum_voters: config.controller_quorum_voters.clone(),
-            },
-            node_id: config.node_id,
-            partitions: Arc::clone(partitions),
-            controller: Arc::clone(controller),
-            replica_lag_time_max: config.replica_lag_time_max,
-            default_min_insync_replicas: config.default_min_insync_replicas,
-            scan_interval: config.isr_scan_interval,
-            broker_id: config.broker_id,
-            shutdown: shutdown.child_token(),
-            metrics: metrics.clone(),
+    tokio::spawn(run_isr_maintenance(Config {
+        // Kafka sends `AlterPartition` to the active controller on its
+        // CONTROLLER listener, as it sends `BrokerHeartbeat`. An isolated
+        // controller has no broker listener at all.
+        dialer: ControllerDialer {
+            outbound_client: Arc::clone(inter_broker_client),
+            listener_protocol: config.controller_listener_protocol,
+            server_name: config
+                .controller_server_name
+                .clone()
+                .unwrap_or_else(|| "localhost".to_owned()),
+            quorum_voters: config.controller_quorum_voters.clone(),
         },
-    ));
+        node_id: config.node_id,
+        partitions: Arc::clone(partitions),
+        controller: Arc::clone(controller),
+        replica_lag_time_max: config.replica_lag_time_max,
+        default_min_insync_replicas: config.default_min_insync_replicas,
+        scan_interval: config.isr_scan_interval,
+        broker_id: config.broker_id,
+        shutdown: shutdown.child_token(),
+        metrics: metrics.clone(),
+    }));
     let disk_scanner = (config.partition_disk_scan_interval > <Time as TimeExt>::ZERO).then(|| {
-        let scanner = crate::disk_scanner::DiskScanner {
+        let scanner = DiskScanner {
             log_dirs: config.all_log_dirs(),
             interval: config.partition_disk_scan_interval,
             metrics: metrics.clone(),
@@ -63,13 +77,15 @@ pub(super) fn spawn_storage_security_maintenance(
     if let Some(endpoint) = config.oauthbearer_jwks_endpoint.clone()
         && let Some(handle) = config.oauthbearer_validator.jwks_handle()
     {
+        use crate::{oauth_jwks::JwksRefresher, time_util::system_timer};
+
         let signal_rx = config
             .oauthbearer_jwks_signal_rx
             .lock()
             .unwrap()
             .take()
             .expect("signed validator must park its JWKS signal receiver");
-        let refresher = crate::oauth_jwks::JwksRefresher {
+        let refresher = JwksRefresher {
             endpoint,
             handle,
             interval: config.oauthbearer_jwks_refresh_interval,
@@ -84,7 +100,7 @@ pub(super) fn spawn_storage_security_maintenance(
                 &config.oauthbearer_jwks_last_on_demand_refresh_ms,
             ),
             ignore_key_use: config.features.oauthbearer_jwks_ignore_key_use,
-            timer: crate::time_util::system_timer(),
+            timer: system_timer(),
         };
         tokio::spawn(refresher.run());
     }
@@ -92,7 +108,7 @@ pub(super) fn spawn_storage_security_maintenance(
 }
 
 fn spawn_producer_expiry(
-    producer_state: Arc<crate::producer_state::ProducerState>,
+    producer_state: Arc<ProducerState>,
     partitions: Arc<PartitionRegistry>,
     scan_interval: Time,
     expiration: Time,
@@ -106,8 +122,8 @@ fn spawn_producer_expiry(
         let period = scan_interval.to_std();
         let tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         let (producer_state, partitions) = (&producer_state, &partitions);
-        crate::task_util::run_every(tick, &shutdown, move || async move {
-            let now_ms = crate::time_util::now_ms();
+        run_every(tick, &shutdown, move || async move {
+            let now_ms = now_ms();
             producer_state.expire_older_than(now_ms, expiration).await;
             expire_log_producers(partitions, now_ms, expiration).await;
         })
@@ -126,7 +142,7 @@ fn spawn_producer_expiry(
 async fn expire_log_producers(partitions: &PartitionRegistry, now_ms: i64, expiration: Time) {
     let hosted = partitions.arcs();
     let expiration_ms = expiration.millis_i64();
-    let sweep = crate::blocking::spawn_blocking(move || {
+    let sweep = spawn_blocking(move || {
         for partition in hosted {
             partition
                 .log
@@ -140,48 +156,48 @@ async fn expire_log_producers(partitions: &PartitionRegistry, now_ms: i64, expir
     }
 }
 
-fn cleaner_config(config: &BrokerConfig) -> crate::cleaner::CleanerConfig {
+fn cleaner_config(config: &BrokerConfig) -> CleanerConfig {
     let interval = config.cleaner_interval;
     #[cfg(any(test, feature = "test-helpers"))]
     {
-        crate::cleaner::CleanerConfig::system(config.cleaner_interval_override.unwrap_or(interval))
+        use crate::cleaner::CleanerConfig;
+
+        CleanerConfig::system(config.cleaner_interval_override.unwrap_or(interval))
     }
     #[cfg(not(any(test, feature = "test-helpers")))]
     {
-        crate::cleaner::CleanerConfig::system(interval)
+        CleanerConfig::system(interval)
     }
 }
 
 pub(super) fn spawn_cluster_data_maintenance(
     config: &BrokerConfig,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
-    liveness: &Arc<crate::heartbeat::controller_state::ControllerLivenessState>,
+    controller: &Arc<dyn MetadataSource>,
+    liveness: &Arc<ControllerLivenessState>,
     partitions: &Arc<PartitionRegistry>,
-    producer_state: &Arc<crate::producer_state::ProducerState>,
-    metrics: &crate::metrics::BrokerMetrics,
+    producer_state: &Arc<ProducerState>,
+    metrics: &BrokerMetrics,
     shutdown: &CancellationToken,
 ) {
     if config.features.auto_leader_rebalance_enable {
-        let adapter: Arc<dyn crate::leader_rebalance::ControllerLike> =
-            Arc::new(ControllerAdapter {
-                handle: Arc::clone(controller),
-                node_id: config.node_id,
-            });
-        tokio::spawn(crate::leader_rebalance::run(
+        let adapter: Arc<dyn ControllerLike> = Arc::new(ControllerAdapter {
+            handle: Arc::clone(controller),
+            node_id: config.node_id,
+        });
+        tokio::spawn(run_leader_rebalance(
             adapter,
             Arc::clone(liveness),
-            crate::leader_rebalance::AutoRebalanceConfig {
+            AutoRebalanceConfig {
                 check_interval: config.leader_imbalance_check_interval,
             },
             shutdown.child_token(),
         ));
     }
-    let reassignment: Arc<dyn crate::reassignment::ReassignmentController> =
-        Arc::new(ControllerAdapter {
-            handle: Arc::clone(controller),
-            node_id: config.node_id,
-        });
-    tokio::spawn(crate::reassignment::run(
+    let reassignment: Arc<dyn ReassignmentController> = Arc::new(ControllerAdapter {
+        handle: Arc::clone(controller),
+        node_id: config.node_id,
+    });
+    tokio::spawn(run_reassignment(
         reassignment,
         Arc::clone(liveness),
         shutdown.child_token(),
@@ -204,7 +220,7 @@ pub(super) fn spawn_cluster_data_maintenance(
     // log the broker hosts, so a follower replica of a compacted topic
     // compacts its own copy instead of accumulating segments until it is
     // elected.
-    tokio::spawn(crate::cleaner::run(
+    tokio::spawn(run_cleaner(
         Arc::clone(partitions),
         cleaner,
         shutdown.child_token(),
@@ -217,10 +233,9 @@ pub(super) fn spawn_cluster_data_maintenance(
     // `LogManager.cleanupLogs` runs over every log the broker hosts, so a
     // follower trims its own replica rather than accumulating segments until
     // it is elected.
-    let mut retention =
-        crate::log_retention::LogRetentionConfig::system(config.log_retention_check_interval);
+    let mut retention = LogRetentionConfig::system(config.log_retention_check_interval);
     retention.metadata = Some(Arc::clone(controller));
-    tokio::spawn(crate::log_retention::run(
+    tokio::spawn(run_log_retention(
         Arc::clone(partitions),
         retention,
         shutdown.child_token(),

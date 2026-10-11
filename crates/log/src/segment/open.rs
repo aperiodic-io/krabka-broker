@@ -18,6 +18,7 @@ use tracing::instrument;
 
 use super::{Segment, io::seek_to_log_size};
 use crate::{
+    config::DEFAULT_INDEX_INTERVAL,
     error::LogError,
     index::{OffsetIndex, TimeIndex},
     io::FileIo,
@@ -113,12 +114,7 @@ impl Segment {
     /// # Errors
     /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
     pub fn open_active(dir: &Path, base_offset: Offset, validate: bool) -> Result<Self, LogError> {
-        Self::open_active_with_index_interval(
-            dir,
-            base_offset,
-            validate,
-            crate::config::DEFAULT_INDEX_INTERVAL,
-        )
+        Self::open_active_with_index_interval(dir, base_offset, validate, DEFAULT_INDEX_INTERVAL)
     }
 
     pub(crate) fn open_active_with_index_interval(
@@ -303,28 +299,26 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::segment::test_support::{DENSE_INDEX, NO_LIMIT, sample_batch, seeded_segment};
+    use crate::segment::test_support::{
+        DENSE_INDEX, FIVE_OFFSET_TIMESTAMP_BATCHES, NO_LIMIT, ONE_RECORD_BATCH, RecordTimestamp,
+        SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup, SeededSegmentSetup,
+        THIRD_SINGLE_RECORD_BATCH, sample_batch, seeded_segment,
+    };
 
     #[test]
     fn append_after_open_active_writes_at_eof() {
         let dir = tempdir().unwrap();
         drop(seeded_segment(
             dir.path(),
-            crate::segment::test_support::SeededSegmentSetup {
-                batches: &[
-                    crate::segment::test_support::ONE_RECORD_BATCH,
-                    crate::segment::test_support::SECOND_SINGLE_RECORD_BATCH,
-                ],
+            SeededSegmentSetup {
+                batches: &[ONE_RECORD_BATCH, SECOND_SINGLE_RECORD_BATCH],
                 ..Default::default()
             },
         ));
 
         let mut seg = Segment::open_active(dir.path(), Offset(0), true).unwrap();
         let position = seg
-            .append(
-                &sample_batch(crate::segment::test_support::THIRD_SINGLE_RECORD_BATCH),
-                DENSE_INDEX,
-            )
+            .append(&sample_batch(THIRD_SINGLE_RECORD_BATCH), DENSE_INDEX)
             .unwrap();
 
         let read = seg.read(Offset(0), NO_LIMIT).unwrap();
@@ -341,8 +335,8 @@ mod tests {
         let valid_size = {
             let mut seg = seeded_segment(
                 dir.path(),
-                crate::segment::test_support::SeededSegmentSetup {
-                    batches: crate::segment::test_support::FIVE_OFFSET_TIMESTAMP_BATCHES,
+                SeededSegmentSetup {
+                    batches: FIVE_OFFSET_TIMESTAMP_BATCHES,
                     ..Default::default()
                 },
             );
@@ -400,9 +394,9 @@ mod tests {
             let mut seg = Segment::create(dir.path(), Offset(0)).unwrap();
             for (base, timestamp) in [(0, 100), (1, 300), (2, 200)] {
                 seg.append(
-                    &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                        offset: crate::Offset(base),
-                        timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+                    &sample_batch(SampleBatchSetup {
+                        offset: Offset(base),
+                        timestamp: RecordTimestamp(timestamp),
                         ..Default::default()
                     }),
                     kibibytes(4),

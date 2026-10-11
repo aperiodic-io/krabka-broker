@@ -11,6 +11,9 @@ use krabka_units::{Time, convert::TimeExt as _};
 #[cfg(not(target_family = "wasm"))]
 use super::oauthbearer::{DEFAULT_ALLOWABLE_CLOCK_SKEW, DEFAULT_INTROSPECTION_HTTP_TIMEOUT};
 use super::{FileConfigError, oauthbearer::FileOAuthBearerConfig};
+use crate::config::{BrokerConfig, DEFAULT_JWKS_MIN_ON_DEMAND_PAUSE};
+#[cfg(not(target_family = "wasm"))]
+use crate::oauth_introspection::ReqwestIntrospectionClient;
 
 #[cfg(not(target_family = "wasm"))]
 fn configure_introspection_validator(
@@ -18,7 +21,7 @@ fn configure_introspection_validator(
     endpoint: &str,
     custom_claim_check: Option<jsonpath_rust::parser::model::JpQuery>,
     groups_claim: Option<jsonpath_rust::parser::model::JpQuery>,
-    cfg: &mut crate::config::BrokerConfig,
+    cfg: &mut BrokerConfig,
 ) {
     let client_id = oauth.introspection_client_id.clone().unwrap_or_else(|| {
         panic!("[oauthbearer]: introspection endpoint requires introspection_client_id")
@@ -45,7 +48,7 @@ fn configure_introspection_validator(
         .map_or(DEFAULT_INTROSPECTION_HTTP_TIMEOUT, |ms| {
             Time::from_millis(i64::try_from(ms).unwrap_or(i64::MAX))
         });
-    let client = crate::oauth_introspection::ReqwestIntrospectionClient::build(
+    let client = ReqwestIntrospectionClient::build(
         endpoint.to_owned(),
         oauth.userinfo_endpoint_uri.clone(),
         client_id,
@@ -83,7 +86,7 @@ fn configure_introspection_validator(
     endpoint: &str,
     _custom_claim_check: Option<jsonpath_rust::parser::model::JpQuery>,
     _groups_claim: Option<jsonpath_rust::parser::model::JpQuery>,
-    _cfg: &mut crate::config::BrokerConfig,
+    _cfg: &mut BrokerConfig,
 ) {
     panic!(
         "[oauthbearer]: introspection_endpoint_uri {endpoint:?} is set, but token introspection is unavailable on this platform"
@@ -93,7 +96,7 @@ fn configure_introspection_validator(
 /// Whether any resolved listener offers SASL/OAUTHBEARER. A listener's own
 /// `sasl_mechanisms` wins over the broker-wide list, matching
 /// [`crate::config::BrokerConfig::validate`].
-fn oauthbearer_listener_enabled(cfg: &crate::config::BrokerConfig) -> bool {
+fn oauthbearer_listener_enabled(cfg: &BrokerConfig) -> bool {
     cfg.listeners.iter().any(|listener| {
         listener
             .sasl_mechanisms
@@ -113,7 +116,7 @@ fn oauthbearer_listener_enabled(cfg: &crate::config::BrokerConfig) -> bool {
 /// OAUTHBEARER and `allow_unsecured` is not `true`.
 pub(super) fn apply_oauthbearer(
     oauth: Option<FileOAuthBearerConfig>,
-    cfg: &mut crate::config::BrokerConfig,
+    cfg: &mut BrokerConfig,
 ) -> Result<(), FileConfigError> {
     // An absent `[oauthbearer]` table is an endpoint-less one: it must still
     // reach the `(None, None)` arm below, or a listener enabling OAUTHBEARER
@@ -208,7 +211,7 @@ pub(super) fn apply_oauthbearer(
             cfg.oauthbearer_jwks_last_on_demand_refresh_ms = last_on_demand;
             cfg.oauthbearer_jwks_min_on_demand_pause = oauth
                 .jwks_min_refresh_pause_seconds
-                .map_or(crate::config::DEFAULT_JWKS_MIN_ON_DEMAND_PAUSE, |s| {
+                .map_or(DEFAULT_JWKS_MIN_ON_DEMAND_PAUSE, |s| {
                     Time::from_secs(i64::from(s))
                 });
             cfg.features.oauthbearer_jwks_ignore_key_use =
@@ -270,9 +273,15 @@ mod tests {
     use assert2::{assert, check};
     use krabka_units::{minutes, secs};
 
-    use crate::file_config::{FileConfig, FileConfigError};
+    use crate::{
+        config::BrokerConfig,
+        file_config::{
+            FileConfig, FileConfigError,
+            test_support::{configured, configured_unwrap_parse},
+        },
+    };
 
-    fn check_unsecured(cfg: &crate::config::BrokerConfig) {
+    fn check_unsecured(cfg: &BrokerConfig) {
         assert!(cfg.oauthbearer_jwks_endpoint.is_none());
         assert!(matches!(
             cfg.oauthbearer_validator,
@@ -298,7 +307,7 @@ principal_claim_name = "client_id"
 jwks_refresh_interval_ms = 60000
 jwks_expiry_seconds = 360
 "#;
-        let cfg = crate::file_config::test_support::configured(src, "parse").unwrap();
+        let cfg = configured(src, "parse").unwrap();
         assert!(cfg.oauthbearer_jwks_endpoint.as_deref() == Some("https://idp.example/jwks"));
         assert!(cfg.oauthbearer_jwks_refresh_interval == minutes(1));
         match cfg.oauthbearer_validator {
@@ -335,7 +344,7 @@ allowable_clock_skew_ms = 5000
     #[test]
     fn apply_to_oauthbearer_without_endpoint_rejects_unsecured_fallback() {
         let file: FileConfig = toml::from_str(&oauthbearer_listener_toml("")).expect("parse");
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
         let error = file
             .apply_to(&mut cfg)
             .expect_err("unsecured fallback must be rejected without allow_unsecured");
@@ -347,7 +356,7 @@ allowable_clock_skew_ms = 5000
 
     #[test]
     fn apply_to_oauthbearer_allow_unsecured_opts_into_unsecured_validator() {
-        let cfg = crate::file_config::test_support::configured(
+        let cfg = configured(
             &oauthbearer_listener_toml("allow_unsecured = true"),
             "parse",
         )
@@ -370,7 +379,7 @@ allowable_clock_skew_ms = 5000
 principal_claim_name = "sub"
 allowable_clock_skew_ms = 5000
 "#;
-        let cfg = crate::file_config::test_support::configured(src, "parse").unwrap();
+        let cfg = configured(src, "parse").unwrap();
         check_unsecured(&cfg);
     }
 
@@ -385,7 +394,7 @@ protocol = "SaslPlaintext"
 sasl_config = { enabled_mechanisms = ["OAUTHBEARER"] }
 "#;
         let file: FileConfig = toml::from_str(src).expect("parse");
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
         let error = file
             .apply_to(&mut cfg)
             .expect_err("a missing [oauthbearer] table must not silently stay unsecured");
@@ -404,7 +413,7 @@ bind_addr = "0.0.0.0:9092"
 advertised = "host:9092"
 protocol = "Plaintext"
 "#;
-        let cfg = crate::file_config::test_support::configured(src, "parse").unwrap();
+        let cfg = configured(src, "parse").unwrap();
         check_unsecured(&cfg);
     }
 
@@ -415,7 +424,7 @@ protocol = "Plaintext"
 jwks_endpoint_uri = "https://idp.example/certs"
 idp_tls_trust = "/etc/krabka/oauth/idp-ca.pem"
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         assert!(
             cfg.oauthbearer_idp_tls_trust.as_deref()
                 == Some(std::path::Path::new("/etc/krabka/oauth/idp-ca.pem"))
@@ -428,7 +437,7 @@ idp_tls_trust = "/etc/krabka/oauth/idp-ca.pem"
 [oauthbearer]
 jwks_endpoint_uri = "https://idp.example/certs"
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let cfg = configured_unwrap_parse(toml).unwrap();
         assert!(cfg.oauthbearer_idp_tls_trust.is_none());
     }
 
@@ -444,7 +453,7 @@ introspection_client_secret_path = '{}'
 "#,
             secret_path.display()
         );
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(&toml).unwrap();
+        let cfg = configured_unwrap_parse(&toml).unwrap();
         assert!(matches!(
             cfg.oauthbearer_validator,
             krabka_security::OAuthBearerValidator::Introspection(_)
@@ -465,7 +474,7 @@ introspection_client_secret_path = '{}'
 "#,
             secret_path.display()
         );
-        let _cfg = crate::file_config::test_support::configured_unwrap_parse(&toml).unwrap();
+        let _cfg = configured_unwrap_parse(&toml).unwrap();
     }
 
     #[test]
@@ -480,7 +489,7 @@ introspection_client_secret_path = '{}'
 "#,
             secret_path.display()
         );
-        let _cfg = crate::file_config::test_support::configured_unwrap_parse(&toml).unwrap();
+        let _cfg = configured_unwrap_parse(&toml).unwrap();
     }
 
     #[test]
@@ -491,7 +500,7 @@ introspection_client_secret_path = '{}'
 introspection_endpoint_uri = "https://idp.example/introspect"
 introspection_client_id = "kafka-broker"
 "#;
-        let _cfg = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap();
+        let _cfg = configured_unwrap_parse(toml).unwrap();
     }
 
     #[test]
@@ -513,7 +522,7 @@ introspection_client_secret_path = '{}'
 "#,
                 secret_path.display()
             );
-            let cfg = crate::file_config::test_support::configured_unwrap_parse(&toml).unwrap();
+            let cfg = configured_unwrap_parse(&toml).unwrap();
             match cfg.oauthbearer_validator {
                 krabka_security::OAuthBearerValidator::Introspection(v) => assert!(
                     v.call_userinfo == expected,

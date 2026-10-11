@@ -11,7 +11,10 @@ use krabka_units::secs;
 use super::*;
 use crate::{
     log_retention::test_support::{expired_partition, segment_files},
-    test_support::{BrokenTimer, TimerFailure, park_manual_timer as park},
+    test_support::{
+        BrokenTimer, CommittedPartitionSetup, TimerFailure, park_manual_timer as park,
+        sweep_registry_fixture,
+    },
 };
 
 /// Block until the sweep has counted `want` clean passes, or give up.
@@ -34,10 +37,10 @@ async fn swept(metrics: &BrokerMetrics, want: u64) -> bool {
 async fn run_ticks_until_shutdown() {
     use qubit_clock::{ManualMonotonicClock, MonotonicClock as _};
 
-    let (dir, registry) = crate::test_support::sweep_registry_fixture();
+    let (dir, registry) = sweep_registry_fixture();
     let partition = expired_partition(
         &dir,
-        crate::test_support::CommittedPartitionSetup {
+        CommittedPartitionSetup {
             topic: "run-retain",
             leader: NodeId(7),
             ..Default::default()
@@ -110,10 +113,10 @@ async fn run_ticks_until_shutdown() {
 
 #[tokio::test]
 async fn run_stops_without_sweeping_when_the_first_deadline_is_refused() {
-    let (dir, registry) = crate::test_support::sweep_registry_fixture();
+    let (dir, registry) = sweep_registry_fixture();
     let partition = expired_partition(
         &dir,
-        crate::test_support::CommittedPartitionSetup {
+        CommittedPartitionSetup {
             topic: "unarmable",
             leader: NodeId(7),
             ..Default::default()

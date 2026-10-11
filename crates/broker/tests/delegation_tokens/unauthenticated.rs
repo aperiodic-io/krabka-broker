@@ -25,7 +25,11 @@ use tokio_rustls::{
     },
 };
 
-use crate::{DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, rpc::send_create_delegation_token};
+use crate::{
+    DELEGATION_TOKEN_REQUEST_NOT_ALLOWED,
+    rpc::send_create_delegation_token,
+    support::{sasl::delegation_token_defaults, tls::PinnedCertVerifier},
+};
 
 const DEV_CERT: &str = include_str!("../fixtures/security/dev_cert.pem");
 const DEV_KEY: &str = include_str!("../fixtures/security/dev_key.pem");
@@ -72,7 +76,7 @@ async fn start_broker(
     for user in super_users {
         cfg.super_users.insert((*user).to_string());
     }
-    crate::support::sasl::delegation_token_defaults(&mut cfg, b"anon-master-key");
+    delegation_token_defaults(&mut cfg, b"anon-master-key");
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
@@ -89,7 +93,7 @@ async fn tls_connect_without_client_cert(
         .expect("dev cert parses");
     let client_cfg = ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(crate::support::tls::PinnedCertVerifier {
+        .with_custom_certificate_verifier(Arc::new(PinnedCertVerifier {
             pinned,
             schemes: tokio_rustls::rustls::crypto::ring::default_provider()
                 .signature_verification_algorithms

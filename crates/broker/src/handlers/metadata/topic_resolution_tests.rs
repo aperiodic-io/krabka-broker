@@ -24,7 +24,7 @@ use crate::{
     authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
     broker::BrokerHandle,
     codes,
-    test_support::{peer, principal, start_broker_no_audit_with},
+    test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
 };
 
 /// An id that no topic in these tests has.
@@ -161,7 +161,7 @@ async fn metadata(
         principal("describer"),
         client_id = "metadata-client"
     );
-    crate::test_support::dispatch_wire(
+    dispatch_wire(
         &shared,
         krabka_protocol::api_key::ApiKey::Metadata as i16,
         version,

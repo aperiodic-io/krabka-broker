@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::FileConfigError;
+use crate::config::{BrokerConfig, KAFKA_STATIC_KEYS};
 
 /// Validated operational policy loaded from `[runtime]`.
 #[krabka_macros::runtime_policy_fields(toml)]
@@ -424,10 +425,7 @@ impl RuntimeFileConfig {
     /// # Errors
     ///
     /// Returns [`FileConfigError::InvalidConfig`] for an invalid value.
-    pub fn apply_to(
-        mut self,
-        cfg: &mut crate::config::BrokerConfig,
-    ) -> Result<(), FileConfigError> {
+    pub fn apply_to(mut self, cfg: &mut BrokerConfig) -> Result<(), FileConfigError> {
         self.record_supplied_kafka_keys(cfg);
         self.apply_core(cfg)?;
         self.apply_replication(cfg)?;
@@ -448,11 +446,11 @@ impl RuntimeFileConfig {
     ///
     /// The overlay of a command line or the environment applies through this
     /// too, after the file, so it adds to what the file recorded.
-    fn record_supplied_kafka_keys(&self, cfg: &mut crate::config::BrokerConfig) {
+    fn record_supplied_kafka_keys(&self, cfg: &mut BrokerConfig) {
         let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(self) else {
             return;
         };
-        let supplied = crate::config::KAFKA_STATIC_KEYS.iter().filter(|key| {
+        let supplied = KAFKA_STATIC_KEYS.iter().filter(|key| {
             key.runtime_field
                 .and_then(|field| fields.get(field))
                 .is_some_and(|value| !value.is_null())

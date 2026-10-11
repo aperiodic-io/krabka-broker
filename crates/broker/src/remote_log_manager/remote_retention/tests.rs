@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::{
+    metrics::BrokerMetrics,
     remote_log_manager::{
         test_support as fixtures,
         test_support::{
@@ -833,7 +834,7 @@ async fn a_floor_nobody_moved_leaves_the_archive_alone() {
 #[tokio::test]
 async fn a_retention_pass_records_its_delete_requests_errors_and_lag() {
     let (rlmm, _rsm_impl, rsm) = refusing_backends();
-    let metrics = crate::metrics::BrokerMetrics::new();
+    let metrics = BrokerMetrics::new();
     let index_cache = Arc::new(krabka_remote_storage::RemoteIndexCache::disabled());
     let tier = fixtures::configured_tier(
         &rsm,

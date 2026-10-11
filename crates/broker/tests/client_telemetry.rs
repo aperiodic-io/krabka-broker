@@ -32,7 +32,8 @@
 use assert2::{assert, check};
 
 use crate::support::{
-    client::connect_owned, configs::client_metrics_subscription,
+    client::connect_owned,
+    configs::{ClientMetricsSubscriptionSetup, client_metrics_subscription},
     discovery::api_versions_request_for,
 };
 mod support;
@@ -106,12 +107,11 @@ async fn configure_match_all_subscription(
     name: &str,
     interval_ms: &str,
 ) {
-    let alter_req =
-        client_metrics_subscription(crate::support::configs::ClientMetricsSubscriptionSetup {
-            name,
-            interval: interval_ms,
-            ..Default::default()
-        });
+    let alter_req = client_metrics_subscription(ClientMetricsSubscriptionSetup {
+        name,
+        interval: interval_ms,
+        ..Default::default()
+    });
 
     let alter_resp: IncrementalAlterConfigsResponse = client
         .send(alter_req)

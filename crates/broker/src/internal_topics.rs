@@ -45,7 +45,11 @@
 //! opinion about them, and each carries broker state that no application should
 //! read as a data topic.
 
-use crate::{BrokerError, config::BrokerConfig};
+use crate::{
+    BrokerError, barrier::STATE_TOPIC, config::BrokerConfig, coordinator::bootstrap::OFFSETS_TOPIC,
+    diskless::index_log::DISKLESS_WAL_INDEX_TOPIC, share_coordinator::bootstrap::TOPIC,
+    txn::bootstrap::TOPIC as TXN_TOPIC,
+};
 
 /// The broker-owned topics whose names are fixed, each named by the constant
 /// its subsystem declares.
@@ -58,11 +62,11 @@ use crate::{BrokerError, config::BrokerConfig};
 /// the crate — the freeze registry's, in particular — can hold their own rules
 /// against the whole set instead of against a copy of it.
 pub(crate) const INTERNAL_TOPICS: [&str; 5] = [
-    crate::coordinator::bootstrap::OFFSETS_TOPIC,
-    crate::txn::bootstrap::TOPIC,
-    crate::share_coordinator::bootstrap::TOPIC,
-    crate::barrier::STATE_TOPIC,
-    crate::diskless::index_log::DISKLESS_WAL_INDEX_TOPIC,
+    OFFSETS_TOPIC,
+    TXN_TOPIC,
+    TOPIC,
+    STATE_TOPIC,
+    DISKLESS_WAL_INDEX_TOPIC,
 ];
 
 /// The name prefix that marks a broker-owned topic.
@@ -155,6 +159,7 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
+    use crate::config::DEFAULT_AUDIT_TOPIC;
 
     /// A config whose audit topic is `name`, for driving [`is_internal_topic`].
     fn config_auditing_to(name: &str) -> BrokerConfig {
@@ -293,7 +298,7 @@ mod tests {
     fn a_validated_audit_topic_is_never_freezable() {
         use krabka_metadata::PatternType;
 
-        for name in [crate::config::DEFAULT_AUDIT_TOPIC, "__house_audit"] {
+        for name in [DEFAULT_AUDIT_TOPIC, "__house_audit"] {
             check!(validate_audit_topic_name(name).is_ok(), "{name}");
             check!(
                 crate::freeze::scope_covers_internal_topic(PatternType::Literal, name),

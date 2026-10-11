@@ -31,7 +31,11 @@ use crate::{
     broker::BrokerHandle,
     codes,
     handlers::test_support::{
-        AcknowledgementMode, AcknowledgementPartitionSetup, ShareSessionEpoch,
+        AcknowledgementMode, AcknowledgementPartitionSetup, AcknowledgementSetup, ClientTopicSetup,
+        ProduceRecordsSetup, ShareSessionEpoch, ShareWireSetup, acknowledge_batches_request,
+        acquired_share_records, create_topic as create_topic_from_test_support,
+        initialize_earliest_share, produce_records, share_acknowledge_wire, share_fetch_wire,
+        share_record_states,
     },
     share_partition::state::RecordState::{self, Acquired},
     test_support::start_broker_no_audit_with,
@@ -74,9 +78,9 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 }
 
 async fn create_topic(broker: &BrokerHandle) -> WireUuid {
-    crate::handlers::test_support::create_topic(
+    create_topic_from_test_support(
         broker,
-        crate::handlers::test_support::ClientTopicSetup {
+        ClientTopicSetup {
             client_id: "ack-order-test",
             name: TOPIC,
             ..Default::default()
@@ -87,9 +91,9 @@ async fn create_topic(broker: &BrokerHandle) -> WireUuid {
 
 /// Appends one batch of three records to partition 0.
 async fn produce(broker: &BrokerHandle) {
-    crate::handlers::test_support::produce_records(
+    produce_records(
         broker,
-        crate::handlers::test_support::ProduceRecordsSetup {
+        ProduceRecordsSetup {
             topic: TOPIC,
             ..Default::default()
         },
@@ -100,7 +104,7 @@ async fn produce(broker: &BrokerHandle) {
 /// Starts `group` at the earliest offset and lets [`READER`] acquire offsets
 /// 0 to 2 at epoch 0.
 async fn acquire_all(broker: &BrokerHandle, group: &str, topic_id: WireUuid) {
-    crate::handlers::test_support::initialize_earliest_share(broker, group, topic_id, 0..1).await;
+    initialize_earliest_share(broker, group, topic_id, 0..1).await;
     let response = share_fetch(
         broker,
         ValidationFetchSetup {
@@ -111,8 +115,7 @@ async fn acquire_all(broker: &BrokerHandle, group: &str, topic_id: WireUuid) {
         },
     )
     .await;
-    let acquired: Vec<_> =
-        crate::handlers::test_support::acquired_share_records(&response.responses[0].partitions[0]);
+    let acquired: Vec<_> = acquired_share_records(&response.responses[0].partitions[0]);
     assert!(acquired == vec![(0, 2)], "{response:?}");
 }
 
@@ -157,10 +160,10 @@ async fn share_fetch(broker: &BrokerHandle, setup: ValidationFetchSetup<'_>) -> 
         }],
         ..Default::default()
     };
-    crate::handlers::test_support::share_fetch_wire(
+    share_fetch_wire(
         broker,
         &request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(VERSION),
             user: setup.user,
         },
@@ -182,18 +185,16 @@ async fn share_acknowledge(
     broker: &BrokerHandle,
     setup: ValidationAcknowledgeSetup<'_>,
 ) -> ShareAcknowledgeResponse {
-    let request = crate::handlers::test_support::acknowledge_batches_request(
-        crate::handlers::test_support::AcknowledgementSetup {
-            group: setup.group,
-            topic_id: setup.topic_id,
-            partition: setup.partition,
-            ..Default::default()
-        },
-    );
-    crate::handlers::test_support::share_acknowledge_wire(
+    let request = acknowledge_batches_request(AcknowledgementSetup {
+        group: setup.group,
+        topic_id: setup.topic_id,
+        partition: setup.partition,
+        ..Default::default()
+    });
+    share_acknowledge_wire(
         broker,
         &request,
-        crate::handlers::test_support::ShareWireSetup {
+        ShareWireSetup {
             version: krabka_ids::ApiVersion(VERSION),
             user: setup.user,
         },
@@ -202,7 +203,7 @@ async fn share_acknowledge(
 }
 
 async fn record_states(broker: &BrokerHandle, group: &str, topic_id: WireUuid) -> Vec<RecordState> {
-    crate::handlers::test_support::share_record_states(broker, group, topic_id).await
+    share_record_states(broker, group, topic_id).await
 }
 
 /// One scenario for both APIs.

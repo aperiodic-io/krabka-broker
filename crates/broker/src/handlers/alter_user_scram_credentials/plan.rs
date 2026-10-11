@@ -199,8 +199,8 @@ mod tests {
         handlers::alter_user_scram_credentials::{
             answer,
             test_support::{
-                KAFKA_DUPLICATE_RESOURCE, expected_result, start_broker, test_context,
-                valid_upsertion, valid_upsertion_for_mechanism,
+                KAFKA_DUPLICATE_RESOURCE, expected_result, mixed_mechanisms, start_broker,
+                test_context, valid_upsertion, valid_upsertion_for_mechanism,
             },
         },
         test_support::test_ctx,
@@ -297,8 +297,7 @@ mod tests {
             })
             .await;
         test_ctx!(ctx, "admin");
-        let req =
-            crate::handlers::alter_user_scram_credentials::test_support::mixed_mechanisms("alice");
+        let req = mixed_mechanisms("alice");
 
         check_refusal!((resp, expected, image), broker, req, ctx, KAFKA_DUPLICATE_RESOURCE, "A user credential cannot be altered twice in the same request", [SaslMechanism::ScramSha512 => is_some, SaslMechanism::ScramSha256 => is_none]);
         broker_handle.shutdown().await;
@@ -312,8 +311,7 @@ mod tests {
             context(ctx, "admin"),
             controller_leader
         );
-        let req =
-            crate::handlers::alter_user_scram_credentials::test_support::mixed_mechanisms("alice");
+        let req = mixed_mechanisms("alice");
 
         check_refusal!((resp, expected, image), broker, req, ctx, codes::RESOURCE_NOT_FOUND, "Attempt to delete a user credential that does not exist", [SaslMechanism::ScramSha256 => is_none, SaslMechanism::ScramSha512 => is_none]);
         broker_handle.shutdown().await;

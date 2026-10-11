@@ -68,6 +68,7 @@ use crate::{
         offsets_log::{OffsetsLog, write_failure_code},
     },
     metadata_source::MetadataSource,
+    task_util::spawn_mailbox,
 };
 
 /// Messages accepted by a [`StreamsGroupActorHandle`].
@@ -179,7 +180,7 @@ impl StreamsGroupActorHandle {
         config: Arc<StreamsGroupConfig>,
         coordinator: Arc<super::super::GroupCoordinator>,
     ) -> Self {
-        let (tx, task) = crate::task_util::spawn_mailbox(config.actor_mailbox_capacity, |rx| {
+        let (tx, task) = spawn_mailbox(config.actor_mailbox_capacity, |rx| {
             actor_loop(group_id, config, coordinator, rx)
         });
         Self { tx, _task: task }

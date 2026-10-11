@@ -27,9 +27,14 @@ use crate::{
     rlmm_round_trip::remote_log_files,
     run_broker_test,
     support::{
-        fetch::{fetch_partition, single_partition_fetch},
+        fetch::{
+            FetchLimits, FetchPartitionSetup, RequestWaitMillis, SinglePartitionFetchSetup,
+            fetch_partition, single_partition_fetch,
+        },
         topic_id_for,
+        topics::topic_configs,
     },
+    topic_fixture::create_configured_topic,
 };
 
 const TOPIC: &str = "tiered-delete-records-itest";
@@ -118,10 +123,10 @@ async fn delete_records_puts_the_tiered_prefix_out_of_range_and_frees_it_case() 
 }
 
 async fn create_tiered_topic(client: &Client) {
-    crate::topic_fixture::create_configured_topic(
+    create_configured_topic(
         client,
         TOPIC,
-        crate::support::topics::topic_configs([
+        topic_configs([
             ("remote.storage.enable", "true"),
             ("internal.segment.bytes", "1024"),
             // Evict every copied segment from local disk, so the reads
@@ -185,19 +190,15 @@ async fn fetch_once(
     fetch_offset: i64,
 ) -> krabka_protocol::owned::fetch_response::PartitionData {
     let resp = client
-        .send(single_partition_fetch(
-            crate::support::fetch::SinglePartitionFetchSetup {
-                topic: TOPIC.into(),
-                topic_id,
-                partition: fetch_partition(crate::support::fetch::FetchPartitionSetup {
-                    offset: krabka_ids::Offset(fetch_offset),
-                    ..Default::default()
-                }),
-                limits: crate::support::fetch::FetchLimits::wait_for_data(
-                    crate::support::fetch::RequestWaitMillis(500),
-                ),
-            },
-        ))
+        .send(single_partition_fetch(SinglePartitionFetchSetup {
+            topic: TOPIC.into(),
+            topic_id,
+            partition: fetch_partition(FetchPartitionSetup {
+                offset: krabka_ids::Offset(fetch_offset),
+                ..Default::default()
+            }),
+            limits: FetchLimits::wait_for_data(RequestWaitMillis(500)),
+        }))
         .await
         .expect("Fetch");
     resp.responses

@@ -21,7 +21,10 @@ use crate::{
     control_plane::{cluster_id, freeze_request, set_freeze, wait_for_registry_len},
     signing::{SignedFreeze, signed_request, verifies_locally},
     support::{self, OperatorKey, client::connect_owned},
-    wire::{CONTROL, accepted, create_topic, now_ms, refused},
+    wire::{
+        CONTROL, accepted, create_controlled_topic, create_topic, now_ms, refused,
+        wait_controlled_partitions,
+    },
 };
 
 async fn check_frozen_then_shutdown(
@@ -285,7 +288,7 @@ async fn a_signature_survives_a_controller_restart_and_still_verifies() {
         "client build",
     )
     .await;
-    crate::wire::wait_controlled_partitions(&broker, "orders").await;
+    wait_controlled_partitions(&broker, "orders").await;
 
     let after = wait_for_registry_len(&client, 1).await;
     check!(after == before);
@@ -309,7 +312,7 @@ async fn operator_fixture(
         let (broker, client, _) = support::start_with_operator_key(logs, &key).await;
         (broker, client)
     };
-    let (frozen, control) = crate::wire::create_controlled_topic(&broker, &client, "orders").await;
+    let (frozen, control) = create_controlled_topic(&broker, &client, "orders").await;
     (broker, client, key, frozen, control)
 }
 

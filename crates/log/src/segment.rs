@@ -33,6 +33,7 @@ mod timestamp_scan;
 use crate::{
     index::{OFFSET_ENTRY_SIZE, OffsetIndex, TIME_ENTRY_SIZE, TimeIndex},
     io::LogIo,
+    name::{leader_epoch_checkpoint_path, stampindex_path, txnindex_path},
 };
 
 /// A single log segment: the `.log` data file paired with its sparse
@@ -192,13 +193,13 @@ impl Segment {
     /// Path to this segment's `.txnindex` file (may not exist yet).
     #[must_use]
     pub fn txn_index_path(&self) -> std::path::PathBuf {
-        crate::name::txnindex_path(&self.dir, self.base_offset.0)
+        txnindex_path(&self.dir, self.base_offset.0)
     }
 
     /// Path to this segment's `.stampindex` sidecar (may not exist yet).
     #[must_use]
     pub fn stamp_index_path(&self) -> std::path::PathBuf {
-        crate::name::stampindex_path(&self.dir, self.base_offset.0)
+        stampindex_path(&self.dir, self.base_offset.0)
     }
 
     /// Path to the per-partition `.leader-epoch-checkpoint` file in this
@@ -206,7 +207,7 @@ impl Segment {
     /// and epoch history accumulates over the log's lifetime.
     #[must_use]
     pub fn leader_epoch_checkpoint_path(&self) -> std::path::PathBuf {
-        crate::name::leader_epoch_checkpoint_path(&self.dir)
+        leader_epoch_checkpoint_path(&self.dir)
     }
 
     /// Highest absolute offset (inclusive) of any batch appended to this

@@ -18,9 +18,12 @@ use krabka_protocol::{
 use tokio::net::TcpStream;
 
 use crate::{
-    CLIENT_ID, kafka_wire,
-    kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
-    support::wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+    CLIENT_ID,
+    kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+    support::{
+        topics::consumer_fetch_request,
+        wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+    },
 };
 
 /// The `AddOffsetsToTxn` version the driver below speaks: the newest the
@@ -104,7 +107,7 @@ pub async fn drive_fetch_sasl(
 ) -> FetchResponse {
     let version: i16 = 12; // flexible, supports throttle_time_ms
 
-    let req = crate::support::topics::consumer_fetch_request(topic);
+    let req = consumer_fetch_request(topic);
 
     let mut stream = kafka_wire::sasl_plain_authenticate(
         addr,

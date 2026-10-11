@@ -2,8 +2,10 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::fixtures::name;
+
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         mod {{ name }} {
             /// Start the server with the published port and fixture credentials.

@@ -17,7 +17,9 @@ use krabka_protocol::owned::{
 };
 
 use crate::{
-    codes, coordinator::unified::streams::actor::StreamsGroupActorMessage, task_util::ask,
+    codes,
+    coordinator::unified::streams::actor::{StreamsGroupActorMessage, response::error_resp},
+    task_util::ask,
     time_util::now_ms,
 };
 
@@ -139,7 +141,7 @@ context_handler! {
 
 /// Kafka's error response: the code, message and generated defaults.
 fn reply(code: i16, message: Option<String>) -> StreamsGroupHeartbeatResponse {
-    crate::coordinator::unified::streams::actor::response::error_resp(code, message)
+    error_resp(code, message)
 }
 
 #[cfg(test)]
@@ -151,18 +153,31 @@ mod tests {
     use krabka_protocol::{Decode, owned::streams_group_heartbeat_response};
 
     use crate::{
-        broker::Broker,
-        test_support::{peer, principal},
+        authorizer::AllowAllAuthorizer,
+        broker::{Broker, BrokerHandle},
+        config::BrokerConfig,
+        handlers::{
+            RequestContext, encode_response,
+            group_heartbeat_test_support::{
+                GroupAclSetup, GroupTopicSetup, check_group_read_denied, streams_request,
+                topic_with_partitions,
+            },
+        },
+        task_util::ask,
+        test_support::{
+            ControllerPeerAllowed, GrantsInPrincipalName, PartitionCount, dispatch_wire, peer,
+            principal, request_context, start_group_broker_with,
+        },
     };
 
     /// Dispatch every version through its wire codec so omitted fields stay observable.
     async fn wire_heartbeat(
         broker: &Broker,
-        ctx: &crate::handlers::RequestContext<'_>,
+        ctx: &RequestContext<'_>,
         req: StreamsGroupHeartbeatRequest,
         version: i16,
     ) -> StreamsGroupHeartbeatResponse {
-        crate::test_support::dispatch_wire(
+        dispatch_wire(
             broker,
             krabka_protocol::api_key::ApiKey::StreamsGroupHeartbeat as i16,
             version,
@@ -174,7 +189,7 @@ mod tests {
 
     /// A valid join of member `m1` with a one-subtopology topology.
     fn request(group_id: &str) -> StreamsGroupHeartbeatRequest {
-        crate::handlers::group_heartbeat_test_support::streams_request(group_id, "m1")
+        streams_request(group_id, "m1")
     }
 
     /// Creates a one-partition topic on the test broker, so that a streams
@@ -182,16 +197,12 @@ mod tests {
     async fn create_source_topic(broker: &Broker, name: &str) {
         broker
             .controller
-            .submit_change(
-                crate::handlers::group_heartbeat_test_support::topic_with_partitions(
-                    crate::handlers::group_heartbeat_test_support::GroupTopicSetup {
-                        name,
-                        topic_id: uuid::Uuid::new_v4(),
-                        partitions: crate::test_support::PartitionCount(1),
-                        node: broker.config.node_id,
-                    },
-                ),
-            )
+            .submit_change(topic_with_partitions(GroupTopicSetup {
+                name,
+                topic_id: uuid::Uuid::new_v4(),
+                partitions: PartitionCount(1),
+                node: broker.config.node_id,
+            }))
             .await
             .expect("create the source topic");
     }
@@ -422,7 +433,7 @@ mod tests {
         set_streams_version(&broker, 1).await;
         let peer = peer();
         // `Group:Read` only: the source topic `in` gets no `Describe`.
-        let principal = crate::test_support::principal("Group:Read");
+        let principal = principal("Group:Read");
         let ctx = test_context(&principal, &peer);
 
         let resp = handle(&broker, request("describe-denied"), version, &ctx)
@@ -463,7 +474,7 @@ mod tests {
         let peer = peer();
         // `Read` on the group and `Describe` on the topics, but no `Create`
         // anywhere.
-        let principal = crate::test_support::principal("Group:Read+Topic:Describe");
+        let principal = principal("Group:Read+Topic:Describe");
         let ctx = test_context(&principal, &peer);
 
         let mut req = request("no-create-grant");
@@ -699,10 +710,10 @@ mod tests {
     crate::test_support::context_helper!(client_id = "streams-client");
 
     async fn configured_streams_broker(
-        configure: impl FnOnce(&mut crate::config::BrokerConfig),
-    ) -> (crate::broker::BrokerHandle, tempfile::TempDir, Arc<Broker>) {
-        let (handle, directory) = crate::test_support::start_group_broker_with(|cfg| {
-            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        configure: impl FnOnce(&mut BrokerConfig),
+    ) -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+        let (handle, directory) = start_group_broker_with(|cfg| {
+            cfg.authorizer = Arc::new(AllowAllAuthorizer);
             configure(cfg);
         })
         .await;
@@ -723,11 +734,9 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
-    async fn start_broker(
-        streams_enabled: bool,
-    ) -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-        crate::test_support::start_group_broker_with(|cfg| {
-            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+    async fn start_broker(streams_enabled: bool) -> (BrokerHandle, tempfile::TempDir) {
+        start_group_broker_with(|cfg| {
+            cfg.authorizer = Arc::new(AllowAllAuthorizer);
             cfg.streams_group.enable = streams_enabled;
         })
         .await
@@ -737,11 +746,9 @@ mod tests {
     /// caller's principal (see [`crate::test_support::GrantsInPrincipalName`]),
     /// for the tests that drive a specific ACL gate rather than allow
     /// everything.
-    async fn start_broker_with_grants() -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-        crate::test_support::start_group_broker_with(|cfg| {
-            cfg.authorizer = Arc::new(crate::test_support::ControllerPeerAllowed(
-                crate::test_support::GrantsInPrincipalName,
-            ));
+    async fn start_broker_with_grants() -> (BrokerHandle, tempfile::TempDir) {
+        start_group_broker_with(|cfg| {
+            cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
             cfg.streams_group.enable = true;
         })
         .await
@@ -898,7 +905,7 @@ mod tests {
         let actor = broker
             .group_coordinator
             .get_or_create_streams("identity-group");
-        let view = crate::task_util::ask(&actor.tx, |reply| StreamsGroupActorMessage::Describe {
+        let view = ask(&actor.tx, |reply| StreamsGroupActorMessage::Describe {
             reply,
         })
         .await
@@ -909,7 +916,7 @@ mod tests {
         assert!(view.members[0].client_host == "/127.0.0.1");
 
         let peer: SocketAddr = "127.0.0.2:9093".parse().unwrap();
-        let ctx = crate::test_support::request_context(&principal, &peer, "streams-client-b");
+        let ctx = request_context(&principal, &peer, "streams-client-b");
         let req = StreamsGroupHeartbeatRequest {
             group_id: "identity-group".into(),
             member_id: view.members[0].member_id.clone(),
@@ -921,7 +928,7 @@ mod tests {
             .expect("StreamsGroupHeartbeat identity refresh");
         assert!(resp.error_code == 0);
 
-        let view = crate::task_util::ask(&actor.tx, |reply| StreamsGroupActorMessage::Describe {
+        let view = ask(&actor.tx, |reply| StreamsGroupActorMessage::Describe {
             reply,
         })
         .await
@@ -938,14 +945,12 @@ mod tests {
     fn group_read_denied_yields_group_authorization_failed() {
         use krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse;
 
-        crate::handlers::group_heartbeat_test_support::check_group_read_denied(
-            crate::handlers::group_heartbeat_test_support::GroupAclSetup {
-                client_id: "streams-client",
-                ..Default::default()
-            },
-        );
+        check_group_read_denied(GroupAclSetup {
+            client_id: "streams-client",
+            ..Default::default()
+        });
 
-        let bytes = crate::handlers::encode_response(
+        let bytes = encode_response(
             &reply(codes::GROUP_AUTHORIZATION_FAILED, None),
             streams_group_heartbeat_response::MAX_VERSION,
         )

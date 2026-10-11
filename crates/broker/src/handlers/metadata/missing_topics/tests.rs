@@ -11,7 +11,7 @@ use krabka_protocol::{
 use super::missing_topic_rows;
 use crate::{
     codes,
-    coordinator::bootstrap::OFFSETS_TOPIC,
+    coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
     test_support::{peer, principal, start_broker_no_audit_with},
 };
 
@@ -69,9 +69,7 @@ async fn a_coordinator_topic_is_created_with_its_configured_shape_unless_in_flig
     let image = broker.controller.current_image();
     check!(image.topic_partition_count(OFFSETS_TOPIC) == 7);
     let configs: BTreeMap<String, String> =
-        crate::coordinator::bootstrap::offsets_topic_configs(&broker.config)
-            .into_iter()
-            .collect();
+        offsets_topic_configs(&broker.config).into_iter().collect();
     check!(image.topic_config(OFFSETS_TOPIC) == Some(&configs));
     handle.shutdown().await;
 }

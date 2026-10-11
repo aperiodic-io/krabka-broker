@@ -16,7 +16,9 @@ use super::{
         replay_stream,
     },
 };
-use crate::coordinator::persistence::GroupMetadataValue;
+use crate::coordinator::{
+    persistence::GroupMetadataValue, unified::actor::test_support::rpc::describe,
+};
 
 /// PROBLEM A, the downgrade trap: a group that started classic, then was
 /// UPGRADED to next-gen, then was DOWNGRADED back to classic must replay
@@ -202,7 +204,7 @@ async fn member_with_classic_block_replays_facade() {
 
     let handle = coord.find("g").expect("consumer actor present");
     assert!(handle.kind == GroupKindTag::Consumer);
-    let view = crate::coordinator::unified::actor::test_support::rpc::describe(&handle).await;
+    let view = describe(&handle).await;
     let m1 = view
         .members
         .iter()

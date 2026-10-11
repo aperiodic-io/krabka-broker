@@ -21,7 +21,7 @@ use super::{
     owned_decode::decode_owned_batch,
     topic_settings::TimestampPolicy,
 };
-use crate::codes;
+use crate::{codes, metrics::BrokerMetrics, time_util::now_ms};
 
 /// The topic-and-metrics context [`prepare_batch`] and [`owned_fallback`]
 /// need beside the batch's own bytes: what to label the decode-time metrics
@@ -32,7 +32,7 @@ use crate::codes;
 #[derive(Clone, Copy)]
 pub(super) struct DecodeEnv<'a> {
     pub(super) topic_name: &'a Arc<str>,
-    pub(super) metrics: &'a crate::metrics::BrokerMetrics,
+    pub(super) metrics: &'a BrokerMetrics,
     pub(super) policy: RecordDecompressionPolicy,
 }
 
@@ -111,7 +111,7 @@ impl PreparedBatch {
     /// compacted topic, and the timestamp window only for a record whose key
     /// passed that check (or every record, off a compacted topic).
     fn from_owned(batch: RecordBatch, compacted_topic: bool, timestamps: TimestampPolicy) -> Self {
-        let now_ms = timestamps.bounds_records().then(crate::time_util::now_ms);
+        let now_ms = timestamps.bounds_records().then(now_ms);
         let mut keyless_records = Vec::new();
         let mut invalid_timestamp_records = Vec::new();
         for (index, record) in batch.records.iter().enumerate() {
@@ -309,7 +309,7 @@ pub(super) fn prepare_batch(
     let mut keyless_records = Vec::new();
     let mut invalid_timestamp_records = Vec::new();
     if timestamps.bounds_records() || compacted_topic {
-        let now_ms = crate::time_util::now_ms();
+        let now_ms = now_ms();
         let mut index = 0_i32;
         validated
             .validate_records_with(policy, |record| {

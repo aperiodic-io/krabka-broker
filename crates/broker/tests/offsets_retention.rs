@@ -29,7 +29,11 @@ use crate::support::{
     offsets::{
         offset_commit_topic, offset_delete_partition, offset_delete_request, offset_delete_topic,
     },
-    topics::creatable_topic,
+    standalone_broker,
+    topics::{
+        ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis, creatable_topic,
+        create_topic_request_with_setup,
+    },
 };
 
 /// `ConfigResource.Type.BROKER`.
@@ -68,7 +72,7 @@ async fn client_for(broker: &krabka_broker::BrokerHandle) -> Arc<Client> {
 /// Kafka's own defaults.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_configs_reports_the_retention_knobs() {
-    let (_dir, broker) = crate::support::standalone_broker().await;
+    let (_dir, broker) = standalone_broker().await;
     let client = client_for(&broker).await;
 
     let described = client
@@ -203,13 +207,13 @@ async fn the_broker_sweep_reaps_a_dead_group_on_its_own() {
     // `OffsetDelete` resolves each partition against the metadata image, so
     // the topic has to exist for the delete to reach the log.
     let created = client
-        .send(crate::support::topics::create_topic_request_with_setup(
-            creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+        .send(create_topic_request_with_setup(
+            creatable_topic(ConfiguredTopicSetup {
                 name: TOPIC.to_string(),
                 ..Default::default()
             }),
-            crate::support::topics::CreateTopicRequestSetup {
-                timeout: crate::support::topics::CreateTopicsTimeoutMillis(10_000),
+            CreateTopicRequestSetup {
+                timeout: CreateTopicsTimeoutMillis(10_000),
             },
         ))
         .await

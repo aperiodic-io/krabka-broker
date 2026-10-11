@@ -7,7 +7,13 @@ use krabka_units::prelude::{Time, TimeExt as _, millis, secs};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
-use crate::{error::RaftError, kraft::KraftController};
+use crate::{
+    ControllerFetchMissLimit, MetadataLogConfig, MetadataRaftCommandQueueCapacity,
+    MetadataRaftFetchMax,
+    error::RaftError,
+    kraft::{Activation, KraftController, NullPeerSender},
+    test_support::single_partition_topic,
+};
 
 /// Read a complete length-prefixed listener response.
 pub(super) async fn read_frame<R: AsyncReadExt + Unpin>(stream: &mut R) -> Vec<u8> {
@@ -58,19 +64,19 @@ pub(super) fn test_engine_with_voters(
         krabka_metadata::VoterSet::from_voters(voters),
         TEST_ELECTION_TIMEOUT,
         None,
-        crate::ControllerFetchMissLimit::default(),
-        crate::MetadataRaftCommandQueueCapacity::default(),
-        crate::MetadataRaftFetchMax::default(),
-        std::sync::Arc::new(crate::kraft::NullPeerSender),
+        ControllerFetchMissLimit::default(),
+        MetadataRaftCommandQueueCapacity::default(),
+        MetadataRaftFetchMax::default(),
+        std::sync::Arc::new(NullPeerSender),
         0,
         krabka_units::prelude::bytes(0),
         millis(0),
         krabka_kraft_core::snapshot_fetch::MetadataSnapshotFetchMax::default(),
-        crate::MetadataLogConfig {
+        MetadataLogConfig {
             max_idle_interval: millis(0),
-            ..crate::MetadataLogConfig::default()
+            ..MetadataLogConfig::default()
         },
-        crate::kraft::Activation::default(),
+        Activation::default(),
     )
     .expect("open engine");
     (ctrl, dir)
@@ -108,10 +114,7 @@ pub(super) async fn activate_dynamic_membership(engine: &KraftController) {
 }
 
 pub(super) fn topic_record(name: &str) -> krabka_metadata::MetadataRecord {
-    krabka_metadata::MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-        name,
-        uuid::Uuid::new_v4(),
-    ))
+    krabka_metadata::MetadataRecord::V1Topic(single_partition_topic(name, uuid::Uuid::new_v4()))
 }
 
 /// Encodes `message` at `version`.

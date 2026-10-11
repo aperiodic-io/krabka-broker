@@ -17,7 +17,7 @@ use super::{
     engine::{self, WalShardEngine},
     test_support::{append_source, batch, local_replicas, open_log, source_log},
 };
-use crate::{error::BrokerError, wal::WalStore};
+use crate::{diskless::hot_tail::HotTailCache, error::BrokerError, wal::WalStore};
 
 #[test]
 fn strict_majority_requires_more_than_half_of_every_voter_set() {
@@ -100,7 +100,7 @@ async fn quorum_wal_store_populates_hot_tail_after_durable_sync() {
     let source_dir = tempfile::tempdir().unwrap();
     let source = open_log(source_dir.path());
     let (_replica_dirs, engine) = local_replicas(3);
-    let cache = Arc::new(crate::diskless::hot_tail::HotTailCache::default());
+    let cache = Arc::new(HotTailCache::default());
     let topic_id = Uuid::from_u128(9);
     let partition = PartitionIndex(0);
     let store = QuorumWalStore {
@@ -143,7 +143,7 @@ async fn quorum_wal_store_trims_every_replica_before_the_source() {
     let source = source_log(dir.path());
     let topic_id = Uuid::from_u128(10);
     let partition = PartitionIndex(0);
-    let cache = Arc::new(crate::diskless::hot_tail::HotTailCache::default());
+    let cache = Arc::new(HotTailCache::default());
     let store = QuorumWalStore::for_partition(
         "topic",
         Some(topic_id),

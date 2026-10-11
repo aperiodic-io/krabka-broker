@@ -9,7 +9,11 @@ use bytes::Bytes;
 use krabka_protocol::records::{Record, RecordBatch};
 use tempfile::TempDir;
 
-use crate::partition::Partition;
+use crate::{
+    log_dir::partition_dir,
+    partition::Partition,
+    test_support::{CommittedPartitionSetup, block_log_artifact_paths, committed_partition},
+};
 
 /// One record at `base`, timestamped at the epoch so every retention setting
 /// this module uses has already expired it.
@@ -35,9 +39,9 @@ fn epoch_batch(base: i64, value: &[u8]) -> RecordBatch {
 /// expiry the moment the sweep looks at it.
 pub(super) async fn expired_partition(
     root: &TempDir,
-    setup: crate::test_support::CommittedPartitionSetup<'_>,
+    setup: CommittedPartitionSetup<'_>,
 ) -> Arc<Partition> {
-    let part_dir = crate::log_dir::partition_dir(root.path(), setup.topic, setup.partition.0);
+    let part_dir = partition_dir(root.path(), setup.topic, setup.partition.0);
     std::fs::create_dir_all(&part_dir).expect("create partition dir");
     let cfg = krabka_log::LogConfig {
         segment_size: krabka_units::bytes(64),
@@ -49,12 +53,12 @@ pub(super) async fn expired_partition(
         let mut batch = epoch_batch(idx, format!("value-{idx}").as_bytes());
         log.append(&mut batch).expect("append expired batch");
     }
-    crate::test_support::committed_partition(root.path(), log, setup).await
+    committed_partition(root.path(), log, setup).await
 }
 
 /// The base offsets of the segment files currently on disk for `topic`.
 pub(super) fn segment_files(root: &TempDir, topic: &str) -> Vec<String> {
-    let part_dir = crate::log_dir::partition_dir(root.path(), topic, 0);
+    let part_dir = partition_dir(root.path(), topic, 0);
     let mut names: Vec<String> = std::fs::read_dir(&part_dir)
         .expect("read partition dir")
         .map(|entry| entry.expect("partition dir entry").path())
@@ -90,7 +94,7 @@ pub(super) fn log_size(partition: &Partition) -> u64 {
 /// Returns the paths it blocked so a test can unblock them and watch the sweep
 /// recover.
 pub(super) fn block_segment_deletion(root: &TempDir, topic: &str) -> Vec<std::path::PathBuf> {
-    crate::test_support::block_log_artifact_paths(
+    block_log_artifact_paths(
         root.path(),
         topic,
         "log.deleted",

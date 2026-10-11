@@ -219,13 +219,15 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::test_support::single_partition_topic;
 
     fn image_with(topics: &[&str]) -> MetadataImage {
         let mut image = MetadataImage::new(Uuid::nil());
         for name in topics {
-            image.apply(&MetadataRecord::V1Topic(
-                crate::test_support::single_partition_topic(name, Uuid::new_v4()),
-            ));
+            image.apply(&MetadataRecord::V1Topic(single_partition_topic(
+                name,
+                Uuid::new_v4(),
+            )));
         }
         image
     }

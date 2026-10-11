@@ -17,7 +17,7 @@ use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
-use crate::config::InterBrokerCredentials;
+use crate::{config::InterBrokerCredentials, host_port::parse_host_port};
 
 /// Socket buffer applied to an outbound inter-broker connection when the
 /// caller does not supply the broker's configured value. It matches the
@@ -336,7 +336,7 @@ impl krabka_raft::OutboundDialer for InterBrokerDialer {
         // (the openraft `Node.addr` string). For SocketAddr-style
         // addresses we honour the configured `server_name` for SNI
         // separately from the literal host string.
-        let (host, port) = crate::host_port::parse_host_port(addr).ok_or_else(|| {
+        let (host, port) = parse_host_port(addr).ok_or_else(|| {
             krabka_client_core::ClientError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("invalid raft peer address {addr:?}"),
@@ -370,12 +370,15 @@ mod tests {
         DEFAULT_SOCKET_BUFFER, InterBrokerClient, to_client_creds, tune_outbound_socket,
         unbracket_host,
     };
-    use crate::config::InterBrokerCredentials;
+    use crate::{
+        config::InterBrokerCredentials,
+        network::test_support::{check_socket_tuning, tcp_pair},
+    };
 
     #[tokio::test]
     async fn outbound_socket_tuning_sets_nodelay_and_large_buffers() {
-        let (server, client) = crate::network::test_support::tcp_pair().await;
-        crate::network::test_support::check_socket_tuning(&client, |socket| {
+        let (server, client) = tcp_pair().await;
+        check_socket_tuning(&client, |socket| {
             tune_outbound_socket(socket, kibibytes(64), kibibytes(128));
         });
         drop(server);

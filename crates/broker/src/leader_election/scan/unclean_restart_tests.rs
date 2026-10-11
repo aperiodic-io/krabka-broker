@@ -13,8 +13,10 @@ use super::*;
 use crate::{
     config_keys::{ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS},
     leader_election::test_support::{
-        ElectionSetup, ExpectedPartitionSetup, expected_partition, img_with_partition,
+        ElectionSetup, ElrFinalization, ExpectedPartitionSetup, expected_partition,
+        img_with_partition,
     },
+    metrics::BrokerMetrics,
 };
 
 /// Liveness where each of `alive` heartbeated inside the current window.
@@ -32,7 +34,7 @@ async fn restart_batch(image: &MetadataImage, alive_nodes: &[u64]) -> FailoverPl
         image,
         NodeId(3),
         &alive(alive_nodes).await,
-        &crate::metrics::BrokerMetrics::new(),
+        &BrokerMetrics::new(),
     )
     .await
 }
@@ -51,7 +53,7 @@ async fn restart_batch(image: &MetadataImage, alive_nodes: &[u64]) -> FailoverPl
 #[tokio::test]
 async fn a_returning_broker_leaves_the_isr_and_does_not_re_enter_the_elr() {
     let image = img_with_partition(ElectionSetup {
-        elr: crate::leader_election::test_support::ElrFinalization::Enabled,
+        elr: ElrFinalization::Enabled,
         configs: &[(MIN_INSYNC_REPLICAS, "3")],
         ..Default::default()
     });
@@ -81,7 +83,7 @@ async fn a_returning_broker_leaves_the_isr_and_does_not_re_enter_the_elr() {
 async fn a_published_membership_is_withdrawn_without_a_partition_change() {
     let image = img_with_partition(ElectionSetup {
         isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
-        elr: crate::leader_election::test_support::ElrFinalization::Enabled,
+        elr: ElrFinalization::Enabled,
         configs: &[(ELIGIBLE_LEADER_REPLICAS, "0:3:")],
         ..Default::default()
     });
@@ -109,7 +111,7 @@ async fn the_only_isr_member_restarting_uncleanly_leaves_the_partition_leaderles
     let image = img_with_partition(ElectionSetup {
         leader: krabka_raft::NodeId(3),
         isr: &[krabka_raft::NodeId(3)],
-        elr: crate::leader_election::test_support::ElrFinalization::Enabled,
+        elr: ElrFinalization::Enabled,
         ..Default::default()
     });
 

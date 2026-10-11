@@ -34,9 +34,10 @@ use tokio::net::TcpStream;
 use crate::{
     kafka_wire::ExchangeSetup as WireExchangeSetup,
     support::{
-        fetch::single_partition_fetch,
+        client::{metrics_config, scrape_metrics},
+        fetch::{SinglePartitionFetchSetup, single_partition_fetch},
         records::{batch_from_records, value_record},
-        topics::{creatable_topic, create_topic_request},
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
         wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
@@ -54,12 +55,10 @@ async fn create_topic(addr: std::net::SocketAddr) {
 }
 
 async fn create_topic_named(addr: std::net::SocketAddr, topic: &str) {
-    let req = create_topic_request(creatable_topic(
-        crate::support::topics::ConfiguredTopicSetup {
-            name: (topic).into(),
-            ..Default::default()
-        },
-    ));
+    let req = create_topic_request(creatable_topic(ConfiguredTopicSetup {
+        name: (topic).into(),
+        ..Default::default()
+    }));
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let mut body = BytesMut::new();
     req.encode(&mut body, CREATE_TOPICS_VERSION).unwrap();
@@ -120,7 +119,7 @@ async fn produce_to(addr: std::net::SocketAddr, topic: &str, partition: i32) -> 
 
 async fn fetch_one(addr: std::net::SocketAddr) {
     use krabka_protocol::owned::fetch_response::FetchResponse;
-    let req = single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+    let req = single_partition_fetch(SinglePartitionFetchSetup {
         topic: TOPIC.into(),
         topic_id: krabka_protocol::primitives::uuid::Uuid::default(),
         ..Default::default()
@@ -131,7 +130,7 @@ async fn fetch_one(addr: std::net::SocketAddr) {
 }
 
 async fn scrape(addr: std::net::SocketAddr) -> String {
-    crate::support::client::scrape_metrics(addr).await
+    scrape_metrics(addr).await
 }
 
 async fn wait_until_absent(addr: std::net::SocketAddr, needle: &str) -> String {
@@ -180,7 +179,7 @@ async fn rejected_client_labels_leave_the_metrics_body() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metrics_endpoint_serves_openmetrics_and_counters_tick() {
     let log_dir = tempfile::tempdir().unwrap();
-    let cfg = crate::support::client::metrics_config(log_dir.path().to_path_buf());
+    let cfg = metrics_config(log_dir.path().to_path_buf());
 
     let handle = Broker::start(cfg).await.unwrap();
     let kafka_addr = handle.listen_addr();
@@ -284,7 +283,7 @@ async fn metrics_endpoint_serves_openmetrics_and_counters_tick() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn partition_level_metrics_and_disk_gauge_render() {
     let log_dir = tempfile::tempdir().unwrap();
-    let mut cfg = crate::support::client::metrics_config(log_dir.path().to_path_buf());
+    let mut cfg = metrics_config(log_dir.path().to_path_buf());
     // Enable the disk scanner with a 1s tick so the gauge gets a
     // chance to populate within the test's wait window.
     cfg.partition_disk_scan_interval = krabka_units::secs(1);

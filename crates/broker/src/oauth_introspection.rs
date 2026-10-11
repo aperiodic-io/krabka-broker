@@ -133,6 +133,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::test_support::{ecdsa_pair_for_host, serve_loopback_tls};
 
     /// Records observed requests so tests can assert on the bytes.
     #[derive(Debug, Default)]
@@ -177,7 +178,7 @@ mod tests {
         let introspect_status = introspect_status.0;
         let observed = Arc::new(ObservedRequests::default());
         let observed_in_task = observed.clone();
-        let (addr, shutdown, cert_path) = crate::test_support::serve_loopback_tls(move |mut tls| {
+        let (addr, shutdown, cert_path) = serve_loopback_tls(move |mut tls| {
             let observed = observed_in_task.clone();
             async move {
                             let mut buf = vec![0u8; 8192];
@@ -446,7 +447,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let (cert, _key) = crate::test_support::ecdsa_pair_for_host("127.0.0.1");
+        let (cert, _key) = ecdsa_pair_for_host("127.0.0.1");
         let ca_path = dir.path().join("ca.pem");
         std::fs::write(&ca_path, cert.pem()).unwrap();
         drop(listener);

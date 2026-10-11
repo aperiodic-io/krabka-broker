@@ -12,7 +12,9 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::share_coordinator::{
-    config::ShareCoordinatorConfig, coordinator::test_support::configured_coordinator,
+    config::ShareCoordinatorConfig,
+    coordinator::test_support::{configured_coordinator, image_with_topic},
+    persistence::KEY_SHARE_SNAPSHOT,
 };
 
 /// Kafka's `handleOperationException` codes for each append failure,
@@ -131,7 +133,7 @@ async fn a_record_is_appended_only_as_the_leader_of_the_term() {
             ..TERM
         };
         let key = ShareStateKey {
-            record_type: crate::share_coordinator::persistence::KEY_SHARE_SNAPSHOT,
+            record_type: KEY_SHARE_SNAPSHOT,
             group_id: "g".into(),
             topic_id: uuid::Uuid::from_bytes([3; 16]),
             partition: 0,
@@ -201,10 +203,7 @@ async fn a_prune_trims_only_committed_snapshots() {
         // uncommitted row waits it out once.
         let (coord, part) = one_partition(dir.path(), Duration::from_secs(2));
         coord.lead_all_partitions_for_test().await;
-        let image = crate::share_coordinator::coordinator::test_support::image_with_topic(
-            uuid::Uuid::from_bytes([3; 16]),
-            1,
-        );
+        let image = image_with_topic(uuid::Uuid::from_bytes([3; 16]), 1);
         let topic_id = uuid::Uuid::from_bytes([3; 16]);
         coord
             .initialize(&image, "g", topic_id, 0, 0, Offset(0))

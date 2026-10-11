@@ -26,7 +26,11 @@ use tempfile::TempDir;
 use crate::support::{
     client::connect_owned,
     discovery::coordinator_lookup_request,
-    topics::{creatable_topic, create_topic_request},
+    shutdown_cluster,
+    topics::{
+        ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor, creatable_topic,
+        create_topic_request,
+    },
 };
 
 mod support;
@@ -135,7 +139,7 @@ async fn a_cold_cluster_replicates_the_offsets_topic_on_every_broker() {
     check!(next != coordinator);
     survivor.close();
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
     drop(stopped_dir);
 }
 
@@ -164,7 +168,7 @@ async fn a_replication_factor_above_the_broker_count_leaves_the_coordinator_unav
     }
     admin.close();
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// A broker that stops through a controlled shutdown stays registered,
@@ -196,10 +200,10 @@ async fn a_cleanly_stopped_broker_still_counts_toward_the_replication_factor() {
     let admin = client(&cluster[(position + 1) % cluster.len()].0).await;
     let created = admin
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (LED_TOPIC).into(),
-                partitions: crate::support::topics::TopicPartitionCount(3),
-                replicas: crate::support::topics::TopicReplicationFactor(3),
+                partitions: TopicPartitionCount(3),
+                replicas: TopicReplicationFactor(3),
                 ..Default::default()
             },
         )))
@@ -261,6 +265,6 @@ async fn a_cleanly_stopped_broker_still_counts_toward_the_replication_factor() {
     let every_broker = vec![NodeId(1), NodeId(2), NodeId(3)];
     assert!(placed == vec![(every_broker, survivors); 3]);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
     drop(stopped_dir);
 }

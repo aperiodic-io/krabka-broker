@@ -6,10 +6,12 @@ use super::producer_identity::prepare_completion_identities;
 use crate::{
     codes,
     txn::{
+        coordinator::TxnCoordinator,
         decision::{apply_end_txn_prepare, decide_phase1_transition},
         marker::MarkerType,
         state::{TxnEntry, TxnState},
         util::now_millis,
+        version::TxnVersion,
     },
 };
 
@@ -18,13 +20,10 @@ use crate::{
 /// carry. `format_version` is the cluster's level, which only picks the
 /// `__transaction_state` value format.
 pub(super) async fn prepare_transaction(
-    coordinator: &crate::txn::coordinator::TxnCoordinator,
+    coordinator: &TxnCoordinator,
     entry: &std::sync::Arc<tokio::sync::Mutex<TxnEntry>>,
     (committed, no_partition_added): (bool, bool),
-    (client_version, format_version): (
-        crate::txn::version::TxnVersion,
-        crate::txn::version::TxnVersion,
-    ),
+    (client_version, format_version): (TxnVersion, TxnVersion),
     transactional_id: &str,
 ) -> Result<(MarkerType, TxnState, TxnState, TxnEntry), i16> {
     let marker_type = if committed {

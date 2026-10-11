@@ -21,7 +21,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use krabka_ids::PartitionIndex;
 
-use crate::partition::Partition;
+use crate::{cordoned_log_dirs::CordonedLogDirs, partition::Partition};
 
 /// Concurrent registry of locally-hosted partitions, keyed by
 /// (topic, partition).
@@ -37,7 +37,7 @@ pub(crate) struct PartitionRegistry {
     /// KIP-1066: the log directories this broker holds cordoned, which new
     /// partition directories avoid. It lives beside the preferred directories
     /// because both decide where a partition this broker opens goes.
-    cordoned_log_dirs: crate::cordoned_log_dirs::CordonedLogDirs,
+    cordoned_log_dirs: CordonedLogDirs,
     stamp_source: Option<Arc<dyn krabka_log::StampSource>>,
 }
 
@@ -56,24 +56,21 @@ impl PartitionRegistry {
         Self {
             inner: DashMap::new(),
             preferred_log_dirs: DashMap::new(),
-            cordoned_log_dirs: crate::cordoned_log_dirs::CordonedLogDirs::default(),
+            cordoned_log_dirs: CordonedLogDirs::default(),
             stamp_source,
         }
     }
 
     /// Hold `cordoned` as the set of cordoned log directories.
     #[must_use]
-    pub(crate) fn with_cordoned_log_dirs(
-        mut self,
-        cordoned: crate::cordoned_log_dirs::CordonedLogDirs,
-    ) -> Self {
+    pub(crate) fn with_cordoned_log_dirs(mut self, cordoned: CordonedLogDirs) -> Self {
         self.cordoned_log_dirs = cordoned;
         self
     }
 
     /// The log directories this broker holds cordoned.
     #[must_use]
-    pub(crate) fn cordoned_log_dirs(&self) -> &crate::cordoned_log_dirs::CordonedLogDirs {
+    pub(crate) fn cordoned_log_dirs(&self) -> &CordonedLogDirs {
         &self.cordoned_log_dirs
     }
 
@@ -233,19 +230,23 @@ mod tests {
     use tempfile::tempdir;
 
     use super::PartitionRegistry;
-    use crate::partition::Partition;
+    use crate::{
+        log_dir::partition_dir,
+        partition::Partition,
+        test_support::{StandalonePartitionSetup, spawn_standalone_partition},
+    };
 
     /// Builds a `Partition` rooted at `<log_dir>/<topic>-<partition>` through
     /// the real `spawn_partition` path. It mirrors the test fixture in
     /// `future_log`.
     fn fixture_partition(log_dir: &Path, topic: &str, partition: PartitionIndex) -> Arc<Partition> {
-        let part_dir = crate::log_dir::partition_dir(log_dir, topic, partition.get());
+        let part_dir = partition_dir(log_dir, topic, partition.get());
         std::fs::create_dir_all(&part_dir).unwrap();
         let log = Log::open(&part_dir, LogConfig::default()).unwrap();
-        crate::test_support::spawn_standalone_partition(
+        spawn_standalone_partition(
             log_dir,
             log,
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic,
                 partition,
                 ..Default::default()

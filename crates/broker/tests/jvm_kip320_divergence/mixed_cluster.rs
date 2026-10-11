@@ -16,8 +16,12 @@ use tempfile::TempDir;
 use uuid::Uuid;
 
 use crate::{
-    docker::{KAFKA_IMAGE_KRAFT, docker_bridge_gateway, docker_rm, kafka_cluster_id_string},
-    support,
+    docker::{
+        KAFKA_IMAGE_KRAFT, docker_bridge_gateway, docker_rm, kafka_cluster_id_string,
+        produce_committed_prefix,
+    },
+    support::{self, JvmBrokerSetup, JvmStaticVoterSetup, controller_voters},
+    topic_admin::create_and_wait_for_isr,
 };
 
 /// A running mixed cluster: two Krabka brokers (ids 1, 2) that hold the
@@ -82,10 +86,7 @@ impl MixedCluster {
 /// static `KRaft` quorum) and a data-plane broker. Mirrors
 /// `jvm_static_quorum_spike.rs::krabka_controller_config` plus a bound data
 /// listener.
-fn krabka_mixed_config(
-    log_dir: &std::path::Path,
-    setup: crate::support::JvmStaticVoterSetup,
-) -> BrokerConfig {
+fn krabka_mixed_config(log_dir: &std::path::Path, setup: JvmStaticVoterSetup) -> BrokerConfig {
     let mut cfg = support::jvm_static_voter_config(log_dir, setup);
     cfg.heartbeat_interval = krabka_units::millis(1_000);
     // Kafka's `broker.session.timeout.ms` default. The controller starts a
@@ -145,14 +146,14 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
     let dir2 = TempDir::new().unwrap();
     let cfg1 = krabka_mixed_config(
         dir1.path(),
-        crate::support::JvmStaticVoterSetup {
-            broker: crate::support::JvmBrokerSetup {
+        JvmStaticVoterSetup {
+            broker: JvmBrokerSetup {
                 listen: format!("0.0.0.0:{}", krabka_client_ports[0])
                     .parse()
                     .unwrap(),
                 advertised: format!("{}:{}", advertised_host, krabka_client_ports[0]),
                 controller: format!("0.0.0.0:{p1}").parse().unwrap(),
-                voters: crate::support::controller_voters(&krabka_voters),
+                voters: controller_voters(&krabka_voters),
                 ..Default::default()
             },
             cluster_id,
@@ -160,15 +161,15 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
     );
     let cfg2 = krabka_mixed_config(
         dir2.path(),
-        crate::support::JvmStaticVoterSetup {
-            broker: crate::support::JvmBrokerSetup {
+        JvmStaticVoterSetup {
+            broker: JvmBrokerSetup {
                 node: krabka_broker::NodeId(u64::try_from((1) + 1).expect("one-based node id")),
                 listen: format!("0.0.0.0:{}", krabka_client_ports[1])
                     .parse()
                     .unwrap(),
                 advertised: format!("{}:{}", advertised_host, krabka_client_ports[1]),
                 controller: format!("0.0.0.0:{p2}").parse().unwrap(),
-                voters: crate::support::controller_voters(&krabka_voters),
+                voters: controller_voters(&krabka_voters),
             },
             cluster_id,
         },
@@ -221,12 +222,10 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
     // but unreadable on native Linux (the CI runner included).
     #[cfg(unix)]
     {
-        crate::support::chmod_for_container(
-            propdir.path(),
-            0o755,
-            "chmod server.properties directory",
-        );
-        crate::support::chmod_for_container(&proppath, 0o644, "chmod server.properties");
+        use crate::support::chmod_for_container;
+
+        chmod_for_container(propdir.path(), 0o755, "chmod server.properties directory");
+        chmod_for_container(&proppath, 0o644, "chmod server.properties");
     }
     let entry = format!(
         "/opt/kafka/bin/kafka-storage.sh format -t {cid_str} --config /tmp/s.properties --ignore-formatted && \
@@ -375,8 +374,8 @@ pub async fn prepare_divergence(
         };
     let (container, cluster) = registered_mixed_cluster(container_prefix, join_context).await;
     let bootstrap = cluster.bootstrap_all.clone();
-    crate::topic_admin::create_and_wait_for_isr(&bootstrap, topic, required, isr_context).await;
-    crate::docker::produce_committed_prefix(&bootstrap, topic, prefix, count);
+    create_and_wait_for_isr(&bootstrap, topic, required, isr_context).await;
+    produce_committed_prefix(&bootstrap, topic, prefix, count);
     // Intentional: allow the external JVM producer/follower to settle; no broker image or metric expresses this.
     tokio::time::sleep(Duration::from_secs(2)).await;
     let leo = prefix_log_end(&cluster.krabka[0].0, topic, expected, label);

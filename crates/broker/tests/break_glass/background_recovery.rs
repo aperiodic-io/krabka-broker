@@ -17,7 +17,7 @@ use krabka_metadata::{
 
 use crate::{
     cluster::{index_of, plain_client, start_gated_cluster},
-    support,
+    support::{self, shutdown_cluster},
     topics::create_topic,
     transitions::bypassed,
 };
@@ -180,7 +180,7 @@ async fn background_recovery_case(case: &BackgroundCase) {
     take_offline(controller, victim).await;
     check_background_outcome(controller, case, victim).await;
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// The background unclean-recovery path under each of the three settings it

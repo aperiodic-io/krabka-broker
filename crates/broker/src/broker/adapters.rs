@@ -5,6 +5,10 @@
 
 use std::sync::Arc;
 
+#[cfg(test)]
+use crate::test_support::FakeMetadataSource;
+use crate::{delegation_token_cleanup::DelegationTokenController, metadata_source::MetadataSource};
+
 /// Wraps a real [`krabka_raft::ControllerHandle`] so it can satisfy the
 /// controller traits of the broker's background tasks:
 ///
@@ -19,7 +23,7 @@ use std::sync::Arc;
 /// Every broker runs both expiry sweeps. Raft serializes duplicate
 /// tombstones, so each one after the first is a no-op on the apply path.
 pub(super) struct ControllerAdapter {
-    pub(super) handle: Arc<dyn crate::metadata_source::MetadataSource>,
+    pub(super) handle: Arc<dyn MetadataSource>,
     pub(super) node_id: krabka_raft::NodeId,
 }
 
@@ -70,7 +74,7 @@ controller_adapter!(
 );
 
 #[async_trait::async_trait]
-impl crate::delegation_token_cleanup::DelegationTokenController for ControllerAdapter {
+impl DelegationTokenController for ControllerAdapter {
     fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> {
         self.handle.current_image()
     }
@@ -94,12 +98,16 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::broker::test_support::{fake_source, metadata_topic_record};
+    use crate::{
+        break_glass::sweep::BreakGlassController,
+        broker::test_support::{fake_source, metadata_topic_record},
+        delegation_token_cleanup::DelegationTokenController,
+        leader_rebalance::ControllerLike,
+        metadata_source::MetadataSource,
+        reassignment::ReassignmentController,
+    };
 
-    fn adapter(
-        source: &Arc<dyn crate::metadata_source::MetadataSource>,
-        node: u64,
-    ) -> ControllerAdapter {
+    fn adapter(source: &Arc<dyn MetadataSource>, node: u64) -> ControllerAdapter {
         ControllerAdapter {
             handle: Arc::clone(source),
             node_id: krabka_raft::NodeId(node),
@@ -108,7 +116,7 @@ mod tests {
 
     #[test]
     fn controller_adapter_reports_leadership_from_leader_watch() {
-        let source: Arc<dyn crate::metadata_source::MetadataSource> = Arc::new(fake_source(
+        let source: Arc<dyn MetadataSource> = Arc::new(fake_source(
             krabka_metadata::MetadataImage::new(uuid::Uuid::from_u128(1)),
             Some(krabka_raft::NodeId(7)),
         ));
@@ -130,22 +138,22 @@ mod tests {
     #[test]
     fn controller_adapter_forwards_current_image() {
         let cluster_id = uuid::Uuid::from_u128(0x5150);
-        let source: Arc<dyn crate::metadata_source::MetadataSource> = Arc::new(fake_source(
+        let source: Arc<dyn MetadataSource> = Arc::new(fake_source(
             krabka_metadata::MetadataImage::new(cluster_id),
             Some(krabka_raft::NodeId(1)),
         ));
         let adapter = adapter(&source, 1);
 
         let images = [
-            crate::leader_rebalance::ControllerLike::current_image(&adapter),
-            crate::reassignment::ReassignmentController::current_image(&adapter),
-            crate::delegation_token_cleanup::DelegationTokenController::current_image(&adapter),
-            crate::break_glass::sweep::BreakGlassController::current_image(&adapter),
+            ControllerLike::current_image(&adapter),
+            ReassignmentController::current_image(&adapter),
+            DelegationTokenController::current_image(&adapter),
+            BreakGlassController::current_image(&adapter),
         ];
         for image in images {
             assert!(image.cluster_id() == cluster_id);
         }
-        let reassignment_rx = crate::reassignment::ReassignmentController::watch_image(&adapter);
+        let reassignment_rx = ReassignmentController::watch_image(&adapter);
         assert!(reassignment_rx.borrow().cluster_id() == cluster_id);
     }
 
@@ -153,8 +161,8 @@ mod tests {
     async fn controller_adapter_forwards_submit_errors() {
         // The only site that needs a rejecting write: each trait must
         // surface the controller's error rather than swallow it into `Ok`.
-        let source: Arc<dyn crate::metadata_source::MetadataSource> = Arc::new(
-            crate::test_support::FakeMetadataSource::builder()
+        let source: Arc<dyn MetadataSource> = Arc::new(
+            FakeMetadataSource::builder()
                 .image(krabka_metadata::MetadataImage::new(uuid::Uuid::from_u128(
                     1,
                 )))
@@ -167,20 +175,10 @@ mod tests {
         let adapter = adapter(&source, 1);
 
         let results = [
-            crate::leader_rebalance::ControllerLike::submit_change(&adapter, vec![record.clone()])
-                .await,
-            crate::reassignment::ReassignmentController::submit_change(
-                &adapter,
-                vec![record.clone()],
-            )
-            .await,
-            crate::break_glass::sweep::BreakGlassController::submit_change(&adapter, vec![record])
-                .await,
-            crate::delegation_token_cleanup::DelegationTokenController::submit_mutations(
-                &adapter,
-                Vec::new(),
-            )
-            .await,
+            ControllerLike::submit_change(&adapter, vec![record.clone()]).await,
+            ReassignmentController::submit_change(&adapter, vec![record.clone()]).await,
+            BreakGlassController::submit_change(&adapter, vec![record]).await,
+            DelegationTokenController::submit_mutations(&adapter, Vec::new()).await,
         ];
         for result in results {
             assert!(result.is_err());

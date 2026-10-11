@@ -43,8 +43,9 @@ use crate::{
     codes,
     coordinator::unified::actor::{DescribeMember, DescribeView, GroupActorMessage},
     handlers::{
+        RequestContext,
         authorized_operations::{DescribedGroupRow, fill_group_authorized_operations},
-        group_version_disabled,
+        denied_topics, group_version_disabled,
     },
     task_util::{AskError, ask},
 };
@@ -184,12 +185,11 @@ impl DescribedTopics for DescribedGroup {
 pub(super) fn hide_undescribable_topics<G: DescribedTopics>(
     authorizer: &dyn Authorizer,
     image: &MetadataImage,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     groups: &mut [G],
 ) {
     let named: HashSet<&str> = groups.iter().flat_map(DescribedTopics::topics).collect();
-    let undescribable =
-        crate::handlers::denied_topics(authorizer, image, ctx, AclOperation::Describe, named);
+    let undescribable = denied_topics(authorizer, image, ctx, AclOperation::Describe, named);
     if undescribable.is_empty() {
         return;
     }
@@ -306,12 +306,17 @@ mod tests {
 
     use super::*;
     use crate::{
+        authorizer::AllowAllAuthorizer,
         broker::Broker,
         handlers::{
+            RequestContext,
             authorized_operations::authorized_operations_bits,
             group_heartbeat_test_support::{
-                acl_authorizer, image_with_group_version, set_group_version,
+                GroupFeatureLevel, acl_authorizer, image_with_group_version, set_group_version,
             },
+        },
+        test_support::{
+            AllowAclSetup, allow_acl, start_group_broker_no_audit, start_group_broker_with,
         },
     };
 
@@ -327,7 +332,7 @@ mod tests {
     async fn describe_groups(
         broker: &Broker,
         request: ConsumerGroupDescribeRequest,
-        context: &crate::handlers::RequestContext<'_>,
+        context: &RequestContext<'_>,
     ) -> ConsumerGroupDescribeResponse {
         handle(broker, request, VERSION, context)
             .await
@@ -349,9 +354,7 @@ mod tests {
         for (level, want_disabled) in cases {
             let image = match level {
                 None => MetadataImage::new(uuid::Uuid::nil()),
-                Some(level) => image_with_group_version(
-                    crate::handlers::group_heartbeat_test_support::GroupFeatureLevel(level),
-                ),
+                Some(level) => image_with_group_version(GroupFeatureLevel(level)),
             };
             assert!(
                 group_version_disabled(&image) == want_disabled,
@@ -568,12 +571,12 @@ mod tests {
     #[test]
     fn a_group_naming_an_undescribable_topic_is_replaced_by_an_error_row() {
         let mut image = image_with_topics();
-        image.apply(&MetadataRecord::V1AccessControlEntry(
-            crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+        image.apply(&MetadataRecord::V1AccessControlEntry(allow_acl(
+            AllowAclSetup {
                 operation: AclOperation::Describe,
                 ..Default::default()
-            }),
-        ));
+            },
+        )));
         let authorizer = acl_authorizer();
         request_identity!(
             (principal, peer, ctx),
@@ -630,7 +633,7 @@ mod tests {
     /// with the lookup's message, and an empty id is `INVALID_GROUP_ID`.
     #[tokio::test]
     async fn handle_answers_a_group_that_is_not_a_consumer_group() {
-        let (broker_handle, _dir) = crate::test_support::start_group_broker_with(|_| {}).await;
+        let (broker_handle, _dir) = start_group_broker_with(|_| {}).await;
         let broker = broker_handle.broker_arc_for_test();
         let _ = broker
             .group_coordinator
@@ -744,11 +747,7 @@ mod tests {
             (broker_handle, _dir, broker),
             group_controller_peer(authorizer)
         );
-        set_group_version(
-            &broker,
-            crate::handlers::group_heartbeat_test_support::GroupFeatureLevel(0),
-        )
-        .await;
+        set_group_version(&broker, GroupFeatureLevel(0)).await;
         request_identity!(
             (principal, peer, ctx),
             crate::test_support::principal("nobody"),
@@ -825,11 +824,9 @@ mod tests {
     /// an errored row) keeps the wire-default `i32::MIN` sentinel.
     #[tokio::test]
     async fn handle_fills_authorized_operations_only_on_opt_in_for_clean_rows() {
-        let authorizer = std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer);
-        let (broker_handle, _dir) = crate::test_support::start_group_broker_no_audit(
-            std::sync::Arc::clone(&authorizer) as _,
-        )
-        .await;
+        let authorizer = std::sync::Arc::new(AllowAllAuthorizer);
+        let (broker_handle, _dir) =
+            start_group_broker_no_audit(std::sync::Arc::clone(&authorizer) as _).await;
         let broker = broker_handle.broker_arc_for_test();
         let _ = broker
             .group_coordinator

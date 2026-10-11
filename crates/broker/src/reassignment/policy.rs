@@ -13,8 +13,10 @@ use krabka_verified::{
 };
 
 use crate::{
+    elr::ElrPublisher,
     freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
     heartbeat::controller_state::ControllerLivenessState,
+    metadata_epoch::{next_i32, next_leader},
 };
 
 /// Remaps a partition's `directories` vector onto a new `replicas` order. A
@@ -125,8 +127,8 @@ pub(crate) fn reassign_one(
     if let ReassignmentAction::Handoff(index) = action {
         // The verified index maps to target ∩ ISR ∩ alive.
         let new_leader = target[index];
-        let leader_epoch = crate::metadata_epoch::next_leader(pr.leader_epoch)?;
-        let partition_epoch = crate::metadata_epoch::next_i32(pr.partition_epoch)?;
+        let leader_epoch = next_leader(pr.leader_epoch)?;
+        let partition_epoch = next_i32(pr.partition_epoch)?;
         return Some(PartitionRecord {
             topic: pr.topic.clone(),
             partition: pr.partition,
@@ -149,7 +151,7 @@ pub(crate) fn reassign_one(
         isr: new_isr,
     } = completed?;
     let new_directories = remap_directories(&pr.replicas, &pr.directories, &target);
-    let partition_epoch = crate::metadata_epoch::next_i32(pr.partition_epoch)?;
+    let partition_epoch = next_i32(pr.partition_epoch)?;
     Some(PartitionRecord {
         topic: pr.topic.clone(),
         partition: pr.partition,
@@ -198,7 +200,7 @@ pub(crate) async fn compute_reassignment_progress(
             updates.push(MetadataRecord::V1Partition(next));
         }
     }
-    crate::elr::ElrPublisher::new(image).extend(&mut updates);
+    ElrPublisher::new(image).extend(&mut updates);
     updates
 }
 
@@ -214,8 +216,13 @@ mod tests {
 
     use super::*;
     use crate::{
+        config_keys::MIN_INSYNC_REPLICAS,
+        elr::state::test_records,
         reassignment::test_support::{first_partition, img, liveness},
-        test_support::{FreezeSetup, ReassignmentSetup},
+        test_support::{
+            FreezeSetup, ReassignmentSetup, broker_registration, finalize_elr_version,
+            topic_freeze_record,
+        },
     };
 
     #[test]
@@ -516,19 +523,16 @@ mod tests {
                 ..Default::default()
             }))
             .expect("the fixture holds the only reference");
-            crate::test_support::finalize_elr_version(&mut image);
+            finalize_elr_version(&mut image);
             image.apply(&MetadataRecord::V1TopicConfig(
                 krabka_metadata::TopicConfigRecord {
                     topic: "foo".into(),
-                    overrides: [(
-                        crate::config_keys::MIN_INSYNC_REPLICAS.to_string(),
-                        "3".to_string(),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    overrides: [(MIN_INSYNC_REPLICAS.to_string(), "3".to_string())]
+                        .into_iter()
+                        .collect(),
                 },
             ));
-            for record in crate::elr::state::test_records("foo", published) {
+            for record in test_records("foo", published) {
                 image.apply(&record);
             }
             let l = liveness(&[1, 2, 3]).await;
@@ -544,7 +548,7 @@ mod tests {
                         last_known_elr: vec![],
                     })
                 },
-                |value| crate::elr::state::test_records("foo", value).remove(0),
+                |value| test_records("foo", value).remove(0),
             );
             let MetadataRecord::V1PartitionElr(expected) = expected else {
                 unreachable!()
@@ -578,7 +582,7 @@ mod tests {
         });
         Arc::make_mut(&mut image).apply(&MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
             set_at_ms: 10,
-            ..crate::test_support::topic_freeze_record(FreezeSetup {
+            ..topic_freeze_record(FreezeSetup {
                 scope: "foo",
                 ..Default::default()
             })
@@ -691,7 +695,7 @@ mod tests {
                 BrokerRegistrationRecord {
                     host: String::new(),
                     port: 0,
-                    ..crate::test_support::broker_registration(krabka_raft::NodeId(n))
+                    ..broker_registration(krabka_raft::NodeId(n))
                 },
             ));
         }

@@ -27,9 +27,13 @@ use krabka_protocol::{
 use tempfile::TempDir;
 
 use crate::{
-    support,
+    cluster_lock,
     support::{
+        self,
+        client::connect_with_context,
+        produce::{SinglePartitionProduceSetup, send_batch},
         records::{batch_from_records, value_record},
+        registered_cluster, shutdown_cluster,
         topics::create_topic_request,
     },
 };
@@ -97,12 +101,8 @@ fn duplicate_of(base_offset: i64) -> PartitionProduceResponse {
 /// Create `topic` with one partition on `replicas`, the first one leading, and
 /// wait until every broker of `cluster` has it.
 async fn create_topic(cluster: &Cluster, topic: &str, replicas: &[i32]) -> WireUuid {
-    let admin = crate::support::client::connect_with_context(
-        cluster[0].1.listen_addr.to_string(),
-        None,
-        "admin client",
-    )
-    .await;
+    let admin =
+        connect_with_context(cluster[0].1.listen_addr.to_string(), None, "admin client").await;
     let response = admin
         .send(create_topic_request(support::topic_on(topic, &[replicas])))
         .await
@@ -122,16 +122,16 @@ async fn produce(
     topic_id: WireUuid,
     batch: RecordBatch,
 ) -> PartitionProduceResponse {
-    let client = crate::support::client::connect_with_context(
-        broker.listen_addr().to_string(),
-        None,
-        "producer client",
-    )
-    .await;
-    let response = crate::support::produce::send_batch(
+    let client =
+        connect_with_context(broker.listen_addr().to_string(), None, "producer client").await;
+    let response = send_batch(
         &client,
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {topic: topic.to_owned(), topic_id, ..crate::support::produce::SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()},
+        SinglePartitionProduceSetup {
+            topic: topic.to_owned(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
+        },
     )
     .await;
     response.responses[0].partition_responses[0].clone()
@@ -190,8 +190,8 @@ async fn batch_base_offsets(
 /// first append and must not append the batch a second time.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_leader_elected_by_a_controlled_shutdown_answers_a_replicated_retry_as_a_duplicate() {
-    let _g = crate::cluster_lock().lock().await;
-    let mut cluster = crate::support::registered_cluster(3).await;
+    let _g = cluster_lock().lock().await;
+    let mut cluster = registered_cluster(3).await;
 
     // Do not stop the controller leader: it holds the only replica of an
     // internal partition, which a controlled shutdown cannot move.
@@ -259,7 +259,7 @@ async fn a_leader_elected_by_a_controlled_shutdown_answers_a_replicated_retry_as
             )
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// A broker that leads, follows, and leads again. While it follows, it
@@ -268,8 +268,8 @@ async fn a_leader_elected_by_a_controlled_shutdown_answers_a_replicated_retry_as
 /// sequence: it is not out of order against the sequence of the first term.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_leader_elected_again_continues_from_the_batches_it_replicated() {
-    let _g = crate::cluster_lock().lock().await;
-    let cluster = crate::support::registered_cluster(3).await;
+    let _g = cluster_lock().lock().await;
+    let cluster = registered_cluster(3).await;
     let topic = "idempotent-reelection";
     let topic_id = create_topic(&cluster, topic, &[1, 2, 3]).await;
     cluster[0]
@@ -298,5 +298,5 @@ async fn a_leader_elected_again_continues_from_the_batches_it_replicated() {
             )
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

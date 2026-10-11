@@ -8,8 +8,8 @@
 use assert2::{assert, check};
 
 use crate::support::{
-    BAD_SIGNATURE, KEY_ID, NO_APPROVAL, PRINCIPAL, TOPIC, cli, cluster, set_signed_freeze,
-    signed_as,
+    BAD_SIGNATURE, KEY_ID, NO_APPROVAL, PRINCIPAL, TOPIC, cli, cluster,
+    frozen_cluster_with_stranger, set_signed_freeze, signed_as,
 };
 
 /// A thaw is the dangerous direction. A signed one that names no approved
@@ -43,8 +43,7 @@ async fn a_thaw_with_no_approval_reports_that_an_approval_is_missing() {
 /// refusal, so a runbook sends them to their key material.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_signature_the_broker_refuses_reports_a_signature_failure() {
-    let (_broker, _dir, bootstrap, key, stranger) =
-        crate::support::frozen_cluster_with_stranger().await;
+    let (_broker, _dir, bootstrap, key, stranger) = frozen_cluster_with_stranger().await;
 
     let proposal = uuid::Uuid::new_v4().to_string();
     let clear = vec!["freeze", "clear", "--topic", TOPIC, "--proposal", &proposal];

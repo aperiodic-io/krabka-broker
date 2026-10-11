@@ -17,7 +17,8 @@ use tokio::sync::Notify;
 
 use super::storage::{flag_storage_failure, lock_log, run_log_mutation};
 use crate::{
-    log_dir_status::LogDirRegistry, producer_state::ProducerState, replica_state::ReplicaState,
+    error::BrokerError, log_dir_status::LogDirRegistry, producer_state::ProducerState,
+    replica_state::ReplicaState, wal::SharedWal,
 };
 
 pub(super) async fn handle_replicate(
@@ -26,7 +27,7 @@ pub(super) async fn handle_replicate(
     storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
     state: (&ProducerState, &tokio::sync::Mutex<ReplicaState>),
     mut batch: krabka_protocol::records::RecordBatch,
-    ack: tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>,
+    ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
 ) {
     let (producer_state, replica_state) = state;
@@ -70,7 +71,7 @@ pub(super) async fn handle_replicate(
             }
             guard
                 .append_at(&mut batch, Offset(offset))
-                .map_err(crate::error::BrokerError::from)?;
+                .map_err(BrokerError::from)?;
             Ok(control_producer.and_then(|producer_id| guard.producer_state_entry(producer_id)))
         },
         "replicate task panicked",
@@ -105,7 +106,7 @@ pub(super) async fn handle_replicate_verbatim(
     log_dir_status: &LogDirRegistry,
     batch: krabka_log::VerbatimBatch,
     base_offset: Offset,
-    ack: tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>,
+    ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
 ) {
     let log_for_blocking = Arc::clone(log);
@@ -114,7 +115,7 @@ pub(super) async fn handle_replicate_verbatim(
             lock_log(&log_for_blocking)
                 .append_verbatim_at(&batch, base_offset)
                 .map(|_| ())
-                .map_err(crate::error::BrokerError::from)
+                .map_err(BrokerError::from)
         },
         "replicate verbatim task panicked",
         (log_dir, log_dir_status),
@@ -138,9 +139,9 @@ pub(super) async fn handle_log_reset(
     log: &Arc<Mutex<Log>>,
     storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
     replica_state: &tokio::sync::Mutex<ReplicaState>,
-    wal: Option<&crate::wal::SharedWal>,
+    wal: Option<&SharedWal>,
     mutation: ResetMutation,
-    ack: tokio::sync::oneshot::Sender<Result<(), crate::error::BrokerError>>,
+    ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
 ) -> bool {
     let panic_context = match mutation {
         ResetMutation::Truncate(_) => "truncate task panicked",
@@ -154,7 +155,7 @@ pub(super) async fn handle_log_reset(
                 ResetMutation::Truncate(offset) => log.truncate_to(offset),
                 ResetMutation::Reset(offset) => log.reset_to(offset),
             }
-            .map_err(crate::error::BrokerError::from)
+            .map_err(BrokerError::from)
         },
         panic_context,
         storage_status,
@@ -166,9 +167,9 @@ pub(super) async fn handle_log_reset(
 pub(super) async fn handle_trim(
     log: &Arc<Mutex<Log>>,
     storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
-    wal: Option<&crate::wal::SharedWal>,
+    wal: Option<&SharedWal>,
     new_start: Offset,
-    ack: tokio::sync::oneshot::Sender<Result<Offset, crate::error::BrokerError>>,
+    ack: tokio::sync::oneshot::Sender<Result<Offset, BrokerError>>,
 ) {
     let result = if let Some(wal) = wal {
         // The WAL is the first durable trim step. Include an already-advanced
@@ -190,7 +191,7 @@ pub(super) async fn handle_trim(
             move || {
                 lock_log(&log_for_blocking)
                     .trim_to_offset(new_start)
-                    .map_err(crate::error::BrokerError::from)
+                    .map_err(BrokerError::from)
             },
             "trim_to_offset task panicked",
             storage_status,
@@ -205,7 +206,7 @@ async fn reconcile_trim_frontiers(
     storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
     requested: Offset,
     wal_start: Offset,
-) -> Result<Offset, crate::error::BrokerError> {
+) -> Result<Offset, BrokerError> {
     use krabka_verified::DeleteRecordsTrimApplication::{
         Complete, RejectMalformed, TrimLocal, TrimWal,
     };
@@ -220,7 +221,7 @@ async fn reconcile_trim_frontiers(
                 move || {
                     lock_log(&log_for_blocking)
                         .trim_to_offset(Offset(frontier))
-                        .map_err(crate::error::BrokerError::from)
+                        .map_err(BrokerError::from)
                 },
                 "trim reconciliation task panicked",
                 storage_status,
@@ -229,17 +230,17 @@ async fn reconcile_trim_frontiers(
             if local_result == Offset(frontier) {
                 Ok(local_result)
             } else {
-                Err(crate::error::BrokerError::Replication(format!(
+                Err(BrokerError::Replication(format!(
                     "trim frontiers diverged: WAL {frontier}, local {}",
                     local_result.0
                 )))
             }
         }
-        TrimWal { frontier } => Err(crate::error::BrokerError::Replication(format!(
+        TrimWal { frontier } => Err(BrokerError::Replication(format!(
             "WAL trim stopped at {} before required frontier {frontier}",
             wal_start.0
         ))),
-        RejectMalformed => Err(crate::error::BrokerError::Replication(format!(
+        RejectMalformed => Err(BrokerError::Replication(format!(
             "invalid trim frontiers: requested {}, WAL {}, local {}",
             requested.0, wal_start.0, local_start.0
         ))),
@@ -248,10 +249,10 @@ async fn reconcile_trim_frontiers(
 
 /// Publish a successful reset to the WAL cache and replica watermark, then ack.
 async fn finish_log_reset(
-    result: Result<(), crate::error::BrokerError>,
+    result: Result<(), BrokerError>,
     log: &Mutex<Log>,
     replica_state: &tokio::sync::Mutex<ReplicaState>,
-    wal: Option<&crate::wal::SharedWal>,
+    wal: Option<&SharedWal>,
     ack: super::storage::MaintenanceAck,
 ) -> bool {
     let succeeded = result.is_ok();

@@ -93,13 +93,14 @@ mod tests {
     use krabka_units::secs;
 
     use super::*;
+    use crate::test_support::localhost_ecdsa_pair;
 
     fn install_provider() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
 
     fn generated_pair() -> (String, String) {
-        let (cert, key) = crate::test_support::localhost_ecdsa_pair();
+        let (cert, key) = localhost_ecdsa_pair();
         (cert.pem(), key.serialize_pem())
     }
 

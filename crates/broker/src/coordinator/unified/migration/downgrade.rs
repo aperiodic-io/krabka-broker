@@ -14,7 +14,7 @@ use super::assignment::{consumer_assignment_blob, embedded_protocol_version};
 use crate::coordinator::unified::{
     actor::{GroupTombstone, PendingRecords, classic_group_metadata_record},
     classic_state::{ClassicGroup as ClassicState, Member as ClassicMember, select_protocol},
-    consumer_state::GroupState as ConsumerState,
+    consumer_state::{GroupState as ConsumerState, MemberState},
     reconciler::ReconcileInput,
 };
 
@@ -40,10 +40,7 @@ pub(crate) fn convert_consumer_to_classic(
 ) -> ClassicState {
     let mut classic = ClassicState::new(state.group_id.clone());
     classic.protocol_type = Some("consumer".into());
-    let mut members: Vec<(
-        &String,
-        &crate::coordinator::unified::consumer_state::MemberState,
-    )> = state
+    let mut members: Vec<(&String, &MemberState)> = state
         .members
         .iter()
         .filter(|(member_id, _)| !leaving.contains(member_id))
@@ -167,7 +164,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::coordinator::unified::persistence_next_gen::NextGenKey;
+    use crate::coordinator::unified::persistence_next_gen::{NextGenKey, encode_key};
 
     #[test]
     fn downgrade_re_expresses_members_as_classic() {
@@ -261,9 +258,7 @@ mod tests {
         // Kafka's `convertToClassicGroup`: the group's tombstones in the
         // order of `ConsumerGroup.createGroupTombstoneRecords`, the deprecated
         // k4 record always among them, then the classic k2 value.
-        let ng = |key: NextGenKey| {
-            crate::coordinator::unified::persistence_next_gen::encode_key(&key).unwrap()
-        };
+        let ng = |key: NextGenKey| encode_key(&key).unwrap();
         let keys: Vec<_> = first
             .records
             .iter()

@@ -9,9 +9,10 @@ use krabka_protocol::owned::end_txn_request::EndTxnRequest;
 
 use super::state_table::{EndTxnDecision, end_txn_decision};
 use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult},
+    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
     codes,
-    txn::state::TxnEntry,
+    handlers::RequestContext,
+    txn::{coordinator::TxnCoordinator, state::TxnEntry, version::TxnVersion},
 };
 
 pub(super) enum EndTxnValidation {
@@ -26,12 +27,12 @@ pub(super) enum EndTxnValidation {
 }
 
 pub(super) async fn validate_end_txn(
-    coordinator: &crate::txn::coordinator::TxnCoordinator,
-    authorizer: &dyn crate::authorizer::Authorizer,
+    coordinator: &TxnCoordinator,
+    authorizer: &dyn Authorizer,
     image: &MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     request: &EndTxnRequest,
-    (client_version, trunk_rules): (crate::txn::version::TxnVersion, bool),
+    (client_version, trunk_rules): (TxnVersion, bool),
 ) -> Result<EndTxnValidation, i16> {
     let transactional_id = request.transactional_id.as_str();
     let authorization = AuthorizationRequest {

@@ -9,11 +9,19 @@ use tempfile::tempdir;
 use super::*;
 use crate::{
     config::LogConfig,
-    log::test_support::{NO_LIMIT, sample_batch, test_batch_at, test_log, tiny_segments},
+    log::{
+        RawRead,
+        test_support::{
+            NO_LIMIT, append_samples, configured_test_log, sample_batch, test_batch_at, test_log,
+            tiny_segments,
+        },
+    },
+    segment::Segment,
+    test_support::{RecordedAdvice, segmented_log},
 };
 
 /// Read a complete raw response and check every byte against the written wire image.
-fn check_raw_bytes(log: &Log, wire: &[u8]) -> crate::log::RawRead {
+fn check_raw_bytes(log: &Log, wire: &[u8]) -> RawRead {
     let log_end = log.log_end_offset();
     let read = log.read_raw(Offset(0), log_end, mebibytes(10)).unwrap();
     assert2::assert!(read.start_offset == Offset(0));
@@ -34,7 +42,7 @@ fn batch_header_floor_is_the_protocol_header_length() {
 #[test]
 fn a_raw_fetch_outside_the_readable_range_is_refused_or_empty() {
     let (_dir, mut log) = test_log();
-    crate::log::test_support::append_samples(&mut log, 4, 2);
+    append_samples(&mut log, 4, 2);
     log.set_log_start_offset(Offset(2)).expect("set log start");
 
     let below = log.read_raw(Offset(1), Offset(99), mebibytes(1));
@@ -64,8 +72,8 @@ fn a_raw_fetch_outside_the_readable_range_is_refused_or_empty() {
 fn a_fetch_across_the_seal_joins_its_chunks_in_order() {
     let dir = tempdir().unwrap();
     // A small segment cap so the appends roll and the fetch has to cross.
-    let mut log = crate::test_support::segmented_log(dir.path(), kibibytes(1));
-    crate::log::test_support::append_samples(&mut log, 40, 2);
+    let mut log = segmented_log(dir.path(), kibibytes(1));
+    append_samples(&mut log, 40, 2);
     check!(!log.segments.is_empty(), "the appends should have rolled");
 
     let end = log.log_end_offset();
@@ -118,7 +126,7 @@ fn log_read_raw_spans_multiple_segments() {
     // segments) never reaches.
     let dir = tempdir().unwrap();
     // tiny: roll after roughly each batch
-    let mut log = crate::test_support::segmented_log(dir.path(), bytes(100));
+    let mut log = segmented_log(dir.path(), bytes(100));
 
     let n: i64 = 6;
     let mut wire = bytes::BytesMut::new();
@@ -248,7 +256,7 @@ fn seam_log() -> (tempfile::TempDir, Log, usize) {
         .segments
         .iter()
         .chain(log.active.as_ref())
-        .map(crate::segment::Segment::base_offset)
+        .map(Segment::base_offset)
         .collect();
     assert2::assert!(bases == vec![Offset(0), Offset(9), Offset(11)]);
     (dir, log, small)
@@ -414,7 +422,7 @@ fn read_raw_multi_segment_budget_and_limit() {
     let dir = TempDir::new().unwrap();
     let cfg = tiny_segments();
     let mut log = Log::open(dir.path(), cfg).unwrap();
-    crate::log::test_support::append_samples(&mut log, 3, 1);
+    append_samples(&mut log, 3, 1);
 
     let full = log.read_raw(Offset(0), Offset(3), mebibytes(1)).unwrap();
     assert2::assert!(full.start_offset == Offset(0));
@@ -445,7 +453,7 @@ fn a_small_budget_preserves_unindexed_records_before_a_segment_seam() {
         ..LogConfig::default()
     };
     let mut log = Log::open(dir.path(), config).unwrap();
-    crate::log::test_support::append_samples(&mut log, 8, 1);
+    append_samples(&mut log, 8, 1);
     check!(!log.segments.is_empty());
     let end = log.log_end_offset();
     let mut actual = Vec::new();
@@ -498,13 +506,13 @@ fn configured_read_ahead_max_reaches_both_verbatim_reads() {
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (read_ahead_max, hinted) in [(0, 1_000), (100, 1_100)] {
-        let (_dir, mut log) = crate::log::test_support::configured_test_log(LogConfig {
+        let (_dir, mut log) = configured_test_log(LogConfig {
             read_ahead_max: ByteSize::from_bytes(read_ahead_max),
             ..LogConfig::default()
         });
-        crate::log::test_support::append_samples(&mut log, 40, 1);
+        append_samples(&mut log, 40, 1);
         check!(log.active.as_ref().unwrap().size().bytes_u64() > 2 * budget.bytes_u64());
-        let advice = std::sync::Arc::new(crate::test_support::RecordedAdvice::default());
+        let advice = std::sync::Arc::new(RecordedAdvice::default());
         log.test_set_io(advice.clone());
         let end = log.log_end_offset();
 

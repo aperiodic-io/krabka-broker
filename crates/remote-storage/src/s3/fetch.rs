@@ -92,9 +92,11 @@ mod tests {
     use super::{IndexType, RemoteStorageError, WormError};
     use crate::{
         s3::test_support::{
-            counting_rsm, rsm, sample_metadata, seeded_blocking, stamped_metadata, worm_rsm,
+            SeededCopySetup, StampedMetadataSetup, WormAccess, counting_rsm, rsm, sample_metadata,
+            seeded_blocking, stamped_metadata, worm_rsm,
         },
         storage_manager::RemoteStorageManager,
+        test_support::{TransactionIndex, check_sample_indexes},
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -126,7 +128,7 @@ mod tests {
         let store = rsm(None);
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup::without_transaction_index(),
+            SeededCopySetup::without_transaction_index(),
             move |store, md| {
                 // Inclusive [2, 5] -> "2345".
                 assert!(store.fetch_log_segment(&md, 2, Some(5)).unwrap() == b"2345");
@@ -142,7 +144,7 @@ mod tests {
         let store = rsm(None);
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup::without_transaction_index(),
+            SeededCopySetup::without_transaction_index(),
             move |store, md| {
                 // Inclusive [3, 3] is a valid single-byte range -> "3" (the guard
                 // is `end < start_position`, not `<=`/`==`).
@@ -158,12 +160,12 @@ mod tests {
         let md = sample_metadata(uuid::Uuid::from_u128(11));
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup {
+            SeededCopySetup {
                 metadata: md,
                 ..Default::default()
             },
             move |store, md| {
-                crate::test_support::check_sample_indexes(&store, &md);
+                check_sample_indexes(&store, &md);
             },
         )
         .await;
@@ -186,9 +188,9 @@ mod tests {
         let md = sample_metadata(uuid::Uuid::from_u128(12));
         seeded_blocking(
             store,
-            crate::s3::test_support::SeededCopySetup {
+            SeededCopySetup {
                 metadata: md,
-                transaction_index: crate::test_support::TransactionIndex::Omitted,
+                transaction_index: TransactionIndex::Omitted,
             },
             move |store, md| {
                 let err = store.fetch_index(&md, IndexType::Transaction).unwrap_err();
@@ -212,17 +214,9 @@ mod tests {
         let backing: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         let readable_keys = TempDir::new().unwrap();
         let sealed_keys = TempDir::new().unwrap();
-        let readable = worm_rsm(
-            Arc::clone(&backing),
-            &readable_keys,
-            crate::s3::test_support::WormAccess::ReadWrite,
-        );
-        let write_only = worm_rsm(
-            backing,
-            &sealed_keys,
-            crate::s3::test_support::WormAccess::WriteOnly,
-        );
-        let md = stamped_metadata(crate::s3::test_support::StampedMetadataSetup {
+        let readable = worm_rsm(Arc::clone(&backing), &readable_keys, WormAccess::ReadWrite);
+        let write_only = worm_rsm(backing, &sealed_keys, WormAccess::WriteOnly);
+        let md = stamped_metadata(StampedMetadataSetup {
             segment_id: uuid::Uuid::from_u128(56),
             ..Default::default()
         });
@@ -230,9 +224,9 @@ mod tests {
         let readable_md = md.clone();
         seeded_blocking(
             readable,
-            crate::s3::test_support::SeededCopySetup {
+            SeededCopySetup {
                 metadata: readable_md,
-                transaction_index: crate::test_support::TransactionIndex::Omitted,
+                transaction_index: TransactionIndex::Omitted,
             },
             move |readable, readable_md| {
                 check!(readable.fetch_log_segment(&readable_md, 0, None).unwrap() == b"0123456789");

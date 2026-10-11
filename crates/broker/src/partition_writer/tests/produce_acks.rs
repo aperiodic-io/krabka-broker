@@ -11,14 +11,16 @@ use super::*;
 use crate::{
     partition::{ProduceData, ProduceJob},
     partition_writer::test_support::{GatedWal, sample_batch, test_sequencer},
+    test_support::{EmptyPayloadBatchSetup, RecordCount},
+    wal::SharedWal,
 };
 
 async fn writer_after_first_append() -> DefaultWriter {
     let fixture = default_writer();
     let ack = queue_batch(
         &fixture.sender,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup {
-            count: crate::test_support::RecordCount(3),
+        sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(3),
         }),
     )
     .await;
@@ -40,8 +42,8 @@ async fn writer_appends_and_acks() {
     // Second append assigns offset 3.
     let ack_rx = queue_batch(
         &tx,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup {
-            count: crate::test_support::RecordCount(2),
+        sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(2),
         }),
     )
     .await;
@@ -66,15 +68,11 @@ async fn writer_groups_queued_produces_up_to_configured_cap() {
     let log = open_default_log(dir.path());
     let (sync_started_tx, sync_started_rx) = oneshot::channel();
     let (_release_sync_tx, release_sync_rx) = oneshot::channel();
-    let wal: crate::wal::SharedWal = Arc::new(GatedWal::new(sync_started_tx, release_sync_rx));
+    let wal: SharedWal = Arc::new(GatedWal::new(sync_started_tx, release_sync_rx));
     let (tx, rx) = mpsc::channel(3);
 
     for _ in 0..3 {
-        let _ack_rx = queue_batch(
-            &tx,
-            sample_batch(crate::test_support::EmptyPayloadBatchSetup::default()),
-        )
-        .await;
+        let _ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
     }
 
     let writer = spawn_writer(
@@ -106,7 +104,7 @@ async fn durable_sync_ack_waits_for_diskless_wal() {
     let log = open_default_log(dir.path());
     let (sync_started_tx, sync_started_rx) = oneshot::channel();
     let (release_sync_tx, release_sync_rx) = oneshot::channel();
-    let wal: crate::wal::SharedWal = Arc::new(GatedWal::new(sync_started_tx, release_sync_rx));
+    let wal: SharedWal = Arc::new(GatedWal::new(sync_started_tx, release_sync_rx));
     let (tx, rx) = mpsc::channel(2);
     let writer = spawn_writer(
         dir.path(),
@@ -120,11 +118,7 @@ async fn durable_sync_ack_waits_for_diskless_wal() {
         },
     );
 
-    let append_ack_rx = queue_batch(
-        &tx,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup::default()),
-    )
-    .await;
+    let append_ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
     assert!(
         append_ack_rx
             .await
@@ -186,7 +180,7 @@ async fn writer_appends_verbatim_byte_exact() {
     } = default_writer();
 
     // "Producer" batch with a bogus base_offset + epoch the log overwrites.
-    let mut producer = sample_batch(crate::test_support::EmptyPayloadBatchSetup::default());
+    let mut producer = sample_batch(EmptyPayloadBatchSetup::default());
     producer.base_offset = 555;
     producer.partition_leader_epoch = -1;
     producer.max_timestamp = 1_234;
@@ -246,11 +240,7 @@ async fn writer_fires_notify_after_append() {
     let waiter = notify.notified();
     tokio::pin!(waiter);
 
-    let _ack_rx = queue_batch(
-        &tx,
-        sample_batch(crate::test_support::EmptyPayloadBatchSetup::default()),
-    )
-    .await;
+    let _ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
 
     // Should wake within a short timeout.
     tokio::time::timeout(std::time::Duration::from_secs(1), waiter)

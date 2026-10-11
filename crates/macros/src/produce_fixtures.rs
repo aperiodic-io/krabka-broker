@@ -2,8 +2,10 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::fixtures::named_items;
+
 pub(crate) fn single_partition_produce(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
             #[derive(Clone, Copy)]
             pub(crate) struct WireAcknowledgements(pub i16);

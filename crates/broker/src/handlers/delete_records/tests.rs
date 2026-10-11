@@ -17,10 +17,30 @@ use krabka_protocol::owned::{
 
 use super::*;
 use crate::{
-    broker::Broker,
+    authorizer::AllowAllAuthorizer,
+    broker::{Broker, BrokerHandle},
     codes,
-    handlers::{delete_records::test_support::gated_config, test_support::CreateTopicSetup},
-    test_support::{DenyAll, KafkaErrorCode, peer, principal},
+    config_keys::{CLEANUP_POLICY, DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, parse_cleanup_policy},
+    coordinator::bootstrap::OFFSETS_TOPIC,
+    delivery::test_support::batch_at as delivery_batch_at,
+    fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
+    freeze::resolve::resolve_topic_freeze,
+    handlers::{
+        RequestContext,
+        create_topics::handle as create_topics_handle,
+        delete_records::test_support::gated_config,
+        fetch::handle as fetch_handle,
+        test_support::{CreateTopicSetup, configured_topic_request},
+    },
+    heartbeat::fencing::{RegistrationChange, registration_change},
+    partition::Partition,
+    replica_state::ReplicaState,
+    share_coordinator::bootstrap::TOPIC as SHARE_COORDINATOR_TOPIC,
+    test_support::{
+        DenyAll, KafkaErrorCode, append_partition_batch, broker_registration, encode_request, peer,
+        principal, start_broker_no_audit_with,
+    },
+    txn::bootstrap::TOPIC,
 };
 
 const VERSION: i16 = 2;
@@ -65,7 +85,7 @@ use crate::test_support::start_broker_with_authorizer_no_audit as start_broker;
 async fn drive(
     broker: &Broker,
     req: &DeleteRecordsRequest,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> DeleteRecordsResponse {
     handle(broker, req.clone(), VERSION, ctx)
         .await
@@ -74,7 +94,7 @@ async fn drive(
 
 async fn drive_trim(
     broker: &Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     setup: TrimRequestSetup<'_>,
 ) -> DeleteRecordsResponse {
     drive(broker, &request(setup), ctx).await
@@ -83,7 +103,7 @@ async fn drive_trim(
 /// Compare the entire response with independent caller-specified expected rows.
 async fn check_trim_response(
     broker: &Broker,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     request: &DeleteRecordsRequest,
     expected: ExpectedTrimRowsSetup<'_>,
 ) {
@@ -106,7 +126,7 @@ struct RefusedTrimSetup<'a> {
 
 async fn check_refused_trim(
     broker: &Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     setup: RefusedTrimSetup<'_>,
 ) {
     let response = drive_trim(
@@ -141,8 +161,8 @@ struct TrimFrontierSetup<'a> {
 
 async fn check_trim_frontier(
     broker: &Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
-    partition: &crate::partition::Partition,
+    ctx: &RequestContext<'_>,
+    partition: &Partition,
     setup: TrimFrontierSetup<'_>,
 ) {
     let response = drive_trim(
@@ -257,7 +277,7 @@ const PENDING_MS: i64 = 4_100_000_000_000;
 fn batch_at(activation_ms: i64, leader_epoch: i32) -> krabka_protocol::records::RecordBatch {
     krabka_protocol::records::RecordBatch {
         partition_leader_epoch: leader_epoch,
-        ..crate::delivery::test_support::batch_at(activation_ms)
+        ..delivery_batch_at(activation_ms)
     }
 }
 
@@ -279,8 +299,8 @@ struct ConfiguredPendingBatchSetup<'a> {
 // that has come due and one that has not. Two records per batch puts the
 // log end offset at 4, and a scheduled topic's delivery watermark at 2.
 async fn topic_holding_a_pending_batch(
-    broker_handle: &crate::broker::BrokerHandle,
-    ctx: &crate::handlers::RequestContext<'_>,
+    broker_handle: &BrokerHandle,
+    ctx: &RequestContext<'_>,
     setup: PendingBatchTopicSetup<'_>,
 ) {
     let PendingBatchTopicSetup {
@@ -288,7 +308,7 @@ async fn topic_holding_a_pending_batch(
         delivery_mode,
     } = setup;
     let configs: Vec<(&str, &str)> = delivery_mode
-        .map(|mode| (crate::config_keys::DELIVERY_MODE, mode))
+        .map(|mode| (DELIVERY_MODE, mode))
         .into_iter()
         .collect();
     topic_with_configs_holding_a_pending_batch(
@@ -306,8 +326,8 @@ async fn topic_holding_a_pending_batch(
 // waits until the delivery mode and the cleanup policy reach the partition
 // log before it appends.
 async fn topic_with_configs_holding_a_pending_batch(
-    broker_handle: &crate::broker::BrokerHandle,
-    ctx: &crate::handlers::RequestContext<'_>,
+    broker_handle: &BrokerHandle,
+    ctx: &RequestContext<'_>,
     setup: ConfiguredPendingBatchSetup<'_>,
 ) {
     use krabka_protocol::owned::create_topics_response;
@@ -321,24 +341,24 @@ async fn topic_with_configs_holding_a_pending_batch(
             .find(|(name, _)| *name == key)
             .map(|(_, value)| *value)
     };
-    let delivery_mode = config(crate::config_keys::DELIVERY_MODE);
-    let expected_cleanup = config(crate::config_keys::CLEANUP_POLICY)
+    let delivery_mode = config(DELIVERY_MODE);
+    let expected_cleanup = config(CLEANUP_POLICY)
         .map_or_else(krabka_log::CleanupPolicy::default, |policy| {
-            crate::config_keys::parse_cleanup_policy(policy).expect("a valid cleanup.policy")
+            parse_cleanup_policy(policy).expect("a valid cleanup.policy")
         });
     let version = create_topics_response::MAX_VERSION;
-    let create = crate::handlers::test_support::configured_topic_request(CreateTopicSetup {
+    let create = configured_topic_request(CreateTopicSetup {
         topic,
         configs,
         ..Default::default()
     });
-    let created = crate::handlers::create_topics::handle(&broker, create, version, ctx)
+    let created = create_topics_handle(&broker, create, version, ctx)
         .await
         .expect("CreateTopics");
     assert!(created.topics[0].error_code == codes::NONE, "{created:?}");
     broker_handle.wait_until_partition_present(topic, 0).await;
 
-    let expected_policy = if delivery_mode == Some(crate::config_keys::DELIVERY_MODE_SCHEDULED) {
+    let expected_policy = if delivery_mode == Some(DELIVERY_MODE_SCHEDULED) {
         krabka_log::DeliveryPolicy::Scheduled
     } else {
         krabka_log::DeliveryPolicy::Immediate
@@ -383,7 +403,7 @@ async fn a_trim_stops_at_the_delivery_watermark_of_a_scheduled_topic() {
         ("delete-records-immediate-delivery", None, 4),
         (
             "delete-records-scheduled-delivery",
-            Some(crate::config_keys::DELIVERY_MODE_SCHEDULED),
+            Some(DELIVERY_MODE_SCHEDULED),
             2,
         ),
     ];
@@ -563,9 +583,7 @@ async fn a_frozen_topic_refuses_a_trim() {
         .await
         .expect("the freeze record commits");
     broker_handle
-        .wait_for_image(|image| {
-            crate::freeze::resolve::resolve_topic_freeze(image, topic).is_some()
-        })
+        .wait_for_image(|image| resolve_topic_freeze(image, topic).is_some())
         .await;
 
     check_refused_trim(
@@ -640,7 +658,7 @@ async fn a_compact_only_topic_refuses_a_trim() {
             &ctx,
             ConfiguredPendingBatchSetup {
                 topic,
-                configs: &[(crate::config_keys::CLEANUP_POLICY, policy)],
+                configs: &[(CLEANUP_POLICY, policy)],
             },
         )
         .await;
@@ -761,20 +779,10 @@ async fn an_internal_topic_refuses_a_trim() {
     topic_holding_a_pending_batch(&broker_handle, &ctx, PendingBatchTopicSetup::default()).await;
 
     let cases = [
+        (OFFSETS_TOPIC, -1_i64, codes::INVALID_TOPIC_EXCEPTION, 0_i64),
+        (TOPIC, -1, codes::INVALID_TOPIC_EXCEPTION, 0),
         (
-            crate::coordinator::bootstrap::OFFSETS_TOPIC,
-            -1_i64,
-            codes::INVALID_TOPIC_EXCEPTION,
-            0_i64,
-        ),
-        (
-            crate::txn::bootstrap::TOPIC,
-            -1,
-            codes::INVALID_TOPIC_EXCEPTION,
-            0,
-        ),
-        (
-            crate::share_coordinator::bootstrap::TOPIC,
+            SHARE_COORDINATOR_TOPIC,
             -1,
             codes::INVALID_TOPIC_EXCEPTION,
             0,
@@ -820,7 +828,7 @@ async fn an_internal_topic_refuses_a_trim() {
         &broker,
         &test_context(&admin, &peer),
         TrimRequestSetup {
-            topic: crate::coordinator::bootstrap::OFFSETS_TOPIC,
+            topic: OFFSETS_TOPIC,
             partitions: &[(PartitionIndex(missing), Offset(-1))],
             ..Default::default()
         },
@@ -848,10 +856,7 @@ const APPENDED: i64 = 10;
 /// Create `topic` with one partition that this broker leads and that the live,
 /// registered broker [`FOLLOWER`] follows, append [`APPENDED`] records, and
 /// fetch them as the follower so the high watermark reaches the log end.
-async fn replicated_topic(
-    broker_handle: &crate::broker::BrokerHandle,
-    topic: &str,
-) -> Arc<crate::partition::Partition> {
+async fn replicated_topic(broker_handle: &BrokerHandle, topic: &str) -> Arc<Partition> {
     use krabka_metadata::{MetadataRecord, PartitionRecord, TopicRecord};
 
     let broker = broker_handle.broker_arc_for_test();
@@ -911,19 +916,19 @@ async fn replicated_topic(
             .collect(),
         ..Default::default()
     };
-    crate::test_support::append_partition_batch(&partition, &mut batch);
+    append_partition_batch(&partition, &mut batch);
     follower_fetch(&broker, topic, APPENDED, 0).await;
     assert!(partition.high_watermark().await == krabka_log::Offset(APPENDED));
     partition
 }
 
 /// Register [`FOLLOWER`] as a broker in the controller's image.
-async fn register_follower(broker_handle: &crate::broker::BrokerHandle) {
+async fn register_follower(broker_handle: &BrokerHandle) {
     broker_handle
         .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1BrokerRegistration(
             krabka_metadata::BrokerRegistrationRecord {
                 broker_epoch: -1,
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(FOLLOWER))
+                ..broker_registration(krabka_raft::NodeId(FOLLOWER))
             },
         ))
         .await
@@ -932,13 +937,13 @@ async fn register_follower(broker_handle: &crate::broker::BrokerHandle) {
 
 /// Fence [`FOLLOWER`] the way the controller does: its heartbeat session is
 /// fenced, and its registration says so.
-async fn fence_follower(broker_handle: &crate::broker::BrokerHandle) {
+async fn fence_follower(broker_handle: &BrokerHandle) {
     let broker = broker_handle.broker_arc_for_test();
     broker.liveness.apply_fencing(FOLLOWER, true, true).await;
-    let fence = crate::heartbeat::fencing::registration_change(
+    let fence = registration_change(
         &broker.controller.current_image(),
         krabka_raft::NodeId(FOLLOWER),
-        crate::heartbeat::fencing::RegistrationChange::FENCE,
+        RegistrationChange::FENCE,
     )
     .expect("the follower is registered and unfenced");
     broker_handle
@@ -958,8 +963,8 @@ async fn follower_fetch(broker: &Broker, topic: &str, fetch_offset: i64, log_sta
         max_wait_ms: 0,
         min_bytes: 0,
         max_bytes: 1_048_576,
-        session_id: crate::fetch_session::INVALID_SESSION_ID,
-        session_epoch: crate::fetch_session::FINAL_EPOCH,
+        session_id: INVALID_SESSION_ID,
+        session_epoch: FINAL_EPOCH,
         topics: vec![FetchTopic {
             topic: topic.to_owned(),
             partitions: vec![FetchPartition {
@@ -978,15 +983,9 @@ async fn follower_fetch(broker: &Broker, topic: &str, fetch_offset: i64, log_sta
         principal("replicator"),
         client_id = "replica-2"
     );
-    let (response, _) = crate::handlers::fetch::handle(
-        broker,
-        VERSION,
-        1,
-        &crate::test_support::encode_request(&request, VERSION),
-        &ctx,
-    )
-    .await
-    .expect("follower fetch");
+    let (response, _) = fetch_handle(broker, VERSION, 1, &encode_request(&request, VERSION), &ctx)
+        .await
+        .expect("follower fetch");
     assert!(
         response.responses[0].partitions[0].error_code == codes::NONE,
         "{response:?}"
@@ -1021,8 +1020,8 @@ async fn delete_to(broker: &Broker, setup: DeleteToSetup<'_>) -> Vec<DeleteRecor
 /// on a fenced broker is not live and does not hold the row.
 #[tokio::test]
 async fn a_trim_waits_for_every_live_follower_to_reach_the_trim_point() {
-    let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
-        cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+    let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+        cfg.authorizer = Arc::new(AllowAllAuthorizer);
         // The follower never fetches on its own. Keep it in the ISR and alive
         // for the whole test, so only the fetches below move its state.
         cfg.replica_lag_time_max = krabka_units::secs(600);
@@ -1111,7 +1110,7 @@ async fn a_trim_waits_for_every_live_follower_to_reach_the_trim_point() {
     {
         let mut state = partition.replica_state.lock().await;
         let high_watermark = state.hw;
-        *state = crate::replica_state::ReplicaState::new();
+        *state = ReplicaState::new();
         state.hw = high_watermark;
     }
     let not_installed = delete_to(

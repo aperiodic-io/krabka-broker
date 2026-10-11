@@ -422,12 +422,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::test_support::single_partition_topic;
 
     fn topic_record(name: &str) -> MetadataRecord {
-        MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-            name,
-            Uuid::new_v4(),
-        ))
+        MetadataRecord::V1Topic(single_partition_topic(name, Uuid::new_v4()))
     }
 
     fn metadata_batch(base_offset: i64, rec: &MetadataRecord) -> RecordBatch {

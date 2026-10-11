@@ -9,14 +9,14 @@ use std::collections::BTreeMap;
 
 use krabka_units::convert::ByteSizeExt as _;
 
+use crate::share_coordinator::config::ShareCoordinatorConfig;
+
 pub const TOPIC: &str = "__share_group_state";
 
 /// The topic configs Kafka writes when it creates `__share_group_state`
 /// (`ShareCoordinatorService.shareGroupStateTopicConfigs`, as KIP-932
 /// defines them).
-pub(crate) fn topic_configs(
-    config: &crate::share_coordinator::config::ShareCoordinatorConfig,
-) -> BTreeMap<String, String> {
+pub(crate) fn topic_configs(config: &ShareCoordinatorConfig) -> BTreeMap<String, String> {
     use crate::config_keys::{
         CLEANUP_POLICY, COMPRESSION_TYPE, MIN_INSYNC_REPLICAS, RETENTION_MS, SEGMENT_BYTES,
     };

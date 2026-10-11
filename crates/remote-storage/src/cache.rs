@@ -266,7 +266,9 @@ mod tests {
     use assert2::{assert, check};
 
     use super::*;
-    use crate::metadata::{CustomMetadata, RemoteLogSegmentId, TopicIdPartition};
+    use crate::metadata::{
+        CustomMetadata, RemoteLogSegmentDetails, RemoteLogSegmentId, TopicIdPartition,
+    };
 
     fn tp() -> TopicIdPartition {
         TopicIdPartition::new(Uuid::from_u128(1), "t", 0)
@@ -311,7 +313,7 @@ mod tests {
             end.0,
             1,
             100,
-            crate::metadata::RemoteLogSegmentDetails::new(
+            RemoteLogSegmentDetails::new(
                 1024,
                 RemoteLogSegmentState::CopySegmentStarted,
                 epochs

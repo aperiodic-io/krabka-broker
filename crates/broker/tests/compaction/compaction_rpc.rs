@@ -23,21 +23,21 @@ use krabka_protocol::{
 use tokio::net::TcpStream;
 
 use crate::{
-    CLIENT_ID, kafka_wire,
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    CLIENT_ID,
+    kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
     support::{
+        discovery::named_topic_metadata,
+        produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
+        topics::{CreateTopicSetup, configured_topic_request},
         wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
 
 /// Create a topic with config overrides, on PLAINTEXT and with no SASL.
-pub(crate) async fn create_topic_with_configs(
-    addr: SocketAddr,
-    setup: crate::support::topics::CreateTopicSetup<'_>,
-) {
+pub(crate) async fn create_topic_with_configs(addr: SocketAddr, setup: CreateTopicSetup<'_>) {
     let topic = setup.topic;
-    let req = crate::support::topics::configured_topic_request(setup);
+    let req = configured_topic_request(setup);
 
     let version: i16 = 7; // flexible
     let mut stream = TcpStream::connect(addr).await.expect("connect");
@@ -69,7 +69,7 @@ pub(crate) async fn create_topic_with_configs(
 
 /// Get `topic_id` with Metadata. Produce and Fetch v9+ need it.
 pub(crate) async fn get_topic_id(addr: SocketAddr, topic: &str) -> Uuid {
-    let req = crate::support::discovery::named_topic_metadata(topic.to_string());
+    let req = named_topic_metadata(topic.to_string());
     let version: i16 = 12; // flexible
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let resp: MetadataResponse = kafka_wire::exchange(
@@ -121,9 +121,9 @@ pub(crate) async fn produce_record(addr: SocketAddr, setup: ProduceRecordSetup<'
         ..batch_from_records(vec![record])
     };
 
-    let req = crate::support::produce::batch_request(
+    let req = batch_request(
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: topic.to_string(),
             topic_id,
             ..Default::default()

@@ -24,7 +24,7 @@ use krabka_protocol::{
 use super::*;
 use crate::{
     authorizer::Authorizer,
-    test_support::{DenyAll, test_ctx},
+    test_support::{DenyAll, ShareApiSupport, test_ctx},
 };
 
 type RequestTopic<'a> = (&'a str, Vec<i32>);
@@ -62,7 +62,7 @@ async fn handle_error_scenarios_preserve_expected_rows() {
     type Case<'a> = (
         &'a str,
         Arc<dyn Authorizer>,
-        crate::test_support::ShareApiSupport,
+        ShareApiSupport,
         Vec<RequestGroup<'a>>,
         DescribeShareGroupOffsetsResponse,
     );

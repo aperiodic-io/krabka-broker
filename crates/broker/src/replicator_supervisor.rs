@@ -31,6 +31,9 @@ use krabka_raft::NodeId;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+#[cfg(test)]
+use crate::replicator_supervisor::test_support::{SupervisorPartitionSetup, SupervisorTopicSetup};
+
 mod desired_sets;
 mod dir_assignments;
 mod local_partitions;
@@ -50,9 +53,23 @@ pub(crate) use self::{
     topic_config::push_topic_configs,
 };
 use crate::{
-    config::ReplicationRuntimeConfig, partition_registry::PartitionRegistry,
-    replicator::ReplicationConnectionConfig, throttle::ThrottleState,
+    api_catalog::UnstableApiVersions,
+    broker::registered_listener_endpoint,
+    config::ReplicationRuntimeConfig,
+    controller_endpoint::ControllerDialer,
+    diskless::hot_tail::HotTailCache,
+    log_dir_id::LogDirIds,
+    log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    network::client::InterBrokerClient,
+    partition_registry::PartitionRegistry,
+    producer_state::ProducerState,
+    replicator::{FollowedPartitions, ReplicationConnectionConfig},
+    share_coordinator::coordinator::ShareCoordinator,
+    throttle::ThrottleState,
     txn::coordinator::TxnCoordinator,
+    wal::quorum::registry::{ShardId, WalShardRegistry},
 };
 
 /// A `(topic, partition)` pair. The supervisor keys follower tasks, local
@@ -77,7 +94,7 @@ struct FetcherTask {
     handle: JoinHandle<()>,
     /// Shared with the running task. A reconcile writes the partitions the
     /// fetcher should follow; the fetcher reads them at the top of each round.
-    followed: crate::replicator::FollowedPartitions,
+    followed: FollowedPartitions,
     /// The leader endpoint this fetcher dialled. A leader that re-registers on
     /// a different address needs a new connection, which means a new fetcher.
     endpoint: (String, u16),
@@ -93,31 +110,31 @@ fn resolve_leader_endpoint(
     broker: &krabka_metadata::BrokerRegistrationRecord,
     listener_name: &str,
 ) -> (String, u16) {
-    let (host, port) = crate::broker::registered_listener_endpoint(broker, listener_name);
+    let (host, port) = registered_listener_endpoint(broker, listener_name);
     (host.to_owned(), port)
 }
 
 pub(crate) struct ReplicatorSupervisor {
     node_id: NodeId,
     broker_id: i32,
-    controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: Arc<dyn MetadataSource>,
     partitions: Arc<PartitionRegistry>,
     log_dirs: Vec<PathBuf>,
     log_config: LogConfig,
-    unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    unstable_api_versions: UnstableApiVersions,
     client_id: String,
     tasks: DashMap<FetcherKey, FetcherTask>,
-    wal_tasks: DashMap<crate::wal::quorum::registry::ShardId, WalFollowerTask>,
-    wal_task_targets: DashMap<crate::wal::quorum::registry::ShardId, WalFollowerSpec>,
+    wal_tasks: DashMap<ShardId, WalFollowerTask>,
+    wal_task_targets: DashMap<ShardId, WalFollowerSpec>,
     shutdown: CancellationToken,
     txn_coordinator: Option<Arc<TxnCoordinator>>,
     /// KIP-932 share coordinator. Each reconcile refreshes its view of
     /// locally-led `__share_group_state` partitions, the same as for the
     /// txn coordinator.
-    share_coordinator: Option<Arc<crate::share_coordinator::coordinator::ShareCoordinator>>,
+    share_coordinator: Option<Arc<ShareCoordinator>>,
     /// Shared outbound dialer. It uses TLS and SASL when configured, and raw
     /// TCP otherwise. Each spawned replicator clones this Arc.
-    inter_broker_client: Arc<crate::network::client::InterBrokerClient>,
+    inter_broker_client: Arc<InterBrokerClient>,
     /// Listener protocol used for inter-broker dials. It decides whether
     /// the dialer runs TLS and SASL.
     inter_broker_listener_protocol: krabka_security::ListenerProtocol,
@@ -133,27 +150,27 @@ pub(crate) struct ReplicatorSupervisor {
     /// `materialize_partition` and each spawned `Replicator::Config`, so the
     /// partition writer's storage-failure path can flip the dir
     /// offline broker-wide.
-    log_dir_status: crate::log_dir_status::LogDirRegistry,
+    log_dir_status: LogDirRegistry,
     /// Broker-wide idempotent/transactional producer-sequence tracker.
     /// Forwarded into each `materialize_partition`, so that the partition
     /// writer copies the producer state of each replicated transaction marker
     /// into it, and into each spawned replicator.
-    producer_state: Arc<crate::producer_state::ProducerState>,
+    producer_state: Arc<ProducerState>,
     max_produce_group: usize,
     partition_writer_queue_depth: usize,
     diskless_wal_local_replica_count: usize,
     /// Broker-wide metrics handle. Each spawned replicator
     /// clones this so it can increment `replication_bytes_in` after a
     /// successful follower-side append.
-    metrics: crate::metrics::BrokerMetrics,
+    metrics: BrokerMetrics,
     /// KIP-858: stable UUID per configured log.dir. The reconcile loop uses
     /// these to build `AssignReplicasToDirs` reports.
-    log_dir_ids: crate::log_dir_id::LogDirIds,
+    log_dir_ids: LogDirIds,
     /// Shared advisory cache for quorum-committed diskless WAL tails.
-    hot_tail: Arc<crate::diskless::hot_tail::HotTailCache>,
+    hot_tail: Arc<HotTailCache>,
     /// Registry exposed through the KIP-595 shard router for diskless WAL
     /// fetches to newly materialized partitions.
-    wal_shards: Arc<crate::wal::quorum::registry::WalShardRegistry>,
+    wal_shards: Arc<WalShardRegistry>,
     /// KIP-858: tracks the last-reported dir UUID per (topic, partition), so
     /// the supervisor sends `AssignReplicasToDirs` only on first
     /// materialization or after a KIP-113 log-dir swap.
@@ -169,18 +186,18 @@ pub(crate) struct ReplicatorSupervisor {
 pub(crate) struct ReplicatorSupervisorConfig {
     pub node_id: NodeId,
     pub broker_id: i32,
-    pub controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    pub controller: Arc<dyn MetadataSource>,
     pub partitions: Arc<PartitionRegistry>,
     pub log_dirs: Vec<PathBuf>,
     pub log_config: LogConfig,
     /// Whether the broker serves Kafka trunk's topic keys, which is what lets
     /// `max.decompressed.message.bytes` reach the partition logs.
-    pub unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    pub unstable_api_versions: UnstableApiVersions,
     pub client_id: String,
     pub shutdown: CancellationToken,
     pub txn_coordinator: Option<Arc<TxnCoordinator>>,
-    pub share_coordinator: Option<Arc<crate::share_coordinator::coordinator::ShareCoordinator>>,
-    pub inter_broker_client: Arc<crate::network::client::InterBrokerClient>,
+    pub share_coordinator: Option<Arc<ShareCoordinator>>,
+    pub inter_broker_client: Arc<InterBrokerClient>,
     pub inter_broker_listener_protocol: krabka_security::ListenerProtocol,
     pub inter_broker_server_name: String,
     pub inter_broker_listener_name: String,
@@ -193,15 +210,15 @@ pub(crate) struct ReplicatorSupervisorConfig {
     pub controller_quorum_voters: Vec<(NodeId, String)>,
     pub replication: ReplicationRuntimeConfig,
     pub throttle_state: Arc<ThrottleState>,
-    pub log_dir_status: crate::log_dir_status::LogDirRegistry,
-    pub producer_state: Arc<crate::producer_state::ProducerState>,
+    pub log_dir_status: LogDirRegistry,
+    pub producer_state: Arc<ProducerState>,
     pub max_produce_group: usize,
     pub partition_writer_queue_depth: usize,
     pub diskless_wal_local_replica_count: usize,
-    pub metrics: crate::metrics::BrokerMetrics,
-    pub log_dir_ids: crate::log_dir_id::LogDirIds,
-    pub hot_tail: Arc<crate::diskless::hot_tail::HotTailCache>,
-    pub wal_shards: Arc<crate::wal::quorum::registry::WalShardRegistry>,
+    pub metrics: BrokerMetrics,
+    pub log_dir_ids: LogDirIds,
+    pub hot_tail: Arc<HotTailCache>,
+    pub wal_shards: Arc<WalShardRegistry>,
 }
 
 impl ReplicatorSupervisor {
@@ -249,7 +266,7 @@ impl ReplicatorSupervisor {
         } = config;
         let assign_dirs_reporter: Arc<dyn AssignDirsReporter> =
             Arc::new(NetworkAssignDirsReporter {
-                dialer: crate::controller_endpoint::ControllerDialer {
+                dialer: ControllerDialer {
                     outbound_client: Arc::clone(&inter_broker_client),
                     listener_protocol: controller_listener_protocol,
                     server_name: controller_server_name,
@@ -372,8 +389,8 @@ mod tests {
     #[tokio::test]
     async fn run_reconciles_initial_image_before_shutdown() {
         let img = image_with(&[
-            topic_record(crate::replicator_supervisor::test_support::SupervisorTopicSetup::default()),
-            partition_record(crate::replicator_supervisor::test_support::SupervisorPartitionSetup::single_replica("t", NodeId(2))),
+            topic_record(SupervisorTopicSetup::default()),
+            partition_record(SupervisorPartitionSetup::single_replica("t", NodeId(2))),
         ]);
         let (supervisor, partitions, _reporter, _dir) = supervisor_fixture(img);
         supervisor.shutdown.cancel();

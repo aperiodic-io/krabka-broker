@@ -12,7 +12,8 @@ use krabka_broker::Broker;
 use tokio::net::TcpSocket;
 
 use crate::{
-    cluster_lock, support,
+    cluster_lock,
+    support::{self, ClusterNodeSetup, NodeIndex, controller_voters, topics::AssignedTopicSetup},
     wait::{wait_isr_contains, wait_partition_exists, wait_partition_leader},
     wire::create_topic_plaintext,
 };
@@ -56,10 +57,10 @@ async fn auto_rebalance_restores_preferred_leader() {
 
     let mut cfg0 = support::broker_config(
         dir0.path(),
-        crate::support::ClusterNodeSetup {
+        ClusterNodeSetup {
             client_addrs: &client_addrs,
             controller_addrs: &controller_addrs,
-            voters: crate::support::controller_voters(&voters),
+            voters: controller_voters(&voters),
             mode: krabka_broker::BootstrapMode::Bootstrap,
             ..Default::default()
         },
@@ -69,11 +70,11 @@ async fn auto_rebalance_restores_preferred_leader() {
 
     let mut cfg1 = support::broker_config(
         dir1.path(),
-        crate::support::ClusterNodeSetup {
-            index: crate::support::NodeIndex(1),
+        ClusterNodeSetup {
+            index: NodeIndex(1),
             client_addrs: &client_addrs,
             controller_addrs: &controller_addrs,
-            voters: crate::support::controller_voters(&voters),
+            voters: controller_voters(&voters),
             mode: krabka_broker::BootstrapMode::Bootstrap,
         },
     );
@@ -82,11 +83,11 @@ async fn auto_rebalance_restores_preferred_leader() {
 
     let mut cfg2 = support::broker_config(
         dir2.path(),
-        crate::support::ClusterNodeSetup {
-            index: crate::support::NodeIndex(2),
+        ClusterNodeSetup {
+            index: NodeIndex(2),
             client_addrs: &client_addrs,
             controller_addrs: &controller_addrs,
-            voters: crate::support::controller_voters(&voters),
+            voters: controller_voters(&voters),
             mode: krabka_broker::BootstrapMode::Bootstrap,
         },
     );
@@ -126,7 +127,7 @@ async fn auto_rebalance_restores_preferred_leader() {
     // assignment for partition 0 is replicas=[1, 2]. Broker 1 is preferred.
     create_topic_plaintext(
         addr,
-        crate::support::topics::AssignedTopicSetup {
+        AssignedTopicSetup {
             name: (topic).into(),
             replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
         },

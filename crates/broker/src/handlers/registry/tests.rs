@@ -6,7 +6,10 @@ use std::collections::BTreeSet;
 use assert2::assert;
 
 use super::*;
-use crate::handlers::{self, ApiKeyCode};
+use crate::{
+    api_catalog::dispatched_apis,
+    handlers::{self, ApiKeyCode, KRABKA_PRIVATE_API_KEY_FLOOR},
+};
 
 #[test]
 fn registry_registers_raw_context_handlers() {
@@ -159,7 +162,7 @@ fn registry_reports_missing_keys() {
 fn registry_and_api_catalog_cover_the_same_kafka_api_keys() {
     let registry = build_registry();
     let registered: BTreeSet<ApiKeyCode> = registry.registered_api_keys().collect();
-    let dispatched: BTreeSet<ApiKeyCode> = crate::api_catalog::dispatched_apis()
+    let dispatched: BTreeSet<ApiKeyCode> = dispatched_apis()
         .into_iter()
         .map(|api| api.api_key)
         .collect();
@@ -188,8 +191,8 @@ fn registry_and_api_catalog_cover_the_same_kafka_api_keys() {
 /// it and `kafka-broker-api-versions` never prints an `UNKNOWN(1020)` row.
 #[test]
 fn the_only_catalogued_krabka_private_key_is_inter_broker_only() {
-    let floor = crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR;
-    let private: Vec<ApiKeyCode> = crate::api_catalog::dispatched_apis()
+    let floor = KRABKA_PRIVATE_API_KEY_FLOOR;
+    let private: Vec<ApiKeyCode> = dispatched_apis()
         .into_iter()
         .map(|api| api.api_key)
         .filter(|key| *key >= floor)
@@ -204,7 +207,7 @@ fn the_only_catalogued_krabka_private_key_is_inter_broker_only() {
 fn registry_version_bounds_match_api_catalog() {
     let registry = build_registry();
 
-    for api in crate::api_catalog::dispatched_apis() {
+    for api in dispatched_apis() {
         let entry = registry
             .get(api.api_key)
             .unwrap_or_else(|| panic!("registered api_key {}", api.api_key));

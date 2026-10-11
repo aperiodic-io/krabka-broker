@@ -17,7 +17,15 @@ use krabka_protocol::records::{Record, RecordBatch};
 use tokio::sync::Mutex;
 
 use super::{TxnCoordinator, pid_index::RecoveredTransactions};
-use crate::{error::BrokerError, txn::state::TxnEntry};
+use crate::{
+    error::BrokerError,
+    partition::Partition,
+    txn::{
+        log_record::{decode_key, decode_value, encode_key, encode_value},
+        state::TxnEntry,
+        version::TxnVersion,
+    },
+};
 
 impl TxnCoordinator {
     pub(crate) async fn lock_state_partition_for(
@@ -60,7 +68,7 @@ impl TxnCoordinator {
     pub(crate) async fn put(
         &self,
         entry: TxnEntry,
-        format_txnv: crate::txn::version::TxnVersion,
+        format_txnv: TxnVersion,
     ) -> Result<TxnEntry, BrokerError> {
         let _state_partition_write = self.lock_state_partition_for(&entry.transactional_id).await;
         self.put_under_state_partition_lock(entry, format_txnv)
@@ -92,7 +100,7 @@ impl TxnCoordinator {
     pub(crate) async fn put_under_state_partition_lock(
         &self,
         entry: TxnEntry,
-        format_txnv: crate::txn::version::TxnVersion,
+        format_txnv: TxnVersion,
     ) -> Result<TxnEntry, BrokerError> {
         let tid = entry.transactional_id.clone();
         let p = self.partition_for(&tid);
@@ -100,12 +108,8 @@ impl TxnCoordinator {
         self.validate_pid_install(&entry)?;
 
         // Byte-exact Kafka TransactionLogKey(v0) + TransactionLogValue(v0/v1).
-        let key = crate::txn::log_record::encode_key(&tid)?;
-        let value = crate::txn::log_record::encode_value(
-            &entry,
-            format_txnv,
-            self.persist_last_producer_epoch,
-        );
+        let key = encode_key(&tid)?;
+        let value = encode_value(&entry, format_txnv, self.persist_last_producer_epoch);
 
         let mut batch = RecordBatch::default();
         batch.records.push(Record {
@@ -191,7 +195,7 @@ impl TxnCoordinator {
         let mut batch = RecordBatch::default();
         batch.records.push(Record {
             offset_delta: 0,
-            key: Some(Bytes::from(crate::txn::log_record::encode_key(tid)?)),
+            key: Some(Bytes::from(encode_key(tid)?)),
             value: None,
             ..Default::default()
         });
@@ -234,7 +238,7 @@ impl TxnCoordinator {
 // decisions and is mutation-tested on its own.
 #[cfg_attr(test, mutants::skip)]
 pub(super) fn replay_partition(
-    part: &crate::partition::Partition,
+    part: &Partition,
     partition: PartitionIndex,
     read: (krabka_units::ByteSize, bool),
     partition_for: impl Fn(&str) -> PartitionIndex,
@@ -263,7 +267,7 @@ pub(super) fn replay_partition(
 #[cfg_attr(test, mutants::skip)]
 fn replay_into(
     recovered: &mut RecoveredTransactions,
-    part: &crate::partition::Partition,
+    part: &Partition,
     p: PartitionIndex,
     (read_max, last_epoch_tag): (krabka_units::ByteSize, bool),
     partition_for: impl Fn(&str) -> PartitionIndex,
@@ -291,7 +295,7 @@ fn replay_into(
                     warn_unknown_version("key", version, p);
                     continue;
                 }
-                let tid = crate::txn::log_record::decode_key(key_bytes)?;
+                let tid = decode_key(key_bytes)?;
                 let partition_matches = partition_for(&tid) == p;
                 let Some(value_bytes) = rec.value.as_ref() else {
                     if !partition_matches {
@@ -306,7 +310,7 @@ fn replay_into(
                     warn_unknown_version("value", version, p);
                     continue;
                 }
-                let entry = crate::txn::log_record::decode_value(value_bytes, tid, last_epoch_tag)?;
+                let entry = decode_value(value_bytes, tid, last_epoch_tag)?;
                 recovered.apply_value(entry, partition_matches)?;
             }
             offset = recovery_next_offset(batch.base_offset, batch.last_offset_delta)?;

@@ -33,7 +33,7 @@ pub(crate) struct MetadataSweepConfig {
     pub timer: Arc<dyn Timer>,
     /// Re-read once per sweep so freezes and thaws take effect at the next tick.
     /// With no authority, the sweep resolves no freeze and leaves partitions eligible.
-    pub metadata: Option<Arc<dyn crate::metadata_source::MetadataSource>>,
+    pub metadata: Option<Arc<dyn MetadataSource>>,
 }
 
 impl MetadataSweepConfig {
@@ -178,6 +178,8 @@ macro_rules! run_sweeps {
     }};
 }
 pub(crate) use run_sweeps;
+
+use crate::metadata_source::MetadataSource;
 
 #[cfg(test)]
 mod tests {

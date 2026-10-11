@@ -58,7 +58,11 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::producer_state::Decision;
+    use crate::{
+        producer_state::Decision,
+        test_support::{RecordCount, RepeatedRecordsSetup, repeated_records_batch},
+        txn::marker::{MarkerType, build_marker_batch},
+    };
 
     fn idempotent_batch(base_offset: i64, base_sequence: i32, count: i32) -> RecordBatch {
         RecordBatch {
@@ -68,12 +72,10 @@ mod tests {
             producer_id: 42,
             producer_epoch: 3,
             base_sequence,
-            ..crate::test_support::repeated_records_batch(
-                crate::test_support::RepeatedRecordsSetup {
-                    count: crate::test_support::RecordCount(count),
-                    ..Default::default()
-                },
-            )
+            ..repeated_records_batch(RepeatedRecordsSetup {
+                count: RecordCount(count),
+                ..Default::default()
+            })
         }
     }
 
@@ -112,11 +114,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
         log.append(&mut idempotent_batch(0, 0, 2)).unwrap();
-        let mut marker = crate::txn::marker::build_marker_batch(
+        let mut marker = build_marker_batch(
             krabka_log::ProducerId(42),
             3,
             Offset(2),
-            crate::txn::marker::MarkerType::Commit,
+            MarkerType::Commit,
             0,
         );
         marker.base_sequence = 0;
@@ -128,11 +130,11 @@ mod tests {
     async fn producer_rebuild_preserves_marker_only_base_offset_sentinel() {
         let dir = tempdir().unwrap();
         let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
-        let mut marker = crate::txn::marker::build_marker_batch(
+        let mut marker = build_marker_batch(
             krabka_log::ProducerId(42),
             3,
             Offset(0),
-            crate::txn::marker::MarkerType::Commit,
+            MarkerType::Commit,
             0,
         );
         log.append(&mut marker).unwrap();

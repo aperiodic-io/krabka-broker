@@ -38,11 +38,13 @@ use tokio::{
 use crate::{
     harness::{admin_plain_password, round_trip, wrong_scram_password},
     support::{
+        client::http_get,
         discovery::{api_versions_request_for, topic_metadata_request},
+        sasl::sasl_temp_config,
         topics::metadata_topic,
         wire::{
             CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-            SocketExchangeSetup,
+            SocketExchangeSetup, WireFrameSetup, request_frame as support_request_frame,
         },
     },
 };
@@ -52,7 +54,7 @@ const REBOOTSTRAP_REQUIRED: i16 = 129;
 
 /// A `SASL_PLAINTEXT` broker serving PLAIN for `admin`.
 async fn start_broker(customize: impl FnOnce(&mut BrokerConfig)) -> BrokerHandle {
-    let (log_dir, mut cfg) = crate::support::sasl::sasl_temp_config(vec![SaslMechanism::Plain]);
+    let (log_dir, mut cfg) = sasl_temp_config(vec![SaslMechanism::Plain]);
     cfg.plain_credentials
         .insert("admin".to_string(), admin_plain_password());
     customize(&mut cfg);
@@ -75,15 +77,15 @@ struct RequestFrameSetup<'a> {
     #[default(krabka_ids::ApiVersion(3))]
     version: krabka_ids::ApiVersion,
     #[default(crate::support::wire::CorrelationId(2))]
-    correlation: crate::support::wire::CorrelationId,
+    correlation: WireCorrelationId,
     #[default(crate::support::wire::HeaderEncoding::Flexible)]
-    header: crate::support::wire::HeaderEncoding,
+    header: RequestHeaderEncoding,
     body: &'a [u8],
 }
 
 /// A sized request frame with the pre-authentication client's header.
 fn request_frame(setup: RequestFrameSetup<'_>) -> Vec<u8> {
-    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+    let frame = support_request_frame(WireFrameSetup {
         api_key: setup.api_key,
         version: setup.version,
         correlation: setup.correlation,
@@ -192,7 +194,7 @@ async fn plain_login(stream: &mut TcpStream, password: &str) -> Result<(), io::E
 }
 
 async fn scrape_metrics(addr: SocketAddr) -> String {
-    crate::support::client::http_get(addr, "/metrics", false).await
+    http_get(addr, "/metrics", false).await
 }
 
 /// A size prefix over `sasl.server.max.receive.size` fails the authentication

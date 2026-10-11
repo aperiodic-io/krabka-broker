@@ -12,7 +12,7 @@ use krabka_protocol::owned::{
     update_features_request::UpdateFeaturesRequest,
 };
 
-use crate::support::configs::feature_update;
+use crate::support::{configs::feature_update, standalone_broker};
 pub async fn finalize_streams_version(client: &Client) {
     let resp = client
         .send(UpdateFeaturesRequest {
@@ -123,10 +123,10 @@ pub async fn streams_join_and_converge(
         tokio::time::sleep(Duration::from_millis(200)).await;
         let active = request_active_tasks(&resp);
         resp = client
-            .send(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            .send(follow_up(StreamsFollowUpSetup {
                 group,
                 member_id: &member_id,
-                epoch: crate::support::streams::StreamsMemberEpoch(resp.member_epoch),
+                epoch: StreamsMemberEpoch(resp.member_epoch),
                 active,
             }))
             .await
@@ -144,7 +144,7 @@ pub enum ElectionReadiness {
 pub async fn boot(
     readiness: ElectionReadiness,
 ) -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    let (dir, broker) = crate::support::standalone_broker().await;
+    let (dir, broker) = standalone_broker().await;
     // A streams or classic group needs `__consumer_offsets`. No broker creates
     // it at startup, so create it as a client's first lookup does.
     broker.wait_until_group_coordinator_ready().await;

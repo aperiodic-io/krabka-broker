@@ -327,17 +327,20 @@ mod tests {
     use krabka_metadata::{ClientQuotaRecord, MetadataImage};
 
     use super::*;
-    use crate::quota::test_support::{image_with_quotas, quota_record as rec};
+    use crate::quota::test_support::{
+        QuotaEntitySpec, QuotaRecordSetup, QuotaValue, alice_app1_producer_quota,
+        app1_producer_quota, image_with_quotas, producer_quota_image, quota_record as rec,
+    };
 
     fn img_with(records: Vec<ClientQuotaRecord>) -> MetadataImage {
         image_with_quotas(records)
     }
 
     /// Both identities must resolve the configured 1,024-byte producer quota.
-    fn assert_alice_app1_entity(entity: crate::quota::test_support::QuotaEntitySpec<'_>) {
-        let img = img_with(vec![rec(crate::quota::test_support::QuotaRecordSetup {
+    fn assert_alice_app1_entity(entity: QuotaEntitySpec<'_>) {
+        let img = img_with(vec![rec(QuotaRecordSetup {
             entity,
-            value: crate::quota::test_support::QuotaValue(1024.0),
+            value: QuotaValue(1024.0),
             ..Default::default()
         })]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(1024.0));
@@ -356,8 +359,8 @@ mod tests {
 
     #[test]
     fn single_user_match_when_no_pair_exists() {
-        let img = img_with(vec![rec(crate::quota::test_support::QuotaRecordSetup {
-            value: crate::quota::test_support::QuotaValue(2048.0),
+        let img = img_with(vec![rec(QuotaRecordSetup {
+            value: QuotaValue(2048.0),
             ..Default::default()
         })]);
         assert!(
@@ -367,9 +370,9 @@ mod tests {
 
     #[test]
     fn single_client_id_match_when_no_user_exists() {
-        let img = img_with(vec![rec(crate::quota::test_support::QuotaRecordSetup {
+        let img = img_with(vec![rec(QuotaRecordSetup {
             entity: vec![("client-id", Some("app1"))],
-            value: crate::quota::test_support::QuotaValue(512.0),
+            value: QuotaValue(512.0),
             ..Default::default()
         })]);
         assert!(lookup_quota(&img, "anyuser", Some("app1"), "producer_byte_rate") == Some(512.0));
@@ -377,9 +380,9 @@ mod tests {
 
     #[test]
     fn default_user_default_client_pair() {
-        let img = img_with(vec![rec(crate::quota::test_support::QuotaRecordSetup {
+        let img = img_with(vec![rec(QuotaRecordSetup {
             entity: vec![("user", None), ("client-id", None)],
-            value: crate::quota::test_support::QuotaValue(256.0),
+            value: QuotaValue(256.0),
             ..Default::default()
         })]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(256.0));
@@ -387,9 +390,9 @@ mod tests {
 
     #[test]
     fn default_user_alone() {
-        let img = img_with(vec![rec(crate::quota::test_support::QuotaRecordSetup {
+        let img = img_with(vec![rec(QuotaRecordSetup {
             entity: vec![("user", None)],
-            value: crate::quota::test_support::QuotaValue(128.0),
+            value: QuotaValue(128.0),
             ..Default::default()
         })]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(128.0));
@@ -397,9 +400,9 @@ mod tests {
 
     #[test]
     fn default_client_alone() {
-        let img = img_with(vec![rec(crate::quota::test_support::QuotaRecordSetup {
+        let img = img_with(vec![rec(QuotaRecordSetup {
             entity: vec![("client-id", None)],
-            value: crate::quota::test_support::QuotaValue(64.0),
+            value: QuotaValue(64.0),
             ..Default::default()
         })]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(64.0));
@@ -414,13 +417,13 @@ mod tests {
     #[test]
     fn pair_specific_wins_over_user_only() {
         let img = img_with(vec![
-            rec(crate::quota::test_support::QuotaRecordSetup {
-                value: crate::quota::test_support::QuotaValue(8192.0),
+            rec(QuotaRecordSetup {
+                value: QuotaValue(8192.0),
                 ..Default::default()
             }),
-            rec(crate::quota::test_support::QuotaRecordSetup {
+            rec(QuotaRecordSetup {
                 entity: vec![("user", Some("alice")), ("client-id", Some("app1"))],
-                value: crate::quota::test_support::QuotaValue(512.0),
+                value: QuotaValue(512.0),
                 ..Default::default()
             }),
         ]);
@@ -535,7 +538,7 @@ mod tests {
             ),
         ];
         for (label, configured, principal, client_id, expected) in cases {
-            let img = crate::quota::test_support::producer_quota_image(configured);
+            let img = producer_quota_image(configured);
             check!(
                 lookup_quota_with_key(&img, principal, Some(client_id), "producer_byte_rate")
                     == expected,
@@ -628,7 +631,7 @@ mod tests {
             ),
         ];
         for (label, configured, principal, null_expected, empty_expected) in cases {
-            let img = crate::quota::test_support::producer_quota_image(configured);
+            let img = producer_quota_image(configured);
             check!(
                 lookup_quota_with_key(&img, principal, None, "producer_byte_rate") == null_expected,
                 "null: {label}"
@@ -648,22 +651,22 @@ mod tests {
     #[test]
     fn a_bucket_is_rated_by_its_own_key_levels() {
         let img = img_with(vec![
-            rec(crate::quota::test_support::QuotaRecordSetup::default()),
-            crate::quota::test_support::alice_app1_producer_quota(),
-            crate::quota::test_support::app1_producer_quota(),
-            rec(crate::quota::test_support::QuotaRecordSetup {
+            rec(QuotaRecordSetup::default()),
+            alice_app1_producer_quota(),
+            app1_producer_quota(),
+            rec(QuotaRecordSetup {
                 entity: vec![("user", None)],
-                value: crate::quota::test_support::QuotaValue(700.0),
+                value: QuotaValue(700.0),
                 ..Default::default()
             }),
-            rec(crate::quota::test_support::QuotaRecordSetup {
+            rec(QuotaRecordSetup {
                 entity: vec![("client-id", None)],
-                value: crate::quota::test_support::QuotaValue(300.0),
+                value: QuotaValue(300.0),
                 ..Default::default()
             }),
-            rec(crate::quota::test_support::QuotaRecordSetup {
+            rec(QuotaRecordSetup {
                 entity: vec![("ip", Some("10.0.0.1"))],
-                value: crate::quota::test_support::QuotaValue(9.0),
+                value: QuotaValue(9.0),
                 ..Default::default()
             }),
         ]);
@@ -724,12 +727,12 @@ mod tests {
         ip: Option<&'a str>,
         #[default("connection_creation_rate")]
         key: &'a str,
-        #[default(crate::quota::test_support::QuotaValue(1.0))]
-        value: crate::quota::test_support::QuotaValue,
+        #[default(QuotaValue(1.0))]
+        value: QuotaValue,
     }
 
     fn rec_ip(setup: IpQuotaSetup<'_>) -> ClientQuotaRecord {
-        rec(crate::quota::test_support::QuotaRecordSetup {
+        rec(QuotaRecordSetup {
             entity: vec![("ip", setup.ip)],
             key: setup.key,
             value: setup.value,
@@ -753,7 +756,7 @@ mod tests {
             ),
             (
                 vec![rec_ip(IpQuotaSetup {
-                    value: crate::quota::test_support::QuotaValue(2.0),
+                    value: QuotaValue(2.0),
                     ..Default::default()
                 })],
                 "10.0.0.7",
@@ -762,7 +765,7 @@ mod tests {
             (
                 vec![
                     rec_ip(IpQuotaSetup {
-                        value: crate::quota::test_support::QuotaValue(8.0),
+                        value: QuotaValue(8.0),
                         ..Default::default()
                     }),
                     rec_ip(IpQuotaSetup {
@@ -839,7 +842,7 @@ mod tests {
         for (label, entity, peer, matches) in cases {
             let img = img_with_ip(vec![rec_ip(IpQuotaSetup {
                 ip: Some(entity),
-                value: crate::quota::test_support::QuotaValue(7.0),
+                value: QuotaValue(7.0),
                 ..Default::default()
             })]);
             let names = IpNames::default();
@@ -865,11 +868,11 @@ mod tests {
         let img = img_with_ip(vec![
             rec_ip(IpQuotaSetup {
                 ip: Some("db"),
-                value: crate::quota::test_support::QuotaValue(9.0),
+                value: QuotaValue(9.0),
                 ..Default::default()
             }),
             rec_ip(IpQuotaSetup {
-                value: crate::quota::test_support::QuotaValue(2.0),
+                value: QuotaValue(2.0),
                 ..Default::default()
             }),
         ]);
@@ -894,7 +897,7 @@ mod tests {
         // IPv6 peer keyed by its canonical string form, not just IPv4.
         let img = img_with_ip(vec![rec_ip(IpQuotaSetup {
             ip: Some("::1"),
-            value: crate::quota::test_support::QuotaValue(3.0),
+            value: QuotaValue(3.0),
             ..Default::default()
         })]);
         let ip: std::net::IpAddr = "::1".parse().unwrap();
@@ -908,7 +911,7 @@ mod tests {
         // An IPv6 peer with no specific entry falls back to the (ip=None)
         // default, proving IPv6 is no longer skipped by the quota path.
         let img = img_with_ip(vec![rec_ip(IpQuotaSetup {
-            value: crate::quota::test_support::QuotaValue(5.0),
+            value: QuotaValue(5.0),
             ..Default::default()
         })]);
         let ip: std::net::IpAddr = "2001:db8::42".parse().unwrap();
@@ -1006,9 +1009,9 @@ mod tests {
                 configured
                     .into_iter()
                     .map(|(entity, value)| {
-                        rec(crate::quota::test_support::QuotaRecordSetup {
+                        rec(QuotaRecordSetup {
                             entity,
-                            value: crate::quota::test_support::QuotaValue(value),
+                            value: QuotaValue(value),
                             ..Default::default()
                         })
                     })
@@ -1031,7 +1034,7 @@ mod tests {
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
     struct QuotaCandidatesSetup<'a> {
-        entities: &'a [crate::quota::test_support::QuotaEntitySpec<'a>],
+        entities: &'a [QuotaEntitySpec<'a>],
         mask: QuotaCandidateMask,
         #[default("k")]
         key: &'a str,
@@ -1045,10 +1048,10 @@ mod tests {
             .enumerate()
             .filter(|(index, _)| setup.mask.0 & (1 << index) != 0)
             .map(|(index, entity)| {
-                rec(crate::quota::test_support::QuotaRecordSetup {
+                rec(QuotaRecordSetup {
                     entity: entity.clone(),
                     key: setup.key,
-                    value: crate::quota::test_support::QuotaValue(CAND_VALS[index]),
+                    value: QuotaValue(CAND_VALS[index]),
                 })
             })
             .collect()
@@ -1132,13 +1135,13 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| present[*i])
-                .map(|(i, c)| rec(crate::quota::test_support::QuotaRecordSetup { entity: c.clone(), key: qkey, value: crate::quota::test_support::QuotaValue(CAND_VALS[i]) }))
+                .map(|(i, c)| rec(QuotaRecordSetup { entity: c.clone(), key: qkey, value: QuotaValue(CAND_VALS[i]) }))
                 .collect();
             if decoy {
                 // Non-matching entity (never a candidate for a [uv][12]/[cd][12]
                 // probe) — must never be returned.
-                records.push(rec(crate::quota::test_support::QuotaRecordSetup { entity: vec![("client-id", Some("ZZZ")), ("user", Some("ZZZ"))], key: qkey, value: crate::quota::test_support::QuotaValue(9999.0) }));
-                records.push(rec(crate::quota::test_support::QuotaRecordSetup { entity: vec![("user", Some("ZZZ"))], key: qkey, value: crate::quota::test_support::QuotaValue(9998.0) }));
+                records.push(rec(QuotaRecordSetup { entity: vec![("client-id", Some("ZZZ")), ("user", Some("ZZZ"))], key: qkey, value: QuotaValue(9999.0) }));
+                records.push(rec(QuotaRecordSetup { entity: vec![("user", Some("ZZZ"))], key: qkey, value: QuotaValue(9998.0) }));
             }
             let img = img_with(records);
             let got = lookup_quota_with_key(&img, &principal, Some(&client_id), qkey);
@@ -1158,13 +1161,13 @@ mod tests {
             let ip: std::net::IpAddr = "10.9.8.7".parse().unwrap();
             let mut records = vec![];
             if specific {
-                records.push(rec(crate::quota::test_support::QuotaRecordSetup { entity: vec![("ip", Some("10.9.8.7"))], key: "connection_creation_rate", value: crate::quota::test_support::QuotaValue(1.0) }));
+                records.push(rec(QuotaRecordSetup { entity: vec![("ip", Some("10.9.8.7"))], key: "connection_creation_rate", value: QuotaValue(1.0) }));
             }
             if default {
-                records.push(rec(crate::quota::test_support::QuotaRecordSetup { entity: vec![("ip", None)], key: "connection_creation_rate", value: crate::quota::test_support::QuotaValue(2.0) }));
+                records.push(rec(QuotaRecordSetup { entity: vec![("ip", None)], key: "connection_creation_rate", value: QuotaValue(2.0) }));
             }
             // A user/client entry must not leak into the IP path.
-            records.push(rec(crate::quota::test_support::QuotaRecordSetup { entity: vec![("user", Some("u"))], key: "connection_creation_rate", value: crate::quota::test_support::QuotaValue(50.0) }));
+            records.push(rec(QuotaRecordSetup { entity: vec![("user", Some("u"))], key: "connection_creation_rate", value: QuotaValue(50.0) }));
             let img = img_with(records);
             let got = lookup_ip_quota_with_key(&img, &IpNames::default(), ip, "connection_creation_rate");
             if specific {

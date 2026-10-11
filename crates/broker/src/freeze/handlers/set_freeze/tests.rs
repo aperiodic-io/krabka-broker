@@ -14,11 +14,15 @@ use tempfile::TempDir;
 use uuid::Uuid;
 
 use crate::{
+    cluster_id::encode,
     config::BrokerConfig,
     freeze::signing::freeze_signing_bytes,
     handlers::RequestContext,
     operator_keys::{OperatorKeyEntry, OperatorKeys},
-    test_support::principal,
+    test_support::{
+        FrozenTopicsImageSetup, OperatorKeyFileSetup, ed25519_public_key_file, frozen_topics_image,
+        principal, start_broker_no_audit_with,
+    },
 };
 
 /// Alice's identity and request context, with caller-owned borrowed storage.
@@ -54,10 +58,7 @@ const ALICE_NAME: &str = "alice";
 const ALICE_KEY: &str = "alice-yubi";
 
 fn image(entries: &[(&str, PatternType)]) -> MetadataImage {
-    crate::test_support::frozen_topics_image(
-        entries,
-        crate::test_support::FrozenTopicsImageSetup { cluster: CLUSTER },
-    )
+    frozen_topics_image(entries, FrozenTopicsImageSetup { cluster: CLUSTER })
 }
 
 fn peer() -> SocketAddr {
@@ -94,10 +95,7 @@ fn with_freeze_env(
 
 // A broker configuration with alice's operator key loaded.
 fn config_with_alice(dir: &TempDir) -> (BrokerConfig, Ed25519KeyPair) {
-    let (pair, path) = crate::test_support::ed25519_public_key_file(
-        dir.path(),
-        crate::test_support::OperatorKeyFileSetup::default(),
-    );
+    let (pair, path) = ed25519_public_key_file(dir.path(), OperatorKeyFileSetup::default());
     let keys = OperatorKeys::load(&[OperatorKeyEntry {
         key_id: ALICE_KEY.to_owned(),
         principal: ALICE.to_owned(),
@@ -131,7 +129,7 @@ fn freeze_request(scope: &str, pattern_type: i8) -> SetTopicFreezeRequest {
 // `krabka-guard` reads from `DescribeCluster` and `check_signature` verifies
 // against (#1082).
 fn sign(pair: &Ed25519KeyPair, record: &TopicFreezeRecord) -> Vec<u8> {
-    let bytes = freeze_signing_bytes(&crate::cluster_id::encode(CLUSTER), record);
+    let bytes = freeze_signing_bytes(&encode(CLUSTER), record);
     pair.sign(&bytes).as_ref().to_vec()
 }
 
@@ -141,7 +139,7 @@ async fn handle_processes_request_and_encodes_response() {
 
     let dir = tempfile::TempDir::new().unwrap();
     let (config, _) = config_with_alice(&dir);
-    let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
+    let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
         cfg.operator_keys = config.operator_keys;
     })
     .await;

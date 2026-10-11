@@ -28,11 +28,20 @@ use super::{
 };
 pub(super) use crate::test_support::await_until;
 use crate::{
+    api_catalog::UnstableApiVersions,
     config::ReplicationRuntimeConfig,
+    diskless::hot_tail::HotTailCache,
+    log_dir_id::LogDirIds,
+    log_dir_status::LogDirRegistry,
     metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    network::client::InterBrokerClient,
+    partition::{Partition, PartitionRuntimeConfig},
     partition_registry::PartitionRegistry,
-    test_support::{FakeMetadataSource, PartitionCount, ReplicationFactor},
+    producer_state::ProducerState,
+    test_support::{FakeMetadataSource, PartitionCount, ReplicationFactor, broker_registration},
     throttle::ThrottleState,
+    wal::quorum::registry::WalShardRegistry,
 };
 
 pub(super) fn image_with(records: &[MetadataRecord]) -> MetadataImage {
@@ -73,25 +82,18 @@ pub(super) fn topic_record(setup: SupervisorTopicSetup<'_>) -> MetadataRecord {
 
 pub(super) fn single_partition_image(topic: &str, topic_id: Uuid, leader: NodeId) -> MetadataImage {
     image_with(&[
-        topic_record(
-            crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                topic,
-                identity:
-                    crate::replicator_supervisor::test_support::SupervisorTopicIdentity::Specified(
-                        topic_id,
-                    ),
-                replication_factor: crate::test_support::ReplicationFactor(1),
-                ..Default::default()
-            },
-        ),
-        partition_record(
-            crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                topic,
-                leader,
-                replicas: vec![leader],
-                ..Default::default()
-            },
-        ),
+        topic_record(SupervisorTopicSetup {
+            topic,
+            identity: SupervisorTopicIdentity::Specified(topic_id),
+            replication_factor: ReplicationFactor(1),
+            ..Default::default()
+        }),
+        partition_record(SupervisorPartitionSetup {
+            topic,
+            leader,
+            replicas: vec![leader],
+            ..Default::default()
+        }),
     ])
 }
 
@@ -121,37 +123,32 @@ pub(super) fn three_replica_image(leader: NodeId, epoch: LeaderEpoch) -> Metadat
 
 pub(super) fn follower_promotion_images() -> (MetadataImage, MetadataImage) {
     let replicas = vec![NodeId(1), NodeId(2)];
-    let topic =
-        topic_record(crate::replicator_supervisor::test_support::SupervisorTopicSetup::default());
+    let topic = topic_record(SupervisorTopicSetup::default());
     (
         image_with(&[
             topic.clone(),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    replicas: replicas.clone(),
-                    epoch: krabka_metadata::LeaderEpoch(3),
-                    ..Default::default()
-                },
-            ),
+            partition_record(SupervisorPartitionSetup {
+                replicas: replicas.clone(),
+                epoch: krabka_metadata::LeaderEpoch(3),
+                ..Default::default()
+            }),
         ]),
         image_with(&[
             topic,
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    leader: NodeId(2),
-                    replicas,
-                    epoch: krabka_metadata::LeaderEpoch(7),
-                    ..Default::default()
-                },
-            ),
+            partition_record(SupervisorPartitionSetup {
+                leader: NodeId(2),
+                replicas,
+                epoch: krabka_metadata::LeaderEpoch(7),
+                ..Default::default()
+            }),
         ]),
     )
 }
 
 #[derive(Default)]
 pub(super) struct MaterializeFixture {
-    log_dir_status: crate::log_dir_status::LogDirRegistry,
-    producer_state: Arc<crate::producer_state::ProducerState>,
+    log_dir_status: LogDirRegistry,
+    producer_state: Arc<ProducerState>,
 }
 
 #[derive(Clone, Copy)]
@@ -189,11 +186,7 @@ impl MaterializeFixture {
             log_config: setup.log_config,
             log_dir_status: &self.log_dir_status,
             producer_state: &self.producer_state,
-            runtime: crate::partition::PartitionRuntimeConfig::new(
-                (1_024, 64, 3),
-                false,
-                (None, None, None),
-            ),
+            runtime: PartitionRuntimeConfig::new((1_024, 64, 3), false, (None, None, None)),
         }
     }
 
@@ -216,7 +209,7 @@ pub(super) fn materialized_partition_with_config(
     let partitions = Arc::new(PartitionRegistry::new());
     MaterializeFixture::default().materialize(
         &partitions,
-        crate::replicator_supervisor::test_support::MaterializeSetup {
+        MaterializeSetup {
             log_dirs: &[dir.path().to_path_buf()],
             log_config,
             ..Default::default()
@@ -273,7 +266,7 @@ pub(super) fn broker_record(node_id: NodeId) -> BrokerRegistrationRecord {
             port: 19092,
             protocol: krabka_security::ListenerProtocol::Plaintext,
         }],
-        ..crate::test_support::broker_registration(node_id)
+        ..broker_registration(node_id)
     }
 }
 
@@ -314,7 +307,7 @@ pub(super) type SupervisorFixture = (
 pub(super) async fn reconciled_partition(
     image: &MetadataImage,
     context: &str,
-) -> (SupervisorFixture, Arc<crate::partition::Partition>) {
+) -> (SupervisorFixture, Arc<Partition>) {
     let fixture = reconciled_supervisor(image).await;
     let partition = fixture
         .1
@@ -341,12 +334,12 @@ pub(super) fn supervisor_fixture(image: MetadataImage) -> SupervisorFixture {
         partitions: partitions.clone(),
         log_dirs: vec![dir.path().to_path_buf()],
         log_config: LogConfig::default(),
-        unstable_api_versions: crate::api_catalog::UnstableApiVersions::Disabled,
+        unstable_api_versions: UnstableApiVersions::Disabled,
         client_id: "supervisor-test".into(),
         shutdown: CancellationToken::new(),
         txn_coordinator: None,
         share_coordinator: None,
-        inter_broker_client: Arc::new(crate::network::client::InterBrokerClient::new(None, None)),
+        inter_broker_client: Arc::new(InterBrokerClient::new(None, None)),
         inter_broker_listener_protocol: krabka_security::ListenerProtocol::Plaintext,
         inter_broker_server_name: "localhost".into(),
         inter_broker_listener_name: "INTERNAL".into(),
@@ -355,17 +348,15 @@ pub(super) fn supervisor_fixture(image: MetadataImage) -> SupervisorFixture {
         controller_quorum_voters: Vec::new(),
         replication: ReplicationRuntimeConfig::default(),
         throttle_state: Arc::new(ThrottleState::new()),
-        log_dir_status: crate::log_dir_status::LogDirRegistry::default(),
-        producer_state: Arc::new(crate::producer_state::ProducerState::new()),
+        log_dir_status: LogDirRegistry::default(),
+        producer_state: Arc::new(ProducerState::new()),
         max_produce_group: 1_024,
         partition_writer_queue_depth: 64,
         diskless_wal_local_replica_count: 3,
-        metrics: crate::metrics::BrokerMetrics::default(),
-        log_dir_ids: crate::log_dir_id::LogDirIds::resolve(&[dir.path().to_path_buf()]),
-        hot_tail: Arc::new(crate::diskless::hot_tail::HotTailCache::default()),
-        wal_shards: Arc::new(crate::wal::quorum::registry::WalShardRegistry::new(
-            krabka_raft::NodeId(2),
-        )),
+        metrics: BrokerMetrics::default(),
+        log_dir_ids: LogDirIds::resolve(&[dir.path().to_path_buf()]),
+        hot_tail: Arc::new(HotTailCache::default()),
+        wal_shards: Arc::new(WalShardRegistry::new(krabka_raft::NodeId(2))),
     });
     supervisor.assign_dirs_reporter = reporter.clone();
     (supervisor, partitions, reporter, dir)

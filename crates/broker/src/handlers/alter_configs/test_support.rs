@@ -16,7 +16,7 @@ use krabka_protocol::owned::{
 use super::{RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC, handle};
 use crate::{
     authorizer::Authorizer,
-    test_support::{start_broker_with_authorizer as start_broker, test_ctx},
+    test_support::{broker_registration, start_broker_with_authorizer as start_broker, test_ctx},
 };
 
 crate::test_support::context_helper!(client_id = "admin-client");
@@ -28,9 +28,9 @@ pub(super) fn resource(resource_type: i8, resource_name: &str) -> AlterConfigsRe
 /// A metadata image that holds one registered broker and nothing else.
 pub(super) fn image_with_broker(node_id: u64) -> krabka_metadata::MetadataImage {
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-    image.apply(&MetadataRecord::V1BrokerRegistration(
-        crate::test_support::broker_registration(krabka_raft::NodeId(node_id)),
-    ));
+    image.apply(&MetadataRecord::V1BrokerRegistration(broker_registration(
+        krabka_raft::NodeId(node_id),
+    )));
     image
 }
 

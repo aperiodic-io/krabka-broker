@@ -30,6 +30,8 @@ mod refresh;
 pub(crate) use expiry::run as run_expiry;
 pub use refresh::run;
 
+use crate::throttle::MICROS_PER_TOKEN;
+
 /// Result of consuming a client quota, carrying the delay and the resolved
 /// entity identity (`user` and `client_id`) that the match was charged to (#418).
 #[derive(Debug, Clone, PartialEq, derive_more::Deref)]
@@ -160,8 +162,7 @@ fn consume_configured_quota(
 /// The debt a bucket reports, in tokens with its fractional part, or `None`
 /// when the bucket owes nothing.
 pub(crate) fn debt_tokens(debt_micros: u64) -> Option<f64> {
-    (debt_micros > 0)
-        .then(|| u64_to_f64(debt_micros) / u64_to_f64(crate::throttle::MICROS_PER_TOKEN))
+    (debt_micros > 0).then(|| u64_to_f64(debt_micros) / u64_to_f64(MICROS_PER_TOKEN))
 }
 
 /// A quota delay as Kafka's `throttle_time_ms` wire field: the delay in
@@ -233,6 +234,8 @@ pub(crate) mod test_support {
     }
     pub(crate) use image_builder;
 
+    use crate::throttle::TokenBucket;
+
     /// Independent expected throttles for producer and consumer quotas.
     pub(crate) fn fractional_bandwidth_cases() -> [(f64, u64, Time); 7] {
         [
@@ -254,9 +257,9 @@ pub(crate) mod test_support {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for (rate, bytes, delay) in fractional_bandwidth_cases() {
-            let image = image_with_quota(crate::quota::test_support::QuotaRecordSetup {
+            let image = image_with_quota(QuotaRecordSetup {
                 key,
-                value: crate::quota::test_support::QuotaValue(rate),
+                value: QuotaValue(rate),
                 ..Default::default()
             });
             let buckets = super::QuotaBuckets::with_window(secs(1));
@@ -334,7 +337,7 @@ pub(crate) mod test_support {
         setup: UserBucketSetup<'_>,
     ) -> (
         std::sync::Arc<super::QuotaBuckets>,
-        std::sync::Arc<crate::throttle::TokenBucket>,
+        std::sync::Arc<TokenBucket>,
     ) {
         let buckets = std::sync::Arc::new(super::QuotaBuckets::new());
         let key: krabka_metadata::EntityKey = vec![("user".into(), Some("alice".into()))];
@@ -389,7 +392,11 @@ mod tests {
     use assert2::{assert, check};
     use krabka_units::secs;
 
-    use super::{test_support::image_with_quota, *};
+    use super::{
+        test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
+        *,
+    };
+    use crate::throttle::MICROS_PER_TOKEN;
 
     /// `throttle_time_ms` rounds to the nearest millisecond, half up, as
     /// Kafka's `Math.round` does: 0.4 ms reports `0`, 0.6 ms and 1.6 ms report
@@ -447,7 +454,7 @@ mod tests {
     /// that owes nothing has none.
     #[test]
     fn debt_tokens_is_the_exact_debt() {
-        let m = crate::throttle::MICROS_PER_TOKEN;
+        let m = MICROS_PER_TOKEN;
         let cases = [
             (0, None),
             (1, Some(0.000_001)),
@@ -465,9 +472,9 @@ mod tests {
 
     #[test]
     fn consume_configured_quota_returns_zero_without_mutating_bucket_for_zero_amount() {
-        let image = image_with_quota(crate::quota::test_support::QuotaRecordSetup {
+        let image = image_with_quota(QuotaRecordSetup {
             key: "request_percentage",
-            value: crate::quota::test_support::QuotaValue(100.0),
+            value: QuotaValue(100.0),
             ..Default::default()
         });
         let buckets = QuotaBuckets::new();
@@ -509,8 +516,8 @@ mod tests {
     #[test]
     fn consume_configured_quota_ignores_non_positive_rates() {
         for rate in [-1.0, 0.0] {
-            let image = image_with_quota(crate::quota::test_support::QuotaRecordSetup {
-                value: crate::quota::test_support::QuotaValue(rate),
+            let image = image_with_quota(QuotaRecordSetup {
+                value: QuotaValue(rate),
                 ..Default::default()
             });
             let buckets = QuotaBuckets::new();
@@ -544,8 +551,8 @@ mod tests {
 
     #[test]
     fn consume_configured_quota_leaves_the_overage_delay_uncapped() {
-        let image = image_with_quota(crate::quota::test_support::QuotaRecordSetup {
-            value: crate::quota::test_support::QuotaValue(1.0),
+        let image = image_with_quota(QuotaRecordSetup {
+            value: QuotaValue(1.0),
             ..Default::default()
         });
         // A one-second window: at 1 B/s the burst is one byte, so 10 bytes

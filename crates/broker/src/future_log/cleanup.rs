@@ -99,6 +99,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::test_support::wait_tasks_started;
 
     macro_rules! pending_move_fixture {
         ($dir:ident, $log:ident, $logs:ident, $started:ident, $dropped:ident) => {
@@ -151,11 +152,7 @@ mod tests {
             cancels.push(cancel);
         }
 
-        crate::test_support::wait_tasks_started(
-            || started.load(Ordering::SeqCst) == 2,
-            "move tasks start",
-        )
-        .await;
+        wait_tasks_started(|| started.load(Ordering::SeqCst) == 2, "move tasks start").await;
 
         tokio::time::timeout(
             std::time::Duration::from_secs(1),

@@ -49,9 +49,9 @@ use self::{
     response::whole_request_error,
 };
 use crate::{
-    codes::{CLUSTER_AUTHORIZATION_FAILED, COORDINATOR_NOT_AVAILABLE, POLICY_VIOLATION},
+    codes::{CLUSTER_AUTHORIZATION_FAILED, COORDINATOR_NOT_AVAILABLE, NONE, POLICY_VIOLATION},
     freeze::resolve::resolve_freeze_mutation,
-    handlers::stamp_unset,
+    handlers::{audit_resource, stamp_unset},
 };
 
 context_handler! {
@@ -167,12 +167,12 @@ fn audited_partitions(
         .iter()
         .flat_map(|(topic, rows)| {
             rows.iter()
-                .filter(|row| row.error_code == crate::codes::NONE)
+                .filter(|row| row.error_code == NONE)
                 .filter_map(move |row| {
                     let name = format!("{topic}-{}", row.partition_index);
                     altered
                         .contains(&name)
-                        .then(|| crate::handlers::audit_resource("Partition", name))
+                        .then(|| audit_resource("Partition", name))
                 })
         })
         .collect()

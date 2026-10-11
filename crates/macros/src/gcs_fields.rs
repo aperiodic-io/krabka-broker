@@ -5,8 +5,10 @@ use moxy::{
     token::{LitStr, Span, TokenStream, TokenTree},
 };
 
+use crate::meta::{mode, named_body};
+
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
-    let [prefix_doc, path_doc, key_doc, adc_doc, endpoint_doc] = match crate::meta::mode(meta, ["file", "runtime"])? {
+    let [prefix_doc, path_doc, key_doc, adc_doc, endpoint_doc] = match mode(meta, ["file", "runtime"])? {
         "file" => [
             "Optional key prefix inside the bucket (lets multiple clusters\nshare a bucket).",
             "Path to a service-account JSON key file. Omit (along with the\nother credential fields) to use Workload Identity / ADC.",
@@ -24,7 +26,7 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         _ => unreachable!(),
     }
     .map(|doc| LitStr::new(doc, Span::call_site()));
-    let (mut tokens, body) = crate::meta::named_body(item, "gcs_fields")?;
+    let (mut tokens, body) = named_body(item, "gcs_fields")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

@@ -232,17 +232,20 @@ mod tests {
     use krabka_units::{kibibytes, mebibytes, secs};
 
     use super::*;
-    use crate::broker::test_support::local_partition_with_records;
+    use crate::{
+        broker::test_support::{LocalPartitionSetup, local_partition_with_records},
+        test_support::start_broker_with,
+    };
 
     #[tokio::test]
     async fn single_broker_handle_local_log_helpers_observe_real_state() {
-        let (handle, dir) = crate::test_support::start_broker_with(|_| {}).await;
+        let (handle, dir) = start_broker_with(|_| {}).await;
         let broker = handle.broker_arc_for_test();
 
         let helper_topic = "handle-partition-helper-mutant-topic";
         let helper_part = local_partition_with_records(
             dir.path(),
-            crate::broker::test_support::LocalPartitionSetup {
+            LocalPartitionSetup {
                 topic: helper_topic,
                 ..Default::default()
             },

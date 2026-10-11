@@ -19,7 +19,10 @@ use krabka_units::{Time, convert::TimeExt as _};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::{partition::Partition, partition_registry::PartitionRegistry};
+use crate::{
+    controller_endpoint::ControllerDialer, metadata_source::MetadataSource, metrics::BrokerMetrics,
+    partition::Partition, partition_registry::PartitionRegistry, replica_state::LeaderPolicy,
+};
 
 mod alter_partition;
 mod proposal;
@@ -35,11 +38,11 @@ use self::{
 
 pub(crate) struct Config {
     /// How a leader reaches the CONTROLLER listener of the active controller.
-    pub dialer: crate::controller_endpoint::ControllerDialer,
+    pub dialer: ControllerDialer,
     pub node_id: NodeId,
     pub scan_interval: Time,
     pub partitions: Arc<PartitionRegistry>,
-    pub controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    pub controller: Arc<dyn MetadataSource>,
     pub replica_lag_time_max: Time,
     /// This broker's static `min.insync.replicas`, the last resort when the
     /// image names no value for a topic.
@@ -47,7 +50,7 @@ pub(crate) struct Config {
     pub broker_id: i32,
     pub shutdown: CancellationToken,
     /// Bumped on each proposed shrink or expand.
-    pub metrics: crate::metrics::BrokerMetrics,
+    pub metrics: BrokerMetrics,
 }
 
 pub(crate) async fn run(cfg: Config) {
@@ -78,7 +81,7 @@ pub(crate) async fn run(cfg: Config) {
             let Some(record) = image.partition(&part.topic, part.index.get()) else {
                 continue;
             };
-            let policy = crate::replica_state::LeaderPolicy::from_image(
+            let policy = LeaderPolicy::from_image(
                 &image,
                 cfg.node_id,
                 record,
@@ -149,8 +152,12 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::isr_maintenance::test_support::{
-        IsrSetup, fake_source, fixture_partition, partition, set_replica_state, topic,
+    use crate::{
+        isr_maintenance::test_support::{
+            IsrSetup, fake_source, fixture_partition, partition, set_replica_state, topic,
+        },
+        metadata_source::MetadataSource,
+        test_support::{PartitionEpoch, StandalonePartitionSetup, plaintext_controller_dialer},
     };
 
     /// One scan of a leader partition whose only follower last caught up
@@ -169,7 +176,7 @@ mod tests {
         let log_dir = tempdir().unwrap();
         let part = fixture_partition(
             log_dir.path(),
-            crate::test_support::StandalonePartitionSetup {
+            StandalonePartitionSetup {
                 topic: "t",
                 ..Default::default()
             },
@@ -188,18 +195,17 @@ mod tests {
         image.apply(&topic("t", uuid::Uuid::from_u128(1)));
         image.apply(&partition(IsrSetup {
             leader_epoch: krabka_ids::LeaderEpoch(10),
-            partition_epoch: crate::test_support::PartitionEpoch(4),
+            partition_epoch: PartitionEpoch(4),
             ..Default::default()
         }));
 
         let partitions = Arc::new(PartitionRegistry::new());
         partitions.insert("t".into(), PartitionIndex(0), part);
-        let controller: Arc<dyn crate::metadata_source::MetadataSource> =
-            Arc::new(fake_source(image, None));
-        let metrics = crate::metrics::BrokerMetrics::default();
+        let controller: Arc<dyn MetadataSource> = Arc::new(fake_source(image, None));
+        let metrics = BrokerMetrics::default();
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(run(Config {
-            dialer: crate::test_support::plaintext_controller_dialer(),
+            dialer: plaintext_controller_dialer(),
             node_id: NodeId(1),
             scan_interval: hours(1),
             partitions,

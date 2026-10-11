@@ -33,18 +33,29 @@ use krabka_protocol::{
 };
 use tempfile::TempDir;
 
-use crate::support::{
-    self,
-    client::connect_owned,
-    offsets::{
-        offset_commit_partition, offset_commit_topic, offset_delete_partition,
-        offset_delete_request, offset_delete_topic,
+use crate::{
+    support::{
+        self, ClusterBootstrapSetup, NodeIndex,
+        client::connect_owned,
+        offsets::{
+            offset_commit_partition, offset_commit_topic, offset_delete_partition,
+            offset_delete_request, offset_delete_topic,
+        },
+        relay::Relay,
+        shutdown_cluster,
+        topics::AssignedTopicSetup,
+        transaction_wire::{
+            AssignedTransactionTopicSetup, TransactionProduceSetup, add_partition_request,
+            coordinator_loading, create_assigned_topic, init_producer_request,
+            initialized_identity, partition_added, partition_leader, produce_fixture,
+            read_committed_through, retry_coordinator,
+        },
+        transactions::{
+            EndTransactionSetup, ProducerIdentity, end_transaction_request, txn_offset_partition,
+            txn_offset_topic,
+        },
     },
-    relay::Relay,
-    transaction_wire::{TransactionProduceSetup, produce_fixture},
-    transactions::{
-        ProducerIdentity, end_transaction_request, txn_offset_partition, txn_offset_topic,
-    },
+    txn_harness::registered_transaction_cluster,
 };
 
 const TID: &str = "txn-uncommitted-writes";
@@ -60,7 +71,7 @@ const CONCURRENT_TRANSACTIONS: i16 = 51;
 const SETTLE: Duration = Duration::from_secs(60);
 
 fn retriable(code: i16) -> bool {
-    crate::support::transaction_wire::coordinator_loading(code) || code == CONCURRENT_TRANSACTIONS
+    coordinator_loading(code) || code == CONCURRENT_TRANSACTIONS
 }
 
 /// One connection to the broker that binds `address`, past any relay, so a
@@ -83,16 +94,13 @@ async fn client(address: SocketAddr) -> Client {
 
 /// The leader of `topic-0` in the image of `handle`.
 async fn leader_of(handle: &BrokerHandle, topic: &str) -> u64 {
-    crate::support::transaction_wire::partition_leader(handle, topic, SETTLE).await
+    partition_leader(handle, topic, SETTLE).await
 }
 
-async fn create_topic(
-    client: &Client,
-    topic: crate::support::topics::AssignedTopicSetup,
-) -> WireUuid {
-    crate::support::transaction_wire::create_assigned_topic(
+async fn create_topic(client: &Client, topic: AssignedTopicSetup) -> WireUuid {
+    create_assigned_topic(
         client,
-        crate::support::transaction_wire::AssignedTransactionTopicSetup {
+        AssignedTransactionTopicSetup {
             topic,
             ..Default::default()
         },
@@ -101,10 +109,10 @@ async fn create_topic(
 }
 
 async fn init_producer(connection: &Connection) -> (i64, i16) {
-    crate::support::transaction_wire::initialized_identity(
+    initialized_identity(
         || async {
             connection
-                .send(crate::support::transaction_wire::init_producer_request(TID))
+                .send(init_producer_request(TID))
                 .await
                 .expect("InitProducerId")
         },
@@ -115,10 +123,7 @@ async fn init_producer(connection: &Connection) -> (i64, i16) {
 }
 
 async fn add_partition(connection: &Connection, producer: (i64, i16)) {
-    crate::support::transaction_wire::partition_added(connection.send(
-        crate::support::transaction_wire::add_partition_request(TID, TOPIC, producer),
-    ))
-    .await;
+    partition_added(connection.send(add_partition_request(TID, TOPIC, producer))).await;
 }
 
 async fn produce(
@@ -143,11 +148,8 @@ async fn produce(
 fn end_txn_request((producer_id, epoch): (i64, i16)) -> EndTxnRequest {
     end_transaction_request(
         TID,
-        crate::support::transactions::EndTransactionSetup {
-            producer: crate::support::transactions::ProducerIdentity::from_wire((
-                producer_id,
-                epoch,
-            )),
+        EndTransactionSetup {
+            producer: ProducerIdentity::from_wire((producer_id, epoch)),
             ..Default::default()
         },
     )
@@ -155,7 +157,7 @@ fn end_txn_request((producer_id, epoch): (i64, i16)) -> EndTxnRequest {
 
 /// Commit, and retry while the coordinator answers a retriable error.
 async fn end_txn(connection: &Connection, producer: (i64, i16)) -> EndTxnResponse {
-    crate::support::transaction_wire::retry_coordinator(
+    retry_coordinator(
         || async {
             connection
                 .send(end_txn_request(producer))
@@ -209,13 +211,7 @@ async fn describe_until(connection: &Connection, expected: &Described) -> Option
 }
 
 async fn read_committed(bootstrap: SocketAddr, last: &str) -> Vec<String> {
-    crate::support::transaction_wire::read_committed_through(
-        &bootstrap.to_string(),
-        TOPIC,
-        last,
-        SETTLE,
-    )
-    .await
+    read_committed_through(&bootstrap.to_string(), TOPIC, last, SETTLE).await
 }
 
 /// Three brokers whose data listeners each sit behind a [`Relay`]: every
@@ -269,8 +265,8 @@ impl RelayedCluster {
             let dir = TempDir::new().expect("tempdir");
             let mut config = support::broker_config(
                 dir.path(),
-                topology.node_setup(crate::support::ClusterBootstrapSetup {
-                    index: crate::support::NodeIndex(index),
+                topology.node_setup(ClusterBootstrapSetup {
+                    index: NodeIndex(index),
                     ..Default::default()
                 }),
             )
@@ -427,10 +423,7 @@ async fn an_end_txn_is_answered_only_once_its_commit_decision_is_replicated() {
         .expect("another broker");
     let topic_id = create_topic(
         &admin,
-        crate::support::topics::AssignedTopicSetup::on_replicas(
-            TOPIC,
-            vec![krabka_metadata::NodeId(data_node)],
-        ),
+        AssignedTopicSetup::on_replicas(TOPIC, vec![krabka_metadata::NodeId(data_node)]),
     )
     .await;
     admin.close();
@@ -532,7 +525,7 @@ async fn a_transaction_completes_only_once_its_markers_are_committed() {
         .expect("another broker");
     let topic_id = create_topic(
         &admin,
-        crate::support::topics::AssignedTopicSetup::on_replicas(
+        AssignedTopicSetup::on_replicas(
             TOPIC,
             vec![
                 krabka_metadata::NodeId(coordinator),
@@ -603,7 +596,7 @@ async fn a_transaction_completes_only_once_its_markers_are_committed() {
 /// `CoordinatorOperationExceptionHelper` answers `COORDINATOR_NOT_AVAILABLE`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn group_coordinator_writes_are_answered_only_once_committed() {
-    let mut cluster = crate::txn_harness::registered_transaction_cluster(|_, config| {
+    let mut cluster = registered_transaction_cluster(|_, config| {
         config.offsets_topic_num_partitions = 1;
         config.transaction_state_num_partitions = 1;
         // A stopped follower stays in the ISR: the leader does not shrink it
@@ -635,10 +628,7 @@ async fn group_coordinator_writes_are_answered_only_once_committed() {
     .expect("a node id");
     let topic_id = create_topic(
         &admin,
-        crate::support::topics::AssignedTopicSetup::on_replicas(
-            TOPIC,
-            vec![krabka_metadata::NodeId(group_node)],
-        ),
+        AssignedTopicSetup::on_replicas(TOPIC, vec![krabka_metadata::NodeId(group_node)]),
     )
     .await;
     admin.close();
@@ -736,6 +726,6 @@ async fn group_coordinator_writes_are_answered_only_once_committed() {
             }
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
     drop(stopped_dir);
 }

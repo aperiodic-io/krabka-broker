@@ -29,7 +29,7 @@ use crate::{
         role::Role,
         types::{Epoch, ReplicaKey},
     },
-    reconfig::ReconfigOutcome,
+    reconfig::{ReconfigOutcome, VoterChange},
 };
 
 /// Classify the request's voter key against the committed voter set, with a
@@ -167,7 +167,7 @@ impl Engine {
     /// trails the leader.
     fn reconfiguration_target(
         &self,
-        change: &crate::reconfig::VoterChange,
+        change: &VoterChange,
         current: &VoterSet,
         current_version: u16,
         check_only: bool,
@@ -249,8 +249,8 @@ impl Engine {
     /// append-only acknowledgement.
     pub fn on_reconfigure(
         &mut self,
-        change: crate::reconfig::VoterChange,
-        reply: oneshot::Sender<Result<crate::reconfig::ReconfigOutcome, RaftError>>,
+        change: VoterChange,
+        reply: oneshot::Sender<Result<ReconfigOutcome, RaftError>>,
     ) {
         use crate::reconfig::VoterChange;
 
@@ -496,7 +496,7 @@ impl Engine {
             return;
         };
         if let Some(reply) = pending.reply.take() {
-            let _ = reply.send(Ok(crate::reconfig::ReconfigOutcome::Committed));
+            let _ = reply.send(Ok(ReconfigOutcome::Committed));
         }
         if pending.removed_local_leader {
             let actions = self.core.finish_local_leader_removal(self.now());

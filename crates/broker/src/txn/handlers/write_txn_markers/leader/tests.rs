@@ -18,7 +18,7 @@ use super::{PendingMarker, append_marker_as_leader};
 use crate::{
     codes,
     error::BrokerError,
-    partition::Partition,
+    partition::{Partition, test_support::test_partition_with_writer},
     replica_state::LeaderPolicy,
     txn::{handlers::write_txn_markers::MarkerAppend, marker::MarkerType},
 };
@@ -45,7 +45,7 @@ const MARKER: MarkerAppend = MarkerAppend {
 /// ISR holds a follower that has not fetched, so the high watermark stays at
 /// zero. It holds a two-record transaction of the producer of [`MARKER`].
 async fn led_partition() -> (Arc<Partition>, tempfile::TempDir) {
-    let (partition, dir) = crate::partition::test_support::test_partition_with_writer();
+    let (partition, dir) = test_partition_with_writer();
     let partition = Arc::new(partition);
     partition.install_leader_change(NODE.0, EPOCH).await;
     partition

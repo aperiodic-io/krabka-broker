@@ -10,7 +10,7 @@ use krabka_protocol::owned::{
 };
 
 use super::{OP_APPEND, OP_DELETE, OP_SET, OP_SUBTRACT};
-use crate::codes;
+use crate::{client_metrics::config::validate, codes};
 
 /// Merge per-key ops into a client-metrics subscription's override map and
 /// stage a `V1ClientMetricsConfig` record, as Kafka's
@@ -60,7 +60,7 @@ pub(super) fn handle_client_metrics_scoped(
             }
         }
     }
-    if let Err(error) = crate::client_metrics::config::validate(&resource.resource_name, &merged) {
+    if let Err(error) = validate(&resource.resource_name, &merged) {
         out.error_code = error.code();
         out.error_message = Some(error.message().to_string());
         return;

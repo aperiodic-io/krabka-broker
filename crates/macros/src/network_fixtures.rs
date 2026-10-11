@@ -2,8 +2,14 @@
 
 use moxy::{ast::ParseError, token::TokenStream};
 
+use crate::{
+    fixtures::{name, named_items, named_root},
+    meta::arguments,
+    sendfile_match::platform_cfg,
+};
+
 pub(crate) fn request_frame(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
             #[derive(Clone, Copy)]
             pub(crate) struct FrameCorrelationId(pub i32);
@@ -39,7 +45,7 @@ pub(crate) fn request_frame(input: TokenStream) -> Result<TokenStream, ParseErro
 }
 
 pub(crate) fn patterned_bytes(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
         #[derive(Clone, Copy)]
         pub(crate) struct PatternedPayloadLength(pub usize);
@@ -52,7 +58,7 @@ pub(crate) fn patterned_bytes(input: TokenStream) -> Result<TokenStream, ParseEr
 }
 
 pub(crate) fn frame_prefix(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
         #[derive(Clone, Copy)]
         pub(crate) struct ResponseByteCount(pub usize);
@@ -94,7 +100,7 @@ pub(crate) fn frame_prefix(input: TokenStream) -> Result<TokenStream, ParseError
 }
 
 pub(crate) fn file_region(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
         fn {{ name }}(region: &::krabka_protocol::records::FileRegion) -> Vec<u8> {
             use ::std::os::unix::fs::FileExt as _;
@@ -114,7 +120,7 @@ pub(crate) fn file_region(input: TokenStream) -> Result<TokenStream, ParseError>
 
 /// The keyed fixture's ordinary non-transactional headers and exact offset arithmetic.
 pub(crate) fn keyed_record_batch(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
         #[derive(Clone, Copy)]
         pub(crate) struct KeyedRecordCount(pub i32);
@@ -148,7 +154,7 @@ pub(crate) fn keyed_record_batch(input: TokenStream) -> Result<TokenStream, Pars
 
 /// Export the original paths and snapshot policy before constructing the caller's epoch bytes.
 pub(crate) fn export_segment_data(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
         #[derive(Clone, Copy)]
         pub(crate) enum ProducerSnapshotExport { Include, Omit }
@@ -172,7 +178,7 @@ pub(crate) fn export_segment_data(input: TokenStream) -> Result<TokenStream, Par
 
 /// Apply the shared file-region platform condition without rebuilding the caller's tokens.
 pub(crate) fn sendfile_platform(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let mut output: proc_macro::TokenStream = crate::sendfile_match::platform_cfg().into();
+    let mut output: proc_macro::TokenStream = platform_cfg().into();
     output.extend(input);
     output
 }
@@ -327,7 +333,7 @@ pub(crate) fn partition_spawn_parameters(
 
 /// Stage checkpoint bytes under the JVM decoder's caller-chosen file name.
 pub(crate) fn jvm_checkpoint_dump(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         fn {{ name }}(dir: &::std::path::Path, filename: &str, bytes: &[u8], image: &str) -> ::std::process::Output {
             use ::std::io::Write as _;
@@ -345,9 +351,8 @@ pub(crate) fn jvm_checkpoint_dump(input: TokenStream) -> Result<TokenStream, Par
 
 /// Compose a literal Java probe with the standard string-producer imports and properties.
 pub(crate) fn java_string_producer(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let [before, bootstrap, after]: [TokenStream; 3] = crate::meta::arguments(input, 3)?
-        .try_into()
-        .expect("three arguments");
+    let [before, bootstrap, after]: [TokenStream; 3] =
+        arguments(input, 3)?.try_into().expect("three arguments");
     Ok(moxy::template! {
         concat!(
             "import java.util.Properties;\nimport org.apache.kafka.clients.producer.KafkaProducer;\nimport org.apache.kafka.clients.producer.ProducerConfig;\nimport org.apache.kafka.clients.producer.ProducerRecord;\n",
@@ -367,9 +372,8 @@ pub(crate) fn java_string_producer(input: TokenStream) -> Result<TokenStream, Pa
 
 /// Define an epoch-millisecond reader with the caller's attributes and overflow fallback.
 pub(crate) fn epoch_millis(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let [signature, overflow]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
-        .try_into()
-        .expect("two arguments");
+    let [signature, overflow]: [TokenStream; 2] =
+        arguments(input, 2)?.try_into().expect("two arguments");
     Ok(moxy::template! {
         {{ signature }}() -> i64 {
             use ::std::time::{SystemTime, UNIX_EPOCH};
@@ -382,7 +386,7 @@ pub(crate) fn epoch_millis(input: TokenStream) -> Result<TokenStream, ParseError
 /// Literal bytes captured from Kafka 4.3.1's principal serializer.
 /// Keep this oracle independent of the broker's principal encoder.
 pub(crate) fn jvm_principal_golden(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let (user, token) = crate::fixtures::named_root(input)?;
+    let (user, token) = named_root(input)?;
     let name = match user.to_string().as_str() {
         "alice" => moxy::template! { 0x06, b'a', b'l', b'i', b'c', b'e' },
         "bob" => moxy::template! { 0x04, b'b', b'o', b'b' },
@@ -400,7 +404,7 @@ pub(crate) fn jvm_principal_golden(input: TokenStream) -> Result<TokenStream, Pa
 
 /// The deliberately distinctive proposal UUID used by both signing golden fixtures.
 pub(crate) fn break_glass_golden_id(input: TokenStream) -> Result<TokenStream, ParseError> {
-    crate::fixtures::named_items(input, |name| {
+    named_items(input, |name| {
         moxy::template! {
             const {{ name }}: [u8; 16] = [
                 0x0B, 0xAD, 0xC0, 0xFF, 0xEE, 0x00, 0x40, 0x00, 0x80, 0x00, 0x01, 0x02,

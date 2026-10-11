@@ -95,15 +95,15 @@ pub use creatable_topic as creatable_topic_with_configs;
 
 /// A single-partition diskless topic created through the ordinary admin handler.
 pub fn diskless_topic_request(name: impl Into<String>, replication: i16) -> CreateTopicsRequest {
-    crate::support::topics::create_topic_request_with_setup(
-        creatable_topic_with_configs(crate::support::topics::ConfiguredTopicSetup {
+    create_topic_request_with_setup(
+        creatable_topic_with_configs(ConfiguredTopicSetup {
             name: name.into(),
-            replicas: crate::support::topics::TopicReplicationFactor(replication),
+            replicas: TopicReplicationFactor(replication),
             configs: topic_configs([("krabka.diskless", "true")]),
             ..Default::default()
         }),
-        crate::support::topics::CreateTopicRequestSetup {
-            timeout: crate::support::topics::CreateTopicsTimeoutMillis(10_000),
+        CreateTopicRequestSetup {
+            timeout: CreateTopicsTimeoutMillis(10_000),
         },
     )
 }

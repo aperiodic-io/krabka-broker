@@ -15,6 +15,8 @@ use krabka_log::{Log, LogConfig, name};
 use krabka_restore::{Cli, RestoreArgs, restore};
 use tempfile::TempDir;
 
+use crate::archive::build_archive;
+
 /// Build the `RestoreArgs` every scenario shares -- a local archive, a
 /// fresh target directory, and a standalone node 1, matching the shape
 /// `materialize.rs`'s own tests use to satisfy `format_target`'s
@@ -82,7 +84,7 @@ pub(crate) fn empty_first_batch(
 pub(crate) async fn restore_excluding_keys(
     fixture: &mut [krabka_protocol::records::RecordBatch],
 ) -> (TempDir, TempDir, PathBuf) {
-    let archive = crate::archive::build_archive("orders", 0, fixture);
+    let archive = build_archive("orders", 0, fixture);
     let (target, dir) = run_restore(archive.path(), &["--exclude-key", "^drop"]).await;
     (archive, target, dir)
 }

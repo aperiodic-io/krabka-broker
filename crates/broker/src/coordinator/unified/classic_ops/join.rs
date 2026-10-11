@@ -23,6 +23,7 @@ use crate::{
         classic_state::{ClassicGroup as ClassicState, GroupState, Member, select_protocol},
         persistence::MAX_STRING_BYTES,
     },
+    metadata_epoch::next_i32,
 };
 
 const DEFAULT_SESSION_TIMEOUT_MS: u64 = 30_000;
@@ -489,8 +490,7 @@ pub(crate) fn try_complete(
         state.joined_this_round.remove(member_id);
     }
     if state.members.is_empty() {
-        let generation_id = crate::metadata_epoch::next_i32(state.generation_id)
-            .ok_or(CompleteError::EpochExhausted)?;
+        let generation_id = next_i32(state.generation_id).ok_or(CompleteError::EpochExhausted)?;
         state.generation_id = generation_id;
         state.state = GroupState::Empty;
         state.leader_id = None;

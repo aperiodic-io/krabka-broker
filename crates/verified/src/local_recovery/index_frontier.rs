@@ -3,6 +3,7 @@ use creusot_std::prelude::*;
 #[cfg(creusot)]
 use super::{Int, invariant, logic};
 use super::{LocalRecoveryStep, LocalRecoverySwapAction, LocalRecoverySwapFacts};
+use crate::restore::restore_batch_step;
 
 open_logic! {
 /// A `.log.swap` is authoritative once it exists without its `.log.cleaned`.
@@ -132,8 +133,7 @@ pub fn local_recovery_batch_step(
     if valid_end > file_end {
         return None;
     }
-    let next_offset =
-        crate::restore::restore_batch_step(expected_offset, batch_base, last_offset_delta)?;
+    let next_offset = restore_batch_step(expected_offset, batch_base, last_offset_delta)?;
     Some(LocalRecoveryStep {
         valid_end,
         last_offset: next_offset - 1,

@@ -263,11 +263,12 @@ mod tests {
     use crate::{
         barrier::{
             marker::BarrierMarker,
-            test_support::{open_partition, topic_records},
+            test_support::{check_control_marker, open_partition, topic_records},
         },
         codes,
         coordinator::unified::persistence::MAX_STRING_BYTES,
         partition_registry::PartitionRegistry,
+        test_support::StandalonePartitionSetup,
     };
 
     const LOCAL: NodeId = NodeId(1);
@@ -309,11 +310,7 @@ mod tests {
         leader_epoch: i32,
     ) -> PartitionRegistry {
         let registry = PartitionRegistry::new();
-        open_partition(
-            &registry,
-            dir,
-            crate::test_support::StandalonePartitionSetup::default(),
-        );
+        open_partition(&registry, dir, StandalonePartitionSetup::default());
         let partition = registry
             .get("orders", PartitionIndex(0))
             .expect("the partition is open");
@@ -417,7 +414,7 @@ mod tests {
             .expect("read the log back");
         check!(read.batches.len() == 1);
         let batch = &read.batches[0];
-        crate::barrier::test_support::check_control_marker(batch, &marker());
+        check_control_marker(batch, &marker());
     }
 
     /// Authorization answers first, so a caller that may not write markers

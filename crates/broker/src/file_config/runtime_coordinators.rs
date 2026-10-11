@@ -16,12 +16,12 @@ use super::{
         whole_millis_i32_time,
     },
 };
-use crate::coordinator::unified::share::config::ShareGroupConfig;
+use crate::{config::BrokerConfig, coordinator::unified::share::config::ShareGroupConfig};
 
 impl RuntimeFileConfig {
     pub(super) fn apply_coordinators(
         &mut self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
         set_runtime! {
@@ -60,7 +60,7 @@ impl RuntimeFileConfig {
     /// file's values.
     pub(super) fn apply_share_group(
         &mut self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
         let share = &mut *cfg.share_group;
@@ -97,7 +97,7 @@ impl RuntimeFileConfig {
 
     pub(super) fn apply_streams_group(
         &mut self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
         set_runtime! {
@@ -302,10 +302,10 @@ fn validate_share_group_order(share: &ShareGroupConfig) -> Result<(), FileConfig
 
 #[cfg(test)]
 mod tests {
-    fn applied_runtime(body: &str) -> Result<crate::config::BrokerConfig, String> {
-        let file: crate::file_config::FileConfig =
+    fn applied_runtime(body: &str) -> Result<BrokerConfig, String> {
+        let file: FileConfig =
             toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
         file.apply_to(&mut cfg).map_err(|error| error.to_string())?;
         Ok(cfg)
     }
@@ -313,6 +313,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::{config::BrokerConfig, file_config::FileConfig};
 
     fn with(change: fn(&mut ShareGroupConfig)) -> Result<ShareGroupConfig, String> {
         let mut config = ShareGroupConfig::default();
@@ -570,11 +571,11 @@ mod tests {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for (value, want) in rows {
-            let file: crate::file_config::FileConfig = toml::from_str(&format!(
+            let file: FileConfig = toml::from_str(&format!(
                 "[runtime]\nstreams_group_rack_aware_assignment_tags = {value}\n"
             ))
             .expect("parse runtime config");
-            let mut cfg = crate::config::BrokerConfig::default();
+            let mut cfg = BrokerConfig::default();
             let applied = file
                 .apply_to(&mut cfg)
                 .map(|()| cfg.streams_group.rack_aware_assignment_tags.clone())

@@ -8,16 +8,20 @@
 use assert2::assert;
 use krabka_broker::Broker;
 
-use crate::{harness::start_two_dir_broker, wire::alter_replica_log_dirs};
+use crate::{
+    harness::start_two_dir_broker,
+    support::{acl::use_simple_acl_authorizer, storage::two_dir_config},
+    two_dir_topic::{Setup, start},
+    wire::{CLIENT_ID, alter_replica_log_dirs},
+};
 
 #[tokio::test]
 async fn alter_replica_log_dirs_rejects_unknown_target() {
-    let (handle, _primary, _extra, addr) =
-        crate::two_dir_topic::start(crate::two_dir_topic::Setup {
-            client_id: crate::wire::CLIENT_ID,
-            ..Default::default()
-        })
-        .await;
+    let (handle, _primary, _extra, addr) = start(Setup {
+        client_id: CLIENT_ID,
+        ..Default::default()
+    })
+    .await;
 
     let bogus = tempfile::tempdir().unwrap();
     let resp = alter_replica_log_dirs(addr, bogus.path(), "t", vec![0]).await;
@@ -58,12 +62,12 @@ async fn alter_replica_log_dirs_rejects_unknown_replica() {
 async fn alter_replica_log_dirs_denied_without_cluster_alter() {
     let primary = tempfile::tempdir().unwrap();
     let extra = tempfile::tempdir().unwrap();
-    let mut cfg = crate::support::storage::two_dir_config(primary.path(), extra.path());
+    let mut cfg = two_dir_config(primary.path(), extra.path());
     // Default authorizer for `for_tests` is AllowAll; swap in a deny-
     // everything SimpleAclAuthorizer (empty super-users + empty ACL
     // image) so the Cluster Alter gate engages.
     cfg.super_users = std::collections::HashSet::new();
-    crate::support::acl::use_simple_acl_authorizer(&mut cfg);
+    use_simple_acl_authorizer(&mut cfg);
     let handle = Broker::start(cfg).await.expect("broker start");
     let addr = handle.listen_addr();
 

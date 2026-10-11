@@ -9,9 +9,16 @@ use krabka_protocol::records::{Attributes, Record, TimestampType};
 use krabka_units::prelude::millis;
 
 use super::*;
-use crate::compact::test_support::{
-    RETENTION, control_batch, make_record, rewrite_all, rewrite_with_map, superseded_records,
-    transactional_record, write_sealed_batches, write_sealed_segment,
+use crate::{
+    ProducerId,
+    compact::{
+        build_offset_map,
+        test_support::{
+            RETENTION, TransactionalRecordSetup, control_batch, make_record, rewrite_all,
+            rewrite_with_map, superseded_records, transactional_record, write_sealed_batches,
+            write_sealed_segment,
+        },
+    },
 };
 
 /// A far-future `now` so nothing in the simple tests ages out, plus an
@@ -212,14 +219,14 @@ fn rewrite_both_commit_markers_survive_when_data_survives() {
     let dir = tempfile::tempdir().unwrap();
     // pid 1000: data batch at offset 0 (key k1), commit marker at offset 1.
     // pid 2000: data batch at offset 2 (key k2), commit marker at offset 3.
-    let data1 = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
+    let data1 = transactional_record(TransactionalRecordSetup {
         payload: (b"k1", b"v1"),
         ..Default::default()
     });
     let marker1 = control_batch(1, 1000, 1 /* COMMIT */);
-    let data2 = transactional_record(crate::compact::test_support::TransactionalRecordSetup {
-        offset: crate::Offset(2),
-        producer: crate::ProducerId(2000),
+    let data2 = transactional_record(TransactionalRecordSetup {
+        offset: Offset(2),
+        producer: ProducerId(2000),
         payload: (b"k2", b"v2"),
     });
     let marker2 = control_batch(3, 2000, 1 /* COMMIT */);
@@ -594,7 +601,7 @@ fn only_the_last_group_of_a_round_keeps_an_emptied_last_batch() {
     let dir = tempfile::tempdir().unwrap();
     let first = write_sealed_batches(dir.path(), &[one_record_batch(0, (-1, -1), None)]);
     let second = write_sealed_batches(dir.path(), &[one_record_batch(1, (-1, -1), None)]);
-    let map = crate::compact::build_offset_map(&[&first, &second], vec![], None).unwrap();
+    let map = build_offset_map(&[&first, &second], vec![], None).unwrap();
     let active = HashMap::new();
     let round = CleaningRound {
         active_producers: &active,

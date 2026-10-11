@@ -19,10 +19,12 @@ use krabka_records_legacy::decode_message_set;
 use crate::{
     harness::{
         create_topic, create_topic_with_partitions, fetch_legacy_raw, fetch_legacy_raw_partitions,
-        produce_batch, produce_batch_to,
+        legacy_bytes, produce_batch, produce_batch_to,
     },
-    support,
-    support::topics::{creatable_topic, create_topic_request},
+    support::{
+        self,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
 };
 
 #[tokio::test]
@@ -33,7 +35,7 @@ async fn fetch_v3_downconverts_v2_batch_to_v0_messageset() {
     let cr = p
         .client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("legacy_fetch_basic").into(),
                 ..Default::default()
             },
@@ -81,7 +83,7 @@ async fn fetch_v3_downconverts_v2_batch_to_v0_messageset() {
         "expected 1 topic in fetch response"
     );
     let part = &fetch_resp.responses[0].partitions[0];
-    let legacy_bytes = crate::harness::legacy_bytes(
+    let legacy_bytes = legacy_bytes(
         part.error_code,
         part.records.as_ref(),
         "expected Legacy MessageSet in Fetch v3 response, got non-Legacy payload",

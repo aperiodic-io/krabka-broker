@@ -27,7 +27,7 @@ use plotly::{
 
 use crate::{
     aggregate::{
-        CellAgg, CellKey, ScalarMetric, TsSeries, aggregate_cells, averaged_timeseries,
+        CellAgg, CellKey, ScalarMetric, StackAgg, TsSeries, aggregate_cells, averaged_timeseries,
         scalar_metrics,
     },
     ids::TimeOffsetMs,
@@ -254,7 +254,7 @@ fn per_run_chart(
 fn bar_chart(cells: &[CellAgg], m: &ScalarMetric) -> Plot {
     let labels: Vec<String> = cells.iter().map(|c| c.key.label()).collect();
 
-    let stack_series = |pick: fn(&CellAgg) -> &crate::aggregate::StackAgg| {
+    let stack_series = |pick: fn(&CellAgg) -> &StackAgg| {
         let mut means = Vec::with_capacity(cells.len());
         let mut errs = Vec::with_capacity(cells.len());
         for c in cells {

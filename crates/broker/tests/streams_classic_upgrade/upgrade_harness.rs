@@ -11,7 +11,14 @@ use assert2::assert;
 use krabka_client_core::Client;
 use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
-use crate::support::offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic};
+use crate::support::{
+    client::{connect as connect_client, create_topic as create_support_topic},
+    offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic},
+    streams::{
+        ElectionReadiness, boot as boot_streams,
+        finalize_streams_version as finalize_streams_version_request,
+    },
+};
 
 // ── error codes ──────────────────────────────────────────────────────────────
 pub const ERR_NONE: i16 = 0;
@@ -21,11 +28,11 @@ pub const ERR_GROUP_ID_NOT_FOUND: i16 = 69;
 // ── boot / connect helpers ────────────────────────────────────────────────────
 
 pub async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    crate::support::streams::boot(crate::support::streams::ElectionReadiness::BrokerElectable).await
+    boot_streams(ElectionReadiness::BrokerElectable).await
 }
 
 pub async fn connect(bootstrap: &str) -> Arc<Client> {
-    crate::support::client::connect(bootstrap, "c1").await
+    connect_client(bootstrap, "c1").await
 }
 
 pub async fn assert_committed_offset(client: &Client, topic_id: WireUuid, expected: i64) {
@@ -58,13 +65,13 @@ pub async fn assert_committed_offset(client: &Client, topic_id: WireUuid, expect
 }
 
 pub async fn create_topic(client: &Client, topic: &str, partitions: i32) {
-    crate::support::client::create_topic(client, topic, partitions).await;
+    create_support_topic(client, topic, partitions).await;
 }
 
 /// Finalize `streams.version` to level 1 so the heartbeat/describe handlers
 /// stop returning `UNSUPPORTED_VERSION`. `upgrade_type: 1` is UPGRADE.
 pub async fn finalize_streams_version(client: &Client) {
-    crate::support::streams::finalize_streams_version(client).await;
+    finalize_streams_version_request(client).await;
 }
 
 pub use crate::support::topic_id_for;

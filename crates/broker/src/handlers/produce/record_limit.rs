@@ -24,6 +24,7 @@ use krabka_compression::{CompressionType, RecordDecompressionPolicy};
 use krabka_protocol::records::validate_one_v2_batch;
 
 use super::prepare::{PreparedBatch, PreparedSource};
+use crate::{api_catalog::UnstableApiVersions, config_keys::resolve_max_decompressed_record_bytes};
 
 /// Whether `prepared` breaks the topic's `max.decompressed.message.bytes`,
 /// which `(image, node, topic)` resolve: a compressed batch with a record whose
@@ -37,12 +38,12 @@ pub(super) fn exceeds_decompressed_limit(
         krabka_metadata::NodeId,
         &str,
     ),
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
     policy: RecordDecompressionPolicy,
 ) -> bool {
-    unstable == crate::api_catalog::UnstableApiVersions::Enabled
+    unstable == UnstableApiVersions::Enabled
         && prepared.attributes.compression() != CompressionType::None
-        && crate::config_keys::resolve_max_decompressed_record_bytes(image, node, topic)
+        && resolve_max_decompressed_record_bytes(image, node, topic)
             .is_some_and(|limit| has_oversized_record(prepared, limit, policy))
 }
 

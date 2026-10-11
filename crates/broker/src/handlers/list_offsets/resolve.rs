@@ -35,7 +35,7 @@ use super::{
     sentinels::{UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP, timestamp_kind},
     timestamp::resolve_timestamp_offset,
 };
-use crate::{broker::Broker, codes};
+use crate::{broker::Broker, codes, partition::Partition};
 
 fn earliest_pending_upload_offset(tiered_offset: i64) -> Option<i64> {
     tiered_offset.checked_add(1)
@@ -47,7 +47,7 @@ struct EarliestContext<'a> {
     broker: &'a Broker,
     topic_name: &'a str,
     index: i32,
-    partition: &'a crate::partition::Partition,
+    partition: &'a Partition,
     remote_timeout: Duration,
     remote_topic_id: Option<uuid::Uuid>,
     topic_id: Option<uuid::Uuid>,
@@ -254,7 +254,7 @@ fn lagging_high_watermark_fences(
 /// watermark's async mutex and the epoch-start lookup, which the fence never
 /// needs for them.
 async fn measure(
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     kind: ListOffsetsKind,
     bound: FetchBound,
     version: i16,
@@ -553,7 +553,11 @@ pub(super) async fn resolve_partition(
 
 #[cfg(test)]
 mod tests {
-    use crate::handlers::list_offsets::test_support::test_context;
+    use crate::{
+        broker::BrokerHandle,
+        handlers::list_offsets::test_support::{remote_topic, test_context},
+        partition::Partition,
+    };
     mod timestamp_visibility;
 
     use assert2::assert;
@@ -705,8 +709,7 @@ mod tests {
 
         const TOPIC: &str = "list-offsets-tiered";
 
-        let (broker, client, _dirs) =
-            crate::handlers::list_offsets::test_support::remote_topic(TOPIC, vec![]).await;
+        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
         broker
             .produce_records_for_test(TOPIC, 0, 10)
             .await
@@ -820,8 +823,7 @@ mod tests {
     async fn earliest_pending_upload_falls_back_to_earliest_when_nothing_is_tiered() {
         const TOPIC: &str = "list-offsets-pending-upload-empty-tier";
 
-        let (broker, client, _dirs) =
-            crate::handlers::list_offsets::test_support::remote_topic(TOPIC, vec![]).await;
+        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
         broker
             .produce_records_for_test(TOPIC, 0, 4)
             .await
@@ -851,7 +853,7 @@ mod tests {
     async fn earliest_pending_upload_stays_unknown_when_local_segments_outrun_the_rlmm() {
         const TOPIC: &str = "list-offsets-pending-upload-unconfirmed";
 
-        let (broker, client, _dirs) = crate::handlers::list_offsets::test_support::remote_topic(
+        let (broker, client, _dirs) = remote_topic(
             TOPIC,
             vec![CreatableTopicConfig {
                 name: "internal.segment.bytes".into(),
@@ -906,7 +908,7 @@ mod tests {
     /// `LEADER_NOT_AVAILABLE` below it), so this suite needs to pick the
     /// version a case tests rather than always sending the client's max.
     async fn list_one_at_version(
-        broker: &crate::broker::BrokerHandle,
+        broker: &BrokerHandle,
         topic: &str,
         (timestamp, isolation_level): (i64, i8),
         version: i16,
@@ -950,7 +952,7 @@ mod tests {
     /// transaction that producer leaves open, which pins the last stable
     /// offset at the offset it lands at. Returns that offset.
     async fn produce_one_at_timestamp(
-        partition: &crate::partition::Partition,
+        partition: &Partition,
         leader_epoch: i32,
         timestamp: i64,
         transactional_producer: Option<i64>,

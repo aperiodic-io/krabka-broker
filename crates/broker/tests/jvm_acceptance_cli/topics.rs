@@ -4,7 +4,8 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    broker0_advertised, docker_run_kafka_tool, nc_check_connectivity, start_host_broker,
+    broker0_advertised, docker_run_kafka_tool, nc_check_connectivity, start_console_broker,
+    start_host_broker,
 };
 
 // `flavor = "multi_thread"` is essential here. The test bodies make
@@ -62,7 +63,7 @@ async fn kafka_topics_describe_smokes_metadata() {
 async fn kafka_topics_alter_partitions() {
     const TOPIC: &str = "krabka-alter-parts-itest";
 
-    let (_broker, _dir) = crate::jvm_acceptance::start_console_broker(TOPIC, 1).await;
+    let (_broker, _dir) = start_console_broker(TOPIC, 1).await;
 
     docker_run_kafka_tool(&[
         "kafka-topics",

@@ -119,9 +119,24 @@ use self::{
     session::{FrameWaitPolicy, RequestLimits, initial_connection_auth, next_connection_frame},
 };
 use crate::{
+    api_catalog::{INTER_BROKER_ONLY_APIS, ListenerKind, is_disabled_version},
     broker::Broker,
-    handlers::{ApiKeyCode, ApiVersion},
-    network::codec::{self, KafkaCodec},
+    config::ListenerSpec,
+    handlers::{
+        ApiKeyCode, ApiVersion,
+        api_versions::{is_valid_client_info, unsupported_version_response},
+        registry::DispatchEntry,
+    },
+    metrics::ConnectionCloseReason,
+    network::{
+        auth::ConnectionAuth,
+        codec::{self, KafkaCodec},
+        fetch_writer::SendfileSink,
+        listener::resolve_sasl_mechanisms_for_listener,
+        request::{ParsedRequest, parse_request, peek_api_key},
+    },
+    telemetry::request_span,
+    time_util::now_ms,
 };
 
 /// What the connection loop does once a response has been written.
@@ -155,11 +170,7 @@ const API_VERSIONS_KEY: ApiKeyCode = ApiKey::ApiVersions as i16;
 /// name and version of a client that has not sent them.
 const UNKNOWN_CLIENT_SOFTWARE: &str = "unknown";
 
-fn capture_client_software(
-    parsed: &crate::network::request::ParsedRequest<'_>,
-    name: &mut String,
-    version: &mut String,
-) {
+fn capture_client_software(parsed: &ParsedRequest<'_>, name: &mut String, version: &mut String) {
     if parsed.api_key != API_VERSIONS_KEY || parsed.api_version < 3 {
         return;
     }
@@ -167,8 +178,8 @@ fn capture_client_software(
     if let Ok(request) = krabka_protocol::owned::api_versions_request::ApiVersionsRequest::decode(
         &mut body,
         parsed.api_version,
-    ) && crate::handlers::api_versions::is_valid_client_info(&request.client_software_name)
-        && crate::handlers::api_versions::is_valid_client_info(&request.client_software_version)
+    ) && is_valid_client_info(&request.client_software_name)
+        && is_valid_client_info(&request.client_software_version)
     {
         name.clone_from(&request.client_software_name);
         version.clone_from(&request.client_software_version);
@@ -179,15 +190,15 @@ fn parse_connection_request<'a>(
     broker: &Broker,
     frame: &'a Bytes,
     peer: &SocketAddr,
-) -> Option<(crate::network::request::ParsedRequest<'a>, tracing::Span)> {
-    let peeked_api_key = match crate::network::request::peek_api_key(frame) {
+) -> Option<(ParsedRequest<'a>, tracing::Span)> {
+    let peeked_api_key = match peek_api_key(frame) {
         Ok(api_key) => api_key,
         Err(error) => {
             tracing::warn!(%error, "frame too small to peek api_key, closing");
             return None;
         }
     };
-    let parsed = match crate::network::request::parse_request(frame, |api_key, version| {
+    let parsed = match parse_request(frame, |api_key, version| {
         broker.handlers().body_flexible(api_key, version)
     }) {
         Ok(parsed) => parsed,
@@ -201,7 +212,7 @@ fn parse_connection_request<'a>(
         target: crate::telemetry::REQUEST_TARGET,
         tracing::Level::DEBUG
     ) {
-        crate::telemetry::request_span(
+        request_span(
             parsed.api_key,
             parsed.api_version,
             parsed.correlation_id,
@@ -216,7 +227,7 @@ fn parse_connection_request<'a>(
 
 fn begin_request<'a>(
     broker: &'a Broker,
-    parsed: &crate::network::request::ParsedRequest<'_>,
+    parsed: &ParsedRequest<'_>,
 ) -> (std::time::Instant, InFlightGuard<'a>) {
     let started = std::time::Instant::now();
     broker.metrics.record_api_request(parsed.api_key);
@@ -254,17 +265,13 @@ fn begin_request<'a>(
 /// trunk's KIP-1242 v5 while `unstable.api.versions.enable` is off -- is not
 /// served, and [`reject_unsupported_version`] answers it `UNSUPPORTED_VERSION`
 /// as it answers an unknown version.
-fn is_served_version(
-    broker: &Broker,
-    entry: crate::handlers::registry::DispatchEntry,
-    parsed: &crate::network::request::ParsedRequest<'_>,
-) -> bool {
+fn is_served_version(broker: &Broker, entry: DispatchEntry, parsed: &ParsedRequest<'_>) -> bool {
     let api_versions_unserved = parsed.api_key == API_VERSIONS_KEY
         && parsed.api_version
             > krabka_raft::api_versions_max_version(broker.config.features.unstable_api_versions);
     entry.supports_version(parsed.api_version)
         && !api_versions_unserved
-        && !crate::api_catalog::is_disabled_version(
+        && !is_disabled_version(
             parsed.api_key,
             parsed.api_version,
             broker.config.features.version_gates(),
@@ -274,9 +281,9 @@ fn is_served_version(
 async fn reject_unsupported_version<S>(
     framed: &mut Framed<S, KafkaCodec>,
     broker: &Broker,
-    entry: crate::handlers::registry::DispatchEntry,
-    parsed: &crate::network::request::ParsedRequest<'_>,
-    auth: &crate::network::auth::ConnectionAuth,
+    entry: DispatchEntry,
+    parsed: &ParsedRequest<'_>,
+    auth: &ConnectionAuth,
 ) -> AfterResponse
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -303,9 +310,7 @@ where
     broker
         .metrics
         .record_unsupported_api_request(parsed.api_key);
-    let body = match crate::handlers::api_versions::unsupported_version_response(
-        broker.config.features.unstable_api_versions,
-    ) {
+    let body = match unsupported_version_response(broker.config.features.unstable_api_versions) {
         Ok(body) => body,
         Err(error) => {
             tracing::warn!(%error, "unsupported-version response encode error, closing");
@@ -352,11 +357,11 @@ where
 /// per-handler `ClusterAction` check applies.
 fn is_inter_broker_api_on_client_listener(
     broker: &Broker,
-    spec: &crate::config::ListenerSpec,
+    spec: &ListenerSpec,
     api_key: i16,
 ) -> bool {
-    crate::api_catalog::INTER_BROKER_ONLY_APIS.contains(&api_key)
-        && broker.config.listener_kind(&spec.name) == crate::api_catalog::ListenerKind::Client
+    INTER_BROKER_ONLY_APIS.contains(&api_key)
+        && broker.config.listener_kind(&spec.name) == ListenerKind::Client
 }
 
 /// Generic per-connection request loop.
@@ -369,20 +374,18 @@ fn is_inter_broker_api_on_client_listener(
 async fn serve_connection_stream<S>(
     broker: std::sync::Arc<Broker>,
     stream: S,
-    spec: crate::config::ListenerSpec,
+    spec: ListenerSpec,
     peer: SocketAddr,
     mtls_principal: Option<krabka_security::Principal>,
 ) where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static + crate::network::fetch_writer::SendfileSink,
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static + SendfileSink,
 {
     let limits = RequestLimits::of(&broker.config);
     let mut framed: Framed<S, _> = Framed::new(stream, codec::codec(limits.request_max()));
     let is_sasl_listener = spec.protocol.requires_sasl();
-    let sasl_mechanisms = crate::network::listener::resolve_sasl_mechanisms_for_listener(
-        &spec,
-        &broker.config.enabled_sasl_mechanisms,
-    )
-    .to_owned();
+    let sasl_mechanisms =
+        resolve_sasl_mechanisms_for_listener(&spec, &broker.config.enabled_sasl_mechanisms)
+            .to_owned();
     let mut auth =
         initial_connection_auth(is_sasl_listener, mtls_principal, &broker.audit_log, &peer);
     let connection_id = uuid::Uuid::new_v4().to_string();
@@ -465,7 +468,7 @@ async fn serve_connection_stream<S>(
                 );
                 broker
                     .metrics
-                    .record_connection_close(crate::metrics::ConnectionCloseReason::DecodeError);
+                    .record_connection_close(ConnectionCloseReason::DecodeError);
                 break;
             }
         };
@@ -488,7 +491,7 @@ async fn serve_connection_stream<S>(
             // something that is not a Kafka request and the connection ends.
             broker
                 .metrics
-                .record_connection_close(crate::metrics::ConnectionCloseReason::DecodeError);
+                .record_connection_close(ConnectionCloseReason::DecodeError);
             break;
         };
         // KIP-368 session expiry, enforced where Kafka enforces it: on the
@@ -497,8 +500,7 @@ async fn serve_connection_stream<S>(
         // send, so it routinely opens the exchange after its window closed;
         // `expired_for_request` lets the two SASL api_keys through so that
         // exchange runs, and ends the connection on anything else.
-        if is_sasl_listener && auth.expired_for_request(parsed.api_key, crate::time_util::now_ms())
-        {
+        if is_sasl_listener && auth.expired_for_request(parsed.api_key, now_ms()) {
             // Kafka's `Processor.processCompletedReceives` logs this at DEBUG.
             tracing::debug!(
                 api_key = parsed.api_key,
@@ -508,7 +510,7 @@ async fn serve_connection_stream<S>(
             );
             broker
                 .metrics
-                .record_connection_close(crate::metrics::ConnectionCloseReason::SaslSessionExpired);
+                .record_connection_close(ConnectionCloseReason::SaslSessionExpired);
             break;
         }
         // Per-state request gate after Kafka's `SaslServerAuthenticator`

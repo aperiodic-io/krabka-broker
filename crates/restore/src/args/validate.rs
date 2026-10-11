@@ -91,7 +91,7 @@ mod tests {
     use assert2::check;
     use clap::Parser as _;
 
-    use crate::{args::test_support::args_from, error::RestoreError};
+    use crate::{Cli, args::test_support::args_from, error::RestoreError};
 
     #[test]
     fn backend_sub_flags_require_their_bucket() {
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn backend_sub_flags_are_accepted_with_their_bucket() {
-        let args = crate::Cli::try_parse_from([
+        let args = Cli::try_parse_from([
             "krabka-restore",
             "--log-dir",
             "/target",

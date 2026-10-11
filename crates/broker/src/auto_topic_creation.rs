@@ -57,14 +57,19 @@ use krabka_protocol::{
 };
 
 use crate::{
+    barrier::{STATE_TOPIC, bootstrap::topic_configs as barrier_topic_configs},
     broker::Broker,
     codes,
     config::BrokerConfig,
     config_keys::{
         ERRORS_DEADLETTERQUEUE_GROUP_ENABLE, MESSAGE_TIMESTAMP_TYPE, MESSAGE_TIMESTAMP_TYPE_CREATE,
     },
-    coordinator::bootstrap::OFFSETS_TOPIC,
+    coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
+    internal_topics::is_internal_topic,
+    share_coordinator::bootstrap::{TOPIC as SHARE_TOPIC, topic_configs as share_topic_configs},
+    time_util::now_ms,
     topic_creator::{ForwardedIdentity, TopicCreator, TopicCreatorError},
+    txn::bootstrap::{TOPIC as TRANSACTION_TOPIC, topic_configs as transaction_topic_configs},
 };
 
 /// The `timeout_ms` of each `CreateTopics` request. Kafka's
@@ -307,7 +312,7 @@ impl AutoTopicCreation {
             error_code,
             name: Some(name.to_owned()),
             topic_id: WireUuid::ZERO,
-            is_internal: crate::internal_topics::is_internal_topic(&broker.config, name),
+            is_internal: is_internal_topic(&broker.config, name),
             ..Default::default()
         };
         let mut uncreatable = Vec::new();
@@ -369,7 +374,7 @@ impl AutoTopicCreation {
             };
             let result = shutdown.run_until_cancelled(send).await;
             if let (Some(ttl_ms), Some(result)) = (cache_ttl_ms, &result) {
-                this.finish_streams_creation(&names, result, ttl_ms, crate::time_util::now_ms());
+                this.finish_streams_creation(&names, result, ttl_ms, now_ms());
             } else {
                 this.end(&names);
                 match result {
@@ -394,7 +399,7 @@ impl AutoTopicCreation {
         identity: ForwardedIdentity,
         ttl_ms: i64,
     ) {
-        let now_ms = crate::time_util::now_ms();
+        let now_ms = now_ms();
         let topics: Vec<CreatableTopic> = topics
             .into_iter()
             .filter(|topic| !self.errors.has_error(&topic.name, now_ms) && self.begin(&topic.name))
@@ -547,25 +552,25 @@ pub fn creatable_topic(config: &BrokerConfig, name: &str) -> CreatableTopic {
         OFFSETS_TOPIC => (
             config.offsets_topic_num_partitions,
             config.offsets_topic_replication_factor,
-            crate::coordinator::bootstrap::offsets_topic_configs(config),
+            offsets_topic_configs(config),
         ),
-        crate::txn::bootstrap::TOPIC => (
+        TRANSACTION_TOPIC => (
             config.transaction_state_num_partitions,
             config.transaction_state_replication_factor,
-            crate::txn::bootstrap::topic_configs(
+            transaction_topic_configs(
                 config.transaction_state_segment_bytes,
                 config.transaction_state_min_isr,
             ),
         ),
-        crate::share_coordinator::bootstrap::TOPIC => (
+        SHARE_TOPIC => (
             config.share_coordinator.state_topic_num_partitions,
             config.share_coordinator.state_topic_replication_factor,
-            crate::share_coordinator::bootstrap::topic_configs(&config.share_coordinator),
+            share_topic_configs(&config.share_coordinator),
         ),
-        crate::barrier::STATE_TOPIC => (
+        STATE_TOPIC => (
             config.barrier_state_num_partitions,
             config.barrier_state_replication_factor,
-            crate::barrier::bootstrap::topic_configs(),
+            barrier_topic_configs(),
         ),
         _ => {
             let supplied = config.static_config_origins.topic_creation;

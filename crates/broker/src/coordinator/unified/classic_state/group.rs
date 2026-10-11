@@ -10,6 +10,7 @@ use std::{
 };
 
 use super::member::Member;
+use crate::codes::{FENCED_INSTANCE_ID, UNKNOWN_MEMBER_ID};
 
 /// Four-state machine for a live consumer group, matching the Apache Kafka
 /// classic protocol (KIP-62 / KIP-394).
@@ -153,9 +154,9 @@ impl ClassicGroup {
     pub fn validate_member(&self, member_id: &str, instance_id: Option<&str>) -> Result<(), i16> {
         if let Some(instance_id) = instance_id {
             match self.current_member_id_for_instance(instance_id) {
-                None => return Err(crate::codes::UNKNOWN_MEMBER_ID),
+                None => return Err(UNKNOWN_MEMBER_ID),
                 Some(pinned) if pinned != member_id => {
-                    return Err(crate::codes::FENCED_INSTANCE_ID);
+                    return Err(FENCED_INSTANCE_ID);
                 }
                 Some(_) => {}
             }
@@ -163,7 +164,7 @@ impl ClassicGroup {
         if self.members.contains_key(member_id) {
             Ok(())
         } else {
-            Err(crate::codes::UNKNOWN_MEMBER_ID)
+            Err(UNKNOWN_MEMBER_ID)
         }
     }
 }

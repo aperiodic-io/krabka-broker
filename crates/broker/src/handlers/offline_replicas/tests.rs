@@ -8,6 +8,7 @@ use krabka_metadata::{BrokerEndpoint, LeaderEpoch, MetadataRecord, TopicRecord};
 use uuid::Uuid;
 
 use super::*;
+use crate::test_support::{InSyncPartitionSetup, broker_registration, in_sync_partition};
 
 /// The listener that the requests in these tests arrive on, and that every
 /// registration lists unless a test says otherwise.
@@ -33,12 +34,12 @@ fn registration_on(node_id: NodeId, log_dirs: Vec<Uuid>, listener: &str) -> Meta
             protocol: krabka_security::ListenerProtocol::Plaintext,
         }],
         log_dirs,
-        ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id.0))
+        ..broker_registration(krabka_raft::NodeId(node_id.0))
     })
 }
 
 fn partition(replicas: &[NodeId], directories: &[Uuid]) -> PartitionRecord {
-    crate::test_support::in_sync_partition(crate::test_support::InSyncPartitionSetup {
+    in_sync_partition(InSyncPartitionSetup {
         replicas: replicas.to_vec(),
         directories: directories.to_vec(),
         leader_epoch: LeaderEpoch(3),

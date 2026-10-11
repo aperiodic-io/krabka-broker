@@ -8,7 +8,13 @@ use krabka_protocol::{
 };
 
 use super::node_endpoints::produce_node_endpoints;
-use crate::{broker::Broker, error::BrokerError};
+use crate::{
+    broker::Broker,
+    error::BrokerError,
+    handlers::RequestContext,
+    metrics::QuotaType,
+    quota::{QuotaDelay, consume_producer_quota, throttle_time_ms},
+};
 
 /// First `Produce` response version that carries the KIP-951 `CurrentLeader`
 /// hint and its `NodeEndpoints` companion. Both are tagged fields at v10+.
@@ -17,7 +23,7 @@ const KIP_951_PRODUCE_VERSION: i16 = 10;
 pub(super) fn finish_produce_response(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
     request_quota_start: Option<std::time::Instant>,
     topic_results: Vec<TopicProduceResponse>,
     version: i16,
@@ -25,7 +31,7 @@ pub(super) fn finish_produce_response(
     // Kafka's `KafkaApis.handleProduceRequest` charges `producer_byte_rate`
     // once per request, with `request.sizeInBytes`: the header and the body,
     // not only the record payloads.
-    let data_delay = crate::quota::consume_producer_quota(
+    let data_delay = consume_producer_quota(
         image,
         &broker.quota_buckets,
         &context.principal.name,
@@ -35,7 +41,7 @@ pub(super) fn finish_produce_response(
     // Kafka's `KafkaApis.handleProduceRequest` charges no request quota for
     // `acks = 0`, which `request_quota_start` holds as `None`. The byte-rate
     // quota above still applies.
-    let request_delay = request_quota_start.map_or_else(crate::quota::QuotaDelay::zero, |start| {
+    let request_delay = request_quota_start.map_or_else(QuotaDelay::zero, |start| {
         context.charge_request_quota(broker, image, start)
     });
     // KIP-219: the connection is muted for the larger of the two delays.
@@ -45,8 +51,8 @@ pub(super) fn finish_produce_response(
     let delay = broker.metrics.record_applied_throttle(
         super::PRODUCE_API_KEY,
         &[
-            (crate::metrics::QuotaType::Produce, data_delay).into(),
-            (crate::metrics::QuotaType::Request, request_delay).into(),
+            (QuotaType::Produce, data_delay).into(),
+            (QuotaType::Request, request_delay).into(),
         ],
     );
     // KIP-951: the `CurrentLeader` hints the partition rows carry are node ids,
@@ -65,7 +71,7 @@ pub(super) fn finish_produce_response(
     };
     let response = ProduceResponse {
         responses: topic_results,
-        throttle_time_ms: crate::quota::throttle_time_ms(delay),
+        throttle_time_ms: throttle_time_ms(delay),
         node_endpoints,
         ..Default::default()
     };
@@ -91,31 +97,32 @@ mod tests {
     use assert2::assert;
     use krabka_units::secs;
 
+    use crate::quota::{
+        QuotaBuckets, consume_producer_quota,
+        test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
+    };
+
     #[test]
     fn consume_producer_quota_tuple_match_overage_throttles() {
         use krabka_units::{Time, convert::TimeExt};
 
-        let img = crate::quota::test_support::image_with_quota(
-            crate::quota::test_support::QuotaRecordSetup {
-                entity: vec![("user", Some("alice")), ("client-id", Some("app-x"))],
-                value: crate::quota::test_support::QuotaValue(1024.0),
-                ..Default::default()
-            },
-        );
+        let img = image_with_quota(QuotaRecordSetup {
+            entity: vec![("user", Some("alice")), ("client-id", Some("app-x"))],
+            value: QuotaValue(1024.0),
+            ..Default::default()
+        });
         // A one-second window, so 4096 bytes at 1024 B/s is 3072 over the
         // burst rather than inside the default 11-second one.
-        let buckets = crate::quota::QuotaBuckets::with_window(secs(1));
+        let buckets = QuotaBuckets::with_window(secs(1));
         // Tuple match → 3072 bytes overage at 1024 B/s → throttle > 0.
-        let delay_match =
-            crate::quota::consume_producer_quota(&img, &buckets, "alice", Some("app-x"), 4096);
+        let delay_match = consume_producer_quota(&img, &buckets, "alice", Some("app-x"), 4096);
         assert!(
             delay_match.delay > <Time as TimeExt>::ZERO,
             "tuple quota match should throttle on overage; got {delay_match:?}"
         );
         // No tuple match for client_id="other"; no (user=alice)-only quota exists.
-        let buckets2 = crate::quota::QuotaBuckets::with_window(secs(1));
-        let delay_other =
-            crate::quota::consume_producer_quota(&img, &buckets2, "alice", Some("other"), 4096);
+        let buckets2 = QuotaBuckets::with_window(secs(1));
+        let delay_other = consume_producer_quota(&img, &buckets2, "alice", Some("other"), 4096);
         assert!(
             delay_other.delay == <Time as TimeExt>::ZERO,
             "non-matching client_id should not throttle; got {delay_other:?}"

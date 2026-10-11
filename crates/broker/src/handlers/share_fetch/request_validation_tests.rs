@@ -23,7 +23,10 @@ use crate::{
     authorizer::AuthorizationResult,
     broker::BrokerHandle,
     codes,
-    test_support::{decode_response, encode_request, peer, principal, start_broker_no_audit_with},
+    test_support::{
+        decode_response, encode_request, peer, principal, start_broker_no_audit_with,
+        try_dispatch_context,
+    },
 };
 
 /// The share group that the principal may read.
@@ -159,7 +162,7 @@ async fn group_and_member_ids_are_checked_in_kafka_order() {
             share_session_epoch: 0,
             ..Default::default()
         };
-        let fetched = crate::test_support::try_dispatch_context(
+        let fetched = try_dispatch_context(
             &shared,
             krabka_protocol::owned::share_fetch_request::API_KEY,
             fetch_version,
@@ -174,7 +177,7 @@ async fn group_and_member_ids_are_checked_in_kafka_order() {
             share_session_epoch: 1,
             ..Default::default()
         };
-        let acknowledged = crate::test_support::try_dispatch_context(
+        let acknowledged = try_dispatch_context(
             &shared,
             krabka_protocol::owned::share_acknowledge_request::API_KEY,
             acknowledge_version,
@@ -219,7 +222,7 @@ async fn a_member_the_group_does_not_know_still_fetches() {
         share_session_epoch: 0,
         ..Default::default()
     };
-    let response = crate::test_support::try_dispatch_context(
+    let response = try_dispatch_context(
         &shared,
         krabka_protocol::owned::share_fetch_request::API_KEY,
         version,

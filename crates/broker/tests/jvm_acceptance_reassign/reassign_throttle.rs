@@ -7,22 +7,24 @@
 
 use assert2::assert;
 
-use crate::jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised};
+use crate::{
+    cluster::{assert_reassigned, assignment, execute_plan, reassignment_cluster, removed_replica},
+    jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
+    support::{JvmDockerSetup, jvm_docker_command},
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires Docker"]
 async fn jvm_kafka_reassign_partitions_with_throttle_end_to_end() {
     const TOPIC: &str = "krabka-throttle-reassign-itest";
 
-    let (cluster, _admin_props, admin_mount) =
-        Box::pin(crate::cluster::reassignment_cluster(TOPIC)).await;
+    let (cluster, _admin_props, admin_mount) = Box::pin(reassignment_cluster(TOPIC)).await;
 
-    let (initial, new_node, staying) = crate::cluster::assignment(&cluster.h1, TOPIC, false);
-    let (_json_file, json_mount) =
-        crate::cluster::execute_plan(&admin_mount, TOPIC, staying, new_node, true);
+    let (initial, new_node, staying) = assignment(&cluster.h1, TOPIC, false);
+    let (_json_file, json_mount) = execute_plan(&admin_mount, TOPIC, staying, new_node, true);
 
     // Verify throttle configs were applied via kafka-configs --describe.
-    let desc = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let desc = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE_TXN,
         mounts: &[&admin_mount],
         args: &[
@@ -61,7 +63,7 @@ async fn jvm_kafka_reassign_partitions_with_throttle_end_to_end() {
         .h1
         .partition_record_for_test(TOPIC, 0)
         .expect("partition record after execute");
-    let removing_replica = crate::cluster::removed_replica(&pr_after, &initial);
+    let removing_replica = removed_replica(&pr_after, &initial);
     let injected = krabka_metadata::PartitionRecord {
         isr: vec![
             krabka_metadata::NodeId(staying),
@@ -86,12 +88,12 @@ async fn jvm_kafka_reassign_partitions_with_throttle_end_to_end() {
         })
         .await;
     // After completion the replica set must be exactly {staying, new_node}.
-    crate::cluster::assert_reassigned(&cluster.h1, TOPIC, staying, new_node);
+    assert_reassigned(&cluster.h1, TOPIC, staying, new_node);
     eprintln!("KRABKA[test] reassignment completed; running --verify");
 
     // --verify clears throttle configs and exits 0 (broker-scoped
     // IncrementalAlterConfigs is supported).
-    let _ = crate::jvm_acceptance::verify_console_reassignment(&admin_mount, &json_mount);
+    let _ = verify_console_reassignment(&admin_mount, &json_mount);
 
     // Confirm throttle configs were cleared from the metadata image after --verify.
     cluster

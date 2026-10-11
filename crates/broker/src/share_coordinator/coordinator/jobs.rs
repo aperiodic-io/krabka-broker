@@ -26,6 +26,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use super::{LoadStatus, ShareCoordinator, Term, state_machine::StateRecord};
+use crate::{
+    coordinator::topic_deletion::deleted_topics, features::share_groups_enabled,
+    time_util::duration_millis,
+};
 
 impl ShareCoordinator {
     /// The state partitions that this broker leads and has loaded.
@@ -149,8 +153,7 @@ impl ShareCoordinator {
     /// A state partition whose every key already has a cold snapshot (its
     /// write timestamp differs from its create timestamp) is skipped.
     pub(crate) async fn snapshot_cold_partitions(&self) -> usize {
-        let interval =
-            crate::time_util::duration_millis(self.config.cold_partition_snapshot_interval);
+        let interval = duration_millis(self.config.cold_partition_snapshot_interval);
         let mut written = 0;
         for state_partition in self.active_partitions().await {
             let Ok(active) = self.active(state_partition).await else {
@@ -222,12 +225,12 @@ impl ShareCoordinator {
 /// Whether the timers run for `image`: a finalized `share.version` of 1 or
 /// more.
 pub(crate) fn periodic_jobs_enabled(image: &MetadataImage) -> bool {
-    crate::features::share_groups_enabled(image)
+    share_groups_enabled(image)
 }
 
 /// The topic ids of `previous` that `next` does not hold.
 fn deleted_topic_ids(previous: &MetadataImage, next: &MetadataImage) -> HashSet<uuid::Uuid> {
-    crate::coordinator::topic_deletion::deleted_topics(previous, next)
+    deleted_topics(previous, next)
         .into_iter()
         .map(|(_, topic_id)| topic_id)
         .collect()

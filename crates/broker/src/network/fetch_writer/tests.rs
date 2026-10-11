@@ -8,6 +8,7 @@ use super::{
     test_support::{inline_bytes, sample_response},
     *,
 };
+use crate::handlers::fetch::encode_fetch_response;
 
 fn empty_plan_body(
     response: &krabka_protocol::owned::fetch_response::FetchResponse,
@@ -215,8 +216,7 @@ fn both_fetch_encoders_agree_on_the_body_bytes() {
                 }
             }
 
-            let struct_body =
-                crate::handlers::fetch::encode_fetch_response(response, version).unwrap();
+            let struct_body = encode_fetch_response(response, version).unwrap();
 
             assert2::assert!(
                 (&plan_body[..]) == (&struct_body[..]),

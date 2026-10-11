@@ -8,8 +8,14 @@
 use assert2::assert;
 use krabka_broker::{Broker, BrokerConfig};
 
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE, broker0_advertised, broker0_listen, docker_run_kafka_tool, nc_check_connectivity,
+use crate::{
+    jvm_acceptance::{
+        KAFKA_IMAGE, broker0_advertised, broker0_listen, docker_run_kafka_tool, host_broker_config,
+        nc_check_connectivity, wait_jvm_log_config,
+    },
+    support::{
+        ContainerInput, JvmDockerSetup, init_jvm_tracing, jvm_docker_command, jvm_stdin_output,
+    },
 };
 
 /// `kafka-console-consumer` sees a compacted topic with only
@@ -47,7 +53,7 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
     /// parsed broker config; the harness sets the struct field directly.
     const SEGMENT_SIZE: krabka_units::ByteSize = krabka_units::bytes(256);
 
-    crate::support::init_jvm_tracing("krabka_broker=debug,info");
+    init_jvm_tracing("krabka_broker=debug,info");
     let dir = tempfile::tempdir().expect("tempdir");
     let config = BrokerConfig {
         // The topic below overrides no segment size, so it inherits this one.
@@ -58,7 +64,7 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
         },
         // 3s cleaner tick so we don't have to wait the full 30s default.
         cleaner_interval_override: Some(krabka_units::secs(3)),
-        ..crate::jvm_acceptance::host_broker_config(dir.path(), "static addr")
+        ..host_broker_config(dir.path(), "static addr")
     };
     let broker = Broker::start(config).await.expect("start broker");
     eprintln!(
@@ -103,7 +109,7 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
     //     default and is in place the moment the partition exists, so the
     //     assertion after the loop is a check on the harness rather than on
     //     propagation.
-    let cfg = crate::jvm_acceptance::wait_jvm_log_config(
+    let cfg = wait_jvm_log_config(
         &broker,
         TOPIC,
         |cfg| {
@@ -126,7 +132,7 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
 
     // 2. Produce 5 records under 3 keys — k1 has three values (v1, v2, v4);
     //    only v4 should survive compaction.
-    let mut child_command = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let mut child_command = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE,
         args: &[
             "kafka-console-producer",
@@ -151,7 +157,7 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
             "--producer-property",
             "max.in.flight.requests.per.connection=1",
         ],
-        input: crate::support::ContainerInput::Attached,
+        input: ContainerInput::Attached,
         ..Default::default()
     });
     // First 5 records: the actual workload. After that, a burst of "pad"
@@ -159,7 +165,7 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
     // `SEGMENT_SIZE` so v5 ends up sealed (otherwise the compactor
     // can't see it; it never touches the active segment) and the test's
     // "no stale v1" assertion can actually hold for k1.
-    let producer_out = crate::support::jvm_stdin_output(
+    let producer_out = jvm_stdin_output(
         &mut child_command,
         b"k1:v1\nk1:v2\nk2:v3\nk1:v4\nk3:v5\n\
               __pad__:p0\n__pad__:p1\n__pad__:p2\n__pad__:p3\n\

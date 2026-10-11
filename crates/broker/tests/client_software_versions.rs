@@ -20,7 +20,14 @@ use krabka_broker::Broker;
 use krabka_protocol::{Encode, owned::api_versions_response::ApiVersionsResponse};
 use tokio::net::TcpStream;
 
-use crate::support::discovery::api_versions_request_for;
+use crate::support::{
+    client::{metrics_config, scrape_metrics},
+    discovery::api_versions_request_for,
+    wire::{
+        CorrelationId, HeaderEncoding, WireFrameSetup, decode_response_frame, read_frame,
+        request_body_capacity, request_frame, write_frame,
+    },
+};
 
 const INVALID_REQUEST: i16 = 42;
 
@@ -34,7 +41,7 @@ async fn boot() -> (
     tempfile::TempDir,
 ) {
     let tempdir = tempfile::tempdir().unwrap();
-    let cfg = crate::support::client::metrics_config(tempdir.path().to_path_buf());
+    let cfg = metrics_config(tempdir.path().to_path_buf());
 
     let handle = Broker::start(cfg).await.expect("broker start");
     let kafka_addr = handle.listen_addr();
@@ -63,26 +70,26 @@ async fn send_api_versions(
     // parse the error code on negotiated downgrade.
     let flexible = version >= 3;
 
-    let frame = crate::support::wire::request_frame(crate::support::wire::WireFrameSetup {
+    let frame = request_frame(WireFrameSetup {
         version: krabka_ids::ApiVersion(version),
-        correlation: crate::support::wire::CorrelationId(99),
-        header: crate::support::wire::HeaderEncoding::from_wire(flexible),
+        correlation: CorrelationId(99),
+        header: HeaderEncoding::from_wire(flexible),
         client_id: "krabka-kip-511-test",
         body: &body,
-        capacity: Some(crate::support::wire::request_body_capacity(&body)),
+        capacity: Some(request_body_capacity(&body)),
         ..Default::default()
     });
 
     let mut stream = TcpStream::connect(addr).await?;
-    crate::support::wire::write_frame(&mut stream, &frame, None).await?;
+    write_frame(&mut stream, &frame, None).await?;
 
-    let resp = crate::support::wire::read_frame(&mut stream).await?;
+    let resp = read_frame(&mut stream).await?;
     // ApiVersions keeps a non-flexible response header, including on flexible versions.
-    crate::support::wire::decode_response_frame(&resp, version, false, "ApiVersionsResponse decode")
+    decode_response_frame(&resp, version, false, "ApiVersionsResponse decode")
 }
 
 async fn scrape(addr: SocketAddr) -> String {
-    crate::support::client::scrape_metrics(addr).await
+    scrape_metrics(addr).await
 }
 
 // ── KIP-511 validation paths ────────────────────────────────────────────────

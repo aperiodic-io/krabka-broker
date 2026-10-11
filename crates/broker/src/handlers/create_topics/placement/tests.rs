@@ -12,7 +12,14 @@ use super::{
     inactive_brokers, manual_leaderships, manual_replicas, placement_failure_message,
     resolve_assignments, site_broker_views,
 };
-use crate::config_keys::resolve_preferred_leader_site;
+use crate::{
+    config_keys::{
+        BROKER_WITNESS, STRETCH_PREFERRED_LEADER_SITE, WITNESS_TRUE, resolve_preferred_leader_site,
+    },
+    handlers::test_support::sorted_replica_sites,
+    heartbeat::fencing::fenced_node_ids,
+    test_support::broker_registration,
+};
 
 /// The seeds that a test runs the placement with.
 const SEEDS: std::ops::Range<u64> = 0..32;
@@ -44,7 +51,7 @@ fn stretch_image(
             krabka_metadata::BrokerRegistrationRecord {
                 incarnation_id: uuid::Uuid::from_u128(u128::from(*node_id)),
                 rack: rack.map(str::to_string),
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(*node_id))
+                ..broker_registration(krabka_raft::NodeId(*node_id))
             },
         ));
     }
@@ -52,8 +59,8 @@ fn stretch_image(
         image.apply(&MetadataRecord::V1BrokerConfig(
             krabka_metadata::BrokerConfigRecord {
                 node_id: NodeId(*node_id),
-                config_name: crate::config_keys::BROKER_WITNESS.into(),
-                config_value: Some(crate::config_keys::WITNESS_TRUE.into()),
+                config_name: BROKER_WITNESS.into(),
+                config_value: Some(WITNESS_TRUE.into()),
             },
         ));
     }
@@ -61,7 +68,7 @@ fn stretch_image(
         image.apply(&MetadataRecord::V1BrokerConfig(
             krabka_metadata::BrokerConfigRecord {
                 node_id: krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID,
-                config_name: crate::config_keys::STRETCH_PREFERRED_LEADER_SITE.into(),
+                config_name: STRETCH_PREFERRED_LEADER_SITE.into(),
                 config_value: Some(site.into()),
             },
         ));
@@ -99,7 +106,7 @@ fn site_of(brokers: &[(u64, Option<&str>)], node_id: NodeId) -> String {
 /// The sites of one replica list, sorted, so the caller can compare the
 /// spread without depending on the replica order.
 fn sites_of(brokers: &[(u64, Option<&str>)], replicas: &[NodeId]) -> Vec<String> {
-    crate::handlers::test_support::sorted_replica_sites(replicas, |node| site_of(brokers, node))
+    sorted_replica_sites(replicas, |node| site_of(brokers, node))
 }
 
 fn broker_views(
@@ -384,7 +391,7 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
         image.apply(&MetadataRecord::V1BrokerRegistration(registration));
         // `unavailable_brokers`: the replicated fence, with the controller's
         // registry on top.
-        let mut unavailable = crate::heartbeat::fencing::fenced_node_ids(&image);
+        let mut unavailable = fenced_node_ids(&image);
         unavailable.extend(case.registry_unavailable);
 
         let views = site_broker_views(

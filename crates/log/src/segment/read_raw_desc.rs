@@ -153,10 +153,10 @@ mod tests {
     fn read_raw_desc_region_equals_read_raw_bytes() {
         let (dir, mut seg) = test_segment();
         for off in 0..5i64 {
-            seg.append(&test_batch_at(crate::Offset(off)), DENSE_INDEX)
+            seg.append(&test_batch_at(Offset(off)), DENSE_INDEX)
                 .unwrap();
         }
-        let batch_len = u32::try_from(test_batch_at(crate::Offset(0)).encoded_len()).unwrap();
+        let batch_len = u32::try_from(test_batch_at(Offset(0)).encoded_len()).unwrap();
         let cases = [
             ("all batches", 0i64, 5i64, mebibytes(10)),
             ("limit clamp", 0, 3, mebibytes(10)),
@@ -202,7 +202,7 @@ mod tests {
         let (dir, mut seg) = test_segment();
         // Several batches; a mid-size budget will include some but not all.
         for off in 0..6i64 {
-            seg.append(&test_batch_at(crate::Offset(off)), DENSE_INDEX)
+            seg.append(&test_batch_at(Offset(off)), DENSE_INDEX)
                 .unwrap();
         }
         // Budget that admits ~2-3 batches (each batch is small but > a few bytes).
@@ -226,11 +226,11 @@ mod tests {
 
         let (_dir, mut seg) = test_segment();
         for off in 0..20i64 {
-            seg.append(&test_batch_at(crate::Offset(off)), DENSE_INDEX)
+            seg.append(&test_batch_at(Offset(off)), DENSE_INDEX)
                 .unwrap();
         }
         let advice = recording_advice(&mut seg);
-        let batch_len = u64::try_from(test_batch_at(crate::Offset(0)).encoded_len()).unwrap();
+        let batch_len = u64::try_from(test_batch_at(Offset(0)).encoded_len()).unwrap();
         let budget = 3 * batch_len;
 
         let desc = seg

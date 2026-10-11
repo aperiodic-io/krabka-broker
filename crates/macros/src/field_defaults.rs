@@ -5,7 +5,7 @@ use moxy::{
     token::{Spanner, TokenStream},
 };
 
-use crate::meta::{field_ident, named_fields};
+use crate::meta::{field_ident, impl_block, named_fields};
 
 /// The expression inside a field's `#[default(...)]`.
 struct DefaultExpr(TokenStream);
@@ -42,7 +42,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         .map(initializer)
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(crate::meta::impl_block(
+    Ok(impl_block(
         item,
         &moxy::template! { ::core::default::Default for },
         &moxy::template! {

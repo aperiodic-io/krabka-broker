@@ -12,22 +12,39 @@ use krabka_ids::PartitionIndex;
 
 use crate::{
     config::BrokerConfig,
+    delivery::DeliveryHandles,
+    diskless::hot_tail::HotTailCache,
     error::BrokerError,
-    partition::{Partition, PartitionRuntimeConfig, WriterMessage, empty_marker_materialization},
+    log_dir_status::LogDirRegistry,
+    partition::{
+        Partition, PartitionRuntimeConfig, ReplicationTarget, WriterMessage,
+        empty_marker_materialization, initial_replication_target,
+    },
+    partition_writer::run_with_sequencer,
+    producer_state::ProducerState,
+    replica_state::ReplicaState,
+    wal::{
+        SharedWal,
+        quorum::{
+            QuorumWalStore,
+            engine::WalShardEngine,
+            registry::{ShardId, WalShardRegistry},
+        },
+    },
 };
 
 type PartitionWal = (
-    Option<crate::wal::SharedWal>,
+    Option<SharedWal>,
     Option<krabka_log::Offset>,
-    Option<Arc<crate::wal::quorum::engine::WalShardEngine>>,
+    Option<Arc<WalShardEngine>>,
 );
 
 fn partition_wal(
     identity: (&str, Option<uuid::Uuid>, PartitionIndex),
     log: Arc<Mutex<krabka_log::Log>>,
     diskless: bool,
-    hot_tail: Option<Arc<crate::diskless::hot_tail::HotTailCache>>,
-    wal_shards: Option<Arc<crate::wal::quorum::registry::WalShardRegistry>>,
+    hot_tail: Option<Arc<HotTailCache>>,
+    wal_shards: Option<Arc<WalShardRegistry>>,
     replica_count: usize,
 ) -> Result<PartitionWal, BrokerError> {
     let (topic, topic_id, partition_id) = identity;
@@ -46,7 +63,7 @@ fn partition_wal(
             partition_id.0
         ))
     })?;
-    let wal = crate::wal::quorum::QuorumWalStore::for_distributed_partition(
+    let wal = QuorumWalStore::for_distributed_partition(
         topic_id,
         partition_id,
         log,
@@ -54,7 +71,7 @@ fn partition_wal(
         replica_count,
     )?;
     registry.insert(
-        crate::wal::quorum::registry::ShardId {
+        ShardId {
             topic_id,
             partition: partition_id,
         },
@@ -63,7 +80,7 @@ fn partition_wal(
     let durable_watermark = wal.engine().durable_watermark();
     let engine = wal.engine();
     Ok((
-        Some(Arc::new(wal) as crate::wal::SharedWal),
+        Some(Arc::new(wal) as SharedWal),
         Some(durable_watermark),
         Some(engine),
     ))
@@ -86,7 +103,7 @@ pub(crate) fn spawn_partition() -> Arc<Partition> {
     let topic_id = None;
     spawn_partition_with_replication_target(
         topic,
-        crate::partition::ReplicationTarget {
+        ReplicationTarget {
             topic_id,
             leader_node_id: krabka_raft::NodeId(0),
             leader_epoch: krabka_metadata::LeaderEpoch(0),
@@ -106,15 +123,15 @@ pub(crate) fn spawn_partition_with_replication_target() -> Arc<Partition> {
     let broker_config = BrokerConfig::default();
     #[cfg(test)]
     let wal_shards = replication_target.topic_id.map(|topic_id| {
-        let registry = Arc::new(crate::wal::quorum::registry::WalShardRegistry::new(
-            krabka_raft::NodeId(0),
-        ));
+        use crate::wal::quorum::registry::{ShardId, WalPlacement};
+
+        let registry = Arc::new(WalShardRegistry::new(krabka_raft::NodeId(0)));
         registry.replace_placements(&std::collections::HashMap::from([(
-            crate::wal::quorum::registry::ShardId {
+            ShardId {
                 topic_id,
                 partition: partition_id,
             },
-            crate::wal::quorum::registry::WalPlacement {
+            WalPlacement {
                 voters: vec![krabka_raft::NodeId(0)],
                 leader_epoch: 0,
             },
@@ -161,15 +178,15 @@ pub(crate) struct PartitionSpawnConfig {
     pub partition_id: PartitionIndex,
     pub log_dir: std::path::PathBuf,
     pub log: krabka_log::Log,
-    pub log_dir_status: crate::log_dir_status::LogDirRegistry,
-    pub producer_state: Arc<crate::producer_state::ProducerState>,
+    pub log_dir_status: LogDirRegistry,
+    pub producer_state: Arc<ProducerState>,
     pub runtime: PartitionRuntimeConfig,
 }
 
 pub(crate) fn try_spawn_partition_with_sequencer(
     config: PartitionSpawnConfig,
 ) -> Result<Arc<Partition>, BrokerError> {
-    let initial_target = crate::partition::ReplicationTarget {
+    let initial_target = ReplicationTarget {
         topic_id: config.topic_id,
         leader_node_id: krabka_raft::NodeId(0),
         leader_epoch: krabka_metadata::LeaderEpoch(0),
@@ -179,7 +196,7 @@ pub(crate) fn try_spawn_partition_with_sequencer(
 
 pub(crate) fn try_spawn_partition_with_replication_target(
     config: PartitionSpawnConfig,
-    initial_target: crate::partition::ReplicationTarget,
+    initial_target: ReplicationTarget,
 ) -> Result<Arc<Partition>, BrokerError> {
     assert2::assert!((config.topic_id) == (initial_target.topic_id));
     let PartitionSpawnConfig {
@@ -212,11 +229,11 @@ pub(crate) fn try_spawn_partition_with_replication_target(
     )?;
     let (tx, rx) = tokio::sync::mpsc::channel::<WriterMessage>(partition_writer_queue_depth);
     let notify = Arc::new(tokio::sync::Notify::new());
-    let delivery = crate::delivery::DeliveryHandles::new();
+    let delivery = DeliveryHandles::new();
     // Seed the watermark mirror from the log the recovery walk just opened, so
     // a reader that takes no lock never sees the placeholder zero.
     delivery.publish_now(&log);
-    let mut initial_replica_state = crate::replica_state::ReplicaState::new();
+    let mut initial_replica_state = ReplicaState::new();
     initial_replica_state.current_leader_epoch =
         krabka_ids::LeaderEpoch(initial_target.leader_epoch.0);
     if let Some(durable_watermark) = recovered_durable_watermark {
@@ -227,12 +244,12 @@ pub(crate) fn try_spawn_partition_with_replication_target(
     let hw_advance_notify = Arc::new(tokio::sync::Notify::new());
     let current_leader = Arc::new(AtomicU64::new(initial_target.leader_node_id.0));
     let current_leader_epoch = Arc::new(AtomicI32::new(initial_target.leader_epoch.0));
-    let replication_target = crate::partition::initial_replication_target(topic_id);
+    let replication_target = initial_replication_target(topic_id);
     *replication_target
         .try_write()
         .expect("new partition target is uncontended") = initial_target;
     let log_dir = Arc::new(arc_swap::ArcSwap::from_pointee(log_dir));
-    let writer_future = crate::partition_writer::run_with_sequencer(
+    let writer_future = run_with_sequencer(
         (topic.clone(), partition_id),
         (log.clone(), log_dir.clone()),
         rx,

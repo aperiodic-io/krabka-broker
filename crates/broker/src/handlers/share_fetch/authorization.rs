@@ -6,7 +6,10 @@
 
 use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
 
-use crate::{broker::Broker, handlers::RequestContext};
+use crate::{
+    broker::Broker,
+    handlers::{RequestContext, acl_denied},
+};
 
 /// Reports whether the per-topic `Read` ACL denies this row.
 pub(super) fn topic_read_denied(
@@ -15,7 +18,7 @@ pub(super) fn topic_read_denied(
     ctx: &RequestContext<'_>,
     topic_name: &str,
 ) -> bool {
-    crate::handlers::acl_denied(
+    acl_denied(
         broker.config.authorizer.as_ref(),
         image,
         ctx,

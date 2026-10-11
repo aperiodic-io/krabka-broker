@@ -3,24 +3,27 @@ mod support;
 use krabka_client_consumer::{AutoOffsetReset, Consumer, Header as ConsumerHeader};
 use krabka_client_producer::{Header, ProducerRecord};
 
+use crate::support::{
+    client::standalone_topic,
+    producer::{ProducerRecordSetup, default_producer, producer_record},
+};
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn consumer_record_carries_headers() {
-    let (_dir, _broker, bootstrap, _admin) = crate::support::client::standalone_topic("h").await;
+    let (_dir, _broker, bootstrap, _admin) = standalone_topic("h").await;
 
-    let producer = crate::support::producer::default_producer(&bootstrap).await;
+    let producer = default_producer(&bootstrap).await;
     producer
         .send(ProducerRecord {
             headers: vec![Header {
                 key: "trace".into(),
                 value: Some("abc".into()),
             }],
-            ..crate::support::producer::producer_record(
-                crate::support::producer::ProducerRecordSetup {
-                    topic: ("h").into(),
-                    value: Some("v".into()),
-                    ..Default::default()
-                },
-            )
+            ..producer_record(ProducerRecordSetup {
+                topic: ("h").into(),
+                value: Some("v".into()),
+                ..Default::default()
+            })
         })
         .await
         .unwrap();

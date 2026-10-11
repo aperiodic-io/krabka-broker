@@ -19,7 +19,10 @@
 use krabka_ids::PartitionIndex;
 use krabka_metadata::MetadataImage;
 
-use crate::broker::{BrokerHandle, TEST_AWAITER_TIMEOUT};
+use crate::{
+    broker::{BrokerHandle, TEST_AWAITER_TIMEOUT},
+    txn::bootstrap::TOPIC as TXN_BOOTSTRAP_TOPIC,
+};
 
 /// The partitions of `topic` that `node` leads, or `None` while `topic` is
 /// absent or one of its first `partitions` partitions has no leader.
@@ -78,7 +81,9 @@ impl BrokerHandle {
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
     pub async fn wait_until_group_coordinator_ready(&self) {
-        let topic = crate::coordinator::bootstrap::OFFSETS_TOPIC;
+        use crate::coordinator::bootstrap::OFFSETS_TOPIC;
+
+        let topic = OFFSETS_TOPIC;
         let partitions = self.broker.config.offsets_topic_num_partitions;
         let ready = self
             .await_coordinator_ready(topic, partitions, |image, led| async move {
@@ -104,18 +109,20 @@ impl BrokerHandle {
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
     pub async fn wait_until_transaction_coordinator_ready(&self) {
-        let topic = crate::txn::bootstrap::TOPIC;
+        let topic = TXN_BOOTSTRAP_TOPIC;
         let partitions = self.broker.config.transaction_state_num_partitions;
         let ready = self
             .await_coordinator_ready(topic, partitions, |_image, led| async move {
                 let mut loaded = true;
                 for partition in led {
+                    use crate::txn::coordinator::leadership::LoadStatus;
+
                     loaded &= self
                         .broker
                         .txn_coordinator
                         .load_status(PartitionIndex(partition))
                         .await
-                        == Some(crate::txn::coordinator::leadership::LoadStatus::Loaded);
+                        == Some(LoadStatus::Loaded);
                 }
                 loaded
             })
@@ -136,7 +143,9 @@ impl BrokerHandle {
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
     pub async fn wait_until_share_coordinator_ready(&self) {
-        let topic = crate::share_coordinator::bootstrap::TOPIC;
+        use crate::share_coordinator::bootstrap::TOPIC;
+
+        let topic = TOPIC;
         let partitions = self
             .broker
             .config
@@ -152,12 +161,14 @@ impl BrokerHandle {
                     .await;
                 let mut active = true;
                 for partition in led {
+                    use crate::share_coordinator::coordinator::LoadStatus;
+
                     active &= self
                         .broker
                         .share_coordinator
                         .load_status(PartitionIndex(partition))
                         .await
-                        == Some(crate::share_coordinator::coordinator::LoadStatus::Active);
+                        == Some(LoadStatus::Active);
                 }
                 active
             })

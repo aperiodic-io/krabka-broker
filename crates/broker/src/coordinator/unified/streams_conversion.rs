@@ -12,6 +12,7 @@ use super::{
     group_coordinator::{GroupCoordinator, GroupType},
     streams,
 };
+use crate::error::BrokerError;
 
 impl GroupCoordinator {
     /// The `error_message` of the `GROUP_ID_NOT_FOUND` answer to a
@@ -32,7 +33,7 @@ impl GroupCoordinator {
         group_id: &str,
         member_epoch: i32,
         now_ms: i64,
-    ) -> Result<Option<String>, crate::error::BrokerError> {
+    ) -> Result<Option<String>, BrokerError> {
         let joining = member_epoch == 0;
         let not_streams = format!("Group {group_id} is not a streams group.");
         match self.group_type(group_id) {
@@ -97,7 +98,7 @@ impl GroupCoordinator {
         self: &Arc<Self>,
         group_id: &str,
         now_ms: i64,
-    ) -> Result<streams::migration::ConvertOutcome, crate::error::BrokerError> {
+    ) -> Result<streams::migration::ConvertOutcome, BrokerError> {
         use streams::migration::{ConvertOutcome, classic_group_metadata_tombstone_batch};
 
         if self.group_type(group_id) != Some(GroupType::Classic) {
@@ -164,7 +165,7 @@ impl GroupCoordinator {
         group_id: &str,
         member_id: &str,
         now_ms: i64,
-    ) -> Result<streams::migration::DowngradeOutcome, crate::error::BrokerError> {
+    ) -> Result<streams::migration::DowngradeOutcome, BrokerError> {
         use streams::{
             actor::StreamsGroupActorMessage,
             migration::{DowngradeOutcome, streams_to_classic_batch},

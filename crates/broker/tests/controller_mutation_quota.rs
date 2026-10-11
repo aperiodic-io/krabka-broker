@@ -34,20 +34,22 @@ use krabka_metadata::AclOperation;
 use crate::support::client::metric_value;
 use crate::{
     cluster::start_single_broker_sasl_plaintext_with_users,
-    support::acl::{ClusterAclSetup, TopicAclSetup},
+    kafka_wire::{
+        PlainAuthenticationSetup,
+        quotas::{QuotaEntity, QuotaValue, UserQuotaSetup, alter_user_quota},
+    },
+    support::acl::{ClusterAclSetup, TopicAclSetup, cluster_acl_record, topic_acl_record},
     topic_admin::{drive_create_topics_sasl, drive_delete_topics_sasl},
 };
 
 /// Install Alice's shared mutation quota and return its complete wire response.
-async fn set_controller_mutation_quota(
-    addr: std::net::SocketAddr,
-) -> Vec<(crate::kafka_wire::quotas::QuotaEntity, i16)> {
-    crate::kafka_wire::quotas::alter_user_quota(
+async fn set_controller_mutation_quota(addr: std::net::SocketAddr) -> Vec<(QuotaEntity, i16)> {
+    alter_user_quota(
         addr,
-        crate::kafka_wire::quotas::UserQuotaSetup {
-            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+        UserQuotaSetup {
+            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
             key: "controller_mutation_rate",
-            value: crate::kafka_wire::quotas::QuotaValue(2.0),
+            value: QuotaValue(2.0),
             ..Default::default()
         },
     )
@@ -67,7 +69,7 @@ async fn controller_mutation_rate_throttles_create_topics() {
 
     // Seed an ACL granting alice Cluster Create — this also disables the
     // compat shim (allow-all when no ACLs present in image).
-    let admin_acl = crate::support::acl::cluster_acl_record(ClusterAclSetup {
+    let admin_acl = cluster_acl_record(ClusterAclSetup {
         operation: AclOperation::Create,
         ..Default::default()
     });
@@ -143,7 +145,7 @@ async fn controller_mutation_rate_throttles_delete_topics() {
 
     // Seed a dummy ACL to disable the compat shim (allow-all when no ACLs present).
     // Use an unrelated ACL; the real alice ACLs come below.
-    let shim_disable = crate::support::acl::topic_acl_record(TopicAclSetup {
+    let shim_disable = topic_acl_record(TopicAclSetup {
         topic: "__compat_shim_disable__",
         principal: "User:admin",
         ..Default::default()
@@ -166,7 +168,7 @@ async fn controller_mutation_rate_throttles_delete_topics() {
     assert!(ec == 0);
 
     // Grant alice Topic Delete on "to-delete".
-    let alice_delete_acl = crate::support::acl::topic_acl_record(TopicAclSetup {
+    let alice_delete_acl = topic_acl_record(TopicAclSetup {
         topic: "to-delete",
         operation: AclOperation::Delete,
         ..Default::default()

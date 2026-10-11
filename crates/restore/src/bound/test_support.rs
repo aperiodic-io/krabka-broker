@@ -11,7 +11,7 @@ use krabka_protocol::{
 };
 
 use crate::{
-    args::{PartitionRef, RestoreArgs},
+    args::{PartitionRef, RestoreArgs, test_support::args_from as parse_args_from},
     bound::{BatchDecision, Predicates, RecordDecision, record_coordinates},
     error::RestoreError,
 };
@@ -25,7 +25,7 @@ pub(super) use crate::args::test_support::partition;
 /// archive source and target so a test only has to state the bound
 /// flags under test.
 pub(super) fn args_from(extra: &[&str]) -> RestoreArgs {
-    crate::args::test_support::args_from(extra).expect("valid command line")
+    parse_args_from(extra).expect("valid command line")
 }
 
 pub(super) fn predicates(extra: &[&str]) -> Predicates {

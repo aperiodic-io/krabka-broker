@@ -13,6 +13,7 @@ use krabka_units::{
 use crate::{
     BrokerError,
     config::{BrokerConfig, RlmmKind},
+    internal_topics::validate_audit_topic_name,
 };
 
 impl BrokerConfig {
@@ -37,7 +38,7 @@ impl BrokerConfig {
     ///   metrics, or the OAUTHBEARER JWKS refresher.
     pub fn validate(&self) -> Result<(), BrokerError> {
         self.validate_log_io_policy()?;
-        crate::internal_topics::validate_audit_topic_name(&self.audit_topic)?;
+        validate_audit_topic_name(&self.audit_topic)?;
         if self.roles.is_empty() {
             return Err(BrokerError::EmptyRoles);
         }
@@ -376,7 +377,10 @@ mod tests {
     use krabka_units::{Time, bytes, millis};
 
     use super::*;
-    use crate::config::test_support::{RuntimeInvalidator, assert_invalid_runtime};
+    use crate::config::{
+        PlainCredentials, RemoteStorageBackend,
+        test_support::{RuntimeInvalidator, assert_invalid_runtime, base},
+    };
 
     /// Kafka's `super.users` accepts any principal, `User:ANONYMOUS`
     /// included. A cluster with a `PLAINTEXT` controller listener and a
@@ -404,8 +408,8 @@ mod tests {
     /// a startup error rather than a run of `SASL_AUTHENTICATION_FAILED`.
     #[test]
     fn rejects_plain_listener_without_credentials() {
-        let mut config = crate::config::test_support::base();
-        config.plain_credentials = crate::config::PlainCredentials::default();
+        let mut config = base();
+        config.plain_credentials = PlainCredentials::default();
 
         let Err(BrokerError::PlainListenerNoCredentials { name }) = config.validate() else {
             panic!("expected PlainListenerNoCredentials");
@@ -413,7 +417,7 @@ mod tests {
         assert!(name == "EXTERNAL");
 
         // The same config passes once the table is loaded.
-        let config = crate::config::test_support::base();
+        let config = base();
         assert!(config.validate().is_ok());
     }
 
@@ -438,7 +442,7 @@ mod tests {
                         .into_iter()
                         .collect()
                 } else {
-                    crate::config::PlainCredentials::default()
+                    PlainCredentials::default()
                 },
                 ..BrokerConfig::default()
             };
@@ -475,7 +479,7 @@ mod tests {
             }),
             // The default metadata manager is the topic-backed one.
             ("remote_storage_backend", |config| {
-                config.remote_storage_backend = Some(crate::config::RemoteStorageBackend::Local {
+                config.remote_storage_backend = Some(RemoteStorageBackend::Local {
                     dir: "/tiered".into(),
                 });
             }),
@@ -496,7 +500,7 @@ mod tests {
         // Tiered storage itself is not refused: the in-process metadata
         // manager needs no thread.
         let config = BrokerConfig {
-            remote_storage_backend: Some(crate::config::RemoteStorageBackend::Local {
+            remote_storage_backend: Some(RemoteStorageBackend::Local {
                 dir: "/tiered".into(),
             }),
             remote_log_metadata: RlmmKind::InMemory,

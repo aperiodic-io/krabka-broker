@@ -26,14 +26,14 @@ use krabka_protocol::{
     records::RecordBatch,
 };
 
-use crate::{
-    support,
-    support::{
-        offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-        records::{batch_from_records, value_record},
-        sasl::{ScramAlgorithm, ScramUpsertionSetup, scram_upsertion},
-        topics::{creatable_topic, create_topic_request},
-    },
+use crate::support::{
+    self, OperatorKeysSetup, OperatorSaslSetup,
+    discovery::named_topic_metadata,
+    offsets::{delete_records_partition, delete_records_request, delete_records_topic},
+    produce::{SinglePartitionProduceSetup, send_batch},
+    records::{batch_from_records, value_record},
+    sasl::{ScramAlgorithm, ScramUpsertionSetup, scram_upsertion},
+    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
 
 /// The KIP-133 `resource_type` discriminant for a topic.
@@ -55,10 +55,10 @@ async fn produce_one(
             Some(bytes::Bytes::from_static(b"audited-record")),
         )])
     };
-    let resp = crate::support::produce::send_batch(
+    let resp = send_batch(
         &p.client,
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: (topic).into(),
             topic_id,
             ..Default::default()
@@ -76,7 +76,7 @@ async fn produce_one(
 async fn trim_twice(p: &support::InProcess, topic: &str) {
     let topic_id = p
         .client
-        .send(crate::support::discovery::named_topic_metadata(topic))
+        .send(named_topic_metadata(topic))
         .await
         .expect("Metadata")
         .topics
@@ -118,7 +118,7 @@ async fn audit_topic_exists_after_startup() {
     // returns it with `error_code == 0` and at least one partition.
     let resp = p
         .client
-        .send(crate::support::discovery::named_topic_metadata(AUDIT_TOPIC))
+        .send(named_topic_metadata(AUDIT_TOPIC))
         .await
         .expect("MetadataRequest failed");
 
@@ -187,7 +187,7 @@ async fn every_admin_mutation_is_audited() {
     let created = p
         .client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: (topic).into(),
                 ..Default::default()
             },
@@ -408,8 +408,8 @@ async fn sasl_plain_logins_are_audited_either_way() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
         &dir.path().join("data"),
-        crate::support::OperatorSaslSetup {
-            trust: crate::support::OperatorKeysSetup {
+        OperatorSaslSetup {
+            trust: OperatorKeysSetup {
                 keys: &[],
                 approvers: &[],
             },

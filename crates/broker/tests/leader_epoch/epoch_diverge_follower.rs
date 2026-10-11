@@ -8,7 +8,17 @@
 
 use assert2::assert;
 
-use crate::{cluster_lock, epoch_harness::record, support, support::client::connect_client};
+use crate::{
+    cluster_lock,
+    epoch_harness::record,
+    support::{
+        self,
+        client::connect_client,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        registered_cluster, shutdown_cluster,
+        topics::AssignedTopicSetup,
+    },
+};
 
 /// KIP-320 follower side, end to end. A follower whose local log has a
 /// divergent suffix beyond the leader's epoch boundary must truncate that
@@ -36,7 +46,7 @@ use crate::{cluster_lock, epoch_harness::record, support, support::client::conne
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn follower_truncates_in_band_on_diverging_epoch() {
     let _g = cluster_lock().lock().await;
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
 
     // cluster[0] is node 1, and the topic pins it as the leader of partition 0
     // (the same placement the replication tests use).
@@ -44,7 +54,7 @@ async fn follower_truncates_in_band_on_diverging_epoch() {
     let admin = connect_client(leader_addr.clone(), None).await;
     let topic_id = support::topics::create_assigned_partition(
         &admin,
-        crate::support::topics::AssignedTopicSetup::three_replicas("divtrunc"),
+        AssignedTopicSetup::three_replicas("divtrunc"),
         cluster.iter().map(|(broker, _, _)| broker),
     )
     .await;
@@ -55,12 +65,12 @@ async fn follower_truncates_in_band_on_diverging_epoch() {
     let producer = connect_client(leader_addr, None).await;
     for i in 0..k {
         let prod = producer
-            .send(crate::support::produce::batch_request(
+            .send(batch_request(
                 record(&format!("v{i}")),
-                crate::support::produce::SinglePartitionProduceSetup {
+                SinglePartitionProduceSetup {
                     topic: ("divtrunc").into(),
                     topic_id,
-                    ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                    ..SinglePartitionProduceSetup::replicated()
                 },
             ))
             .await
@@ -126,5 +136,5 @@ async fn follower_truncates_in_band_on_diverging_epoch() {
             == cluster[0].0.local_log_end_offset("divtrunc", 0)
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

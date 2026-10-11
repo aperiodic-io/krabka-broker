@@ -16,12 +16,21 @@ use krabka_client_core::Client;
 use krabka_protocol::owned::end_txn_response::EndTxnResponse;
 use tempfile::TempDir;
 
-use crate::support::{
-    client::connect_owned,
-    discovery::{coordinator_lookup_request, topic_metadata_request},
-    topics::metadata_topic,
-    transaction_wire::{TransactionProduceSetup, produce_fixture},
-    transactions::{ProducerIdentity, end_transaction_request},
+use crate::{
+    support::{
+        client::connect_owned,
+        discovery::{coordinator_lookup_request, topic_metadata_request},
+        shutdown_cluster,
+        topics::{AssignedTopicSetup, metadata_topic},
+        transaction_wire::{
+            AssignedTransactionTopicSetup, TransactionProduceSetup, add_partition_request,
+            coordinator_loading, create_assigned_topic, init_producer_request,
+            initialized_identity, partition_added, partition_leader, produce_fixture,
+            read_committed_through, retry_coordinator,
+        },
+        transactions::{EndTransactionSetup, ProducerIdentity, end_transaction_request},
+    },
+    txn_harness::registered_transaction_cluster,
 };
 
 const TID: &str = "txn-coordinator-failover";
@@ -36,7 +45,7 @@ const SETTLE: Duration = Duration::from_secs(60);
 type Cluster = Vec<(BrokerHandle, BrokerConfig, TempDir)>;
 
 fn retriable(code: i16) -> bool {
-    crate::support::transaction_wire::coordinator_loading(code)
+    coordinator_loading(code)
 }
 
 async fn client(address: &str) -> Client {
@@ -53,7 +62,7 @@ fn address_of(cluster: &Cluster, node: u64) -> String {
 
 /// The leader of `topic-0` in the image of `handle`.
 async fn leader_of(handle: &BrokerHandle, topic: &str) -> u64 {
-    crate::support::transaction_wire::partition_leader(handle, topic, SETTLE).await
+    partition_leader(handle, topic, SETTLE).await
 }
 
 /// Metadata leadership can precede installation of the Produce readiness gate.
@@ -91,10 +100,10 @@ async fn find_coordinator(client: &Client) {
 }
 
 async fn init_producer(client: &Client) -> (i64, i16) {
-    crate::support::transaction_wire::initialized_identity(
+    initialized_identity(
         || async {
             client
-                .send(crate::support::transaction_wire::init_producer_request(TID))
+                .send(init_producer_request(TID))
                 .await
                 .expect("InitProducerId")
         },
@@ -105,10 +114,7 @@ async fn init_producer(client: &Client) -> (i64, i16) {
 }
 
 async fn add_partition(client: &Client, producer: (i64, i16)) {
-    crate::support::transaction_wire::partition_added(client.send(
-        crate::support::transaction_wire::add_partition_request(TID, TOPIC, producer),
-    ))
-    .await;
+    partition_added(client.send(add_partition_request(TID, TOPIC, producer))).await;
 }
 
 async fn produce(client: &Client, producer: Option<(i64, i16)>, values: &[&'static str]) {
@@ -138,16 +144,13 @@ async fn produce(client: &Client, producer: Option<(i64, i16)>, values: &[&'stat
 }
 
 async fn end_txn(client: &Client, (producer_id, epoch): (i64, i16)) -> EndTxnResponse {
-    crate::support::transaction_wire::retry_coordinator(
+    retry_coordinator(
         || async {
             client
                 .send(end_transaction_request(
                     TID,
-                    crate::support::transactions::EndTransactionSetup {
-                        producer: crate::support::transactions::ProducerIdentity::from_wire((
-                            producer_id,
-                            epoch,
-                        )),
+                    EndTransactionSetup {
+                        producer: ProducerIdentity::from_wire((producer_id, epoch)),
                         ..Default::default()
                     },
                 ))
@@ -162,12 +165,12 @@ async fn end_txn(client: &Client, (producer_id, epoch): (i64, i16)) -> EndTxnRes
 }
 
 async fn read_committed(bootstrap: &str, last: &str) -> Vec<String> {
-    crate::support::transaction_wire::read_committed_through(bootstrap, TOPIC, last, SETTLE).await
+    read_committed_through(bootstrap, TOPIC, last, SETTLE).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_transaction_commits_through_the_next_coordinator() {
-    let mut cluster = crate::txn_harness::registered_transaction_cluster(|_, config| {
+    let mut cluster = registered_transaction_cluster(|_, config| {
         config.transaction_state_num_partitions = 1;
         config.transaction_state_replication_factor = 3;
     })
@@ -175,13 +178,10 @@ async fn a_transaction_commits_through_the_next_coordinator() {
     let admin = client(&cluster[0].0.listen_addr().to_string()).await;
     find_coordinator(&admin).await;
     let coordinator = leader_of(&cluster[0].0, STATE_TOPIC).await;
-    crate::support::transaction_wire::create_assigned_topic(
+    create_assigned_topic(
         &admin,
-        crate::support::transaction_wire::AssignedTransactionTopicSetup {
-            topic: crate::support::topics::AssignedTopicSetup::leader_first(
-                TOPIC,
-                krabka_metadata::NodeId(coordinator),
-            ),
+        AssignedTransactionTopicSetup {
+            topic: AssignedTopicSetup::leader_first(TOPIC, krabka_metadata::NodeId(coordinator)),
             context: Some("CreateTopics"),
         },
     )
@@ -238,6 +238,6 @@ async fn a_transaction_commits_through_the_next_coordinator() {
     let seen = read_committed(&bootstrap, "z").await;
     assert!(seen == ["a", "b", "c", "z"]);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
     drop(stopped_dir);
 }

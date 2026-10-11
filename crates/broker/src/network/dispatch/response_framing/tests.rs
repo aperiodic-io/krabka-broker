@@ -23,7 +23,7 @@ use tokio_util::codec::{Encoder as _, Framed};
 use super::{codec, encode_response, response_header_len, response_header_v1};
 use crate::{
     handlers::{ApiKeyCode, CorrelationId},
-    network::codec::KafkaCodec,
+    network::codec::{KafkaCodec, codec as production_codec},
 };
 
 /// Kafka's default `socket.request.max.bytes`, the request limit the dispatch
@@ -210,7 +210,7 @@ async fn the_seam_codec_writes_the_frame_the_connection_loop_writes() {
         let expected = expected.to_vec();
 
         let seam = wire_bytes(framed.clone(), codec(MAX_FRAME_BYTES)).await;
-        let production = wire_bytes(framed, crate::network::codec::codec(MAX_FRAME_BYTES)).await;
+        let production = wire_bytes(framed, production_codec(MAX_FRAME_BYTES)).await;
 
         assert!(seam == expected, "{}", case.name);
         assert!(production == expected, "{}", case.name);
@@ -245,10 +245,7 @@ fn the_seam_codec_frames_a_response_over_the_request_limit() {
     expected.put_u32(9);
     expected.put_slice(&response);
 
-    for (which, mut codec) in [
-        ("seam", codec(8)),
-        ("production", crate::network::codec::codec(8)),
-    ] {
+    for (which, mut codec) in [("seam", codec(8)), ("production", production_codec(8))] {
         let mut wire = BytesMut::new();
         codec
             .encode(response.clone(), &mut wire)

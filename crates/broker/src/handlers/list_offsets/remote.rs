@@ -40,6 +40,7 @@ mod tests {
     use super::*;
     use crate::{
         codes,
+        config_keys::REMOTE_LIST_OFFSETS_REQUEST_TIMEOUT_MS,
         handlers::list_offsets::{
             response::error_response,
             sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
@@ -72,7 +73,7 @@ mod tests {
         ] {
             image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
                 node_id,
-                config_name: crate::config_keys::REMOTE_LIST_OFFSETS_REQUEST_TIMEOUT_MS.to_owned(),
+                config_name: REMOTE_LIST_OFFSETS_REQUEST_TIMEOUT_MS.to_owned(),
                 config_value: Some(value.to_owned()),
             }));
         }

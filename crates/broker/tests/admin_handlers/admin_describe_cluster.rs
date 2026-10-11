@@ -5,11 +5,13 @@
 use assert2::check;
 use krabka_protocol::owned::describe_cluster_request::DescribeClusterRequest;
 
+use crate::support::start_n_node_client;
+
 /// `DescribeCluster` on a 1-broker cluster returns `error_code == 0`, exactly
 /// one broker entry, and `controller_id == 1`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_cluster_lists_brokers() {
-    let (_cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (_cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
 
     let resp = client
         .send(DescribeClusterRequest::default())
@@ -25,7 +27,7 @@ async fn describe_cluster_lists_brokers() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_cluster_endpoint_type_controllers_is_rejected() {
     const ENDPOINT_TYPE_CONTROLLERS: i8 = 2;
-    let (_cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (_cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
 
     let resp = client
         .send(DescribeClusterRequest {

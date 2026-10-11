@@ -34,7 +34,7 @@ use krabka_units::{ByteSize, Time};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::BrokerError;
+use crate::{error::BrokerError, log_dir::FUTURE_SUFFIX, throttle::TokenBucket};
 
 mod catch_up;
 mod cleanup;
@@ -110,7 +110,7 @@ pub enum MoveError {
 pub(crate) struct MovePolicy {
     pub retry_backoff: Time,
     pub read_chunk: ByteSize,
-    pub throttle: Arc<crate::throttle::TokenBucket>,
+    pub throttle: Arc<TokenBucket>,
 }
 
 /// The longest directory name Kafka lets a future log take.
@@ -133,7 +133,7 @@ fn future_dir_name_too_long(topic: &str, partition: i32) -> bool {
         + partition.to_string().len()
         + ".".len()
         + FUTURE_DIR_UNIQUE_ID_LEN
-        + crate::log_dir::FUTURE_SUFFIX.len();
+        + FUTURE_SUFFIX.len();
     len > MAX_FUTURE_DIR_NAME_LEN
 }
 
@@ -175,13 +175,14 @@ mod tests {
     use krabka_units::{kibibytes, millis};
 
     use super::*;
+    use crate::throttle::TokenBucket;
 
     #[test]
     fn move_policy_preserves_nondefault_values() {
         let policy = MovePolicy {
             retry_backoff: millis(7),
             read_chunk: kibibytes(4),
-            throttle: Arc::new(crate::throttle::TokenBucket::new()),
+            throttle: Arc::new(TokenBucket::new()),
         };
 
         assert!(policy.retry_backoff == millis(7));

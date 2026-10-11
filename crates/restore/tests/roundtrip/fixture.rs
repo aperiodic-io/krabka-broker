@@ -18,7 +18,10 @@ use krabka_remote_storage::{
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use crate::batches::{append_groups, tiny_segment_config};
+use crate::{
+    archive_fixture::archive_segment,
+    batches::{append_groups, tiny_segment_config},
+};
 
 /// One archived segment: the id it was archived under, and the exact batch
 /// (with its real, log-assigned `base_offset`) a correct restore must
@@ -127,8 +130,7 @@ fn build_partition(storage: &LocalTieredStorage, spec: PartitionSpec<'_>) -> Par
         .map(|(export, batch)| {
             let segment_id = Uuid::new_v4();
             let partition_id = TopicIdPartition::new(spec.topic_id, spec.topic, spec.partition);
-            let metadata =
-                crate::archive_fixture::archive_segment(storage, partition_id, segment_id, export);
+            let metadata = archive_segment(storage, partition_id, segment_id, export);
 
             SegmentFixture {
                 segment_id,

@@ -6,9 +6,13 @@
 use krabka_security::ListenerProtocol::{self, Plaintext, SaslPlaintext, SaslSsl, Ssl};
 
 use super::*;
-use crate::config::{
-    BrokerConfig, ListenerSpec,
-    NodeRole::{self, Broker, Controller},
+use crate::{
+    SslPrincipalMapper,
+    config::{
+        BrokerConfig, ListenerSpec,
+        NodeRole::{self, Broker, Controller},
+    },
+    file_config::FileConfig,
 };
 
 /// The five keys, in the name order that `describe_one` reports them in.
@@ -56,7 +60,7 @@ fn listener(setup: ListenerSetup<'_>) -> ListenerSpec {
         protocol,
         tls_config: None,
         sasl_mechanisms: None,
-        principal_mapper: crate::SslPrincipalMapper::default(),
+        principal_mapper: SslPrincipalMapper::default(),
     }
 }
 
@@ -80,7 +84,7 @@ fn two_listener_node(roles: &[NodeRole], inter_broker: Option<&str>) -> BrokerCo
         ..BrokerConfig::default()
     };
     if let Some(name) = inter_broker {
-        let file: crate::file_config::FileConfig =
+        let file: FileConfig =
             toml::from_str(&format!("inter_broker_listener_name = \"{name}\"\n"))
                 .expect("parse the file");
         file.apply_to(&mut config).expect("apply the file");

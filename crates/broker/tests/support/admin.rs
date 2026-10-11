@@ -3,6 +3,8 @@
 use krabka_client_admin::CreateTopicSpec;
 use krabka_ids::PartitionIndex as ElectionPartitionIndex;
 
+use crate::support::standalone_broker;
+
 pub fn topic_spec(name: impl Into<String>, partitions: i32, replicas: i32) -> CreateTopicSpec {
     CreateTopicSpec {
         name: name.into(),
@@ -42,7 +44,7 @@ pub async fn standalone_admin() -> (
     String,
     krabka_client_admin::AdminClient,
 ) {
-    let (dir, broker) = crate::support::standalone_broker().await;
+    let (dir, broker) = standalone_broker().await;
     let bootstrap = broker.listen_addr().to_string();
     let admin = krabka_client_admin::AdminClient::connect(std::slice::from_ref(&bootstrap))
         .await

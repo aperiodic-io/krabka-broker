@@ -35,8 +35,11 @@ use crate::{
     broker::BrokerHandle,
     codes,
     fetch_session::INVALID_SESSION_ID,
+    handlers::test_support::{
+        ReplicatedTopicSetup, default_records_batch, seed_partition_replicas,
+    },
     partition::Partition,
-    test_support::{KafkaErrorCode, start_broker_no_audit_with},
+    test_support::{KafkaErrorCode, append_partition_batch, start_broker_no_audit_with},
 };
 
 /// The node id of the broker under test.
@@ -99,13 +102,10 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 
 /// Create `topic` with replicas 1 and 2, led by `leader`, wait until this
 /// broker holds the partition in that role, and append two records.
-async fn partition(
-    broker: &BrokerHandle,
-    setup: crate::handlers::test_support::ReplicatedTopicSetup<'_>,
-) -> Arc<Partition> {
+async fn partition(broker: &BrokerHandle, setup: ReplicatedTopicSetup<'_>) -> Arc<Partition> {
     let topic = setup.topic;
     let leader = setup.leader;
-    crate::handlers::test_support::seed_partition_replicas(broker, setup).await;
+    seed_partition_replicas(broker, setup).await;
 
     wait_for_local_partition!(
         (shared, partition),
@@ -126,8 +126,8 @@ async fn partition(
         "the broker holds the partition in its role"
     );
 
-    let mut batch = crate::handlers::test_support::default_records_batch(&[b"first", b"second"]);
-    crate::test_support::append_partition_batch(&partition, &mut batch);
+    let mut batch = default_records_batch(&[b"first", b"second"]);
+    append_partition_batch(&partition, &mut batch);
     partition
 }
 

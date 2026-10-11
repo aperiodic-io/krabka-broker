@@ -377,7 +377,11 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::segment::test_support::{DENSE_INDEX, sample_batch};
+    use crate::segment::test_support::{
+        DENSE_INDEX, FIVE_OFFSET_TIMESTAMP_BATCHES, ONE_RECORD_BATCH, RecordCount, RecordTimestamp,
+        SampleBatchSetup, SeededSegmentSetup, sample_batch, seeded_fixture, segment_at,
+        test_segment,
+    };
 
     #[test]
     fn first_record_timestamp_survives_appends_and_reloads_after_truncation() {
@@ -385,10 +389,10 @@ mod tests {
 
         for codec in [CompressionType::None, CompressionType::Lz4] {
             for timestamp_type in [TimestampType::CreateTime, TimestampType::LogAppendTime] {
-                let (dir, mut seg) = crate::segment::test_support::test_segment();
+                let (dir, mut seg) = test_segment();
                 assert2::assert!(seg.first_record_timestamp().is_none());
-                let mut batch = sample_batch(crate::segment::test_support::SampleBatchSetup {
-                    records: crate::segment::test_support::RecordCount(2),
+                let mut batch = sample_batch(SampleBatchSetup {
+                    records: RecordCount(2),
                     ..Default::default()
                 });
                 batch.records[0].timestamp_delta = -5;
@@ -404,9 +408,9 @@ mod tests {
                 seg.append(&batch, DENSE_INDEX).unwrap();
                 assert2::assert!(seg.first_record_timestamp() == Some(expected));
                 seg.append(
-                    &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                        offset: crate::Offset(2),
-                        timestamp: crate::segment::test_support::RecordTimestamp(100),
+                    &sample_batch(SampleBatchSetup {
+                        offset: Offset(2),
+                        timestamp: RecordTimestamp(100),
                         ..Default::default()
                     }),
                     DENSE_INDEX,
@@ -421,8 +425,8 @@ mod tests {
                 seg.truncate_to_relative(0).unwrap();
                 assert2::assert!(seg.first_record_timestamp().is_none());
                 seg.append(
-                    &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                        timestamp: crate::segment::test_support::RecordTimestamp(200),
+                    &sample_batch(SampleBatchSetup {
+                        timestamp: RecordTimestamp(200),
                         ..Default::default()
                     }),
                     DENSE_INDEX,
@@ -467,9 +471,9 @@ mod tests {
 
         // Multiple batches: max timestamp is at last_offset
         seg.append(
-            &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                offset: crate::Offset(13),
-                timestamp: crate::segment::test_support::RecordTimestamp(600),
+            &sample_batch(SampleBatchSetup {
+                offset: Offset(13),
+                timestamp: RecordTimestamp(600),
                 ..Default::default()
             }),
             DENSE_INDEX,
@@ -520,18 +524,14 @@ mod tests {
 
     #[test]
     fn malformed_or_stale_time_index_floor_fails_closed() {
-        let (_dir, mut stale) = crate::segment::test_support::test_segment();
+        let (_dir, mut stale) = test_segment();
         stale
-            .append(
-                &sample_batch(crate::segment::test_support::ONE_RECORD_BATCH),
-                DENSE_INDEX,
-            )
+            .append(&sample_batch(ONE_RECORD_BATCH), DENSE_INDEX)
             .unwrap();
         stale.time_index.append(200, u32::MAX).unwrap();
         assert2::assert!(stale.offset_for_timestamp(200).is_none());
 
-        let (_dir2, mut overflowing) =
-            crate::segment::test_support::segment_at(crate::Offset(i64::MAX));
+        let (_dir2, mut overflowing) = segment_at(Offset(i64::MAX));
         overflowing.last_offset = Offset(i64::MAX);
         overflowing.time_index.append(0, 1).unwrap();
         assert2::assert!(overflowing.offset_for_timestamp(0).is_none());
@@ -539,12 +539,10 @@ mod tests {
 
     #[test]
     fn truncated_log_failure_exhausts_the_retry_window() {
-        let (_dir, seg) = crate::segment::test_support::seeded_fixture(
-            crate::segment::test_support::SeededSegmentSetup {
-                batches: &[crate::segment::test_support::ONE_RECORD_BATCH],
-                ..Default::default()
-            },
-        );
+        let (_dir, seg) = seeded_fixture(SeededSegmentSetup {
+            batches: &[ONE_RECORD_BATCH],
+            ..Default::default()
+        });
         seg.log_file.set_len(1).unwrap();
 
         assert2::assert!(
@@ -557,12 +555,10 @@ mod tests {
     #[test]
     fn offset_for_timestamp_finds_first_ge() {
         // Two batches: offsets 0..=2 ts 100..=102, offsets 3..=4 ts 200..=201.
-        let (dir, seg) = crate::segment::test_support::seeded_fixture(
-            crate::segment::test_support::SeededSegmentSetup {
-                batches: crate::segment::test_support::FIVE_OFFSET_TIMESTAMP_BATCHES,
-                ..Default::default()
-            },
-        );
+        let (dir, seg) = seeded_fixture(SeededSegmentSetup {
+            batches: FIVE_OFFSET_TIMESTAMP_BATCHES,
+            ..Default::default()
+        });
         // sample_batch sets per-record timestamp_delta = i, base_timestamp = ts_base.
         // Batch 1 records: (off0,ts100),(off1,ts101),(off2,ts102).
         // Batch 2 records: (off3,ts200),(off4,ts201).
@@ -580,7 +576,7 @@ mod tests {
 
     #[test]
     fn scan_from_floor_finds_match_beyond_first_window() {
-        let (dir, mut seg) = crate::segment::test_support::test_segment();
+        let (dir, mut seg) = test_segment();
         // Many single-record batches with increasing timestamps. With a
         // tiny scan window each batch lands in its own window, so a match
         // at the tail forces the windowed loop to advance many times.
@@ -627,23 +623,20 @@ mod tests {
         // A full-size window keeps the match in the first read so the
         // cursor-advance path isn't involved.
         const WINDOW: ByteSize = kibibytes(64);
-        let (dir, mut seg) = crate::segment::test_support::test_segment();
+        let (dir, mut seg) = test_segment();
         // A leading single-record batch at offset 0, then a 3-record batch
         // based at offset 1 (abs offsets 1,2,3; timestamps 200,201,202). The
         // match is the *third* record, whose absolute offset is
         // `base_offset + offset_delta = 1 + 2 = 3` — a value that only a
         // correct `+` reproduces (`1 - 2` or `1 * 2` both differ), so this
         // pins the returned offset arithmetic.
+        seg.append(&sample_batch(ONE_RECORD_BATCH), DENSE_INDEX)
+            .unwrap();
         seg.append(
-            &sample_batch(crate::segment::test_support::ONE_RECORD_BATCH),
-            DENSE_INDEX,
-        )
-        .unwrap();
-        seg.append(
-            &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                offset: crate::Offset(1),
-                records: crate::segment::test_support::RecordCount(3),
-                timestamp: crate::segment::test_support::RecordTimestamp(200),
+            &sample_batch(SampleBatchSetup {
+                offset: Offset(1),
+                records: RecordCount(3),
+                timestamp: RecordTimestamp(200),
             }),
             DENSE_INDEX,
         )
@@ -659,16 +652,14 @@ mod tests {
     fn offset_of_max_timestamp_earliest_on_tie() {
         // Batch records ts: 100,101,102 (max in batch = 102 at offset 2).
         // Second batch: offsets 3,4 ts 200,201 — segment max becomes 201 @4.
-        let (dir, seg) = crate::segment::test_support::seeded_fixture(
-            crate::segment::test_support::SeededSegmentSetup {
-                batches: crate::segment::test_support::FIVE_OFFSET_TIMESTAMP_BATCHES,
-                ..Default::default()
-            },
-        );
+        let (dir, seg) = seeded_fixture(SeededSegmentSetup {
+            batches: FIVE_OFFSET_TIMESTAMP_BATCHES,
+            ..Default::default()
+        });
         assert2::assert!(seg.offset_of_max_timestamp() == Some((Offset(4), 201)));
 
         // Empty segment → None.
-        let (dir2, empty) = crate::segment::test_support::test_segment();
+        let (dir2, empty) = test_segment();
         assert2::assert!(empty.offset_of_max_timestamp() == None);
         drop(dir);
         drop(dir2);
@@ -676,7 +667,7 @@ mod tests {
 
     #[test]
     fn offset_of_max_timestamp_tie_picks_earliest() {
-        let (dir, mut seg) = crate::segment::test_support::test_segment();
+        let (dir, mut seg) = test_segment();
         // All three records share timestamp 500; earliest offset is 0.
         let mut b = RecordBatch {
             base_offset: 0,
@@ -710,7 +701,7 @@ mod record_limit_tests {
     use krabka_units::prelude::{ByteSize, bytes, kibibytes};
 
     use super::*;
-    use crate::segment::test_support::DENSE_INDEX;
+    use crate::segment::test_support::{DENSE_INDEX, test_segment};
 
     /// The body size of a record with a `1000`-byte value and nothing else:
     /// its attributes byte, a one-byte timestamp and offset delta, a null key,
@@ -744,7 +735,7 @@ mod record_limit_tests {
     }
 
     fn segment(batches: &[RecordBatch]) -> (tempfile::TempDir, Segment) {
-        let (dir, mut seg) = crate::segment::test_support::test_segment();
+        let (dir, mut seg) = test_segment();
         for batch in batches {
             seg.append(batch, DENSE_INDEX).unwrap();
         }

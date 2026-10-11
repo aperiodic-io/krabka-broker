@@ -11,7 +11,7 @@ use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
 use tracing::instrument;
 
 use super::{Segment, io::seek_to_log_size};
-use crate::error::LogError;
+use crate::{error::LogError, io::LogIo};
 
 /// Log a block reservation, a release, or a switch to `O_DIRECT` that the
 /// filesystem refused.
@@ -236,7 +236,7 @@ impl Segment {
         Ok(())
     }
 
-    pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn crate::io::LogIo>) {
+    pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn LogIo>) {
         self.offset_index.set_io(io.clone());
         self.time_index.set_io(io.clone());
         self.io = io;
@@ -325,7 +325,11 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::segment::test_support::{DENSE_INDEX, NO_LIMIT, sample_batch};
+    use crate::segment::test_support::{
+        DENSE_INDEX, NO_LIMIT, RecordCount, RecordTimestamp, SECOND_THREE_RECORD_BATCH,
+        SampleBatchSetup, SeededSegmentSetup, THREE_RECORD_BATCH, sample_batch, seeded_fixture,
+        segment_at, test_segment, two_record_fixture,
+    };
 
     /// Truncating to a relative offset keeps every batch that ends before it,
     /// and leaves the segment describing exactly what it kept.
@@ -344,10 +348,10 @@ mod tests {
         // timestamps 500, 600, 700.
         for i in 0..3i64 {
             seg.append(
-                &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                    offset: crate::Offset(100 + i * 2),
-                    records: crate::segment::test_support::RecordCount(2),
-                    timestamp: crate::segment::test_support::RecordTimestamp(500 + i * 100),
+                &sample_batch(SampleBatchSetup {
+                    offset: Offset(100 + i * 2),
+                    records: RecordCount(2),
+                    timestamp: RecordTimestamp(500 + i * 100),
                 }),
                 DENSE_INDEX,
             )
@@ -389,7 +393,7 @@ mod tests {
     /// Sealing is what `is_sealed` reports.
     #[test]
     fn is_sealed_follows_seal() {
-        let (_dir, mut seg) = crate::segment::test_support::two_record_fixture();
+        let (_dir, mut seg) = two_record_fixture();
         check!(!seg.is_sealed(), "a fresh segment is open");
         seg.seal().unwrap();
         check!(seg.is_sealed(), "a sealed segment reports it");
@@ -426,12 +430,12 @@ mod tests {
             ),
         ];
         for (label, batches, expected) in cases {
-            let (_dir, mut seg) = crate::segment::test_support::test_segment();
+            let (_dir, mut seg) = test_segment();
             for (base, timestamp, interval) in batches {
                 seg.append(
-                    &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                        offset: crate::Offset(base),
-                        timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+                    &sample_batch(SampleBatchSetup {
+                        offset: Offset(base),
+                        timestamp: RecordTimestamp(timestamp),
                         ..Default::default()
                     }),
                     interval,
@@ -456,15 +460,13 @@ mod tests {
     /// returns batch B.
     #[test]
     fn truncate_to_relative_uses_batch_last_offset() {
-        let (_dir, mut seg) = crate::segment::test_support::seeded_fixture(
-            crate::segment::test_support::SeededSegmentSetup {
-                batches: &[
-                    crate::segment::test_support::THREE_RECORD_BATCH, // offsets 0..=2
-                    crate::segment::test_support::SECOND_THREE_RECORD_BATCH, // offsets 3..=5
-                ],
-                ..Default::default()
-            },
-        );
+        let (_dir, mut seg) = seeded_fixture(SeededSegmentSetup {
+            batches: &[
+                THREE_RECORD_BATCH,        // offsets 0..=2
+                SECOND_THREE_RECORD_BATCH, // offsets 3..=5
+            ],
+            ..Default::default()
+        });
         assert2::assert!(seg.last_offset() == 5);
 
         // target_abs = base(0) + rel(3) = 3. Drop batches with last >= 3.
@@ -482,7 +484,7 @@ mod tests {
 
     #[test]
     fn truncate_to_relative_rejects_an_absolute_offset_overflow() {
-        let (_dir, mut seg) = crate::segment::test_support::segment_at(crate::Offset(i64::MAX));
+        let (_dir, mut seg) = segment_at(Offset(i64::MAX));
 
         let error = seg
             .truncate_to_relative(1)
@@ -492,10 +494,10 @@ mod tests {
 
     #[test]
     fn flush_succeeds() {
-        let (_dir, mut seg) = crate::segment::test_support::test_segment();
+        let (_dir, mut seg) = test_segment();
         seg.append(
-            &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                timestamp: crate::segment::test_support::RecordTimestamp(42),
+            &sample_batch(SampleBatchSetup {
+                timestamp: RecordTimestamp(42),
                 ..Default::default()
             }),
             kibibytes(4),

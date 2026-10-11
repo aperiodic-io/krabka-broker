@@ -34,7 +34,10 @@ use crate::{
         start_single_broker_plaintext, start_single_broker_plaintext_with_conn_caps,
         start_single_broker_sasl_plaintext_with_users,
     },
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
+    kafka_wire::{
+        ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup,
+        quotas::{QuotaAlterSetup, QuotaDescribeSetup},
+    },
     quota_admin::{drive_alter_client_quotas_sasl, drive_describe_client_quotas_sasl},
     support::wire::CorrelationId as WireCorrelationId,
 };
@@ -57,8 +60,8 @@ async fn ip_quota_alter_then_describe_round_trip() {
             vec![("ip".into(), Some("127.0.0.1".into()))],
             vec![("connection_creation_rate".into(), 2.0, false)],
         )],
-        &crate::kafka_wire::quotas::QuotaAlterSetup {
-            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+        &QuotaAlterSetup {
+            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
             ..Default::default()
         },
     )
@@ -79,8 +82,8 @@ async fn ip_quota_alter_then_describe_round_trip() {
     let desc = drive_describe_client_quotas_sasl(
         addr,
         vec![("ip".into(), /*ANY*/ 2, None)],
-        &crate::kafka_wire::quotas::QuotaDescribeSetup {
-            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+        &QuotaDescribeSetup {
+            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
             ..Default::default()
         },
     )

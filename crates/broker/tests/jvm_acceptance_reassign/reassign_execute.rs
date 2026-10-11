@@ -8,7 +8,15 @@ use std::{io::Write as _, process::Stdio, time::Duration};
 
 use assert2::assert;
 
-use crate::jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised};
+use crate::{
+    cluster::{
+        admin_text_cluster, assert_reassigned, assignment, execute_plan, offline_for_partition,
+        reassignment_cluster, removed_replica,
+    },
+    jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
+    oracle::{AssignedTopicCommandSetup, CliRun, OracleComparison},
+    support::{ContainerInput, JvmDockerSetup, jvm_docker_command},
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires Docker"]
@@ -16,10 +24,9 @@ use crate::jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised};
 async fn jvm_kafka_reassign_partitions_end_to_end() {
     const TOPIC: &str = "krabka-reassign-itest";
 
-    let (cluster, _admin_props, admin_mount) =
-        Box::pin(crate::cluster::reassignment_cluster(TOPIC)).await;
+    let (cluster, _admin_props, admin_mount) = Box::pin(reassignment_cluster(TOPIC)).await;
 
-    let mut producer = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let mut producer = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE_TXN,
         mounts: &[&admin_mount],
         args: &[
@@ -31,7 +38,7 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
             "--producer.config",
             "/client.properties",
         ],
-        input: crate::support::ContainerInput::Attached,
+        input: ContainerInput::Attached,
     })
     .stdin(Stdio::piped())
     .spawn()
@@ -45,15 +52,14 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
     drop(producer.stdin.take());
     assert!(producer.wait().expect("producer exit").success());
 
-    let (initial, new_node, staying) = crate::cluster::assignment(&cluster.h1, TOPIC, true);
-    let (_json_file, json_mount) =
-        crate::cluster::execute_plan(&admin_mount, TOPIC, staying, new_node, false);
+    let (initial, new_node, staying) = assignment(&cluster.h1, TOPIC, true);
+    let (_json_file, json_mount) = execute_plan(&admin_mount, TOPIC, staying, new_node, false);
 
     let pr_after = cluster
         .h1
         .partition_record_for_test(TOPIC, 0)
         .expect("partition record after alter");
-    let removing_replica = crate::cluster::removed_replica(&pr_after, &initial);
+    let removing_replica = removed_replica(&pr_after, &initial);
     let handles = [&cluster.h1, &cluster.h2, &cluster.h3];
     let leader_leo = handles[usize::try_from(staying - 1).unwrap()]
         .local_log_end_offset(TOPIC, 0)
@@ -93,7 +99,7 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
         cluster.h1.partition_record_for_test(TOPIC, 0)
     );
     // After completion the replica set must match [staying, new_node].
-    crate::cluster::assert_reassigned(&cluster.h1, TOPIC, staying, new_node);
+    assert_reassigned(&cluster.h1, TOPIC, staying, new_node);
     let dirs = [cluster.d1.path(), cluster.d2.path(), cluster.d3.path()];
     let removed_dir =
         dirs[usize::try_from(removing_replica.0 - 1).unwrap()].join(format!("{TOPIC}-0"));
@@ -107,7 +113,7 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
     eprintln!("KRABKA[test] reassignment completed; running --verify");
 
     // --verify should report completion.
-    let verify_out = crate::jvm_acceptance::verify_console_reassignment(&admin_mount, &json_mount);
+    let verify_out = verify_console_reassignment(&admin_mount, &json_mount);
 
     assert!(
         String::from_utf8_lossy(&verify_out.stdout)
@@ -146,12 +152,7 @@ const PLAN_JSON: &str = "/tmp/krabka-reassignment.json";
 const CLIENT_PROPS: &str = "/client.properties";
 
 /// One `kafka-reassign-partitions` invocation, with the files it names.
-fn reassign(
-    side: &Side<'_>,
-    props: Option<&str>,
-    args: &[&str],
-    files: Vec<ToolFile>,
-) -> crate::oracle::CliRun {
+fn reassign(side: &Side<'_>, props: Option<&str>, args: &[&str], files: Vec<ToolFile>) -> CliRun {
     let mut full = vec!["--bootstrap-server", side.bootstrap()];
     full.extend_from_slice(args);
     let mut files = files;
@@ -219,7 +220,7 @@ async fn reassign_partitions_generate_produces_a_usable_plan_on_both() {
     const TOPIC: &str = "krabka-generate-itest";
     const PARTITIONS: i32 = 3;
 
-    let comparison = crate::oracle::OracleComparison::start("reassign-generate").await;
+    let comparison = OracleComparison::start("reassign-generate").await;
     let [oracle_side, krabka_side] = comparison.sides();
 
     let document = topics_to_move_json(&[TOPIC]);
@@ -299,12 +300,12 @@ async fn reassign_partitions_generate_produces_a_usable_plan_on_both() {
 async fn reassign_partitions_additional_keeps_the_reassignment_already_running() {
     const TOPIC: &str = "krabka-additional-itest";
 
-    let (brokers, props, advertised) = Box::pin(crate::cluster::admin_text_cluster()).await;
+    let (brokers, props, advertised) = Box::pin(admin_text_cluster()).await;
     let side = Side::Krabka {
         bootstrap: &advertised,
     };
 
-    side.create_assigned_topic(crate::oracle::AssignedTopicCommandSetup {
+    side.create_assigned_topic(AssignedTopicCommandSetup {
         topic: TOPIC,
         assignment: "1,1",
         props_path: CLIENT_PROPS,
@@ -319,7 +320,7 @@ async fn reassign_partitions_additional_keeps_the_reassignment_already_running()
 
     // Stop a registered, non-bootstrap target so the first move cannot race
     // replica catch-up and complete before the second command runs.
-    let (offline_node, handles, first) = crate::cluster::offline_for_partition(
+    let (offline_node, handles, first) = offline_for_partition(
         [brokers.h1, brokers.h2, brokers.h3],
         TOPIC,
         "partition record",

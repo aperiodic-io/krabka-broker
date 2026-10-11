@@ -5,6 +5,8 @@ use moxy::{
     token::TokenStream,
 };
 
+use crate::fixtures::name;
+
 struct Arguments(List<Expr, Token![,]>);
 
 impl Parse for Arguments {
@@ -45,7 +47,7 @@ pub(crate) fn scram_client_first(input: TokenStream) -> Result<TokenStream, Pars
 }
 
 pub(crate) fn scram_client_proof(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = name(input)?;
     Ok(moxy::template! {
         pub(crate) fn {{ name }}(client_key: &[u8], signature: &[u8]) -> Vec<u8> {
             client_key.iter().zip(signature).map(|(key, signed)| key ^ signed).collect()

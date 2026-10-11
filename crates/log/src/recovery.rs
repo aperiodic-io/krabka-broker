@@ -124,6 +124,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::io::FileIo;
 
     fn touch(path: &std::path::Path) {
         std::fs::File::create(path).unwrap();
@@ -170,7 +171,7 @@ mod tests {
             touch(path);
         }
 
-        deleted_orphan_recover(&crate::io::FileIo, p).unwrap();
+        deleted_orphan_recover(&FileIo, p).unwrap();
 
         for path in tombstones.iter().chain(stranded.iter()) {
             check!(!path.exists(), "reclaimed: {}", path.display());
@@ -188,7 +189,7 @@ mod tests {
         }
 
         // Idempotent: a second sweep over the healed directory changes nothing.
-        deleted_orphan_recover(&crate::io::FileIo, p).unwrap();
+        deleted_orphan_recover(&FileIo, p).unwrap();
         check!(name::log_path(p, 0).exists());
         check!(name::index_path(p, 0).exists());
     }

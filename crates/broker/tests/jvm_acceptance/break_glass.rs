@@ -1,5 +1,7 @@
 //! Break-glass setup through the host-side private APIs.
 
+use crate::support::sasl_client;
+
 pub(crate) async fn propose(
     bootstrap: &str,
     operator: (&str, &str),
@@ -8,7 +10,7 @@ pub(crate) async fn propose(
     reason: &str,
 ) -> krabka_protocol::primitives::uuid::Uuid {
     use krabka_protocol::krabka::break_glass::ProposeBreakGlassRequest;
-    let client = crate::support::sasl_client(bootstrap, operator.0, operator.1).await;
+    let client = sasl_client(bootstrap, operator.0, operator.1).await;
     let response = client
         .send(ProposeBreakGlassRequest {
             action,
@@ -31,7 +33,7 @@ pub(crate) async fn approve(
     proposal_id: krabka_protocol::primitives::uuid::Uuid,
 ) -> (i32, i32) {
     use krabka_protocol::krabka::break_glass::ApproveBreakGlassRequest;
-    let client = crate::support::sasl_client(bootstrap, operator.0, operator.1).await;
+    let client = sasl_client(bootstrap, operator.0, operator.1).await;
     let response = client
         .send(ApproveBreakGlassRequest {
             proposal_id,

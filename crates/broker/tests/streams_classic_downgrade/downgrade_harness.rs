@@ -20,26 +20,33 @@ use krabka_protocol::{
 
 use crate::{
     ERR_NONE,
-    support::offsets::{offset_commit_partition, offset_commit_topic},
+    support::{
+        client::{connect as connect_client, create_topic as create_support_topic},
+        offsets::{offset_commit_partition, offset_commit_topic},
+        streams::{
+            ElectionReadiness, boot as boot_streams,
+            finalize_streams_version as finalize_streams_version_request,
+        },
+    },
 };
 
 pub(crate) async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    crate::support::streams::boot(crate::support::streams::ElectionReadiness::BrokerElectable).await
+    boot_streams(ElectionReadiness::BrokerElectable).await
 }
 
 pub(crate) async fn connect(bootstrap: &str) -> Arc<Client> {
-    crate::support::client::connect(bootstrap, "c1").await
+    connect_client(bootstrap, "c1").await
 }
 
 pub(crate) async fn create_topic(client: &Client, topic: &str, partitions: i32) {
-    crate::support::client::create_topic(client, topic, partitions).await;
+    create_support_topic(client, topic, partitions).await;
 }
 
 /// Finalizes `streams.version` at level 1, so that the heartbeat and describe
 /// handlers stop returning `UNSUPPORTED_VERSION`. `upgrade_type: 1` is
 /// UPGRADE.
 pub(crate) async fn finalize_streams_version(client: &Client) {
-    crate::support::streams::finalize_streams_version(client).await;
+    finalize_streams_version_request(client).await;
 }
 
 pub(crate) use crate::support::topic_id_for;

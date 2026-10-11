@@ -7,7 +7,9 @@ use std::collections::HashSet;
 use krabka_metadata::PartitionRecord;
 use krabka_raft::NodeId;
 
-use crate::handlers::offline_replicas::replica_dir_online;
+use crate::{
+    handlers::offline_replicas::replica_dir_online, metadata_epoch::next_partition_change,
+};
 
 #[cfg(test)]
 mod tests;
@@ -99,12 +101,9 @@ pub(crate) fn select_new_leader_for_partition(
             if !acceptable(preferred) {
                 return Err(ElectError::PreferredNotAlive);
             }
-            let (partition_epoch, leader_epoch) = crate::metadata_epoch::next_partition_change(
-                pr.partition_epoch,
-                pr.leader_epoch,
-                true,
-            )
-            .ok_or(ElectError::EpochExhausted)?;
+            let (partition_epoch, leader_epoch) =
+                next_partition_change(pr.partition_epoch, pr.leader_epoch, true)
+                    .ok_or(ElectError::EpochExhausted)?;
             Ok(PartitionRecord {
                 topic: pr.topic.clone(),
                 partition: pr.partition,
@@ -134,12 +133,8 @@ pub(crate) fn select_new_leader_for_partition(
             for &n in &pr.replicas {
                 if !witnesses.contains(&n) && acceptable(n) {
                     let (partition_epoch, leader_epoch) =
-                        crate::metadata_epoch::next_partition_change(
-                            pr.partition_epoch,
-                            pr.leader_epoch,
-                            true,
-                        )
-                        .ok_or(ElectError::EpochExhausted)?;
+                        next_partition_change(pr.partition_epoch, pr.leader_epoch, true)
+                            .ok_or(ElectError::EpochExhausted)?;
                     return Ok(PartitionRecord {
                         topic: pr.topic.clone(),
                         partition: pr.partition,

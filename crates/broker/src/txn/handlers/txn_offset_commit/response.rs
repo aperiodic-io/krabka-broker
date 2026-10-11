@@ -181,7 +181,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::txn::handlers::txn_offset_commit::test_support::request;
+    use crate::{
+        handlers::encode_response, test_support::decode_response,
+        txn::handlers::txn_offset_commit::test_support::request,
+    };
 
     fn request_topic(name: &str, id: u128, partitions: &[i32]) -> TxnOffsetCommitRequestTopic {
         TxnOffsetCommitRequestTopic {
@@ -367,18 +370,13 @@ mod tests {
                 &HashSet::new(),
                 &HashSet::new(),
             );
-            let bytes = crate::handlers::encode_response(&built, version).expect("encode response");
-            let decoded: TxnOffsetCommitResponse =
-                crate::test_support::decode_response(&bytes, version);
+            let bytes = encode_response(&built, version).expect("encode response");
+            let decoded: TxnOffsetCommitResponse = decode_response(&bytes, version);
             assert!(decoded == expected, "build v{version}");
 
-            let bytes = crate::handlers::encode_response(
-                &error_response(&req, codes::INVALID_TXN_STATE),
-                version,
-            )
-            .expect("encode all-error response");
-            let decoded: TxnOffsetCommitResponse =
-                crate::test_support::decode_response(&bytes, version);
+            let bytes = encode_response(&error_response(&req, codes::INVALID_TXN_STATE), version)
+                .expect("encode all-error response");
+            let decoded: TxnOffsetCommitResponse = decode_response(&bytes, version);
             assert!(decoded == expected, "error v{version}");
         }
     }

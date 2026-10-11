@@ -30,7 +30,10 @@ use krabka_metadata::MetadataRecord;
 use krabka_security::ListenerProtocol;
 use tempfile::TempDir;
 
-use crate::{PASSWORD, TOPIC, VOTERS, support, support::client::connect_owned};
+use crate::{
+    PASSWORD, TOPIC, VOTERS,
+    support::{self, NodeIndex, client::connect_owned, topics::diskless_topic_request},
+};
 
 /// The listener every client in this suite and every JVM container speaks to.
 const CLIENT_LISTENER: &str = "PLAINTEXT";
@@ -131,7 +134,7 @@ pub(crate) async fn start_jepsen_cluster(object_dir: &Path) -> Vec<TestNode> {
             data_dir.path(),
             object_dir,
             DisklessNodeSetup {
-                index: crate::support::NodeIndex(index),
+                index: NodeIndex(index),
                 addrs,
                 rlmm_bootstrap: &rlmm_bootstrap,
                 voters: voters.clone(),
@@ -188,7 +191,7 @@ struct NodeAddrs {
 /// and the topic-backed metadata log the flush index rides on.
 #[derive(krabka_macros::FieldDefaults)]
 struct DisklessNodeSetup<'a> {
-    index: crate::support::NodeIndex,
+    index: NodeIndex,
     addrs: NodeAddrs,
     #[default("127.0.0.1:0")]
     rlmm_bootstrap: &'a str,
@@ -294,7 +297,7 @@ pub(crate) async fn await_brokers_registered(cluster: &[TestNode]) {
 pub(crate) async fn create_diskless_topic(bootstrap: &str) {
     let client = connect_owned(bootstrap, "diskless-jepsen-admin", "admin client").await;
     let response = client
-        .send(crate::support::topics::diskless_topic_request(TOPIC, 1))
+        .send(diskless_topic_request(TOPIC, 1))
         .await
         .expect("CreateTopics");
     assert!(

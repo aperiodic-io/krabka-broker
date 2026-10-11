@@ -10,8 +10,9 @@
 use krabka_security::ListenerProtocol;
 
 use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, nc_check_connectivity,
-    prepare_jks_truststore, start_two_sasl_ssl_brokers_with_controller_protocol,
+    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, assert_console_produced,
+    nc_check_connectivity, numbered_payload, prepare_jks_truststore, produce_console,
+    provision_ssl_topic, start_two_sasl_ssl_brokers_with_controller_protocol,
 };
 
 /// Two-broker `SASL_SSL` cluster with `controller_listener_protocol =
@@ -52,7 +53,7 @@ async fn jvm_inter_broker_sasl_ssl_raft_replication() {
 
     // Step A: provision alice's SCRAM-SHA-512 credential via admin/PLAIN
     // over the SASL_SSL data-plane listener. Use cp-kafka:7.5.0 (KIP-554).
-    let (_admin_props, alice_props) = crate::jvm_acceptance::provision_ssl_topic(
+    let (_admin_props, alice_props) = provision_ssl_topic(
         (ADMIN, ADMIN_PASS),
         (ALICE, ALICE_PASS),
         &ts_mount,
@@ -67,15 +68,15 @@ async fn jvm_inter_broker_sasl_ssl_raft_replication() {
 
     // Produce 50 records via `kafka-console-producer` as alice over SASL_SSL.
 
-    let payload = crate::jvm_acceptance::numbered_payload("rec", 50);
-    let producer_out = crate::jvm_acceptance::produce_console(
+    let payload = numbered_payload("rec", 50);
+    let producer_out = produce_console(
         KAFKA_IMAGE_TXN,
         &[&alice_props_mount, &ts_mount],
         TOPIC,
         false,
         payload.as_bytes(),
     );
-    crate::jvm_acceptance::assert_console_produced(&producer_out);
+    assert_console_produced(&producer_out);
 
     // Assert BOTH brokers reach offset 50 on partition 0 — proves rf=2
     // follower replication completed over the SASL_SSL inter-broker

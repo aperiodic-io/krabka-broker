@@ -9,7 +9,15 @@ use std::sync::Arc;
 use assert2::assert;
 use krabka_ids::{LeaderEpoch, NodeId, PartitionIndex};
 
-use crate::{broker::BrokerHandle, partition::Partition, test_support::FakeMetadataSource};
+use crate::{
+    broker::BrokerHandle,
+    log_dir::partition_dir,
+    partition::Partition,
+    test_support::{
+        FakeMetadataSource, StandalonePartitionSetup, single_partition_topic,
+        spawn_standalone_partition,
+    },
+};
 
 /// A metadata source over `image`, with `leader` as the controller leader and
 /// a loopback controller listener for the gauges and adapter paths to report.
@@ -50,14 +58,14 @@ pub(super) fn local_partition_with_records(
         partition,
         values,
     } = setup;
-    let part_dir = crate::log_dir::partition_dir(log_dir, topic, partition.0);
+    let part_dir = partition_dir(log_dir, topic, partition.0);
     std::fs::create_dir_all(&part_dir).expect("create partition dir");
     let log = krabka_log::Log::open(&part_dir, krabka_log::LogConfig::default())
         .expect("open partition log");
-    let part = crate::test_support::spawn_standalone_partition(
+    let part = spawn_standalone_partition(
         log_dir,
         log,
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic,
             partition,
             ..Default::default()
@@ -90,9 +98,7 @@ pub(super) fn metadata_topic_record(
     topic: &str,
     topic_id: uuid::Uuid,
 ) -> krabka_metadata::MetadataRecord {
-    krabka_metadata::MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-        topic, topic_id,
-    ))
+    krabka_metadata::MetadataRecord::V1Topic(single_partition_topic(topic, topic_id))
 }
 
 #[derive(Clone)]

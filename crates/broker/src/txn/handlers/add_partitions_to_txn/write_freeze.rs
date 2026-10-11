@@ -84,14 +84,20 @@ mod tests {
 
     use super::*;
     use crate::{
-        authorizer::AuthorizationResult,
-        test_support::{FreezeSetup, test_ctx},
+        authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
+        broker::{Broker, BrokerHandle},
+        test_support::{
+            FreezeSetup, FrozenTopicsImageSetup, configure_single_partition_transactions,
+            start_broker_no_audit_with, test_ctx, topic_freeze_record,
+        },
         txn::{
+            bootstrap::TOPIC,
             handlers::add_partitions_to_txn::{
                 handle,
-                test_support::{topic, topic_result},
+                test_support::{seed_topic, topic, topic_result},
             },
             state::TxnEntry,
+            version::resolve_txn_version,
         },
     };
 
@@ -105,7 +111,7 @@ mod tests {
     const UNFROZEN_TOPIC: &str = "events";
 
     fn freeze_record(scope: &str, pattern_type: PatternType) -> TopicFreezeRecord {
-        crate::test_support::topic_freeze_record(FreezeSetup {
+        topic_freeze_record(FreezeSetup {
             scope,
             pattern_type,
             ..Default::default()
@@ -121,7 +127,7 @@ mod tests {
                 ("orders", PatternType::Literal),
                 ("tenant-a.", PatternType::Prefixed),
             ],
-            crate::test_support::FrozenTopicsImageSetup::default(),
+            FrozenTopicsImageSetup::default(),
         );
 
         // (label, the topics the request names, the names the gate keeps)
@@ -161,7 +167,7 @@ mod tests {
 
     #[test]
     fn frozen_topics_is_empty_on_a_cluster_with_no_freeze() {
-        let image = image_with_freezes(&[], crate::test_support::FrozenTopicsImageSetup::default());
+        let image = image_with_freezes(&[], FrozenTopicsImageSetup::default());
         let topics = [topic("orders", &[0]), topic("tenant-a.billing", &[1])];
 
         check!(frozen_topics(&image, &topics, &HashSet::new()) == HashSet::new());
@@ -222,11 +228,11 @@ mod tests {
     /// `transaction_state_num_partitions = 1` puts every tid on partition 0,
     /// so the coordinator check passes and the freeze gate behind it runs.
     async fn start_frozen_coordinator(
-        authorizer: Arc<dyn crate::authorizer::Authorizer>,
+        authorizer: Arc<dyn Authorizer>,
         freeze: (&str, PatternType),
-    ) -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-        let (handle, dir) = crate::test_support::start_broker_no_audit_with(move |cfg| {
-            crate::test_support::configure_single_partition_transactions(cfg, authorizer);
+    ) -> (BrokerHandle, tempfile::TempDir) {
+        let (handle, dir) = start_broker_no_audit_with(move |cfg| {
+            configure_single_partition_transactions(cfg, authorizer);
         })
         .await;
         let broker = handle.broker_arc_for_test();
@@ -245,18 +251,8 @@ mod tests {
         handle.wait_until_transaction_coordinator_ready().await;
         // The two topics exist, so the existence check lets them through to
         // the freeze gate.
-        crate::txn::handlers::add_partitions_to_txn::test_support::seed_topic(
-            &broker,
-            FROZEN_TOPIC,
-            2,
-        )
-        .await;
-        crate::txn::handlers::add_partitions_to_txn::test_support::seed_topic(
-            &broker,
-            UNFROZEN_TOPIC,
-            1,
-        )
-        .await;
+        seed_topic(&broker, FROZEN_TOPIC, 2).await;
+        seed_topic(&broker, UNFROZEN_TOPIC, 1).await;
         broker
             .controller
             .submit_change(vec![MetadataRecord::V1TopicFreeze(freeze_record(
@@ -265,10 +261,7 @@ mod tests {
             .await
             .expect("submit the freeze");
         wait_until("__transaction_state-0 becomes local", || {
-            broker
-                .partitions
-                .get(crate::txn::bootstrap::TOPIC, PartitionIndex(0))
-                .is_some()
+            broker.partitions.get(TOPIC, PartitionIndex(0)).is_some()
         })
         .await;
         let image = broker.controller.current_image();
@@ -286,7 +279,7 @@ mod tests {
                 == Some(crate::txn::coordinator::leadership::LoadStatus::Loaded),
             "__transaction_state-0 loads"
         );
-        let txnv = crate::txn::version::resolve_txn_version(&image);
+        let txnv = resolve_txn_version(&image);
         broker
             .txn_coordinator
             .put(
@@ -341,10 +334,7 @@ mod tests {
         }
     }
 
-    async fn anonymous_freeze_request(
-        broker: &crate::broker::Broker,
-        version: i16,
-    ) -> AddPartitionsToTxnResponse {
+    async fn anonymous_freeze_request(broker: &Broker, version: i16) -> AddPartitionsToTxnResponse {
         test_ctx!(ctx, "ANONYMOUS");
         handle(broker, freeze_case_request(version), version, &ctx)
             .await
@@ -372,11 +362,8 @@ mod tests {
             ),
             ("v4, a prefix freeze", 4, "tenant-a.", PatternType::Prefixed),
         ] {
-            let (broker_handle, _dir) = start_frozen_coordinator(
-                Arc::new(crate::authorizer::AllowAllAuthorizer),
-                (scope, pattern_type),
-            )
-            .await;
+            let (broker_handle, _dir) =
+                start_frozen_coordinator(Arc::new(AllowAllAuthorizer), (scope, pattern_type)).await;
             let broker = broker_handle.broker_arc_for_test();
             let resp = anonymous_freeze_request(&broker, version).await;
 

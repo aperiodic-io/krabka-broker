@@ -20,11 +20,16 @@ use super::{
     Config,
     checkpoint::{DURABLE_OFFSET_FILE, DurableRange, recover_durable_offset, write_durable_offset},
 };
-use crate::wal::quorum::{
-    engine::{split_batches, sync_replica},
-    log_view::ShardLog,
-    registry::ShardId,
-    shard_dir,
+use crate::{
+    BrokerError,
+    log_dir::place_partition_dir,
+    partition_writer::storage_failure_error,
+    wal::quorum::{
+        engine::{split_batches, sync_replica},
+        log_view::ShardLog,
+        registry::ShardId,
+        shard_dir,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -34,7 +39,7 @@ pub(super) struct FollowerLog {
 }
 
 impl FollowerLog {
-    pub(super) fn open(config: &Config) -> Result<Self, crate::BrokerError> {
+    pub(super) fn open(config: &Config) -> Result<Self, BrokerError> {
         let dir = config
             .log_dirs
             .iter()
@@ -42,7 +47,7 @@ impl FollowerLog {
             .find(|candidate| candidate.exists())
             .map_or_else(
                 || {
-                    let partition_dir = crate::log_dir::place_partition_dir(
+                    let partition_dir = place_partition_dir(
                         &config.log_dirs,
                         &config.topic,
                         config.shard.partition.0,
@@ -50,16 +55,14 @@ impl FollowerLog {
                     partition_dir
                         .parent()
                         .map(|root| voter_dir(root, &config.topic, config.shard, config.node_id))
-                        .ok_or_else(|| {
-                            crate::BrokerError::Replication("WAL log dir has no parent".into())
-                        })
+                        .ok_or_else(|| BrokerError::Replication("WAL log dir has no parent".into()))
                 },
                 Ok,
             )?;
         Self::open_at(dir, &config.storage)
     }
 
-    pub(super) fn open_at(dir: PathBuf, storage: &LogConfig) -> Result<Self, crate::BrokerError> {
+    pub(super) fn open_at(dir: PathBuf, storage: &LogConfig) -> Result<Self, BrokerError> {
         let mut log_config = storage.clone();
         log_config.validate_on_open = true;
         let durable_offset_path = dir.join(DURABLE_OFFSET_FILE);
@@ -104,7 +107,7 @@ impl FollowerLog {
             .map_or(-1, |epoch| epoch.0)
     }
 
-    pub(super) async fn trim_to(&self, offset: Offset) -> Result<(), crate::BrokerError> {
+    pub(super) async fn trim_to(&self, offset: Offset) -> Result<(), BrokerError> {
         if offset <= self.start_offset() {
             return Ok(());
         }
@@ -112,7 +115,7 @@ impl FollowerLog {
         run_blocking(move || follower.trim_to_blocking(offset)).await
     }
 
-    pub(super) fn trim_to_blocking(&self, offset: Offset) -> Result<(), crate::BrokerError> {
+    pub(super) fn trim_to_blocking(&self, offset: Offset) -> Result<(), BrokerError> {
         let mut log = self.log.lock();
         if offset <= log.log_start_offset() {
             return Ok(());
@@ -132,7 +135,7 @@ impl FollowerLog {
         Ok(())
     }
 
-    pub(super) async fn reset_to(&self, offset: Offset) -> Result<(), crate::BrokerError> {
+    pub(super) async fn reset_to(&self, offset: Offset) -> Result<(), BrokerError> {
         self.mutate_and_checkpoint(move |log| {
             log.reset_to(offset)?;
             Ok(DurableRange {
@@ -143,7 +146,7 @@ impl FollowerLog {
         .await
     }
 
-    pub(super) async fn truncate_to(&self, offset: Offset) -> Result<(), crate::BrokerError> {
+    pub(super) async fn truncate_to(&self, offset: Offset) -> Result<(), BrokerError> {
         self.mutate_and_checkpoint(move |log| {
             log.truncate_to(offset)?;
             Ok(DurableRange {
@@ -157,8 +160,8 @@ impl FollowerLog {
     /// Fsync the mutation before publishing its new durable range.
     async fn mutate_and_checkpoint(
         &self,
-        mutation: impl FnOnce(&mut Log) -> Result<DurableRange, crate::BrokerError> + Send + 'static,
-    ) -> Result<(), crate::BrokerError> {
+        mutation: impl FnOnce(&mut Log) -> Result<DurableRange, BrokerError> + Send + 'static,
+    ) -> Result<(), BrokerError> {
         let log = self.log.clone();
         let durable_offset_path = self.durable_offset_path.clone();
         run_blocking(move || {
@@ -196,7 +199,7 @@ impl FollowerLog {
         diverging: LogOffsetMetadata,
         leader_start: Offset,
         requested: Offset,
-    ) -> Result<(), crate::BrokerError> {
+    ) -> Result<(), BrokerError> {
         let local = self.log.end_offset_for_epoch(diverging.epoch);
         let truncation = Offset(if local.epoch == diverging.epoch {
             local.offset.min(diverging.offset)
@@ -215,9 +218,9 @@ impl FollowerLog {
         requested: Offset,
         leader_end: Offset,
         records: Option<RecordsPayload>,
-    ) -> Result<Offset, crate::BrokerError> {
+    ) -> Result<Offset, BrokerError> {
         if self.end_offset() != requested {
-            return Err(crate::BrokerError::Replication(format!(
+            return Err(BrokerError::Replication(format!(
                 "WAL follower moved from requested offset {} to {}",
                 requested.0,
                 self.end_offset().0
@@ -227,25 +230,28 @@ impl FollowerLog {
             return Ok(requested);
         };
         let mut encoded = BytesMut::with_capacity(records.payload_len());
-        records.encode_to(&mut encoded).map_err(|error| {
-            crate::BrokerError::Replication(format!("encode WAL fetch: {error}"))
-        })?;
+        records
+            .encode_to(&mut encoded)
+            .map_err(|error| BrokerError::Replication(format!("encode WAL fetch: {error}")))?;
         let bytes: Bytes = encoded.freeze();
         let batches = split_batches(&bytes)?;
         let mut expected = requested;
         for batch in &batches {
             if batch.base_offset != expected {
-                return Err(crate::BrokerError::Replication(format!(
+                return Err(BrokerError::Replication(format!(
                     "WAL fetch is not contiguous at {}, got {}",
                     expected.0, batch.base_offset.0
                 )));
             }
-            expected = Offset(batch.last_offset.0.checked_add(1).ok_or_else(|| {
-                crate::BrokerError::Replication("WAL fetch offset overflow".into())
-            })?);
+            expected =
+                Offset(
+                    batch.last_offset.0.checked_add(1).ok_or_else(|| {
+                        BrokerError::Replication("WAL fetch offset overflow".into())
+                    })?,
+                );
         }
         if expected.cmp(&leader_end).is_gt() {
-            return Err(crate::BrokerError::Replication(format!(
+            return Err(BrokerError::Replication(format!(
                 "WAL fetch ends at {}, beyond leader LEO {}",
                 expected.0, leader_end.0
             )));
@@ -253,7 +259,7 @@ impl FollowerLog {
         sync_replica(self.log.clone(), batches).await?;
         let actual = self.end_offset();
         if actual != expected {
-            return Err(crate::BrokerError::Replication(format!(
+            return Err(BrokerError::Replication(format!(
                 "WAL follower ended at {}, expected {}",
                 actual.0, expected.0
             )));
@@ -275,16 +281,13 @@ pub(super) fn voter_dir(root: &Path, topic: &str, shard: ShardId, node_id: NodeI
 }
 
 async fn run_blocking<T: Send + 'static>(
-    operation: impl FnOnce() -> Result<T, crate::BrokerError> + Send + 'static,
-) -> Result<T, crate::BrokerError> {
-    crate::blocking::run_blocking(operation)
+    operation: impl FnOnce() -> Result<T, BrokerError> + Send + 'static,
+) -> Result<T, BrokerError> {
+    use crate::blocking::run_blocking;
+
+    run_blocking(operation)
         .await
-        .map_err(|error| {
-            crate::partition_writer::storage_failure_error(
-                "WAL follower storage task panicked",
-                error,
-            )
-        })?
+        .map_err(|error| storage_failure_error("WAL follower storage task panicked", error))?
 }
 
 #[cfg(test)]

@@ -12,8 +12,17 @@ use krabka_client_core::Client;
 use krabka_protocol::owned::common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic;
 
 use crate::{
-    support::{discovery::coordinator_lookup_request, transactions::init_producer_request},
-    txnver_harness::{NONE, TRANSACTION_ABORTABLE, admin_client, boot_single, create_topic},
+    support::{
+        discovery::coordinator_lookup_request,
+        topics::TopicPartitionCount,
+        transaction_wire::{TransactionPartitionsSetup, partitions_request},
+        transactions::{
+            InitProducerSetup, PartitionRegistration, ProducerIdentity, init_producer_request,
+        },
+    },
+    txnver_harness::{
+        NONE, TRANSACTION_ABORTABLE, admin_client, boot_single, create_topic, expected_partitions,
+    },
 };
 
 const VERIFY_TID: &str = "verify-tid";
@@ -39,12 +48,10 @@ async fn await_transaction_coordinator(client: &Client) -> (i64, i16) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let response = client
-            .send(init_producer_request(
-                crate::support::transactions::InitProducerSetup {
-                    transactional_id: Some(VERIFY_TID.into()),
-                    ..Default::default()
-                },
-            ))
+            .send(init_producer_request(InitProducerSetup {
+                transactional_id: Some(VERIFY_TID.into()),
+                ..Default::default()
+            }))
             .await
             .expect("InitProducerId");
         if response.error_code == 0 {
@@ -81,7 +88,7 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
     let (broker, bootstrap, _dir) = boot_single().await;
     let client = admin_client(&bootstrap).await;
     // Two partitions so (t,1) is a real partition that simply isn't in the txn.
-    create_topic(&client, "t", crate::support::topics::TopicPartitionCount(2)).await;
+    create_topic(&client, "t", TopicPartitionCount(2)).await;
 
     // Locate (and trigger loading of) the transaction coordinator for TID.
     // On a single-broker cluster the coordinator is this same node, but the
@@ -98,17 +105,15 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
         ..Default::default()
     };
     let add = client
-        .send(crate::support::transaction_wire::partitions_request(
-            crate::support::transaction_wire::TransactionPartitionsSetup {
-                transactional_id: VERIFY_TID,
-                producer: crate::support::transactions::ProducerIdentity::from_wire((pid, epoch)),
-                topics: vec![added_topic],
-                ..Default::default()
-            },
-        ))
+        .send(partitions_request(TransactionPartitionsSetup {
+            transactional_id: VERIFY_TID,
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            topics: vec![added_topic],
+            ..Default::default()
+        }))
         .await
         .expect("AddPartitionsToTxn add");
-    let expected_add = crate::txnver_harness::expected_partitions(VERIFY_TID, "t", &[(0, NONE)]);
+    let expected_add = expected_partitions(VERIFY_TID, "t", &[(0, NONE)]);
     assert!(
         add == expected_add,
         "adding (t,0) returned an unexpected response: {add:?}"
@@ -122,21 +127,16 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
         ..Default::default()
     };
     let verify = client
-        .send(crate::support::transaction_wire::partitions_request(
-            crate::support::transaction_wire::TransactionPartitionsSetup {
-                transactional_id: VERIFY_TID,
-                producer: crate::support::transactions::ProducerIdentity::from_wire((pid, epoch)),
-                registration: crate::support::transactions::PartitionRegistration::VerifyOnly,
-                topics: vec![verify_topic],
-            },
-        ))
+        .send(partitions_request(TransactionPartitionsSetup {
+            transactional_id: VERIFY_TID,
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            registration: PartitionRegistration::VerifyOnly,
+            topics: vec![verify_topic],
+        }))
         .await
         .expect("AddPartitionsToTxn verify-only");
-    let expected_verify = crate::txnver_harness::expected_partitions(
-        VERIFY_TID,
-        "t",
-        &[(0, NONE), (1, TRANSACTION_ABORTABLE)],
-    );
+    let expected_verify =
+        expected_partitions(VERIFY_TID, "t", &[(0, NONE), (1, TRANSACTION_ABORTABLE)]);
     assert!(
         verify == expected_verify,
         "verify-only response did not match the partition result table: {verify:?}"

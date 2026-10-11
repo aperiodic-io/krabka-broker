@@ -78,7 +78,13 @@ mod tests {
     use krabka_units::millis;
 
     use super::*;
-    use crate::file_config::{FileConfig, FileConfigError};
+    use crate::{
+        config::BrokerConfig,
+        file_config::{
+            FileConfig, FileConfigError,
+            test_support::{configured, configured_unwrap_parse},
+        },
+    };
 
     #[test]
     fn schema_registry_section_round_trips_every_key() {
@@ -144,9 +150,8 @@ failopen = true
 [schema_registry]
 url = "http://schema-registry.invalid:8081"
 "#;
-        let cfg =
-            crate::file_config::test_support::configured(toml, "parse schema_registry section")
-                .expect("apply schema_registry section");
+        let cfg = configured(toml, "parse schema_registry section")
+            .expect("apply schema_registry section");
 
         assert!(cfg.schema_validator.is_some());
     }
@@ -161,7 +166,7 @@ basic_auth_username = "broker"
 "#,
         )
         .unwrap();
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
 
         let error = file.apply_to(&mut cfg).unwrap_err();
 
@@ -173,7 +178,7 @@ basic_auth_username = "broker"
         let dir = tempfile::tempdir().unwrap();
         let password_path = dir.path().join("registry-password");
         std::fs::write(&password_path, "secret\n").unwrap();
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(&format!(
+        let cfg = configured_unwrap_parse(&format!(
             r#"
 [schema_registry]
 url = "http://schema-registry.invalid:8081"
@@ -189,8 +194,7 @@ basic_auth_password_path = "{}"
 
     #[test]
     fn schema_registry_section_absent_leaves_no_validator() {
-        let cfg = crate::file_config::test_support::configured("", "parse empty config")
-            .expect("apply empty config");
+        let cfg = configured("", "parse empty config").expect("apply empty config");
 
         assert!(cfg.schema_validator.is_none());
     }
@@ -206,7 +210,7 @@ url = "http://schema-registry.invalid:8081"
 maximum_cache_size = 0
 "#;
         let file: FileConfig = toml::from_str(toml).expect("parse schema_registry section");
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
 
         let error = file
             .apply_to(&mut cfg)
@@ -218,7 +222,7 @@ maximum_cache_size = 0
 
     #[test]
     fn runtime_schema_registry_http_timeout_applies() {
-        let cfg = crate::file_config::test_support::configured(
+        let cfg = configured(
             r#"
 [runtime]
 schema_registry_http_timeout = "2500ms"

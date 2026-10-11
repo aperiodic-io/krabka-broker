@@ -7,8 +7,8 @@ use krabka_metadata::{
     AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
 };
 
-pub(super) fn acl_authorizer() -> crate::authorizer::SimpleAclAuthorizer {
-    crate::authorizer::SimpleAclAuthorizer::new(HashSet::new())
+pub(super) fn acl_authorizer() -> SimpleAclAuthorizer {
+    SimpleAclAuthorizer::new(HashSet::new())
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -25,9 +25,9 @@ pub(super) struct GroupAclSetup<'a> {
 pub(super) fn check_group_read_denied(setup: GroupAclSetup<'_>) {
     let authorizer = acl_authorizer();
     let image = MetadataImage::new(uuid::Uuid::nil());
-    let principal = crate::test_support::principal(setup.principal);
-    let peer = crate::test_support::peer();
-    let ctx = crate::test_support::request_context(&principal, &peer, setup.client_id);
+    let principal = principal(setup.principal);
+    let peer = peer();
+    let ctx = request_context(&principal, &peer, setup.client_id);
     assert!(super::group_read_denied(
         &authorizer,
         &image,
@@ -42,14 +42,12 @@ pub(super) fn acl(
     name: &str,
     operation: AclOperation,
 ) -> MetadataRecord {
-    MetadataRecord::V1AccessControlEntry(crate::test_support::allow_acl(
-        crate::test_support::AllowAclSetup {
-            resource_type,
-            resource_name: name,
-            operation,
-            ..Default::default()
-        },
-    ))
+    MetadataRecord::V1AccessControlEntry(allow_acl(AllowAclSetup {
+        resource_type,
+        resource_name: name,
+        operation,
+        ..Default::default()
+    }))
 }
 
 /// `Describe` on `Topic(name)`, allowed to `User:alice` from any host.
@@ -66,7 +64,7 @@ pub(super) fn group_read_acl(name: &str) -> MetadataRecord {
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct GroupFeatureLevel(pub i16);
 
-pub(super) async fn grant_group_read(broker: &crate::broker::Broker, group: &str) {
+pub(super) async fn grant_group_read(broker: &Broker, group: &str) {
     broker
         .controller
         .submit_change(vec![group_read_acl(group)])
@@ -88,7 +86,7 @@ pub(super) fn image_with_group_version(level: GroupFeatureLevel) -> MetadataImag
 }
 
 /// Override the broker's release-default finalized consumer-group feature.
-pub(super) async fn set_group_version(broker: &crate::broker::Broker, level: GroupFeatureLevel) {
+pub(super) async fn set_group_version(broker: &Broker, level: GroupFeatureLevel) {
     broker
         .controller
         .submit_change(vec![group_version(level)])
@@ -98,14 +96,10 @@ pub(super) async fn set_group_version(broker: &crate::broker::Broker, level: Gro
 
 /// Start the coordinator fixture with an explicit finalized group version.
 pub(super) async fn versioned_group_broker(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: std::sync::Arc<dyn Authorizer>,
     level: GroupFeatureLevel,
-) -> (
-    crate::BrokerHandle,
-    tempfile::TempDir,
-    std::sync::Arc<crate::broker::Broker>,
-) {
-    let (handle, dir) = crate::test_support::start_group_broker(authorizer).await;
+) -> (BrokerHandle, tempfile::TempDir, std::sync::Arc<Broker>) {
+    let (handle, dir) = start_group_broker(authorizer).await;
     let broker = handle.broker_arc_for_test();
     set_group_version(&broker, level).await;
     (handle, dir, broker)
@@ -123,7 +117,16 @@ fn topic_record(name: &str, topic_id: uuid::Uuid, partitions: PartitionCount) ->
 
 use krabka_raft::NodeId;
 
-use crate::test_support::PartitionCount;
+use crate::{
+    BrokerHandle,
+    authorizer::{Authorizer, SimpleAclAuthorizer},
+    broker::Broker,
+    handlers::test_support::single_replica_partition,
+    test_support::{
+        AllowAclSetup, PartitionCount, StreamsJoinSetup, allow_acl, peer, principal,
+        request_context, sasl_principal, start_group_broker, streams_join_request,
+    },
+};
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(super) struct GroupTopicSetup<'a> {
@@ -151,7 +154,7 @@ pub(super) fn topic_with_partitions(setup: GroupTopicSetup<'_>) -> Vec<MetadataR
     } = setup;
     let mut records = vec![topic_record(name, topic_id, partitions)];
     records.extend((0..partitions.0).map(|partition| {
-        MetadataRecord::V1Partition(crate::handlers::test_support::single_replica_partition(
+        MetadataRecord::V1Partition(single_replica_partition(
             name,
             krabka_ids::PartitionIndex(partition),
             node,
@@ -162,7 +165,7 @@ pub(super) fn topic_with_partitions(setup: GroupTopicSetup<'_>) -> Vec<MetadataR
 
 /// The SASL/PLAIN principal `User:alice` that the ACLs above name.
 pub(super) fn alice() -> krabka_security::Principal {
-    crate::test_support::sasl_principal("alice")
+    sasl_principal("alice")
 }
 
 /// Kafka's explicit-name Describe check, shared by consumer and share heartbeats.
@@ -257,7 +260,7 @@ pub(super) fn streams_request_with_topology(
         source_topic,
         state_changelog_topics,
     } = setup;
-    crate::test_support::streams_join_request(
+    streams_join_request(
         Topology {
             epoch: 1,
             subtopologies: vec![Subtopology {
@@ -268,7 +271,7 @@ pub(super) fn streams_request_with_topology(
             }],
             ..Default::default()
         },
-        crate::test_support::StreamsJoinSetup {
+        StreamsJoinSetup {
             group_id,
             member_id,
         },

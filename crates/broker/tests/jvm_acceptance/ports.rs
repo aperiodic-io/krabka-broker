@@ -4,6 +4,8 @@
 //! listeners here instead of sharing the fixed 9092-9097 range. Two container
 //! suites can then run at the same time without one losing the bind.
 
+use crate::support::{JvmListeners, free_port, jvm_client_ports};
+
 /// Ports for this test process, allocated once rather than fixed at 9092-9097.
 ///
 /// This suite runs up to three brokers, each with a client and a controller
@@ -24,14 +26,14 @@ pub(crate) struct Ports {
 pub(crate) fn ports() -> &'static Ports {
     static PORTS: std::sync::OnceLock<Ports> = std::sync::OnceLock::new();
     PORTS.get_or_init(|| {
-        let (client, listen, advertised) = crate::support::jvm_client_ports::<3>();
-        let controller: [u16; 3] = std::array::from_fn(|_| crate::support::free_port());
+        let (client, listen, advertised) = jvm_client_ports::<3>();
+        let controller: [u16; 3] = std::array::from_fn(|_| free_port());
         Ports {
             client: listen,
             advertised,
             controller: controller.map(|p| format!("0.0.0.0:{p}")),
             loopback: format!("127.0.0.1:{}", client[0]),
-            minio: crate::support::free_port(),
+            minio: free_port(),
         }
     })
 }
@@ -91,8 +93,8 @@ pub(crate) fn minio_port() -> u16 {
 }
 
 /// The first `N` broker endpoints allocated for this test process.
-pub(crate) fn cluster_listeners<const N: usize>() -> [crate::support::JvmListeners; N] {
-    std::array::from_fn(|index| crate::support::JvmListeners {
+pub(crate) fn cluster_listeners<const N: usize>() -> [JvmListeners; N] {
+    std::array::from_fn(|index| JvmListeners {
         listen: ports().client[index].clone(),
         advertised: ports().advertised[index].clone(),
         controller: ports().controller[index].clone(),

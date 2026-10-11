@@ -6,7 +6,9 @@ use assert2::check;
 use krabka_protocol::records::RecordBatch;
 
 use super::replay::replay_records;
-use crate::coordinator::{persistence::OffsetCommitValue, unified::actor::test_support::rpc};
+use crate::coordinator::{
+    persistence::OffsetCommitValue, test_support::temp_log, unified::actor::test_support::rpc,
+};
 
 fn append_record(log: &mut krabka_log::Log, record: krabka_protocol::records::Record) {
     let mut batch = RecordBatch {
@@ -35,7 +37,7 @@ async fn replay_records_walks_all_batches() {
     // (topic, partition), so we can tell which batches were replayed.
     let commit_record = super::test_support::commit_record;
 
-    let (_dir, mut log) = crate::coordinator::test_support::temp_log();
+    let (_dir, mut log) = temp_log();
 
     // First batch spans TWO offsets (last_offset_delta == 1): partitions 0
     // and 1 commit at offsets 100 and 101.
@@ -87,7 +89,7 @@ fn replay_applies_only_committed_transactional_offsets() {
         ..RecordBatch::default()
     };
 
-    let (_dir, mut log) = crate::coordinator::test_support::temp_log();
+    let (_dir, mut log) = temp_log();
     log.append(&mut transactional(0, 111)).unwrap();
     log.append(&mut build_marker_batch(
         ProducerId(7),
@@ -129,7 +131,7 @@ async fn replay_carries_an_open_transactions_offsets_forward_as_pending() {
     use super::{replay::finalize, test_support::bare_coordinator};
 
     let coordinator = bare_coordinator();
-    let (_dir, mut log) = crate::coordinator::test_support::temp_log();
+    let (_dir, mut log) = temp_log();
     log.append(&mut RecordBatch {
         producer_id: 7,
         producer_epoch: 0,
@@ -263,7 +265,7 @@ fn replay_honours_offset_and_group_tombstones() {
         ..Default::default()
     };
 
-    let (_dir, mut log) = crate::coordinator::test_support::temp_log();
+    let (_dir, mut log) = temp_log();
     for record in [
         commit(0, 100),
         commit(1, 101),
@@ -317,7 +319,7 @@ async fn a_fully_reaped_group_does_not_come_back_after_replay() {
         ..Default::default()
     };
 
-    let (_dir, mut log) = crate::coordinator::test_support::temp_log();
+    let (_dir, mut log) = temp_log();
     for record in [
         super::test_support::commit_record_for_group("reaped", 0, 100),
         // The sweep's batch: the last offset, then the group itself.
@@ -363,7 +365,7 @@ async fn replay_keeps_the_committed_topic_id() {
         ..Default::default()
     };
 
-    let (_dir, mut log) = crate::coordinator::test_support::temp_log();
+    let (_dir, mut log) = temp_log();
     let mut batch = RecordBatch {
         last_offset_delta: 1,
         ..RecordBatch::default()

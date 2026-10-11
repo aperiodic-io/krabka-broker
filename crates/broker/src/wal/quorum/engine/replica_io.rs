@@ -9,23 +9,24 @@
 use krabka_ids::Offset;
 
 use super::{BatchBytes, read_log_batches_exact};
-use crate::{error::BrokerError, wal::quorum::log_view::ShardLog};
+use crate::{
+    blocking::run_blocking, error::BrokerError, partition_writer::storage_failure_error,
+    wal::quorum::log_view::ShardLog,
+};
 
 pub(in crate::wal::quorum) async fn sync_replica(
     log: ShardLog,
     batches: Vec<BatchBytes>,
 ) -> Result<(), BrokerError> {
-    crate::blocking::run_blocking(move || sync_replica_blocking(&log, &batches))
+    run_blocking(move || sync_replica_blocking(&log, &batches))
         .await
         .map_err(|e| BrokerError::Replication(format!("wal replica task panicked: {e}")))?
 }
 
 pub(super) async fn trim_log(log: ShardLog, new_start: Offset) -> Result<Offset, BrokerError> {
-    crate::blocking::run_blocking(move || log.lock().trim_to_offset(new_start).map_err(Into::into))
+    run_blocking(move || log.lock().trim_to_offset(new_start).map_err(Into::into))
         .await
-        .map_err(|error| {
-            crate::partition_writer::storage_failure_error("wal trim task panicked", error)
-        })?
+        .map_err(|error| storage_failure_error("wal trim task panicked", error))?
 }
 
 pub(super) fn sync_replica_blocking(

@@ -6,13 +6,17 @@ use assert2::{assert, check};
 use krabka_units::prelude::{TimeExt as _, millis, secs};
 
 use super::*;
-use crate::kraft::controller::{
-    test_support::{EngineSetup, voter_set},
-    timing::{
-        election_timeout_ms, election_timer_starts_election, following_leader_for_role,
-        heartbeat_period, initial_election_at, instant_from_clock_base,
-        should_fail_waiters_on_leadership_change,
+use crate::kraft::{
+    controller::{
+        test_support::{EngineSetup, voter_set},
+        timing::{
+            election_timeout_ms, election_timer_starts_election, following_leader_for_role,
+            heartbeat_period, initial_election_at, instant_from_clock_base,
+            should_fail_waiters_on_leadership_change,
+        },
     },
+    core::election_jitter_ms,
+    transport::wire::FETCH_VERSION,
 };
 
 #[test]
@@ -62,7 +66,7 @@ fn initial_election_deadline_matches_startup_role() {
     );
     // The jitter is integer milliseconds and the deadline is the integer
     // sum, so the quantity must not shift the deadline by even a nanosecond.
-    let jitter = crate::kraft::core::election_jitter_ms(NodeId(1), 0, TIMEOUT_MS);
+    let jitter = election_jitter_ms(NodeId(1), 0, TIMEOUT_MS);
     let at =
         initial_election_at(&multi, None, base, NodeId(1), 0, TIMEOUT).expect("multi voter timer");
     assert2::assert!(at.duration_since(base) == Duration::from_millis(TIMEOUT_MS + jitter));
@@ -317,7 +321,7 @@ fn inbound_fetch_keys_observers_by_directory_id() {
         };
         let (reply, _rx) = oneshot::channel();
         engine.on_inbound(Inbound::Fetch {
-            version: crate::kraft::transport::wire::FETCH_VERSION,
+            version: FETCH_VERSION,
             req: req.encode(),
             reply,
         });

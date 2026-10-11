@@ -177,7 +177,7 @@ mod listener_auth_tests {
     use assert2::assert;
 
     use super::*;
-    use crate::file_config::FileConfig;
+    use crate::file_config::{FileConfig, test_support::configured_unwrap_parse};
 
     #[test]
     fn file_listener_parses_per_listener_tls_config_inline() {
@@ -272,8 +272,7 @@ advertised = "localhost:9094"
 protocol = "Ssl"
 tls_config = { cert_path = "/tls/c", key_path = "/tls/k", client_auth = "Required", principal_mapping_rules = ["RULE:^CN=(.*?),.*$/$1/", "DEFAULT"] }
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(toml)
-            .expect("apply listener");
+        let cfg = configured_unwrap_parse(toml).expect("apply listener");
         let listener = cfg
             .listeners
             .iter()
@@ -307,7 +306,7 @@ advertised = "localhost:9094"
 protocol = "Ssl"
 tls_config = { cert_path = "/tls/c", key_path = "/tls/k", principal_mapping_rules = ["NOT_A_RULE:::"] }
 "#;
-        let err = crate::file_config::test_support::configured_unwrap_parse(toml).unwrap_err();
+        let err = configured_unwrap_parse(toml).unwrap_err();
         assert!(matches!(
             err,
             crate::file_config::FileConfigError::InvalidConfig(_)

@@ -22,6 +22,8 @@ use krabka_verified::isr::{
     CaughtUpCredit, HighWatermarkFacts, HwmReplica, IsrEligibilityFacts, leader_high_watermark,
 };
 
+use crate::config_keys::node_min_insync_replicas;
+
 /// What the leader knows of one follower's progress, Kafka's `ReplicaState`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct FollowerStats {
@@ -178,7 +180,7 @@ impl LeaderPolicy {
                 )
             })
             .collect();
-        let configured = crate::config_keys::node_min_insync_replicas(image, node, &record.topic)
+        let configured = node_min_insync_replicas(image, node, &record.topic)
             .unwrap_or(default_min_insync_replicas);
         Self {
             effective_min_isr: usize::try_from(configured)
@@ -502,7 +504,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::test_support::TopicSetup;
+    use crate::{
+        config_keys::MIN_INSYNC_REPLICAS,
+        test_support::{TopicSetup, broker_registration, topic_image},
+    };
 
     /// Shorthand for wrapping a raw offset in the test asserts below.
     fn o(v: i64) -> Offset {
@@ -1071,7 +1076,7 @@ mod tests {
     }
 
     fn policy_image() -> MetadataImage {
-        crate::test_support::topic_image(TopicSetup {
+        topic_image(TopicSetup {
             topic: "t",
             ..Default::default()
         })
@@ -1088,18 +1093,15 @@ mod tests {
                 in_controlled_shutdown,
                 broker_epoch,
                 host: "localhost".to_string(),
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
+                ..broker_registration(krabka_raft::NodeId(node))
             })
         };
         let mut image = policy_image();
         image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
             topic: "t".into(),
-            overrides: [(
-                crate::config_keys::MIN_INSYNC_REPLICAS.to_string(),
-                "2".to_string(),
-            )]
-            .into_iter()
-            .collect(),
+            overrides: [(MIN_INSYNC_REPLICAS.to_string(), "2".to_string())]
+                .into_iter()
+                .collect(),
         }));
         image.apply(&register(1, 11, false, false));
         image.apply(&register(2, 12, false, true));
@@ -1172,7 +1174,7 @@ mod tests {
         for (node, value) in [(DEFAULT_BROKER_CONFIG_NODE_ID, "2"), (NodeId(1), "3")] {
             image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
                 node_id: node,
-                config_name: crate::config_keys::MIN_INSYNC_REPLICAS.to_string(),
+                config_name: MIN_INSYNC_REPLICAS.to_string(),
                 config_value: Some(value.to_string()),
             }));
         }

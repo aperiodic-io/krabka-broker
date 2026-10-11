@@ -8,21 +8,29 @@ use std::sync::Arc;
 use krabka_units::convert::TimeExt as _;
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::BrokerConfig, error::BrokerError};
+use crate::{
+    client_metrics::{
+        ClientMetrics, ClientMetricsManager, prometheus_sink::SharedClientMetricsCollector,
+    },
+    config::BrokerConfig,
+    error::BrokerError,
+    metrics::BrokerMetrics,
+    metrics_server::run,
+};
 
 pub(super) struct ObservabilityStartup {
     pub(super) metrics_bound_addr: Option<std::net::SocketAddr>,
-    pub(super) client_metrics: Arc<crate::client_metrics::ClientMetrics>,
+    pub(super) client_metrics: Arc<ClientMetrics>,
 }
 
 pub(super) async fn start_observability(
     config: &BrokerConfig,
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
     shutdown: &CancellationToken,
 ) -> Result<ObservabilityStartup, BrokerError> {
     let metrics_bound_addr = if let Some(address) = config.metrics_listen_addr {
         Some(
-            crate::metrics_server::run(
+            run(
                 address,
                 Arc::clone(&metrics.registry),
                 config.profiling.clone(),
@@ -39,8 +47,8 @@ pub(super) async fn start_observability(
     } else {
         None
     };
-    let client_metrics = Arc::new(crate::client_metrics::ClientMetrics::new(
-        crate::client_metrics::ClientMetricsManager::new(
+    let client_metrics = Arc::new(ClientMetrics::new(
+        ClientMetricsManager::new(
             config.client_metrics_telemetry_max,
             config.client_metrics_default_interval.millis_i32(),
         ),
@@ -51,11 +59,13 @@ pub(super) async fn start_observability(
         metrics.client_metrics_otlp_dropped_total.clone(),
         metrics.client_metrics_otlp_failed_total.clone(),
     ));
-    metrics.registry.lock().await.register_collector(Box::new(
-        crate::client_metrics::prometheus_sink::SharedClientMetricsCollector(
+    metrics
+        .registry
+        .lock()
+        .await
+        .register_collector(Box::new(SharedClientMetricsCollector(
             client_metrics.prometheus.clone(),
-        ),
-    ));
+        )));
     let eviction_metrics = Arc::clone(&client_metrics);
     let eviction_shutdown = shutdown.child_token();
     let eviction_tick = config.client_metrics_eviction_tick;

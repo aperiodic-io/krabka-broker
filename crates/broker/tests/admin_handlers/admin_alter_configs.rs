@@ -14,7 +14,10 @@ use crate::{
     admin_harness::create_topic_helper,
     support::{
         configs::{legacy_config, legacy_request, legacy_resource},
+        discovery::named_topic_metadata,
+        produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
+        start_n_node_client,
     },
 };
 
@@ -23,7 +26,7 @@ use crate::{
 /// into the partition's log.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_configs_round_trip() {
-    let (cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
     let broker = &cluster[0].0;
 
     create_topic_helper(&client, "t-alter", 1).await;
@@ -77,7 +80,7 @@ async fn alter_configs_round_trip() {
 /// and includes the offending key name in the error message.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_configs_rejects_unknown_key() {
-    let (_cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (_cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
 
     create_topic_helper(&client, "t-bad-cfg", 1).await;
 
@@ -118,7 +121,7 @@ async fn alter_configs_rejects_unknown_key() {
 /// covered by `leadership.rs`'s table test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
-    let (cluster, client) = crate::support::start_n_node_client(1, "admin-handlers-test").await;
+    let (cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
     let broker = &cluster[0].0;
 
     create_topic_helper(&client, "t-min-isr", 1).await;
@@ -130,7 +133,7 @@ async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
     // Produce v13+ drops `name` from the wire and demands `topic_id`.
     // Fetch it via Metadata so the produce calls below resolve.
     let md = client
-        .send(crate::support::discovery::named_topic_metadata("t-min-isr"))
+        .send(named_topic_metadata("t-min-isr"))
         .await
         .expect("Metadata for topic_id");
     let topic_id: WireUuid = md
@@ -169,12 +172,12 @@ async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
 
     // acks=-1 ("all"): ISR={1} meets the clamped threshold of 1.
     let all = client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             batch.clone(),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("t-min-isr").into(),
                 topic_id,
-                ..crate::support::produce::SinglePartitionProduceSetup::replicated()
+                ..SinglePartitionProduceSetup::replicated()
             },
         ))
         .await
@@ -188,9 +191,9 @@ async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
 
     // acks=1: leader-only; min.insync.replicas never gates it.
     let ok = client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             batch,
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: ("t-min-isr").into(),
                 topic_id,
                 ..Default::default()

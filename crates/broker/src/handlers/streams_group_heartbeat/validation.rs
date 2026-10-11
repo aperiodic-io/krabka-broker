@@ -139,6 +139,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::handlers::group_heartbeat_test_support::streams_request;
 
     fn topology() -> Topology {
         Topology {
@@ -155,7 +156,7 @@ mod tests {
     /// A valid join: a member id, a rebalance timeout, three empty task lists
     /// and a topology.
     fn join() -> StreamsGroupHeartbeatRequest {
-        crate::handlers::group_heartbeat_test_support::streams_request("g", "m1")
+        streams_request("g", "m1")
     }
 
     fn heartbeat(member_epoch: i32) -> StreamsGroupHeartbeatRequest {

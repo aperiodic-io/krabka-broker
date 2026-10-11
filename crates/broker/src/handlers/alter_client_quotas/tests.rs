@@ -19,7 +19,10 @@ use super::{
 use crate::{
     broker::BrokerHandle,
     codes::INVALID_REQUEST,
-    test_support::{DenyAll, peer, start_broker_with_authorizer as start_broker, test_ctx},
+    test_support::{
+        DenyAll, grant_cluster_operation, peer, principal,
+        start_broker_with_authorizer as start_broker, test_ctx,
+    },
 };
 
 crate::test_support::context_helper!(client_id = "admin-client");
@@ -133,9 +136,9 @@ async fn cluster_alter_configs_gates_the_quota_write() {
         ("all", Some(AclOperation::All), true),
     ] {
         if let Some(operation) = grant {
-            crate::test_support::grant_cluster_operation(&broker_handle, user, operation).await;
+            grant_cluster_operation(&broker_handle, user, operation).await;
         }
-        let principal = crate::test_support::principal(user);
+        let principal = principal(user);
         let ctx = test_context(&principal, &peer);
         let req = request(
             vec![entry(

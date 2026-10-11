@@ -20,8 +20,10 @@ impl BrokerHandle {
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
     pub async fn wait_for_transaction_marker_fanouts_for_test(&self, count: usize) {
+        use crate::broker::TEST_AWAITER_TIMEOUT;
+
         let arrived = tokio::time::timeout(
-            crate::broker::TEST_AWAITER_TIMEOUT,
+            TEST_AWAITER_TIMEOUT,
             self.broker
                 .txn_coordinator
                 .marker_fanout_gate

@@ -193,6 +193,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
+    use crate::test_support::{s3_config, serve_http_pages};
 
     const GCS_TEST_KEY: &str = r#"{
         "private_key":"unused",
@@ -213,8 +214,8 @@ mod tests {
                 "<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>",
             ),
         ].into_iter().map(|(query, body)| (format!("GET /bucket?{query}= HTTP/1.1"), "200 OK", body)).collect();
-        let (endpoint, server) = crate::test_support::serve_http_pages(pages, true).await;
-        let cfg = crate::test_support::s3_config("bucket", endpoint);
+        let (endpoint, server) = serve_http_pages(pages, true).await;
+        let cfg = s3_config("bucket", endpoint);
 
         verify_s3_worm_bucket(&cfg).await.unwrap();
         server.await.unwrap();
@@ -310,7 +311,7 @@ mod tests {
     /// to make. Returns the endpoint to point a `GcsConfig` at, and the task
     /// to join once the check has run.
     async fn serve_bucket_policy(body: &'static str) -> (String, tokio::task::JoinHandle<()>) {
-        crate::test_support::serve_http_pages(
+        serve_http_pages(
             vec![("GET /storage/v1/b/bucket?fields=".into(), "200 OK", body)],
             false,
         )

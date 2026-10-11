@@ -5,15 +5,17 @@ use moxy::{
     token::{Span, TokenStream, TokenTree},
 };
 
+use crate::fixtures::{CommaArguments, name as fixture_name};
+
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let arguments = crate::fixtures::CommaArguments::new(input);
+    let arguments = CommaArguments::new(input);
     let parts = arguments.parts();
     let Some([TokenTree::Ident(mode)]) = parts.first().copied() else {
         return Err(arguments_error(arguments.span));
     };
     match (mode.to_string().as_str(), parts.as_slice()) {
         ("config", [_, name, namespace]) if !namespace.is_empty() => {
-            let name = crate::fixtures::name(TokenStream::from(*name))?;
+            let name = fixture_name(TokenStream::from(*name))?;
             let namespace = TokenStream::from(*namespace);
             Ok(moxy::template! {
                 fn {{ name }}(
@@ -31,8 +33,8 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
             })
         }
         ("start", [_, name, namespace, policy, config]) if !namespace.is_empty() => {
-            let name = crate::fixtures::name(TokenStream::from(*name))?;
-            let config = crate::fixtures::name(TokenStream::from(*config))?;
+            let name = fixture_name(TokenStream::from(*name))?;
+            let config = fixture_name(TokenStream::from(*config))?;
             let namespace = TokenStream::from(*namespace);
             let expect = match *policy {
                 [TokenTree::Ident(policy)] if policy == "expect" => true,
@@ -83,7 +85,7 @@ fn arguments_error(span: Span) -> ParseError {
 
 /// Preserve absent, empty and ordered SCRAM user filters as distinct requests.
 pub(crate) fn scram_users(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = fixture_name(input)?;
     Ok(moxy::template! {
         fn {{ name }}(users_filter: Option<Vec<String>>) -> ::krabka_protocol::owned::describe_user_scram_credentials_request::DescribeUserScramCredentialsRequest {
             ::krabka_protocol::owned::describe_user_scram_credentials_request::DescribeUserScramCredentialsRequest {
@@ -100,7 +102,7 @@ pub(crate) fn scram_users(input: TokenStream) -> Result<TokenStream, ParseError>
 
 /// Construct the request's ordered directories, topics and partition assignments.
 pub(crate) fn assignment_dirs(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = fixture_name(input)?;
     Ok(moxy::template! {
         #[derive(Clone, Copy, ::krabka_macros::FieldDefaults)]
         pub(crate) struct DirectoryAssignmentSetup<'a> {
@@ -142,7 +144,7 @@ pub(crate) fn assignment_dirs(input: TokenStream) -> Result<TokenStream, ParseEr
 
 /// Keep registry guards and finish diagnostics in the caller's original scope.
 pub(crate) fn metric_registry(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = crate::fixtures::name(input)?;
+    let name = fixture_name(input)?;
     Ok(moxy::template! {
         macro_rules! {{ name }} {
             ($metrics:expr, $output:ident, $guard:ident; $finish:ident($($args:tt)*)) => {
@@ -156,7 +158,7 @@ pub(crate) fn metric_registry(input: TokenStream) -> Result<TokenStream, ParseEr
 
 /// Read epoch milliseconds with each caller's original checked conversions.
 pub(crate) fn unix_millis(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let arguments = crate::fixtures::CommaArguments::new(input);
+    let arguments = CommaArguments::new(input);
     let parts = arguments.parts();
     let [binding, epoch_context, conversion_context] = parts.as_slice() else {
         return Err(ParseError::new(

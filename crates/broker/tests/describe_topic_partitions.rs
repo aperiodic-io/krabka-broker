@@ -14,7 +14,10 @@
 
 use assert2::{assert, check};
 
-use crate::support::acl::TOPIC_FULL_MASK;
+use crate::support::{
+    acl::TOPIC_FULL_MASK,
+    topics::{CreateTopicSetup, TopicPartitionCount},
+};
 mod support;
 
 use krabka_protocol::owned::{
@@ -53,9 +56,9 @@ async fn described_topic(
     let p = support::start().await;
     create_topic(
         &p,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: name,
-            num_partitions: crate::support::topics::TopicPartitionCount(partitions),
+            num_partitions: TopicPartitionCount(partitions),
             ..Default::default()
         },
     )
@@ -70,7 +73,7 @@ async fn described_topic(
 
 // Bit positions (subset; cross-check'd with the KIP-430 unit tests).
 
-async fn create_topic(p: &support::InProcess, setup: crate::support::topics::CreateTopicSetup<'_>) {
+async fn create_topic(p: &support::InProcess, setup: CreateTopicSetup<'_>) {
     support::client::create_topic_named(&p.client, setup).await;
 }
 
@@ -80,7 +83,7 @@ async fn named_request_returns_listed_topics_with_partitions() {
     create_alpha_beta(
         &p,
         AlphaBetaTopicsSetup {
-            alpha_partitions: crate::support::topics::TopicPartitionCount(2),
+            alpha_partitions: TopicPartitionCount(2),
         },
     )
     .await;
@@ -121,7 +124,7 @@ async fn fetch_all_returns_topics_in_alphabetical_order() {
     // Create in non-alphabetical order to prove the broker sorts.
     create_topic(
         &p,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "gamma",
             ..Default::default()
         },
@@ -156,7 +159,7 @@ async fn unknown_topic_in_named_request_returns_error_row() {
     let p = support::start().await;
     create_topic(
         &p,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "real-topic",
             ..Default::default()
         },
@@ -231,7 +234,7 @@ async fn a_feature_downgrade_empties_the_reported_elr() {
     let p = support::start().await;
     create_topic(
         &p,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "t",
             ..Default::default()
         },
@@ -361,9 +364,9 @@ async fn pagination_caps_response_at_partition_limit_and_returns_next_cursor() {
     let p = support::start().await;
     create_topic(
         &p,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "big",
-            num_partitions: crate::support::topics::TopicPartitionCount(5),
+            num_partitions: TopicPartitionCount(5),
             ..Default::default()
         },
     )
@@ -417,14 +420,14 @@ async fn pagination_caps_response_at_partition_limit_and_returns_next_cursor() {
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct AlphaBetaTopicsSetup {
     #[default(crate::support::topics::TopicPartitionCount(1))]
-    alpha_partitions: crate::support::topics::TopicPartitionCount,
+    alpha_partitions: TopicPartitionCount,
 }
 
 /// Keep the shared alpha-before-beta creation order with each case's alpha partition count.
 async fn create_alpha_beta(p: &support::InProcess, setup: AlphaBetaTopicsSetup) {
     create_topic(
         p,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "alpha",
             num_partitions: setup.alpha_partitions,
             ..Default::default()
@@ -433,7 +436,7 @@ async fn create_alpha_beta(p: &support::InProcess, setup: AlphaBetaTopicsSetup) 
     .await;
     create_topic(
         p,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic: "beta",
             ..Default::default()
         },

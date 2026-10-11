@@ -16,9 +16,12 @@ use krabka_protocol::owned::{
     streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
 };
 
-use crate::streams_harness::{
-    boot, connect, create_topic, describe, finalize_streams_version, first_join, follow_up,
-    join_and_converge, topology,
+use crate::{
+    streams_harness::{
+        boot, connect, create_topic, describe, finalize_streams_version, first_join, follow_up,
+        join_and_converge, topology,
+    },
+    support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
 };
 
 /// The Kafka error code `INVALID_REQUEST`.
@@ -64,37 +67,37 @@ async fn every_static_member_request_is_refused_and_changes_nothing() {
         ),
         (
             "a heartbeat of the known member with an instance id",
-            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            instance(follow_up(StreamsFollowUpSetup {
                 group: "static-app",
                 member_id: &member_id,
-                epoch: crate::support::streams::StreamsMemberEpoch(epoch),
+                epoch: StreamsMemberEpoch(epoch),
                 ..Default::default()
             })),
         ),
         (
             "a heartbeat with an instance id and another member id",
-            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            instance(follow_up(StreamsFollowUpSetup {
                 group: "static-app",
                 member_id: "another-member",
-                epoch: crate::support::streams::StreamsMemberEpoch(epoch),
+                epoch: StreamsMemberEpoch(epoch),
                 ..Default::default()
             })),
         ),
         (
             "a temporary leave at epoch -2",
-            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            instance(follow_up(StreamsFollowUpSetup {
                 group: "static-app",
                 member_id: &member_id,
-                epoch: crate::support::streams::StreamsMemberEpoch(-2),
+                epoch: StreamsMemberEpoch(-2),
                 ..Default::default()
             })),
         ),
         (
             "a permanent leave at epoch -1 with an instance id",
-            instance(follow_up(crate::support::streams::StreamsFollowUpSetup {
+            instance(follow_up(StreamsFollowUpSetup {
                 group: "static-app",
                 member_id: &member_id,
-                epoch: crate::support::streams::StreamsMemberEpoch(-1),
+                epoch: StreamsMemberEpoch(-1),
                 ..Default::default()
             })),
         ),

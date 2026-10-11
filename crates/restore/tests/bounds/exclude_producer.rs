@@ -13,7 +13,7 @@ use krabka_log::LogConfig;
 use crate::{
     archive::build_archive,
     fixtures::{commit_marker, producer_batch, transactional_batch, value_record},
-    harness::{reopen, run_restore},
+    harness::{check_batches, empty_first_batch, reopen, run_restore},
 };
 
 // ---------------------------------------------------------------------
@@ -35,8 +35,8 @@ async fn exclude_producer_id_drops_only_that_producers_batch() {
     let (_target, target_dir) =
         run_restore(archive.path(), &["--exclude-producer-id", "101"]).await;
 
-    let expected = crate::harness::empty_first_batch(&fixture);
-    crate::harness::check_batches(&target_dir, 3, &expected);
+    let expected = empty_first_batch(&fixture);
+    check_batches(&target_dir, 3, &expected);
 }
 
 // ---------------------------------------------------------------------
@@ -62,6 +62,6 @@ async fn exclude_producer_id_never_drops_a_control_batch() {
         .expect("read back");
     // Desired: the producer's ordinary data is excluded (a bare header),
     // but its commit marker survives intact at its own original offset.
-    let expected = crate::harness::empty_first_batch(&fixture);
+    let expected = empty_first_batch(&fixture);
     check!(read.batches == expected);
 }

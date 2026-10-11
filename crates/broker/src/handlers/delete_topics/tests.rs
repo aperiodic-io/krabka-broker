@@ -18,12 +18,20 @@ use super::{
     *,
 };
 use crate::{
+    authorizer::AllowAllAuthorizer,
     broker::Broker,
     codes,
     config::BreakGlassConfig,
-    handlers::test_support::CreateTopicSetup,
+    handlers::{
+        RequestContext,
+        acl_wire::CLUSTER_RESOURCE_NAME,
+        create_topics::handle as create_topics_handle,
+        test_support::{AclSetup, CreateTopicSetup, configured_topic_request},
+    },
+    metrics::AuthorizationDeniedLabel,
     test_support::{
-        DenyAll, peer, principal, start_broker_with_authorizer_no_audit as start_broker,
+        AllowAclSetup, DenyAll, allow_acl, dispatch_wire, peer, principal,
+        start_broker_no_audit_with, start_broker_with_authorizer_no_audit as start_broker,
     },
 };
 
@@ -38,7 +46,7 @@ crate::test_support::context_helper!(client_id = "admin-client");
 async fn drive(
     broker: &Broker,
     req: &DeleteTopicsRequest,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> DeleteTopicsResponse {
     sorted(
         handle(broker, req.clone(), VERSION, ctx)
@@ -116,8 +124,8 @@ async fn handle_unknown_name_and_id_preserve_error_rows() {
 /// `DeleteTopics` request for it, and answer the topic row, the topic id, and
 /// whether the topic still exists.
 async fn delete_doomed(break_glass: BreakGlassConfig) -> (DeletableTopicResult, WireUuid, bool) {
-    let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(move |cfg| {
-        cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+    let (broker_handle, _dir) = start_broker_no_audit_with(move |cfg| {
+        cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.break_glass = break_glass;
     })
     .await;
@@ -192,7 +200,7 @@ async fn a_refused_deletion_never_reaches_the_metadata_quorum() {
 #[tokio::test]
 async fn invalid_topic_rows_answer_invalid_request_and_delete_nothing() {
     const TOPIC: &str = "kept";
-    let (broker_handle, _dir) = start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+    let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
     let client = krabka_client_core::Client::builder()
         .bootstrap(broker_handle.listen_addr().to_string())
         .client_id("delete-topics-validation-test")
@@ -308,14 +316,10 @@ async fn invalid_topic_rows_answer_invalid_request_and_delete_nothing() {
 /// carries, and asserts the create itself was not refused. Setup for the
 /// cluster-`Delete` shortcut test below, which needs topics that already
 /// exist before it authorizes their deletion.
-async fn seed_topic(
-    broker: &Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
-    setup: CreateTopicSetup<'_>,
-) {
+async fn seed_topic(broker: &Broker, ctx: &RequestContext<'_>, setup: CreateTopicSetup<'_>) {
     let name = setup.topic;
-    let req = crate::handlers::test_support::configured_topic_request(setup);
-    let resp = crate::handlers::create_topics::handle(broker, req, CREATE_VERSION, ctx)
+    let req = configured_topic_request(setup);
+    let resp = create_topics_handle(broker, req, CREATE_VERSION, ctx)
         .await
         .expect("handle CreateTopics");
     assert!(
@@ -327,7 +331,7 @@ async fn seed_topic(
 /// Seed the topic, then read its identity from the published controller image.
 async fn seeded_topic_id(
     broker: &Broker,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
     setup: CreateTopicSetup<'_>,
 ) -> WireUuid {
     let name = setup.topic;
@@ -360,18 +364,14 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
 
     use crate::handlers::test_support::acl;
 
-    let cluster_create = acl(crate::handlers::test_support::AclSetup::cluster(
-        AclOperation::Create,
-    ));
-    let cluster_delete = acl(crate::handlers::test_support::AclSetup::cluster(
-        AclOperation::Delete,
-    ));
-    let literal_a_delete = acl(crate::handlers::test_support::AclSetup {
+    let cluster_create = acl(AclSetup::cluster(AclOperation::Create));
+    let cluster_delete = acl(AclSetup::cluster(AclOperation::Delete));
+    let literal_a_delete = acl(AclSetup {
         resource_name: "a",
         operation: AclOperation::Delete,
         ..Default::default()
     });
-    let prefixed_app_delete = acl(crate::handlers::test_support::AclSetup {
+    let prefixed_app_delete = acl(AclSetup {
         resource_name: "app-",
         pattern_type: PatternType::Prefixed,
         operation: AclOperation::Delete,
@@ -494,7 +494,7 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
         let cluster_delete_denials = broker
             .metrics
             .authorization_denied
-            .get_or_create(&crate::metrics::AuthorizationDeniedLabel {
+            .get_or_create(&AuthorizationDeniedLabel {
                 operation: "Delete".into(),
                 resource_type: "Cluster".into(),
             })
@@ -519,7 +519,7 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
 
 /// One `alice` Allow ACL on a literal resource.
 fn alice_acl(resource_type: ResourceType, name: &str, operation: AclOperation) -> AclEntry {
-    crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
+    allow_acl(AllowAclSetup {
         resource_type,
         resource_name: name,
         operation,
@@ -611,7 +611,7 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
         request_identity!((p, peer), principal("alice"));
         let cluster_create = alice_acl(
             ResourceType::Cluster,
-            crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+            CLUSTER_RESOURCE_NAME,
             AclOperation::Create,
         );
         broker
@@ -677,8 +677,8 @@ async fn delete_topic_enable_false_refuses_every_row() {
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (enabled, version, error_code, exists) in cases {
-        let (broker_handle, _dir) = crate::test_support::start_broker_no_audit_with(move |cfg| {
-            cfg.authorizer = Arc::new(crate::authorizer::AllowAllAuthorizer);
+        let (broker_handle, _dir) = start_broker_no_audit_with(move |cfg| {
+            cfg.authorizer = Arc::new(AllowAllAuthorizer);
             cfg.delete_topic_enable = enabled;
         })
         .await;
@@ -703,7 +703,7 @@ async fn delete_topic_enable_false_refuses_every_row() {
             request(vec![named_state(TOPIC)])
         };
         let ctx = test_context(&p, &peer);
-        let resp: DeleteTopicsResponse = crate::test_support::dispatch_wire(
+        let resp: DeleteTopicsResponse = dispatch_wire(
             &broker,
             krabka_protocol::owned::delete_topics_request::API_KEY,
             version,

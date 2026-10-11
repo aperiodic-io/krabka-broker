@@ -10,7 +10,16 @@ use krabka_raft::NodeId;
 use tracing::warn;
 
 use super::scan::compute_failover_changes;
-use crate::{error::BrokerError, heartbeat::controller_state::ControllerLivenessState};
+use crate::{
+    error::BrokerError,
+    heartbeat::{
+        controller_state::{ControllerLivenessState, replicated_registrations},
+        fencing::publish_fencing_changes,
+    },
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    unclean_recovery::{RecoveryJob, UncleanRecoveryHandle},
+};
 
 #[cfg(test)]
 mod failover_tests;
@@ -34,10 +43,7 @@ pub(crate) enum FailoverTrigger {
 
 /// `true` when the leader watch names this node. Only the controller leader
 /// receives heartbeats and can `submit_change`.
-fn is_controller_leader(
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
-    node_id: NodeId,
-) -> bool {
+fn is_controller_leader(controller: &Arc<dyn MetadataSource>, node_id: NodeId) -> bool {
     controller
         .watch_leader()
         .borrow()
@@ -88,11 +94,11 @@ pub(crate) struct LivenessTickState {
 ///    reports the same `offline_replicas` as one served here. It runs last,
 ///    so a death this tick detected is published in the same tick.
 pub(crate) async fn run_liveness_tick(
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &Arc<dyn MetadataSource>,
     node_id: NodeId,
     liveness: &Arc<ControllerLivenessState>,
-    metrics: &crate::metrics::BrokerMetrics,
-    recovery: &crate::unclean_recovery::UncleanRecoveryHandle,
+    metrics: &BrokerMetrics,
+    recovery: &UncleanRecoveryHandle,
     state: &mut LivenessTickState,
 ) {
     let leader_now = is_controller_leader(controller, node_id);
@@ -102,7 +108,7 @@ pub(crate) async fn run_liveness_tick(
             liveness
                 .seed_term(
                     controller.current_controller_epoch(),
-                    crate::heartbeat::controller_state::replicated_registrations(&image),
+                    replicated_registrations(&image),
                 )
                 .await;
         }
@@ -137,7 +143,7 @@ pub(crate) async fn run_liveness_tick(
         }
     }
     if is_controller_leader(controller, node_id) {
-        crate::heartbeat::fencing::publish_fencing_changes(controller, liveness).await;
+        publish_fencing_changes(controller, liveness).await;
         // After the await, so the count answers "the fencing this pass
         // decided on is applied", not "a pass started". The publication
         // awaits its own commit, and that is the whole difference between a
@@ -153,12 +159,12 @@ pub(crate) async fn run_liveness_tick(
 /// This is a no-op unless `controller` is currently the openraft leader. Only
 /// the leader can `submit_change`.
 pub(crate) async fn on_broker_dead(
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &Arc<dyn MetadataSource>,
     node_id: NodeId,
     dead: NodeId,
     liveness: &Arc<ControllerLivenessState>,
-    metrics: &crate::metrics::BrokerMetrics,
-    recovery: &crate::unclean_recovery::UncleanRecoveryHandle,
+    metrics: &BrokerMetrics,
+    recovery: &UncleanRecoveryHandle,
 ) -> Result<(), BrokerError> {
     fail_over_dead_broker(
         FailoverTrigger::Edge,
@@ -176,10 +182,10 @@ pub(crate) async fn on_broker_dead(
 
 /// Services shared by death-edge and retry-sweep failover.
 struct FailoverServices<'a> {
-    controller: &'a Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &'a Arc<dyn MetadataSource>,
     liveness: &'a Arc<ControllerLivenessState>,
-    metrics: &'a crate::metrics::BrokerMetrics,
-    recovery: &'a crate::unclean_recovery::UncleanRecoveryHandle,
+    metrics: &'a BrokerMetrics,
+    recovery: &'a UncleanRecoveryHandle,
 }
 
 /// The failover behind [`on_broker_dead`] and [`sweep_dead_leaders`].
@@ -244,7 +250,7 @@ async fn fail_over_dead_broker(
     // forget — the failover path does not await the outcome.
     for (topic, partition, strategy) in plan.recoveries {
         recovery
-            .enqueue(crate::unclean_recovery::RecoveryJob {
+            .enqueue(RecoveryJob {
                 topic,
                 partition,
                 strategy,
@@ -282,11 +288,11 @@ async fn fail_over_dead_broker(
 /// one that was decommissioned, therefore costs one walk per image change,
 /// not one per tick.
 pub(crate) async fn sweep_dead_leaders(
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &Arc<dyn MetadataSource>,
     node_id: NodeId,
     liveness: &Arc<ControllerLivenessState>,
-    metrics: &crate::metrics::BrokerMetrics,
-    recovery: &crate::unclean_recovery::UncleanRecoveryHandle,
+    metrics: &BrokerMetrics,
+    recovery: &UncleanRecoveryHandle,
     state: &mut LivenessTickState,
 ) {
     if !is_controller_leader(controller, node_id) {
@@ -342,7 +348,7 @@ pub(crate) async fn sweep_dead_leaders(
 /// `isr_maintenance` once the rejoined broker's replicator catches up.
 /// The hook is here for future enhancements, for example auto-rebalance.
 pub(crate) fn on_broker_alive(
-    _controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    _controller: &Arc<dyn MetadataSource>,
     _node_id: NodeId,
     _alive: NodeId,
     _liveness: &Arc<ControllerLivenessState>,

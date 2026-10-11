@@ -113,11 +113,12 @@ mod tests {
     use clap::Parser as _;
 
     use super::*;
+    use crate::Cli;
 
     fn args_from(extra: &[&str]) -> RestoreArgs {
         let mut argv = vec!["krabka-restore", "--log-dir", "/target"];
         argv.extend_from_slice(extra);
-        crate::Cli::parse_from(argv).args
+        Cli::parse_from(argv).args
     }
 
     krabka_macros::s3_archive_config_fixture!(expected_s3_config, krabka_object_store::S3Config);

@@ -262,10 +262,12 @@ mod tests {
     use assert2::{assert, check};
 
     use super::{super::assignor::UniformAssignor, *};
-    use crate::coordinator::unified::consumer_state::{MemberState, ResolvedRegularExpression};
+    use crate::coordinator::unified::consumer_state::{
+        MemberState, ResolvedRegularExpression, test_support::subscribed_member,
+    };
 
     fn fresh_member(id: &str, topic: &str) -> MemberState {
-        crate::coordinator::unified::consumer_state::test_support::subscribed_member(id, &[topic])
+        subscribed_member(id, &[topic])
     }
 
     fn input(topic_name: &str, partitions: i32) -> (ReconcileInput, Uuid) {

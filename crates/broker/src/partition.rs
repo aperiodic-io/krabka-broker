@@ -29,15 +29,18 @@ use tokio::{
 
 // `std::sync::Mutex` is kept for `log` (sync hot-path callers);
 // `replica_state` uses `tokio::sync::Mutex` to avoid blocking worker threads.
-use crate::txn::handlers::write_txn_markers::CommittedOffsets;
+use crate::{
+    config::BrokerConfig,
+    diskless::hot_tail::HotTailCache,
+    txn::{handlers::write_txn_markers::CommittedOffsets, marker::MarkerType},
+    wal::{OffsetSequencer, quorum::registry::WalShardRegistry},
+};
 
 /// Per producer, the offset resolution a durable `__consumer_offsets` marker
 /// still owes the group actors: the marker type, the marker's offset, and
 /// the offsets the transaction wrote.
-pub(crate) type OwedMarkerResolutions = std::collections::HashMap<
-    krabka_log::ProducerId,
-    (crate::txn::marker::MarkerType, i64, CommittedOffsets),
->;
+pub(crate) type OwedMarkerResolutions =
+    std::collections::HashMap<krabka_log::ProducerId, (MarkerType, i64, CommittedOffsets)>;
 use crate::{delivery::DeliveryHandles, error::BrokerError, replica_state::ReplicaState};
 
 mod commands;
@@ -72,15 +75,15 @@ pub(crate) struct PartitionRuntimeConfig {
     pub partition_writer_queue_depth: usize,
     pub diskless_wal_local_replica_count: usize,
     pub diskless: bool,
-    pub hot_tail: Option<Arc<crate::diskless::hot_tail::HotTailCache>>,
-    pub wal_shards: Option<Arc<crate::wal::quorum::registry::WalShardRegistry>>,
-    pub sequencer: Option<Arc<dyn crate::wal::OffsetSequencer>>,
+    pub hot_tail: Option<Arc<HotTailCache>>,
+    pub wal_shards: Option<Arc<WalShardRegistry>>,
+    pub sequencer: Option<Arc<dyn OffsetSequencer>>,
 }
 
 type PartitionWalServices = (
-    Option<Arc<crate::diskless::hot_tail::HotTailCache>>,
-    Option<Arc<crate::wal::quorum::registry::WalShardRegistry>>,
-    Option<Arc<dyn crate::wal::OffsetSequencer>>,
+    Option<Arc<HotTailCache>>,
+    Option<Arc<WalShardRegistry>>,
+    Option<Arc<dyn OffsetSequencer>>,
 );
 
 impl PartitionRuntimeConfig {
@@ -104,7 +107,7 @@ impl PartitionRuntimeConfig {
     }
 
     pub(crate) fn from_broker(
-        config: &crate::config::BrokerConfig,
+        config: &BrokerConfig,
         diskless: bool,
         services: PartitionWalServices,
     ) -> Self {
@@ -364,7 +367,10 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::*;
-    use crate::partition::test_support::{append_records, test_partition};
+    use crate::{
+        partition::test_support::{append_records, test_partition},
+        test_support::{PartitionRecordsSetup, RecordCount},
+    };
 
     /// `Partition::stamp_for_offset` returns the log's actual stamp for a
     /// covered offset and `None` beyond the stamped range. It is not a
@@ -389,8 +395,8 @@ mod tests {
             .expect("set stamp source");
         append_records(
             &p,
-            crate::test_support::PartitionRecordsSetup {
-                count: crate::test_support::RecordCount(3),
+            PartitionRecordsSetup {
+                count: RecordCount(3),
                 ..Default::default()
             },
         ); // offsets 0..=2, each stamped 4242
@@ -407,8 +413,8 @@ mod tests {
         let (p, _dir) = test_partition(Arc::new(Notify::new()));
         append_records(
             &p,
-            crate::test_support::PartitionRecordsSetup {
-                count: crate::test_support::RecordCount(3),
+            PartitionRecordsSetup {
+                count: RecordCount(3),
                 ..Default::default()
             },
         );

@@ -2,21 +2,26 @@
 use krabka_broker::BrokerHandle;
 use krabka_metadata::PartitionRecord;
 
+use crate::{
+    jvm_acceptance::{
+        ADMIN, ADMIN_PASS, ClientPropsFile, KAFKA_IMAGE_TXN, SaslClusterSetup, TempFileMount,
+        broker0_advertised, create_console_topic, plain_client_properties,
+        start_registered_sasl_cluster, write_plain_props, write_temp_file,
+    },
+    support::{JvmDockerSetup, jvm_docker_command},
+};
+
 pub(crate) fn free_replica(record: &PartitionRecord) -> u64 {
     (1u64..=3)
         .find(|node| !record.replicas.contains(&krabka_metadata::NodeId(*node)))
         .expect("free broker")
 }
 
-pub(crate) fn plan_file(
-    topic: &str,
-    staying: u64,
-    new_node: u64,
-) -> crate::jvm_acceptance::TempFileMount {
+pub(crate) fn plan_file(topic: &str, staying: u64, new_node: u64) -> TempFileMount {
     let json = format!(
         r#"{{"version":1,"partitions":[{{"topic":"{topic}","partition":0,"replicas":[{staying},{new_node}]}}]}}"#
     );
-    crate::jvm_acceptance::write_temp_file("reassignment.json", &json)
+    write_temp_file("reassignment.json", &json)
 }
 
 pub(crate) async fn offline_target(
@@ -113,10 +118,7 @@ pub(crate) struct RegisteredCluster {
 
 async fn registered_admin() -> RegisteredCluster {
     let (h1, h2, h3, cfg1, cfg2, cfg3, d1, d2, d3) =
-        Box::pin(crate::jvm_acceptance::start_registered_sasl_cluster(
-            crate::jvm_acceptance::SaslClusterSetup::default(),
-        ))
-        .await;
+        Box::pin(start_registered_sasl_cluster(SaslClusterSetup::default())).await;
     RegisteredCluster {
         d3,
         d2,
@@ -131,22 +133,15 @@ async fn registered_admin() -> RegisteredCluster {
 }
 
 /// Registered default-admin cluster and its mounted client configuration.
-pub(crate) async fn admin_cluster() -> (RegisteredCluster, crate::jvm_acceptance::ClientPropsFile) {
+pub(crate) async fn admin_cluster() -> (RegisteredCluster, ClientPropsFile) {
     let cluster = Box::pin(registered_admin()).await;
-    let props = crate::jvm_acceptance::write_plain_props(
-        crate::jvm_acceptance::ADMIN,
-        crate::jvm_acceptance::ADMIN_PASS,
-    );
+    let props = write_plain_props(ADMIN, ADMIN_PASS);
     (cluster, props)
 }
 
 pub(crate) async fn reassignment_cluster(
     topic: &str,
-) -> (
-    RegisteredCluster,
-    crate::jvm_acceptance::ClientPropsFile,
-    String,
-) {
+) -> (RegisteredCluster, ClientPropsFile, String) {
     let (cluster, props) = Box::pin(admin_cluster()).await;
     let mount = props.mount_str();
     prepare_topic(&cluster.h1, &mount, topic).await;
@@ -156,23 +151,14 @@ pub(crate) async fn reassignment_cluster(
 /// Registered voters and caller-owned properties/advertised address for oracle-mounted admin files.
 pub(crate) async fn admin_text_cluster() -> (RegisteredCluster, String, String) {
     let brokers = Box::pin(registered_admin()).await;
-    let props = crate::jvm_acceptance::plain_client_properties(
-        crate::jvm_acceptance::ADMIN,
-        crate::jvm_acceptance::ADMIN_PASS,
-    );
-    let advertised = crate::jvm_acceptance::broker0_advertised().to_owned();
+    let props = plain_client_properties(ADMIN, ADMIN_PASS);
+    let advertised = broker0_advertised().to_owned();
     (brokers, props, advertised)
 }
 
 /// Install the rf=2 reassignment topic on the first registered broker.
 pub(crate) async fn prepare_topic(broker: &BrokerHandle, admin_mount: &str, topic: &str) {
-    crate::jvm_acceptance::create_console_topic(
-        crate::jvm_acceptance::KAFKA_IMAGE_TXN,
-        &[admin_mount],
-        topic,
-        1,
-        2,
-    );
+    create_console_topic(KAFKA_IMAGE_TXN, &[admin_mount], topic, 1, 2);
     broker.wait_until_partition_present(topic, 0).await;
 }
 
@@ -203,7 +189,7 @@ pub(crate) fn execute_plan(
     staying: u64,
     new_node: u64,
     throttled: bool,
-) -> (crate::jvm_acceptance::TempFileMount, String) {
+) -> (TempFileMount, String) {
     let file = plan_file(topic, staying, new_node);
     let mount = format!("{}:/reassignment.json", file.host_path());
     let mut args = vec![
@@ -217,7 +203,7 @@ pub(crate) fn execute_plan(
     }
     args.extend([
         "--bootstrap-server",
-        crate::jvm_acceptance::broker0_advertised(),
+        broker0_advertised(),
         "--command-config",
         "/client.properties",
     ]);
@@ -231,8 +217,8 @@ pub(crate) fn execute_plan(
     } else {
         "--execute"
     };
-    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
-        image: crate::jvm_acceptance::KAFKA_IMAGE_TXN,
+    let out = jvm_docker_command(JvmDockerSetup {
+        image: KAFKA_IMAGE_TXN,
         mounts: &[admin_mount, &mount],
         args: &args,
         ..Default::default()

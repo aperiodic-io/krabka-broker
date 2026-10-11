@@ -141,8 +141,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        metadata_observer::test_support::observer_config,
-        metadata_source::test_support::topic_record,
+        metadata_observer::{ObserverConfig, test_support::observer_config},
+        metadata_source::test_support::{start_controller, topic_record},
     };
 
     struct RecordingWriter {
@@ -179,12 +179,10 @@ mod tests {
     async fn observer_source_uses_observer_writer_and_denies_controller_only_ops() {
         let cluster_id = Uuid::new_v4();
         let dir = TempDir::new().unwrap();
-        let observer = crate::metadata_observer::MetadataObserver::start(
-            crate::metadata_observer::ObserverConfig {
-                client_id: "observer-source-test".into(),
-                ..observer_config(cluster_id, dir.path().to_path_buf())
-            },
-        );
+        let observer = MetadataObserver::start(ObserverConfig {
+            client_id: "observer-source-test".into(),
+            ..observer_config(cluster_id, dir.path().to_path_buf())
+        });
         let writer = Arc::new(RecordingWriter {
             calls: Mutex::new(Vec::new()),
         });
@@ -219,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn observer_source_reports_the_replicated_metadata_offset() {
-        let (_dir, ctrl) = crate::metadata_source::test_support::start_controller().await;
+        let (_dir, ctrl) = start_controller().await;
         ctrl.submit_change(vec![topic_record("observed-through-source")])
             .await
             .expect("submit metadata");
@@ -238,14 +236,12 @@ mod tests {
         );
 
         let observer_dir = TempDir::new().unwrap();
-        let observer = crate::metadata_observer::MetadataObserver::start(
-            crate::metadata_observer::ObserverConfig {
-                voters: vec![(NodeId(1), ctrl.controller_bound_addr().to_string())],
-                client_id: "observer-source-offset-test".into(),
-                poll_interval: krabka_units::millis(10),
-                ..observer_config(Uuid::nil(), observer_dir.path().to_path_buf())
-            },
-        );
+        let observer = MetadataObserver::start(ObserverConfig {
+            voters: vec![(NodeId(1), ctrl.controller_bound_addr().to_string())],
+            client_id: "observer-source-offset-test".into(),
+            poll_interval: krabka_units::millis(10),
+            ..observer_config(Uuid::nil(), observer_dir.path().to_path_buf())
+        });
         let writer = Arc::new(RecordingWriter {
             calls: Mutex::new(Vec::new()),
         });

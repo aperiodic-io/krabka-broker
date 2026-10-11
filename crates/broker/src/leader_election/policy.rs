@@ -516,7 +516,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::leader_election::test_support::{ElectionSetup, witnesses};
+    use crate::leader_election::test_support::{ElectionSetup, seed_partition, witnesses};
 
     /// The full failover decision for one partition, with `witnesses` and the
     /// published eligible-leader-replica set given directly. This keeps the
@@ -544,7 +544,7 @@ mod tests {
 
     /// The published ELR state of a partition: the eligible and the last-known
     /// replicas.
-    use crate::test_support::partition_elr as elr;
+    use crate::test_support::{partition_elr as elr, replica_nodes};
 
     /// [`decide_with_elr`] for a partition that publishes no ELR at all, which
     /// is every partition of a healthy cluster.
@@ -560,10 +560,10 @@ mod tests {
     }
 
     fn partition_record(leader: u64, replicas: &[u64], isr: &[u64]) -> PartitionRecord {
-        crate::leader_election::test_support::seed_partition(ElectionSetup {
+        seed_partition(ElectionSetup {
             leader: krabka_raft::NodeId(leader),
-            replicas: &crate::test_support::replica_nodes(replicas),
-            isr: &crate::test_support::replica_nodes(isr),
+            replicas: &replica_nodes(replicas),
+            isr: &replica_nodes(isr),
             ..Default::default()
         })
     }

@@ -32,11 +32,14 @@ use krabka_protocol::{
     },
 };
 
+#[cfg(test)]
+use crate::producer_state::ProducerState;
 use crate::{
     broker::Broker,
     codes,
     error::BrokerError,
     future_log::{self, MoveError},
+    handlers::encode_response,
 };
 
 pub(crate) fn handle(
@@ -140,7 +143,7 @@ pub(crate) fn handle(
             results,
             ..Default::default()
         };
-        crate::handlers::encode_response(&resp, version)
+        encode_response(&resp, version)
     })
 }
 
@@ -152,6 +155,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::{broker::spawn_partition, log_dir::partition_dir};
 
     crate::test_support::codec_helpers!(AlterReplicaLogDirsRequest, AlterReplicaLogDirsResponse);
 
@@ -329,16 +333,16 @@ mod tests {
         let extra_dir = extra.path().to_path_buf();
         broker_fixture!((broker_handle, _dir, broker), extra_log_dir(extra_dir));
         let primary = broker.config.log_dir.clone();
-        let partition_dir = crate::log_dir::partition_dir(&primary, "orders", 0);
+        let partition_dir = partition_dir(&primary, "orders", 0);
         std::fs::create_dir_all(&partition_dir).expect("partition dir");
-        let hosted = crate::broker::spawn_partition(
+        let hosted = spawn_partition(
             "orders".into(),
             krabka_ids::PartitionIndex(0),
             primary.clone(),
             krabka_log::Log::open(&partition_dir, krabka_log::LogConfig::default())
                 .expect("open log"),
             broker.log_dir_status.clone(),
-            std::sync::Arc::new(crate::producer_state::ProducerState::new()),
+            std::sync::Arc::new(ProducerState::new()),
             false,
         );
         broker.partitions.insert(

@@ -31,7 +31,10 @@ use super::{
     },
     serves_topic_key,
 };
-use crate::api_catalog::UnstableApiVersions;
+use crate::{
+    api_catalog::UnstableApiVersions,
+    throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_REPLICAS_KEY, ThrottledReplicas},
+};
 
 /// Kafka's `validateRemoteStorageOnlyIfSystemEnabled` refusal: a topic asks
 /// for tiered storage on a broker with no remote storage backend.
@@ -130,10 +133,9 @@ pub(crate) fn canonical_value(row: &ConfigKey, value: &str) -> Result<String, St
             COMPRESSION_TYPE => parse_compression_type(value).map(|_| java_trim(value).to_owned()),
             COMPRESSION_GZIP_LEVEL => parse_gzip_level(value).map(|level| level.to_string()),
             MIN_CLEANABLE_DIRTY_RATIO => parse_ratio_value(value).map(java_double),
-            crate::throttle::LEADER_THROTTLED_REPLICAS_KEY
-            | crate::throttle::FOLLOWER_THROTTLED_REPLICAS_KEY => {
+            LEADER_THROTTLED_REPLICAS_KEY | FOLLOWER_THROTTLED_REPLICAS_KEY => {
                 let values = list_value(value);
-                crate::throttle::ThrottledReplicas::parse(&values.join(","))
+                ThrottledReplicas::parse(&values.join(","))
                     .map(|_| values.join(","))
                     .map_err(|_| {
                         invalid_value(

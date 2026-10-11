@@ -6,6 +6,8 @@
 //! plaintext one. That per-listener choice, and its fallback rules, live here
 //! rather than in the request handling that consumes the result.
 
+use crate::config::BrokerConfig;
+
 /// The local broker's advertised `host:port` string for the request's listener.
 ///
 /// Kafka returns the connection listener's advertised address, so a TLS client
@@ -20,7 +22,7 @@
 /// harnesses. In that case the function falls back to `advertised_listener`,
 /// which `Broker::start` rewrites to the real bound port after it binds.
 pub(super) fn local_advertised_for_listener(
-    config: &crate::config::BrokerConfig,
+    config: &BrokerConfig,
     connection_listener_name: &str,
 ) -> String {
     config
@@ -35,16 +37,20 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::{
+        SslPrincipalMapper,
+        config::{BrokerConfig, ListenerSpec},
+    };
 
-    fn listener(name: &str, advertised: &str) -> crate::config::ListenerSpec {
-        crate::config::ListenerSpec {
+    fn listener(name: &str, advertised: &str) -> ListenerSpec {
+        ListenerSpec {
             name: name.to_string(),
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             advertised: advertised.to_string(),
             protocol: krabka_security::ListenerProtocol::Plaintext,
             tls_config: None,
             sasl_mechanisms: None,
-            principal_mapper: crate::SslPrincipalMapper::default(),
+            principal_mapper: SslPrincipalMapper::default(),
         }
     }
 
@@ -53,7 +59,7 @@ mod tests {
     /// plain listener's address.
     #[test]
     fn local_advertised_tracks_connection_listener() {
-        let config = crate::config::BrokerConfig {
+        let config = BrokerConfig {
             advertised_listener: "legacy:1000".to_string(),
             listeners: vec![
                 listener("plain", "plain-host:9092"),
@@ -69,7 +75,7 @@ mod tests {
     /// to the legacy top-level `advertised_listener`.
     #[test]
     fn local_advertised_falls_back_to_legacy() {
-        let config = crate::config::BrokerConfig {
+        let config = BrokerConfig {
             advertised_listener: "legacy:1000".to_string(),
             listeners: vec![listener("plain", "plain-host:9092")],
             ..Default::default()

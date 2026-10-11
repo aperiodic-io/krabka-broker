@@ -176,7 +176,7 @@ mod tests {
         primitives::uuid::Uuid as ProtoUuid,
     };
 
-    use crate::test_support::DenyAll;
+    use crate::test_support::{DenyAll, round_trip_response};
 
     fn request(voter_id: i32) -> AddRaftVoterRequest {
         AddRaftVoterRequest {
@@ -215,8 +215,7 @@ mod tests {
                 error_message: Some("not the raft leader".into()),
                 ..Default::default()
             };
-            let (decoded, consumed) =
-                crate::test_support::round_trip_response(&resp, krabka_ids::ApiVersion(version));
+            let (decoded, consumed) = round_trip_response(&resp, krabka_ids::ApiVersion(version));
             assert!(decoded.error_code == codes::NOT_LEADER_OR_FOLLOWER);
             assert!(consumed, "all bytes consumed at v{version}");
         }

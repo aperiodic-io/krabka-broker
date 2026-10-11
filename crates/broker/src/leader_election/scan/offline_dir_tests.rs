@@ -14,6 +14,7 @@ use crate::{
         ElectionSetup, ExpectedPartitionSetup, expected_clean_election, expected_partition,
         img_with_partition, liveness_with_alive, one_partition_change,
     },
+    metrics::BrokerMetrics,
 };
 
 #[derive(Clone, Copy)]
@@ -80,9 +81,9 @@ async fn scan_offline_dir_with_metrics(
     broker: u64,
     bad: uuid::Uuid,
     alive: &[u64],
-) -> (FailoverPlan, crate::metrics::BrokerMetrics) {
+) -> (FailoverPlan, BrokerMetrics) {
     let liveness = liveness_with_alive(alive).await;
-    let metrics = crate::metrics::BrokerMetrics::new();
+    let metrics = BrokerMetrics::new();
     let plan = compute_offline_dir_failover_changes(
         image,
         NodeId(broker),

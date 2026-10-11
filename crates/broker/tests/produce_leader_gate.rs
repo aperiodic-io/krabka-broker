@@ -40,7 +40,9 @@ use support::cluster_lock;
 
 use crate::support::{
     client::connect_client,
+    produce::{SinglePartitionProduceSetup, batch_request},
     records::{batch_from_records, value_record},
+    registered_cluster, shutdown_cluster,
     topics::creatable_topic,
 };
 
@@ -80,9 +82,9 @@ async fn produce_one(
     value: &str,
 ) -> (i16, i32, Vec<NodeEndpoint>) {
     let resp = client
-        .send(crate::support::produce::batch_request(
+        .send(batch_request(
             one_record_batch(value),
-            crate::support::produce::SinglePartitionProduceSetup {
+            SinglePartitionProduceSetup {
                 topic: (topic).into(),
                 topic_id,
                 partition: krabka_ids::PartitionIndex(partition),
@@ -188,7 +190,7 @@ async fn rf3_produce_to_a_follower_is_refused(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn produce_to_non_leader_is_rejected() {
     let _g = cluster_lock().lock().await;
-    let cluster = crate::support::registered_cluster(3).await;
+    let cluster = registered_cluster(3).await;
 
     let bootstrap = cluster[0].1.listen_addr.to_string();
     let admin = connect_client(bootstrap.clone(), None).await;
@@ -357,5 +359,5 @@ async fn produce_to_non_leader_is_rejected() {
         "rf=1 record must be durably stored on its leader; leo={leader1_leo}"
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }

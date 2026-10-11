@@ -39,7 +39,7 @@ use std::collections::HashSet;
 use krabka_metadata::{BrokerRegistrationRecord, MetadataImage, NodeId, PartitionRecord};
 
 use super::metadata::wire_id;
-use crate::broker::Broker;
+use crate::{broker::Broker, elr::state::is_leaderless, heartbeat::fencing::fenced_node_ids};
 
 /// The brokers this node knows to be fenced or past their heartbeat deadline.
 ///
@@ -51,7 +51,7 @@ use crate::broker::Broker;
 /// `DescribeCluster` reads the same set for `is_fenced` and for the KIP-1073
 /// `include_fenced_brokers` filter.
 pub(crate) async fn unavailable_brokers(broker: &Broker, image: &MetadataImage) -> HashSet<u64> {
-    let mut unavailable = crate::heartbeat::fencing::fenced_node_ids(image);
+    let mut unavailable = fenced_node_ids(image);
     let is_controller = *broker.controller.watch_leader().borrow() == Some(broker.config.node_id);
     if is_controller {
         unavailable.extend(broker.liveness.unavailable_snapshot().await);
@@ -212,7 +212,7 @@ pub(crate) fn partition_availability(
         .map(|(_, &replica)| wire_id(replica))
         .collect();
     let leader = wire_id(partition.leader);
-    let leaderless = crate::elr::state::is_leaderless(image, partition);
+    let leaderless = is_leaderless(image, partition);
     PartitionAvailability {
         leader_id: if leaderless
             || dead_dir.contains(&leader)

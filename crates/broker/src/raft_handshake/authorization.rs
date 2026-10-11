@@ -12,7 +12,13 @@ use krabka_metadata::{AclOperation, ResourceType};
 use krabka_raft::{ClusterGrants, ClusterOperation};
 
 use super::ControllerHandleArc;
-use crate::authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer};
+use crate::{
+    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+    handlers::{
+        RequestContext, acl_wire::CLUSTER_RESOURCE_NAME,
+        authorized_operations::authorized_operations_bits,
+    },
+};
 
 /// The cluster grants of one controller-listener connection.
 pub(super) struct ControllerPeerGrants {
@@ -42,7 +48,7 @@ impl ClusterGrants for ControllerPeerGrants {
                 principal: &self.principal,
                 host: &self.peer,
                 resource_type: ResourceType::Cluster,
-                resource_name: crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+                resource_name: CLUSTER_RESOURCE_NAME,
                 operation,
             },
         ) == AuthorizationResult::Allow
@@ -54,14 +60,13 @@ impl ClusterGrants for ControllerPeerGrants {
             return 0;
         };
         // The bitfield reads only the principal and peer of the context.
-        let ctx =
-            crate::handlers::RequestContext::new(&self.principal, &self.peer, None, "", false, "");
-        crate::handlers::authorized_operations::authorized_operations_bits(
+        let ctx = RequestContext::new(&self.principal, &self.peer, None, "", false, "");
+        authorized_operations_bits(
             self.authorizer.as_ref(),
             &controller.current_image(),
             &ctx,
             ResourceType::Cluster,
-            crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+            CLUSTER_RESOURCE_NAME,
         )
     }
 }
@@ -72,7 +77,7 @@ mod tests {
     use tokio::sync::OnceCell;
 
     use super::*;
-    use crate::test_support::GrantsInPrincipalName;
+    use crate::test_support::{GrantsInPrincipalName, peer, principal};
 
     /// Each cluster operation maps to the ACL operation of the same name, the
     /// principal and peer of the connection reach the authorizer, and a
@@ -93,8 +98,8 @@ mod tests {
         let grants = |controller: &ControllerHandleArc, name: &str| ControllerPeerGrants {
             authorizer: Arc::new(GrantsInPrincipalName),
             controller: Arc::clone(controller),
-            principal: crate::test_support::principal(name),
-            peer: crate::test_support::peer(),
+            principal: principal(name),
+            peer: peer(),
         };
 
         let operations = [

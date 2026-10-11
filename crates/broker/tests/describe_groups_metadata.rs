@@ -29,7 +29,10 @@ use krabka_protocol::owned::{
 };
 
 use crate::support::{
-    classic::{classic_join_request, classic_sync_request, join_protocol, sync_assignment},
+    classic::{
+        ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
+        classic_sync_request, join_protocol, sync_assignment,
+    },
     client::connect_owned,
 };
 
@@ -37,7 +40,7 @@ use crate::support::{
 struct AssignedSyncSetup<'a> {
     #[default("g")]
     group_id: &'a str,
-    generation_id: crate::support::classic::GenerationId,
+    generation_id: GenerationId,
     member_id: &'a str,
     assignment: &'static [u8],
 }
@@ -45,7 +48,7 @@ struct AssignedSyncSetup<'a> {
 fn sync_request(
     setup: AssignedSyncSetup<'_>,
 ) -> krabka_protocol::owned::sync_group_request::SyncGroupRequest {
-    classic_sync_request(crate::support::classic::ClassicSyncSetup {
+    classic_sync_request(ClassicSyncSetup {
         group_id: setup.group_id.to_owned(),
         generation_id: setup.generation_id,
         member_id: setup.member_id.to_owned(),
@@ -131,10 +134,10 @@ use crate::support::start_group_coordinator as start_broker;
 fn join_request(group_id: &str, member_id: &str, metadata: &'static [u8]) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: None,
-        ..classic_join_request(crate::support::classic::ClassicJoinSetup {
+        ..classic_join_request(ClassicJoinSetup {
             group_id: group_id.to_string(),
             member_id: member_id.to_string(),
-            timeouts: crate::support::classic::ClassicTimeouts {
+            timeouts: ClassicTimeouts {
                 session: krabka_units::millis(10_000),
                 ..Default::default()
             },
@@ -200,7 +203,7 @@ async fn describe_groups_reports_member_metadata_and_protocol_name() {
     let r3 = client
         .send(sync_request(AssignedSyncSetup {
             group_id,
-            generation_id: crate::support::classic::GenerationId(generation_id),
+            generation_id: GenerationId(generation_id),
             member_id: &member_id,
             assignment: ASSIGN,
         }))
@@ -277,7 +280,7 @@ async fn describe_groups_matches_real_kafka_range_subscription() {
     let r3 = client
         .send(sync_request(AssignedSyncSetup {
             group_id,
-            generation_id: crate::support::classic::GenerationId(generation_id),
+            generation_id: GenerationId(generation_id),
             member_id: &member_id,
             assignment: REAL_KAFKA_ASSIGNMENT,
         }))

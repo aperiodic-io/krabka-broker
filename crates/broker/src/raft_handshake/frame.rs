@@ -17,6 +17,7 @@ use krabka_raft::RaftHandshakeError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{API_KEY_API_VERSIONS, API_KEY_SASL_AUTHENTICATE, SASL_AUTHENTICATE_FLEXIBLE_VERSION};
+use crate::network::codec::validate_frame_length;
 
 /// Reads one length-prefixed Kafka request frame, removes the
 /// `RequestHeader` (v1 or v2), and returns `(api_key, api_version,
@@ -40,7 +41,7 @@ pub(super) async fn read_kafka_request(
     let mut size_buf = [0u8; 4];
     stream.read_exact(&mut size_buf).await?;
     let size = u32::from_be_bytes(size_buf) as usize;
-    crate::network::codec::validate_frame_length(size, max_frame_bytes).map_err(|_| {
+    validate_frame_length(size, max_frame_bytes).map_err(|_| {
         RaftHandshakeError::Sasl("Failing SASL authentication due to invalid receive size".into())
     })?;
     let mut frame = vec![0u8; size];

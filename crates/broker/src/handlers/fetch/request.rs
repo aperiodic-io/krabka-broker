@@ -11,7 +11,7 @@ use krabka_protocol::{owned::fetch_request::FetchRequest, primitives::uuid::Uuid
 use crate::{
     broker::Broker,
     fetch_session::{CachedPartitionState, FetchSessionKey, SessionDecision},
-    handlers::cluster_action_denied,
+    handlers::{RequestContext, cluster_action_denied, denied_topics, requested_topic_name},
 };
 
 /// Projection of `FetchRequest::topics` or of the cached session partitions.
@@ -89,7 +89,7 @@ pub(super) struct FetchPreparation {
 pub(super) fn prepare_fetch(
     broker: &Broker,
     (request, version): (&FetchRequest, i16),
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
 ) -> Result<FetchPreparation, i16> {
     let effective_replica_id = if request.replica_id >= 0 {
         request.replica_id
@@ -156,13 +156,13 @@ fn consumer_denied_topics(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
     effective_topics: &[EffectiveTopic],
-    context: &crate::handlers::RequestContext<'_>,
+    context: &RequestContext<'_>,
 ) -> std::collections::HashSet<String> {
     let names: Vec<String> = effective_topics
         .iter()
-        .map(|topic| crate::handlers::requested_topic_name(image, &topic.topic, topic.topic_id))
+        .map(|topic| requested_topic_name(image, &topic.topic, topic.topic_id))
         .collect();
-    crate::handlers::denied_topics(
+    denied_topics(
         broker.config.authorizer.as_ref(),
         image,
         context,

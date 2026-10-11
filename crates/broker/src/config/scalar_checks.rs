@@ -7,7 +7,11 @@ use krabka_units::{
     convert::{ByteSizeExt, TimeExt},
 };
 
-use crate::{BrokerError, config::BrokerConfig};
+use crate::{
+    BrokerError,
+    config::BrokerConfig,
+    config_keys::{SEGMENT_BYTES, validate_topic_config},
+};
 
 #[cfg(test)]
 mod tests;
@@ -518,11 +522,8 @@ impl BrokerConfig {
                 self.share_coordinator.state_topic_segment_bytes,
             ),
         ] {
-            crate::config_keys::validate_topic_config(
-                crate::config_keys::SEGMENT_BYTES,
-                &value.bytes_u64().to_string(),
-            )
-            .map_err(|reason| BrokerError::InvalidRuntimeConfig(format!("{name}: {reason}")))?;
+            validate_topic_config(SEGMENT_BYTES, &value.bytes_u64().to_string())
+                .map_err(|reason| BrokerError::InvalidRuntimeConfig(format!("{name}: {reason}")))?;
         }
         Ok(())
     }

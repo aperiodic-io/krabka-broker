@@ -13,7 +13,10 @@ use krabka_verified::{
 };
 
 use super::prepare::{PreparedBatch, PreparedSource};
-use crate::schema_validation::{RejectReason, Role, SchemaGate, SchemaValidator};
+use crate::{
+    metrics::BrokerMetrics,
+    schema_validation::{RejectReason, Role, SchemaGate, SchemaValidator},
+};
 
 /// The KIP-467 `error_message` a schema rejection carries.
 ///
@@ -53,7 +56,7 @@ pub(super) async fn validate_batch_schemas(
     validator: Option<&Arc<SchemaValidator>>,
     topic_name: &str,
     policy: RecordDecompressionPolicy,
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
 ) -> Result<(), Vec<BatchIndexAndErrorMessage>> {
     let Some(validator) = validator else {
         // The topic asked for validation and this broker has no registry to
@@ -144,7 +147,7 @@ pub(super) async fn validate_batch_schemas(
 
 /// Every schema refusal records its reason and reports the same wire row.
 fn schema_rejection(
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
     topic: &str,
     batch_index: i32,
     reason: &RejectReason,
@@ -165,7 +168,7 @@ struct SchemaCheck<'a> {
     validator: &'a Arc<SchemaValidator>,
     gate: SchemaGate,
     topic_name: &'a str,
-    metrics: &'a crate::metrics::BrokerMetrics,
+    metrics: &'a BrokerMetrics,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -227,7 +230,10 @@ mod tests {
     use krabka_units::secs;
 
     use super::*;
-    use crate::handlers::produce::test_support::encode_batch;
+    use crate::{
+        handlers::produce::test_support::encode_batch,
+        schema_validation::{SchemaGate, ValidationMode},
+    };
 
     /// A record the broker cannot decode must not be admitted by a validated
     /// topic.
@@ -283,7 +289,7 @@ mod tests {
         // No request reaches the registry: the record fails to decode before
         // any field is checked, so the address is never dialled.
         let validator = Arc::new(
-            crate::schema_validation::SchemaValidator::new(
+            SchemaValidator::new(
                 "http://127.0.0.1:1".to_owned(),
                 false,
                 100,
@@ -292,12 +298,12 @@ mod tests {
             )
             .expect("validator"),
         );
-        let gate = crate::schema_validation::SchemaGate {
+        let gate = SchemaGate {
             key: false,
             value: true,
-            mode: crate::schema_validation::ValidationMode::Id,
+            mode: ValidationMode::Id,
         };
-        let metrics = crate::metrics::BrokerMetrics::new();
+        let metrics = BrokerMetrics::new();
 
         let got = validate_batch_schemas(
             &prepared,

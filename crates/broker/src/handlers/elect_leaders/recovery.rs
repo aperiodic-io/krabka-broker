@@ -27,6 +27,7 @@ use crate::{
     broker::Broker,
     codes,
     config_keys::RecoveryStrategy,
+    handlers::submit_failure_code,
     unclean_recovery::{RecoveryJob, RecoveryOutcome},
 };
 
@@ -172,7 +173,7 @@ async fn spend_before_recovery(
         Err(error) => {
             tracing::warn!(%error, "elect-leaders could not spend the break-glass approval");
             Err((
-                crate::handlers::submit_failure_code(&error, codes::COORDINATOR_NOT_AVAILABLE),
+                submit_failure_code(&error, codes::COORDINATOR_NOT_AVAILABLE),
                 format!("submit failed: {error}"),
             ))
         }

@@ -2,6 +2,11 @@ use assert2::assert;
 use tempfile::tempdir;
 
 use super::*;
+use crate::{
+    config::{NodeRole, StretchProfile},
+    file_config::FileConfig,
+    host_port::local_host_name,
+};
 
 /// The gap `wait_for_self_registration_published` closes: a `submit_change`
 /// reply that has already committed and applied the registration, while the
@@ -165,7 +170,7 @@ mod publish_race {
 
 #[test]
 fn file_config_self_registration_uses_advertised_listener_for_legacy_endpoint() {
-    let file: crate::file_config::FileConfig = toml::from_str(
+    let file: FileConfig = toml::from_str(
         r#"
 inter_broker_listener_name = "INTERNAL"
 
@@ -219,8 +224,8 @@ protocol = "Plaintext"
 
 /// A stretch profile with two data sites and one witness site, with
 /// leadership pinned to `dc-a`.
-fn three_site_profile() -> crate::config::StretchProfile {
-    crate::config::StretchProfile {
+fn three_site_profile() -> StretchProfile {
+    StretchProfile {
         sites: vec!["dc-a".to_string(), "dc-b".to_string(), "dc-w".to_string()],
         witness_site: "dc-w".to_string(),
         preferred_leader_site: "dc-a".to_string(),
@@ -231,7 +236,7 @@ fn three_site_profile() -> crate::config::StretchProfile {
 ///
 /// The registration record mints a directory id under `log_dir`, so the
 /// caller passes a temporary directory rather than the source tree.
-fn node_with_roles(log_dir: &std::path::Path, roles: Vec<crate::config::NodeRole>) -> BrokerConfig {
+fn node_with_roles(log_dir: &std::path::Path, roles: Vec<NodeRole>) -> BrokerConfig {
     BrokerConfig {
         node_id: krabka_metadata::NodeId(4),
         roles,
@@ -394,7 +399,7 @@ fn self_controller_registration_uses_quorum_endpoint_and_feature_ranges() {
 /// dial.
 #[test]
 fn a_dynamic_controller_registers_its_listener_with_the_host_name_for_a_wildcard() {
-    let host_name = crate::host_port::local_host_name().unwrap_or_else(|| "127.0.0.1".into());
+    let host_name = local_host_name().unwrap_or_else(|| "127.0.0.1".into());
     let cases = [
         ("192.0.2.10:9592", "192.0.2.10".to_owned()),
         ("0.0.0.0:9592", host_name.clone()),
@@ -465,10 +470,15 @@ mod unclean_restart {
     use krabka_metadata::{LeaderEpoch, MetadataRecord, NodeId, PartitionRecord};
 
     use crate::{
+        authorizer::AllowAllAuthorizer,
         broker::{Broker, registration::register_broker},
+        clean_shutdown::{take, write},
         config::BrokerConfig,
         elr::{TopicElr, state::PartitionElr},
-        test_support::start_broker_with_authorizer,
+        test_support::{
+            IsrResponseCheck, LiveIsrSetup, accepted_isr_proposal, elr_topic_records,
+            start_broker_with_authorizer, started_controller_broker, wait_for_controller_leader,
+        },
     };
 
     const TOPIC: &str = "orders";
@@ -487,7 +497,7 @@ mod unclean_restart {
     /// One RF=3 partition with a full ISR, and a `min.insync.replicas` of 2,
     /// which is what gives the partition an ELR to fall below.
     fn seed_records() -> Vec<MetadataRecord> {
-        crate::test_support::elr_topic_records(
+        elr_topic_records(
             PartitionRecord {
                 topic: TOPIC.into(),
                 partition: 0,
@@ -515,7 +525,7 @@ mod unclean_restart {
     ///
     /// This is what `start_metadata_phase` does, in the order it does it.
     async fn boot(broker: &Arc<Broker>, config: &mut BrokerConfig) {
-        config.previous_broker_epoch = crate::clean_shutdown::take(&config.log_dir);
+        config.previous_broker_epoch = take(&config.log_dir);
         register_broker(config, &*broker.controller)
             .await
             .expect("self-registration");
@@ -529,7 +539,7 @@ mod unclean_restart {
     async fn cluster_with_node_two_eligible(
         broker: &Arc<Broker>,
     ) -> (BrokerConfig, tempfile::TempDir, i64) {
-        crate::test_support::wait_for_controller_leader(broker).await;
+        wait_for_controller_leader(broker).await;
         broker
             .controller
             .submit_change(seed_records())
@@ -541,10 +551,10 @@ mod unclean_restart {
         config.node_id = RESTARTING;
         boot(broker, &mut config).await;
 
-        crate::test_support::accepted_isr_proposal(
+        accepted_isr_proposal(
             broker,
-            crate::test_support::LiveIsrSetup::default(),
-            crate::test_support::IsrResponseCheck::PartitionOnly,
+            LiveIsrSetup::default(),
+            IsrResponseCheck::PartitionOnly,
         )
         .await;
         assert!(
@@ -570,8 +580,7 @@ mod unclean_restart {
     /// may be shorter than the records its ELR membership asserts it holds.
     #[tokio::test]
     async fn a_crashed_broker_loses_its_elr_membership_on_restart() {
-        let (handle, _dir) =
-            start_broker_with_authorizer(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (handle, _dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
         let broker = handle.broker_arc_for_test();
         let (mut config, _victim_dir, _epoch) = cluster_with_node_two_eligible(&broker).await;
 
@@ -595,7 +604,7 @@ mod unclean_restart {
     /// one says the broker really does write it on the way down.
     #[tokio::test]
     async fn a_graceful_stop_leaves_the_proof_its_own_restart_spends() {
-        let (handle, dir, broker) = crate::test_support::started_controller_broker().await;
+        let (handle, dir, broker) = started_controller_broker().await;
         let node_id = broker.config.node_id;
         let log_dir = broker.config.log_dir.clone();
         let epoch = broker
@@ -616,13 +625,12 @@ mod unclean_restart {
     /// cluster still holds for it, and keeps its membership.
     #[tokio::test]
     async fn a_gracefully_stopped_broker_keeps_its_elr_membership_on_restart() {
-        let (handle, _dir) =
-            start_broker_with_authorizer(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        let (handle, _dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
         let broker = handle.broker_arc_for_test();
         let (mut config, victim_dir, epoch) = cluster_with_node_two_eligible(&broker).await;
 
         // The graceful stop leaves its proof; the restart spends it.
-        crate::clean_shutdown::write(victim_dir.path(), epoch);
+        write(victim_dir.path(), epoch);
         boot(&broker, &mut config).await;
 
         assert!(

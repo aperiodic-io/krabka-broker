@@ -7,7 +7,8 @@
 //! JVM tools.
 
 use crate::jvm_acceptance::{
-    KAFKA_IMAGE, nc_check_connectivity, plain_jaas, start_sasl_plaintext_broker,
+    KAFKA_IMAGE, console_round_trip_with_props, nc_check_connectivity, plain_jaas,
+    start_sasl_plaintext_broker,
 };
 
 /// End-to-end `SASL_PLAINTEXT` + PLAIN drive of the JVM `kafka-topics`,
@@ -32,8 +33,7 @@ async fn jvm_sasl_plain_produce_consume() {
          sasl.jaas.config={}\n",
         plain_jaas(USER, PASS),
     );
-    let _props_file =
-        crate::jvm_acceptance::console_round_trip_with_props(KAFKA_IMAGE, TOPIC, &props);
+    let _props_file = console_round_trip_with_props(KAFKA_IMAGE, TOPIC, &props);
 
     broker.shutdown().await;
 }

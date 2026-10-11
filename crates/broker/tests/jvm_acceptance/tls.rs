@@ -11,6 +11,7 @@ use assert2::assert;
 use krabka_broker::BrokerConfig;
 
 use super::{docker::KAFKA_IMAGE, ports::broker0_advertised};
+use crate::support::{fixture_cache_dir, manifest_dir};
 
 /// Spawn the broker with a single `SSL` listener on an allocated port
 /// (advertised as an allocated port) with the dev cert/key from
@@ -49,13 +50,13 @@ pub(crate) async fn start_ssl_broker() -> (krabka_broker::BrokerHandle, tempfile
 /// `openjdk:17`. The image is always on disk, because the SSL test itself
 /// runs `kafka-broker-api-versions` from the same image.
 pub(crate) fn prepare_jks_truststore() -> std::path::PathBuf {
-    let cache_dir = crate::support::fixture_cache_dir("krabka-jvm-truststore", &["dev_cert.pem"]);
+    let cache_dir = fixture_cache_dir("krabka-jvm-truststore", &["dev_cert.pem"]);
     std::fs::create_dir_all(&cache_dir).expect("mkdir truststore cache");
     let ts_path = cache_dir.join("ts.jks");
 
     // Stage the cert in the cache dir so the bind mount is a directory we
     // control. This sidesteps mount-path quoting on /mnt/c under WSL.
-    let manifest_dir = crate::support::manifest_dir();
+    let manifest_dir = manifest_dir();
     let cert_src = manifest_dir
         .join("tests")
         .join("fixtures")
@@ -139,7 +140,7 @@ fn configure_tls(config: &mut BrokerConfig, protocol: krabka_security::ListenerP
     } else {
         "SSL"
     };
-    let security = crate::support::manifest_dir().join("tests/fixtures/security");
+    let security = manifest_dir().join("tests/fixtures/security");
     config.listeners = vec![ListenerSpec {
         name: name.into(),
         bind_addr: config.listen_addr,

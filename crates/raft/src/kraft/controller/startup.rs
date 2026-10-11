@@ -38,6 +38,7 @@ use crate::{
         transport::PeerSender,
         types::{NodeId, QuorumState},
     },
+    snapshot::SnapshotReader,
 };
 
 /// Metadata recovered before the controller engine is spawned.
@@ -308,7 +309,7 @@ impl KraftController {
         let mut last_snapshot_timestamp_ms = 0;
         let mut bootstrap_source = "the controller configuration";
         if let Some(bytes) = load_latest_checkpoint(&data_dir)? {
-            let contents = crate::snapshot::SnapshotReader::read(&bytes)?;
+            let contents = SnapshotReader::read(&bytes)?;
             // The records this checkpoint contains are below its boundary and
             // gone from the log, so its header is the only place their
             // create-time survives a restart.

@@ -50,7 +50,12 @@ use super::{
         actor::{GroupActorMessage, ReapOutcome},
     },
 };
-use crate::{metadata_source::MetadataSource, task_util::run_every};
+use crate::{
+    coordinator::unified::actor::GroupActorHandle,
+    metadata_source::MetadataSource,
+    task_util::{ask, run_every},
+    time_util::now_ms,
+};
 
 #[cfg(test)]
 mod tests;
@@ -73,7 +78,7 @@ pub(crate) async fn run(
         sweep(
             coordinator,
             owned,
-            crate::time_util::now_ms(),
+            now_ms(),
             retention_ms,
             interval.millis_i64(),
         )
@@ -107,14 +112,13 @@ pub(crate) async fn sweep(
         let Some(handle) = coordinator.find(&group_id) else {
             continue;
         };
-        let Ok(outcome) =
-            crate::task_util::ask(&handle.tx, |reply| GroupActorMessage::ReapExpiredOffsets {
-                now_ms,
-                retention_ms,
-                empty_grace_ms,
-                reply,
-            })
-            .await
+        let Ok(outcome) = ask(&handle.tx, |reply| GroupActorMessage::ReapExpiredOffsets {
+            now_ms,
+            retention_ms,
+            empty_grace_ms,
+            reply,
+        })
+        .await
         else {
             continue;
         };
@@ -148,11 +152,7 @@ fn sweepable(coordinator: &GroupCoordinator, group_id: &str) -> bool {
 /// reaped handle out. Clearing it unconditionally would strip the
 /// replacement's protocol-type lock, which routing and KIP-848 migration read,
 /// and its durable seed, which a later respawn replays from.
-fn forget_group(
-    coordinator: &GroupCoordinator,
-    group_id: &str,
-    handle: &Arc<crate::coordinator::unified::actor::GroupActorHandle>,
-) {
+fn forget_group(coordinator: &GroupCoordinator, group_id: &str, handle: &Arc<GroupActorHandle>) {
     if coordinator
         .groups
         .remove_if(group_id, |_, live| Arc::ptr_eq(live, handle))

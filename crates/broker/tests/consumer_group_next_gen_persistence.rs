@@ -13,7 +13,10 @@ use krabka_protocol::owned::{
     create_topics_request::{CreatableTopic, CreateTopicsRequest},
 };
 
-use crate::support::client::connect_client;
+use crate::support::{
+    client::{connect, connect_client},
+    consumer_groups::{consumer_heartbeat, joining_consumer},
+};
 
 async fn create_topic(client: &Client, name: &str, partitions: i32) {
     let req = CreateTopicsRequest {
@@ -63,11 +66,7 @@ async fn replay_preserves_group_epoch_and_members() {
         let (broker, client) = boot_topic(log_dir.clone(), "tp").await;
         let req = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp".into()]),
-            ..crate::support::consumer_groups::joining_consumer(
-                "gp",
-                uuid::Uuid::new_v4().to_string(),
-                60_000,
-            )
+            ..joining_consumer("gp", uuid::Uuid::new_v4().to_string(), 60_000)
         };
         let resp = client.send(req).await.unwrap();
         assert!(resp.error_code == 0);
@@ -85,11 +84,7 @@ async fn replay_preserves_group_epoch_and_members() {
         let req = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp".into()]),
             rebalance_timeout_ms: 60_000,
-            ..crate::support::consumer_groups::consumer_heartbeat(
-                "gp",
-                member_id.clone(),
-                initial_epoch,
-            )
+            ..consumer_heartbeat("gp", member_id.clone(), initial_epoch)
         };
         let resp = client.send(req).await.unwrap();
         assert!(resp.error_code == 0, "post-restart heartbeat must succeed");
@@ -107,11 +102,7 @@ async fn next_gen_state_cleared_after_leave_then_restart() {
         create_topic(&client, "tp2", 1).await;
         let join = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp2".into()]),
-            ..crate::support::consumer_groups::joining_consumer(
-                "gpx",
-                uuid::Uuid::new_v4().to_string(),
-                60_000,
-            )
+            ..joining_consumer("gpx", uuid::Uuid::new_v4().to_string(), 60_000)
         };
         let resp = client.send(join).await.unwrap();
         assert!(resp.error_code == 0);
@@ -126,8 +117,7 @@ async fn next_gen_state_cleared_after_leave_then_restart() {
             .is_err(),
             "group-empty waiter must not complete while a member is live"
         );
-        let leave =
-            crate::support::consumer_groups::consumer_heartbeat("gpx", member_id.clone(), -1);
+        let leave = consumer_heartbeat("gpx", member_id.clone(), -1);
         let _ = client.send(leave).await.unwrap();
         // The leave RPC awaits flush_pending→offsets_log.append synchronously,
         // so tombstones are durable before the RPC returns. Wait for actor's
@@ -141,7 +131,7 @@ async fn next_gen_state_cleared_after_leave_then_restart() {
         // After leave + restart, the member should be unknown.
         let req = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp2".into()]),
-            ..crate::support::consumer_groups::consumer_heartbeat("gpx", member_id.clone(), 5)
+            ..consumer_heartbeat("gpx", member_id.clone(), 5)
         };
         let resp = client.send(req).await.unwrap();
         assert!(resp.error_code == krabka_broker::codes::UNKNOWN_MEMBER_ID);
@@ -166,11 +156,7 @@ async fn replay_keeps_the_topics_a_regex_resolved_to_and_finds_new_ones() {
         let resp = client
             .send(ConsumerGroupHeartbeatRequest {
                 subscribed_topic_regex: Some("orders-.*".into()),
-                ..crate::support::consumer_groups::joining_consumer(
-                    "gre",
-                    uuid::Uuid::new_v4().to_string(),
-                    60_000,
-                )
+                ..joining_consumer("gre", uuid::Uuid::new_v4().to_string(), 60_000)
             })
             .await
             .unwrap();
@@ -206,11 +192,7 @@ async fn replay_keeps_the_topics_a_regex_resolved_to_and_finds_new_ones() {
     let mut member_epoch = initial_epoch;
     for _ in 0..200 {
         let resp = client
-            .send(crate::support::consumer_groups::consumer_heartbeat(
-                "gre",
-                member_id.clone(),
-                member_epoch,
-            ))
+            .send(consumer_heartbeat("gre", member_id.clone(), member_epoch))
             .await
             .unwrap();
         assert!(resp.error_code == 0, "{resp:?}");
@@ -240,7 +222,7 @@ async fn boot(log_dir: std::path::PathBuf) -> (krabka_broker::BrokerHandle, Arc<
         .await
         .unwrap();
     broker.wait_until_group_coordinator_ready().await;
-    let client = crate::support::client::connect(&broker.listen_addr().to_string(), "c").await;
+    let client = connect(&broker.listen_addr().to_string(), "c").await;
     (broker, client)
 }
 

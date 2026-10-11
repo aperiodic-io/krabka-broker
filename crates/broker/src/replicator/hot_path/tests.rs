@@ -30,8 +30,11 @@ use tempfile::TempDir;
 
 use super::ReplicaSeam;
 use crate::{
-    broker::spawn_partition, log_dir_status::LogDirRegistry, partition::Partition,
-    producer_state::ProducerState, replica_state::ReplicaState,
+    broker::spawn_partition,
+    log_dir_status::LogDirRegistry,
+    partition::{Partition, ReplicationTarget},
+    producer_state::ProducerState,
+    replica_state::ReplicaState,
 };
 
 /// The topic and partition the seam hard-codes, which a production partition
@@ -68,7 +71,7 @@ struct PartitionShape {
     delivery_watermark: Offset,
     current_leader: u64,
     current_leader_epoch: i32,
-    replication_target: crate::partition::ReplicationTarget,
+    replication_target: ReplicationTarget,
     diskless: bool,
     writer_running: bool,
 }

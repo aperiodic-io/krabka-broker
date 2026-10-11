@@ -13,8 +13,16 @@ use tokio::sync::{Notify, mpsc, oneshot};
 
 use super::{run_with_sequencer, writer_macros::run_writer};
 use crate::{
-    delivery::DeliveryHandles, log_dir_status::LogDirRegistry, partition::WriterMessage,
-    producer_state::ProducerState, replica_state::ReplicaState,
+    config::BrokerConfig,
+    delivery::DeliveryHandles,
+    diskless::hot_tail::HotTailCache,
+    error::BrokerError,
+    log_dir_status::LogDirRegistry,
+    partition::{AppendedBatch, ProduceData, ProduceJob, WriterMessage},
+    producer_state::ProducerState,
+    replica_state::ReplicaState,
+    test_support::{EmptyPayloadBatchSetup, RecordCount},
+    wal::{OffsetSequencer, SharedWal, WalStore},
 };
 
 #[derive(Debug)]
@@ -31,19 +39,19 @@ struct TestSequencer {
 }
 
 #[async_trait::async_trait]
-impl crate::wal::OffsetSequencer for TestSequencer {
+impl OffsetSequencer for TestSequencer {
     async fn assign(
         &self,
         _topic: &str,
         _partition: PartitionIndex,
         count: u32,
-    ) -> Result<Offset, crate::error::BrokerError> {
+    ) -> Result<Offset, BrokerError> {
         let base = self.next.fetch_add(i64::from(count), Ordering::SeqCst);
         Ok(Offset(base))
     }
 }
 
-pub(super) fn test_sequencer() -> Arc<dyn crate::wal::OffsetSequencer> {
+pub(super) fn test_sequencer() -> Arc<dyn OffsetSequencer> {
     Arc::new(TestSequencer {
         next: AtomicI64::new(0),
     })
@@ -56,11 +64,7 @@ pub(super) struct GatedWal {
     release_sync: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
     pub(super) trimmed_to: AtomicI64,
     trim_failures: AtomicUsize,
-    hot_tail: Option<(
-        Arc<crate::diskless::hot_tail::HotTailCache>,
-        uuid::Uuid,
-        PartitionIndex,
-    )>,
+    hot_tail: Option<(Arc<HotTailCache>, uuid::Uuid, PartitionIndex)>,
 }
 
 impl GatedWal {
@@ -86,7 +90,7 @@ impl GatedWal {
     #[must_use]
     pub(super) fn with_hot_tail(
         mut self,
-        cache: Arc<crate::diskless::hot_tail::HotTailCache>,
+        cache: Arc<HotTailCache>,
         topic_id: uuid::Uuid,
         partition: PartitionIndex,
     ) -> Self {
@@ -96,8 +100,8 @@ impl GatedWal {
 }
 
 #[async_trait::async_trait]
-impl crate::wal::WalStore for GatedWal {
-    async fn sync_durable(&self, leo: Offset) -> Result<Offset, crate::error::BrokerError> {
+impl WalStore for GatedWal {
+    async fn sync_durable(&self, leo: Offset) -> Result<Offset, BrokerError> {
         if let Some(started) = self.sync_started.lock().unwrap().take() {
             let _ = started.send(());
         }
@@ -111,7 +115,7 @@ impl crate::wal::WalStore for GatedWal {
         Ok(leo)
     }
 
-    async fn trim_to_offset(&self, new_start: Offset) -> Result<Offset, crate::error::BrokerError> {
+    async fn trim_to_offset(&self, new_start: Offset) -> Result<Offset, BrokerError> {
         if self
             .trim_failures
             .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
@@ -119,9 +123,7 @@ impl crate::wal::WalStore for GatedWal {
             })
             .is_ok()
         {
-            return Err(crate::error::BrokerError::Replication(
-                "injected WAL trim failure".into(),
-            ));
+            return Err(BrokerError::Replication("injected WAL trim failure".into()));
         }
         self.trimmed_to.store(new_start.0, Ordering::SeqCst);
         Ok(new_start)
@@ -137,11 +139,9 @@ impl crate::wal::WalStore for GatedWal {
 pub(super) fn open_log_with_records(path: &std::path::Path, records: i32) -> Log {
     let mut log = Log::open(path, LogConfig::default()).expect("open log");
     if records > 0 {
-        log.append(&mut sample_batch(
-            crate::test_support::EmptyPayloadBatchSetup {
-                count: crate::test_support::RecordCount(records),
-            },
-        ))
+        log.append(&mut sample_batch(EmptyPayloadBatchSetup {
+            count: RecordCount(records),
+        }))
         .expect("append");
     }
     log
@@ -159,9 +159,9 @@ pub(super) struct WriterOptions {
     pub(super) delivery: DeliveryHandles,
     pub(super) log_dir_status: LogDirRegistry,
     pub(super) producer_state: Arc<ProducerState>,
-    pub(super) wal: Option<crate::wal::SharedWal>,
+    pub(super) wal: Option<SharedWal>,
     pub(super) max_produce_group: usize,
-    pub(super) sequencer: Option<Arc<dyn crate::wal::OffsetSequencer>>,
+    pub(super) sequencer: Option<Arc<dyn OffsetSequencer>>,
 }
 
 impl WriterOptions {
@@ -185,7 +185,7 @@ impl Default for WriterOptions {
             log_dir_status: LogDirRegistry::default(),
             producer_state: Arc::new(ProducerState::new()),
             wal: None,
-            max_produce_group: crate::config::BrokerConfig::default().max_produce_group,
+            max_produce_group: BrokerConfig::default().max_produce_group,
             sequencer: None,
         }
     }
@@ -245,8 +245,7 @@ pub(super) fn default_writer() -> DefaultWriter {
     }
 }
 
-pub(super) type ProduceAck =
-    oneshot::Receiver<Result<crate::partition::AppendedBatch, crate::error::BrokerError>>;
+pub(super) type ProduceAck = oneshot::Receiver<Result<AppendedBatch, BrokerError>>;
 
 /// Queue an owned batch without waiting for its append. Callers decide when to
 /// receive or drop the ack, so notification and group-draining tests retain
@@ -257,8 +256,8 @@ pub(super) async fn queue_batch(
 ) -> ProduceAck {
     let (ack, receiver) = oneshot::channel();
     sender
-        .send(WriterMessage::Produce(crate::partition::ProduceJob {
-            data: crate::partition::ProduceData::Owned(batch),
+        .send(WriterMessage::Produce(ProduceJob {
+            data: ProduceData::Owned(batch),
             ack,
             producer_check: None,
         }))

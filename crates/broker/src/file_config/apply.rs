@@ -19,6 +19,10 @@ use super::{
     topic_policy::apply_topic_policy,
     validate::positive_time,
 };
+use crate::{
+    config::{BrokerConfig, DEFAULT_BROKER_ID},
+    replica_selector::ReplicaSelectorKind,
+};
 
 impl FileConfig {
     /// The node id of a broker that holds `current` before this file applies.
@@ -32,7 +36,7 @@ impl FileConfig {
     #[must_use]
     pub fn resolved_broker_id(&self, current: i32) -> i32 {
         match self.broker_id {
-            Some(id) if current == crate::config::DEFAULT_BROKER_ID => id,
+            Some(id) if current == DEFAULT_BROKER_ID => id,
             _ => current,
         }
     }
@@ -65,7 +69,7 @@ impl FileConfig {
     //   that no configured key can verify.
     /// # Errors
     /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
-    pub fn apply_to(self, cfg: &mut crate::config::BrokerConfig) -> Result<(), FileConfigError> {
+    pub fn apply_to(self, cfg: &mut BrokerConfig) -> Result<(), FileConfigError> {
         self.apply_to_inner(cfg, true)
     }
 
@@ -79,17 +83,17 @@ impl FileConfig {
     /// Returns an error when any individual file value is invalid.
     pub fn apply_before_runtime_overlay(
         self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         self.apply_to_inner(cfg, false)
     }
 
     fn apply_to_inner(
         self,
-        cfg: &mut crate::config::BrokerConfig,
+        cfg: &mut BrokerConfig,
         validate_runtime: bool,
     ) -> Result<(), FileConfigError> {
-        let defaults = crate::config::BrokerConfig::default();
+        let defaults = BrokerConfig::default();
         cfg.broker_id = self.resolved_broker_id(cfg.broker_id);
         let has_runtime = self.runtime.is_some();
         if let Some(runtime) = self.runtime {
@@ -102,10 +106,7 @@ impl FileConfig {
             cfg.stretch = Some(stretch.into_profile()?);
         }
         if let Some(sel) = self.replica_selector {
-            cfg.replica_selector = crate::replica_selector::ReplicaSelectorKind::from_config_str(
-                &sel,
-            )
-            .map_err(|bad| {
+            cfg.replica_selector = ReplicaSelectorKind::from_config_str(&sel).map_err(|bad| {
                 FileConfigError::InvalidConfig(format!("unknown replica_selector: {bad}"))
             })?;
         }
@@ -246,7 +247,10 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
-    use crate::file_config::FileListener;
+    use crate::{
+        config::BrokerConfig,
+        file_config::{FileListener, test_support::configured_unwrap_parse},
+    };
 
     #[test]
     fn empty_toml_round_trips() {
@@ -256,7 +260,7 @@ mod tests {
 
     #[test]
     fn applies_inter_broker_principal_node_ids() {
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(
+        let cfg = configured_unwrap_parse(
             r"
 [inter_broker_principal_node_ids]
 admin = 1
@@ -505,7 +509,7 @@ replica_lag_time_max = "2s"
 controller_election_timeout = "500ms"
 controller_heartbeat_interval = "100ms"
 "#;
-        let cfg = crate::file_config::test_support::configured_unwrap_parse(src).unwrap();
+        let cfg = configured_unwrap_parse(src).unwrap();
 
         check!(cfg.heartbeat_interval == millis(500));
         check!(cfg.heartbeat_timeout == millis(1500));
@@ -522,7 +526,7 @@ rack = "az-1"
 replica_selector = "rack-aware"
 "#;
         let cfg: FileConfig = toml::from_str(src).expect("parse");
-        let mut broker = crate::config::BrokerConfig::default();
+        let mut broker = BrokerConfig::default();
         cfg.apply_to(&mut broker).expect("apply");
         assert!(broker.rack.as_deref() == Some("az-1"));
         assert!(broker.replica_selector == ReplicaSelectorKind::RackAware);
@@ -534,7 +538,7 @@ broker_id = 0
 replica_selector = "nonsense"
 "#;
         let cfg: FileConfig = toml::from_str(src).expect("parse");
-        let mut broker = crate::config::BrokerConfig::default();
+        let mut broker = BrokerConfig::default();
         assert!(cfg.apply_to(&mut broker).is_err());
     }
     #[test]

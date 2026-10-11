@@ -9,6 +9,7 @@ use std::path::Path;
 use krabka_broker::{BootstrapMode, Broker, BrokerConfig};
 
 use super::ports::{broker0_advertised, broker0_listen, controller_addr_0};
+use crate::support::{JvmBrokerSetup, controller_voters, init_jvm_tracing, jvm_broker_config};
 
 pub(crate) type HostBroker = (krabka_broker::BrokerHandle, tempfile::TempDir);
 
@@ -16,13 +17,13 @@ pub(crate) type HostBroker = (krabka_broker::BrokerHandle, tempfile::TempDir);
 pub(crate) fn host_broker_config(dir: &Path, client_context: &str) -> BrokerConfig {
     let listen = broker0_listen().parse().expect(client_context);
     let controller = controller_addr_0().parse().expect("allocated addr");
-    crate::support::jvm_broker_config(
+    jvm_broker_config(
         dir.to_path_buf(),
-        crate::support::JvmBrokerSetup {
+        JvmBrokerSetup {
             listen,
             controller,
             advertised: (broker0_advertised()).to_owned(),
-            voters: crate::support::controller_voters(&[(1, controller)]),
+            voters: controller_voters(&[(1, controller)]),
             ..Default::default()
         },
     )
@@ -90,7 +91,7 @@ async fn start_host_broker_in_with(
     dir: &Path,
     adjust: impl FnOnce(&mut BrokerConfig),
 ) -> krabka_broker::BrokerHandle {
-    crate::support::init_jvm_tracing("krabka_broker=debug,info");
+    init_jvm_tracing("krabka_broker=debug,info");
     let mut config = BrokerConfig {
         bootstrap_mode: bootstrap_mode(dir),
         ..host_broker_config(dir, "static addr")
@@ -128,7 +129,7 @@ pub(crate) async fn start_host_broker_jbod() -> (
     tempfile::TempDir,
     tempfile::TempDir,
 ) {
-    crate::support::init_jvm_tracing("krabka_broker=debug,info");
+    init_jvm_tracing("krabka_broker=debug,info");
     let primary = tempfile::tempdir().expect("tempdir");
     let extra = tempfile::tempdir().expect("tempdir");
     let config = BrokerConfig {

@@ -13,6 +13,8 @@ use std::{
 use krabka_metadata::BreakGlassAction as GatedAction;
 use prometheus_client::encoding::{EncodeLabelSet, EncodeLabelValue, LabelValueEncoder};
 
+use crate::break_glass::action_name;
+
 /// Sentinel label value that folds unbounded inputs (unrecognised
 /// `api_key`s, `SaslAuthenticate` without a prior handshake) into one
 /// series, keeping label cardinality bounded.
@@ -255,7 +257,7 @@ impl BreakGlassAction {
     /// The `action` label value this transition renders as.
     #[must_use]
     pub fn as_str(self) -> &'static str {
-        crate::break_glass::action_name(self.0)
+        action_name(self.0)
     }
 }
 

@@ -5,6 +5,8 @@ use moxy::{
     token::{Ident, Span, TokenStream, TokenTree},
 };
 
+use crate::meta::item_body;
+
 fn methods(meta: TokenStream) -> Result<Vec<Ident>, ParseError> {
     let mut names = Vec::new();
     let mut expecting_name = true;
@@ -109,8 +111,7 @@ fn implementation(name: &Ident) -> Result<TokenStream, ParseError> {
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     let names = methods(meta)?;
-    let (mut tokens, body) =
-        crate::meta::item_body(item, "object_store_delegate", TokenTree::is_keyword_impl)?;
+    let (mut tokens, body) = item_body(item, "object_store_delegate", TokenTree::is_keyword_impl)?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

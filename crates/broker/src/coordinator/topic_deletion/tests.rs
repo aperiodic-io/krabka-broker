@@ -8,13 +8,21 @@ use krabka_metadata::{DeleteTopicRecord, MetadataRecord, TopicRecord};
 use uuid::Uuid;
 
 use super::{deleted_topics, on_topics_deleted};
-use crate::coordinator::{
-    test_support::{metadata_delta_image as image, offset_entry as entry},
-    unified::{
-        classic_state::ClassicGroup,
-        group::{CoordinatorGroup, GroupKind},
-        test_support::make_coord_with_log,
+use crate::{
+    authorizer::AllowAllAuthorizer,
+    coordinator::{
+        test_support::{fetch_offset, metadata_delta_image as image, offset_entry as entry},
+        unified::{
+            classic_state::ClassicGroup,
+            group::{CoordinatorGroup, GroupKind},
+            test_support::make_coord_with_log,
+        },
     },
+    handlers::{
+        offset_commit::handle as offset_commit_handle,
+        test_support::{CreateTopicSetup, configured_topic_request},
+    },
+    test_support::start_broker_with_authorizer_no_audit,
 };
 
 krabka_macros::delete_topic_request!(delete_request);
@@ -136,13 +144,10 @@ async fn a_recreated_topic_does_not_inherit_the_old_committed_offsets() {
     const FETCH_VERSION: i16 = 7;
 
     async fn fetched_offset(broker: &Broker) -> i64 {
-        crate::coordinator::test_support::fetch_offset(broker, GROUP, TOPIC, FETCH_VERSION).await
+        fetch_offset(broker, GROUP, TOPIC, FETCH_VERSION).await
     }
 
-    let (handle, _dir) = crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(
-        crate::authorizer::AllowAllAuthorizer,
-    ))
-    .await;
+    let (handle, _dir) = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
     handle.wait_until_group_coordinator_ready().await;
     let broker = handle.broker_arc_for_test();
     let client = krabka_client_core::Client::builder()
@@ -152,12 +157,10 @@ async fn a_recreated_topic_does_not_inherit_the_old_committed_offsets() {
         .await
         .expect("client build");
     let create = || {
-        crate::handlers::test_support::configured_topic_request(
-            crate::handlers::test_support::CreateTopicSetup {
-                topic: TOPIC,
-                ..Default::default()
-            },
-        )
+        configured_topic_request(CreateTopicSetup {
+            topic: TOPIC,
+            ..Default::default()
+        })
     };
 
     let created = client.send(create()).await.expect("CreateTopics");
@@ -187,10 +190,9 @@ async fn a_recreated_topic_does_not_inherit_the_old_committed_offsets() {
         let broker = Arc::clone(&broker);
         let ctx = &ctx;
         async move {
-            let committed =
-                crate::handlers::offset_commit::handle(&broker, request, COMMIT_VERSION, ctx)
-                    .await
-                    .expect("OffsetCommit");
+            let committed = offset_commit_handle(&broker, request, COMMIT_VERSION, ctx)
+                .await
+                .expect("OffsetCommit");
             committed.topics[0].partitions[0].error_code
         }
     };

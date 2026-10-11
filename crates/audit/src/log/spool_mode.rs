@@ -133,13 +133,15 @@ mod tests {
 
     use super::*;
     use crate::{
+        NodeId,
+        chain::{ChainState, GENESIS_HEAD},
         event::AuditEventClass,
         log::{
             AuditLog, AuditMode,
             test_support::{
-                FailableSink, REPLAY_EVERY, ROOMY_CAP, await_until, failed_sink_stats,
-                finish_writer, healthy_sink_stats, life, params, params_with_clock, product,
-                record_sequences, spawn_writer, test_signer,
+                FailableSink, REPLAY_EVERY, ROOMY_CAP, await_until, emit_lifecycle,
+                failed_sink_stats, finish_writer, healthy_sink_stats, life, params,
+                params_with_clock, product, record_sequences, spawn_writer, test_signer,
             },
         },
         spool::Spool,
@@ -204,13 +206,13 @@ mod tests {
     }
 
     async fn check_required_failure(log: &AuditLog, reason: &str) {
-        let error = log.emit_required(life(crate::NodeId(1))).await.unwrap_err();
+        let error = log.emit_required(life(NodeId(1))).await.unwrap_err();
         check!(error.to_string().contains(reason));
     }
 
     fn first_chained_record() -> AuditRecord {
-        let mut record = AuditRecord::from_event(&life(crate::NodeId(0)), &product());
-        record.push_chain_headers(0, &crate::chain::GENESIS_HEAD);
+        let mut record = AuditRecord::from_event(&life(NodeId(0)), &product());
+        record.push_chain_headers(0, &GENESIS_HEAD);
         record
     }
 
@@ -258,9 +260,9 @@ mod tests {
     async fn records_spool_on_sink_failure_then_replay_to_sink() {
         let fixture = failing_spool(FailingSpoolSetup::default());
 
-        fixture.log.emit(life(crate::NodeId(1)));
-        fixture.log.emit(life(crate::NodeId(2)));
-        fixture.log.emit(life(crate::NodeId(3)));
+        fixture.log.emit(life(NodeId(1)));
+        fixture.log.emit(life(NodeId(2)));
+        fixture.log.emit(life(NodeId(3)));
         // wait until the writer has drained all three into the spool
         await_until("3 records spooled", || fixture.stats.spooled() >= 3).await;
         check!(fixture.stats.depth() >= 3);
@@ -295,7 +297,7 @@ mod tests {
         let (log, rx) = AuditLog::new(16);
         let spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         let h = spawn_writer(rx, params(sink.clone(), spool, stats.clone()));
-        crate::log::test_support::emit_lifecycle(&log, &[crate::NodeId(1), crate::NodeId(2)]);
+        emit_lifecycle(&log, &[NodeId(1), NodeId(2)]);
         finish_writer(log, h).await;
         check!((sink.inner.records().len(), stats.spooled(), stats.depth()) == (2, 0, 0));
     }
@@ -308,7 +310,7 @@ mod tests {
         let spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         let handle = spawn_writer(receiver, params(sink.clone(), spool, Arc::clone(&stats)));
 
-        log.emit_required(life(crate::NodeId(1))).await.unwrap();
+        log.emit_required(life(NodeId(1))).await.unwrap();
         finish_writer(log, handle).await;
 
         check!(
@@ -331,7 +333,7 @@ mod tests {
         check_required_failure(&log, "indeterminate").await;
         handle.await.unwrap();
         check!(
-            log.emit_required(life(crate::NodeId(2)))
+            log.emit_required(life(NodeId(2)))
                 .await
                 .unwrap_err()
                 .to_string()
@@ -344,8 +346,8 @@ mod tests {
     async fn indeterminate_replay_poison_survives_after_a_successful_prefix() {
         let dir = tempfile::tempdir().unwrap();
         let mut spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
-        let mut chain = crate::chain::ChainState::new();
-        for event in [life(crate::NodeId(1)), life(crate::NodeId(2))] {
+        let mut chain = ChainState::new();
+        for event in [life(NodeId(1)), life(NodeId(2))] {
             let mut record = AuditRecord::from_event(&event, &product());
             let (seq, previous) = chain.extend(&record.value);
             record.push_chain_headers(seq, &previous);
@@ -378,8 +380,8 @@ mod tests {
             frequency: CheckpointFrequency::Every(AuditEventCount(2)),
             ..Default::default()
         });
-        fixture.log.emit(life(crate::NodeId(0)));
-        fixture.log.emit(life(crate::NodeId(1))); // 2 records → triggers a checkpoint, all spooled
+        fixture.log.emit(life(NodeId(0)));
+        fixture.log.emit(life(NodeId(1))); // 2 records → triggers a checkpoint, all spooled
         // 2 chained records + 1 count-triggered checkpoint all land in the spool
         await_until("2 records + checkpoint spooled", || {
             fixture.stats.spooled() >= 3
@@ -420,8 +422,8 @@ mod tests {
         let one = {
             let d2 = tempfile::tempdir().unwrap();
             let mut s = Spool::open(d2.path(), ROOMY_CAP).unwrap();
-            let mut rec = AuditRecord::from_event(&life(crate::NodeId(0)), &product());
-            rec.push_chain_headers(0, &crate::chain::GENESIS_HEAD);
+            let mut rec = AuditRecord::from_event(&life(NodeId(0)), &product());
+            rec.push_chain_headers(0, &GENESIS_HEAD);
             s.append(&rec).unwrap();
             s.size()
         };
@@ -430,7 +432,7 @@ mod tests {
         let spool = Spool::open(dir.path(), one).unwrap();
         let h = spawn_writer(rx, params(sink.clone(), spool, stats.clone()));
         for i in 0..6 {
-            log.emit(life(crate::NodeId(i)));
+            log.emit(life(NodeId(i)));
         }
         // wait until all six events are accounted for (each is spooled or dropped)
         await_until("6 events processed", || {
@@ -474,10 +476,7 @@ mod tests {
         let (params, clock) = params_with_clock(sink.clone(), spool, stats.clone());
         let handle = spawn_writer(receiver, params);
 
-        crate::log::test_support::emit_lifecycle(
-            &log,
-            &[crate::NodeId(0), crate::NodeId(1), crate::NodeId(2)],
-        );
+        emit_lifecycle(&log, &[NodeId(0), NodeId(1), NodeId(2)]);
         await_until("one spooled and two lost", || stats.dropped() == 2).await;
         check_spool_within_capacity(dir.path(), one);
 
@@ -512,9 +511,9 @@ mod tests {
     #[tokio::test]
     async fn partial_replay_keeps_remainder_then_drains() {
         let fixture = failing_spool(FailingSpoolSetup::default());
-        fixture.log.emit(life(crate::NodeId(0)));
-        fixture.log.emit(life(crate::NodeId(1)));
-        fixture.log.emit(life(crate::NodeId(2)));
+        fixture.log.emit(life(NodeId(0)));
+        fixture.log.emit(life(NodeId(1)));
+        fixture.log.emit(life(NodeId(2)));
         await_until("3 records spooled", || fixture.stats.depth() == 3).await;
 
         // allow exactly 2 replay writes, then fail → partial replay

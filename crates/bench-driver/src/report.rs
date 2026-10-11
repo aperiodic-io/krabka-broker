@@ -11,9 +11,10 @@ use krabka_units::{fmt::Human as _, prelude::*};
 
 use crate::{
     aggregate::CellKey,
+    graph::{render_html as render_graph_html, render_web_fragment as render_graph_web_fragment},
     ids::{MessageCount, TimeOffsetMs},
     numeric::{mebibytes_f64, millis_f64, to_f64},
-    scenario::{RunOutput, Stack},
+    scenario::{Disturbance, LatencyPercentiles, RunOutput, Sample, Stack},
 };
 
 fn push_fmt(output: &mut String, args: Arguments<'_>) {
@@ -280,7 +281,7 @@ fn render_group(out: &mut String, key: &CellKey, runs: &[RunOutput]) {
 
     // ── Failover disturbance (mean across runs that injected a kill) ────
     for (label, stack_runs) in [("krabka", &krabka), ("kafka", &kafka)] {
-        let dists: Vec<&crate::scenario::Disturbance> = stack_runs
+        let dists: Vec<&Disturbance> = stack_runs
             .iter()
             .filter_map(|r| r.disturbance.as_ref())
             .collect();
@@ -368,7 +369,7 @@ fn truncate_list(items: &[String], n: usize) -> String {
     }
 }
 
-type LatencySelector = fn(&crate::scenario::LatencyPercentiles) -> f64;
+type LatencySelector = fn(&LatencyPercentiles) -> f64;
 
 /// The percentile rows of a latency table. Each row holds a label, a way to read
 /// the value out in the unit the statistics run over, and a way to write the
@@ -390,7 +391,7 @@ fn render_latency_table(
     out: &mut String,
     heading: &str,
     (krabka, kafka): (&[&RunOutput], &[&RunOutput]),
-    select: fn(&RunOutput) -> &crate::scenario::LatencyPercentiles,
+    select: fn(&RunOutput) -> &LatencyPercentiles,
 ) {
     push_fmt(out, format_args!("{heading}\n\n"));
     out.push_str("| percentile | krabka | kafka |\n|---|---|---|\n");
@@ -691,10 +692,7 @@ fn require_rate_samples(
     }
 }
 
-fn mean_failover_value(
-    runs: &[&RunOutput],
-    value: impl Fn(&crate::scenario::Disturbance) -> f64,
-) -> Option<f64> {
+fn mean_failover_value(runs: &[&RunOutput], value: impl Fn(&Disturbance) -> f64) -> Option<f64> {
     let vals: Vec<f64> = runs
         .iter()
         .filter_map(|r| r.disturbance.as_ref())
@@ -748,7 +746,7 @@ fn rate_recovery_for_run(r: &RunOutput, select: SampleRate) -> Option<RateRecove
     // Sample offsets are measured from the *measurement* window start, so the
     // kill offset drops the warmup the scenario spent before it.
     let kill_offset = failover.kill_after - r.scenario.warmup;
-    let rate_at = |s: &crate::scenario::Sample| select(s).per_sec_f64();
+    let rate_at = |s: &Sample| select(s).per_sec_f64();
     let baseline: Vec<f64> = r
         .samples
         .iter()
@@ -759,7 +757,7 @@ fn rate_recovery_for_run(r: &RunOutput, select: SampleRate) -> Option<RateRecove
         return None;
     }
     let baseline_rate = mean(&baseline);
-    let after: Vec<&crate::scenario::Sample> = r
+    let after: Vec<&Sample> = r
         .samples
         .iter()
         .filter(|s| s.t_offset_ms.as_time() >= kill_offset)
@@ -785,13 +783,13 @@ fn rate_recovery_for_run(r: &RunOutput, select: SampleRate) -> Option<RateRecove
 }
 
 /// How one of the two client message rates is read out of a time-series sample.
-type SampleRate = fn(&crate::scenario::Sample) -> Frequency;
+type SampleRate = fn(&Sample) -> Frequency;
 
-fn producer_sample_rate(s: &crate::scenario::Sample) -> Frequency {
+fn producer_sample_rate(s: &Sample) -> Frequency {
     s.producer_rate
 }
 
-fn consumer_sample_rate(s: &crate::scenario::Sample) -> Frequency {
+fn consumer_sample_rate(s: &Sample) -> Frequency {
     s.consumer_rate
 }
 
@@ -1096,7 +1094,7 @@ pub fn render_html(input_dir: &Path, strict: bool, title: &str) -> Result<String
         .into_iter()
         .map(|(_, r)| r)
         .collect();
-    Ok(crate::graph::render_html(&outputs, title))
+    Ok(render_graph_html(&outputs, title))
 }
 
 /// Renders the website HTML fragment from every run in `input_dir`. The
@@ -1110,7 +1108,7 @@ pub fn render_web_fragment(input_dir: &Path, strict: bool) -> Result<String> {
         .into_iter()
         .map(|(p, r)| (run_tag_from_path(&p), r))
         .collect();
-    Ok(crate::graph::render_web_fragment(&tagged))
+    Ok(render_graph_web_fragment(&tagged))
 }
 
 #[cfg(test)]
@@ -1122,12 +1120,16 @@ mod tests {
     use crate::{
         ids::WallclockMs,
         numeric::{event_rate, nonnegative_i64_to_u64},
-        scenario::{Disturbance, ModeTag, Sample, Throughput, Topology},
+        scenario::{
+            Disturbance, FailoverSpec, LatencyPercentiles, ModeTag, Resource, Sample, Throughput,
+            Topology,
+            fixture::{scenario, short_scenario},
+        },
     };
 
     fn fake_run(stack: Stack, msgs: u64) -> RunOutput {
         RunOutput {
-            scenario: crate::scenario::fixture::scenario("small-msg-saturate"),
+            scenario: scenario("small-msg-saturate"),
             stack,
             topology: Topology {
                 partitions: 6,
@@ -1156,7 +1158,7 @@ mod tests {
         r.scenario.replication_factor = 3;
         r.scenario.duration = secs(12);
         r.scenario.warmup = Time::ZERO;
-        r.scenario.failover = Some(crate::scenario::FailoverSpec {
+        r.scenario.failover = Some(FailoverSpec {
             kill_after: secs(4),
             target: "partition0_leader".into(),
         });
@@ -1202,7 +1204,7 @@ mod tests {
     impl RunOutput {
         fn default_placeholder() -> Self {
             Self {
-                scenario: crate::scenario::fixture::short_scenario(1),
+                scenario: short_scenario(1),
                 stack: Stack::Krabka,
                 topology: Topology {
                     partitions: 1,
@@ -1212,9 +1214,9 @@ mod tests {
                 wallclock_start_unix_ms: WallclockMs(0),
                 wallclock_end_unix_ms: WallclockMs(0),
                 throughput: Throughput::default(),
-                producer_latency: crate::scenario::LatencyPercentiles::default(),
-                consumer_e2e_latency: crate::scenario::LatencyPercentiles::default(),
-                resource: crate::scenario::Resource::default(),
+                producer_latency: LatencyPercentiles::default(),
+                consumer_e2e_latency: LatencyPercentiles::default(),
+                resource: Resource::default(),
                 disturbance: None,
                 startup: None,
                 first_ack: Time::ZERO,

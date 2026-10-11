@@ -11,7 +11,7 @@ use std::process::Command;
 use base64::Engine as _;
 use uuid::Uuid;
 
-use crate::support::bridge_gateway;
+use crate::support::{bridge_gateway, jvm_acks_all_producer, jvm_tool_output};
 
 /// cp-kafka 6.1.1 (Kafka 2.7) ships the standard Apache Kafka CLI tools used
 /// for produce / topic admin / `kafka-dump-log`. NOTE: its bundled consumer
@@ -83,13 +83,13 @@ pub fn docker_bridge_gateway() -> String {
 /// default bridge with `host.docker.internal` wired to the host gateway.
 /// Mirrors `jvm_acceptance.rs::docker_run_kafka_tool_with_image`.
 pub fn docker_run_kafka_tool_with_image(image: &str, args: &[&str]) -> std::process::Output {
-    crate::support::jvm_tool_output(image, args, "kip320")
+    jvm_tool_output(image, args, "kip320")
 }
 
 /// Produce `lines` to `topic` partition 0 with the JVM `kafka-console-producer`
 /// at `acks=all`, one record per line. Panics on producer failure.
 pub fn produce_lines_via_jvm(bootstrap: &str, topic: &str, lines: &[String]) {
-    let mut child = crate::support::jvm_acks_all_producer(KAFKA_IMAGE, bootstrap, topic);
+    let mut child = jvm_acks_all_producer(KAFKA_IMAGE, bootstrap, topic);
     {
         use std::io::Write as _;
         let stdin = child.stdin.as_mut().expect("stdin");

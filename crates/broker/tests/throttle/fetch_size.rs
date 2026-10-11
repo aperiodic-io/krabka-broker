@@ -11,12 +11,15 @@
 use assert2::assert;
 
 use crate::{
+    CLIENT_ID,
     cluster::{
         add_follower, add_follower_in_isr, create_topic_plaintext, start_single_broker_plaintext,
         wait_partition_exists,
     },
     configs::drive_incremental_alter_configs_plaintext,
+    kafka_wire::AutomaticTopicSetup,
     records::{fetch_plaintext_replica, produce_plaintext},
+    support::topics::ConfiguredTopicSetup,
 };
 
 /// Sets a leader throttle rate of 512 bytes/sec and the given
@@ -38,9 +41,9 @@ async fn replica_fetch_bytes(
     // replica 2 as a follower so its fetch is served.
     create_topic_plaintext(
         addr,
-        crate::kafka_wire::AutomaticTopicSetup {
-            client_id: crate::CLIENT_ID,
-            topic: crate::support::topics::ConfiguredTopicSetup {
+        AutomaticTopicSetup {
+            client_id: CLIENT_ID,
+            topic: ConfiguredTopicSetup {
                 name: ("bar").into(),
                 ..Default::default()
             },
@@ -155,9 +158,9 @@ async fn unthrottled_partition_unaffected() {
     // Create topic rf=1.
     create_topic_plaintext(
         addr,
-        crate::kafka_wire::AutomaticTopicSetup {
-            client_id: crate::CLIENT_ID,
-            topic: crate::support::topics::ConfiguredTopicSetup {
+        AutomaticTopicSetup {
+            client_id: CLIENT_ID,
+            topic: ConfiguredTopicSetup {
                 name: ("baz").into(),
                 ..Default::default()
             },

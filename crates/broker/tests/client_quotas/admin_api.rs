@@ -10,6 +10,14 @@ use super::{
     cluster::{seed_compat_shim_disable_acl, start_single_broker_sasl_plaintext_with_users},
     quota_admin::{drive_alter_client_quotas_sasl, drive_describe_client_quotas_sasl},
 };
+use crate::{
+    CLIENT_ID,
+    cluster::wait_alice_quota,
+    kafka_wire::{
+        PlainAuthenticationSetup,
+        quotas::{QuotaAlterSetup, QuotaDescribeSetup, UserQuotaSetup, alter_user_quota},
+    },
+};
 
 /// Test 1: `AlterClientQuotas` sets `(user=alice) producer_byte_rate=1024`.
 ///
@@ -24,10 +32,10 @@ async fn alter_then_describe_round_trip() {
     .await;
 
     // Alter: set producer_byte_rate=1024 for (user=alice).
-    let alter_resp = crate::kafka_wire::quotas::alter_user_quota(
+    let alter_resp = alter_user_quota(
         addr,
-        crate::kafka_wire::quotas::UserQuotaSetup {
-            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+        UserQuotaSetup {
+            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
             ..Default::default()
         },
     )
@@ -40,14 +48,14 @@ async fn alter_then_describe_round_trip() {
     );
 
     // Await until the quota is visible in the committed metadata image.
-    crate::cluster::wait_alice_quota(&handle, "producer_byte_rate", 1024.0).await;
+    wait_alice_quota(&handle, "producer_byte_rate", 1024.0).await;
 
     // Describe: fetch back the quota.
     let desc = drive_describe_client_quotas_sasl(
         addr,
         vec![("user".into(), 2 /* ANY */, None)],
-        &crate::kafka_wire::quotas::QuotaDescribeSetup {
-            authentication: crate::kafka_wire::PlainAuthenticationSetup::admin(crate::CLIENT_ID),
+        &QuotaDescribeSetup {
+            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
             ..Default::default()
         },
     )
@@ -103,9 +111,9 @@ async fn non_super_user_denied() {
                 vec![("user".into(), Some("alice".into()))],
                 vec![("producer_byte_rate".into(), 999.0, false)],
             )],
-            &crate::kafka_wire::quotas::QuotaAlterSetup {
-                authentication: crate::kafka_wire::PlainAuthenticationSetup {
-                    client_id: crate::CLIENT_ID,
+            &QuotaAlterSetup {
+                authentication: PlainAuthenticationSetup {
+                    client_id: CLIENT_ID,
                     password: ("alice-secret").as_bytes().to_vec(),
                     ..Default::default()
                 },

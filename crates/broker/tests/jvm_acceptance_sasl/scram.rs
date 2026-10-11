@@ -9,9 +9,10 @@
 use assert2::assert;
 
 use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-    docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity, scram_jaas,
-    start_dual_mech_broker, start_dual_mech_broker_with_reauth, write_client_props,
+    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, authenticated_console_round_trip,
+    broker0_advertised, create_console_topic, docker_run_kafka_tool_with_image_and_mount,
+    nc_check_connectivity, provision_plain_scram, scram_jaas, start_dual_mech_broker,
+    start_dual_mech_broker_with_reauth, write_client_props, write_plain_props,
 };
 
 /// End-to-end `SASL_PLAINTEXT` + SCRAM-SHA-512 drive of the JVM tools
@@ -67,20 +68,9 @@ async fn jvm_sasl_scram_sha512_in_band_reauth_under_max_reauth_window() {
         start_dual_mech_broker_with_reauth(ADMIN, ADMIN_PASS, Some(krabka_units::secs(2))).await;
     nc_check_connectivity();
 
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
-    crate::jvm_acceptance::provision_plain_scram(
-        &admin_props.mount_str(),
-        ALICE,
-        ALICE_PASS,
-        "SCRAM-SHA-512",
-    );
-    crate::jvm_acceptance::create_console_topic(
-        KAFKA_IMAGE_TXN,
-        &[&admin_props.mount_str()],
-        TOPIC,
-        1,
-        1,
-    );
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
+    provision_plain_scram(&admin_props.mount_str(), ALICE, ALICE_PASS, "SCRAM-SHA-512");
+    create_console_topic(KAFKA_IMAGE_TXN, &[&admin_props.mount_str()], TOPIC, 1, 1);
     docker_run_kafka_tool_with_image_and_mount(
         KAFKA_IMAGE_TXN,
         &admin_props.mount_str(),
@@ -145,13 +135,8 @@ async fn scram_round_trip(topic: &str, mechanism: &str) {
     let (broker, _dir) = start_dual_mech_broker(ADMIN, ADMIN_PASS).await;
     nc_check_connectivity();
 
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
-    crate::jvm_acceptance::provision_plain_scram(
-        &admin_props.mount_str(),
-        ALICE,
-        ALICE_PASS,
-        mechanism,
-    );
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
+    provision_plain_scram(&admin_props.mount_str(), ALICE, ALICE_PASS, mechanism);
 
     let alice_props = write_client_props(&format!(
         "security.protocol=SASL_PLAINTEXT\n\
@@ -164,13 +149,7 @@ async fn scram_round_trip(topic: &str, mechanism: &str) {
     let alice_mount = alice_props.mount_str();
 
     // Create the topic as admin.
-    crate::jvm_acceptance::create_console_topic(
-        KAFKA_IMAGE_TXN,
-        &[&admin_props.mount_str()],
-        topic,
-        1,
-        1,
-    );
+    create_console_topic(KAFKA_IMAGE_TXN, &[&admin_props.mount_str()], topic, 1, 1);
 
     // Grant alice Read + Write on the topic. ACL implications cover
     // Describe.
@@ -197,11 +176,7 @@ async fn scram_round_trip(topic: &str, mechanism: &str) {
 
     // Produce 10 records.
 
-    crate::jvm_acceptance::authenticated_console_round_trip(
-        KAFKA_IMAGE_TXN,
-        &[&alice_mount],
-        topic,
-    );
+    authenticated_console_round_trip(KAFKA_IMAGE_TXN, &[&alice_mount], topic);
 
     broker.shutdown().await;
 }

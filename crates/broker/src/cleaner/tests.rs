@@ -9,18 +9,19 @@ use qubit_clock::Timer;
 
 use super::*;
 use crate::{
-    cleaner::test_support::{compactable_partition, record_count},
-    test_support::{BrokenTimer, TimerFailure},
+    cleaner::test_support::{CompactionSetup, compactable_partition, record_count},
+    partition::Partition,
+    test_support::{BrokenTimer, TimerFailure, park_manual_timer, sweep_registry_fixture},
 };
 
 #[tokio::test]
 async fn run_ticks_until_shutdown() {
     use qubit_clock::{ManualMonotonicClock, MonotonicClock as _};
 
-    let (dir, registry) = crate::test_support::sweep_registry_fixture();
+    let (dir, registry) = sweep_registry_fixture();
     let partition = compactable_partition(
         &dir,
-        crate::cleaner::test_support::CompactionSetup {
+        CompactionSetup {
             topic: "run-compact",
             ..Default::default()
         },
@@ -56,7 +57,7 @@ async fn run_ticks_until_shutdown() {
     // `wait_for_waiters` runs on a blocking thread so it never stalls the
     // current-thread runtime that must drive the cleaner task and the
     // partition writer actor to completion.
-    let parked = crate::test_support::park_manual_timer(&clock).await;
+    let parked = park_manual_timer(&clock).await;
     assert!(
         parked,
         "cleaner should park on the interval timer after the first sweep"
@@ -73,7 +74,7 @@ async fn run_ticks_until_shutdown() {
     clock
         .advance(interval.to_std())
         .expect("manual time moves forward");
-    let parked_again = crate::test_support::park_manual_timer(&clock).await;
+    let parked_again = park_manual_timer(&clock).await;
     assert!(
         parked_again,
         "cleaner should re-park on the interval timer after the second sweep"
@@ -93,11 +94,7 @@ async fn spawn_on(
     dir: &tempfile::TempDir,
     topic: &str,
     timer: Arc<dyn Timer>,
-) -> (
-    tokio::task::JoinHandle<()>,
-    Arc<crate::partition::Partition>,
-    usize,
-) {
+) -> (tokio::task::JoinHandle<()>, Arc<Partition>, usize) {
     let registry = Arc::new(PartitionRegistry::new());
     let (partition, before) =
         super::test_support::register_compactable(dir, &registry, topic).await;

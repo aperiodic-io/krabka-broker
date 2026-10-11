@@ -23,7 +23,9 @@ use crate::{
         ELIGIBLE_LEADERS_NOT_AVAILABLE, INVALID_REPLICA_ASSIGNMENT, INVALID_REPLICATION_FACTOR,
         INVALID_REQUEST, NO_REASSIGNMENT_IN_PROGRESS, POLICY_VIOLATION, UNKNOWN_TOPIC_OR_PARTITION,
     },
-    reassignment::{CompletedReassignment, maybe_complete_reassignment},
+    config_keys::resolve_unclean_leader_election_enabled,
+    metadata_epoch::next_partition_change,
+    reassignment::{CompletedReassignment, maybe_complete_reassignment, remap_directories},
 };
 
 /// Per-row rejection: a Kafka wire error code and a readable message.
@@ -58,7 +60,7 @@ pub(crate) fn process_one_partition(
         None => cancel_path(
             pr,
             cancel_approved,
-            crate::config_keys::resolve_unclean_leader_election_enabled(image, topic),
+            resolve_unclean_leader_election_enabled(image, topic),
         ),
         Some(target_slice) => {
             let target = validate_target(target_slice, image)?;
@@ -333,20 +335,15 @@ fn build(
     // leaves the list must see a new leader epoch.
     let bump_leader_epoch =
         leader != pr.leader || !pr.replicas.iter().all(|n| change.replicas.contains(n));
-    let (partition_epoch, leader_epoch) = crate::metadata_epoch::next_partition_change(
-        pr.partition_epoch,
-        pr.leader_epoch,
-        bump_leader_epoch,
-    )
-    .ok_or((
-        INVALID_REQUEST,
-        "partition metadata epoch is exhausted".into(),
-    ))?;
+    let (partition_epoch, leader_epoch) =
+        next_partition_change(pr.partition_epoch, pr.leader_epoch, bump_leader_epoch).ok_or((
+            INVALID_REQUEST,
+            "partition metadata epoch is exhausted".into(),
+        ))?;
     if !krabka_verified::reassignment_plan_admission(mode, (true, true), (true, true)) {
         return Err((INVALID_REQUEST, "reassignment admission failed".into()));
     }
-    let directories =
-        crate::reassignment::remap_directories(&pr.replicas, &pr.directories, &change.replicas);
+    let directories = remap_directories(&pr.replicas, &pr.directories, &change.replicas);
     Ok(Some(PartitionRecord {
         topic: pr.topic.clone(),
         partition: pr.partition,
@@ -369,10 +366,12 @@ mod tests {
 
     use super::*;
     use crate::{
+        config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
         handlers::alter_partition_reassignments::test_support::{
             ReassignmentImageSetup, ReplicaBrokerId, ReplicationFactorPolicy, img_with,
+            pending_reassignment_image,
         },
-        test_support::ReassignmentSetup,
+        test_support::{PartitionEpoch, ReassignmentSetup},
     };
 
     /// The record the fixture partition `foo-0` becomes.
@@ -655,7 +654,7 @@ mod tests {
         for (label, assignment, target, allow_rf, expected) in cases {
             let image = img_with(ReassignmentImageSetup {
                 assignment,
-                partition_epoch: crate::test_support::PartitionEpoch(11),
+                partition_epoch: PartitionEpoch(11),
             });
             let planned = process_one_partition(
                 &image,
@@ -753,13 +752,13 @@ mod tests {
         for (label, assignment, unclean, expected) in cases {
             let mut image = img_with(ReassignmentImageSetup {
                 assignment,
-                partition_epoch: crate::test_support::PartitionEpoch(11),
+                partition_epoch: PartitionEpoch(11),
             });
             if matches!(unclean, UncleanElection::Allowed) {
                 image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
                     topic: "foo".into(),
                     overrides: [(
-                        crate::config_keys::UNCLEAN_LEADER_ELECTION_ENABLE.to_string(),
+                        UNCLEAN_LEADER_ELECTION_ENABLE.to_string(),
                         "true".to_string(),
                     )]
                     .into_iter()
@@ -930,7 +929,7 @@ mod tests {
     #[test]
     fn start_rejects_an_exhausted_partition_epoch() {
         let image = img_with(ReassignmentImageSetup {
-            partition_epoch: crate::test_support::PartitionEpoch(i32::MAX),
+            partition_epoch: PartitionEpoch(i32::MAX),
             ..Default::default()
         });
         let error = process_one_partition(&image, "foo", 0, Some(&[1, 4]), true, true)
@@ -983,7 +982,7 @@ mod tests {
         let cases = [
             (
                 "a reassignment is in progress",
-                crate::handlers::alter_partition_reassignments::test_support::pending_reassignment_image(),
+                pending_reassignment_image(),
             ),
             (
                 "nothing to cancel",

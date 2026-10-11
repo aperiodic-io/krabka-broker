@@ -14,11 +14,12 @@ use super::{
     ControllerHandle, checkpoint::load_latest_checkpoint, feature_check::unsupported_feature_level,
 };
 use crate::{
-    config::{BootstrapMode, ControllerConfig, UnstableFeatureVersions},
+    config::{BootstrapMode, ControllerConfig, UnstableFeatureVersions, metadata_partition_dir},
     error::RaftError,
-    kraft::KraftController,
+    kraft::{Activation, KraftController},
     network::{OutboundDialer, PlaintextDialer, RealPeerSender},
     server,
+    snapshot::SnapshotReader,
 };
 
 /// Zero-sized factory for [`ControllerHandle`]s.
@@ -65,10 +66,10 @@ impl Controller {
         // The metadata log, its checkpoints and the quorum-state file all live
         // in the `__cluster_metadata-0` directory under `log_dir`, as Kafka's
         // do under `metadata.log.dir`.
-        let data_dir = crate::config::metadata_partition_dir(&config.log_dir);
+        let data_dir = metadata_partition_dir(&config.log_dir);
         let log_exists = metadata_log_nonempty(&data_dir);
         let snapshot_voters = load_latest_checkpoint(&data_dir)
-            .and_then(|(_, bytes)| crate::snapshot::SnapshotReader::read(&bytes).ok())
+            .and_then(|(_, bytes)| SnapshotReader::read(&bytes).ok())
             .and_then(|snapshot| snapshot.control_state.map(|state| state.voters))
             .unwrap_or_default();
         let voters = if config.initial_voters.is_empty() {
@@ -144,7 +145,7 @@ impl Controller {
             config.max_snapshot_interval,
             metadata_snapshot_fetch_max,
             config.metadata_log,
-            crate::kraft::Activation {
+            Activation {
                 bootstrap_records: config.bootstrap_records.clone(),
                 default_min_insync_replicas: config.default_min_insync_replicas,
             },
@@ -370,7 +371,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        controller::test_support::{submit_change_with_timeout, wait_for_leader},
+        controller::test_support::{
+            bootstrap_controller, joining_controller, submit_change_with_timeout, wait_for_leader,
+        },
+        metadata_partition_dir,
         types::NodeId,
     };
 
@@ -422,7 +426,7 @@ mod tests {
         wait_for_leader(&ctrl).await;
         // The committed offset is written to this file on every advance. A
         // directory in its place makes the next write fail with an I/O error.
-        let high_watermark = crate::metadata_partition_dir(dir.path()).join("high-watermark");
+        let high_watermark = metadata_partition_dir(dir.path()).join("high-watermark");
         let _ = std::fs::remove_file(&high_watermark);
         std::fs::create_dir(&high_watermark).unwrap();
 
@@ -499,8 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn bootstrap_on_non_empty_log_errors() {
-        let (dir, ctrl) =
-            crate::controller::test_support::bootstrap_controller("first bootstrap ok").await;
+        let (dir, ctrl) = bootstrap_controller("first bootstrap ok").await;
         // Drive a commit so the log is non-empty on the second boot.
         wait_for_leader(&ctrl).await;
         submit_change_with_timeout(
@@ -545,9 +548,7 @@ mod tests {
 
     #[tokio::test]
     async fn join_on_empty_log_starts_unattached() {
-        let (_dir, ctrl) =
-            crate::controller::test_support::joining_controller("Join on empty log starts ok")
-                .await;
+        let (_dir, ctrl) = joining_controller("Join on empty log starts ok").await;
         // Without voters this node never elects.
         assert2::assert!(ctrl.watch_leader().borrow().is_none());
         ctrl.shutdown().await;

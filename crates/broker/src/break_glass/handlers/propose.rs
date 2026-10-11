@@ -29,6 +29,7 @@ use crate::{
     broker::Broker,
     codes,
     handlers::{RequestContext, cluster_alter_denied, encode_response},
+    time_util::now_ms,
 };
 
 /// The `ttl_ms` value that asks for the configured lifetime.
@@ -133,7 +134,7 @@ async fn propose(
             ttl_ms: req.ttl_ms,
             proposer: &principal_name(ctx),
             proposal_id: Uuid::new_v4(),
-            now_ms: crate::time_util::now_ms(),
+            now_ms: now_ms(),
         },
     )?;
     admit_privileged_request(

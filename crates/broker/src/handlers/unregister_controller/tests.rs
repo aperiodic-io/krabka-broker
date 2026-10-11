@@ -8,6 +8,10 @@ use krabka_metadata::{
 use krabka_protocol::owned::unregister_controller_response::MAX_VERSION;
 
 use super::*;
+use crate::{
+    handlers::{RequestContext, update_features::answer},
+    test_support::{ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with},
+};
 
 crate::test_support::codec_helpers!(
     UnregisterControllerRequest,
@@ -128,7 +132,7 @@ async fn finalize_metadata_version(broker: &Broker, level: i16) {
         client_id = "kafka-features",
         address = crate::test_support::peer()
     );
-    let answer = crate::handlers::update_features::answer(
+    let answer = answer(
         broker,
         UpdateFeaturesRequest {
             feature_updates: vec![FeatureUpdateKey {
@@ -171,7 +175,7 @@ async fn send(
         crate::test_support::principal(principal),
         crate::test_support::peer()
     );
-    let ctx = crate::handlers::RequestContext::new(
+    let ctx = RequestContext::new(
         &principal,
         &peer,
         "kafka-cluster",
@@ -195,13 +199,11 @@ async fn send(
 /// Both levels are finalized through `UpdateFeatures`.
 #[tokio::test]
 async fn handle_unregisters_a_registered_controller_as_trunk_does() {
-    let (handle, _dir) = crate::test_support::start_broker_with(|cfg| {
+    let (handle, _dir) = start_broker_with(|cfg| {
         // Trunk's 4.4-IV2 is past 4.3.1's latest production level, so the
         // node has to support unstable feature levels to finalize it.
         cfg.features.unstable_feature_versions = krabka_raft::UnstableFeatureVersions::Enabled;
-        cfg.authorizer = Arc::new(crate::test_support::ControllerPeerAllowed(
-            crate::test_support::GrantsInPrincipalName,
-        ));
+        cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
     })
     .await;
     let broker = handle.broker_arc_for_test();

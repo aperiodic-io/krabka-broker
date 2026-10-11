@@ -5,8 +5,10 @@ use moxy::{
     token::{LitStr, Span, ToTokenStream, TokenStream, TokenTree},
 };
 
+use crate::meta::{mode, named_body};
+
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
-    let mode = crate::meta::mode(meta, ["toml", "cli", "node_cli"])?;
+    let mode = mode(meta, ["toml", "cli", "node_cli"])?;
     if mode == "node_cli" {
         return controller_fields(item, ControllerFieldInterface::CommandLine);
     }
@@ -281,7 +283,7 @@ fn insert_fields(
     item: TokenStream,
     fields: impl IntoIterator<Item = (&'static str, TokenStream)>,
 ) -> Result<TokenStream, ParseError> {
-    let (mut tokens, body) = crate::meta::named_body(item, "runtime_policy_fields")?;
+    let (mut tokens, body) = named_body(item, "runtime_policy_fields")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

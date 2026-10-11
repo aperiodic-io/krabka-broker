@@ -26,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::{
+    config_keys::witness_node_ids,
     heartbeat::controller_state::ControllerLivenessState,
     leader_election::{ElectionType, select_new_leader_for_partition},
 };
@@ -105,7 +106,7 @@ pub(crate) async fn rebalance_tick(
     let mut selected_keys = HashSet::new();
     // Witness nodes never lead. Build the set once per tick, not once per
     // partition, so the tick stays a single walk over the image.
-    let witnesses = crate::config_keys::witness_node_ids(&image);
+    let witnesses = witness_node_ids(&image);
     // One lock acquisition for the whole tick rather than one per partition;
     // the set is exactly `is_alive` over every broker the registry knows.
     let alive = liveness.alive_snapshot().await;

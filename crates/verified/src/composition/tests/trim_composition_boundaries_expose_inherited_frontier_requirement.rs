@@ -1,6 +1,7 @@
 use assert2::assert;
 
 use super::*;
+use crate::producer_snapshot::ProducerSnapshotEntryFacts;
 
 #[test]
 fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
@@ -43,7 +44,7 @@ fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
     }
     // Snapshot validity preserves historical producer state, even when
     // its last batch is below the new logical start. It is not a data read.
-    let historical = crate::producer_snapshot::ProducerSnapshotEntryFacts {
+    let historical = ProducerSnapshotEntryFacts {
         producer_id: 1,
         producer_epoch: 0,
         last_sequence: 0,

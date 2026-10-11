@@ -2,7 +2,9 @@ use assert2::check;
 
 use super::*;
 use crate::{
-    core::test_support::{CellLog, FakeLog, RunsLog, machine, three_voter_machine, win_election},
+    core::test_support::{
+        CellLog, FakeLog, RunsLog, machine, three_voter_machine, voters, win_election,
+    },
     event::Event,
 };
 
@@ -644,10 +646,7 @@ fn growing_past_one_voter_starts_the_leader_a_window() {
     let promotion = win_election(&mut m, &log, &[], SimInstant(2000));
     assert2::assert!(armed_check_quorum(&promotion) == None);
 
-    let actions = m.apply_voter_set(
-        crate::core::test_support::voters(&[NodeId(1), NodeId(2)]),
-        SimInstant(4000),
-    );
+    let actions = m.apply_voter_set(voters(&[NodeId(1), NodeId(2)]), SimInstant(4000));
     assert2::assert!(
         actions
             == vec![Action::ResetTimer {
@@ -669,10 +668,7 @@ fn a_removed_leader_still_runs_check_quorum_over_the_remaining_voter() {
     win_election(&mut m, &log, &[NodeId(2)], SimInstant(2000));
     // The record that drops us leaves one voter, and we keep leading until it
     // commits.
-    let applied = m.apply_voter_set(
-        crate::core::test_support::voters(&[NodeId(2)]),
-        SimInstant(3000),
-    );
+    let applied = m.apply_voter_set(voters(&[NodeId(2)]), SimInstant(3000));
     assert2::assert!(m.role().is_leader());
     assert2::check!(armed_check_quorum(&applied) == Some(SimInstant(4500)));
 
@@ -718,7 +714,7 @@ fn a_membership_change_starts_the_contact_tally_over() {
     // Swap voter 5 for voter 6: still five voters, still a threshold of two,
     // but a fresh window.
     m.apply_voter_set(
-        crate::core::test_support::voters(&[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(6)]),
+        voters(&[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(6)]),
         SimInstant(2200),
     );
     // A single fetch inside the new window is one voter, not two.
@@ -744,10 +740,7 @@ fn a_membership_change_starts_the_contact_tally_over() {
 fn a_removed_leader_resigns_into_observer_discovery() {
     let log = FakeLog::new(0, 0);
     let mut m = three_voter_leader(&log);
-    m.apply_voter_set(
-        crate::core::test_support::voters(&[NodeId(2), NodeId(3)]),
-        SimInstant(3000),
-    );
+    m.apply_voter_set(voters(&[NodeId(2), NodeId(3)]), SimInstant(3000));
     let actions = m.on_event(Event::CheckQuorumTimeout, &log, SimInstant(5000));
     assert2::assert!(
         actions

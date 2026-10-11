@@ -32,7 +32,11 @@ use self::{
     response::{feature_error, success, top_level_error},
     validate::{UpdateError, plan_updates},
 };
-use crate::{broker::Broker, codes};
+use crate::{
+    broker::Broker,
+    codes,
+    handlers::{RequestContext, audit_admin_success, audit_resource, cluster_alter_denied},
+};
 
 /// `NOT_CONTROLLER`'s answer when the write reaches a node that has lost the
 /// quorum leadership.
@@ -95,12 +99,12 @@ pub(crate) async fn answer(
     broker: &Broker,
     req: UpdateFeaturesRequest,
     version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> UpdateFeaturesResponse {
     let image = broker.controller.current_image();
 
     // Whole-request Cluster:Alter gate.
-    if crate::handlers::cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+    if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
         return top_level_error(
             codes::CLUSTER_AUTHORIZATION_FAILED,
             "Cluster authorization failed.",
@@ -161,13 +165,13 @@ pub(crate) async fn answer(
         }
     }
 
-    crate::handlers::audit_admin_success(
+    audit_admin_success(
         broker.audit_log.as_ref(),
         ctx,
         "UpdateFeatures",
         plan.features
             .into_iter()
-            .map(|feature| crate::handlers::audit_resource("Feature", feature))
+            .map(|feature| audit_resource("Feature", feature))
             .collect(),
     );
 

@@ -20,12 +20,18 @@ use krabka_protocol::owned::{
     list_config_resources_response::{ConfigResource, ListConfigResourcesResponse},
 };
 
+#[cfg(test)]
+use crate::authorizer::SimpleAclAuthorizer;
 use crate::{
     broker::Broker,
     codes,
-    handlers::describe_configs::{
-        RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
-        RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+    handlers::{
+        RequestContext, acl_denied,
+        acl_wire::CLUSTER_RESOURCE_NAME,
+        describe_configs::{
+            RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
+            RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+        },
     },
 };
 
@@ -44,7 +50,7 @@ pub(crate) fn handle(
     broker: &Broker,
     req: &ListConfigResourcesRequest,
     version: i16,
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> ListConfigResourcesResponse {
     let image = broker.controller.current_image();
 
@@ -52,12 +58,12 @@ pub(crate) fn handle(
     // authorizes `DescribeConfigs` on the cluster. Only `AlterConfigs` and
     // `All` imply it, so a principal with only `Describe` (or `Read`,
     // `Write`, `Delete`, `Alter`) gets `CLUSTER_AUTHORIZATION_FAILED`.
-    if crate::handlers::acl_denied(
+    if acl_denied(
         broker.config.authorizer.as_ref(),
         &image,
         ctx,
         krabka_metadata::ResourceType::Cluster,
-        crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+        CLUSTER_RESOURCE_NAME,
         AclOperation::DescribeConfigs,
     ) {
         return ListConfigResourcesResponse {
@@ -208,7 +214,7 @@ mod tests {
                 port: 9092,
                 protocol: krabka_security::ListenerProtocol::Plaintext,
             }],
-            ..crate::test_support::broker_registration(krabka_raft::NodeId(id))
+            ..broker_registration(krabka_raft::NodeId(id))
         })
     }
 
@@ -336,7 +342,10 @@ mod tests {
 
     crate::test_support::context_helper!(client_id = "admin-client");
 
-    use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
+    use crate::test_support::{
+        broker_registration, describe_configs_acl_cases, grant_cluster_operation,
+        start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+    };
 
     async fn seed_topic(handle: &BrokerHandle, name: &str) {
         handle
@@ -446,9 +455,9 @@ mod tests {
     /// `CLUSTER_AUTHORIZATION_FAILED` and no resources.
     #[tokio::test]
     async fn cluster_describe_configs_gates_the_enumeration() {
-        let (broker_handle, _dir) = start_broker(Arc::new(
-            crate::authorizer::SimpleAclAuthorizer::new(std::collections::HashSet::new()),
-        ))
+        let (broker_handle, _dir) = start_broker(Arc::new(SimpleAclAuthorizer::new(
+            std::collections::HashSet::new(),
+        )))
         .await;
         seed_topic(&broker_handle, "orders").await;
         let broker = broker_handle.broker_arc_for_test();
@@ -472,11 +481,11 @@ mod tests {
             config_resources: vec![],
         });
 
-        let mut cases = crate::test_support::describe_configs_acl_cases(&allowed, &denied);
+        let mut cases = describe_configs_acl_cases(&allowed, &denied);
         cases.insert(3, ("read", Some(AclOperation::Read), &denied));
         for (user, grant, expected) in cases {
             if let Some(operation) = grant {
-                crate::test_support::grant_cluster_operation(&broker_handle, user, operation).await;
+                grant_cluster_operation(&broker_handle, user, operation).await;
             }
             test_ctx!(ctx, user);
 

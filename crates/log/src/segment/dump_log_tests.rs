@@ -19,7 +19,12 @@ use super::{
     Segment,
     test_support::{DENSE_INDEX, sample_batch},
 };
-use crate::name;
+use crate::{
+    name,
+    segment::test_support::{
+        ONE_RECORD_BATCH, RecordCount, RecordTimestamp, SampleBatchSetup, test_segment,
+    },
+};
 
 /// The `(relative last offset, position)` entries of a `.index` file.
 fn offset_entries(dir: &Path, base: i64) -> Vec<(u32, u32)> {
@@ -131,10 +136,10 @@ const BATCHES: [(i64, i32, i64); 5] = [
 ];
 
 fn encoded(base_offset: i64, records: i32, timestamp: i64) -> (RecordBatch, bytes::Bytes) {
-    let batch = sample_batch(crate::segment::test_support::SampleBatchSetup {
-        offset: crate::Offset(base_offset),
-        records: crate::segment::test_support::RecordCount(records),
-        timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+    let batch = sample_batch(SampleBatchSetup {
+        offset: Offset(base_offset),
+        records: RecordCount(records),
+        timestamp: RecordTimestamp(timestamp),
     });
     let mut wire = BytesMut::new();
     batch.encode(&mut wire).unwrap();
@@ -145,10 +150,10 @@ fn write_all_encoded(segment: &mut Segment, interval: ByteSize) {
     for (base, records, timestamp) in BATCHES {
         segment
             .append(
-                &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                    offset: crate::Offset(base),
-                    records: crate::segment::test_support::RecordCount(records),
-                    timestamp: crate::segment::test_support::RecordTimestamp(timestamp),
+                &sample_batch(SampleBatchSetup {
+                    offset: Offset(base),
+                    records: RecordCount(records),
+                    timestamp: RecordTimestamp(timestamp),
                 }),
                 interval,
             )
@@ -186,7 +191,7 @@ fn write_all_verbatim(segment: &mut Segment, interval: ByteSize) {
 fn the_append_paths_write_the_indexes_kafka_dump_log_verifies() {
     let expected_time_entries = vec![(102, 2), (201, 5), (300, 7)];
     for (label, verbatim) in [("encoding append", false), ("verbatim append", true)] {
-        let (dir, mut segment) = crate::segment::test_support::test_segment();
+        let (dir, mut segment) = test_segment();
         if verbatim {
             write_all_verbatim(&mut segment, DENSE_INDEX);
         } else {
@@ -213,7 +218,7 @@ fn the_append_paths_write_the_indexes_kafka_dump_log_verifies() {
 /// add up to the interval, and what it takes still verifies.
 #[test]
 fn a_sparse_index_still_verifies() {
-    let (dir, mut segment) = crate::segment::test_support::test_segment();
+    let (dir, mut segment) = test_segment();
     write_all_encoded(&mut segment, bytes(200));
 
     let entries = offset_entries(dir.path(), 0).len();
@@ -251,9 +256,7 @@ fn recovery_rebuilds_the_indexes_the_append_wrote() {
 /// offsets that get an entry)`, over five one-record batches of one size.
 #[test]
 fn the_index_takes_an_entry_only_once_more_than_the_interval_was_written() {
-    let size =
-        u64::try_from(sample_batch(crate::segment::test_support::ONE_RECORD_BATCH).encoded_len())
-            .unwrap();
+    let size = u64::try_from(sample_batch(ONE_RECORD_BATCH).encoded_len()).unwrap();
     let cases: [(&str, u64, Vec<u32>); 4] = [
         (
             "an interval of one batch skips a batch exactly that far",
@@ -284,9 +287,9 @@ fn the_index_takes_an_entry_only_once_more_than_the_interval_was_written() {
             for offset in 0..5 {
                 segment
                     .append(
-                        &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                            offset: crate::Offset(offset),
-                            timestamp: crate::segment::test_support::RecordTimestamp(100 + offset),
+                        &sample_batch(SampleBatchSetup {
+                            offset: Offset(offset),
+                            timestamp: RecordTimestamp(100 + offset),
                             ..Default::default()
                         }),
                         interval,
@@ -315,7 +318,7 @@ fn the_index_takes_an_entry_only_once_more_than_the_interval_was_written() {
 /// segment keeps is the one of the batches that survived.
 #[test]
 fn appends_after_a_truncation_keep_the_indexes_verifying() {
-    let (dir, mut segment) = crate::segment::test_support::test_segment();
+    let (dir, mut segment) = test_segment();
     write_all_encoded(&mut segment, DENSE_INDEX);
 
     // Keep the batches ending at 2, 3 and 5.
@@ -326,10 +329,10 @@ fn appends_after_a_truncation_keep_the_indexes_verifying() {
     // Older than the surviving maximum: no time entry, one offset entry.
     segment
         .append(
-            &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                offset: crate::Offset(6),
-                records: crate::segment::test_support::RecordCount(2),
-                timestamp: crate::segment::test_support::RecordTimestamp(150),
+            &sample_batch(SampleBatchSetup {
+                offset: Offset(6),
+                records: RecordCount(2),
+                timestamp: RecordTimestamp(150),
             }),
             DENSE_INDEX,
         )
@@ -338,10 +341,10 @@ fn appends_after_a_truncation_keep_the_indexes_verifying() {
     // Newer: the entry names the new batch's last offset.
     segment
         .append(
-            &sample_batch(crate::segment::test_support::SampleBatchSetup {
-                offset: crate::Offset(8),
-                records: crate::segment::test_support::RecordCount(2),
-                timestamp: crate::segment::test_support::RecordTimestamp(400),
+            &sample_batch(SampleBatchSetup {
+                offset: Offset(8),
+                records: RecordCount(2),
+                timestamp: RecordTimestamp(400),
             }),
             DENSE_INDEX,
         )
@@ -355,7 +358,7 @@ fn appends_after_a_truncation_keep_the_indexes_verifying() {
 /// record in the middle of that batch.
 #[test]
 fn a_timestamp_search_finds_the_record_inside_the_batch_that_set_the_maximum() {
-    let (_dir, mut segment) = crate::segment::test_support::test_segment();
+    let (_dir, mut segment) = test_segment();
     write_all_encoded(&mut segment, DENSE_INDEX);
 
     // Batch (4, 2 records, 200): records at offsets 4 and 5 with timestamps

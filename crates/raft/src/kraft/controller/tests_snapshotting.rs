@@ -6,18 +6,21 @@
 use assert2::assert;
 
 use super::*;
-use crate::kraft::controller::{
-    checkpoint::{
-        checkpoint_id_is_newer, latest_checkpoint_id, load_checkpoint_by_id,
-        load_latest_checkpoint, parse_checkpoint_name, retain_latest_checkpoint,
-        retain_recent_checkpoints, write_checkpoint,
+use crate::{
+    kraft::controller::{
+        checkpoint::{
+            checkpoint_id_is_newer, latest_checkpoint_id, load_checkpoint_by_id,
+            load_latest_checkpoint, parse_checkpoint_name, retain_latest_checkpoint,
+            retain_recent_checkpoints, write_checkpoint,
+        },
+        records::decode_control_record,
+        test_support::{
+            ControllerOpenSetup, ControllerSetup, EngineSetup, SnapshotRecordCount, await_leader,
+            build, build_engine_only, elect_single_voter_engine, one_offset_batch,
+            open_test_controller_with, submit_change_with_timeout, topic_record, voter_set,
+        },
     },
-    records::decode_control_record,
-    test_support::{
-        ControllerSetup, EngineSetup, TEST_ELECTION_TIMEOUT, await_leader, build,
-        build_engine_only, elect_single_voter_engine, one_offset_batch, submit_change_with_timeout,
-        test_metadata_log, topic_record, voter_set,
-    },
+    snapshot::SnapshotWriter,
 };
 
 async fn assert_checkpoint_pruned(ctrl: &KraftController, dir: &std::path::Path) {
@@ -122,7 +125,7 @@ fn ordinary_snapshot_does_not_reload_the_live_image() {
 async fn single_leader_snapshot_fixture() -> (KraftController, tempfile::TempDir) {
     let (ctrl, dir) = build(ControllerSetup {
         ids: &[NodeId(1)],
-        snapshot_interval_records: crate::kraft::controller::test_support::SnapshotRecordCount(3),
+        snapshot_interval_records: SnapshotRecordCount(3),
         ..Default::default()
     });
     super::test_support::elect_single_voter_controller(&ctrl).await;
@@ -387,7 +390,7 @@ fn an_installed_snapshot_hands_its_header_timestamp_to_the_next_checkpoint() {
     image.apply(&MetadataRecord::V1Voters(VotersRecord {
         voters: voter_set(&[NodeId(1), NodeId(2)]),
     }));
-    let bytes = crate::snapshot::SnapshotWriter::serialize(&image, stamp).expect("serialize");
+    let bytes = SnapshotWriter::serialize(&image, stamp).expect("serialize");
 
     engine
         .install_fetched_snapshot((7, 0), &bytes)
@@ -421,24 +424,13 @@ async fn a_restart_recovers_the_header_timestamp_from_the_checkpoint() {
     assert2::assert!(latest_header_timestamp(&cp_dir) == stamp);
     drop(engine);
 
-    let reopened = KraftController::open(
+    let reopened = open_test_controller_with(
         dir.path().to_path_buf(),
-        NodeId(1),
-        uuid::Uuid::nil(),
-        uuid::Uuid::nil(),
-        voter_set(&[NodeId(1)]),
-        TEST_ELECTION_TIMEOUT,
-        None,
-        ControllerFetchMissLimit::default(),
-        MetadataRaftCommandQueueCapacity::default(),
-        MetadataRaftFetchMax::default(),
-        Arc::new(crate::kraft::NullPeerSender),
-        0,
-        krabka_units::prelude::bytes(0),
-        krabka_units::prelude::millis(0),
-        MetadataSnapshotFetchMax::default(),
-        test_metadata_log(),
-        crate::kraft::Activation::default(),
+        ControllerOpenSetup {
+            cluster_id: uuid::Uuid::nil(),
+            voters: voter_set(&[NodeId(1)]),
+            ..Default::default()
+        },
     )
     .expect("reopen over the same data dir");
     reopened.trigger_snapshot().await.expect("trigger snapshot");

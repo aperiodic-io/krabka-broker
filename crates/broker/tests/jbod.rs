@@ -28,7 +28,11 @@ use tokio::net::TcpStream;
 
 use crate::{
     kafka_wire::ExchangeSetup as WireExchangeSetup,
-    support::wire::HeaderEncoding as RequestHeaderEncoding,
+    support::{
+        storage::count_partition_dirs, topics::TopicPartitionCount,
+        wire::HeaderEncoding as RequestHeaderEncoding,
+    },
+    two_dir_topic::{PartitionReadiness, Setup, start},
 };
 
 const CLIENT_ID: &str = "krabka-jbod-test";
@@ -55,16 +59,16 @@ async fn describe_log_dirs(addr: SocketAddr) -> DescribeLogDirsResponse {
 
 /// Count `topic-partition` subdirs for `topic` directly under `dir`.
 fn count_topic_dirs(dir: &std::path::Path, topic: &str) -> usize {
-    crate::support::storage::count_partition_dirs(std::fs::read_dir(dir).unwrap(), topic, true)
+    count_partition_dirs(std::fs::read_dir(dir).unwrap(), topic, true)
 }
 
 #[tokio::test]
 async fn partitions_spread_across_dirs_and_describe_log_dirs_reports_them() {
     let n: i32 = 6;
-    let (handle, primary, extra, addr) = crate::two_dir_topic::start(crate::two_dir_topic::Setup {
+    let (handle, primary, extra, addr) = start(Setup {
         client_id: CLIENT_ID,
-        partitions: crate::support::topics::TopicPartitionCount(n),
-        readiness: crate::two_dir_topic::PartitionReadiness::LocalWriterPresent,
+        partitions: TopicPartitionCount(n),
+        readiness: PartitionReadiness::LocalWriterPresent,
         ..Default::default()
     })
     .await;

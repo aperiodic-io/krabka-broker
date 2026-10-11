@@ -13,9 +13,15 @@ use krabka_protocol::{
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
 use super::*;
-use crate::handlers::produce::{
-    framing::PartitionPayload,
-    test_support::{encode_batch, image_with_topic},
+use crate::{
+    handlers::{
+        produce::{
+            framing::PartitionPayload,
+            test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
+        },
+        test_support::{ReplicatedPartitionSetup, replicated_partition},
+    },
+    schema_validation::{SchemaGate, SchemaValidator, ValidationMode},
 };
 
 #[tokio::test]
@@ -27,7 +33,7 @@ async fn process_partition_non_leader_skips_schema_registry_and_preserves_hint()
         .mount(&registry)
         .await;
     let schema_validator = Arc::new(
-        crate::schema_validation::SchemaValidator::new(
+        SchemaValidator::new(
             registry.uri(),
             false,
             100,
@@ -37,8 +43,7 @@ async fn process_partition_non_leader_skips_schema_registry_and_preserves_hint()
         .expect("validator"),
     );
     let image = non_leader_image();
-    let fixture =
-        crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(1));
+    let fixture = PipelineFixture::new(krabka_ids::NodeId(1));
     let payload = encode_batch(&RecordBatch {
         records: vec![Record {
             value: Some(Bytes::from_static(&[0, 0, 0, 0, 42, b'a'])),
@@ -49,15 +54,12 @@ async fn process_partition_non_leader_skips_schema_registry_and_preserves_hint()
 
     let resp = process_partition(
         PartitionInput {
-            schema: Some(crate::schema_validation::SchemaGate {
+            schema: Some(SchemaGate {
                 key: false,
                 value: true,
-                mode: crate::schema_validation::ValidationMode::Full,
+                mode: ValidationMode::Full,
             }),
-            ..crate::handlers::produce::test_support::pipeline_input(
-                "orders",
-                PartitionPayload::Slice(payload),
-            )
+            ..pipeline_input("orders", PartitionPayload::Slice(payload))
         },
         PartitionServices {
             schema_validator: Some(&schema_validator),
@@ -81,8 +83,7 @@ async fn process_partition_leader_without_local_replica_hints_leader() {
     // defaults a struct-field-deletion mutant would leave.
     let image = non_leader_image();
     // Empty registry → `fixture.partitions.get(..)` returns None.
-    let fixture =
-        crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(2));
+    let fixture = PipelineFixture::new(krabka_ids::NodeId(2));
     let payload = encode_batch(&RecordBatch {
         records: vec![Record {
             value: Some(Bytes::from_static(b"hello")),
@@ -92,10 +93,7 @@ async fn process_partition_leader_without_local_replica_hints_leader() {
     });
 
     let resp = process_partition(
-        crate::handlers::produce::test_support::pipeline_input(
-            "orders",
-            PartitionPayload::Slice(payload),
-        ),
+        pipeline_input("orders", PartitionPayload::Slice(payload)),
         PartitionServices {
             broker_policy: BrokerProducePolicy {
                 node_id: krabka_audit::NodeId(2),
@@ -131,13 +129,11 @@ fn non_leader_image() -> Arc<krabka_metadata::MetadataImage> {
     img.apply(&MetadataRecord::V1Partition(PartitionRecord {
         leader_epoch: krabka_metadata::LeaderEpoch(17),
         partition_epoch: 1,
-        ..crate::handlers::test_support::replicated_partition(
-            crate::handlers::test_support::ReplicatedPartitionSetup {
-                leader: krabka_audit::NodeId(2),
-                replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-                ..Default::default()
-            },
-        )
+        ..replicated_partition(ReplicatedPartitionSetup {
+            leader: krabka_audit::NodeId(2),
+            replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
+            ..Default::default()
+        })
     }));
     Arc::new(img)
 }

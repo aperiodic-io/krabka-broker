@@ -183,7 +183,7 @@ mod tests {
     use krabka_units::{bytes, fraction};
 
     use super::*;
-    use crate::decode_message_set;
+    use crate::{decode_message_set, message::Message};
 
     fn v2_batch(codec: CompressionType) -> RecordBatch {
         RecordBatch {
@@ -320,7 +320,7 @@ mod tests {
         let mut cur: &[u8] = &bytes;
         let _offset = cur.get_i64();
         let size = usize::try_from(cur.get_i32()).unwrap();
-        let msg = crate::message::Message::decode_from(&mut cur, size).unwrap();
+        let msg = Message::decode_from(&mut cur, size).unwrap();
         assert2::assert!(msg.compression() == CompressionType::Gzip);
     }
 

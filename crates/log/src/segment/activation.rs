@@ -138,7 +138,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::segment::test_support::seeded_segment;
+    use crate::segment::test_support::{
+        RecordTimestamp, SampleBatchSetup, SeededSegmentSetup, seeded_segment, test_segment,
+    };
 
     fn check_pending_ranges(seg: &Segment, expected: &[(Offset, Offset)]) {
         let mut pending = Vec::new();
@@ -162,9 +164,9 @@ mod tests {
         let dir = tempdir().unwrap();
         drop(seeded_segment(
             dir.path(),
-            crate::segment::test_support::SeededSegmentSetup {
-                batches: &[crate::segment::test_support::SampleBatchSetup {
-                    timestamp: crate::segment::test_support::RecordTimestamp(9_000),
+            SeededSegmentSetup {
+                batches: &[SampleBatchSetup {
+                    timestamp: RecordTimestamp(9_000),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -187,7 +189,7 @@ mod tests {
     /// A segment with no bytes takes the shortcut: there is nothing to walk.
     #[test]
     fn an_empty_segment_is_wholly_active() {
-        let (dir, seg) = crate::segment::test_support::test_segment();
+        let (dir, seg) = test_segment();
 
         assert2::check!(seg.is_wholly_active(0, 1_000));
         let scan = seg.scan_activation(Offset(0), 0, 1_000).unwrap();

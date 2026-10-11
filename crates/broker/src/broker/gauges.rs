@@ -8,7 +8,18 @@ use std::sync::Arc;
 use krabka_units::convert::TimeExt as _;
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::BrokerConfig, partition_registry::PartitionRegistry};
+use crate::{
+    config::BrokerConfig,
+    config_keys::{
+        node_min_insync_replicas, resolve_broker_witness, resolve_preferred_leader_site,
+    },
+    health::HealthState,
+    heartbeat::controller_state::ControllerLivenessState,
+    log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource,
+    metrics::{BrokerMetrics, DirectoryLabel, RaftStateLabel},
+    partition_registry::PartitionRegistry,
+};
 
 /// Epoch milliseconds for the KIP-835 time-since-last-applied-record gauge.
 fn epoch_now_ms() -> i64 {
@@ -38,7 +49,7 @@ fn leader_site_drift_partitions(
     image: &krabka_metadata::MetadataImage,
     node_id: krabka_metadata::NodeId,
 ) -> usize {
-    let Some(preferred) = crate::config_keys::resolve_preferred_leader_site(image) else {
+    let Some(preferred) = resolve_preferred_leader_site(image) else {
         return 0;
     };
     let leader_site = image
@@ -53,13 +64,10 @@ fn leader_site_drift_partitions(
         .count()
 }
 
-fn update_metadata_health_metrics(
-    metrics: &crate::metrics::BrokerMetrics,
-    controller: &dyn crate::metadata_source::MetadataSource,
-) {
+fn update_metadata_health_metrics(metrics: &BrokerMetrics, controller: &dyn MetadataSource) {
     let quorum_snapshot = controller.quorum_snapshot();
     if let Some(snap) = &quorum_snapshot {
-        for state_label in crate::metrics::RaftStateLabel::ALL {
+        for state_label in RaftStateLabel::ALL {
             let is_active = i64::from(state_label.state == snap.current_state);
             metrics
                 .raft_current_state
@@ -109,17 +117,11 @@ fn update_metadata_health_metrics(
 /// state the broker-state gauge reads; they travel together because every
 /// sample writes the first from the second.
 pub(super) fn spawn_broker_gauge_updater(
-    storage: (
-        Arc<PartitionRegistry>,
-        crate::log_dir_status::LogDirRegistry,
-    ),
-    controller: Arc<dyn crate::metadata_source::MetadataSource>,
-    liveness: Arc<crate::heartbeat::controller_state::ControllerLivenessState>,
+    storage: (Arc<PartitionRegistry>, LogDirRegistry),
+    controller: Arc<dyn MetadataSource>,
+    liveness: Arc<ControllerLivenessState>,
     node_id: krabka_metadata::NodeId,
-    observability: (
-        crate::metrics::BrokerMetrics,
-        Option<crate::health::HealthState>,
-    ),
+    observability: (BrokerMetrics, Option<HealthState>),
     config: &BrokerConfig,
     shutdown: CancellationToken,
 ) {
@@ -166,9 +168,8 @@ pub(super) fn spawn_broker_gauge_updater(
             let minimum_isr: std::collections::HashMap<&str, i32> = image
                 .topics()
                 .map(|topic| {
-                    let minimum =
-                        crate::config_keys::node_min_insync_replicas(&image, node_id, &topic.name)
-                            .unwrap_or(default_min_insync_replicas);
+                    let minimum = node_min_insync_replicas(&image, node_id, &topic.name)
+                        .unwrap_or(default_min_insync_replicas);
                     (topic.name.as_str(), minimum)
                 })
                 .collect();
@@ -200,9 +201,9 @@ pub(super) fn spawn_broker_gauge_updater(
             metrics.leader_site_drift_partitions.set(
                 i64::try_from(leader_site_drift_partitions(&image, node_id)).unwrap_or(i64::MAX),
             );
-            metrics.witness_role.set(i64::from(u8::from(
-                crate::config_keys::resolve_broker_witness(&image, node_id),
-            )));
+            metrics
+                .witness_role
+                .set(i64::from(u8::from(resolve_broker_witness(&image, node_id))));
             metrics
                 .active_controller
                 .set(i64::from(u8::from(is_controller)));
@@ -291,7 +292,7 @@ pub(super) fn spawn_broker_gauge_updater(
                 if let Some(directory_id) = previous_voted_directory {
                     metrics
                         .voted_directory
-                        .get_or_create(&crate::metrics::DirectoryLabel {
+                        .get_or_create(&DirectoryLabel {
                             directory_id: directory_id.to_string(),
                         })
                         .set(0);
@@ -299,7 +300,7 @@ pub(super) fn spawn_broker_gauge_updater(
                 if let Some(directory_id) = voted_directory {
                     metrics
                         .voted_directory
-                        .get_or_create(&crate::metrics::DirectoryLabel {
+                        .get_or_create(&DirectoryLabel {
                             directory_id: directory_id.to_string(),
                         })
                         .set(1);
@@ -316,7 +317,12 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
-    use crate::broker::test_support::fake_source;
+    use crate::{
+        broker::test_support::fake_source,
+        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+        metrics::BrokerMetrics,
+        test_support::{broker_registration, single_partition_topic},
+    };
 
     #[test]
     fn active_controller_applied_timestamp_lag_stays_zero() {
@@ -329,7 +335,7 @@ mod tests {
         let node_id = krabka_metadata::NodeId(1);
         let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
         image.apply(&krabka_metadata::MetadataRecord::V1Topic(
-            crate::test_support::single_partition_topic("gauge-topic", uuid::Uuid::nil()),
+            single_partition_topic("gauge-topic", uuid::Uuid::nil()),
         ));
         image.apply(&krabka_metadata::MetadataRecord::V1Partition(
             krabka_metadata::PartitionRecord {
@@ -351,10 +357,10 @@ mod tests {
         spawn_broker_gauge_updater(
             (
                 Arc::new(PartitionRegistry::new()),
-                crate::log_dir_status::LogDirRegistry::default(),
+                LogDirRegistry::default(),
             ),
             Arc::new(fake_source(image, None)),
-            Arc::new(crate::heartbeat::controller_state::ControllerLivenessState::new(secs(10))),
+            Arc::new(ControllerLivenessState::new(secs(10))),
             node_id,
             (metrics.clone(), None),
             &config,
@@ -377,8 +383,8 @@ mod tests {
         shutdown.cancel();
     }
 
-    fn gauge_fixture() -> (crate::metrics::BrokerMetrics, BrokerConfig) {
-        let metrics = crate::metrics::BrokerMetrics::new();
+    fn gauge_fixture() -> (BrokerMetrics, BrokerConfig) {
+        let metrics = BrokerMetrics::new();
         let mut config = BrokerConfig::for_tests(std::path::PathBuf::new());
         config.gauge_poll_interval = millis(1);
         (metrics, config)
@@ -390,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn broker_gauge_publishes_the_offline_log_dir_count() {
         let dir = tempfile::tempdir().expect("log root");
-        let log_dirs = crate::log_dir_status::LogDirRegistry::probe(&[dir.path().to_path_buf()]);
+        let log_dirs = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
         let (metrics, config) = gauge_fixture();
         let shutdown = CancellationToken::new();
         spawn_broker_gauge_updater(
@@ -399,7 +405,7 @@ mod tests {
                 krabka_metadata::MetadataImage::new(uuid::Uuid::nil()),
                 None,
             )),
-            Arc::new(crate::heartbeat::controller_state::ControllerLivenessState::new(secs(10))),
+            Arc::new(ControllerLivenessState::new(secs(10))),
             krabka_metadata::NodeId(1),
             (metrics.clone(), None),
             &config,
@@ -436,7 +442,7 @@ mod tests {
             image.apply(&krabka_metadata::MetadataRecord::V1BrokerRegistration(
                 krabka_metadata::BrokerRegistrationRecord {
                     rack: Some(node_rack.to_string()),
-                    ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+                    ..broker_registration(krabka_raft::NodeId(node_id))
                 },
             ));
         }
@@ -450,14 +456,12 @@ mod tests {
         for partition in 0..=led {
             let leader = if partition < led { 1 } else { 2 };
             image.apply(&krabka_metadata::MetadataRecord::V1Partition(
-                crate::handlers::test_support::replicated_partition(
-                    crate::handlers::test_support::ReplicatedPartitionSetup {
-                        topic: "stretch-topic",
-                        partition: krabka_ids::PartitionIndex(partition),
-                        leader: krabka_metadata::NodeId(leader),
-                        ..Default::default()
-                    },
-                ),
+                replicated_partition(ReplicatedPartitionSetup {
+                    topic: "stretch-topic",
+                    partition: krabka_ids::PartitionIndex(partition),
+                    leader: krabka_metadata::NodeId(leader),
+                    ..Default::default()
+                }),
             ));
         }
         image

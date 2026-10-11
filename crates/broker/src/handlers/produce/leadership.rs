@@ -7,7 +7,13 @@ use std::sync::Arc;
 use krabka_protocol::owned::produce_response::LeaderIdAndEpoch;
 
 use super::{ACKS_ALL, NO_LEADER_ID, topic_settings::topic_min_insync_replicas};
-use crate::{codes, partition_registry::PartitionRegistry};
+use crate::{
+    codes,
+    log_dir_status::LogDirRegistry,
+    partition::{Partition, ReplicationTarget},
+    partition_registry::PartitionRegistry,
+    replica_state::ReplicaState,
+};
 
 pub(super) struct PartitionGateError {
     pub(super) code: i16,
@@ -36,10 +42,10 @@ pub(super) fn validate_partition_gate(
     partition_index: i32,
     acks: i16,
     partitions: &PartitionRegistry,
-    log_dir_status: &crate::log_dir_status::LogDirRegistry,
+    log_dir_status: &LogDirRegistry,
     image: &krabka_metadata::MetadataImage,
     broker_policy: BrokerProducePolicy,
-) -> Result<Arc<crate::partition::Partition>, PartitionGateError> {
+) -> Result<Arc<Partition>, PartitionGateError> {
     let BrokerProducePolicy {
         node_id: this_node_id,
         default_min_insync_replicas,
@@ -146,7 +152,7 @@ pub(super) fn current_effective_min_isr(
 }
 
 pub(super) fn diskless_role_ready(
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     record: &krabka_metadata::PartitionRecord,
 ) -> bool {
     krabka_metadata::NodeId(
@@ -161,7 +167,7 @@ pub(super) fn diskless_role_ready(
 }
 
 pub(super) fn replication_target_matches_image(
-    target: &crate::partition::ReplicationTarget,
+    target: &ReplicationTarget,
     topic_id: Option<uuid::Uuid>,
     record: &krabka_metadata::PartitionRecord,
 ) -> bool {
@@ -171,7 +177,7 @@ pub(super) fn replication_target_matches_image(
 }
 
 pub(super) fn replica_state_matches_image(
-    state: &crate::replica_state::ReplicaState,
+    state: &ReplicaState,
     record: &krabka_metadata::PartitionRecord,
 ) -> bool {
     state.current_leader_epoch == krabka_ids::LeaderEpoch(record.leader_epoch.0)
@@ -194,13 +200,26 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::handlers::produce::test_support::image_with_topic;
+    use crate::{
+        codes::{NOT_ENOUGH_REPLICAS, NOT_LEADER_OR_FOLLOWER},
+        config_keys::{BROKER_WITNESS, MIN_INSYNC_REPLICAS, WITNESS_TRUE},
+        handlers::{
+            produce::test_support::image_with_topic,
+            test_support::{ReplicatedPartitionSetup, replicated_partition},
+        },
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        partition::ReplicationTarget,
+        partition_registry::PartitionRegistry,
+        replica_state::ReplicaState,
+        test_support::{StandalonePartitionSetup, StorageMode, spawn_standalone_partition},
+    };
 
     #[test]
     fn replication_target_must_match_the_complete_image_identity() {
         let image = image_with_topic("orders", &[1, 2]);
         let record = image.partition("orders", 0).expect("partition");
-        let current = crate::partition::ReplicationTarget {
+        let current = ReplicationTarget {
             topic_id: Some(Uuid::nil()),
             leader_node_id: record.leader,
             leader_epoch: record.leader_epoch,
@@ -305,7 +324,7 @@ mod tests {
     fn replica_state_must_install_the_image_epoch_and_exact_isr() {
         let image = image_with_topic("orders", &[1, 2]);
         let record = image.partition("orders", 0).expect("partition");
-        let mut state = crate::replica_state::ReplicaState::new();
+        let mut state = ReplicaState::new();
         assert!(!replica_state_matches_image(&state, record));
 
         state.install_isr(
@@ -326,15 +345,15 @@ mod tests {
         let image = image_with_topic("orders", &[1]);
         let record = image.partition("orders", 0).expect("partition");
         let log = krabka_log::Log::open(
-            crate::log_dir::partition_dir(dir.path(), "orders", 0),
+            partition_dir(dir.path(), "orders", 0),
             krabka_log::LogConfig::default(),
         )
         .unwrap();
-        let partition = crate::test_support::spawn_standalone_partition(
+        let partition = spawn_standalone_partition(
             dir.path(),
             log,
-            crate::test_support::StandalonePartitionSetup {
-                storage: crate::test_support::StorageMode::Diskless,
+            StandalonePartitionSetup {
+                storage: StorageMode::Diskless,
                 ..Default::default()
             },
         );
@@ -378,19 +397,19 @@ mod tests {
     ) -> Option<(i16, Option<LeaderIdAndEpoch>)> {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = krabka_log::Log::open(
-            crate::log_dir::partition_dir(dir.path(), "orders", 0),
+            partition_dir(dir.path(), "orders", 0),
             krabka_log::LogConfig::default(),
         )
         .expect("open log");
-        let partitions = crate::partition_registry::PartitionRegistry::new();
+        let partitions = PartitionRegistry::new();
         partitions.insert(
             "orders".into(),
             krabka_ids::PartitionIndex(0),
-            crate::test_support::spawn_standalone_partition(
+            spawn_standalone_partition(
                 dir.path(),
                 log,
-                crate::test_support::StandalonePartitionSetup {
-                    storage: crate::test_support::StorageMode::from_wire(diskless),
+                StandalonePartitionSetup {
+                    storage: StorageMode::from_wire(diskless),
                     ..Default::default()
                 },
             ),
@@ -400,7 +419,7 @@ mod tests {
             0,
             acks,
             &partitions,
-            &crate::log_dir_status::LogDirRegistry::default(),
+            &LogDirRegistry::default(),
             image,
             BrokerProducePolicy {
                 node_id,
@@ -428,22 +447,20 @@ mod tests {
             krabka_metadata::PartitionRecord {
                 isr: vec![krabka_audit::NodeId(1)],
                 partition_epoch: 1,
-                ..crate::handlers::test_support::replicated_partition(
-                    crate::handlers::test_support::ReplicatedPartitionSetup {
-                        leader: krabka_audit::NodeId(1),
-                        replicas: &[
-                            krabka_audit::NodeId(1),
-                            krabka_audit::NodeId(2),
-                            krabka_audit::NodeId(3),
-                        ],
-                        ..Default::default()
-                    },
-                )
+                ..replicated_partition(ReplicatedPartitionSetup {
+                    leader: krabka_audit::NodeId(1),
+                    replicas: &[
+                        krabka_audit::NodeId(1),
+                        krabka_audit::NodeId(2),
+                        krabka_audit::NodeId(3),
+                    ],
+                    ..Default::default()
+                })
             },
         ));
         image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
             node_id: krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID,
-            config_name: crate::config_keys::MIN_INSYNC_REPLICAS.into(),
+            config_name: MIN_INSYNC_REPLICAS.into(),
             config_value: Some("2".into()),
         }));
 
@@ -516,7 +533,7 @@ mod tests {
                 if let Some(value) = value {
                     image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
                         node_id: node,
-                        config_name: crate::config_keys::MIN_INSYNC_REPLICAS.into(),
+                        config_name: MIN_INSYNC_REPLICAS.into(),
                         config_value: Some(value.into()),
                     }));
                 }
@@ -530,7 +547,7 @@ mod tests {
         let got = gate_with_acks(image, krabka_audit::NodeId(1), false, false, -1, 1);
         let refused = got
             .as_ref()
-            .is_some_and(|(code, _)| *code == crate::codes::NOT_ENOUGH_REPLICAS);
+            .is_some_and(|(code, _)| *code == NOT_ENOUGH_REPLICAS);
         assert!(refused == want_refused, "{label}: got {got:?}");
     }
 
@@ -569,7 +586,7 @@ mod tests {
             ));
             image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
                 node_id: krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID,
-                config_name: crate::config_keys::MIN_INSYNC_REPLICAS.into(),
+                config_name: MIN_INSYNC_REPLICAS.into(),
                 config_value: Some(cluster_min_isr.to_string()),
             }));
 
@@ -584,7 +601,7 @@ mod tests {
         // Metadata round-trip.
         let image = image_with_topic("orders", &[1, 2]);
         let refused = Some((
-            crate::codes::NOT_LEADER_OR_FOLLOWER,
+            NOT_LEADER_OR_FOLLOWER,
             Some(LeaderIdAndEpoch {
                 leader_id: 1,
                 leader_epoch: 0,
@@ -650,8 +667,8 @@ mod tests {
         let mut image = image_with_topic("orders", &[1, 2]);
         image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
             node_id: krabka_audit::NodeId(2),
-            config_name: crate::config_keys::BROKER_WITNESS.into(),
-            config_value: Some(crate::config_keys::WITNESS_TRUE.into()),
+            config_name: BROKER_WITNESS.into(),
+            config_value: Some(WITNESS_TRUE.into()),
         }));
         let got = produce_gate(&image, krabka_audit::NodeId(1), false, false);
         assert!(got.is_none(), "got {got:?}");

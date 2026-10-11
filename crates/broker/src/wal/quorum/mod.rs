@@ -43,7 +43,7 @@ use self::{
     membership::{load_or_prepare_quorum_membership, persist_quorum_membership},
 };
 use super::WalStore;
-use crate::error::BrokerError;
+use crate::{diskless::hot_tail::HotTailCache, error::BrokerError};
 
 /// A [`WalStore`] backed by a quorum of durable WAL replica logs.
 #[derive(Debug, Clone)]
@@ -57,7 +57,7 @@ pub(crate) struct QuorumWalStore {
 struct HotTailTarget {
     topic_id: Uuid,
     partition: PartitionIndex,
-    cache: Arc<crate::diskless::hot_tail::HotTailCache>,
+    cache: Arc<HotTailCache>,
 }
 
 impl QuorumWalStore {
@@ -78,7 +78,7 @@ impl QuorumWalStore {
         partition: PartitionIndex,
         log_dir: &std::path::Path,
         source: Arc<Mutex<Log>>,
-        hot_tail: Option<Arc<crate::diskless::hot_tail::HotTailCache>>,
+        hot_tail: Option<Arc<HotTailCache>>,
         replica_count: usize,
     ) -> Result<Self, BrokerError> {
         let config = source
@@ -125,7 +125,7 @@ impl QuorumWalStore {
         topic_id: Uuid,
         partition: PartitionIndex,
         source: Arc<Mutex<Log>>,
-        hot_tail: Option<Arc<crate::diskless::hot_tail::HotTailCache>>,
+        hot_tail: Option<Arc<HotTailCache>>,
         voter_count: usize,
     ) -> Result<Self, BrokerError> {
         let engine = Arc::new(WalShardEngine::new_distributed(

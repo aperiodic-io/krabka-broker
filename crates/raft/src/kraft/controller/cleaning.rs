@@ -14,7 +14,7 @@ use krabka_ids::Offset;
 use krabka_units::prelude::{ByteSize, ByteSizeExt as _, Time, TimeExt as _};
 
 use super::{Engine, KraftController, checkpoint::checkpoint_ids};
-use crate::error::RaftError;
+use crate::{error::RaftError, snapshot::SnapshotReader};
 
 /// One snapshot the cleaning weighs: its `(end_offset, epoch)` id and the
 /// size of its `.checkpoint` file.
@@ -119,7 +119,7 @@ impl Engine {
     /// `None` when the file does not read.
     fn snapshot_timestamp(&self, id: (i64, i32)) -> Option<i64> {
         let bytes = super::checkpoint::load_checkpoint_by_id(&self.data_dir, id.0, id.1)?;
-        crate::snapshot::SnapshotReader::last_contained_log_timestamp(&bytes).ok()
+        SnapshotReader::last_contained_log_timestamp(&bytes).ok()
     }
 
     /// Kafka's `KafkaRaftLog.deleteBeforeSnapshot`: move the log start up to

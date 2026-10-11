@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use super::{FileConfigError, validate::positive_usize};
+use crate::{config::BrokerConfig, topic_policy::TopicPolicy};
 
 /// TOML shape of `[topic_policy]`. Maps to
 /// [`crate::topic_policy::TopicPolicy`].
@@ -57,14 +58,14 @@ pub struct FileTopicPolicyConfig {
 /// declares no rule.
 pub(super) fn apply_topic_policy(
     file: Option<FileTopicPolicyConfig>,
-    cfg: &mut crate::config::BrokerConfig,
+    cfg: &mut BrokerConfig,
 ) -> Result<(), FileConfigError> {
     let Some(file) = file else {
         return Ok(());
     };
     // A floor or a ceiling of zero is a rule that either means nothing or
     // refuses every topic. Both are the operator having mistyped it.
-    let policy = crate::topic_policy::TopicPolicy {
+    let policy = TopicPolicy {
         min_replication_factor: file
             .min_replication_factor
             .map(|value| positive_usize("topic_policy.min_replication_factor", value))
@@ -89,11 +90,11 @@ mod tests {
     use assert2::check;
 
     use super::*;
-    use crate::file_config::FileConfig;
+    use crate::{config::BrokerConfig, file_config::FileConfig, topic_policy::TopicPolicy};
 
-    fn apply(toml: &str) -> Result<crate::config::BrokerConfig, FileConfigError> {
+    fn apply(toml: &str) -> Result<BrokerConfig, FileConfigError> {
         let file: FileConfig = toml::from_str(toml).expect("parse topic_policy section");
-        let mut cfg = crate::config::BrokerConfig::default();
+        let mut cfg = BrokerConfig::default();
         file.apply_to(&mut cfg)?;
         Ok(cfg)
     }
@@ -112,7 +113,7 @@ forbidden = { "unclean.leader.election.enable" = "true" }
         )
         .expect("a well-formed policy applies");
 
-        let expected = crate::topic_policy::TopicPolicy {
+        let expected = TopicPolicy {
             min_replication_factor: Some(3),
             max_partitions: Some(64),
             min_insync_replicas: Some(2),

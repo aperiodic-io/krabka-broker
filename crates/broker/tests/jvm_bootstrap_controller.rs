@@ -39,6 +39,8 @@ use std::process::Command;
 use assert2::check;
 use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
 
+use crate::support::{JvmBrokerSetup, controller_voters, init_jvm_tracing, jvm_broker_config};
+
 /// Kafka 4.3.1 is the compatibility oracle for KIP-919.
 const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.3.1";
 
@@ -86,20 +88,20 @@ fn controller_bootstrap() -> &'static str {
 async fn start_host_broker_with(
     adjust: impl FnOnce(&mut BrokerConfig),
 ) -> (BrokerHandle, tempfile::TempDir) {
-    crate::support::init_jvm_tracing("krabka_broker=info,warn");
+    init_jvm_tracing("krabka_broker=info,warn");
     let dir = tempfile::tempdir().expect("tempdir");
     let mut config = BrokerConfig {
         controller_quorum_voters: vec![(
             krabka_broker::NodeId(1),
             controller_bootstrap().to_string(),
         )],
-        ..crate::support::jvm_broker_config(
+        ..jvm_broker_config(
             dir.path().to_path_buf(),
-            crate::support::JvmBrokerSetup {
+            JvmBrokerSetup {
                 listen: listen_addr().parse().expect("allocated addr"),
                 controller: controller_listen().parse().expect("allocated addr"),
                 advertised: (advertised_addr()).to_owned(),
-                voters: crate::support::controller_voters(&[(
+                voters: controller_voters(&[(
                     1,
                     controller_listen().parse().expect("allocated addr"),
                 )]),

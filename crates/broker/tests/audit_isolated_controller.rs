@@ -11,6 +11,8 @@ use krabka_broker::{BootstrapMode, Broker, config::NodeRole, coordinator::AUDIT_
 use krabka_raft::NodeId;
 use tempfile::TempDir;
 
+use crate::support::{ClusterNodeSetup, NodeIndex, controller_voters};
+
 mod support;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -24,10 +26,10 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
     let controller_dir = TempDir::new().unwrap();
     let mut controller_config = support::broker_config(
         controller_dir.path(),
-        crate::support::ClusterNodeSetup {
+        ClusterNodeSetup {
             client_addrs: &client_addrs,
             controller_addrs: &controller_addrs,
-            voters: crate::support::controller_voters(&voters),
+            voters: controller_voters(&voters),
             ..Default::default()
         },
     );
@@ -48,11 +50,11 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
     let broker_dir = TempDir::new().unwrap();
     let mut broker_config = support::broker_config(
         broker_dir.path(),
-        crate::support::ClusterNodeSetup {
-            index: crate::support::NodeIndex(1),
+        ClusterNodeSetup {
+            index: NodeIndex(1),
             client_addrs: &client_addrs,
             controller_addrs: &controller_addrs,
-            voters: crate::support::controller_voters(&voters),
+            voters: controller_voters(&voters),
             mode: BootstrapMode::Join,
         },
     );

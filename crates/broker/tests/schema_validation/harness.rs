@@ -22,7 +22,12 @@ use wiremock::{
     matchers::{method, path},
 };
 
-use crate::support::{records::value_record, topics::creatable_topic};
+use crate::support::{
+    client::{BrokerClientSetup, start_broker_client},
+    produce::{SinglePartitionProduceSetup, send_batch},
+    records::value_record,
+    topics::{ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, topic_configs},
+};
 
 /// Kafka error 87. KIP-467 added it for "one or more records in the batch were
 /// invalid", which is what a schema rejection is.
@@ -137,7 +142,7 @@ pub fn boot(
     Box::pin(async move {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
-        crate::harness::apply_registry_config(
+        apply_registry_config(
             &mut config,
             &format!(
                 r#"
@@ -172,7 +177,7 @@ pub fn mock_topic_fixture(
         let id = create_topic(
             &broker,
             &client,
-            crate::harness::SchemaTopicSetup {
+            SchemaTopicSetup {
                 name: topic,
                 configs,
                 ..Default::default()
@@ -201,7 +206,7 @@ pub struct SchemaTopicSetup<'a> {
     #[default(VALIDATED)]
     pub configs: &'a [(&'a str, &'a str)],
     #[default(crate::support::topics::TopicReplicationFactor(1))]
-    pub replicas: crate::support::topics::TopicReplicationFactor,
+    pub replicas: TopicReplicationFactor,
 }
 
 /// The committed `CreateTopics` response supplies the identity, even when another
@@ -211,10 +216,10 @@ pub async fn create_topic(
     client: &Client,
     setup: SchemaTopicSetup<'_>,
 ) -> WireUuid {
-    let topic = creatable_topic(crate::support::topics::ConfiguredTopicSetup {
+    let topic = creatable_topic(ConfiguredTopicSetup {
         name: setup.name.into(),
         replicas: setup.replicas,
-        configs: crate::support::topics::topic_configs(setup.configs.iter().copied()),
+        configs: topic_configs(setup.configs.iter().copied()),
         ..Default::default()
     });
     let name = topic.name.clone();
@@ -249,10 +254,10 @@ pub async fn produce(
     topic_id: WireUuid,
     batch: RecordBatch,
 ) -> PartitionProduceResponse {
-    let resp = crate::support::produce::send_batch(
+    let resp = send_batch(
         &client,
         batch,
-        crate::support::produce::SinglePartitionProduceSetup {
+        SinglePartitionProduceSetup {
             topic: (topic).into(),
             topic_id,
             ..Default::default()
@@ -269,9 +274,9 @@ pub fn boot_config(
     config: BrokerConfig,
 ) -> impl std::future::Future<Output = (BrokerHandle, Client)> {
     Box::pin(async move {
-        crate::support::client::start_broker_client(
+        start_broker_client(
             config,
-            crate::support::client::BrokerClientSetup {
+            BrokerClientSetup {
                 client_id: "schema-validation-test",
                 ..Default::default()
             },

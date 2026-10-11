@@ -9,7 +9,7 @@
 use assert2::{assert, check};
 
 use crate::share_group_harness::{
-    boot, connect, create_topic, describe, heartbeat, start, total_assigned,
+    boot, connect, create_topic, describe, heartbeat, rejoin, start, total_assigned,
 };
 
 /// A single member joins and advances to epoch 1 with an empty assignment,
@@ -170,7 +170,7 @@ async fn state_survives_restart() {
     }
 
     {
-        let (_broker, client) = crate::share_group_harness::rejoin(log_dir).await;
+        let (_broker, client) = rejoin(log_dir).await;
 
         let desc = describe(&client, "g1").await;
         assert!(desc.groups.len() == 1, "group row after restart");

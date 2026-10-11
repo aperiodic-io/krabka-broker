@@ -5,6 +5,8 @@ use moxy::{
     token::{Ident, Span, TokenStream, TokenTree},
 };
 
+use crate::meta::{arguments, item_body, mode, required_tokens};
+
 /// Top-level comma splitting that retains the input's diagnostic span.
 pub(crate) struct CommaArguments {
     pub(crate) span: Span,
@@ -53,16 +55,14 @@ pub(crate) fn named_arguments(
     input: TokenStream,
     count: usize,
 ) -> Result<(Ident, std::vec::IntoIter<TokenStream>), ParseError> {
-    let mut arguments = crate::meta::arguments(input, count)?.into_iter();
+    let mut arguments = arguments(input, count)?.into_iter();
     let name = self::name(arguments.next().expect("item name argument"))?;
     Ok((name, arguments))
 }
 
 /// Parse the common item-name and crate-path pair of fixture generators.
 pub(crate) fn named_root(input: TokenStream) -> Result<(Ident, TokenStream), ParseError> {
-    let [name, root]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
-        .try_into()
-        .expect("two arguments");
+    let [name, root]: [TokenStream; 2] = arguments(input, 2)?.try_into().expect("two arguments");
     Ok((self::name(name)?, root))
 }
 
@@ -216,10 +216,10 @@ pub(crate) fn compacted_batch(tokens: TokenStream) -> Result<TokenStream, ParseE
         .into_iter()
         .any(|token| token.is_punct_comma())
     {
-        let arguments = crate::meta::arguments(tokens, 2)?;
+        let arguments = arguments(tokens, 2)?;
         (
             name(arguments[0].clone())?,
-            crate::meta::mode(arguments[1].clone(), ["plain", "full"])? == "full",
+            mode(arguments[1].clone(), ["plain", "full"])? == "full",
         )
     } else {
         (name(tokens)?, true)
@@ -264,9 +264,9 @@ pub(crate) fn compacted_batch(tokens: TokenStream) -> Result<TokenStream, ParseE
 
 /// Generate the first matching header lookup with the caller's UTF-8 policy.
 pub(crate) fn record_header_text(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let arguments = crate::meta::arguments(tokens, 2)?;
+    let arguments = arguments(tokens, 2)?;
     let name = name(arguments[0].clone())?;
-    let strict = crate::meta::mode(arguments[1].clone(), ["strict", "lossy"])? == "strict";
+    let strict = mode(arguments[1].clone(), ["strict", "lossy"])? == "strict";
     Ok(moxy::template! {
         fn {{ name }}(record: &::krabka_protocol::records::Record, key: &str) -> Option<String> {
             record.headers.iter()
@@ -282,7 +282,7 @@ pub(crate) fn record_header_text(tokens: TokenStream) -> Result<TokenStream, Par
 
 /// Generate the three DLQ counter reads with explicit caller types and docs.
 pub(crate) fn share_dlq_meters(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let arguments = crate::meta::arguments(tokens, 3)?;
+    let arguments = arguments(tokens, 3)?;
     let mut name_tokens = Vec::from(arguments[0].clone());
     let name = name(name_tokens.pop().into_iter().collect())?;
     let attributes = TokenStream::from(name_tokens);
@@ -302,8 +302,8 @@ pub(crate) fn share_dlq_meters(tokens: TokenStream) -> Result<TokenStream, Parse
 }
 
 pub(crate) fn record_batch(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let mut args = crate::meta::arguments(tokens.clone(), 1)
-        .or_else(|_| crate::meta::arguments(tokens, 2))?
+    let mut args = arguments(tokens.clone(), 1)
+        .or_else(|_| arguments(tokens, 2))?
         .into_iter();
     let name = name(args.next().expect("fixture name"))?;
     let (epoch_field, last_offset) = if let Some(epoch) = args.next() {
@@ -333,8 +333,7 @@ pub(crate) fn record_batch(tokens: TokenStream) -> Result<TokenStream, ParseErro
 
 /// Generate the shared action adapter inside either simulation harness impl.
 pub(crate) fn simulation_actions(root: TokenStream) -> Result<TokenStream, ParseError> {
-    let root =
-        crate::meta::required_tokens(root, "simulation_actions needs the consensus crate path")?;
+    let root = required_tokens(root, "simulation_actions needs the consensus crate path")?;
     Ok(moxy::template! {
         /// Apply consensus effects, leaving each harness's durability bookkeeping to its hook.
         pub(super) fn apply_action(&mut self, id: {{ root }}::types::NodeId, action: {{ root }}::action::Action) {
@@ -372,8 +371,7 @@ pub(crate) fn metadata_log_delegate(
     root: TokenStream,
     item: TokenStream,
 ) -> Result<TokenStream, ParseError> {
-    let (mut tokens, body) =
-        crate::meta::item_body(item, "metadata_log_delegate", TokenTree::is_keyword_impl)?;
+    let (mut tokens, body) = item_body(item, "metadata_log_delegate", TokenTree::is_keyword_impl)?;
     let mut root_tokens: Vec<_> = root.into_iter().collect();
     // Optional transport operations require explicit selectors.
     let mut keyed = false;
@@ -397,7 +395,7 @@ pub(crate) fn metadata_log_delegate(
         }
         root_tokens.pop();
     }
-    let root = crate::meta::required_tokens(
+    let root = required_tokens(
         TokenStream::from(root_tokens),
         "metadata_log_delegate needs the metadata log crate path",
     )?;
@@ -472,8 +470,7 @@ pub(crate) fn remote_segment_check(tokens: TokenStream) -> Result<TokenStream, P
 
 /// The harness event adapter, shared by browser and storage simulations.
 pub(crate) fn simulation_step(root: TokenStream) -> Result<TokenStream, ParseError> {
-    let root =
-        crate::meta::required_tokens(root, "simulation_step needs the consensus crate path")?;
+    let root = required_tokens(root, "simulation_step needs the consensus crate path")?;
     Ok(moxy::template! {
         /// Feed one event to the consensus machine, then apply its effects.
         pub(super) fn step(&mut self, id: {{ root }}::NodeId, event: {{ root }}::Event) {
@@ -518,9 +515,8 @@ pub(crate) fn snapshot_topic(tokens: TokenStream) -> Result<TokenStream, ParseEr
 }
 
 pub(crate) fn s3_archive_config(tokens: TokenStream) -> Result<TokenStream, ParseError> {
-    let [name_tokens, config_type]: [TokenStream; 2] = crate::meta::arguments(tokens, 2)?
-        .try_into()
-        .expect("two arguments");
+    let [name_tokens, config_type]: [TokenStream; 2] =
+        arguments(tokens, 2)?.try_into().expect("two arguments");
     let name = name(name_tokens)?;
     Ok(moxy::template! {
         fn {{ name }}() -> {{ config_type }} {
@@ -565,8 +561,7 @@ pub(crate) fn benchmark_scenario(tokens: TokenStream) -> Result<TokenStream, Par
 }
 
 pub(crate) fn simulation_transport(root: TokenStream) -> Result<TokenStream, ParseError> {
-    let root =
-        crate::meta::required_tokens(root, "simulation_transport needs the consensus crate path")?;
+    let root = required_tokens(root, "simulation_transport needs the consensus crate path")?;
     Ok(moxy::template! {
         fn can_replicate(&self, follower: NodeId, leader: NodeId) -> bool {
             follower != leader
@@ -592,9 +587,8 @@ pub(crate) fn simulation_transport(root: TokenStream) -> Result<TokenStream, Par
 }
 
 pub(crate) fn simulation_heartbeat(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let [root, interval]: [TokenStream; 2] = crate::meta::arguments(input, 2)?
-        .try_into()
-        .expect("two arguments");
+    let [root, interval]: [TokenStream; 2] =
+        arguments(input, 2)?.try_into().expect("two arguments");
     Ok(moxy::template! {
         /// Re-broadcast the leader epoch and re-arm its heartbeat timer.
         fn fire_leader_heartbeat(&mut self, id: {{ root }}::types::NodeId) {

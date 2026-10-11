@@ -17,11 +17,17 @@ use super::{
 };
 // A metadata image that holds each group config in `overrides`: a group id
 // and its `share.*` entries.
-use crate::coordinator::unified::test_support::group_config_image as group_image;
 use crate::coordinator::unified::{
     GroupCoordinator,
     share::{actor::test_support::TopicMetadataSetup, config::ShareGroupConfig},
-    test_support::fixed_source,
+    test_support::{check_group_session_timeout, fixed_source},
+};
+use crate::{
+    coordinator::unified::{
+        share::actor::test_support::InitializedTopicSetup,
+        test_support::{check_group_assignment_timing, group_config_image as group_image},
+    },
+    test_support::FakeMetadataSource,
 };
 
 /// A coordinator over topic `t` with four partitions, whose metadata image
@@ -48,7 +54,7 @@ async fn a_heartbeat_runs_with_the_group_config_of_the_moment_it_arrives() {
         TopicMetadataSetup::four_partitions(),
         ShareGroupConfig::assigning_at_once(),
     );
-    let source = Arc::new(crate::test_support::FakeMetadataSource::builder().build());
+    let source = Arc::new(FakeMetadataSource::builder().build());
     coordinator.set_metadata_source(source.clone());
     let handle = coordinator.get_or_create_share("g");
     let joined = join(&handle, "m1", 0).await;
@@ -125,11 +131,7 @@ async fn a_group_expires_a_member_by_its_own_session_timeout() {
             ],
         )],
     );
-    crate::coordinator::unified::test_support::check_group_session_timeout(
-        |id| coordinator.get_or_create_share(id),
-        join,
-    )
-    .await;
+    check_group_session_timeout(|id| coordinator.get_or_create_share(id), join).await;
 }
 
 /// Kafka's `canComputeNextTargetAssignment`: a second member that joins
@@ -149,12 +151,12 @@ async fn a_group_assigns_no_sooner_than_its_own_assignment_interval() {
             ("paced", &[("share.assignment.interval.ms", "300")]),
         ],
     );
-    crate::coordinator::unified::test_support::check_group_assignment_timing(
+    check_group_assignment_timing(
         async |id| {
             let handle = coordinator.get_or_create_share(id);
             seed_initialized(
                 &handle,
-                crate::coordinator::unified::share::actor::test_support::InitializedTopicSetup {
+                InitializedTopicSetup {
                     topic_id,
                     partitions: vec![
                         krabka_ids::PartitionIndex(0),

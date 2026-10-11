@@ -5,9 +5,11 @@
 
 use krabka_protocol::owned::create_partitions_request::CreatePartitionsTopic;
 
+use crate::handlers::request_names::duplicate_names as find_duplicate_names;
+
 /// The names that more than one request row carries, in the order of their
 /// first row. Kafka's `ControllerApis.createPartitions` answers each once
 /// with `INVALID_REQUEST` and grows none of them.
 pub(super) fn duplicate_names(topics: &[CreatePartitionsTopic]) -> Vec<String> {
-    crate::handlers::request_names::duplicate_names(topics.iter().map(|topic| topic.name.as_str()))
+    find_duplicate_names(topics.iter().map(|topic| topic.name.as_str()))
 }

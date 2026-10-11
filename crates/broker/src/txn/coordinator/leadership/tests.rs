@@ -2,6 +2,10 @@ use assert2::assert;
 use uuid::Uuid;
 
 use super::*;
+use crate::{
+    codes::{COORDINATOR_LOAD_IN_PROGRESS, NOT_COORDINATOR},
+    txn::coordinator::test_support::{StateImageSetup, state_image},
+};
 
 const THIS_BROKER: NodeId = NodeId(1);
 const OTHER_BROKER: NodeId = NodeId(2);
@@ -14,14 +18,12 @@ fn image_without_topic() -> MetadataImage {
 }
 
 fn image(topic_id: Uuid, leader: NodeId, leader_epoch: LeaderEpoch) -> MetadataImage {
-    crate::txn::coordinator::test_support::state_image(
-        crate::txn::coordinator::test_support::StateImageSetup {
-            topic_id,
-            leader,
-            leader_epoch,
-            replicas: &[leader],
-        },
-    )
+    state_image(StateImageSetup {
+        topic_id,
+        leader,
+        leader_epoch,
+        replicas: &[leader],
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -281,20 +283,17 @@ fn an_election_before_the_log_opens_loads_once_it_opens() {
 #[test]
 fn the_load_status_gives_the_kafka_error_code() {
     let cases = [
-        (None, Some(crate::codes::NOT_COORDINATOR)),
+        (None, Some(NOT_COORDINATOR)),
         (
             Some(LoadStatus::Pending),
-            Some(crate::codes::COORDINATOR_LOAD_IN_PROGRESS),
+            Some(COORDINATOR_LOAD_IN_PROGRESS),
         ),
         (
             Some(LoadStatus::Loading),
-            Some(crate::codes::COORDINATOR_LOAD_IN_PROGRESS),
+            Some(COORDINATOR_LOAD_IN_PROGRESS),
         ),
         (Some(LoadStatus::Loaded), None),
-        (
-            Some(LoadStatus::Failed),
-            Some(crate::codes::NOT_COORDINATOR),
-        ),
+        (Some(LoadStatus::Failed), Some(NOT_COORDINATOR)),
     ];
     for (status, expected) in cases {
         assert!(coordinator_error(status) == expected, "{status:?}");

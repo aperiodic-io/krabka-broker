@@ -26,7 +26,10 @@ use super::{
     sentinels::{MAX_TIMESTAMP, UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
     test_support::{client_for, create_topic, list_one},
 };
-use crate::{api_catalog::UnstableApiVersions, broker::BrokerHandle, codes};
+use crate::{
+    api_catalog::UnstableApiVersions, broker::BrokerHandle, codes,
+    test_support::start_broker_no_audit_with,
+};
 
 const TOPIC: &str = "list-offsets-record-limit";
 const KEY: &str = "max.decompressed.message.bytes";
@@ -40,7 +43,7 @@ const RETENTION_KEY: &str = "log.retention.ms";
 async fn broker_with_records(
     unstable: UnstableApiVersions,
 ) -> (BrokerHandle, krabka_client_core::Client, tempfile::TempDir) {
-    let (broker, dir) = crate::test_support::start_broker_no_audit_with(move |config| {
+    let (broker, dir) = start_broker_no_audit_with(move |config| {
         config.features.unstable_api_versions = unstable;
     })
     .await;

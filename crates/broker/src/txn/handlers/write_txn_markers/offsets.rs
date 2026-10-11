@@ -24,13 +24,14 @@ use crate::{
         },
     },
     error::BrokerError,
+    partition::Partition,
     txn::marker::MarkerType,
 };
 
 pub(crate) type CommittedOffsets = HashMap<String, Vec<((String, i32), OffsetEntry)>>;
 
 pub(super) fn pending_offset_entries(
-    partition: &crate::partition::Partition,
+    partition: &Partition,
     producer_id: krabka_log::ProducerId,
 ) -> Result<CommittedOffsets, BrokerError> {
     let log = partition.log.lock().map_err(|_| {
@@ -234,18 +235,18 @@ mod tests {
     use super::{CommittedOffsets, checked_batch_advance, scan_pending_offset_entries};
     use crate::coordinator::{
         persistence::OffsetCommitValue,
-        test_support::{offset_entry as entry, replay_offset_batch},
+        test_support::{
+            OffsetRecordSetup, offset_entry as entry, offset_record, replay_offset_batch,
+        },
     };
 
     fn commit(group: &str, topic: &str, partition: i32, offset: i64) -> Record {
-        crate::coordinator::test_support::offset_record(
-            crate::coordinator::test_support::OffsetRecordSetup {
-                group,
-                topic,
-                partition: krabka_ids::PartitionIndex(partition),
-                offset: krabka_log::Offset(offset),
-            },
-        )
+        offset_record(OffsetRecordSetup {
+            group,
+            topic,
+            partition: krabka_ids::PartitionIndex(partition),
+            offset: krabka_log::Offset(offset),
+        })
     }
 
     fn tombstone(group: &str, topic: &str, partition: i32) -> Record {

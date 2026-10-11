@@ -7,8 +7,9 @@ use bytes::Bytes;
 use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
 
 use crate::{
+    DelegationTokenMutation, NodeId, SubmitChangeResult,
     error::RaftError,
-    kraft::KraftController,
+    kraft::{Epoch, KraftController, ReplicaKey},
     wire::{
         KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest,
         KrabkaSubmitChangeResponse, SUBMIT_CHANGE_UNCOMMITTED_TAIL,
@@ -66,14 +67,14 @@ pub(super) async fn dispatch_submit_change(
     Ok(Bytes::from(out))
 }
 
-fn applied_change(
-    result: &crate::SubmitChangeResult,
-) -> Result<KrabkaSubmitChangeResponse, RaftError> {
+fn applied_change(result: &SubmitChangeResult) -> Result<KrabkaSubmitChangeResponse, RaftError> {
     Ok(KrabkaSubmitChangeResponse {
         error_code: SUBMIT_CHANGE_APPLIED,
         leader_hint: LEADER_HINT_UNKNOWN,
         result: Bytes::from(
-            <serde_wincode::SerdeCompat<crate::SubmitChangeResult> as wincode::Serialize>::serialize(result)?,
+            <serde_wincode::SerdeCompat<SubmitChangeResult> as wincode::Serialize>::serialize(
+                result,
+            )?,
         ),
     })
 }
@@ -111,8 +112,8 @@ pub(super) async fn dispatch_delegation_token_mutation(
 ) -> Result<Bytes, RaftError> {
     let mut cur = body;
     let req = KrabkaSubmitChangeRequest::decode_v0(&mut cur)?;
-    let mutations: Vec<crate::DelegationTokenMutation> = match <serde_wincode::SerdeCompat<
-        Vec<crate::DelegationTokenMutation>,
+    let mutations: Vec<DelegationTokenMutation> = match <serde_wincode::SerdeCompat<
+        Vec<DelegationTokenMutation>,
     > as wincode::Deserialize>::deserialize(
         &req.records
     ) {
@@ -154,9 +155,7 @@ pub(super) async fn dispatch_delegation_token_mutation(
 
 /// Serve a committed `__cluster_metadata` slice to a broker-only observer (1004)
 /// from the engine's `KraftLog`.
-fn quorum_metadata_leader(
-    quorum: Option<(Option<crate::NodeId>, crate::kraft::Epoch)>,
-) -> (i64, i32) {
+fn quorum_metadata_leader(quorum: Option<(Option<NodeId>, Epoch)>) -> (i64, i32) {
     let leader_hint: i64 = quorum
         .and_then(|(leader_id, _)| leader_id)
         .and_then(|l| i64::try_from(l.0).ok())
@@ -177,12 +176,10 @@ pub(super) async fn dispatch_metadata_fetch(
     let max_size = ByteSize::from_bytes_i64(i64::from(req.max_bytes.max(0)));
     // A negative replica id is a fetcher that is not a replica, as in Kafka's
     // `FetchRequest`, and the leader tracks nothing for it.
-    let replica = u64::try_from(req.replica_id)
-        .ok()
-        .map(|id| crate::kraft::ReplicaKey {
-            id: crate::NodeId(id),
-            directory_id: req.replica_directory_id,
-        });
+    let replica = u64::try_from(req.replica_id).ok().map(|id| ReplicaKey {
+        id: NodeId(id),
+        directory_id: req.replica_directory_id,
+    });
     let slice = engine
         .metadata_fetch(fetch_offset, max_size, replica)
         .await?;
@@ -214,18 +211,20 @@ mod tests {
 
     use super::*;
     use crate::{
+        DelegationTokenMutation, NodeId,
         server::{
             dispatch::dispatch,
             test_support::{single_voter_engine, test_engine_with_voters, wait_for_leader},
         },
-        wire::{API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE},
+        test_support::single_partition_topic,
+        wire::{
+            API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
+            PRIVATE_UNSUPPORTED_VERSION, private_api_highest_version,
+        },
     };
 
     fn topic_record(name: &str) -> MetadataRecord {
-        MetadataRecord::V1Topic(crate::test_support::single_partition_topic(
-            name,
-            Uuid::new_v4(),
-        ))
+        MetadataRecord::V1Topic(single_partition_topic(name, Uuid::new_v4()))
     }
 
     fn submit_change_body(records: &[MetadataRecord]) -> Bytes {
@@ -308,8 +307,7 @@ mod tests {
     async fn dispatch_answers_an_unsupported_private_version() {
         let (engine, _dir) = single_voter_engine();
         wait_for_leader(&engine).await;
-        let past_max =
-            |api_key| crate::wire::private_api_highest_version(api_key).expect("a private api") + 1;
+        let past_max = |api_key| private_api_highest_version(api_key).expect("a private api") + 1;
 
         let submit = dispatch(
             ApiKey(API_KEY_SUBMIT_CHANGE),
@@ -322,7 +320,7 @@ mod tests {
         check!(
             decode_submit_change_response(&submit)
                 == KrabkaSubmitChangeResponse {
-                    error_code: crate::wire::PRIVATE_UNSUPPORTED_VERSION,
+                    error_code: PRIVATE_UNSUPPORTED_VERSION,
                     leader_hint: -1,
                     result: Bytes::new(),
                 }
@@ -340,7 +338,7 @@ mod tests {
         check!(
             decode_metadata_fetch_response(&fetch)
                 == KrabkaMetadataFetchResponse {
-                    error_code: crate::wire::PRIVATE_UNSUPPORTED_VERSION,
+                    error_code: PRIVATE_UNSUPPORTED_VERSION,
                     leader_hint: -1,
                     leader_epoch: -1,
                     log_start_offset: -1,
@@ -393,7 +391,7 @@ mod tests {
             (
                 "not the leader",
                 RaftError::NotLeader {
-                    current_leader: Some(crate::types::NodeId(3)),
+                    current_leader: Some(NodeId(3)),
                 },
                 SUBMIT_CHANGE_NOT_LEADER,
                 3,
@@ -482,7 +480,7 @@ mod tests {
         let (engine, _dir) = single_voter_engine();
         wait_for_leader(&engine).await;
 
-        let mutation = crate::DelegationTokenMutation::Delete {
+        let mutation = DelegationTokenMutation::Delete {
             expected: krabka_metadata::DelegationTokenRecord {
                 token_id: "token-1".into(),
                 owner: krabka_security::KafkaPrincipal {
@@ -499,7 +497,7 @@ mod tests {
                 renewers: Vec::new(),
             },
         };
-        let payload = <serde_wincode::SerdeCompat<Vec<crate::DelegationTokenMutation>> as wincode::Serialize>::serialize(
+        let payload = <serde_wincode::SerdeCompat<Vec<DelegationTokenMutation>> as wincode::Serialize>::serialize(
             &vec![mutation],
         ).expect("serialize mutation");
 
@@ -510,7 +508,7 @@ mod tests {
         req.encode_v0(&mut req_body).expect("encode req");
 
         let resp_bytes = dispatch(
-            ApiKey(crate::wire::API_KEY_DELEGATION_TOKEN_MUTATION),
+            ApiKey(API_KEY_DELEGATION_TOKEN_MUTATION),
             0,
             Bytes::from(req_body),
             &engine,
@@ -529,7 +527,7 @@ mod tests {
         check!(hint == -1);
         check!(epoch == -1);
 
-        let (hint, epoch) = quorum_metadata_leader(Some((Some(crate::NodeId(42)), 5)));
+        let (hint, epoch) = quorum_metadata_leader(Some((Some(NodeId(42)), 5)));
         check!(hint == 42);
         check!(epoch == 5);
 
@@ -537,7 +535,7 @@ mod tests {
         check!(hint == -1);
         check!(epoch == 0);
 
-        let (hint, epoch) = quorum_metadata_leader(Some((Some(crate::NodeId(1)), u32::MAX)));
+        let (hint, epoch) = quorum_metadata_leader(Some((Some(NodeId(1)), u32::MAX)));
         check!(hint == 1);
         check!(epoch == i32::MAX);
     }

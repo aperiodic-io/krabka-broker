@@ -13,13 +13,19 @@ use super::{
     OFFSETS_PARTITION, OFFSETS_TOPIC, bootstrap,
     test_support::{controller_with_leader, test_coordinator},
 };
-use crate::{config::BrokerConfig, log_dir, partition_registry::PartitionRegistry};
+use crate::{
+    auto_topic_creation::creatable_topic, broker::Broker, config::BrokerConfig,
+    coordinator::GroupCoordinator, log_dir, log_dir_status::LogDirRegistry,
+    metadata_source::MetadataSource, partition_registry::PartitionRegistry,
+    producer_state::ProducerState, share_coordinator::bootstrap::TOPIC as SHARE_TOPIC,
+    topic_creator::TopicCreator, txn::bootstrap::TOPIC as TXN_TOPIC,
+};
 
 krabka_macros::single_replica_partition_fixture!(partition_record);
 
 /// Registers a one-partition `__consumer_offsets` that this node leads, as
 /// the first group lookup's auto-creation does.
-async fn register_offsets_topic(controller: &Arc<dyn crate::metadata_source::MetadataSource>) {
+async fn register_offsets_topic(controller: &Arc<dyn MetadataSource>) {
     let node = krabka_metadata::NodeId(1);
     controller
         .submit_change(vec![
@@ -40,7 +46,7 @@ async fn register_offsets_topic(controller: &Arc<dyn crate::metadata_source::Met
 }
 
 struct BootstrapFixture {
-    controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: Arc<dyn MetadataSource>,
     config: BrokerConfig,
     _dir: tempfile::TempDir,
 }
@@ -58,15 +64,15 @@ async fn bootstrap_fixture() -> BootstrapFixture {
 
 fn bootstrap_components(
     config: &BrokerConfig,
-    controller: &Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: &Arc<dyn MetadataSource>,
 ) -> (
     Arc<PartitionRegistry>,
-    Arc<crate::coordinator::GroupCoordinator>,
-    crate::log_dir_status::LogDirRegistry,
+    Arc<GroupCoordinator>,
+    LogDirRegistry,
 ) {
     let partitions = Arc::new(PartitionRegistry::new());
     let coordinator = test_coordinator(controller, &partitions);
-    let status = crate::log_dir_status::LogDirRegistry::probe(&config.all_log_dirs());
+    let status = LogDirRegistry::probe(&config.all_log_dirs());
     (partitions, coordinator, status)
 }
 
@@ -88,7 +94,7 @@ async fn bootstrap_creates_no_offsets_topic() {
         &partitions,
         &coordinator,
         &log_dir_status,
-        &Arc::new(crate::producer_state::ProducerState::new()),
+        &Arc::new(ProducerState::new()),
     )
     .await
     .unwrap();
@@ -114,7 +120,7 @@ async fn bootstrap_opens_the_local_partitions_of_an_existing_offsets_topic() {
             &partitions,
             &coordinator,
             &log_dir_status,
-            &Arc::new(crate::producer_state::ProducerState::new()),
+            &Arc::new(ProducerState::new()),
         )
         .await
         .unwrap();
@@ -141,22 +147,16 @@ async fn internal_topics_are_created_with_kafkas_topic_configs() {
     // Kafka's default minimum ISR. The single-node fixture lowers it to 1.
     config.transaction_state_min_isr = 2;
     config.share_coordinator.state_topic_min_isr = 2;
-    let handle = crate::broker::Broker::start(config)
-        .await
-        .expect("start broker");
+    let handle = Broker::start(config).await.expect("start broker");
     let broker = handle.broker_arc_for_test();
     let request = CreateTopicsRequest {
-        topics: [
-            OFFSETS_TOPIC,
-            crate::txn::bootstrap::TOPIC,
-            crate::share_coordinator::bootstrap::TOPIC,
-        ]
-        .into_iter()
-        .map(|topic| crate::auto_topic_creation::creatable_topic(&broker.config, topic))
-        .collect(),
+        topics: [OFFSETS_TOPIC, TXN_TOPIC, SHARE_TOPIC]
+            .into_iter()
+            .map(|topic| creatable_topic(&broker.config, topic))
+            .collect(),
         ..Default::default()
     };
-    let response = crate::topic_creator::TopicCreator::new(&broker)
+    let response = TopicCreator::new(&broker)
         .create_topic_without_principal(request)
         .await
         .expect("the controller answers CreateTopics");
@@ -175,7 +175,7 @@ async fn internal_topics_are_created_with_kafkas_topic_configs() {
             ],
         ),
         (
-            crate::txn::bootstrap::TOPIC,
+            TXN_TOPIC,
             vec![
                 ("cleanup.policy", "compact"),
                 ("compression.type", "uncompressed"),
@@ -185,7 +185,7 @@ async fn internal_topics_are_created_with_kafkas_topic_configs() {
             ],
         ),
         (
-            crate::share_coordinator::bootstrap::TOPIC,
+            SHARE_TOPIC,
             vec![
                 ("cleanup.policy", "delete"),
                 ("compression.type", "producer"),

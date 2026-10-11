@@ -23,14 +23,17 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::{
-    broker::Broker,
+    authorizer::{AllowAllAuthorizer, Authorizer},
+    broker::{Broker, BrokerHandle},
     codes,
     coordinator::unified::{
         actor::{GroupActorMessage, GroupKindTag},
         classic_state::OffsetEntry,
+        regex_resolver::no_topic_regex_resolver,
     },
     handlers::test_support::CreateTopicSetup,
-    test_support::{peer, principal},
+    test_support::{dispatch_wire, peer, principal, start_group_broker_no_audit},
+    time_util::now_ms,
 };
 
 // Seed a committed offset for (group, topic, partition) directly on the
@@ -222,7 +225,7 @@ async fn fetch(
     request_identity!((p, peer, ctx), principal("admin"), client_id = "consumer");
     // The response shape changes with the version (KIP-516 moves it into
     // `groups[]` at v8), so this reads it back off the wire.
-    crate::test_support::dispatch_wire(
+    dispatch_wire(
         broker,
         krabka_protocol::owned::offset_fetch_request::API_KEY,
         version,
@@ -441,7 +444,7 @@ use crate::handlers::test_support::{DenyTopics, TopicRef};
 /// Create the known topic and return its id. Seed a committed offset for
 /// `(KNOWN_NAME, 0)`, and one for the empty topic name, which a zero-id row
 /// must not read.
-async fn seed_topic_reference_group(broker_handle: &crate::broker::BrokerHandle) -> WireUuid {
+async fn seed_topic_reference_group(broker_handle: &BrokerHandle) -> WireUuid {
     created_topic_fixture!(
         (client, response),
         broker_handle,
@@ -589,9 +592,9 @@ fn unresolved_topic_reference_cases() -> [TopicReferenceCase; 2] {
 }
 
 async fn topic_reference_broker(
-    authorizer: Arc<dyn crate::authorizer::Authorizer>,
-) -> (crate::broker::BrokerHandle, tempfile::TempDir, WireUuid) {
-    let (handle, directory) = crate::test_support::start_group_broker_no_audit(authorizer).await;
+    authorizer: Arc<dyn Authorizer>,
+) -> (BrokerHandle, tempfile::TempDir, WireUuid) {
+    let (handle, directory) = start_group_broker_no_audit(authorizer).await;
     let topic_id = seed_topic_reference_group(&handle).await;
     (handle, directory, topic_id)
 }
@@ -611,7 +614,7 @@ async fn seed_unresolved_name_offset(broker: &Broker) {
 /// Send one single-topic request per case, and compare every whole response
 /// with the one that the case expects.
 async fn run_topic_reference_table(
-    authorizer: Arc<dyn crate::authorizer::Authorizer>,
+    authorizer: Arc<dyn Authorizer>,
     cases: Vec<TopicReferenceCase>,
 ) {
     let (broker_handle, _dir, known_id) = topic_reference_broker(authorizer).await;
@@ -639,7 +642,7 @@ async fn run_topic_reference_table(
 #[tokio::test]
 async fn topic_row_error_follows_version_and_topic_reference() {
     run_topic_reference_table(
-        Arc::new(crate::authorizer::AllowAllAuthorizer),
+        Arc::new(AllowAllAuthorizer),
         vec![
             (OffsetFetchVersion(9), TopicRef::KnownName, seeded_row()),
             (
@@ -687,7 +690,7 @@ async fn unresolved_id_answers_before_topic_authorization() {
 async fn refused_topics_follow_the_answered_topics() {
     const VERSION: i16 = 10;
     let (broker_handle, _dir, known_id) =
-        topic_reference_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        topic_reference_broker(Arc::new(AllowAllAuthorizer)).await;
     let broker = broker_handle.broker_arc_for_test();
     let (zero_request, zero_response) = topic_reference_rows(TopicReferenceSetup {
         version: OffsetFetchVersion(VERSION),
@@ -896,7 +899,7 @@ async fn topics_are_authorized_with_describe_and_fetch_all_hides_refused_topics(
 #[tokio::test]
 async fn fetch_all_leaves_out_topics_without_an_id_at_v10() {
     let (broker_handle, _dir, known_id) =
-        topic_reference_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
+        topic_reference_broker(Arc::new(AllowAllAuthorizer)).await;
     let broker = broker_handle.broker_arc_for_test();
     seed_unresolved_name_offset(&broker).await;
     let offset_row = |committed_offset| OffsetFetchResponsePartitions {
@@ -953,7 +956,7 @@ async fn join_consumer_group(broker: &Broker, group: &str, member_id: &str) -> i
             client_id: "client".into(),
             client_host: "host".into(),
             reply,
-            regex_resolver: crate::coordinator::unified::regex_resolver::no_topic_regex_resolver(),
+            regex_resolver: no_topic_regex_resolver(),
         })
         .await
         .expect("send Heartbeat");
@@ -1171,7 +1174,7 @@ fn committed_entry(offset: i64) -> OffsetEntry {
         offset: Offset(offset),
         leader_epoch: 5,
         metadata: String::new(),
-        commit_timestamp_ms: crate::time_util::now_ms(),
+        commit_timestamp_ms: now_ms(),
         expire_timestamp_ms: None,
         topic_id: None,
     }

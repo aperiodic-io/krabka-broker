@@ -15,9 +15,12 @@ use tokio::net::TcpStream;
 /// query. This function keeps those call sites free of literals.
 pub use crate::support::sasl::alice_password;
 use crate::{
-    kafka_wire,
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
-    support::wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+    kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
+    support::{
+        sasl::{ScramCredentialSetup, provision_scram, sasl_plaintext_mechanisms, start_broker},
+        sasl_plaintext_config,
+        wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+    },
 };
 
 /// admin PLAIN test password, built at runtime.
@@ -76,7 +79,7 @@ pub fn reauth_config(
     log_dir: &std::path::Path,
     max_reauth: krabka_units::Time,
 ) -> krabka_broker::BrokerConfig {
-    let mut config = crate::support::sasl_plaintext_config(log_dir.to_path_buf());
+    let mut config = sasl_plaintext_config(log_dir.to_path_buf());
     config.connections_max_idle = Some(krabka_units::millis(0));
     config.connections_max_reauth = Some(max_reauth);
     config
@@ -88,8 +91,7 @@ pub async fn start_scram_admin(
     password: &str,
     mechanisms: Vec<krabka_security::SaslMechanism>,
 ) -> (krabka_broker::BrokerHandle, std::net::SocketAddr) {
-    let mut config =
-        crate::support::sasl::sasl_plaintext_mechanisms(log_dir.to_path_buf(), mechanisms);
+    let mut config = sasl_plaintext_mechanisms(log_dir.to_path_buf(), mechanisms);
     config
         .plain_credentials
         .insert("admin".to_string(), password.to_string());
@@ -105,10 +107,7 @@ pub fn alice_plain_config(
     log_dir: std::path::PathBuf,
     password: String,
 ) -> krabka_broker::BrokerConfig {
-    let mut cfg = crate::support::sasl::sasl_plaintext_mechanisms(
-        log_dir,
-        vec![krabka_security::SaslMechanism::Plain],
-    );
+    let mut cfg = sasl_plaintext_mechanisms(log_dir, vec![krabka_security::SaslMechanism::Plain]);
     cfg.plain_credentials.insert("alice".into(), password);
     cfg
 }
@@ -117,13 +116,13 @@ pub async fn start_scram_alice(
     log_dir: std::path::PathBuf,
     mechanism: krabka_security::SaslMechanism,
 ) -> krabka_broker::BrokerHandle {
-    let cfg = crate::support::sasl::sasl_plaintext_mechanisms(log_dir, vec![mechanism]);
+    let cfg = sasl_plaintext_mechanisms(log_dir, vec![mechanism]);
     let broker = krabka_broker::Broker::start(cfg)
         .await
         .expect("broker must start");
-    crate::support::sasl::provision_scram(
+    provision_scram(
         &broker,
-        crate::support::sasl::ScramCredentialSetup {
+        ScramCredentialSetup {
             mechanism,
             ..Default::default()
         },
@@ -145,7 +144,7 @@ pub async fn start_alice_plain(
 ) {
     let log_dir = tempfile::tempdir().unwrap();
     let cfg = alice_plain_config(log_dir.path().to_path_buf(), password);
-    let (handle, log_dir, addr) = crate::support::sasl::start_broker(cfg, log_dir).await;
+    let (handle, log_dir, addr) = start_broker(cfg, log_dir).await;
     (log_dir, handle, addr)
 }
 
@@ -203,9 +202,9 @@ pub async fn start_reauth_broker(
         .expect("broker must start");
     if mechanism == krabka_security::SaslMechanism::ScramSha512 {
         for user in ["alice", "bob"] {
-            crate::support::sasl::provision_scram(
+            provision_scram(
                 &broker,
-                crate::support::sasl::ScramCredentialSetup {
+                ScramCredentialSetup {
                     user: (user).into(),
                     mechanism,
                     ..Default::default()

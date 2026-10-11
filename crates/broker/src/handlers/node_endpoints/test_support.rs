@@ -55,6 +55,8 @@ macro_rules! endpoint_tests {
 
 pub(crate) use endpoint_tests;
 
+use crate::test_support::broker_registration;
+
 fn endpoint(name: &str, host: &str, port: u16) -> BrokerEndpoint {
     BrokerEndpoint {
         name: name.to_string(),
@@ -78,7 +80,7 @@ fn image() -> MetadataImage {
                     endpoint("INTERNAL", &format!("internal-{node_id}"), 9092),
                     endpoint("EXTERNAL", &format!("external-{node_id}"), 9093),
                 ],
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(node_id))
+                ..broker_registration(krabka_raft::NodeId(node_id))
             },
         ));
     }

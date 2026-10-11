@@ -25,8 +25,11 @@ use crate::{
     authorizer::{AuthorizationResult, Authorizer},
     broker::BrokerHandle,
     codes,
-    handlers::{acl_wire::CLUSTER_RESOURCE_NAME, test_support::CreateTopicSetup},
-    test_support::{peer, principal, start_broker_no_audit_with},
+    handlers::{
+        acl_wire::CLUSTER_RESOURCE_NAME,
+        test_support::{CreateTopicSetup, configured_topic_request},
+    },
+    test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
 };
 
 /// The principal whose grants each case sets.
@@ -103,12 +106,10 @@ async fn start(auto_create_topics_enable: bool) -> Fixture {
         .await
         .expect("client build");
     let response = client
-        .send(crate::handlers::test_support::configured_topic_request(
-            CreateTopicSetup {
-                topic: EXISTING,
-                ..Default::default()
-            },
-        ))
+        .send(configured_topic_request(CreateTopicSetup {
+            topic: EXISTING,
+            ..Default::default()
+        }))
         .await
         .expect("CreateTopics");
     assert!(
@@ -134,7 +135,7 @@ impl Fixture {
             principal(TESTER),
             client_id = "metadata-client"
         );
-        crate::test_support::dispatch_wire(
+        dispatch_wire(
             &shared,
             krabka_protocol::api_key::ApiKey::Metadata as i16,
             version,

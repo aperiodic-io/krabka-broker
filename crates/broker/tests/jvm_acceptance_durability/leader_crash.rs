@@ -9,7 +9,15 @@ use std::process::Stdio;
 
 use assert2::assert;
 
-use crate::jvm_acceptance::KAFKA_IMAGE;
+use crate::{
+    jvm_acceptance::{KAFKA_IMAGE, consume_committed_at},
+    prepare_replication_topic,
+    support::{
+        ContainerInput, JvmDockerSetup, client::connect_with_context,
+        discovery::metadata_first_leader, init_jvm_tracing, jvm_docker_command, jvm_output_lines,
+        start_jvm_cluster,
+    },
+};
 
 // `acks=all` survives a leader crash mid-produce burst: 3-broker Krabka
 // cluster, JVM `kafka-console-producer --request-required-acks=-1` writes
@@ -26,12 +34,12 @@ use crate::jvm_acceptance::KAFKA_IMAGE;
 async fn acks_all_survives_leader_crash() {
     const TOPIC: &str = "krabka-acks-all-crash-itest";
 
-    crate::support::init_jvm_tracing("krabka_broker=debug,info");
+    init_jvm_tracing("krabka_broker=debug,info");
 
     let client_ports = [10392u16, 10492, 10592];
     let controller_ports = [10393u16, 10493, 10593];
 
-    let mut cluster = crate::support::start_jvm_cluster(client_ports, controller_ports, |config| {
+    let mut cluster = start_jvm_cluster(client_ports, controller_ports, |config| {
         config.heartbeat_interval = krabka_units::millis(200);
         config.heartbeat_timeout = krabka_units::millis(2_000);
         config.replica_lag_time_max = krabka_units::millis(2_000);
@@ -41,7 +49,7 @@ async fn acks_all_survives_leader_crash() {
     .await;
 
     let (_bootstrap_1, bootstrap_all) =
-        crate::prepare_replication_topic(&cluster[0].0, TOPIC, &client_ports).await;
+        prepare_replication_topic(&cluster[0].0, TOPIC, &client_ports).await;
     // The consumer at the end needs `__consumer_offsets`, which takes three
     // replicas. Create it while all three brokers are up, as Kafka's
     // `IntegrationTestHarness.createOffsetsTopic` does before a test.
@@ -51,9 +59,7 @@ async fn acks_all_survives_leader_crash() {
     let leader_node_id = {
         use krabka_protocol::owned::metadata_request::{MetadataRequest, MetadataRequestTopic};
         let local_bootstrap = format!("127.0.0.1:{}", client_ports[0]);
-        let probe =
-            crate::support::client::connect_with_context(local_bootstrap, None, "metadata probe")
-                .await;
+        let probe = connect_with_context(local_bootstrap, None, "metadata probe").await;
         let resp = probe
             .send(MetadataRequest {
                 topics: Some(vec![MetadataRequestTopic {
@@ -64,12 +70,12 @@ async fn acks_all_survives_leader_crash() {
             })
             .await
             .expect("metadata");
-        crate::support::discovery::metadata_first_leader(&resp, TOPIC, 1)
+        metadata_first_leader(&resp, TOPIC, 1)
     };
 
     // 4. Spawn JVM producer in background (100 records, acks=-1, long timeout
     //    so it retries through the election window).
-    let producer_child = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let producer_child = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE,
         args: &[
             "bash",
@@ -83,7 +89,7 @@ async fn acks_all_survives_leader_crash() {
                    --request-timeout-ms 30000"
             ),
         ],
-        input: crate::support::ContainerInput::Attached,
+        input: ContainerInput::Attached,
         ..Default::default()
     })
     .stdin(Stdio::null())
@@ -132,9 +138,9 @@ async fn acks_all_survives_leader_crash() {
         .collect();
     let survivor_bootstrap = format!("host.docker.internal:{}", surviving_ports[0]);
 
-    let consume_out = crate::jvm_acceptance::consume_committed_at(&survivor_bootstrap, TOPIC, 1);
+    let consume_out = consume_committed_at(&survivor_bootstrap, TOPIC, 1);
     let stdout = String::from_utf8_lossy(&consume_out.stdout);
-    let line_count = crate::support::jvm_output_lines(&consume_out).len();
+    let line_count = jvm_output_lines(&consume_out).len();
     assert!(
         line_count >= 1,
         "expected at least 1 readable record after leader crash; got {line_count}: {stdout}"

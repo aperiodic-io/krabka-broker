@@ -1,0 +1,191 @@
+"""Reject Rust code that refers to crate items without importing them."""
+
+_IDENT_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+
+def _identifier_end(text, start):
+    for index in range(start, len(text)):
+        if text[index] not in _IDENT_CHARS:
+            return index
+    return len(text)
+
+def _crate_paths(line, comment_depth):
+    """All code paths on a line, after comments and strings are blanked."""
+    code = ""
+    quote = False
+    escaped = False
+    skip_until = 0
+    for index in range(len(line)):
+        if index < skip_until:
+            continue
+        char = line[index]
+        if comment_depth:
+            if line[index:index + 2] == "/*":
+                comment_depth += 1
+                code += "  "
+                skip_until = index + 2
+            elif line[index:index + 2] == "*/":
+                comment_depth -= 1
+                code += "  "
+            else:
+                code += " "
+            continue
+        if quote:
+            code += " "
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = False
+            continue
+        if char == '"':
+            quote = True
+            code += " "
+            continue
+        if line[index:index + 2] == "//":
+            break
+        if line[index:index + 2] == "/*":
+            comment_depth = 1
+            code += "  "
+            skip_until = index + 2
+            continue
+        code += char
+
+    found = []
+    after_previous = 0
+    for start in range(len(code)):
+        if start < after_previous or code[start:start + len("crate::")] != "crate::":
+            continue
+        parts = code[start:].split("::")
+        path = "crate"
+        for part in parts[1:]:
+            ident_end = _identifier_end(part, 0)
+            if ident_end == 0:
+                break
+            path += "::" + part[:ident_end]
+            if ident_end < len(part):
+                break
+        end = start + len(path)
+        found.append((start, end, path))
+        after_previous = end
+    return code, found, comment_depth
+
+def _macro_opening(code):
+    """The opening delimiter for a macro invocation on this line, if any."""
+    definition = code.find("macro_rules!")
+    if definition >= 0:
+        opening = code.find("{", definition)
+        if opening >= 0:
+            return opening
+    for index in range(len(code)):
+        if code[index] != "!":
+            continue
+        cursor = index + 1
+        found_nonspace = False
+        for cursor in range(index + 1, len(code)):
+            if code[cursor] not in " \t":
+                found_nonspace = True
+                break
+        if not found_nonspace:
+            cursor = len(code)
+        if cursor < len(code) and code[cursor] in "([{":
+            return cursor
+    return -1
+
+def _advance_macro(delimiters, code, start = 0):
+    pairs = {
+        ")": "(",
+        "]": "[",
+        "}": "{",
+    }
+    for char in code[start:].elems():
+        if char in "([{":
+            delimiters.append(char)
+        elif char in ")]}":
+            if delimiters and delimiters[-1] == pairs[char]:
+                delimiters.pop()
+
+def imported_path_violations(text):
+    """Find code paths, while allowing imports, attributes, docs, and macros."""
+    violations = []
+    in_use = False
+    in_attribute = False
+    attribute_depth = 0
+    comment_depth = 0
+    macro_delimiters = []
+    for line_number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not comment_depth:
+            if stripped.startswith("//"):
+                continue
+            if in_attribute:
+                attribute_depth += line.count("[") - line.count("]")
+                if attribute_depth <= 0:
+                    in_attribute = False
+                continue
+            if stripped.startswith("#"):
+                in_attribute = line.count("[") > line.count("]")
+                attribute_depth = line.count("[") - line.count("]")
+                continue
+
+        code, paths, comment_depth = _crate_paths(line, comment_depth)
+        if macro_delimiters:
+            _advance_macro(macro_delimiters, code)
+            continue
+        starts_use = stripped.startswith("use ") or stripped.startswith("pub use ") or stripped.startswith("pub(crate) use ") or stripped.startswith("pub(super) use ")
+        if in_use or starts_use:
+            in_use = ";" not in code
+            continue
+
+        macro_opening = _macro_opening(code)
+        if macro_opening >= 0:
+            _advance_macro(macro_delimiters, code, macro_opening)
+            continue
+
+        for start, end, path in paths:
+            before = code[:start]
+            after = code[end:]
+
+            # `pub(in crate::...)` is a visibility declaration, not a use in
+            # an item body.
+            if "pub(in " in before and ")" in after:
+                continue
+            violations.append((line_number, path))
+    return violations
+
+def _impl(ctx: TaskContext) -> int:
+    root = ctx.std.env.bazel_root_dir()
+    result = ctx.std.process.command("git").args([
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        "*.rs",
+    ]).current_dir(root).stdout("piped").stderr("piped").spawn().wait_with_output()
+    if result.status.code != 0:
+        fail("git ls-files failed:\n%s" % result.stderr)
+
+    violations = []
+    for path in result.stdout.split("\x00"):
+        if not path:
+            continue
+        source = root + "/" + path
+        if not ctx.std.fs.exists(source) or not ctx.std.fs.metadata(source).is_file:
+            continue
+        for line_number, qualified_path in imported_path_violations(ctx.std.fs.read_to_string(source)):
+            violations.append("  %s:%s: %s" % (path, line_number, qualified_path))
+
+    if violations:
+        ctx.std.io.stderr.write("Crate-qualified Rust paths in code must be imported at module scope:\n")
+        ctx.std.io.stderr.write("\n".join(violations) + "\n")
+        ctx.std.io.stderr.write("Use a module-scope `use` and refer to the imported name.\n")
+        return 1
+    ctx.std.io.stdout.write("No unimported crate-qualified Rust paths found.\n")
+    return 0
+
+check_imported_paths = task(
+    summary = "Require Rust code to import crate items before using them",
+    implementation = _impl,
+)

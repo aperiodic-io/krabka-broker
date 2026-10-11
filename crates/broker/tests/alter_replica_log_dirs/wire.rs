@@ -25,7 +25,10 @@ use krabka_protocol::{
 use tokio::net::TcpStream;
 
 use crate::support::{
-    configs::{incremental_config, incremental_request, incremental_resource},
+    configs::{
+        ConfigOperation, IncrementalConfigsSetup, incremental_config, incremental_request,
+        incremental_resource,
+    },
     wire::ApiRequestSetup,
 };
 
@@ -112,14 +115,14 @@ pub(crate) async fn set_broker_config(
 ) -> (i16, Option<String>) {
     use krabka_protocol::owned::incremental_alter_configs_response::IncrementalAlterConfigsResponse;
     let version: i16 = 1;
-    let req = incremental_request(crate::support::configs::IncrementalConfigsSetup {
+    let req = incremental_request(IncrementalConfigsSetup {
         resources: vec![incremental_resource(
             4,
             broker.to_string(),
             vec![incremental_config(
                 name.to_string(),
                 Some(value.to_string()),
-                crate::support::configs::ConfigOperation::Set,
+                ConfigOperation::Set,
             )],
         )],
         ..Default::default()

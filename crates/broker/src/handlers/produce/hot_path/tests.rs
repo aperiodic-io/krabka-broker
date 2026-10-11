@@ -15,7 +15,7 @@ use krabka_protocol::records::{Record, RecordBatch};
 use tempfile::tempdir;
 
 use super::{HotPathSettings, PathChoice, ProducePath, TimestampPolicy, append_one_batch};
-use crate::{codes, handlers::produce::test_support::encode_batch};
+use crate::{codes, handlers::produce::test_support::encode_batch, metrics::BrokerMetrics};
 
 const RECORDS: i32 = 4;
 
@@ -41,7 +41,7 @@ fn v1_message_set() -> Bytes {
 }
 
 fn settings(
-    metrics: &crate::metrics::BrokerMetrics,
+    metrics: &BrokerMetrics,
     topic_compression: Option<CompressionType>,
 ) -> HotPathSettings<'_> {
     HotPathSettings {

@@ -50,6 +50,19 @@ use super::{
     },
     topic_scope::WRITE_FREEZE,
 };
+use crate::{
+    client_metrics::config::{KEY_INTERVAL_MS, KEY_MATCH, KEY_METRICS},
+    coordinator::unified::streams::config::{
+        KEY_ACCEPTABLE_RECOVERY_LAG, KEY_ASSIGNOR_NAME, KEY_HEARTBEAT_INTERVAL_MS,
+        KEY_NUM_STANDBY_REPLICAS, KEY_NUM_WARMUP_REPLICAS, KEY_RACK_AWARE_ASSIGNMENT_TAGS,
+        KEY_SESSION_TIMEOUT_MS, KEY_SHARE_AUTO_OFFSET_RESET, KEY_TASK_OFFSET_INTERVAL_MS,
+    },
+    cordoned_log_dirs::{CORDONED_LOG_DIRS, CORDONED_LOG_DIRS_DOC},
+    throttle::{
+        ALTER_LOG_DIRS_THROTTLED_RATE_KEY, FOLLOWER_THROTTLED_RATE_KEY,
+        FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_RATE_KEY, LEADER_THROTTLED_REPLICAS_KEY,
+    },
+};
 
 /// The `node.id` a broker resource reports beside its dynamic overrides. The
 /// broker reads it from its own static configuration, never from the metadata
@@ -791,7 +804,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-73"),
         ..key(
-            crate::throttle::LEADER_THROTTLED_REPLICAS_KEY,
+            LEADER_THROTTLED_REPLICAS_KEY,
             ConfigScope::Topic,
             ConfigType::List,
             Some(""),
@@ -802,7 +815,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-73"),
         ..key(
-            crate::throttle::FOLLOWER_THROTTLED_REPLICAS_KEY,
+            FOLLOWER_THROTTLED_REPLICAS_KEY,
             ConfigScope::Topic,
             ConfigType::List,
             Some(""),
@@ -827,7 +840,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("bytes/s"),
         kip: Some("KIP-73"),
         ..key(
-            crate::throttle::LEADER_THROTTLED_RATE_KEY,
+            LEADER_THROTTLED_RATE_KEY,
             ConfigScope::Broker,
             ConfigType::Long,
             None,
@@ -839,7 +852,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("bytes/s"),
         kip: Some("KIP-73"),
         ..key(
-            crate::throttle::FOLLOWER_THROTTLED_RATE_KEY,
+            FOLLOWER_THROTTLED_RATE_KEY,
             ConfigScope::Broker,
             ConfigType::Long,
             None,
@@ -851,7 +864,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("bytes/s"),
         kip: Some("KIP-73"),
         ..key(
-            crate::throttle::ALTER_LOG_DIRS_THROTTLED_RATE_KEY,
+            ALTER_LOG_DIRS_THROTTLED_RATE_KEY,
             ConfigScope::Broker,
             ConfigType::Long,
             None,
@@ -873,11 +886,11 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-1066"),
         ..key(
-            crate::cordoned_log_dirs::CORDONED_LOG_DIRS,
+            CORDONED_LOG_DIRS,
             ConfigScope::Broker,
             ConfigType::List,
             Some(""),
-            crate::cordoned_log_dirs::CORDONED_LOG_DIRS_DOC,
+            CORDONED_LOG_DIRS_DOC,
             ValueCheck::Parsed,
         )
     },
@@ -1064,7 +1077,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-714"),
         ..key(
-            crate::client_metrics::config::KEY_METRICS,
+            KEY_METRICS,
             ConfigScope::ClientMetrics,
             ConfigType::List,
             Some(""),
@@ -1076,7 +1089,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("ms"),
         kip: Some("KIP-714"),
         ..key(
-            crate::client_metrics::config::KEY_INTERVAL_MS,
+            KEY_INTERVAL_MS,
             ConfigScope::ClientMetrics,
             ConfigType::Int,
             None,
@@ -1087,7 +1100,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-714"),
         ..key(
-            crate::client_metrics::config::KEY_MATCH,
+            KEY_MATCH,
             ConfigScope::ClientMetrics,
             ConfigType::List,
             Some(""),
@@ -1100,7 +1113,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("ms"),
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_SESSION_TIMEOUT_MS,
+            KEY_SESSION_TIMEOUT_MS,
             ConfigScope::Group,
             ConfigType::Int,
             None,
@@ -1112,7 +1125,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("ms"),
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_HEARTBEAT_INTERVAL_MS,
+            KEY_HEARTBEAT_INTERVAL_MS,
             ConfigScope::Group,
             ConfigType::Int,
             None,
@@ -1124,7 +1137,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("records"),
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_ACCEPTABLE_RECOVERY_LAG,
+            KEY_ACCEPTABLE_RECOVERY_LAG,
             ConfigScope::Group,
             ConfigType::Long,
             None,
@@ -1135,7 +1148,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_NUM_WARMUP_REPLICAS,
+            KEY_NUM_WARMUP_REPLICAS,
             ConfigScope::Group,
             ConfigType::Int,
             None,
@@ -1146,7 +1159,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_NUM_STANDBY_REPLICAS,
+            KEY_NUM_STANDBY_REPLICAS,
             ConfigScope::Group,
             ConfigType::Int,
             None,
@@ -1158,7 +1171,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
         type_note: Some("ms"),
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_TASK_OFFSET_INTERVAL_MS,
+            KEY_TASK_OFFSET_INTERVAL_MS,
             ConfigScope::Group,
             ConfigType::Long,
             None,
@@ -1169,7 +1182,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_ASSIGNOR_NAME,
+            KEY_ASSIGNOR_NAME,
             ConfigScope::Group,
             ConfigType::String,
             None,
@@ -1180,7 +1193,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-1071"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_RACK_AWARE_ASSIGNMENT_TAGS,
+            KEY_RACK_AWARE_ASSIGNMENT_TAGS,
             ConfigScope::Group,
             ConfigType::List,
             Some(""),
@@ -1191,7 +1204,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
     ConfigKey {
         kip: Some("KIP-932"),
         ..key(
-            crate::coordinator::unified::streams::config::KEY_SHARE_AUTO_OFFSET_RESET,
+            KEY_SHARE_AUTO_OFFSET_RESET,
             ConfigScope::Group,
             ConfigType::String,
             None,

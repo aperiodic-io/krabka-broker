@@ -12,9 +12,22 @@ use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
 use crate::{
-    harness::{alice_password, round_trip, wrong_scram_password},
-    kafka_wire::PlainAuthenticationSetup,
-    support::wire::{HeaderEncoding as RequestHeaderEncoding, SocketExchangeSetup},
+    harness::{
+        alice_password, alice_plain_config, metadata_probe, round_trip, start_alice_plain,
+        start_reauth_broker, wrong_scram_password,
+    },
+    kafka_wire::{
+        PlainAuthenticationSetup, sasl_plain_authenticate_on, sasl_plain_reauthenticate_on,
+    },
+    reauth_cases::{
+        capped_session_closes, different_principal_closes, repeated_expired_reauth,
+        same_principal_reopens,
+    },
+    support::{
+        client::scrape_metrics as scrape_metrics_client,
+        sasl::plain_authentication_body,
+        wire::{CorrelationId, HeaderEncoding as RequestHeaderEncoding, SocketExchangeSetup},
+    },
 };
 
 /// Happy-path drive of a SASL/PLAIN session: `ApiVersions` → `SaslHandshake`
@@ -26,7 +39,7 @@ use crate::{
 /// SASL yet.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_plain_happy_path() {
-    let (_log_dir, handle, addr) = crate::harness::start_alice_plain(alice_password()).await;
+    let (_log_dir, handle, addr) = start_alice_plain(alice_password()).await;
     let result = drive_sasl_plain_session(addr, "alice", alice_password().as_bytes()).await;
     handle.shutdown().await;
     result.expect("SASL/PLAIN session must succeed end-to-end");
@@ -42,8 +55,7 @@ async fn sasl_plain_happy_path() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_plain_authentication_metrics_tick_for_success_and_failure() {
     let log_dir = tempfile::tempdir().unwrap();
-    let mut cfg =
-        crate::harness::alice_plain_config(log_dir.path().to_path_buf(), alice_password());
+    let mut cfg = alice_plain_config(log_dir.path().to_path_buf(), alice_password());
     cfg.metrics_listen_addr = Some("127.0.0.1:0".parse().unwrap());
 
     let handle = Broker::start(cfg).await.expect("broker must start");
@@ -79,7 +91,7 @@ async fn sasl_plain_authentication_metrics_tick_for_success_and_failure() {
 ///
 /// The returned body holds no HTTP head.
 async fn scrape_metrics(addr: SocketAddr) -> String {
-    crate::support::client::scrape_metrics(addr).await
+    scrape_metrics_client(addr).await
 }
 
 /// Negative path: with a wrong password, `SaslAuthenticate` responds with
@@ -92,7 +104,7 @@ async fn scrape_metrics(addr: SocketAddr) -> String {
 /// connection.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_plain_wrong_password_closes_connection() {
-    let (_log_dir, handle, addr) = crate::harness::start_alice_plain(alice_password()).await;
+    let (_log_dir, handle, addr) = start_alice_plain(alice_password()).await;
     let result = drive_sasl_plain_session(addr, "alice", wrong_scram_password().as_bytes()).await;
     handle.shutdown().await;
     assert!(
@@ -125,7 +137,7 @@ async fn drive_sasl_plain_session(
     password: &[u8],
 ) -> Result<(), io::Error> {
     let mut stream = TcpStream::connect(addr).await?;
-    crate::kafka_wire::sasl_plain_authenticate_on(
+    sasl_plain_authenticate_on(
         &mut stream,
         &PlainAuthenticationSetup {
             client_id: "krabka-sasl-test",
@@ -134,7 +146,7 @@ async fn drive_sasl_plain_session(
         },
     )
     .await?;
-    crate::harness::metadata_probe(&mut stream, 4).await
+    metadata_probe(&mut stream, 4).await
 }
 
 /// Opens a PLAIN session on `stream` and returns the `SaslAuthenticate`
@@ -143,10 +155,10 @@ async fn drive_sasl_plain_session(
 /// in-band re-auth on the same connection.
 pub async fn plain_authenticate(
     stream: &mut TcpStream,
-    corr: &mut crate::support::wire::CorrelationId,
+    corr: &mut CorrelationId,
     setup: &PlainAuthenticationSetup<'_>,
 ) -> Result<SaslAuthenticateResponse, io::Error> {
-    crate::kafka_wire::sasl_plain_reauthenticate_on(stream, corr, setup).await
+    sasl_plain_reauthenticate_on(stream, corr, setup).await
 }
 
 /// KIP-368: with `connections.max.reauth.ms` set, a PLAIN session reports the
@@ -154,14 +166,14 @@ pub async fn plain_authenticate(
 /// it elapses without an in-band re-authentication closes the connection.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_session_capped_by_connections_max_reauth_then_closes() {
-    crate::reauth_cases::capped_session_closes(SaslMechanism::Plain).await;
+    capped_session_closes(SaslMechanism::Plain).await;
 }
 
 /// KIP-368: an in-band re-authentication with the same principal succeeds and
 /// re-opens the data plane on the same connection.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_in_band_reauth_same_principal_reopens_data_plane() {
-    crate::reauth_cases::same_principal_reopens(SaslMechanism::Plain).await;
+    same_principal_reopens(SaslMechanism::Plain).await;
 }
 
 /// KIP-368 forbids a principal switch mid-connection: a PLAIN re-auth that
@@ -169,7 +181,7 @@ async fn plain_in_band_reauth_same_principal_reopens_data_plane() {
 /// and the broker closes the connection.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_in_band_reauth_with_different_principal_closes() {
-    crate::reauth_cases::different_principal_closes(SaslMechanism::Plain).await;
+    different_principal_closes(SaslMechanism::Plain).await;
 }
 
 /// A `SaslAuthenticate` before any handshake closes the connection with no
@@ -178,17 +190,12 @@ async fn plain_in_band_reauth_with_different_principal_closes() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_authenticate_without_handshake_closes_the_connection() {
     let log_dir = tempfile::tempdir().unwrap();
-    let handle = crate::harness::start_reauth_broker(
-        log_dir.path(),
-        krabka_units::secs(30),
-        SaslMechanism::Plain,
-    )
-    .await;
+    let handle =
+        start_reauth_broker(log_dir.path(), krabka_units::secs(30), SaslMechanism::Plain).await;
     let addr = handle.listen_addr();
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let auth_body =
-        crate::support::sasl::plain_authentication_body("alice", alice_password().as_bytes());
+    let auth_body = plain_authentication_body("alice", alice_password().as_bytes());
     check!(
         round_trip(
             &mut stream,
@@ -217,10 +224,5 @@ async fn plain_authenticate_without_handshake_closes_the_connection() {
 /// each of the three rounds starts expired.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_reauth_after_the_window_elapsed_keeps_serving_round_after_round() {
-    crate::reauth_cases::repeated_expired_reauth(
-        SaslMechanism::Plain,
-        krabka_units::millis(300),
-        200..=300,
-    )
-    .await;
+    repeated_expired_reauth(SaslMechanism::Plain, krabka_units::millis(300), 200..=300).await;
 }

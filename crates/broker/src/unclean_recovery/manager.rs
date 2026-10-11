@@ -25,7 +25,13 @@ use super::{
     select_leader,
 };
 use crate::{
-    heartbeat::controller_state::ControllerLivenessState, network::client::InterBrokerClient,
+    config_keys::witness_node_ids,
+    elr::{ElrPublisher, TopicElr},
+    heartbeat::controller_state::ControllerLivenessState,
+    metadata_epoch::next_partition_change,
+    metadata_source::MetadataSource,
+    metrics::BrokerMetrics,
+    network::client::InterBrokerClient,
 };
 
 #[cfg(test)]
@@ -38,12 +44,12 @@ mod tests;
 /// of them through `submit_change`: an eligible leader replica if one
 /// answered, and otherwise the most complete log that did.
 pub(crate) struct UncleanRecoveryManager {
-    controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    controller: Arc<dyn MetadataSource>,
     liveness: Arc<ControllerLivenessState>,
     node_id: NodeId,
     inter_broker_client: Arc<InterBrokerClient>,
     listener_protocol: krabka_security::ListenerProtocol,
-    metrics: crate::metrics::BrokerMetrics,
+    metrics: BrokerMetrics,
     policy: RecoveryPolicy,
     in_flight: Arc<Mutex<HashSet<(String, i32)>>>,
 }
@@ -53,11 +59,11 @@ impl UncleanRecoveryManager {
     /// enqueues jobs. The loop exits when `shutdown` fires or when the last
     /// handle drops.
     pub(crate) fn spawn(
-        controller: Arc<dyn crate::metadata_source::MetadataSource>,
+        controller: Arc<dyn MetadataSource>,
         liveness: Arc<ControllerLivenessState>,
         node_id: NodeId,
         inter_broker_client: Arc<InterBrokerClient>,
-        metrics: crate::metrics::BrokerMetrics,
+        metrics: BrokerMetrics,
         policy: RecoveryPolicy,
         shutdown: tokio_util::sync::CancellationToken,
     ) -> UncleanRecoveryHandle {
@@ -135,7 +141,7 @@ impl UncleanRecoveryManager {
         // KIP-966: the replicas that are known to hold every committed record.
         // Read here, with the rest of the partition state, so the selection and
         // the break-glass rule below both see one image.
-        let eligible = crate::elr::TopicElr::of_topic(&image, &job.topic)
+        let eligible = TopicElr::of_topic(&image, &job.topic)
             .partition(job.partition)
             .eligible_leader_replicas;
         // KIP-966's other lossless rule, and the first disjunct of Kafka's
@@ -273,12 +279,7 @@ impl UncleanRecoveryManager {
         eligible: &[i32],
         responses: &[ReplicaLogInfo],
     ) -> Option<Election> {
-        select_leader(
-            responses,
-            in_sync,
-            eligible,
-            &crate::config_keys::witness_node_ids(image),
-        )
+        select_leader(responses, in_sync, eligible, &witness_node_ids(image))
     }
 
     /// Builds and submits the `PartitionRecord` that elects `election.leader`
@@ -316,7 +317,7 @@ impl UncleanRecoveryManager {
             };
         }
         let Some((partition_epoch, leader_epoch)) =
-            crate::metadata_epoch::next_partition_change(pr.partition_epoch, pr.leader_epoch, true)
+            next_partition_change(pr.partition_epoch, pr.leader_epoch, true)
         else {
             warn!(
                 topic = %job.topic,
@@ -368,7 +369,7 @@ impl UncleanRecoveryManager {
                 },
             ));
         }
-        crate::elr::ElrPublisher::new(image).extend(&mut changes);
+        ElrPublisher::new(image).extend(&mut changes);
         if let Err(e) = self.controller.submit_change(changes).await {
             warn!(error = %e, "unclean recovery submit_change failed");
             return RecoveryOutcome::NoEligibleReplica;

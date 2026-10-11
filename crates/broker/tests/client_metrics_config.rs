@@ -10,7 +10,10 @@
 
 use assert2::{assert, check};
 
-use crate::support::configs::client_metrics_subscription;
+use crate::support::{
+    configs::{ClientMetricsSubscriptionSetup, client_metrics_subscription},
+    start_n_node_client,
+};
 mod support;
 
 use krabka_protocol::owned::{
@@ -90,15 +93,13 @@ fn assert_list_response(response: &ListConfigResourcesResponse) {
 ///    "sub-a".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn client_metrics_config_alter_describe_list_round_trip() {
-    let (_cluster, client) =
-        crate::support::start_n_node_client(1, "client-metrics-config-test").await;
+    let (_cluster, client) = start_n_node_client(1, "client-metrics-config-test").await;
 
     // ── Step 1: IncrementalAlterConfigs ──────────────────────────────────────
-    let alter_req =
-        client_metrics_subscription(crate::support::configs::ClientMetricsSubscriptionSetup {
-            metrics: "org.apache.kafka.consumer.",
-            ..Default::default()
-        });
+    let alter_req = client_metrics_subscription(ClientMetricsSubscriptionSetup {
+        metrics: "org.apache.kafka.consumer.",
+        ..Default::default()
+    });
 
     let alter_resp: IncrementalAlterConfigsResponse = client
         .send(alter_req)

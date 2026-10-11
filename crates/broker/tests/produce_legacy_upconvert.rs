@@ -13,7 +13,10 @@
 use assert2::assert;
 
 use crate::support::{
-    client::create_topic, fetch::single_partition_fetch, produce::single_partition_produce,
+    client::create_topic,
+    discovery::named_topic_metadata,
+    fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+    produce::{SinglePartitionProduceSetup, single_partition_produce},
 };
 mod support;
 
@@ -27,7 +30,7 @@ use krabka_records_legacy::{Magic, ParsedRecord, encode_flat_message_set};
 async fn topic_id_for(p: &support::InProcess, name: &str) -> Uuid {
     let resp = p
         .client
-        .send(crate::support::discovery::named_topic_metadata(name))
+        .send(named_topic_metadata(name))
         .await
         .expect("Metadata");
     resp.topics
@@ -63,7 +66,7 @@ async fn produce_v1_message_set_is_upconverted_and_round_trips() {
 
     let legacy_bytes = build_v1_message_set(&[b"alpha", b"beta", b"gamma"]);
 
-    let req = single_partition_produce(crate::support::produce::SinglePartitionProduceSetup {
+    let req = single_partition_produce(SinglePartitionProduceSetup {
         topic: ("legacy").into(),
         topic_id,
         records: Some(RecordsPayload::Legacy(legacy_bytes)),
@@ -85,7 +88,7 @@ async fn produce_v1_message_set_is_upconverted_and_round_trips() {
             .client
             .send(FetchRequest {
                 replica_id: -1,
-                ..single_partition_fetch(crate::support::fetch::SinglePartitionFetchSetup {
+                ..single_partition_fetch(SinglePartitionFetchSetup {
                     topic: "legacy".into(),
                     topic_id,
                     ..Default::default()
@@ -134,7 +137,7 @@ async fn produce_malformed_legacy_bytes_returns_invalid_record() {
     let mut garbage = vec![0u8; 100];
     garbage[8..12].copy_from_slice(&88_i32.to_be_bytes());
     garbage[16] = 0; // explicit: not v2
-    let req = single_partition_produce(crate::support::produce::SinglePartitionProduceSetup {
+    let req = single_partition_produce(SinglePartitionProduceSetup {
         topic: ("bad").into(),
         topic_id,
         records: Some(RecordsPayload::Legacy(Bytes::from(garbage))),

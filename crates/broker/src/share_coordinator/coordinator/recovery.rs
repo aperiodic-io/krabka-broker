@@ -22,6 +22,7 @@ mod tests;
 
 use super::{LoadStatus, ShareCoordinator, ShareStateKey3};
 use crate::{
+    blocking::spawn_blocking,
     error::BrokerError,
     partition::Partition,
     share_coordinator::{
@@ -66,7 +67,7 @@ impl ShareCoordinator {
         let read_max = self.config.load_buffer_size;
         let updates_per_snapshot = self.config.snapshot_update_records_per_snapshot;
         let replayed = match self.partitions.get(bootstrap::TOPIC, state_partition) {
-            Some(part) => crate::blocking::spawn_blocking(move || {
+            Some(part) => spawn_blocking(move || {
                 replay_partition(&part, state_partition, read_max, updates_per_snapshot)
             })
             .await

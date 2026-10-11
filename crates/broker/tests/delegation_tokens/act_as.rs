@@ -13,9 +13,9 @@ use krabka_protocol::owned::{
 
 use crate::{
     DELEGATION_TOKEN_AUTHORIZATION_FAILED,
-    cluster::{start_broker_with_super_users, wait_for_token},
-    rpc::{send_create_delegation_token, send_describe_delegation_token},
-    wire::sasl_plain_authenticate,
+    cluster::{start_admin_alice, start_broker_with_super_users, wait_for_token},
+    rpc::{check_created_identity, send_create_delegation_token, send_describe_delegation_token},
+    wire::{admin_plain, sasl_plain_authenticate, token_session},
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,11 +40,11 @@ use crate::{
 ///     only on token-authed sessions.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn act_as_super_user_mints_token_owned_by_target() {
-    let (handle, _dir, addr) = crate::cluster::start_admin_alice().await;
+    let (handle, _dir, addr) = start_admin_alice().await;
 
     let result: Result<(), String> = async {
         // (1) admin authenticates via SASL/PLAIN.
-        let mut admin = crate::wire::admin_plain(addr).await?;
+        let mut admin = admin_plain(addr).await?;
 
         // (2) admin mints a token owned by alice. owner_principal_type=User,
         // owner_principal_name=alice, empty renewers, broker-chosen lifetime.
@@ -68,7 +68,7 @@ async fn act_as_super_user_mints_token_owned_by_target() {
                 create_resp.token_requester_principal_name,
             ));
         }
-        crate::rpc::check_created_identity(&create_resp, "alice", "admin");
+        check_created_identity(&create_resp, "alice", "admin");
 
         let token_id = create_resp.token_id.clone();
         let hmac_bytes = create_resp.hmac.clone();
@@ -114,7 +114,7 @@ async fn act_as_super_user_mints_token_owned_by_target() {
         // (3) Open a second connection; SASL/SCRAM-SHA-256 with username =
         // token_id, password = base64(hmac). The token-fallback path
         // authenticates this session as the token's OWNER — alice.
-        let tokenuser = crate::wire::token_session(addr, &token_id, &hmac_bytes).await?;
+        let tokenuser = token_session(addr, &token_id, &hmac_bytes).await?;
 
         drop(admin);
         drop(tokenuser);

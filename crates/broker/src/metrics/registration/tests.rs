@@ -8,9 +8,12 @@ use assert2::assert;
 use krabka_metadata::BreakGlassAction as GatedAction;
 use krabka_units::{convert::TimeExt as _, millis, secs};
 
-use crate::metrics::{
-    BarrierGroupLabel, BreakGlassAction, BreakGlassState, BrokerMetrics, DirectoryLabel,
-    PartitionLabel, ShareGroupLabel, TopicLabel,
+use crate::{
+    break_glass::ALL_ACTIONS,
+    metrics::{
+        BarrierGroupLabel, BreakGlassAction, BreakGlassState, BrokerMetrics, DirectoryLabel,
+        PartitionLabel, RemoteTierPath, ShareGroupLabel, TopicLabel,
+    },
 };
 
 /// The gauge exists so an alert can read the bound the broker relies on
@@ -51,9 +54,9 @@ async fn declared_clock_bound_is_exported_in_seconds() {
 /// invisible to a name check.
 fn seed_remote_tier_and_replication_throttle(m: &BrokerMetrics) {
     for path in [
-        crate::metrics::RemoteTierPath::Copy,
-        crate::metrics::RemoteTierPath::Fetch,
-        crate::metrics::RemoteTierPath::Delete,
+        RemoteTierPath::Copy,
+        RemoteTierPath::Fetch,
+        RemoteTierPath::Delete,
     ] {
         m.record_remote_request(path, "topic-a");
         m.record_remote_error(path, "topic-a");
@@ -393,7 +396,7 @@ async fn break_glass_action_label_covers_every_gated_transition() {
     // An action added to the metadata enum needs a row here, so the closed
     // label set stays covered.
     assert!(cases.len() == crate::break_glass::ALL_ACTIONS.len());
-    for action in crate::break_glass::ALL_ACTIONS {
+    for action in ALL_ACTIONS {
         assert!(
             cases.iter().any(|(_, cased)| *cased == action),
             "no expected label for {action:?}"

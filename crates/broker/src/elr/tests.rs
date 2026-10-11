@@ -20,9 +20,19 @@ use krabka_protocol::owned::{
 
 use super::{ElrPublisher, TopicElr, state::PartitionElr};
 use crate::{
+    BrokerHandle,
     broker::Broker,
     codes,
-    test_support::{peer, principal, request_context},
+    handlers::{
+        broker_registration::handle,
+        describe_topic_partitions::handle as describe_topic_partitions_handle,
+    },
+    heartbeat::controller_state::BrokerControlState,
+    test_support::{
+        IsrResponseCheck, LiveIsrSetup, WireBrokerId, accepted_isr_proposal, broker_registration,
+        elr_topic_records, end_heartbeat_session, finalized_broker_features, peer, principal,
+        request_context, started_controller_broker, topic_partitions_request,
+    },
 };
 
 const TOPIC: &str = "orders";
@@ -58,7 +68,7 @@ fn seed_records() -> Vec<MetadataRecord> {
 /// equal to the replication factor is what makes the ISR shrink of a single
 /// replica cross the threshold on its own.
 fn seed_records_with_min_isr(min_isr: &str) -> Vec<MetadataRecord> {
-    crate::test_support::elr_topic_records(
+    elr_topic_records(
         partition_record(&[NodeId(1), NodeId(2), NodeId(3)]),
         uuid::Uuid::from_bytes(TOPIC_ID_BYTES),
         min_isr,
@@ -90,7 +100,7 @@ fn registration_record(incarnation: u128) -> MetadataRecord {
         incarnation_id: uuid::Uuid::from_u128(incarnation),
         port: 9094,
         endpoints: plaintext_endpoints(EndpointPort(9094)),
-        ..crate::test_support::broker_registration(krabka_raft::NodeId(3))
+        ..broker_registration(krabka_raft::NodeId(3))
     })
 }
 
@@ -99,7 +109,7 @@ fn registration_record(incarnation: u128) -> MetadataRecord {
 async fn mark_broker_3_unavailable(broker: &Broker) {
     broker.liveness.record_heartbeat(3).await;
     broker.liveness.apply_fencing(3, true, true).await;
-    crate::test_support::end_heartbeat_session(broker, 3).await;
+    end_heartbeat_session(broker, 3).await;
 }
 
 /// Register brokers 2 and 3 and make them active on the controller, so that
@@ -120,7 +130,7 @@ async fn activate_followers(broker: &Broker) {
                         endpoints: plaintext_endpoints(EndpointPort(
                             9092 + u16::try_from(node).expect("a small node id"),
                         )),
-                        ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
+                        ..broker_registration(krabka_raft::NodeId(node))
                     })
                 })
                 .collect(),
@@ -131,11 +141,7 @@ async fn activate_followers(broker: &Broker) {
         broker.liveness.record_fenced_heartbeat(node).await;
         broker
             .liveness
-            .touch(
-                node,
-                crate::heartbeat::controller_state::BrokerControlState::Unfenced,
-                0,
-            )
+            .touch(node, BrokerControlState::Unfenced, 0)
             .await;
     }
 }
@@ -145,11 +151,10 @@ async fn describe_partition(broker: &Arc<Broker>) -> DescribeTopicPartitionsResp
     let principal = principal("replica");
     let peer = peer();
     let ctx = request_context(&principal, &peer, "admin-client");
-    let request = crate::test_support::topic_partitions_request(TOPIC);
-    let response =
-        crate::handlers::describe_topic_partitions::handle(broker, request, DESCRIBE_VERSION, &ctx)
-            .await
-            .expect("DescribeTopicPartitions");
+    let request = topic_partitions_request(TOPIC);
+    let response = describe_topic_partitions_handle(broker, request, DESCRIBE_VERSION, &ctx)
+        .await
+        .expect("DescribeTopicPartitions");
 
     response
         .topics
@@ -236,7 +241,7 @@ fn row(setup: ExpectedElrSetup<'_>) -> DescribeTopicPartitionsResponsePartition 
 /// `SupportedFeatures` does.
 async fn register_broker_3(broker: &Arc<Broker>, incarnation: u128) {
     let image = broker.controller.current_image();
-    let features = crate::test_support::finalized_broker_features(&image);
+    let features = finalized_broker_features(&image);
     let request = BrokerRegistrationRequest {
         broker_id: 3,
         cluster_id: image.cluster_id().to_string(),
@@ -259,15 +264,14 @@ async fn register_broker_3(broker: &Arc<Broker>, incarnation: u128) {
     let principal = principal("replica");
     let peer = peer();
     let ctx = request_context(&principal, &peer, "broker-client");
-    let response =
-        crate::handlers::broker_registration::handle(broker, request, REGISTER_VERSION, &ctx)
-            .await
-            .expect("BrokerRegistration");
+    let response = handle(broker, request, REGISTER_VERSION, &ctx)
+        .await
+        .expect("BrokerRegistration");
     assert!(response.error_code == codes::NONE, "{response:?}");
 }
 
-async fn start_orders() -> (crate::BrokerHandle, tempfile::TempDir, Arc<Broker>) {
-    let (handle, dir, broker) = crate::test_support::started_controller_broker().await;
+async fn start_orders() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+    let (handle, dir, broker) = started_controller_broker().await;
     broker
         .controller
         .submit_change(seed_records())
@@ -286,10 +290,10 @@ async fn an_isr_that_crosses_min_insync_replicas_moves_the_reported_elr() {
 
     check_partition(&broker, row(ExpectedElrSetup::default())).await;
 
-    crate::test_support::accepted_isr_proposal(
+    accepted_isr_proposal(
         &broker,
-        crate::test_support::LiveIsrSetup::default(),
-        crate::test_support::IsrResponseCheck::EnvelopeAndPartition,
+        LiveIsrSetup::default(),
+        IsrResponseCheck::EnvelopeAndPartition,
     )
     .await;
     check_partition(
@@ -309,16 +313,13 @@ async fn an_isr_that_crosses_min_insync_replicas_moves_the_reported_elr() {
 
 /// Restore broker 2 to the ISR and check the published two-member partition row.
 async fn rejoin_follower_and_check_isr(broker: &Arc<Broker>) {
-    crate::test_support::accepted_isr_proposal(
+    accepted_isr_proposal(
         broker,
-        crate::test_support::LiveIsrSetup {
-            new_isr: &[
-                crate::test_support::WireBrokerId(1),
-                crate::test_support::WireBrokerId(2),
-            ],
+        LiveIsrSetup {
+            new_isr: &[WireBrokerId(1), WireBrokerId(2)],
             ..Default::default()
         },
-        crate::test_support::IsrResponseCheck::EnvelopeAndPartition,
+        IsrResponseCheck::EnvelopeAndPartition,
     )
     .await;
     check_partition(broker, row(ExpectedElrSetup::two_member_isr())).await;
@@ -337,10 +338,8 @@ async fn an_isr_that_stays_at_min_insync_replicas_reports_no_elr() {
     handle.shutdown().await;
 }
 
-async fn seed_returning_broker(
-    min_isr: &str,
-) -> (crate::BrokerHandle, Arc<Broker>, tempfile::TempDir) {
-    let (handle, dir, broker) = crate::test_support::started_controller_broker().await;
+async fn seed_returning_broker(min_isr: &str) -> (BrokerHandle, Arc<Broker>, tempfile::TempDir) {
+    let (handle, dir, broker) = started_controller_broker().await;
     let mut seed = seed_records_with_min_isr(min_isr);
     seed.push(registration_record(1));
     broker
@@ -373,10 +372,10 @@ async fn assert_returning_broker_withdrawal(min_isr: &str, initial_check: Initia
     .await;
     // Every later derivation still excludes broker 3 while allowing broker 2,
     // which left an ISR whose log was never called into question.
-    crate::test_support::accepted_isr_proposal(
+    accepted_isr_proposal(
         &broker,
-        crate::test_support::LiveIsrSetup::default(),
-        crate::test_support::IsrResponseCheck::EnvelopeAndPartition,
+        LiveIsrSetup::default(),
+        IsrResponseCheck::EnvelopeAndPartition,
     )
     .await;
     check_partition(

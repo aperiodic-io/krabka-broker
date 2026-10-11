@@ -21,9 +21,14 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::{
     delivery::DeliveryHandles,
+    log_dir_status::LogDirRegistry,
     partition::{
         Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
     },
+    partition_writer::run,
+    producer_state::ProducerState,
+    replica_state::ReplicaState,
+    test_support::{PartitionRecordsSetup, partition_records_batch},
 };
 
 // Fails leader-epoch checkpoint writes as a full disk would.
@@ -42,9 +47,7 @@ pub(crate) fn test_partition(hw_advance_notify: Arc<Notify>) -> (Partition, temp
         writer_tx: tx,
         marker_materialization: empty_marker_materialization(),
         append_notify: Arc::new(Notify::new()),
-        replica_state: Arc::new(tokio::sync::Mutex::new(
-            crate::replica_state::ReplicaState::new(),
-        )),
+        replica_state: Arc::new(tokio::sync::Mutex::new(ReplicaState::new())),
         hw_advance_notify,
         current_leader: Arc::new(AtomicU64::new(0)),
         current_leader_epoch: Arc::new(AtomicI32::new(0)),
@@ -91,14 +94,14 @@ pub(crate) fn test_partition_with_writer() -> (Partition, tempfile::TempDir) {
     ));
     let log_dir = Arc::new(ArcSwap::from_pointee(dir.path().to_path_buf()));
     let p = Partition::writer_fixture("t", log, log_dir, |identity, storage, rx, signals| {
-        tokio::spawn(crate::partition_writer::run(
+        tokio::spawn(run(
             identity,
             storage,
             rx,
             signals,
             (
-                crate::log_dir_status::LogDirRegistry::default(),
-                Arc::new(crate::producer_state::ProducerState::new()),
+                LogDirRegistry::default(),
+                Arc::new(ProducerState::new()),
                 None,
             ),
         ))
@@ -127,8 +130,8 @@ pub(crate) async fn install_three_replica_isr(partition: &Partition) {
         .await;
 }
 
-pub(super) fn append_records(p: &Partition, setup: crate::test_support::PartitionRecordsSetup) {
-    let mut batch = crate::test_support::partition_records_batch(setup);
+pub(super) fn append_records(p: &Partition, setup: PartitionRecordsSetup) {
+    let mut batch = partition_records_batch(setup);
     p.log
         .lock()
         .expect("log mutex")

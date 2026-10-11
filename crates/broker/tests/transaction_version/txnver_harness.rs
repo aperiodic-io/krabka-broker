@@ -10,7 +10,12 @@ use assert2::assert;
 use krabka_client_core::Client;
 use krabka_protocol::owned::update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest};
 
-use crate::support::client::connect_client;
+use crate::support::{
+    client::connect_client,
+    discovery::{coordinator_lookup_request, topic_metadata_request},
+    topics::TopicPartitionCount,
+    transaction_wire::{TransactionTopicSetup, create_topic as create_transaction_topic},
+};
 
 // Kafka error codes asserted below.
 pub const NONE: i16 = 0;
@@ -22,14 +27,10 @@ pub async fn admin_client(bootstrap: &str) -> Client {
     connect_client(bootstrap, Some("krabka-txnv-test")).await
 }
 
-pub async fn create_topic(
-    client: &Client,
-    name: &str,
-    partitions: crate::support::topics::TopicPartitionCount,
-) {
-    crate::support::transaction_wire::create_topic(
+pub async fn create_topic(client: &Client, name: &str, partitions: TopicPartitionCount) {
+    create_transaction_topic(
         client,
-        crate::support::transaction_wire::TransactionTopicSetup {
+        TransactionTopicSetup {
             name,
             partitions,
             context: "create_topic",
@@ -88,12 +89,12 @@ pub fn config(
 /// Locate the named topic in its own metadata response, retaining its diagnostic.
 pub async fn topic_id(client: &Client, topic: &str) -> krabka_protocol::primitives::uuid::Uuid {
     client
-        .send(crate::support::discovery::topic_metadata_request(Some(
-            vec![crate::support::topics::metadata_topic(
+        .send(topic_metadata_request(Some(vec![
+            crate::support::topics::metadata_topic(
                 Some(topic.into()),
                 krabka_protocol::primitives::uuid::Uuid::default(),
-            )],
-        )))
+            ),
+        ])))
         .await
         .expect("Metadata")
         .topics
@@ -106,7 +107,7 @@ pub async fn topic_id(client: &Client, topic: &str) -> krabka_protocol::primitiv
 /// Trigger loading of the transaction coordinator without asserting on the lookup response.
 pub async fn find_coordinator(client: &Client, transactional_id: &str) {
     let _ = client
-        .send(crate::support::discovery::coordinator_lookup_request(
+        .send(coordinator_lookup_request(
             transactional_id,
             1,
             vec![transactional_id.into()],

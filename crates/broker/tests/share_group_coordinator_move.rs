@@ -20,7 +20,10 @@ use krabka_protocol::owned::{
 };
 use tempfile::TempDir;
 
-use crate::support::{client::connect_owned, discovery::coordinator_lookup_request};
+use crate::support::{
+    client::connect_owned, discovery::coordinator_lookup_request, share::crash_follower,
+    shutdown_cluster,
+};
 
 mod support;
 
@@ -131,7 +134,7 @@ async fn a_join_that_does_not_commit_is_not_answered() {
     let lookup = client(&cluster[0].0).await;
     let coordinator = coordinator_of(&lookup, None).await;
     lookup.close();
-    let stopped_dir = crate::support::share::crash_follower(&mut cluster, coordinator).await;
+    let stopped_dir = crash_follower(&mut cluster, coordinator).await;
 
     let member = client(&cluster[position_of(&cluster, coordinator)].0).await;
     let joined = heartbeat_once_loaded(&member, heartbeat("member-1", 0)).await;
@@ -145,7 +148,7 @@ async fn a_join_that_does_not_commit_is_not_answered() {
             }
     );
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
     drop(stopped_dir);
 }
 
@@ -182,6 +185,6 @@ async fn a_member_keeps_its_epoch_when_its_coordinator_stops_cleanly() {
     check!(resumed.member_id.as_deref() == Some("member-1"));
     check!(resumed.member_epoch >= joined.member_epoch);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
     drop(stopped_dir);
 }

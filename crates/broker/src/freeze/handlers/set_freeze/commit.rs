@@ -7,7 +7,7 @@
 use krabka_metadata::MetadataRecord;
 
 use super::outcome::{Accepted, Refusal};
-use crate::{broker::Broker, codes};
+use crate::{broker::Broker, codes, handlers::submit_failure_code};
 
 /// Write the accepted records in one raft append.
 ///
@@ -25,10 +25,7 @@ pub(super) async fn submit(broker: &Broker, accepted: Accepted) -> Result<Accept
         Err(error) => {
             tracing::warn!(%error, "set-topic-freeze submit failed");
             Err(Refusal {
-                code: crate::handlers::submit_failure_code(
-                    &error,
-                    codes::COORDINATOR_NOT_AVAILABLE,
-                ),
+                code: submit_failure_code(&error, codes::COORDINATOR_NOT_AVAILABLE),
                 message: format!("submit failed: {error}"),
                 signature_verified: accepted.signature_verified,
             })

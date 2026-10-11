@@ -153,6 +153,7 @@ pub(crate) use self::{
     topic_scope::CONTROLLER_MANAGED_TOPIC_CONFIGS,
     validation::{REMOTE_STORAGE_POLICY_MESSAGE, validate_topic_config_map},
 };
+use crate::api_catalog::UnstableApiVersions;
 pub(crate) const RETENTION_MS: &str = "retention.ms";
 pub(crate) const RETENTION_BYTES: &str = "retention.bytes";
 pub(crate) const SEGMENT_BYTES: &str = "segment.bytes";
@@ -270,12 +271,8 @@ pub(crate) const KAFKA_TRUNK_TOPIC_KEYS: &[&str] = &[
 
 /// Whether a broker serving `unstable` has the topic key `name`: every key
 /// under trunk, and every key but [`KAFKA_TRUNK_TOPIC_KEYS`] otherwise.
-pub(crate) fn serves_topic_key(
-    name: &str,
-    unstable: crate::api_catalog::UnstableApiVersions,
-) -> bool {
-    unstable == crate::api_catalog::UnstableApiVersions::Enabled
-        || !KAFKA_TRUNK_TOPIC_KEYS.contains(&name)
+pub(crate) fn serves_topic_key(name: &str, unstable: UnstableApiVersions) -> bool {
+    unstable == UnstableApiVersions::Enabled || !KAFKA_TRUNK_TOPIC_KEYS.contains(&name)
 }
 
 /// Kafka's `Records.SOFT_MAX_ARRAY_LENGTH`, `Integer.MAX_VALUE - 8`: the

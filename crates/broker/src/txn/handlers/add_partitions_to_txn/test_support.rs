@@ -10,6 +10,14 @@ use krabka_protocol::owned::common::{
     },
 };
 
+use crate::{
+    authorizer::Authorizer,
+    broker::{Broker, BrokerHandle},
+    coordinator::test_support::single_replica_partition,
+    test_support::{configure_single_partition_transactions, start_broker_no_audit_with},
+    txn::{state::TxnEntry, version::resolve_txn_version},
+};
+
 pub(super) fn topic(name: &str, partitions: &[i32]) -> AddPartitionsToTxnTopic {
     AddPartitionsToTxnTopic {
         name: name.into(),
@@ -39,11 +47,7 @@ pub(super) fn topic_result(name: &str, rows: &[(i32, i16)]) -> AddPartitionsToTx
 
 /// Adds `topic` with `partitions` partitions, each led by this broker, to the
 /// metadata image, so the existence check of `AddPartitionsToTxn` finds it.
-pub(in crate::txn::handlers) async fn seed_topic(
-    broker: &crate::broker::Broker,
-    topic: &str,
-    partitions: i32,
-) {
+pub(in crate::txn::handlers) async fn seed_topic(broker: &Broker, topic: &str, partitions: i32) {
     let mut records = vec![krabka_metadata::MetadataRecord::V1Topic(
         krabka_metadata::TopicRecord {
             name: topic.to_owned(),
@@ -55,7 +59,7 @@ pub(in crate::txn::handlers) async fn seed_topic(
     records.extend((0..partitions).map(|partition| {
         krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
             directories: vec![uuid::Uuid::nil()],
-            ..crate::coordinator::test_support::single_replica_partition(
+            ..single_replica_partition(
                 topic,
                 krabka_ids::PartitionIndex(partition),
                 broker.config.node_id,
@@ -76,10 +80,10 @@ pub(in crate::txn::handlers) async fn seed_topic(
 /// `__transaction_state-0`, and this returns once that partition is loaded,
 /// so [`seed_transaction`] and the handler both see a coordinator.
 pub(in crate::txn::handlers) async fn start_coordinator(
-    authorizer: std::sync::Arc<dyn crate::authorizer::Authorizer>,
-) -> (crate::broker::BrokerHandle, tempfile::TempDir) {
-    let (handle, dir) = crate::test_support::start_broker_no_audit_with(|cfg| {
-        crate::test_support::configure_single_partition_transactions(cfg, authorizer);
+    authorizer: std::sync::Arc<dyn Authorizer>,
+) -> (BrokerHandle, tempfile::TempDir) {
+    let (handle, dir) = start_broker_no_audit_with(|cfg| {
+        configure_single_partition_transactions(cfg, authorizer);
     })
     .await;
     let broker = handle.broker_arc_for_test();
@@ -94,15 +98,15 @@ pub(in crate::txn::handlers) async fn start_coordinator(
 /// Opens an empty transaction for `tid` under `producer_id` at producer epoch
 /// 2 on a broker [`start_coordinator`] started.
 pub(in crate::txn::handlers) async fn seed_transaction(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     tid: &str,
     producer_id: i64,
 ) {
-    let txnv = crate::txn::version::resolve_txn_version(&broker.controller.current_image());
+    let txnv = resolve_txn_version(&broker.controller.current_image());
     broker
         .txn_coordinator
         .put(
-            crate::txn::state::TxnEntry::new_empty(
+            TxnEntry::new_empty(
                 tid.to_owned(),
                 krabka_log::ProducerId(producer_id),
                 2,
@@ -117,7 +121,7 @@ pub(in crate::txn::handlers) async fn seed_transaction(
 
 /// The `(topic, partition)` pairs `tid`'s transaction holds.
 pub(super) async fn enlisted(
-    broker: &crate::broker::Broker,
+    broker: &Broker,
     tid: &str,
 ) -> std::collections::BTreeSet<(String, i32)> {
     broker

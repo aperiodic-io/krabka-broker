@@ -21,11 +21,16 @@ use krabka_security::SaslMechanism;
 use tokio::net::TcpStream;
 
 use crate::{
-    harness::{admin_plain_password, alice_password, round_trip, wrong_scram_password},
-    kafka_wire::SaslHandshakeSetup,
+    harness::{
+        admin_plain_password, alice_password, round_trip, scram_admin_fixture, wrong_scram_password,
+    },
+    kafka_wire::{
+        SaslHandshakeSetup, decode_named, encode_named, plain_payload, sasl_handshake_on,
+    },
     scram::drive_sasl_scram_session,
     support::{
-        sasl::{ScramAlgorithm, ScramUpsertionSetup, scram_upsertion},
+        acl::use_simple_acl_authorizer,
+        sasl::{ScramAlgorithm, ScramUpsertionSetup, sasl_temp_config, scram_upsertion},
         wire::{
             CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
             SocketExchangeSetup,
@@ -51,12 +56,10 @@ pub const KAFKA_MAX_SCRAM_ITERATIONS: i32 = 16_384;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_super_user_can_provision() {
     let (_log_dir, handle, addr) =
-        crate::harness::scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha512])
-            .await;
+        scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha512]).await;
 
     let req = alice_sha512_request();
-    let resp =
-        crate::alter_scram::provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion").await;
+    let resp = provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion").await;
     assert!(resp.results.len() == 1, "one result row per upsertion");
     check!(
         resp.results[0].error_code == 0,
@@ -82,8 +85,7 @@ async fn alter_scram_creds_super_user_can_provision() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_super_user_can_provision_sha256() {
     let (_log_dir, handle, addr) =
-        crate::harness::scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha256])
-            .await;
+        scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha256]).await;
 
     let (salt, salted) = pbkdf2_salt_and_salted_sha256(alice_password().as_bytes(), 4096);
     let req = AlterUserScramCredentialsRequest {
@@ -95,9 +97,7 @@ async fn alter_scram_creds_super_user_can_provision_sha256() {
         })],
         ..Default::default()
     };
-    let resp =
-        crate::alter_scram::provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion (SHA-256)")
-            .await;
+    let resp = provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion (SHA-256)").await;
     assert!(resp.results.len() == 1);
     check!(
         resp.results[0].error_code == 0,
@@ -120,14 +120,14 @@ async fn alter_scram_creds_super_user_can_provision_sha256() {
 /// broker makes no metadata change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_non_super_user_rejected() {
-    let (_log_dir, mut cfg) = crate::support::sasl::sasl_temp_config(vec![SaslMechanism::Plain]);
+    let (_log_dir, mut cfg) = sasl_temp_config(vec![SaslMechanism::Plain]);
     cfg.plain_credentials
         .insert("bob".to_string(), wrong_scram_password());
     cfg.super_users = maplit::hashset! {"admin".to_string()};
     // Install `SimpleAclAuthorizer` so the cluster-Alter gate
     // fires for non-super principals; the default `AllowAllAuthorizer`
     // would let alice through.
-    crate::support::acl::use_simple_acl_authorizer(&mut cfg);
+    use_simple_acl_authorizer(&mut cfg);
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
@@ -165,11 +165,11 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
 
     // ── 1. ApiVersions (v0, non-flexible).
     let av_req = ApiVersionsRequest::default();
-    let av_body = crate::kafka_wire::encode_named(&av_req, 0, "ApiVersions")?;
+    let av_body = encode_named(&av_req, 0, "ApiVersions")?;
     let _ = round_trip(&mut stream, SocketExchangeSetup::default(), &av_body).await?;
 
     // ── 2. SaslHandshake v1.
-    crate::kafka_wire::sasl_handshake_on(
+    sasl_handshake_on(
         &mut stream,
         SaslHandshakeSetup {
             client_id: "krabka-sasl-test",
@@ -179,9 +179,9 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
     .await?;
 
     // ── 3. SaslAuthenticate v2 (flexible). auth_bytes = \0user\0password.
-    let auth_body = crate::kafka_wire::encode_named(
+    let auth_body = encode_named(
         &SaslAuthenticateRequest {
-            auth_bytes: crate::kafka_wire::plain_payload(user, password),
+            auth_bytes: plain_payload(user, password),
             ..Default::default()
         },
         2,
@@ -198,11 +198,8 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
         &auth_body,
     )
     .await?;
-    let auth_resp = crate::kafka_wire::decode_named::<SaslAuthenticateResponse>(
-        &auth_resp_bytes,
-        2,
-        "SaslAuthenticate",
-    )?;
+    let auth_resp =
+        decode_named::<SaslAuthenticateResponse>(&auth_resp_bytes, 2, "SaslAuthenticate")?;
     if auth_resp.error_code != 0 {
         return Err(io::Error::other(format!(
             "SaslAuthenticate failed: error_code={}",
@@ -211,7 +208,7 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
     }
 
     // ── 4. AlterUserScramCredentials v0 (api_key 51, flexible from v0).
-    let auscr_body = crate::kafka_wire::encode_named(&req, 0, "AUSCR")?;
+    let auscr_body = encode_named(&req, 0, "AUSCR")?;
     let auscr_resp_bytes = round_trip(
         &mut stream,
         SocketExchangeSetup {
@@ -223,11 +220,7 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
         &auscr_body,
     )
     .await?;
-    crate::kafka_wire::decode_named::<AlterUserScramCredentialsResponse>(
-        &auscr_resp_bytes,
-        0,
-        "AUSCR",
-    )
+    decode_named::<AlterUserScramCredentialsResponse>(&auscr_resp_bytes, 0, "AUSCR")
 }
 
 /// Compute `(salt, salted_password)` for a SCRAM-SHA-512 wire upsertion.

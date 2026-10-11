@@ -24,7 +24,7 @@ use crate::{
     codes,
     coordinator::unified::{
         GroupSeed,
-        actor::{GroupActorMessage, GroupKindTag},
+        actor::{GroupActorMessage, GroupKindTag, test_support::classic_member},
         classic_state::{ClassicGroup, GroupState},
         group::{CoordinatorGroup, GroupKind},
         persistence_next_gen::{
@@ -33,8 +33,11 @@ use crate::{
             TargetAssignmentMemberValue,
         },
     },
-    handlers::test_support::CreateTopicSetup,
-    test_support::{dispatch_context, encode_request, peer, principal},
+    handlers::test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+    test_support::{
+        dispatch_context, dispatch_wire, encode_request, peer, principal,
+        start_group_broker_no_audit,
+    },
 };
 
 const TOPIC: &str = "group-validation";
@@ -77,9 +80,9 @@ async fn create_topic_with_partitions(broker: &Broker, num_partitions: i32) {
         principal("admin"),
         client_id = "group-validation-admin"
     );
-    let request = crate::handlers::test_support::configured_topic_request(CreateTopicSetup {
+    let request = configured_topic_request(CreateTopicSetup {
         topic: TOPIC,
-        num_partitions: crate::handlers::test_support::TopicPartitionCount(num_partitions),
+        num_partitions: TopicPartitionCount(num_partitions),
         ..Default::default()
     });
     dispatch_context(
@@ -98,9 +101,7 @@ fn seed(broker: &Broker, group_id: &str, group: Group) {
         Group::ClassicWithMember => {
             let mut state = ClassicGroup::new(group_id);
             state.protocol_type = Some("consumer".into());
-            state.add_member(
-                crate::coordinator::unified::actor::test_support::classic_member(MEMBER),
-            );
+            state.add_member(classic_member(MEMBER));
             state.state = GroupState::Stable;
             state.generation_id = GENERATION;
             let seeded = CoordinatorGroup::seeded(
@@ -146,7 +147,7 @@ async fn drive(broker: &BrokerHandle, row: usize, case: Case) -> (OffsetCommitRe
         principal("consumer"),
         client_id = "consumer-client"
     );
-    let response = crate::test_support::dispatch_wire(
+    let response = dispatch_wire(
         &shared,
         krabka_protocol::owned::offset_commit_request::API_KEY,
         case.version,
@@ -218,8 +219,7 @@ async fn commit_is_fenced_by_kafka_group_rule() {
             error_code: codes::NONE,
         },
     ];
-    let (broker, _dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     create_topic(&broker.broker_arc_for_test()).await;
     broker.wait_until_partition_present(TOPIC, 0).await;
 
@@ -270,8 +270,7 @@ test_authorizer!(DenyOneTopic, (self, _source, req), {
 /// with no allowed topic never reaches the coordinator.
 #[tokio::test]
 async fn topic_read_is_checked_before_the_group() {
-    let (broker, _dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(DenyOneTopic)).await;
+    let (broker, _dir) = start_group_broker_no_audit(Arc::new(DenyOneTopic)).await;
     let shared = broker.broker_arc_for_test();
     create_topic(&shared).await;
     broker.wait_until_partition_present(TOPIC, 0).await;
@@ -328,7 +327,7 @@ async fn topic_read_is_checked_before_the_group() {
             topics,
             ..Default::default()
         };
-        let response: OffsetCommitResponse = crate::test_support::dispatch_wire(
+        let response: OffsetCommitResponse = dispatch_wire(
             &shared,
             krabka_protocol::owned::offset_commit_request::API_KEY,
             9,
@@ -359,8 +358,7 @@ async fn topic_read_is_checked_before_the_group() {
 #[tokio::test]
 async fn oversized_metadata_is_refused_through_the_handler() {
     const GROUP_ID: &str = "oversized-metadata";
-    let (broker, _dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let shared = broker.broker_arc_for_test();
     create_topic(&shared).await;
     broker.wait_until_partition_present(TOPIC, 0).await;
@@ -384,7 +382,7 @@ async fn oversized_metadata_is_refused_through_the_handler() {
         principal("consumer"),
         client_id = "consumer-client"
     );
-    let response: OffsetCommitResponse = crate::test_support::dispatch_wire(
+    let response: OffsetCommitResponse = dispatch_wire(
         &shared,
         krabka_protocol::owned::offset_commit_request::API_KEY,
         9,
@@ -566,8 +564,7 @@ async fn consumer_group_commit_follows_kip_1251() {
             error_code: codes::NONE,
         },
     ];
-    let (broker, _dir) =
-        crate::test_support::start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let shared = broker.broker_arc_for_test();
     create_topic_with_partitions(&shared, KIP_1251_TOPIC_PARTITIONS).await;
     for partition in 0..KIP_1251_TOPIC_PARTITIONS {
@@ -617,7 +614,7 @@ async fn consumer_group_commit_follows_kip_1251() {
             }],
             ..Default::default()
         };
-        let response: OffsetCommitResponse = crate::test_support::dispatch_wire(
+        let response: OffsetCommitResponse = dispatch_wire(
             &shared,
             krabka_protocol::owned::offset_commit_request::API_KEY,
             row.version,

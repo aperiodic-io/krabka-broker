@@ -23,6 +23,9 @@ use krabka_protocol::owned::{
 use crate::{
     CREATE_ACLS_VERSION, DELETE_ACLS_VERSION, DESCRIBE_ACLS_VERSION, OPERATION_ANY,
     PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PERMISSION_ALLOW, PERMISSION_ANY, RESOURCE_TYPE_TOPIC,
+    framing::CLIENT_ID,
+    kafka_wire::{AutomaticTopicSetup, create_topic_as_super_user},
+    support::topics::{ConfiguredTopicSetup, TopicPartitionCount},
 };
 
 /// Shorthand for `Allow <op> on Topic LITERAL <name> for <principal> from *`.
@@ -61,13 +64,13 @@ pub fn describe_all_topic_acls() -> DescribeAclsRequest {
 /// for the requested topic. The T23 tests use it to materialise a
 /// partition before they produce to it or fetch from it.
 pub async fn create_topic_as_admin(addr: SocketAddr, name: &str, partitions: i32) {
-    crate::kafka_wire::create_topic_as_super_user(
+    create_topic_as_super_user(
         addr,
-        crate::kafka_wire::AutomaticTopicSetup {
-            client_id: crate::framing::CLIENT_ID,
-            topic: crate::support::topics::ConfiguredTopicSetup {
+        AutomaticTopicSetup {
+            client_id: CLIENT_ID,
+            topic: ConfiguredTopicSetup {
                 name: name.to_string(),
-                partitions: crate::support::topics::TopicPartitionCount(partitions),
+                partitions: TopicPartitionCount(partitions),
                 ..Default::default()
             },
         },

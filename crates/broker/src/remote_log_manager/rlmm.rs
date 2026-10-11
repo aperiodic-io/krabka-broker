@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use krabka_remote_storage::RemoteLogMetadataManager;
 
+use crate::{blocking::spawn_blocking, time_util::now_ms};
+
 /// Run one blocking [`RemoteLogMetadataManager`] mutation on the blocking
 /// pool. The topic-backed manager's synchronous SPI methods bridge to a
 /// Tokio runtime with `block_on`, which panics on a runtime worker thread.
@@ -25,7 +27,7 @@ where
         + 'static,
 {
     let rlmm = Arc::clone(rlmm);
-    match crate::blocking::spawn_blocking(move || op(rlmm.as_ref())).await {
+    match spawn_blocking(move || op(rlmm.as_ref())).await {
         Ok(res) => res,
         Err(e) => Err(krabka_remote_storage::RemoteStorageError::Backend(format!(
             "RLMM mutation task panicked: {e}"
@@ -43,7 +45,7 @@ pub(super) async fn update_segment(
 ) -> Result<(), krabka_remote_storage::RemoteStorageError> {
     let update = krabka_remote_storage::RemoteLogSegmentMetadataUpdate {
         remote_log_segment_id: id,
-        event_timestamp_ms: crate::time_util::now_ms(),
+        event_timestamp_ms: now_ms(),
         custom_metadata,
         state,
         broker_id,

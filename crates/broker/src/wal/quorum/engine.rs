@@ -587,15 +587,11 @@ mod tests {
     use krabka_protocol::records::{Record, RecordBatch};
 
     use super::*;
-    use crate::wal::quorum::test_support::batch;
+    use crate::wal::quorum::test_support::{batch, distributed_engine, open_log};
 
     fn configured_engine(path: &Path) -> WalShardEngine {
-        let source = crate::wal::quorum::test_support::open_log(path);
-        crate::wal::quorum::test_support::distributed_engine(
-            &source,
-            3,
-            &[NodeId(1), NodeId(2), NodeId(3)],
-        )
+        let source = open_log(path);
+        distributed_engine(&source, 3, &[NodeId(1), NodeId(2), NodeId(3)])
     }
 
     fn log_with_records(path: &Path, records: usize) -> Arc<Mutex<Log>> {

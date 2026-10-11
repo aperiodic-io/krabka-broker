@@ -82,6 +82,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
+    use crate::internal_topics::INTERNAL_TOPICS;
 
     #[test]
     fn a_pattern_type_names_itself_as_kafka_acls_spell_it() {
@@ -171,7 +172,7 @@ mod tests {
     /// prefix scope that reaches it.
     #[test]
     fn a_freeze_scope_covers_every_internal_topic() {
-        for name in crate::internal_topics::INTERNAL_TOPICS {
+        for name in INTERNAL_TOPICS {
             check!(
                 scope_covers_internal_topic(PatternType::Literal, name),
                 "literal {name}"

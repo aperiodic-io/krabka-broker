@@ -33,6 +33,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     RECORDS, TOPIC, VOTERS,
     cluster::wait_for,
+    topic::{flushing_workload, seeded_leader},
     wire::{assert_matches_produced, fetch_log, produce_until_stopped},
 };
 
@@ -41,11 +42,11 @@ async fn a_broker_crashed_mid_flush_loses_no_acknowledged_offset() {
     // Flush on a tight cadence so the crash below lands inside a flush cycle
     // rather than between two idle ticks.
     let (mut cluster, admin, topic_id, leader, _values, producer) =
-        crate::topic::flushing_workload(krabka_units::millis(50)).await;
+        flushing_workload(krabka_units::millis(50)).await;
 
     // Wait until the flusher has actually started moving objects, so the crash
     // interrupts a running pipeline instead of one that never began.
-    let (leader_broker, committed) = crate::topic::seeded_leader(&cluster, leader);
+    let (leader_broker, committed) = seeded_leader(&cluster, leader);
     wait_for(
         "the diskless flusher to reach the committed prefix",
         Duration::from_secs(90),

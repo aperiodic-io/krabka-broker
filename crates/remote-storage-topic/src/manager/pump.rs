@@ -77,7 +77,9 @@ mod tests {
     use super::*;
     use crate::{
         log::{InProcessMetadataEventLog, MetadataEventLog},
-        manager::test_support::{finish, on_blocking, start_manager_all, started, tp},
+        manager::test_support::{
+            finish, on_blocking, seed_finished, start_manager_all, started, tp,
+        },
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -121,11 +123,7 @@ mod tests {
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
         {
             let m = start_manager_all(log.clone()).await;
-            crate::manager::test_support::seed_finished(
-                &m,
-                &[(10, 0, 99), (11, 100, 199), (12, 200, 299)],
-            )
-            .await;
+            seed_finished(&m, &[(10, 0, 99), (11, 100, 199), (12, 200, 299)]).await;
             m.shutdown();
         }
 

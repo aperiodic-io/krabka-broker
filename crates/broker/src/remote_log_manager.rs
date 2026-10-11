@@ -56,7 +56,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::{
+    api_catalog::UnstableApiVersions,
+    config_keys::resolve_remote_copy_lag,
     freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
+    metadata_source::MetadataSource,
     metrics::BrokerMetrics,
     partition::Partition,
     partition_registry::PartitionRegistry,
@@ -162,7 +165,7 @@ pub(crate) struct RemoteLogManagerConfig {
     pub concurrency: SweepConcurrency,
     /// See [`RemoteTier::unstable_api_versions`].
     #[default(crate::api_catalog::UnstableApiVersions::Disabled)]
-    pub unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    pub unstable_api_versions: UnstableApiVersions,
 }
 
 /// How many partition passes of each kind one tick may have in flight.
@@ -219,7 +222,7 @@ impl SweepPermits {
 
 pub(crate) struct RemoteLogManagerContext {
     pub partitions: Arc<PartitionRegistry>,
-    pub controller: Arc<dyn crate::metadata_source::MetadataSource>,
+    pub controller: Arc<dyn MetadataSource>,
     /// Whether `rsm` is a write-once archive. It gates every delete this
     /// module would otherwise issue, and turns on manifest chaining.
     pub archive: ArchiveMode,
@@ -260,7 +263,7 @@ pub(crate) struct RemoteTier<'a> {
     /// differs from the released 4.3.1: today, how local retention ages a
     /// segment whose newest record claims a timestamp in the future. See
     /// [`local_retention::local_retention_target`].
-    pub unstable_api_versions: crate::api_catalog::UnstableApiVersions,
+    pub unstable_api_versions: UnstableApiVersions,
 }
 
 impl RemoteLogManagerContext {
@@ -316,7 +319,7 @@ pub(crate) async fn run(
 /// filled their disks while it waited.
 async fn tick_all(
     partitions: &PartitionRegistry,
-    controller: &dyn crate::metadata_source::MetadataSource,
+    controller: &dyn MetadataSource,
     tier: &RemoteTier<'_>,
     node_id: NodeId,
     broker_id: i32,
@@ -521,15 +524,15 @@ async fn tick_partition(sweep: PartitionSweep<'_>) {
 fn copy_delay(
     (image, node, topic): (&krabka_metadata::MetadataImage, NodeId, &str),
     log_config: &krabka_log::LogConfig,
-    unstable: crate::api_catalog::UnstableApiVersions,
+    unstable: UnstableApiVersions,
     (local_log_size, sealed): (ByteSize, &[krabka_log::SegmentExport]),
 ) -> CopyDelay {
-    if unstable != crate::api_catalog::UnstableApiVersions::Enabled {
+    if unstable != UnstableApiVersions::Enabled {
         return CopyDelay::IMMEDIATE;
     }
     let sealed_bytes: u64 = sealed.iter().map(|ex| ex.size.bytes_u64()).sum();
     CopyDelay::resolve(
-        crate::config_keys::resolve_remote_copy_lag(image, node, topic),
+        resolve_remote_copy_lag(image, node, topic),
         log_config,
         now_ms(),
         local_log_size.bytes_u64().saturating_sub(sealed_bytes),
@@ -656,7 +659,11 @@ mod tests {
         test_support::{fixed_source, rolled_tiered_partition_with_config, tier, tp},
         *,
     };
-    use crate::remote_log_manager::test_support as fixtures;
+    use crate::{
+        api_catalog::UnstableApiVersions,
+        metadata_source::MetadataSource,
+        remote_log_manager::{local_retention::finished_segment_ranges, test_support as fixtures},
+    };
 
     mod concurrency;
     mod epoch_cache;
@@ -694,8 +701,7 @@ mod tests {
         assert!(export_count >= 2, "test needs multiple sealed segments");
         partitions.insert("orders".into(), PartitionIndex(0), partition);
 
-        let controller: Arc<dyn crate::metadata_source::MetadataSource> =
-            Arc::new(fixed_source(image_with_orders_topic()));
+        let controller: Arc<dyn MetadataSource> = Arc::new(fixed_source(image_with_orders_topic()));
         let (rsm, rlmm) = local_backends(remote_dir.path());
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(run(
@@ -810,9 +816,7 @@ mod tests {
             let mut log = fixtures::partition_log_guard(&partition);
             log.sync().expect("flush rolled segments");
             let observed = Tiered {
-                remote: crate::remote_log_manager::local_retention::finished_segment_ranges(
-                    &rlmm.list_remote_log_segments(&tp()).unwrap(),
-                ),
+                remote: finished_segment_ranges(&rlmm.list_remote_log_segments(&tp()).unwrap()),
                 local_sealed: log
                     .tierable_segments()
                     .iter()
@@ -830,7 +834,7 @@ mod tests {
         segments_copied_by_one_sweep_of(
             partition,
             image_with_orders_topic(),
-            crate::api_catalog::UnstableApiVersions::Disabled,
+            UnstableApiVersions::Disabled,
         )
         .await
     }
@@ -840,7 +844,7 @@ mod tests {
     async fn segments_copied_by_one_sweep_of(
         partition: Arc<Partition>,
         image: MetadataImage,
-        unstable: crate::api_catalog::UnstableApiVersions,
+        unstable: UnstableApiVersions,
     ) -> usize {
         let remote_dir = tempfile::tempdir().unwrap();
         let partitions = PartitionRegistry::new();

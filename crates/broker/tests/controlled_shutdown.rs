@@ -25,7 +25,13 @@ use tokio::net::TcpStream;
 
 use crate::{
     kafka_wire::ExchangeSetup as WireExchangeSetup,
-    support::wire::HeaderEncoding as RequestHeaderEncoding,
+    support::{
+        registered_cluster, shutdown_cluster,
+        topics::{
+            CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor, configured_topic_request,
+        },
+        wire::HeaderEncoding as RequestHeaderEncoding,
+    },
 };
 
 mod kafka_wire;
@@ -37,9 +43,9 @@ const CREATE_TOPICS_VERSION: i16 = 7;
 /// The client id every request header in this suite carries.
 const CLIENT_ID: &str = "krabka-controlled-shutdown-test";
 
-async fn create_topic(addr: SocketAddr, setup: crate::support::topics::CreateTopicSetup<'_>) {
+async fn create_topic(addr: SocketAddr, setup: CreateTopicSetup<'_>) {
     let name = setup.topic;
-    let req = crate::support::topics::configured_topic_request(setup);
+    let req = configured_topic_request(setup);
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let mut body = BytesMut::new();
     req.encode(&mut body, CREATE_TOPICS_VERSION)
@@ -79,7 +85,7 @@ struct ForcedLeadershipSetup<'a> {
     #[default("drain-me")]
     topic: &'a str,
     #[default(crate::support::topics::TopicPartitionCount(4))]
-    partitions: crate::support::topics::TopicPartitionCount,
+    partitions: TopicPartitionCount,
     #[default(krabka_metadata::NodeId(1))]
     leader: krabka_metadata::NodeId,
     #[default(vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2), krabka_metadata::NodeId(3)])]
@@ -150,7 +156,7 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
 
     support::init_tracing();
 
-    let mut cluster = crate::support::registered_cluster(3).await;
+    let mut cluster = registered_cluster(3).await;
 
     // Resolve the raft (controller) leader. We then pick a *follower*
     // broker as the controlled-shutdown target. Picking the controller
@@ -179,10 +185,10 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
     let partitions: i32 = 4;
     create_topic(
         addr,
-        crate::support::topics::CreateTopicSetup {
+        CreateTopicSetup {
             topic,
-            num_partitions: crate::support::topics::TopicPartitionCount(partitions),
-            replication_factor: crate::support::topics::TopicReplicationFactor(3),
+            num_partitions: TopicPartitionCount(partitions),
+            replication_factor: TopicReplicationFactor(3),
             ..Default::default()
         },
     )
@@ -204,7 +210,7 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
         &cluster[raft_leader_idx].0,
         ForcedLeadershipSetup {
             topic,
-            partitions: crate::support::topics::TopicPartitionCount(partitions),
+            partitions: TopicPartitionCount(partitions),
             leader: krabka_metadata::NodeId(target_node_id.0),
             replicas: replicas
                 .iter()
@@ -265,7 +271,7 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
     }
 
     // Tidy up surviving brokers.
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// A controller-only node has no partitions to drain and no heartbeat client

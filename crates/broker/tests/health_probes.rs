@@ -27,9 +27,11 @@ use krabka_broker::{
 use krabka_security::ListenerProtocol;
 use tokio::net::TcpListener;
 
+use crate::support::client::http_get;
+
 /// One HTTP/1.1 GET, returned as `(status line, body)`.
 async fn get(addr: SocketAddr, path: &str) -> (String, String) {
-    let raw = crate::support::client::http_get(addr, path, true).await;
+    let raw = http_get(addr, path, true).await;
     let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw.as_str(), ""));
     let status = head.lines().next().unwrap_or_default().to_string();
     (status, body.to_string())

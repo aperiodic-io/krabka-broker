@@ -5,7 +5,13 @@
 
 use assert2::assert;
 
-use crate::support::topics::{creatable_topic, create_topic_request};
+use crate::{
+    kafka_wire::LegacyExchangeSetup,
+    support::{
+        fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+};
 mod kafka_wire;
 mod support;
 
@@ -64,7 +70,7 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
     let cr = p
         .client
         .send(create_topic_request(creatable_topic(
-            crate::support::topics::ConfiguredTopicSetup {
+            ConfiguredTopicSetup {
                 name: ("legacy_v0").into(),
                 ..Default::default()
             },
@@ -111,7 +117,7 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
     // Produce v0, correlation ID 1 and legacy headers are the setup defaults.
     let resp_body = round_trip_v0(
         &mut stream,
-        crate::kafka_wire::LegacyExchangeSetup {
+        LegacyExchangeSetup {
             client_id: "legacy-produce-test",
             ..Default::default()
         },
@@ -139,13 +145,11 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
     let topic_id = topic_id_for(&p.client, "legacy_v0").await;
     let fetch_resp = p
         .client
-        .send(crate::support::fetch::single_partition_fetch(
-            crate::support::fetch::SinglePartitionFetchSetup {
-                topic: "legacy_v0".to_owned(),
-                topic_id,
-                ..Default::default()
-            },
-        ))
+        .send(single_partition_fetch(SinglePartitionFetchSetup {
+            topic: "legacy_v0".to_owned(),
+            topic_id,
+            ..Default::default()
+        }))
         .await
         .expect("Fetch");
 

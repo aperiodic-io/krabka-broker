@@ -12,7 +12,7 @@ use krabka_verified::producer_snapshot::{self as kernel, ProducerReloadRange};
 
 use crate::{
     LogError,
-    io::{IoTarget, LogIo},
+    io::{IoTarget, LogIo, write_atomic},
     name,
 };
 
@@ -264,7 +264,7 @@ impl PreparedSnapshot {
         }
 
         let temporary = destination.with_extension("snapshot.tmp");
-        crate::io::write_atomic(
+        write_atomic(
             io,
             IoTarget::ProducerSnapshot,
             &temporary,

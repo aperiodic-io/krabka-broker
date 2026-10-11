@@ -30,6 +30,7 @@ use crate::{
         test_support::assert_failed_authenticate_response,
     },
     test_support::FakeMetadataSource,
+    time_util::now_ms,
 };
 
 krabka_macros::scram_client_proof_fixture!(scram_client_proof);
@@ -271,7 +272,7 @@ type ExchangeCase<'a> = (
 #[test]
 fn tokenauth_extension_selects_the_credential_store() {
     const TOKEN_AUTH: &str = ",tokenauth=true";
-    let expiry = crate::time_util::now_ms() + 60_000;
+    let expiry = now_ms() + 60_000;
     for mechanism in [SaslMechanism::ScramSha256, SaslMechanism::ScramSha512] {
         let source = FakeMetadataSource::builder()
             .records(&[
@@ -280,7 +281,7 @@ fn tokenauth_extension_selects_the_credential_store() {
                 scram_user("shared", mechanism),
                 token("shared", expiry),
                 token("tok", expiry),
-                token("expired", crate::time_util::now_ms() - 1),
+                token("expired", now_ms() - 1),
                 // `a,b=c` on the wire is `a=2Cb=3Dc`.
                 scram_user("a,b=c", mechanism),
             ])
@@ -494,14 +495,14 @@ fn token_round_one_threads_the_token_expiry() {
         panic!("round 1 must keep negotiating, got {auth:?}");
     };
     assert!(*pending_token_expiry_ms == Some(expiry));
-    let before = crate::time_util::now_ms();
+    let before = now_ms();
     let round2 = authenticate(
         &source,
         Some(&token_secret()),
         &mut auth,
         client.last(&round1.auth_bytes),
     );
-    let after = crate::time_util::now_ms();
+    let after = now_ms();
     assert!(round2.error_code == 0);
     assert!(matches!(&auth, ConnectionAuth::Authenticated {
         expires_at_ms: Some(at), authenticated_via_token: true, ..
@@ -626,7 +627,7 @@ fn sasl_name_decoding_matches_scram_formatter() {
 }
 
 fn active_token_source() -> (i64, FakeMetadataSource) {
-    let expiry = crate::time_util::now_ms() + 60_000;
+    let expiry = now_ms() + 60_000;
     let source = FakeMetadataSource::builder()
         .records(&[token("tok", expiry)])
         .build();

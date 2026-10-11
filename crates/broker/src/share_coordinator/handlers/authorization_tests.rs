@@ -45,9 +45,10 @@ use krabka_protocol::{
 
 use crate::{
     codes,
+    coordinator::test_support::single_replica_partition,
     test_support::{
-        GrantsInPrincipalName, decode_response, dispatch_context, encode_request, peer, principal,
-        request_context, start_broker_no_audit_with,
+        ControllerPeerAllowed, GrantsInPrincipalName, decode_response, dispatch_context,
+        encode_request, peer, principal, request_context, start_broker_no_audit_with,
     },
 };
 
@@ -327,9 +328,7 @@ fn read(start_offset: i64) -> Response {
 #[tokio::test]
 async fn share_state_rpcs_need_cluster_action() {
     let (handle, _dir) = start_broker_no_audit_with(|cfg| {
-        cfg.authorizer = Arc::new(crate::test_support::ControllerPeerAllowed(
-            GrantsInPrincipalName,
-        ));
+        cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
     })
     .await;
     let broker = handle.broker_arc_for_test();
@@ -349,7 +348,7 @@ async fn share_state_rpcs_need_cluster_action() {
         ));
         for partition in PARTITIONS {
             data_topics.push(krabka_metadata::MetadataRecord::V1Partition(
-                crate::coordinator::test_support::single_replica_partition(
+                single_replica_partition(
                     &name,
                     krabka_ids::PartitionIndex(partition),
                     broker.config.node_id,

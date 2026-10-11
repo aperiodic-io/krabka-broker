@@ -13,7 +13,7 @@ use super::{
     CleanedTransactionMetadata, CleaningRound, ProducerLastRecord, RewriteOutput, RewriteRetention,
     build_offset_map, rewrite_segments,
 };
-use crate::segment::Segment;
+use crate::{io::FileIo, segment::Segment};
 
 /// Kafka's default `index.interval.bytes`. The compaction tests do not
 /// exercise sparse-index density, so they all pass the default value
@@ -145,16 +145,7 @@ pub(super) fn rewrite_with_map(
     retention: RewriteRetention,
     round: CleaningRound<'_>,
 ) -> RewriteOutput {
-    rewrite_segments(
-        &crate::io::FileIo,
-        dir,
-        segments,
-        map,
-        txn,
-        retention,
-        round,
-    )
-    .unwrap()
+    rewrite_segments(&FileIo, dir, segments, map, txn, retention, round).unwrap()
 }
 
 /// Build the map and rewrite every supplied segment as one complete round.

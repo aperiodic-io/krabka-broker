@@ -9,7 +9,12 @@ use krabka_log::{Log, LogConfig};
 use krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord};
 use uuid::Uuid;
 
-use crate::{partition_registry::PartitionRegistry, test_support::FakeMetadataSource};
+use crate::{
+    barrier::marker::BarrierMarker,
+    log_dir::partition_dir,
+    partition_registry::PartitionRegistry,
+    test_support::{FakeMetadataSource, StandalonePartitionSetup, spawn_standalone_partition},
+};
 
 /// The topic and partition records of one topic, with one leader for every
 /// partition and a leader epoch of 3.
@@ -41,14 +46,14 @@ pub(crate) fn topic_records(topic: &str, partitions: i32, leader: NodeId) -> Vec
 pub(crate) fn open_partition(
     registry: &PartitionRegistry,
     dir: &Path,
-    setup: crate::test_support::StandalonePartitionSetup<'_>,
+    setup: StandalonePartitionSetup<'_>,
 ) {
     let topic = setup.topic;
     let index = setup.partition;
-    let partition_dir = crate::log_dir::partition_dir(dir, topic, index.0);
+    let partition_dir = partition_dir(dir, topic, index.0);
     std::fs::create_dir_all(&partition_dir).expect("create the partition directory");
     let log = Log::open(&partition_dir, LogConfig::default()).expect("open the log");
-    let partition = crate::test_support::spawn_standalone_partition(dir, log, setup);
+    let partition = spawn_standalone_partition(dir, log, setup);
     registry.insert(topic.into(), index, partition);
 }
 
@@ -72,7 +77,7 @@ pub(crate) fn metadata_source(records: &[MetadataRecord]) -> FakeMetadataSource 
 /// Check the control flag and decoded marker against the expected value.
 pub(crate) fn check_control_marker(
     batch: &krabka_protocol::records::RecordBatch,
-    expected: &crate::barrier::marker::BarrierMarker,
+    expected: &BarrierMarker,
 ) {
     assert2::check!(batch.attributes.is_control_batch());
     assert2::check!(

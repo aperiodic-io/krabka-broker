@@ -5,7 +5,9 @@ use std::{collections::BTreeMap, ops::RangeInclusive, path::Path};
 use bytes::Bytes;
 use krabka_protocol::records::{Record, RecordBatch};
 
-use crate::{Log, LogConfig, Offset, ProducerId};
+use crate::{
+    Log, LogConfig, Offset, ProducerId, io::LogIo, stamp_index::StampEntry, txn_index::AbortedTxn,
+};
 
 pub(crate) fn open_log(dir: &Path) -> Log {
     Log::open(dir, LogConfig::default()).unwrap()
@@ -61,10 +63,10 @@ pub(crate) fn single_record_batch(base_offset: i64, timestamp: i64, value: Bytes
 }
 
 /// One explicit inclusive stamp range, shared by the index and log scenarios.
-pub(crate) fn stamp_entry(base: i64, last: i64, stamp: u64) -> crate::stamp_index::StampEntry {
-    crate::stamp_index::StampEntry {
-        base_offset: crate::Offset(base),
-        last_offset: crate::Offset(last),
+pub(crate) fn stamp_entry(base: i64, last: i64, stamp: u64) -> StampEntry {
+    StampEntry {
+        base_offset: Offset(base),
+        last_offset: Offset(last),
         stamp,
     }
 }
@@ -80,14 +82,14 @@ pub(crate) struct AbortedTxnSetup {
     pub stable: Offset,
 }
 
-pub(crate) fn aborted_txn(setup: AbortedTxnSetup) -> crate::txn_index::AbortedTxn {
+pub(crate) fn aborted_txn(setup: AbortedTxnSetup) -> AbortedTxn {
     let AbortedTxnSetup {
         producer,
         bounds,
         stable,
     } = setup;
     let (start_offset, last_offset) = bounds.into_inner();
-    crate::txn_index::AbortedTxn {
+    AbortedTxn {
         start_offset,
         last_offset,
         producer_id: producer,
@@ -117,7 +119,7 @@ impl RecordedAdvice {
     }
 }
 
-impl crate::io::LogIo for RecordedAdvice {
+impl LogIo for RecordedAdvice {
     fn advise_will_need(&self, _file: &std::fs::File, offset: u64, len: u64) {
         self.0.lock().unwrap().push((offset, len));
     }

@@ -109,7 +109,11 @@ mod tests {
         test_support::{VERSION, handle_allowed, own_broker_epoch, request},
         *,
     };
-    use crate::broker::Broker;
+    use crate::{
+        broker::Broker,
+        handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup,
+        test_support::{peer, principal, request_context, wait_for_controller_leader},
+    };
 
     macro_rules! seeded_topic_fixture {
         (($handle:ident, $directory:ident, $broker:ident, $epoch:ident, $dir_id:ident, $topic_id:ident)) => {
@@ -176,7 +180,13 @@ mod tests {
             };
             let resp = handle_allowed(
                 &broker,
-                request(crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup { broker_epoch, dir: dir_uuid, topic: topic_id, partitions: &[partition_index], ..Default::default() }),
+                request(DirectoryAssignmentSetup {
+                    broker_epoch,
+                    dir: dir_uuid,
+                    topic: topic_id,
+                    partitions: &[partition_index],
+                    ..Default::default()
+                }),
             )
             .await
             .expect("AssignReplicasToDirs handler");
@@ -241,14 +251,12 @@ mod tests {
         let dir_uuid = uuid::Uuid::from_u128(0xAA);
         let topic_uuid = uuid::Uuid::from_u128(0xBB);
         seed_topic(&broker, topic_uuid).await;
-        let req = request(
-            crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
-                broker_epoch: own_broker_epoch(&broker),
-                dir: dir_uuid,
-                topic: topic_uuid,
-                ..Default::default()
-            },
-        );
+        let req = request(DirectoryAssignmentSetup {
+            broker_epoch: own_broker_epoch(&broker),
+            dir: dir_uuid,
+            topic: topic_uuid,
+            ..Default::default()
+        });
 
         let resp = handle_allowed(&broker, req)
             .await
@@ -280,14 +288,12 @@ mod tests {
 
         let resp = handle_allowed(
             &broker,
-            request(
-                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
-                    broker_epoch: own_broker_epoch(&broker),
-                    dir: uuid::Uuid::from_u128(0xAA),
-                    topic: topic_uuid,
-                    ..Default::default()
-                },
-            ),
+            request(DirectoryAssignmentSetup {
+                broker_epoch: own_broker_epoch(&broker),
+                dir: uuid::Uuid::from_u128(0xAA),
+                topic: topic_uuid,
+                ..Default::default()
+            }),
         )
         .await
         .expect("AssignReplicasToDirs handler");
@@ -314,7 +320,7 @@ mod tests {
     #[tokio::test]
     async fn handle_needs_cluster_action() {
         broker_fixture!((broker_handle, _dir, broker), principal_grants);
-        crate::test_support::wait_for_controller_leader(&broker).await;
+        wait_for_controller_leader(&broker).await;
         let broker_epoch = own_broker_epoch(&broker);
         let dir_uuid = uuid::Uuid::from_u128(0xAA);
         let topic_uuid = uuid::Uuid::from_u128(0xBB);
@@ -328,13 +334,18 @@ mod tests {
             ),
             ("Cluster:ClusterAction", codes::NONE),
         ];
-        let address = crate::test_support::peer();
+        let address = peer();
         for (grants, expected_error) in cases {
-            let user = crate::test_support::principal(grants);
-            let ctx = crate::test_support::request_context(&user, &address, "assign-test");
+            let user = principal(grants);
+            let ctx = request_context(&user, &address, "assign-test");
             let resp = handle(
                 &broker,
-                request(crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup { broker_epoch, dir: dir_uuid, topic: topic_uuid, ..Default::default() }),
+                request(DirectoryAssignmentSetup {
+                    broker_epoch,
+                    dir: dir_uuid,
+                    topic: topic_uuid,
+                    ..Default::default()
+                }),
                 VERSION,
                 &ctx,
             )
@@ -367,14 +378,12 @@ mod tests {
         // matches any registration (see `validation::check_broker_epoch`).
         let stale = handle_allowed(
             &broker,
-            request(
-                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
-                    broker_epoch: broker_epoch + 1,
-                    dir: dir_uuid,
-                    topic: topic_uuid,
-                    ..Default::default()
-                },
-            ),
+            request(DirectoryAssignmentSetup {
+                broker_epoch: broker_epoch + 1,
+                dir: dir_uuid,
+                topic: topic_uuid,
+                ..Default::default()
+            }),
         )
         .await
         .expect("AssignReplicasToDirs handler");
@@ -392,14 +401,12 @@ mod tests {
         // The current epoch succeeds and commits the assignment.
         let current = handle_allowed(
             &broker,
-            request(
-                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
-                    broker_epoch,
-                    dir: dir_uuid,
-                    topic: topic_uuid,
-                    ..Default::default()
-                },
-            ),
+            request(DirectoryAssignmentSetup {
+                broker_epoch,
+                dir: dir_uuid,
+                topic: topic_uuid,
+                ..Default::default()
+            }),
         )
         .await
         .expect("AssignReplicasToDirs handler");
@@ -419,14 +426,12 @@ mod tests {
         // self-reported directory assignments.
         let unspecified = handle_allowed(
             &broker,
-            request(
-                crate::handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup {
-                    broker_epoch: -1,
-                    dir: dir_uuid,
-                    topic: topic_uuid,
-                    ..Default::default()
-                },
-            ),
+            request(DirectoryAssignmentSetup {
+                broker_epoch: -1,
+                dir: dir_uuid,
+                topic: topic_uuid,
+                ..Default::default()
+            }),
         )
         .await
         .expect("AssignReplicasToDirs handler");

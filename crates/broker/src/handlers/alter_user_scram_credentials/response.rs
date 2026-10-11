@@ -7,7 +7,7 @@
 
 use krabka_protocol::owned::alter_user_scram_credentials_response::AlterUserScramCredentialsResult;
 
-use crate::codes;
+use crate::{codes, handlers::stamp_unset};
 
 pub(super) fn ok_result(name: String) -> AlterUserScramCredentialsResult {
     AlterUserScramCredentialsResult {
@@ -28,7 +28,7 @@ pub(super) fn err_result(name: String, code: i16, msg: &str) -> AlterUserScramCr
 }
 
 pub(super) fn apply_submit_error(results: &mut [AlterUserScramCredentialsResult], msg: &str) {
-    crate::handlers::stamp_unset(results, codes::UNKNOWN_SERVER_ERROR, msg);
+    stamp_unset(results, codes::UNKNOWN_SERVER_ERROR, msg);
 }
 
 #[cfg(test)]

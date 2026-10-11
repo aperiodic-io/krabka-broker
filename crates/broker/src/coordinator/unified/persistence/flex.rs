@@ -42,7 +42,7 @@ use krabka_protocol::{
     tagged_fields::{UnknownTaggedFields, WriteTaggedFields, read_tagged_fields},
 };
 
-use crate::error::BrokerError;
+use crate::{coordinator::unified::persistence::get_i16, error::BrokerError};
 
 /// Writes a version-0 flexible record with no known message tags.
 pub(crate) fn encode_value(write: impl FnOnce(&mut BytesMut)) -> Bytes {
@@ -265,7 +265,7 @@ pub(crate) fn get_value_version(
     highest: i16,
     record: &'static str,
 ) -> Result<i16, BrokerError> {
-    let version = crate::coordinator::unified::persistence::get_i16(buf)?;
+    let version = get_i16(buf)?;
     if (0..=highest).contains(&version) {
         Ok(version)
     } else {

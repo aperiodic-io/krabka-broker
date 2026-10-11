@@ -9,6 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::api_versions::table;
 use crate::{
+    ControllerAdminRouter,
     error::RaftError,
     wire::{API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE},
 };
@@ -48,7 +49,7 @@ fn require_remaining(available: usize, required: usize) -> Result<(), RaftError>
 fn request_is_flexible(
     api_key: i16,
     version: i16,
-    admin_router: Option<&dyn crate::ControllerAdminRouter>,
+    admin_router: Option<&dyn ControllerAdminRouter>,
 ) -> bool {
     let flexible_min = match api_key {
         // Krabka-private RPCs are always framed flexible, at every version.
@@ -76,7 +77,7 @@ fn request_is_flexible(
 /// closes the connection, and no allocation is sized from the peer's number.
 pub(super) async fn read_one_request<S>(
     stream: &mut S,
-    admin_router: Option<&dyn crate::ControllerAdminRouter>,
+    admin_router: Option<&dyn ControllerAdminRouter>,
     max_request_bytes: usize,
 ) -> Result<
     (
@@ -207,6 +208,10 @@ mod tests {
     use assert2::check;
 
     use super::*;
+    use crate::{
+        ControllerAdminRequest, ControllerAdminRouteFuture, ControllerAdminRouter,
+        ControllerApiVersion,
+    };
 
     /// `socket.request.max.bytes` for the tests that do not probe it.
     const MAX_REQUEST_BYTES: usize = 100 * 1024 * 1024;
@@ -300,17 +305,14 @@ mod tests {
 
     /// A KIP-919 Admin router that declares one API surface and routes nothing.
     /// The framing path only ever asks it which versions it serves.
-    struct StubAdminRouter(Vec<crate::ControllerApiVersion>);
+    struct StubAdminRouter(Vec<ControllerApiVersion>);
 
-    impl crate::ControllerAdminRouter for StubAdminRouter {
-        fn api_versions(&self) -> &[crate::ControllerApiVersion] {
+    impl ControllerAdminRouter for StubAdminRouter {
+        fn api_versions(&self) -> &[ControllerApiVersion] {
             &self.0
         }
 
-        fn route(
-            &self,
-            _request: crate::ControllerAdminRequest,
-        ) -> crate::ControllerAdminRouteFuture<'_> {
+        fn route(&self, _request: ControllerAdminRequest) -> ControllerAdminRouteFuture<'_> {
             Box::pin(std::future::ready(Ok(None)))
         }
     }
@@ -333,7 +335,7 @@ mod tests {
 
     async fn decode_frame(
         frame: Vec<u8>,
-        router: Option<&dyn crate::ControllerAdminRouter>,
+        router: Option<&dyn ControllerAdminRouter>,
     ) -> DecodedFrame {
         let (mut client, mut server) = tokio::io::duplex(128);
         let writer = tokio::spawn(async move {

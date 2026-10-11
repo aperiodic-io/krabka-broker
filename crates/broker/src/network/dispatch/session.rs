@@ -26,7 +26,14 @@ use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
-use crate::network::codec::KafkaCodec;
+use crate::{
+    config::BrokerConfig,
+    metrics::BrokerMetrics,
+    network::{
+        auth::ConnectionAuth,
+        codec::{KafkaCodec, is_invalid_receive},
+    },
+};
 
 /// Process-lifetime ANONYMOUS principal.
 ///
@@ -47,9 +54,7 @@ static ANONYMOUS_PRINCIPAL: std::sync::LazyLock<krabka_security::Principal> =
 /// When the connection has no principal yet, the defensive SASL pre-auth case,
 /// the function falls back to the shared process-lifetime ANONYMOUS singleton.
 /// This avoids a `Principal` clone for each request.
-pub(super) fn principal_or_anonymous(
-    auth: &crate::network::auth::ConnectionAuth,
-) -> &krabka_security::Principal {
+pub(super) fn principal_or_anonymous(auth: &ConnectionAuth) -> &krabka_security::Principal {
     auth.principal().unwrap_or(&ANONYMOUS_PRINCIPAL)
 }
 
@@ -65,9 +70,9 @@ pub(super) fn initial_connection_auth(
     mtls_principal: Option<krabka_security::Principal>,
     audit_log: &krabka_audit::AuditLog,
     peer: &std::net::SocketAddr,
-) -> crate::network::auth::ConnectionAuth {
+) -> ConnectionAuth {
     if is_sasl_listener {
-        return crate::network::auth::ConnectionAuth::Anonymous;
+        return ConnectionAuth::Anonymous;
     }
     let principal = match mtls_principal {
         Some(principal) => {
@@ -87,7 +92,7 @@ pub(super) fn initial_connection_auth(
             groups: vec![],
         },
     };
-    crate::network::auth::ConnectionAuth::Authenticated {
+    ConnectionAuth::Authenticated {
         principal,
         mechanism: krabka_security::SaslMechanism::Plain,
         expires_at_ms: None,
@@ -112,7 +117,7 @@ pub(super) struct RequestLimits {
 }
 
 impl RequestLimits {
-    pub(super) fn of(config: &crate::config::BrokerConfig) -> Self {
+    pub(super) fn of(config: &BrokerConfig) -> Self {
         use krabka_units::convert::ByteSizeExt as _;
 
         Self {
@@ -122,7 +127,7 @@ impl RequestLimits {
     }
 
     /// The limit for the next frame of a connection in state `auth`.
-    pub(super) fn for_auth(self, auth: &crate::network::auth::ConnectionAuth) -> usize {
+    pub(super) fn for_auth(self, auth: &ConnectionAuth) -> usize {
         if auth.is_authenticated() {
             self.request_max
         } else {
@@ -149,7 +154,7 @@ impl RequestLimits {
 pub(super) struct FrameWaitPolicy {
     pub(super) idle: Option<std::time::Duration>,
     pub(super) peer: std::net::SocketAddr,
-    pub(super) metrics: crate::metrics::BrokerMetrics,
+    pub(super) metrics: BrokerMetrics,
     pub(super) audit_log: std::sync::Arc<krabka_audit::AuditLog>,
     pub(super) failed_authentication_delay: std::time::Duration,
 }
@@ -170,7 +175,7 @@ pub(super) struct FrameWaitPolicy {
 /// `ConnectionAuth::expired_for_request`.
 pub(super) async fn next_connection_frame<S>(
     framed: &mut Framed<S, KafkaCodec>,
-    auth: &crate::network::auth::ConnectionAuth,
+    auth: &ConnectionAuth,
     mute_until: Option<tokio::time::Instant>,
     policy: &FrameWaitPolicy,
 ) -> Option<Bytes>
@@ -212,7 +217,7 @@ where
             policy
                 .metrics
                 .record_connection_close(ConnectionCloseReason::DecodeError);
-            if crate::network::codec::is_invalid_receive(&error) && !auth.is_authenticated() {
+            if is_invalid_receive(&error) && !auth.is_authenticated() {
                 // Kafka's `SaslServerAuthenticator.authenticate` turns the
                 // `InvalidReceiveException` of a receive read during the
                 // exchange into a `SaslAuthenticationException`, so the
@@ -243,6 +248,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::network::test_support::assert_authentication_event;
 
     /// The mTLS binding is the one authentication with no SASL frame behind
     /// it, so `initial_connection_auth` is the only place that can record it.
@@ -274,7 +280,7 @@ mod tests {
         );
 
         let event = rx.try_recv().expect("the mTLS authentication row");
-        crate::network::test_support::assert_authentication_event(
+        assert_authentication_event(
             &event,
             krabka_audit::AuditOutcome::Success,
             "SSL",

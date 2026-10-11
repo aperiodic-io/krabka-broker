@@ -34,7 +34,10 @@ use bytes::Bytes;
 use krabka_client_producer::{Acks, Producer};
 use stateright::semantics::{ConsistencyTester, LinearizabilityTester, SequentialSpec};
 
-use crate::{APPENDERS, RECORDS_PER_APPENDER, TOPIC};
+use crate::{
+    APPENDERS, RECORDS_PER_APPENDER, TOPIC,
+    support::producer::{ProducerRecordSetup, producer_record},
+};
 
 /// One append, identified by the bytes it carries.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -124,14 +127,12 @@ async fn produce_appender(
         let value = format!("appender-{appender}-record-{sequence}").into_bytes();
         let invoke_order = clock.fetch_add(1, Ordering::SeqCst);
         let metadata = producer
-            .send(crate::support::producer::producer_record(
-                crate::support::producer::ProducerRecordSetup {
-                    topic: (TOPIC).into(),
-                    partition: Some(krabka_ids::PartitionIndex(0)),
-                    value: Some(Bytes::copy_from_slice(&value)),
-                    ..Default::default()
-                },
-            ))
+            .send(producer_record(ProducerRecordSetup {
+                topic: (TOPIC).into(),
+                partition: Some(krabka_ids::PartitionIndex(0)),
+                value: Some(Bytes::copy_from_slice(&value)),
+                ..Default::default()
+            }))
             .await
             .expect("acks=all record");
         let return_order = clock.fetch_add(1, Ordering::SeqCst);

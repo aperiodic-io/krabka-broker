@@ -6,7 +6,12 @@ use krabka_broker::BrokerHandle;
 use krabka_protocol::records::RecordBatch;
 
 use super::topic_id_for;
-use crate::support::{client::connect_client, records::value_record, topics::create_topic_request};
+use crate::support::{
+    client::connect_client,
+    records::value_record,
+    registered_cluster,
+    topics::{TopicReplicationFactor, create_topic_request},
+};
 
 #[derive(Clone, Copy)]
 pub struct BrokerCount(pub u64);
@@ -18,7 +23,7 @@ pub struct ReplicatedTopicSetup<'a> {
     #[default("t")]
     pub topic: &'a str,
     #[default(crate::support::topics::TopicReplicationFactor(3))]
-    pub replicas: crate::support::topics::TopicReplicationFactor,
+    pub replicas: TopicReplicationFactor,
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -26,7 +31,7 @@ pub struct TopicReplicasSetup<'a> {
     #[default("t")]
     pub topic: &'a str,
     #[default(crate::support::topics::TopicReplicationFactor(1))]
-    pub replicas: crate::support::topics::TopicReplicationFactor,
+    pub replicas: TopicReplicationFactor,
 }
 
 /// Boot registered brokers and create a topic on the first `rf` replicas.
@@ -39,7 +44,7 @@ pub async fn replicated_topic_fixture(
     Vec<(BrokerHandle, krabka_broker::BrokerConfig, tempfile::TempDir)>,
     String,
 ) {
-    let cluster = crate::support::registered_cluster(setup.brokers.0).await;
+    let cluster = registered_cluster(setup.brokers.0).await;
     let bootstrap = cluster[0].1.listen_addr.to_string();
     create_topic_on_replicas(
         &cluster[0].0,

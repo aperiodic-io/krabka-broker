@@ -7,7 +7,12 @@ use krabka_protocol::{
     owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
 };
 
-use crate::test_support::KafkaErrorCode;
+use crate::{
+    broker::BrokerHandle,
+    codes::NONE,
+    fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
+    test_support::{KafkaErrorCode, encode_request},
+};
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(super) struct FetchWireSetup<'a> {
@@ -71,14 +76,14 @@ pub(super) fn sessionless_request(setup: SessionlessFetchSetup) -> FetchRequest 
         max_wait_ms: 0,
         min_bytes: 0,
         max_bytes: 1_048_576,
-        session_id: crate::fetch_session::INVALID_SESSION_ID,
-        session_epoch: crate::fetch_session::FINAL_EPOCH,
+        session_id: INVALID_SESSION_ID,
+        session_epoch: FINAL_EPOCH,
         ..Default::default()
     }
 }
 
 pub(super) async fn fetch_wire(
-    broker: &crate::broker::BrokerHandle,
+    broker: &BrokerHandle,
     request: &FetchRequest,
     setup: FetchWireSetup<'_>,
 ) -> FetchResponse {
@@ -95,7 +100,7 @@ pub(super) async fn fetch_wire(
         client_id = client_id,
         address = crate::test_support::peer()
     );
-    let bytes = crate::test_support::encode_request(request, version);
+    let bytes = encode_request(request, version);
     let (response, response_version) = super::handle(&shared, version, 7, &bytes, &context)
         .await
         .expect("handle fetch");
@@ -114,8 +119,8 @@ pub(super) fn expected_single_topic(
 ) -> FetchResponse {
     use krabka_protocol::{owned::fetch_response::FetchableTopicResponse, primitives::uuid::Uuid};
     FetchResponse {
-        error_code: crate::codes::NONE,
-        session_id: crate::fetch_session::INVALID_SESSION_ID,
+        error_code: NONE,
+        session_id: INVALID_SESSION_ID,
         responses: vec![FetchableTopicResponse {
             topic: match representation {
                 TopicRepresentation::Id => String::new(),
@@ -176,7 +181,7 @@ pub(super) fn expected_read(
 ) -> krabka_protocol::owned::fetch_response::PartitionData {
     krabka_protocol::owned::fetch_response::PartitionData {
         partition_index: 0,
-        error_code: crate::codes::NONE,
+        error_code: NONE,
         high_watermark: setup.watermark.0,
         last_stable_offset: setup.watermark.0,
         log_start_offset: 0,

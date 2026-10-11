@@ -13,13 +13,12 @@
 
 use std::collections::BTreeMap;
 
+use crate::config_keys::CLEANUP_POLICY;
+
 /// The topic configs `__barrier_state` is created with.
 ///
 /// Compaction keeps the newest record of every key, which is what makes a
 /// group definition and a retained cut survive without a bound on the log.
 pub(crate) fn topic_configs() -> BTreeMap<String, String> {
-    BTreeMap::from([(
-        crate::config_keys::CLEANUP_POLICY.to_owned(),
-        "compact".to_owned(),
-    )])
+    BTreeMap::from([(CLEANUP_POLICY.to_owned(), "compact".to_owned())])
 }

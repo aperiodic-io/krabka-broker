@@ -20,7 +20,10 @@ use krabka_protocol::owned::common::{
 };
 
 use super::write_freeze::topic_refusal;
-use crate::txn::state::{TopicPartition, TxnEntry};
+use crate::txn::{
+    coordinator::produce_verification::verification_code,
+    state::{TopicPartition, TxnEntry},
+};
 
 /// Collapses a requested topic list to one row per topic and one row per
 /// partition within it, in first-occurrence order.
@@ -70,7 +73,7 @@ fn verify_partition_code(
     requested: (krabka_log::ProducerId, i16),
     tp: &TopicPartition,
 ) -> i16 {
-    crate::txn::coordinator::produce_verification::verification_code(
+    verification_code(
         (entry.producer_id, entry.producer_epoch, entry.state),
         entry.partitions.contains(tp),
         requested,

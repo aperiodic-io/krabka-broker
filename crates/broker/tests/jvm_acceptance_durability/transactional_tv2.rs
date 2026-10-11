@@ -58,10 +58,13 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE_ELR, KAFKA_IMAGE_TXN, TRANSACTIONAL_PRODUCER_JAVA, broker0_advertised,
-    docker_run_kafka_tool_with_image, docker_run_kafka_tool_with_image_and_mount,
-    nc_check_connectivity, start_host_broker_with, tool_output,
+use crate::{
+    jvm_acceptance::{
+        KAFKA_IMAGE_ELR, KAFKA_IMAGE_TXN, TRANSACTIONAL_PRODUCER_JAVA, broker0_advertised,
+        docker_run_kafka_tool_with_image, docker_run_kafka_tool_with_image_and_mount,
+        nc_check_connectivity, start_host_broker_with, tool_output,
+    },
+    support::client::connect_owned,
 };
 
 /// The topic the JVM helper commits to and aborts on.
@@ -139,12 +142,7 @@ async fn harness(client_id: &str, topics: &[&str]) -> Harness {
         .metrics_addr()
         .expect("the broker was configured with a metrics listener");
     let host_bootstrap = broker.listen_addr().to_string();
-    let admin = crate::support::client::connect_owned(
-        host_bootstrap.clone(),
-        client_id,
-        "in-process admin client",
-    )
-    .await;
+    let admin = connect_owned(host_bootstrap.clone(), client_id, "in-process admin client").await;
 
     // Precondition. Everything in these cases reads as a KIP-890 claim only
     // because the cluster finalized `transaction.version` at level 2; at TV_0
@@ -541,8 +539,10 @@ fn compile_transactional_producer() -> tempfile::TempDir {
     std::fs::write(&source, TRANSACTIONAL_PRODUCER_JAVA).expect("write the Java helper");
     #[cfg(unix)]
     {
-        crate::support::chmod_for_container(work.path(), 0o777, "chmod the work directory");
-        crate::support::chmod_for_container(&source, 0o644, "chmod the Java helper");
+        use crate::support::chmod_for_container;
+
+        chmod_for_container(work.path(), 0o777, "chmod the work directory");
+        chmod_for_container(&source, 0o644, "chmod the Java helper");
     }
 
     let out = docker_run_kafka_tool_with_image_and_mount(

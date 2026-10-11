@@ -2,6 +2,8 @@
 
 use krabka_broker::NodeId;
 
+use crate::support::NodeIndex;
+
 #[derive(Clone, Copy)]
 pub struct WalVoterCount(pub usize);
 
@@ -34,7 +36,7 @@ pub fn peer_credentials(
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub struct DisklessIdentitySetup<'a> {
-    pub index: crate::support::NodeIndex,
+    pub index: NodeIndex,
     #[default(NodeId(1))]
     pub node: NodeId,
     #[default(WalVoterCount(3))]

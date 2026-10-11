@@ -29,7 +29,7 @@ use krabka_ids::Offset;
 
 use crate::{
     error::LogError,
-    io::{IoTarget, LogIo},
+    io::{IoTarget, LogIo, write_atomic},
     name,
 };
 
@@ -82,7 +82,7 @@ fn parse(contents: &str) -> Result<Offset, LogError> {
 pub(crate) fn write(io: &dyn LogIo, dir: &Path, log_start_offset: Offset) -> Result<(), LogError> {
     let path = name::log_start_offset_checkpoint_path(dir);
     let tmp = path.with_extension("tmp");
-    crate::io::write_atomic(
+    write_atomic(
         io,
         IoTarget::LogStartOffsetCheckpoint,
         &tmp,
@@ -108,16 +108,17 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::io::FileIo;
 
     #[test]
     fn round_trips_through_the_file() {
         let dir = tempfile::tempdir().unwrap();
         assert!(read(dir.path()).unwrap() == None);
 
-        write(&crate::io::FileIo, dir.path(), Offset(42)).unwrap();
+        write(&FileIo, dir.path(), Offset(42)).unwrap();
         assert!(read(dir.path()).unwrap() == Some(Offset(42)));
 
-        write(&crate::io::FileIo, dir.path(), Offset(100)).unwrap();
+        write(&FileIo, dir.path(), Offset(100)).unwrap();
         assert!(read(dir.path()).unwrap() == Some(Offset(100)));
 
         remove(dir.path()).unwrap();
@@ -127,7 +128,7 @@ mod tests {
     #[test]
     fn writes_the_versioned_two_line_format() {
         let dir = tempfile::tempdir().unwrap();
-        write(&crate::io::FileIo, dir.path(), Offset(7)).unwrap();
+        write(&FileIo, dir.path(), Offset(7)).unwrap();
         let contents =
             fs::read_to_string(name::log_start_offset_checkpoint_path(dir.path())).unwrap();
         assert!(contents == "0\n7\n");

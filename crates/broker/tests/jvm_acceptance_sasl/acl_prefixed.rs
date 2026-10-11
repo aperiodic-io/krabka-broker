@@ -9,8 +9,9 @@ use assert2::assert;
 
 use crate::jvm_acceptance::{
     ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-    docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity, plain_jaas,
-    start_sasl_plaintext_broker_with_super_user, write_client_props,
+    create_console_topic, denied_console_consumer, docker_run_kafka_tool_with_image_and_mount,
+    nc_check_connectivity, plain_jaas, produce_console,
+    start_sasl_plaintext_broker_with_super_user, write_client_props, write_plain_props,
 };
 
 /// JVM acceptance: a prefixed topic ACL grants exactly the prefix.
@@ -42,12 +43,12 @@ async fn jvm_prefixed_topic_acl_works() {
     .await;
     nc_check_connectivity();
 
-    let admin_props = crate::jvm_acceptance::write_plain_props(ADMIN, ADMIN_PASS);
+    let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     let admin_mount = admin_props.mount_str();
 
     // Pre-create both topics.
     for topic in [TOPIC_OK, TOPIC_DENIED] {
-        crate::jvm_acceptance::create_console_topic(KAFKA_IMAGE_TXN, &[&admin_mount], topic, 1, 1);
+        create_console_topic(KAFKA_IMAGE_TXN, &[&admin_mount], topic, 1, 1);
     }
 
     // Prefixed Read on `team-*` for alice. ACL implications grant Describe from
@@ -106,7 +107,7 @@ async fn jvm_prefixed_topic_acl_works() {
     let admin_producer_mount = admin_producer_props.mount_str();
 
     for topic in [TOPIC_OK, TOPIC_DENIED] {
-        let seed_out = crate::jvm_acceptance::produce_console(
+        let seed_out = produce_console(
             KAFKA_IMAGE_TXN,
             &[&admin_producer_mount],
             topic,
@@ -121,7 +122,7 @@ async fn jvm_prefixed_topic_acl_works() {
     }
 
     // ---- Alice: consume team-foo (allowed by prefix).
-    let alice_props = crate::jvm_acceptance::write_plain_props(ALICE, ALICE_PASS);
+    let alice_props = write_plain_props(ALICE, ALICE_PASS);
     let alice_mount = alice_props.mount_str();
 
     let consumer_out = docker_run_kafka_tool_with_image_and_mount(
@@ -152,7 +153,7 @@ async fn jvm_prefixed_topic_acl_works() {
     );
 
     // ---- Alice: consume other-foo (denied — no matching prefix).
-    let denied_out = crate::jvm_acceptance::denied_console_consumer(
+    let denied_out = denied_console_consumer(
         &alice_mount,
         TOPIC_DENIED,
         GROUP,

@@ -9,9 +9,12 @@ use std::process::Stdio;
 
 use assert2::assert;
 
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE, broker0_advertised, nc_check_connectivity, prepare_jks_truststore,
-    start_ssl_broker, write_client_props,
+use crate::{
+    jvm_acceptance::{
+        KAFKA_IMAGE, broker0_advertised, nc_check_connectivity, prepare_jks_truststore,
+        start_ssl_broker, write_client_props,
+    },
+    support::{JvmDockerSetup, jvm_docker_command},
 };
 
 /// End-to-end TLS handshake check against an `SSL`-only listener. The test
@@ -43,7 +46,7 @@ async fn jvm_ssl_handshake_succeeds() {
     let props_tmp = write_client_props(props);
     let ts_mount = format!("{}:/truststore.jks:ro", truststore_path.display());
 
-    let out = crate::support::jvm_docker_command(crate::support::JvmDockerSetup {
+    let out = jvm_docker_command(JvmDockerSetup {
         image: KAFKA_IMAGE,
         mounts: &[&props_tmp.mount_str(), &ts_mount],
         args: &[

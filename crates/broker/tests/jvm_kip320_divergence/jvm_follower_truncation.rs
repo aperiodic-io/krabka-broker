@@ -14,6 +14,10 @@ use crate::{
         KAFKA_IMAGE, docker_run_kafka_tool_with_image, produce_lines_via_jvm, set_container_paused,
     },
     dump_log::{dump_log_in_container, grep_base_offsets, max_offset_in_dump},
+    mixed_cluster::{
+        DivergenceDirection, PartitionEpochDelta, SingleLeaderSetup, prepare_divergence,
+        single_leader_record,
+    },
     topic_admin::{LEADER_WAIT, wait_for_described_leader},
 };
 
@@ -26,11 +30,8 @@ use crate::{
 #[ignore = "requires Docker + a published controller/data port; Linux-bound"]
 async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     const TOPIC: &str = "krabka-kip320-jvm-follower";
-    let (container, cluster, bootstrap_all, prefix_leo) = crate::mixed_cluster::prepare_divergence(
-        TOPIC,
-        crate::mixed_cluster::DivergenceDirection::JvmFollower,
-    )
-    .await;
+    let (container, cluster, bootstrap_all, prefix_leo) =
+        prepare_divergence(TOPIC, DivergenceDirection::JvmFollower).await;
     let c1 = &cluster.krabka[0].0;
 
     // 4. INDUCE REAL DIVERGENCE. First make the JVM broker leader and append a
@@ -50,17 +51,15 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     eprintln!("KRABKA[kip320] partition before divergence: {pr:?}");
 
     let jvm_epoch = LeaderEpoch(pr.leader_epoch.0 + 1);
-    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
-        crate::mixed_cluster::single_leader_record(
-            &pr,
-            crate::mixed_cluster::SingleLeaderSetup {
-                topic: TOPIC,
-                leader: krabka_broker::NodeId(3),
-                epoch: jvm_epoch,
-                ..Default::default()
-            },
-        ),
-    ))
+    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(single_leader_record(
+        &pr,
+        SingleLeaderSetup {
+            topic: TOPIC,
+            leader: krabka_broker::NodeId(3),
+            epoch: jvm_epoch,
+            ..Default::default()
+        },
+    )))
     .await
     .expect("promote JVM broker for divergent suffix");
     wait_for_described_leader(&bootstrap_all, TOPIC, 3, LEADER_WAIT).await;
@@ -87,13 +86,13 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     // the assignment and directory vector intact so this record changes only
     // leadership/epoch state.
     let parked_epoch = LeaderEpoch(jvm_epoch.0 + 1);
-    let forged = MetadataRecord::V1Partition(crate::mixed_cluster::single_leader_record(
+    let forged = MetadataRecord::V1Partition(single_leader_record(
         &pr,
-        crate::mixed_cluster::SingleLeaderSetup {
+        SingleLeaderSetup {
             topic: TOPIC,
             leader: krabka_broker::NodeId(99),
             epoch: parked_epoch,
-            partition_epoch_delta: crate::mixed_cluster::PartitionEpochDelta(2),
+            partition_epoch_delta: PartitionEpochDelta(2),
         },
     ));
     c1.submit_metadata_record_for_test(forged)
@@ -136,12 +135,12 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     // Restore Krabka broker 1 as the leader at the next epoch with the JVM
     // follower (3) back in the replica set so it re-fetches and detects
     // divergence.
-    let restore = MetadataRecord::V1Partition(crate::mixed_cluster::single_leader_record(
+    let restore = MetadataRecord::V1Partition(single_leader_record(
         &pr,
-        crate::mixed_cluster::SingleLeaderSetup {
+        SingleLeaderSetup {
             topic: TOPIC,
             epoch: LeaderEpoch(parked_epoch.0 + 1),
-            partition_epoch_delta: crate::mixed_cluster::PartitionEpochDelta(3),
+            partition_epoch_delta: PartitionEpochDelta(3),
             ..Default::default()
         },
     ));

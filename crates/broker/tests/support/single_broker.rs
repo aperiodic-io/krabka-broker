@@ -9,7 +9,7 @@ use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
 use krabka_client_core::Client;
 use tempfile::TempDir;
 
-use crate::support::client::connect_owned;
+use crate::support::client::{BrokerClientSetup, connect_owned, start_broker_client};
 
 pub struct InProcess {
     pub broker: BrokerHandle,
@@ -129,9 +129,9 @@ pub async fn start_with_deny_all_authz() -> InProcess {
     config.authorizer = std::sync::Arc::new(SimpleAclAuthorizer::new(HashSet::new()));
     // The broker's own heartbeat is denied too, so it stays fenced: it never
     // becomes alive in the liveness registry, and nothing here needs it to.
-    let (broker, client) = crate::support::client::start_broker_client(
+    let (broker, client) = start_broker_client(
         config,
-        crate::support::client::BrokerClientSetup {
+        BrokerClientSetup {
             client_id: "krabka-broker-test-deny",
             ..Default::default()
         },

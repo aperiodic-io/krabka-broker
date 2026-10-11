@@ -9,6 +9,11 @@ use krabka_protocol::{
     primitives::uuid::Uuid as WireUuid,
 };
 
+use crate::codes::{
+    INVALID_REQUEST, THROTTLING_QUOTA_EXCEEDED, TOPIC_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_ID,
+    UNKNOWN_TOPIC_OR_PARTITION,
+};
+
 /// Kafka's `Errors.TOPIC_AUTHORIZATION_FAILED.message()`.
 pub(super) const TOPIC_AUTHORIZATION_FAILED_MESSAGE: &str = "Topic authorization failed.";
 
@@ -27,10 +32,10 @@ pub(super) const THROTTLING_QUOTA_EXCEEDED_MESSAGE: &str =
 /// handler answers without a message of its own.
 fn default_message(error_code: i16) -> Option<String> {
     let message = match error_code {
-        crate::codes::TOPIC_AUTHORIZATION_FAILED => TOPIC_AUTHORIZATION_FAILED_MESSAGE,
-        crate::codes::UNKNOWN_TOPIC_OR_PARTITION => UNKNOWN_TOPIC_OR_PARTITION_MESSAGE,
-        crate::codes::UNKNOWN_TOPIC_ID => UNKNOWN_TOPIC_ID_MESSAGE,
-        crate::codes::THROTTLING_QUOTA_EXCEEDED => THROTTLING_QUOTA_EXCEEDED_MESSAGE,
+        TOPIC_AUTHORIZATION_FAILED => TOPIC_AUTHORIZATION_FAILED_MESSAGE,
+        UNKNOWN_TOPIC_OR_PARTITION => UNKNOWN_TOPIC_OR_PARTITION_MESSAGE,
+        UNKNOWN_TOPIC_ID => UNKNOWN_TOPIC_ID_MESSAGE,
+        THROTTLING_QUOTA_EXCEEDED => THROTTLING_QUOTA_EXCEEDED_MESSAGE,
         _ => return None,
     };
     Some(message.to_string())
@@ -113,7 +118,7 @@ pub(super) fn invalid_topic_result(
     DeletableTopicResult {
         name,
         topic_id,
-        error_code: crate::codes::INVALID_REQUEST,
+        error_code: INVALID_REQUEST,
         error_message: Some(message.to_string()),
         ..Default::default()
     }

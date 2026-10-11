@@ -5,6 +5,8 @@ use moxy::{
     token::{Span, TokenStream, TokenTree},
 };
 
+use crate::meta::item_body;
+
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     if meta.into_iter().next().is_some() {
         return Err(ParseError::new(
@@ -12,8 +14,7 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
             "transport_errors takes no arguments",
         ));
     }
-    let (mut tokens, body) =
-        crate::meta::item_body(item, "transport_errors", TokenTree::is_keyword_enum)?;
+    let (mut tokens, body) = item_body(item, "transport_errors", TokenTree::is_keyword_enum)?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

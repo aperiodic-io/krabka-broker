@@ -13,7 +13,9 @@ use krabka_protocol::owned::alter_partition_reassignments_request::{
     AlterPartitionReassignmentsRequest, ReassignablePartition, ReassignableTopic,
 };
 
-use crate::test_support::ReassignmentSetup;
+use crate::test_support::{
+    PartitionEpoch, ReassignmentSetup, broker_registration, reassignment_partition,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum ReplicationFactorPolicy {
@@ -83,7 +85,7 @@ crate::test_support::context_helper!(pub(super) client_id = "admin-client");
 #[derive(Clone, krabka_macros::FieldDefaults)]
 pub(super) struct ReassignmentImageSetup<'a> {
     pub assignment: ReassignmentSetup<'a>,
-    pub partition_epoch: crate::test_support::PartitionEpoch,
+    pub partition_epoch: PartitionEpoch,
 }
 
 /// The in-progress replacement of broker two by broker three.
@@ -110,7 +112,7 @@ pub(super) fn img_with(setup: ReassignmentImageSetup<'_>) -> MetadataImage {
         img.apply(&MetadataRecord::V1BrokerRegistration(
             BrokerRegistrationRecord {
                 host: "localhost".into(),
-                ..crate::test_support::broker_registration(krabka_raft::NodeId(n))
+                ..broker_registration(krabka_raft::NodeId(n))
             },
         ));
     }
@@ -122,7 +124,7 @@ pub(super) fn img_with(setup: ReassignmentImageSetup<'_>) -> MetadataImage {
     }));
     img.apply(&MetadataRecord::V1Partition(PartitionRecord {
         partition_epoch: partition_epoch.0,
-        ..crate::test_support::reassignment_partition(assignment)
+        ..reassignment_partition(assignment)
     }));
     img
 }

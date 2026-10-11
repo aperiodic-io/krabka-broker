@@ -12,7 +12,7 @@ use arc_swap::ArcSwap;
 use krabka_log::Log;
 
 use super::storage::lock_log;
-use crate::partition::SwapOutcome;
+use crate::{error::BrokerError, partition::SwapOutcome};
 
 /// KIP-113 intra-broker log-dir swap.
 ///
@@ -36,7 +36,7 @@ pub(super) fn swap_future_log(
     future_log: &Arc<Mutex<Log>>,
     future_path: &std::path::Path,
     target_partition_path: &std::path::Path,
-) -> Result<SwapOutcome, crate::error::BrokerError> {
+) -> Result<SwapOutcome, BrokerError> {
     // Acquire both logs under the writer's serialization and re-check
     // the caught-up invariant. If the future log fell behind between
     // the caller's check and this cycle, refuse the swap and let the
@@ -92,7 +92,7 @@ pub(super) fn swap_future_log(
             }
         }
         let _ = std::fs::remove_dir_all(&tomb_dir);
-        return Err(crate::error::BrokerError::from(e));
+        return Err(BrokerError::from(e));
     }
 
     if let Err(e) = std::fs::remove_dir_all(&source_partition_path) {

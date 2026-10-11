@@ -16,7 +16,16 @@ use krabka_protocol::records::{Attributes, Record, RecordBatch};
 use krabka_units::{mebibytes, millis};
 
 use super::MovePolicy;
-use crate::partition::Partition;
+use crate::{
+    log_dir::future_partition_dir,
+    partition::Partition,
+    partition_registry::PartitionRegistry,
+    test_support::{
+        PartitionRecordsSetup, RecordCount, StandalonePartitionSetup, open_partition,
+        partition_records_batch,
+    },
+    throttle::TokenBucket,
+};
 
 #[derive(Debug)]
 pub(super) struct TestStampSource(pub(super) AtomicU64);
@@ -31,7 +40,7 @@ pub(super) fn test_policy() -> MovePolicy {
     MovePolicy {
         retry_backoff: millis(5),
         read_chunk: mebibytes(1),
-        throttle: Arc::new(crate::throttle::TokenBucket::new()),
+        throttle: Arc::new(TokenBucket::new()),
     }
 }
 
@@ -43,9 +52,9 @@ pub(super) fn fixture_partition(
     topic: &str,
     partition: PartitionIndex,
 ) -> Arc<Partition> {
-    crate::test_support::open_partition(
+    open_partition(
         log_dir,
-        crate::test_support::StandalonePartitionSetup {
+        StandalonePartitionSetup {
             topic,
             partition: krabka_ids::PartitionIndex(partition.get()),
             ..Default::default()
@@ -53,11 +62,8 @@ pub(super) fn fixture_partition(
     )
 }
 
-pub(super) fn append_records(
-    part: &Arc<Partition>,
-    setup: crate::test_support::PartitionRecordsSetup,
-) {
-    let mut batch = crate::test_support::partition_records_batch(setup);
+pub(super) fn append_records(part: &Arc<Partition>, setup: PartitionRecordsSetup) {
+    let mut batch = partition_records_batch(setup);
     part.log
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -66,14 +72,14 @@ pub(super) fn append_records(
 }
 
 pub(super) struct FutureSourceSetup {
-    pub count: crate::test_support::RecordCount,
+    pub count: RecordCount,
     pub stamp_source: Option<Arc<dyn krabka_log::StampSource>>,
 }
 
 impl Default for FutureSourceSetup {
     fn default() -> Self {
         Self {
-            count: crate::test_support::RecordCount(3),
+            count: RecordCount(3),
             stamp_source: None,
         }
     }
@@ -90,7 +96,7 @@ pub(super) fn source_partition(primary: &Path, setup: FutureSourceSetup) -> Arc<
     }
     append_records(
         &part,
-        crate::test_support::PartitionRecordsSetup {
+        PartitionRecordsSetup {
             count: setup.count,
             ..Default::default()
         },
@@ -119,7 +125,7 @@ pub(super) fn source_fixture(setup: FutureSourceSetup) -> SourceFixture {
 pub(super) struct RegisteredSourceFixture {
     pub partition: Arc<Partition>,
     pub future_logs: Arc<dashmap::DashMap<(String, PartitionIndex), Arc<super::FutureLogState>>>,
-    pub partitions: Arc<crate::partition_registry::PartitionRegistry>,
+    pub partitions: Arc<PartitionRegistry>,
 }
 
 /// Publish a populated source in registries using its configured timestamp source.
@@ -127,9 +133,9 @@ pub(super) fn registered_source_fixture(
     primary: &Path,
     setup: FutureSourceSetup,
 ) -> RegisteredSourceFixture {
-    let partitions = Arc::new(
-        crate::partition_registry::PartitionRegistry::with_stamp_source(setup.stamp_source.clone()),
-    );
+    let partitions = Arc::new(PartitionRegistry::with_stamp_source(
+        setup.stamp_source.clone(),
+    ));
     let future_logs = Arc::new(dashmap::DashMap::new());
     let partition = source_partition(primary, setup);
     partitions.insert("t".into(), PartitionIndex(0), partition.clone());
@@ -212,7 +218,7 @@ pub(super) fn append_epoch_batch(part: &Arc<Partition>, setup: FutureRecordSetup
 
 /// Open a staged future replica at the same path a real move uses.
 pub(super) fn open_future_log(target: &Path) -> (PathBuf, Arc<Mutex<krabka_log::Log>>) {
-    let path = crate::log_dir::future_partition_dir(target, "t", 0);
+    let path = future_partition_dir(target, "t", 0);
     std::fs::create_dir_all(&path).unwrap();
     let log = krabka_log::Log::open(&path, krabka_log::LogConfig::default()).unwrap();
     (path, Arc::new(Mutex::new(log)))

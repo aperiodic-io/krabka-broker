@@ -17,7 +17,8 @@ use krabka_protocol::api_key::ApiKey;
 use crate::{
     broker::Broker,
     error::BrokerError,
-    handlers::{ApiVersion, CorrelationId, RequestContext, TelemetryContext},
+    handlers::{ApiVersion, CorrelationId, RequestContext, TelemetryContext, api_versions::handle},
+    network::auth::ConnectionAuth,
 };
 
 pub(crate) type ContextHandler = for<'a> fn(
@@ -48,7 +49,7 @@ pub(crate) type AuthHandler = for<'a> fn(
     ApiVersion,
     CorrelationId,
     &'a [u8],
-    &'a crate::network::auth::ConnectionAuth,
+    &'a ConnectionAuth,
     &'a std::net::SocketAddr,
 ) -> BoxFuture<'a, Result<Bytes, BrokerError>>;
 
@@ -247,9 +248,9 @@ fn produce_adapter<'a>(
     body_bytes: Bytes,
     ctx: &'a RequestContext<'a>,
 ) -> BoxFuture<'a, Result<Bytes, BrokerError>> {
-    Box::pin(crate::handlers::produce::handle(
-        broker, version, body, body_bytes, ctx,
-    ))
+    use crate::handlers::produce::handle as produce_handle;
+
+    Box::pin(produce_handle(broker, version, body, body_bytes, ctx))
 }
 
 pub(crate) fn build_registry() -> DispatchRegistry {
@@ -263,7 +264,7 @@ pub(crate) fn build_registry() -> DispatchRegistry {
     registry.register(DispatchEntry::self_accounted_context(
         ApiKey::ApiVersions as i16,
         krabka_protocol::owned::api_versions_request::FLEXIBLE_MIN,
-        crate::handlers::api_versions::handle,
+        handle,
     ));
     registry.register(DispatchEntry::produce(
         krabka_protocol::owned::produce_request::FLEXIBLE_MIN,

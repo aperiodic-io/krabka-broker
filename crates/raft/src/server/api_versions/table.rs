@@ -91,6 +91,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        UnstableApiVersions,
         kraft::{
             transport::{api_key, wire::PeerRequest},
             types::NodeId,
@@ -205,9 +206,9 @@ mod tests {
         // the vendored range, except `ApiVersions`, whose KIP-1242 v5 is
         // trunk's.
         for (unstable, api_versions_max) in [
-            (crate::UnstableApiVersions::Disabled, 4),
+            (UnstableApiVersions::Disabled, 4),
             (
-                crate::UnstableApiVersions::Enabled,
+                UnstableApiVersions::Enabled,
                 api_versions_request::MAX_VERSION,
             ),
         ] {

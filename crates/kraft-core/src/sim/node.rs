@@ -12,7 +12,7 @@ use super::log::SimLog;
 use crate::{
     core::QuorumStateMachine,
     event::Event,
-    types::{NodeId, SimInstant},
+    types::{Epoch, NodeId, SimInstant},
 };
 
 /// A message in flight on the bus: a destination node and the event it will
@@ -42,7 +42,7 @@ pub(super) struct Node {
 
 impl Node {
     /// Append under the machine's current epoch, returning the epoch for the trace.
-    pub(super) fn append_in_current_epoch(&mut self, count: usize) -> crate::types::Epoch {
+    pub(super) fn append_in_current_epoch(&mut self, count: usize) -> Epoch {
         let epoch = self.machine.quorum_state().leader_epoch;
         self.log.append_in_epoch(epoch, count);
         epoch

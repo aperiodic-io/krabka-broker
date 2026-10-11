@@ -13,7 +13,10 @@ use std::{
 use krabka_units::prelude::{ByteSize, ByteSizeExt};
 
 use super::Segment;
-use crate::{error::LogError, io::LogIo};
+use crate::{
+    error::LogError,
+    io::{LogIo, write_all_with, write_progress},
+};
 
 /// Positioned read: fill `buf` from `offset` in `file` without a move of the
 /// file's cursor.
@@ -59,7 +62,7 @@ pub(super) fn seek_to_log_size(file: &File, log_size: u64) -> std::io::Result<()
 }
 
 pub(super) fn write_all(io: &dyn LogIo, file: &File, buf: &[u8]) -> std::io::Result<()> {
-    crate::io::write_all_with(buf, |remaining| io.write(file, remaining))
+    write_all_with(buf, |remaining| io.write(file, remaining))
 }
 
 pub(super) fn write_all_vectored(
@@ -68,7 +71,7 @@ pub(super) fn write_all_vectored(
     mut bufs: &mut [IoSlice<'_>],
 ) -> std::io::Result<()> {
     while !bufs.is_empty() {
-        let written = crate::io::write_progress(|| io.write_vectored(file, bufs))?;
+        let written = write_progress(|| io.write_vectored(file, bufs))?;
         IoSlice::advance_slices(&mut bufs, written);
     }
     Ok(())
@@ -419,7 +422,7 @@ mod tests {
         let mut positions = Vec::new();
         for off in 0..20i64 {
             positions.push(seg.log_size);
-            seg.append(&test_batch_at(crate::Offset(off)), DENSE_INDEX)
+            seg.append(&test_batch_at(Offset(off)), DENSE_INDEX)
                 .unwrap();
         }
         let advice = recording_advice(&mut seg);

@@ -9,7 +9,7 @@ use krabka_protocol::owned::{
 };
 use krabka_raft::RaftError;
 
-use crate::{broker::Broker, codes};
+use crate::{broker::Broker, clean_shutdown::restart_was_clean, codes};
 
 context_handler! {
     BrokerRegistrationRequest => BrokerRegistrationResponse,
@@ -239,8 +239,7 @@ fn clean_shutdown_proven(
     image: &krabka_metadata::MetadataImage,
     node_id: NodeId,
 ) -> bool {
-    version >= 3
-        && crate::clean_shutdown::restart_was_clean(image, node_id, req.previous_broker_epoch)
+    version >= 3 && restart_was_clean(image, node_id, req.previous_broker_epoch)
 }
 
 fn decode_listeners(listeners: &[Listener]) -> Result<Vec<BrokerEndpoint>, i16> {
@@ -346,6 +345,7 @@ mod tests {
     use krabka_protocol::owned::broker_registration_request::Feature;
 
     use super::*;
+    use crate::test_support::broker_registration;
 
     #[test]
     fn listener_validation_rejects_duplicates_and_unknown_protocol() {
@@ -481,7 +481,7 @@ mod tests {
                     incarnation_id: uuid::Uuid::from_u128(u128::from(node)),
                     host: "broker".into(),
                     log_dirs: vec![uuid::Uuid::from_u128(directory)],
-                    ..crate::test_support::broker_registration(krabka_raft::NodeId(node))
+                    ..broker_registration(krabka_raft::NodeId(node))
                 },
             ));
         }
@@ -525,10 +525,17 @@ mod wire_tests {
 
     use super::*;
     use crate::{
+        clean_shutdown::UNPROVEN,
         config_keys::MIN_INSYNC_REPLICAS,
-        elr::{TopicElr, state::PartitionElr},
+        elr::{
+            TopicElr,
+            state::{PartitionElr, test_records},
+        },
         handlers::forward_to_controller::is_active_controller,
-        test_support::{peer, start_broker_with_authorizer},
+        test_support::{
+            dispatch_wire, end_heartbeat_session, finalized_broker_features, peer,
+            start_broker_with_authorizer,
+        },
     };
 
     const TOPIC: &str = "orders";
@@ -608,7 +615,7 @@ mod wire_tests {
             }),
         ];
         if let Some(elr) = elr {
-            records.extend(crate::elr::state::test_records(TOPIC, elr));
+            records.extend(test_records(TOPIC, elr));
         }
         records
     }
@@ -650,14 +657,14 @@ mod wire_tests {
         // This fixture represents a stopped old broker, whose heartbeat
         // session is over. End it once the liveness ticker has seeded this
         // term, so the seeding cannot open it again afterwards.
-        crate::test_support::end_heartbeat_session(&broker, REGISTERED.0).await;
+        end_heartbeat_session(&broker, REGISTERED.0).await;
 
         let image = broker.controller.current_image();
         let previous_broker_epoch = match offer {
             Offer::HeldEpoch => image
                 .broker_epoch(REGISTERED)
                 .expect("node 2 is registered"),
-            Offer::Unproven => crate::clean_shutdown::UNPROVEN,
+            Offer::Unproven => UNPROVEN,
         };
         let request = BrokerRegistrationRequest {
             broker_id: 2,
@@ -672,7 +679,7 @@ mod wire_tests {
                 security_protocol: 0,
                 ..Default::default()
             }],
-            features: crate::test_support::finalized_broker_features(&image),
+            features: finalized_broker_features(&image),
             log_dirs: vec![krabka_protocol::primitives::uuid::Uuid(
                 uuid::Uuid::from_u128(1011).into_bytes(),
             )],
@@ -686,7 +693,7 @@ mod wire_tests {
         );
         // Through the dispatch registry: `previous_broker_epoch` only rides
         // the wire from version 3.
-        let response: BrokerRegistrationResponse = crate::test_support::dispatch_wire(
+        let response: BrokerRegistrationResponse = dispatch_wire(
             &broker,
             krabka_protocol::api_key::ApiKey::BrokerRegistration as i16,
             version,

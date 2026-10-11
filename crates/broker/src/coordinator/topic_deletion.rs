@@ -36,7 +36,10 @@ use super::{
     partitioner::local_partition_for_group,
     unified::actor::GroupActorMessage,
 };
-use crate::metadata_source::MetadataSource;
+use crate::{
+    metadata_source::{MetadataSource, next_image_until_shutdown},
+    task_util::ask,
+};
 
 #[cfg(test)]
 mod tests;
@@ -57,9 +60,7 @@ pub(crate) fn spawn(
         // loaded refreshes the resolutions of its regular expressions once,
         // at its first heartbeat.
         coordinator.bump_regex_refresh_version(metadata.current_metadata_offset());
-        while let Some(image) =
-            crate::metadata_source::next_image_until_shutdown(&mut images, &shutdown).await
-        {
+        while let Some(image) = next_image_until_shutdown(&mut images, &shutdown).await {
             let owned =
                 |group_id: &str| local_partition_for_group(&image, node_id, group_id).is_ok();
             let changed = changed_topics(&previous, &image);
@@ -165,12 +166,11 @@ pub(crate) async fn on_topics_deleted(
         let Some(handle) = coordinator.find(&group_id) else {
             continue;
         };
-        let Ok(deleted) =
-            crate::task_util::ask(&handle.tx, |reply| GroupActorMessage::DeleteTopicOffsets {
-                topics: topics.to_vec(),
-                reply,
-            })
-            .await
+        let Ok(deleted) = ask(&handle.tx, |reply| GroupActorMessage::DeleteTopicOffsets {
+            topics: topics.to_vec(),
+            reply,
+        })
+        .await
         else {
             continue;
         };

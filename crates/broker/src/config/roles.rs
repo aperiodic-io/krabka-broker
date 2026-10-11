@@ -75,7 +75,10 @@ mod tests {
     use krabka_raft::NodeId;
 
     use super::*;
-    use crate::config::test_support::witness_roles;
+    use crate::{
+        SslPrincipalMapper,
+        config::{ListenerSpec, test_support::witness_roles},
+    };
 
     #[test]
     fn defaults_to_combined_roles() {
@@ -143,19 +146,15 @@ mod tests {
     #[test]
     fn only_a_node_with_the_broker_role_names_listeners() {
         // (roles, the [[listeners]] entries, what validation answers)
-        type Case = (
-            Vec<NodeRole>,
-            Vec<crate::config::ListenerSpec>,
-            Result<(), String>,
-        );
-        let listener = |name: &str, port: u16| crate::config::ListenerSpec {
+        type Case = (Vec<NodeRole>, Vec<ListenerSpec>, Result<(), String>);
+        let listener = |name: &str, port: u16| ListenerSpec {
             name: name.to_owned(),
             bind_addr: std::net::SocketAddr::from(([127, 0, 0, 1], port)),
             advertised: format!("127.0.0.1:{port}"),
             protocol: krabka_security::ListenerProtocol::Plaintext,
             tls_config: None,
             sasl_mechanisms: None,
-            principal_mapper: crate::SslPrincipalMapper::default(),
+            principal_mapper: SslPrincipalMapper::default(),
         };
         let refused = |names: &str| {
             Err(format!(

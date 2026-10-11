@@ -31,7 +31,11 @@ use crate::{
     multi_client::topic_id_for,
     multi_cluster::{ready_admin, start_three_tiered_brokers_with_segment_sizes},
     multi_workload::local_segment_bases,
-    support::client::connect_owned,
+    support::{client::connect_owned, storage::topic_remote_log_files, topics::AssignedTopicSetup},
+    topic_fixture::{
+        AssignedTieredTopicSetup, TieredRecordCount, TieredRecordsSetup, await_tiered_replicas,
+        create_assigned_topic, produce_records as produce_tiered_records,
+    },
 };
 
 /// The topic this suite produces into. It sets no `segment.bytes`, so each
@@ -56,7 +60,7 @@ struct RemoteSegment {
 /// them, so a duplicate here is a duplicate object in the store and a hole
 /// here is a hole in the only copy that survives local retention.
 fn remote_segments(root: &Path) -> Vec<RemoteSegment> {
-    let files = crate::support::storage::topic_remote_log_files(root, TOPIC);
+    let files = topic_remote_log_files(root, TOPIC);
     let mut segments: Vec<RemoteSegment> = files
         .iter()
         .filter_map(|path| {
@@ -82,13 +86,13 @@ fn remote_segments(root: &Path) -> Vec<RemoteSegment> {
 /// Produces `count` single-record batches through `client`, one request each,
 /// so both replicas see many small batches and roll on their own byte budget.
 async fn produce_records(client: &Client, topic_id: WireUuid, prefix: &str, count: usize) {
-    crate::topic_fixture::produce_records(
+    produce_tiered_records(
         client,
         |index| bytes::Bytes::from(format!("{prefix}-record-{index}")),
-        crate::topic_fixture::TieredRecordsSetup {
+        TieredRecordsSetup {
             topic: TOPIC,
             topic_id,
-            count: crate::topic_fixture::TieredRecordCount(count),
+            count: TieredRecordCount(count),
         },
     )
     .await;
@@ -105,20 +109,20 @@ async fn produce_records(client: &Client, topic_id: WireUuid, prefix: &str, coun
 /// its `CopySegmentStarted` write before it uploaded anything. Kafka reads a
 /// manual assignment as `num_partitions = -1, replication_factor = -1`.
 async fn create_misaligned_topic(admin: &Client, b1: &BrokerHandle, b2: &BrokerHandle) {
-    let assignment = crate::support::topics::AssignedTopicSetup::on_replicas(
+    let assignment = AssignedTopicSetup::on_replicas(
         TOPIC,
         vec![krabka_metadata::NodeId(2), krabka_metadata::NodeId(1)],
     );
-    crate::topic_fixture::create_assigned_topic(
+    create_assigned_topic(
         admin,
-        crate::topic_fixture::AssignedTieredTopicSetup {
+        AssignedTieredTopicSetup {
             topic: assignment,
             segment_bytes: None,
         },
     )
     .await;
 
-    crate::topic_fixture::await_tiered_replicas(
+    await_tiered_replicas(
         &[b1, b2],
         TOPIC,
         None,

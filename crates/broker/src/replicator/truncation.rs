@@ -28,7 +28,9 @@ use super::{
     Config, connection::connection_options, replication_target_changed, response::RowAction,
     task_replication_target,
 };
-use crate::{codes, network::client::InterBrokerError};
+#[cfg(test)]
+use crate::config::ReplicationRuntimeConfig;
+use crate::{codes, network::client::InterBrokerError, partition::Partition};
 
 /// Where this follower truncates for a KIP-320 `diverging_epoch` row, as
 /// `AbstractFetcherThread.getOffsetTruncationState` computes it.
@@ -69,7 +71,7 @@ fn diverging_truncation_offset(
 /// Where the local log of `part` truncates for the leader's `diverging`
 /// epoch and end offset. See [`diverging_truncation_offset`].
 pub(super) fn diverging_epoch_truncation_target(
-    part: &crate::partition::Partition,
+    part: &Partition,
     diverging: &EpochEndOffset,
 ) -> Offset {
     let leader_epoch = LeaderEpoch(diverging.epoch);
@@ -862,9 +864,8 @@ mod tests {
     /// replica holding offsets 0..6 and a leader scripted per sentinel.
     #[tokio::test]
     async fn out_of_range_recovery_follows_kafka_fetch_offset_and_truncate() {
-        let backoff = RowAction::Backoff(
-            crate::config::ReplicationRuntimeConfig::default().unexpected_error_backoff,
-        );
+        let backoff =
+            RowAction::Backoff(ReplicationRuntimeConfig::default().unexpected_error_backoff);
         let lookup_failed = || Err::<i64, _>("scripted lookup failure".to_owned());
         let recovery = |action, asked: &[i64], log_start, log_end| Recovery {
             action,

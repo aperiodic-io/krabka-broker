@@ -9,12 +9,17 @@ use std::time::{Duration, Instant};
 use assert2::assert;
 
 use crate::{
+    kafka_wire::AutomaticTopicSetup,
     plaintext_cluster::wait_partition_exists,
+    plaintext_wire::CLIENT_ID,
     sasl_wire::{
         create_topic_as_admin, drive_alter_reassignments_sasl_plain,
         start_single_broker_sasl_plaintext_with_users,
     },
-    support::acl::TopicAclSetup,
+    support::{
+        acl::{TopicAclSetup, topic_acl_record},
+        topics::ConfiguredTopicSetup,
+    },
 };
 
 /// Test 4: alice, who authenticated over SASL/PLAIN and holds no ACLs, sends
@@ -35,7 +40,7 @@ async fn non_super_user_denied() {
     // irrelevant — any non-empty `image.acls` flips the shim off and forces
     // the authorizer to evaluate every request.
     handle
-        .submit_metadata_record_for_test(crate::support::acl::topic_acl_record(TopicAclSetup {
+        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
             topic: "__compat_shim_disable__",
             principal: "User:admin",
             ..Default::default()
@@ -53,9 +58,9 @@ async fn non_super_user_denied() {
 
     create_topic_as_admin(
         addr,
-        crate::kafka_wire::AutomaticTopicSetup {
-            client_id: crate::plaintext_wire::CLIENT_ID,
-            topic: crate::support::topics::ConfiguredTopicSetup {
+        AutomaticTopicSetup {
+            client_id: CLIENT_ID,
+            topic: ConfiguredTopicSetup {
                 name: ("foo").into(),
                 ..Default::default()
             },

@@ -1,6 +1,7 @@
 use creusot_std::prelude::*;
 
 use super::DisklessRetentionPolicy;
+use crate::log_index::upper_range_cursor;
 
 /// The bytes of the oldest `count` ranges.
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
@@ -192,7 +193,7 @@ pub const fn diskless_object_reclaimable(referenced: bool, grace_elapsed: bool) 
 })]
 #[must_use]
 pub fn diskless_logical_range(entries: &[(i64, i64)], requested: i64) -> Option<usize> {
-    let lo = crate::log_index::upper_range_cursor(entries, requested);
+    let lo = upper_range_cursor(entries, requested);
     if lo == 0 {
         return None;
     }

@@ -13,7 +13,7 @@ use super::{
     local::latest_offset,
     remote::concurrently,
 };
-use crate::{broker::Broker, codes, error::BrokerError};
+use crate::{broker::Broker, codes, error::BrokerError, handlers::RequestContext};
 
 const LATEST_TIMESTAMP: i64 = -1;
 
@@ -143,7 +143,7 @@ async fn resolve_partition(
 pub(super) async fn handle(
     broker: &Broker,
     req_bytes: &[u8],
-    ctx: &crate::handlers::RequestContext<'_>,
+    ctx: &RequestContext<'_>,
 ) -> Result<Bytes, BrokerError> {
     let request = decode(req_bytes)?;
     let acl_image = broker.controller.current_image();
@@ -212,6 +212,8 @@ mod tests {
 
     use super::*;
     use crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::BrokerHandle,
         handlers::list_offsets::test_support::{client_for, create_topic, test_context},
         test_support::{peer, principal, start_broker_with_authorizer_no_audit},
     };
@@ -228,8 +230,7 @@ mod tests {
     async fn max_num_offsets_caps_legacy_segment_boundaries() {
         const TOPIC: &str = "list-offsets-v0-max";
         let (broker_handle, _dir) =
-            start_broker_with_authorizer_no_audit(Arc::new(crate::authorizer::AllowAllAuthorizer))
-                .await;
+            start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
         let client = client_for(&broker_handle).await;
         create_topic(
             &client,
@@ -343,8 +344,7 @@ mod tests {
     async fn duplicate_partition_gets_invalid_request_on_every_row() {
         const TOPIC: &str = "list-offsets-v0-duplicate";
         let (broker_handle, _dir) =
-            start_broker_with_authorizer_no_audit(Arc::new(crate::authorizer::AllowAllAuthorizer))
-                .await;
+            start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
         let client = client_for(&broker_handle).await;
         create_topic(&client, TOPIC, vec![]).await;
         broker_handle.wait_until_partition_present(TOPIC, 0).await;
@@ -375,7 +375,7 @@ mod tests {
 
         broker_handle.shutdown().await;
     }
-    async fn answer(broker: &crate::broker::BrokerHandle, request: &[u8]) -> Bytes {
+    async fn answer(broker: &BrokerHandle, request: &[u8]) -> Bytes {
         let shared = broker.broker_arc_for_test();
         request_identity!((admin, socket), principal("admin"));
         handle(&shared, request, &test_context(&admin, &socket))

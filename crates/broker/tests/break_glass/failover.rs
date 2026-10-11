@@ -18,7 +18,7 @@ use crate::{
     cluster::{index_of, plain_client, start_gated_cluster, wait_for_new_leader},
     principals::{BOB, CAROL, principal},
     proposals::{ACTION_DELETE_TOPIC, now_ms, open, stored},
-    support,
+    support::{self, shutdown_cluster},
     topics::{create_topic, delete_topic_as_admin_client},
 };
 
@@ -109,7 +109,7 @@ async fn an_approved_proposal_survives_a_controller_failover() {
         .await;
     check!(stored(&after_client, id).await.consumed_at_ms != 0);
 
-    crate::support::shutdown_cluster(cluster).await;
+    shutdown_cluster(cluster).await;
 }
 
 /// One unsigned approval by `user`, in the metadata form.

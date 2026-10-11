@@ -8,6 +8,7 @@ use krabka_units::prelude::{ByteSize, ByteSizeExt, gibibytes};
 use tempfile::tempdir;
 
 use super::Segment;
+use crate::test_support::{RecordedAdvice, numbered_record, single_record_batch};
 
 /// Index every batch but the first. Every later batch is more than `0` bytes
 /// past the last entry, and the first is `0` bytes past the segment start,
@@ -131,8 +132,7 @@ pub(super) fn sample_batch(setup: SampleBatchSetup) -> RecordBatch {
         ..RecordBatch::default()
     };
     for i in 0..records.0 {
-        b.records
-            .push(crate::test_support::numbered_record(i, i64::from(i)));
+        b.records.push(numbered_record(i, i64::from(i)));
     }
     b
 }
@@ -148,7 +148,7 @@ pub(super) fn segment_at(base: Offset) -> (tempfile::TempDir, Segment) {
 }
 
 pub(super) fn test_batch_at(off: Offset) -> RecordBatch {
-    crate::test_support::single_record_batch(off.0, 1_000, Bytes::from(format!("v{}", off.0)))
+    single_record_batch(off.0, 1_000, Bytes::from(format!("v{}", off.0)))
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -195,8 +195,8 @@ pub(super) fn indexed_segment() -> (tempfile::TempDir, Segment) {
     let dir = tempdir().unwrap();
     let segment = seeded_segment(
         dir.path(),
-        crate::segment::test_support::SeededSegmentSetup {
-            offset: crate::Offset(100),
+        SeededSegmentSetup {
+            offset: Offset(100),
             batches: INDEXED_READ_BATCHES,
             ..Default::default()
         },
@@ -211,10 +211,8 @@ pub(super) fn sample_batches(batches: &[SampleBatchSetup]) -> Vec<RecordBatch> {
 /// `seg` with its I/O routed through a fresh
 /// [`crate::test_support::RecordedAdvice`], which the caller keeps to read the
 /// hints back.
-pub(super) fn recording_advice(
-    seg: &mut Segment,
-) -> std::sync::Arc<crate::test_support::RecordedAdvice> {
-    let advice = std::sync::Arc::new(crate::test_support::RecordedAdvice::default());
+pub(super) fn recording_advice(seg: &mut Segment) -> std::sync::Arc<RecordedAdvice> {
+    let advice = std::sync::Arc::new(RecordedAdvice::default());
     seg.set_io(advice.clone());
     advice
 }

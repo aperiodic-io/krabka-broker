@@ -24,7 +24,10 @@ use std::sync::Arc;
 use krabka_units::{Time, convert::TimeExt as _};
 use tracing::{debug, info};
 
-use crate::{metadata_source::MetadataSource, txn::coordinator::TxnCoordinator};
+use crate::{
+    metadata_source::MetadataSource,
+    txn::{coordinator::TxnCoordinator, util::now_millis},
+};
 
 super::util::reaper_task! {
     /// Entry point of the spawned task. It returns when `shutdown` is cancelled.
@@ -57,7 +60,7 @@ pub(in crate::txn) async fn sweep_once(
         .await
         .finished()
         .await;
-    let now_ms = crate::txn::util::now_millis();
+    let now_ms = now_millis();
     let expired = coord
         .expire_transactional_ids(now_ms, expiration.millis_i64())
         .await;
