@@ -23,6 +23,12 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Fixed
+
+- Sendfile fetches read only batch headers when scanning large batches, avoiding
+  synchronous reads of cold payload pages during backlog consumption. Small
+  batches retain buffered header scans.
+
 ## [1.0.2] - 2026-10-10
 
 1.0.2 changes no on-disk format, so it upgrades from 1.0.1 in place and

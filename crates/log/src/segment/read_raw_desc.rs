@@ -19,8 +19,8 @@ use super::{
 };
 use crate::{config::DEFAULT_READ_AHEAD_MAX, error::LogError};
 
-/// The first header scan stays small until it identifies the first batch size.
-const INITIAL_HEADER_SCAN_WINDOW: usize = 16 * 1024;
+/// Only small batches benefit from reading ahead to amortize header lookups.
+const SMALL_BATCH_THRESHOLD: usize = 16 * 1024;
 
 /// Maximum bytes prefetched after the scanner identifies a small batch.
 const HEADER_SCAN_WINDOW: usize = 256 * 1024;
@@ -68,6 +68,25 @@ impl Segment {
         max_size: ByteSize,
         read_ahead_max: ByteSize,
     ) -> Result<RawSegmentDesc, LogError> {
+        self.read_raw_desc_with_reader(
+            fetch_offset,
+            limit_offset,
+            max_size,
+            read_ahead_max,
+            |pos, buf, len| self.read_log_range(pos, buf, len),
+        )
+    }
+
+    /// Keep the positional reads injectable so tests can measure the synchronous
+    /// I/O of the descriptor walk as well as the file region it selects.
+    fn read_raw_desc_with_reader(
+        &self,
+        fetch_offset: Offset,
+        limit_offset: Offset,
+        max_size: ByteSize,
+        read_ahead_max: ByteSize,
+        mut read_range: impl FnMut(u64, &mut Vec<u8>, usize) -> Result<(), LogError>,
+    ) -> Result<RawSegmentDesc, LogError> {
         let Some(start_pos) =
             self.raw_start_position(fetch_offset, limit_offset, "read_raw_desc")?
         else {
@@ -90,16 +109,19 @@ impl Segment {
         self.advise_read(start_pos, window, read_ahead_max);
         let window = usize::try_from(window)
             .map_err(|_| LogError::Corrupt("read_raw_desc window too large".into()))?;
-        let mut header_buf = Vec::with_capacity(INITIAL_HEADER_SCAN_WINDOW.min(window));
+        let mut header_buf = Vec::with_capacity(HEADER_LEN.min(window));
         let mut header_buf_start = 0usize;
         let mut header_buf_end = 0usize;
-        let mut scan_window = INITIAL_HEADER_SCAN_WINDOW;
+        // Until a small batch justifies a buffered scan, touch only its header.
+        // Larger reads at sparse batch boundaries pull cold payload pages into
+        // this synchronous walk, delaying sendfile while the log is locked.
+        let mut scan_window = HEADER_LEN;
         let Some(range) = select_raw_range(fetch_offset, limit_offset, max_bytes, window, |pos| {
             if pos < header_buf_start || pos + HEADER_LEN > header_buf_end {
                 header_buf.clear();
                 header_buf_start = pos;
                 let read_len = (window - pos).min(scan_window);
-                self.read_log_range(start_pos + pos as u64, &mut header_buf, read_len)?;
+                read_range(start_pos + pos as u64, &mut header_buf, read_len)?;
                 header_buf_end = header_buf_start + header_buf.len();
             }
             if pos + HEADER_LEN > header_buf_end {
@@ -107,10 +129,10 @@ impl Segment {
             }
             let start = pos - header_buf_start;
             let batch = RawBatch::decode(&header_buf[start..start + HEADER_LEN])?;
-            scan_window = if batch.len <= INITIAL_HEADER_SCAN_WINDOW {
+            scan_window = if batch.len <= SMALL_BATCH_THRESHOLD {
                 HEADER_SCAN_WINDOW
             } else {
-                INITIAL_HEADER_SCAN_WINDOW
+                HEADER_LEN
             };
             Ok(Some(batch))
         })?
@@ -134,15 +156,77 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use krabka_units::prelude::{bytes, mebibytes};
 
     use super::*;
-    use crate::segment::test_support::{DENSE_INDEX, test_batch_at, test_segment};
+    use crate::segment::test_support::{
+        DENSE_INDEX, recording_advice, test_batch_at, test_segment,
+    };
 
     // `pread` a `FileRegion` into a fresh `Vec`. These are the bytes that the
     // broker's sendfile would transmit, and that its TLS pread-fallback would
     // copy.
     krabka_macros::file_region_fixture!(region_bytes);
+
+    #[test]
+    fn descriptor_scan_reads_only_headers_for_large_batches_and_buffers_small_batches() {
+        let large = 1024 * 1024;
+        let cases = [
+            (vec![large; 10], vec![HEADER_LEN; 10]),
+            (vec![1; 4000], vec![HEADER_LEN, HEADER_SCAN_WINDOW]),
+            (
+                vec![1, large, large, 1, large, large],
+                vec![
+                    HEADER_LEN,
+                    HEADER_SCAN_WINDOW,
+                    HEADER_LEN,
+                    HEADER_LEN,
+                    HEADER_SCAN_WINDOW,
+                    HEADER_LEN,
+                ],
+            ),
+        ];
+        for (payload_sizes, mut expected_reads) in cases {
+            let (_dir, mut seg) = test_segment();
+            let mut batch_len = 0;
+            for (off, size) in payload_sizes.iter().enumerate() {
+                let mut batch = test_batch_at(Offset(i64::try_from(off).unwrap()));
+                batch.records[0].value = Some(Bytes::from(vec![0; *size]));
+                batch_len = batch.encoded_len();
+                seg.append(&batch, DENSE_INDEX).unwrap();
+            }
+            // The small batches cross one scan window; the final read is
+            // clamped to the bytes remaining in the segment.
+            if payload_sizes.len() == 4000 {
+                let buffered_headers = (HEADER_SCAN_WINDOW - HEADER_LEN) / batch_len + 1;
+                let next_read = (1 + buffered_headers) * batch_len;
+                expected_reads.push(usize::try_from(seg.log_size).unwrap() - next_read);
+            }
+            let limit = Offset(i64::try_from(payload_sizes.len()).unwrap());
+            let mut reads = Vec::new();
+            let desc = seg
+                .read_raw_desc_with_reader(
+                    Offset(0),
+                    limit,
+                    mebibytes(16),
+                    DEFAULT_READ_AHEAD_MAX,
+                    |pos, buf, len| {
+                        reads.push((pos, len));
+                        seg.read_log_range(pos, buf, len)
+                    },
+                )
+                .unwrap();
+            assert2::assert!(
+                reads.iter().map(|(_, len)| *len).collect::<Vec<_>>() == expected_reads
+            );
+            let raw = seg.read_raw(Offset(0), limit, mebibytes(16)).unwrap();
+            let region = desc.region.unwrap();
+            assert2::assert!(desc.start_offset == raw.start_offset);
+            assert2::assert!(desc.last_offset == raw.last_offset);
+            assert2::assert!(region_bytes(&region) == raw.bytes.to_vec());
+        }
+    }
 
     /// The load-bearing Increment-D/E invariant: the `read_raw_desc` region
     /// maps to exactly the bytes that `read_raw` would have returned, for the
@@ -222,8 +306,6 @@ mod tests {
     /// taking one disk read per batch on a cold segment.
     #[test]
     fn read_raw_desc_advises_its_region_and_the_next_window_in_one_hint() {
-        use crate::segment::test_support::recording_advice;
-
         let (_dir, mut seg) = test_segment();
         for off in 0..20i64 {
             seg.append(&test_batch_at(Offset(off)), DENSE_INDEX)
