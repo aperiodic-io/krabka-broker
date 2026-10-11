@@ -15,10 +15,12 @@ use tracing::instrument;
 
 use super::{
     RawSegmentDesc, Segment,
-    io::read_full_at,
     read_raw::{RawBatch, select_raw_range},
 };
 use crate::{config::DEFAULT_READ_AHEAD_MAX, error::LogError};
+
+/// Maximum bytes prefetched by the descriptor header scanner.
+const HEADER_SCAN_WINDOW: usize = 4 * 1024;
 
 impl Segment {
     /// Descriptor variant of [`Segment::read_raw`] for the zero-copy
@@ -29,10 +31,10 @@ impl Segment {
     /// `read_raw` would have sliced. It returns a [`krabka_protocol::records::FileRegion`] descriptor
     /// instead of a `pread` of the payload into an owned `Bytes`.
     ///
-    /// The walk is header-only. It `pread`s only the fixed v2 batch headers to
-    /// find batch boundaries, and it uses the header's `batch_length`. It
-    /// never reads the record payloads. The region is byte-identical to the
-    /// `bytes` of `read_raw` for the same
+    /// The walk reads bounded windows to amortize header lookups and uses the
+    /// header's `batch_length` to find boundaries. It returns a file region
+    /// instead of building an owned copy of the selected payload. The region
+    /// is byte-identical to the `bytes` of `read_raw` for the same
     /// `(fetch_offset, limit_offset, max_bytes)`.
     #[instrument(
         level = "debug",
@@ -85,12 +87,22 @@ impl Segment {
         self.advise_read(start_pos, window, read_ahead_max);
         let window = usize::try_from(window)
             .map_err(|_| LogError::Corrupt("read_raw_desc window too large".into()))?;
-        let mut header = [0; HEADER_LEN];
+        let mut header_buf = Vec::with_capacity(HEADER_SCAN_WINDOW.min(window));
+        let mut header_buf_start = 0usize;
+        let mut header_buf_end = 0usize;
         let Some(range) = select_raw_range(fetch_offset, limit_offset, max_bytes, window, |pos| {
-            if read_full_at(&self.log_file, start_pos + pos as u64, &mut header)? < HEADER_LEN {
+            if pos < header_buf_start || pos + HEADER_LEN > header_buf_end {
+                header_buf.clear();
+                header_buf_start = pos;
+                let read_len = (window - pos).min(HEADER_SCAN_WINDOW);
+                self.read_log_range(start_pos + pos as u64, &mut header_buf, read_len)?;
+                header_buf_end = header_buf_start + header_buf.len();
+            }
+            if pos + HEADER_LEN > header_buf_end {
                 return Ok(None);
             }
-            RawBatch::decode(&header).map(Some)
+            let start = pos - header_buf_start;
+            RawBatch::decode(&header_buf[start..start + HEADER_LEN]).map(Some)
         })?
         else {
             return Ok(RawSegmentDesc::empty());
