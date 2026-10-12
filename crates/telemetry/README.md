@@ -1,6 +1,5 @@
 # krabka-telemetry
 
-[![Crates.io](https://img.shields.io/crates/v/krabka-telemetry.svg)](https://crates.io/crates/krabka-telemetry)
 [API documentation](https://krabka-io.github.io/krabka-broker/krabka-telemetry/krabka_telemetry/index.html)
 [![CI](https://github.com/robot-head/crabka/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-head/crabka/actions/workflows/ci.yml)
 
@@ -11,10 +10,10 @@ This crate is part of [Krabka](https://github.com/robot-head/crabka), a Rust imp
 ## Install
 
 ```sh
-cargo add krabka-telemetry
+cargo add krabka-telemetry --path ../krabka-broker/crates/telemetry
 ```
 
-For workspace development, use the path dependency from this repository instead.
+This crate is not published by this repository. Adjust the path to your local checkout. Workspace development uses the path dependencies declared in this repository.
 
 ## Usage example
 

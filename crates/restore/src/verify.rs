@@ -254,11 +254,8 @@ fn require_artifact<'a>(
 }
 
 /// Fetch a whole object, refusing it before buffering any bytes if it exceeds
-/// `max_bytes`. This mirrors `krabka_object_store::read_capped`'s head-then-get
-/// guard against OOM on a corrupt or oversized archive object; it is
-/// reimplemented here because that helper takes the concrete
-/// `Arc<dyn object_store::ObjectStore>` rather than the [`ObjectOps`] surface
-/// [`ArchiveStore`] exposes.
+/// `max_bytes`. [`ObjectOps::get_capped`] binds its read to backend metadata
+/// when available and enforces the limit while streaming the response.
 pub(super) async fn fetch_capped(
     ops: &dyn ObjectOps,
     key: &Path,
@@ -290,7 +287,7 @@ pub(super) async fn fetch_capped(
         }
         .into());
     }
-    let bytes = ops.get(key).await?;
+    let bytes = ops.get_capped(key, max_bytes).await?;
     if let Some(expected) = expected {
         let actual_size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         let actual_digest = Sha256Digest::of(&bytes);

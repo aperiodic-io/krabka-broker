@@ -1,18 +1,20 @@
-(* #"/workspace/crates/verified/src/broker/fetch.rs" 185 0 190 20 *)
+(* #"/workspace/crates/verified/src/broker/fetch.rs" 188 0 193 20 *)
 
-let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
-let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 198 32 198 62
-let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 210 15 210 59
-let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 169 10 169 63
-let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 170 10 171 97
-let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 83
-let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 175 58
-let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 176 74
-let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 177 10 181 1
-let%span sfetch'7 = "/workspace/crates/verified/src/broker/fetch.rs" 182 10 182 36
-let%span sfetch'8 = "/workspace/crates/verified/src/broker/fetch.rs" 183 10 183 59
-let%span sfetch'9 = "/workspace/crates/verified/src/broker/fetch.rs" 120 16 120 42
-let%span sfetch'10 = "/workspace/crates/verified/src/broker/fetch.rs" 133 8 139 9
+let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
+let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
+let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 201 32 201 62
+let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 210 23 210 77
+let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 213 15 213 59
+let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 93
+let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 174 97
+let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 175 10 175 83
+let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 178 58
+let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 179 10 179 74
+let%span sfetch'7 = "/workspace/crates/verified/src/broker/fetch.rs" 180 10 184 1
+let%span sfetch'8 = "/workspace/crates/verified/src/broker/fetch.rs" 185 10 185 36
+let%span sfetch'9 = "/workspace/crates/verified/src/broker/fetch.rs" 186 10 186 59
+let%span sfetch'10 = "/workspace/crates/verified/src/broker/fetch.rs" 120 16 120 42
+let%span sfetch'11 = "/workspace/crates/verified/src/broker/fetch.rs" 133 8 139 9
 
 use creusot.int.Int64
 use creusot.prelude.Any
@@ -29,15 +31,19 @@ type t_FetchVisibility = {
   response_hw: Int64.t;
   response_lso: Int64.t }
 
-predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
+predicate gt_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other < self
+
+meta "rewrite_def" predicate gt_log_Int
+
+predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other <= self
 
 meta "rewrite_def" predicate ge_log_Int
 
 function offset_min [#"/workspace/crates/verified/src/broker/fetch.rs" 119 0 119 40] (a: int) (b: int) : int =
-  [%#sfetch'9] if a <= b then a else b
+  [%#sfetch'10] if a <= b then a else b
 
 function fetch_limit_model [#"/workspace/crates/verified/src/broker/fetch.rs" 131 0 131 92] (is_follower: bool) (read_committed: bool) (w: t_FetchWatermarks) : int
- = [%#sfetch'10] if is_follower then
+ = [%#sfetch'11] if is_follower then
     Int64.to_int w.log_end
   else
     if read_committed then
@@ -51,15 +57,15 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let fetch_visibility [#"/workspace/crates/verified/src/broker/fetch.rs" 185 0 190 20] (is_follower: bool)
+let fetch_visibility [#"/workspace/crates/verified/src/broker/fetch.rs" 188 0 193 20] (is_follower: bool)
   (read_committed: bool) (w: t_FetchWatermarks) (fetch_offset: Int64.t) (return (x: t_FetchVisibility)) = (! bb0
   [ bb0 = s0
-    [ s0 = [ &_36 <- Int64.lt w.deliverable w.hw ] s1
-    | s1 = any [ br0 -> {_36 = false} (! bb2) | br1 -> {_36} (! bb1) ] ]
+    [ s0 = [ &_37 <- Int64.lt w.deliverable w.hw ] s1
+    | s1 = any [ br0 -> {_37 = false} (! bb2) | br1 -> {_37} (! bb1) ] ]
   | bb1 = s0 [ s0 = [ &visible <- w.deliverable ] s1 | s1 = bb3 ]
   | bb2 = s0 [ s0 = [ &visible <- w.hw ] s1 | s1 = bb3 ]
   | bb3 = s0
-    [ s0 = [ &_40 <- Int64.lt w.lso w.hw ] s1 | s1 = any [ br0 -> {_40 = false} (! bb5) | br1 -> {_40} (! bb4) ] ]
+    [ s0 = [ &_41 <- Int64.lt w.lso w.hw ] s1 | s1 = any [ br0 -> {_41 = false} (! bb5) | br1 -> {_41} (! bb4) ] ]
   | bb4 = s0 [ s0 = [ &stable <- w.lso ] s1 | s1 = bb6 ]
   | bb5 = s0 [ s0 = [ &stable <- w.hw ] s1 | s1 = bb6 ]
   | bb6 = any [ br0 -> {read_committed = false} (! bb8) | br1 -> {read_committed} (! bb7) ]
@@ -69,25 +75,28 @@ let fetch_visibility [#"/workspace/crates/verified/src/broker/fetch.rs" 185 0 19
   | bb10 = s0 [ s0 = [ &limit_offset'0 <- w.log_end ] s1 | s1 = bb17 ]
   | bb11 = any [ br0 -> {read_committed = false} (! bb15) | br1 -> {read_committed} (! bb12) ]
   | bb12 = s0
-    [ s0 = [ &_49 <- Int64.lt stable visible ] s1 | s1 = any [ br0 -> {_49 = false} (! bb15) | br1 -> {_49} (! bb13) ] ]
+    [ s0 = [ &_50 <- Int64.lt stable visible ] s1 | s1 = any [ br0 -> {_50 = false} (! bb15) | br1 -> {_50} (! bb13) ] ]
   | bb13 = s0 [ s0 = [ &limit_offset'0 <- stable ] s1 | s1 = bb17 ]
   | bb15 = s0 [ s0 = [ &limit_offset'0 <- visible ] s1 | s1 = bb17 ]
   | bb17 = any [ br0 -> {is_follower = false} (! bb19) | br1 -> {is_follower} (! bb18) ]
   | bb18 = s0 [ s0 = [ &upper_bound <- w.log_end ] s1 | s1 = bb20 ]
   | bb19 = s0 [ s0 = [ &upper_bound <- visible ] s1 | s1 = bb20 ]
   | bb20 = s0
-    [ s0 = [ &out_of_range'0 <- Int64.lt fetch_offset w.log_start ] s1
-    | s1 = any [ br0 -> {out_of_range'0 = false} (! bb21) | br1 -> {out_of_range'0} (! bb22) ] ]
-  | bb22 = s0 [ s0 = [ &_58 <- [%#sfetch'0] false ] s1 | s1 = bb23 ]
-  | bb21 = s0 [ s0 = [ &_58 <- Int64.ge fetch_offset upper_bound ] s1 | s1 = bb23 ]
-  | bb23 = any [ br0 -> {read_committed_aborts'0 = false} (! bb25) | br1 -> {read_committed_aborts'0} (! bb24) ]
-  | bb24 = s0 [ s0 = [ &_63 <- stable ] s1 | s1 = bb26 ]
-  | bb25 = s0 [ s0 = [ &_63 <- w.lso ] s1 | s1 = bb26 ]
-  | bb26 = s0
+    [ s0 = [ &_56 <- Int64.lt fetch_offset w.log_start ] s1
+    | s1 = any [ br0 -> {_56 = false} (! bb22) | br1 -> {_56} (! bb21) ] ]
+  | bb21 = s0 [ s0 = [ &out_of_range'0 <- [%#sfetch'0] true ] s1 | s1 = bb23 ]
+  | bb22 = s0 [ s0 = [ &out_of_range'0 <- Int64.gt fetch_offset w.log_end ] s1 | s1 = bb23 ]
+  | bb23 = any [ br0 -> {out_of_range'0 = false} (! bb24) | br1 -> {out_of_range'0} (! bb25) ]
+  | bb25 = s0 [ s0 = [ &_62 <- [%#sfetch'1] false ] s1 | s1 = bb26 ]
+  | bb24 = s0 [ s0 = [ &_62 <- Int64.ge fetch_offset upper_bound ] s1 | s1 = bb26 ]
+  | bb26 = any [ br0 -> {read_committed_aborts'0 = false} (! bb28) | br1 -> {read_committed_aborts'0} (! bb27) ]
+  | bb27 = s0 [ s0 = [ &_67 <- stable ] s1 | s1 = bb29 ]
+  | bb28 = s0 [ s0 = [ &_67 <- w.lso ] s1 | s1 = bb29 ]
+  | bb29 = s0
     [ s0 = [ &_ret <- { out_of_range = out_of_range'0;
-                        empty = _58;
+                        empty = _62;
                         limit_offset = limit_offset'0;
-                        effective_lso = _63;
+                        effective_lso = _67;
                         read_committed_aborts = read_committed_aborts'0;
                         response_hw = w.hw;
                         response_lso = stable } ] s1
@@ -98,41 +107,43 @@ let fetch_visibility [#"/workspace/crates/verified/src/broker/fetch.rs" 185 0 19
   | & w: t_FetchWatermarks = w
   | & fetch_offset: Int64.t = fetch_offset
   | & visible: Int64.t = Any.any_l ()
-  | & _36: bool = Any.any_l ()
+  | & _37: bool = Any.any_l ()
   | & stable: Int64.t = Any.any_l ()
-  | & _40: bool = Any.any_l ()
+  | & _41: bool = Any.any_l ()
   | & read_committed_aborts'0: bool = Any.any_l ()
   | & limit_offset'0: Int64.t = Any.any_l ()
-  | & _49: bool = Any.any_l ()
+  | & _50: bool = Any.any_l ()
   | & upper_bound: Int64.t = Any.any_l ()
   | & out_of_range'0: bool = Any.any_l ()
-  | & _58: bool = Any.any_l ()
-  | & _63: Int64.t = Any.any_l () ])
+  | & _56: bool = Any.any_l ()
+  | & _62: bool = Any.any_l ()
+  | & _67: Int64.t = Any.any_l () ])
   [ return (result: t_FetchVisibility) ->
-  {[@stop_split] [@expl:fetch_visibility ensures] ([@stop_split] [@expl:fetch_visibility ensures #0] [%#sfetch'1] result.out_of_range
-      = (Int64.to_int fetch_offset < Int64.to_int w.log_start))
-    /\ ([@stop_split] [@expl:fetch_visibility ensures #1] [%#sfetch'2] result.empty
+  {[@stop_split] [@expl:fetch_visibility ensures] ([@stop_split] [@expl:fetch_visibility ensures #0] [%#sfetch'2] result.out_of_range
+      = (Int64.to_int fetch_offset < Int64.to_int w.log_start
+      \/ gt_log_Int (Int64.to_int fetch_offset) (Int64.to_int w.log_end)))
+    /\ ([@stop_split] [@expl:fetch_visibility ensures #1] [%#sfetch'3] result.empty
       = (not result.out_of_range
       /\ ge_log_Int (Int64.to_int fetch_offset) (if is_follower then
         Int64.to_int w.log_end
       else
         offset_min (Int64.to_int w.hw) (Int64.to_int w.deliverable)
       )))
-    /\ ([@stop_split] [@expl:fetch_visibility ensures #2] [%#sfetch'3] Int64.to_int result.limit_offset
+    /\ ([@stop_split] [@expl:fetch_visibility ensures #2] [%#sfetch'4] Int64.to_int result.limit_offset
       = fetch_limit_model is_follower read_committed w)
-    /\ ([@stop_split] [@expl:fetch_visibility ensures #3] [%#sfetch'4] not is_follower
+    /\ ([@stop_split] [@expl:fetch_visibility ensures #3] [%#sfetch'5] not is_follower
       -> Int64.to_int result.limit_offset <= Int64.to_int w.hw
       /\ Int64.to_int result.limit_offset <= Int64.to_int w.deliverable
       /\ (read_committed -> Int64.to_int result.limit_offset <= Int64.to_int w.lso))
-    /\ ([@stop_split] [@expl:fetch_visibility ensures #4] [%#sfetch'5] result.read_committed_aborts
+    /\ ([@stop_split] [@expl:fetch_visibility ensures #4] [%#sfetch'6] result.read_committed_aborts
       = (read_committed /\ not is_follower))
-    /\ ([@stop_split] [@expl:fetch_visibility ensures #5] [%#sfetch'6] Int64.to_int result.effective_lso
+    /\ ([@stop_split] [@expl:fetch_visibility ensures #5] [%#sfetch'7] Int64.to_int result.effective_lso
       = (if result.read_committed_aborts then
         offset_min (Int64.to_int w.lso) (Int64.to_int w.hw)
       else
         Int64.to_int w.lso
       ))
-    /\ ([@stop_split] [@expl:fetch_visibility ensures #6] [%#sfetch'7] result.response_hw = w.hw)
-    /\ ([@stop_split] [@expl:fetch_visibility ensures #7] [%#sfetch'8] Int64.to_int result.response_lso
+    /\ ([@stop_split] [@expl:fetch_visibility ensures #6] [%#sfetch'8] result.response_hw = w.hw)
+    /\ ([@stop_split] [@expl:fetch_visibility ensures #7] [%#sfetch'9] Int64.to_int result.response_lso
     = offset_min (Int64.to_int w.lso) (Int64.to_int w.hw))}
     (! return {result}) ]

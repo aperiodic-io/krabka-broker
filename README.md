@@ -150,9 +150,10 @@ Both run the same workspace test set, and CI runs both -- Bazel in the `ci` and
 examples, which `cargo nextest` cannot; `cargo test --workspace --doc` covers
 those.
 
-Benchmarks are Cargo's alone: there is no `crate_bench` rule, so `cargo bench -p
-krabka-broker` (and `-p krabka-log` for the storage suite) is how you get a
-number on your own machine. The other way is to read one somebody else already
+`cargo bench -p krabka-broker` (and `-p krabka-log` for the storage suite) measures
+performance on your own machine. Bazel's `crate_bench` macro also compiles and
+lints these suites; `bazel run //crates/log:log_bench` runs the storage suite.
+The other way is to read one somebody else already
 took: the `bench` job of the `ci` workflow runs every criterion suite on the
 nightly schedule. It alternates four runs of a reference commit and the
 candidate on one host, then publishes raw output, exact commits, host resources
@@ -195,8 +196,9 @@ pass, so they see exactly the files and crates the build sees. A file in a
 target cannot drift unnoticed, and clippy resolves the same features the build
 resolves. The aspect only sees Bazel targets, though, so CI also runs
 `cargo clippy --workspace --all-targets -- -D warnings` in its `cargo` job: the
-benches under `crates/broker/benches` and `crates/log/benches` have no Bazel
-target, `aspect lint` narrows the rest to what a change touched, and
+benches under `crates/broker/benches` and `crates/log/benches` also have Bazel
+targets, but Cargo checks their Cargo dependency graph, `aspect lint` narrows
+to what a change touched, and
 `krabka-protocol`'s build script only ever runs under Cargo. Its `wasm` job
 runs the same Clippy for `wasm32-wasip1` over the broker library and every
 workspace crate in its graph.

@@ -4,7 +4,9 @@
 //! leader is isolated here so the encode and translate halves stay testable
 //! without a live quorum.
 
-use krabka_metadata::MetadataRecord;
+use std::sync::Arc;
+
+use krabka_metadata::{MetadataImage, MetadataRecord};
 
 use super::{ControllerHandle, connection_options};
 use crate::{
@@ -20,6 +22,21 @@ use crate::{
 };
 
 impl ControllerHandle {
+    /// Submit a mutation admitted against this controller's published image.
+    /// The engine checks that image before appending; this method never forwards
+    /// a mutation whose admission happened on a different controller.
+    ///
+    /// # Errors
+    /// Returns a leadership, stale-image, uncommitted-tail, or submission error.
+    pub async fn submit_change_if_image(
+        &self,
+        records: Vec<MetadataRecord>,
+        expected_image: Arc<MetadataImage>,
+    ) -> Result<SubmitChangeResult, RaftError> {
+        self.engine
+            .submit_change_if_image(records, expected_image)
+            .await
+    }
     /// Submit a batch of metadata records. Returns `Ok(())` once committed AND
     /// applied on the leader. Pre-validation lives in the engine. On a follower
     /// (`NotLeader` with a known leader), forwards directly to the leader's

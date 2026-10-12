@@ -9,7 +9,7 @@
       "vc_decrement_sequence": { "prover": "alt-ergo", "time": 0.022 },
       "vc_deref_Vec_ProducerSnapshotEntryFacts_Global": {
         "prover": "alt-ergo",
-        "time": 0.025
+        "time": 0.004
       },
       "vc_epoch_handoff_distinguishes_identity_and_data_retry": {
         "prover": "alt-ergo",
@@ -23,7 +23,7 @@
         "prover": "alt-ergo",
         "time": 0.02
       },
-      "vc_index_Vec_usize_Global": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_index_Vec_usize_Global": { "prover": "alt-ergo", "time": 0.012 },
       "vc_index_mut_Vec_ProducerSnapshotEntryFacts_Global": {
         "prover": "alt-ergo",
         "time": 0.02

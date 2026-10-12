@@ -102,6 +102,13 @@ pub const fn producer_snapshot_reload_keeps(offset: i64, range: ProducerReloadRa
 /// Delete the snapshot at `snapshots[index]` exactly when Kafka's
 /// `removeStraySnapshots` deletes it, given every local segment's base
 /// offset. The snapshot offsets must be distinct; their order is irrelevant.
+///
+/// The proof assumes `index < snapshots.len()`. Other inputs are outside
+/// that contract.
+///
+/// # Panics
+///
+/// Panics when `index` is outside `snapshots`.
 #[requires(index@ < snapshots@.len())]
 #[ensures(result == kafka_stray_removed(snapshots@, index@, segment_bases@))]
 #[must_use]

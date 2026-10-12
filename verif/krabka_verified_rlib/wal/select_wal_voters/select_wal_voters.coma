@@ -35,7 +35,7 @@ let%span sselect_wal_voters'22 = "/workspace/crates/verified/src/wal/select_wal_
 let%span sselect_wal_voters'23 = "/workspace/crates/verified/src/wal/select_wal_voters.rs" 168 10 171 85
 let%span sselect_wal_voters'24 = "/workspace/crates/verified/src/wal/select_wal_voters.rs" 62 10 69 1
 let%span sselect_wal_voters'25 = "/workspace/crates/verified/src/wal/select_wal_voters.rs" 52 8 54 59
-let%span swal = "/workspace/crates/verified/src/wal.rs" 34 16 35 72
+let%span swal = "/workspace/crates/verified/src/wal.rs" 31 16 32 72
 
 use seq.Seq
 use creusot.int.UInt64
@@ -92,7 +92,7 @@ let len_tup2_u64_u64 (self_: t_Vec_tup2_u64_u64_Global) (return (x: UInt64.t)) =
     = Seq.length (view_Vec_tup2_u64_u64_Global self_)}
     (! return {result}) ]
 
-predicate placement_identities_distinct [#"/workspace/crates/verified/src/wal.rs" 33 0 33 71] (selected: Seq.seq tup2_u64_u64) =
+predicate placement_identities_distinct [#"/workspace/crates/verified/src/wal.rs" 30 0 30 71] (selected: Seq.seq tup2_u64_u64) =
   [%#swal] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length selected
     -> (Seq.get selected i).f0 <> (Seq.get selected j).f0 /\ (Seq.get selected i).f1 <> (Seq.get selected j).f1
 

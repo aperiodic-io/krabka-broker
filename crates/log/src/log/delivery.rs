@@ -2,8 +2,10 @@
 //! has not passed yet.
 //!
 //! A fetch caps its limit offset at the watermark, so a scheduled batch is
-//! never served early. Nothing here is persisted, because the schedule is
-//! in the record timestamps and a restart derives the same answer again.
+//! never served before its activation time while the declared clock bound
+//! holds. Nothing here is persisted: restart recomputes using the current
+//! clock and uncertainty bound, which may differ from a previously released
+//! in-memory prefix.
 
 use krabka_ids::Offset;
 use krabka_units::prelude::TimeExt as _;
@@ -32,10 +34,15 @@ impl Log {
     /// from the cached watermark, and skips whole segments whose own maximum
     /// timestamp proves everything in them is active. A repeat call with no
     /// change of time and no new records answers from the cache.
+    /// Increasing clock uncertainty or moving the clock backward does not
+    /// retract the published prefix; current settings govern records at and
+    /// above the cached watermark.
     ///
     /// Nothing here is persisted. The schedule is in the record timestamps,
     /// so after a restart or a leader change the walk starts again from the
-    /// log start and derives the same answer, at worst more slowly.
+    /// log start using the current clock and bound. If uncertainty increased
+    /// or the clock moved backward, a rebuilt watermark can be below the
+    /// prefix this instance had already released.
     ///
     /// # Panics
     ///
@@ -137,6 +144,8 @@ impl Log {
     ///
     /// The result is empty on a topic that does not schedule delivery, and
     /// empty when the window holds no records.
+    /// Records below the published delivery watermark stay visible even if
+    /// clock uncertainty subsequently increases or the clock moves backward.
     ///
     /// # Panics
     ///
@@ -152,7 +161,7 @@ impl Log {
         if !scheduled {
             return Vec::new();
         }
-        let low = start.max(self.local_log_start_offset());
+        let low = start.max(self.bounded_watermark());
         let high = end.min(self.log_end_offset() - 1);
         if low > high {
             return Vec::new();
@@ -266,5 +275,50 @@ impl Log {
     pub(super) fn invalidate_delivery_schedule(&mut self, changed_from: Offset) {
         self.delivery_pending_ms = None;
         self.delivery_watermark = self.delivery_watermark.min(changed_from);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert2::assert;
+    use krabka_protocol::records::{Record, RecordBatch};
+    use krabka_units::millis;
+
+    use super::*;
+    use crate::{LogConfig, log::test_support::configured_test_log};
+
+    #[test]
+    fn larger_uncertainty_is_prospective_for_the_released_prefix() {
+        let (dir, mut log) = configured_test_log(LogConfig {
+            delivery_policy: DeliveryPolicy::Scheduled,
+            delivery_clock_uncertainty: millis(0),
+            ..LogConfig::default()
+        });
+        for time in [100, 200] {
+            log.append(&mut RecordBatch {
+                base_timestamp: time,
+                max_timestamp: time,
+                records: vec![Record::default()],
+                ..RecordBatch::default()
+            })
+            .unwrap();
+        }
+        assert!(log.advance_delivery_watermark(150).watermark == Offset(1));
+        let config = LogConfig {
+            delivery_clock_uncertainty: millis(100),
+            ..log.config_snapshot()
+        };
+        log.set_config(config.clone());
+        assert!(log.advance_delivery_watermark(150).watermark == Offset(1));
+        assert!(log.advance_delivery_watermark(50).watermark == Offset(1));
+        assert!(
+            log.pending_activation_ranges(Offset(0), Offset(1), 150)
+                == vec![(Offset(1), Offset(1))]
+        );
+        log.sync().unwrap();
+        drop(log);
+        let mut reopened = Log::open(dir.path(), config).unwrap();
+        assert!(reopened.advance_delivery_watermark(150).watermark == Offset(0));
+        assert!(reopened.advance_delivery_watermark(300).watermark == Offset(2));
     }
 }

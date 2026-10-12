@@ -39,11 +39,11 @@
               { "prover": "alt-ergo", "time": 0.014 },
               { "prover": "alt-ergo", "time": 0.037 },
               { "prover": "alt-ergo", "time": 0.04 },
-              { "prover": "z3", "time": 0.008 },
+              { "prover": "z3", "time": 0.033 },
               { "prover": "alt-ergo", "time": 0.05 },
               { "prover": "cvc5", "time": 0.676 },
               { "prover": "z3", "time": 0.026 },
-              { "prover": "z3", "time": 0.094 }
+              { "prover": "z3", "time": 0.025 }
             ]
           }
         ]

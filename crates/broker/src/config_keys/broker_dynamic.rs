@@ -11,7 +11,7 @@
 //! define. The broker synonyms of Kafka trunk's topic keys join the roster
 //! under `unstable.api.versions.enable`.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use krabka_metadata::NodeId;
 
@@ -454,21 +454,32 @@ pub(crate) fn elr_min_isr_error(
 /// `KafkaConfig` from the resource's dynamic configs, and its
 /// `validateCordonedLogDirs` refuses a value that is not `*` alone or a subset
 /// of `log.dirs`. The `IllegalArgumentException` it throws reaches the client
-/// as `INVALID_REQUEST`. `log_dirs` is empty on a node without the broker role,
-/// which checks nothing here, as a Kafka controller does not.
+/// as `INVALID_REQUEST`. When `log_dirs` is empty, the forwarding broker has
+/// already checked directory membership. The authoritative controller still
+/// checks that `*` occurs alone in the merged config value.
 ///
 /// # Errors
 /// Returns `INVALID_REQUEST` with Kafka's message.
 pub(crate) fn cordoned_log_dirs_error(
     props: &BTreeMap<String, String>,
-    log_dirs: &[std::path::PathBuf],
+    log_dirs: &[PathBuf],
 ) -> Result<(), (i16, String)> {
-    match props.get(CORDONED_LOG_DIRS) {
-        Some(value) if !log_dirs.is_empty() => resolve(value, log_dirs)
-            .map(drop)
-            .map_err(|message| (codes::INVALID_REQUEST, message)),
-        _ => Ok(()),
-    }
+    let Some(value) = props.get(CORDONED_LOG_DIRS) else {
+        return Ok(());
+    };
+    let mentioned: Vec<PathBuf> = if log_dirs.is_empty() {
+        value.split(',').map(PathBuf::from).collect()
+    } else {
+        Vec::new()
+    };
+    let membership = if log_dirs.is_empty() {
+        &mentioned
+    } else {
+        log_dirs
+    };
+    resolve(value, membership)
+        .map(drop)
+        .map_err(|message| (codes::INVALID_REQUEST, message))
 }
 
 /// Kafka's `ConfigurationControlManager.isCordonedLogDirsDisabled`: below
@@ -502,6 +513,21 @@ mod tests {
 
     use super::*;
     use crate::{test_support::config_map as map, throttle::LEADER_THROTTLED_RATE_KEY};
+
+    /// Controller-side validation skips broker-local membership checks but
+    /// must reject a wildcard mixed with explicit directories after a merge.
+    #[test]
+    fn forwarded_cordoned_config_keeps_the_wildcard_invariant() {
+        let cases = [
+            ("*", Ok(())),
+            ("/remote/broker/logs", Ok(())),
+            ("*,/remote/broker/logs", Err((codes::INVALID_REQUEST,
+                "requirement failed: When cordoned.log.dirs is set to *, it must not contain other values".to_owned()))),
+        ];
+        for (value, expected) in cases {
+            check!(cordoned_log_dirs_error(&map(&[(CORDONED_LOG_DIRS, value)]), &[]) == expected);
+        }
+    }
 
     #[test]
     fn broker_resource_names_follow_kafkas_node_id_rule() {

@@ -159,11 +159,11 @@ impl Segment {
         self.time_index.maybe_append(self.max_timestamp, relative)
     }
 
-    /// Seal a segment loaded through the no-scan [`Segment::open`] path and
+    /// Seal a segment loaded without a scan and
     /// set its `last_offset` to `last`.
     ///
     /// Callers pass `next_segment.base_offset - 1`, the highest offset this
-    /// sealed segment can hold. `Segment::open` leaves
+    /// sealed segment can hold. The no-scan loader leaves
     /// `last_offset = base_offset - 1` because it does not scan the `.log`.
     /// Without this fix, a sealed segment recovered on
     /// [`Log::open`](crate::Log) reports that stale `last_offset`.

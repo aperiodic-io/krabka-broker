@@ -181,22 +181,47 @@ impl BacklogPoller {
             .topic(topic)
             .ok_or_else(|| format!("missing topic metadata for {topic}"))?
             .topic_id;
+        let latest = krabka_protocol::owned::list_offsets_request::ListOffsetsRequest {
+            replica_id: -1,
+            isolation_level: 1,
+            topics: vec![
+                krabka_protocol::owned::list_offsets_request::ListOffsetsTopic {
+                    name: topic.to_owned(),
+                    partitions: vec![
+                        krabka_protocol::owned::list_offsets_request::ListOffsetsPartition {
+                            partition_index: partition,
+                            current_leader_epoch: partition_metadata.leader_epoch.0,
+                            timestamp: -1,
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let latest_response: krabka_protocol::owned::list_offsets_response::ListOffsetsResponse =
+            connection
+                .send(latest)
+                .await
+                .map_err(|error| error.to_string())?;
+        let fetch_offset = latest_fetch_offset(&latest_response, topic, partition)?;
         let request = FetchRequest {
             replica_id: -1,
             max_wait_ms: 0,
             min_bytes: 0,
             max_bytes: 0,
-            isolation_level: 0,
+            isolation_level: 1,
             topics: vec![FetchTopic {
                 topic: topic.to_owned(),
                 topic_id: WireUuid(*topic_id.as_bytes()),
                 partitions: vec![FetchPartition {
                     partition,
                     current_leader_epoch: partition_metadata.leader_epoch.0,
-                    // A consumer Fetch reports the committed high watermark and
-                    // log start even when it returns no records. Asking beyond
-                    // the end keeps this metadata probe payload-free.
-                    fetch_offset: i64::MAX,
+                    // ListOffsets supplied the latest read-committed position.
+                    // Fetching there reports the actual high watermark and log
+                    // start without reading records from the committed range.
+                    fetch_offset,
                     partition_max_bytes: 0,
                     ..Default::default()
                 }],
@@ -211,6 +236,25 @@ impl BacklogPoller {
         connection.close();
         fetch_offsets(&response, topic, WireUuid(*topic_id.as_bytes()), partition)
     }
+}
+
+fn latest_fetch_offset(
+    response: &krabka_protocol::owned::list_offsets_response::ListOffsetsResponse,
+    topic: &str,
+    partition: i32,
+) -> Result<i64, String> {
+    response
+        .topics
+        .iter()
+        .find(|row| row.name == topic)
+        .and_then(|row| {
+            row.partitions
+                .iter()
+                .find(|row| row.partition_index == partition)
+        })
+        .filter(|row| row.error_code == codes::NONE && row.offset >= 0)
+        .map(|row| row.offset)
+        .ok_or_else(|| format!("ListOffsets metadata probe {topic}-{partition} had no valid row"))
 }
 
 fn owns_group(image: &krabka_metadata::MetadataImage, node_id: NodeId, group_id: &str) -> bool {
@@ -304,12 +348,20 @@ mod tests {
     use krabka_ids::LeaderEpoch;
     use krabka_metadata::{MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicRecord};
     use krabka_protocol::{
-        owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+        owned::{
+            fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+            list_offsets_response::{
+                ListOffsetsPartitionResponse, ListOffsetsResponse, ListOffsetsTopicResponse,
+            },
+        },
         primitives::uuid::Uuid as WireUuid,
     };
 
-    use super::{effective_backlog, fetch_offsets, owns_group, prune_stale, replace};
+    use super::{
+        effective_backlog, fetch_offsets, latest_fetch_offset, owns_group, prune_stale, replace,
+    };
     use crate::{
+        codes,
         coordinator::{bootstrap::OFFSETS_TOPIC, partitioner},
         metrics::{BrokerMetrics, ShareGroupLabel},
     };
@@ -388,6 +440,26 @@ mod tests {
         };
 
         assert2::assert!((fetch_offsets(&response, "work", topic_id, 3)) == (Ok((7, 2))));
+    }
+
+    #[test]
+    fn list_offsets_latest_supplies_a_valid_watermark_probe_position() {
+        let response = ListOffsetsResponse {
+            topics: vec![ListOffsetsTopicResponse {
+                name: "work".into(),
+                partitions: vec![ListOffsetsPartitionResponse {
+                    partition_index: 3,
+                    error_code: codes::NONE,
+                    offset: 7,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        assert2::assert!((latest_fetch_offset(&response, "work", 3)) == (Ok(7)));
+        assert2::assert!(latest_fetch_offset(&response, "other", 3).is_err());
     }
 
     #[test]

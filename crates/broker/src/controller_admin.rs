@@ -178,6 +178,7 @@ impl ControllerAdminRouter for BrokerControllerAdminRouter {
                     peer: &request.peer,
                     principal: &principal,
                     authenticated_via_token: request.authenticated_via_token,
+                    forwarded: false,
                 },
             )
             .await
@@ -223,6 +224,7 @@ struct Invocation<'a> {
     /// this is the *client's* principal, not the forwarding hop's.
     principal: &'a krabka_security::Principal,
     authenticated_via_token: bool,
+    forwarded: bool,
 }
 
 /// Dispatch `invocation` through the broker's Admin handler registry.
@@ -243,6 +245,7 @@ async fn invoke_registered_handler(
         peer,
         principal,
         authenticated_via_token,
+        forwarded,
     } = invocation;
     let entry = broker
         .handlers()
@@ -259,7 +262,7 @@ async fn invoke_registered_handler(
         // JVM broker forwards in an `Envelope`, checks it against the
         // principal the envelope names.
         DispatchKind::Context(handler) => {
-            let context = RequestContext::new(
+            let mut context = RequestContext::new(
                 principal,
                 peer,
                 client_id,
@@ -268,6 +271,7 @@ async fn invoke_registered_handler(
                 "CONTROLLER",
             )
             .with_correlation_id(correlation_id);
+            context.forwarded = forwarded;
             handler(broker, api_version, body, &context).await
         }
         DispatchKind::Auth(handler) => {
@@ -330,6 +334,7 @@ async fn serve_envelope(
                     // caller from minting or renewing another token, and that
                     // rule has to follow the identity it belongs to.
                     authenticated_via_token: token_authenticated,
+                    forwarded: true,
                 },
             )
             .await

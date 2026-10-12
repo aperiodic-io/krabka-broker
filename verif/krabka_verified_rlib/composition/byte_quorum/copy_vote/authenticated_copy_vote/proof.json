@@ -8,7 +8,7 @@
       },
       "vc_branch_Option_tup3_i64_u64_Option_usize": {
         "prover": "alt-ergo",
-        "time": 0.02
+        "time": 0.01
       },
       "vc_covering_copy_preserves_logical_fetch": {
         "prover": "alt-ergo",

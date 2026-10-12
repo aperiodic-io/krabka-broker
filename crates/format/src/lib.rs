@@ -80,10 +80,8 @@ pub struct Cli {
 /// formatting is setup rather than the thing under test. The binary itself is
 /// covered end to end by `tests/format_smoke.rs`.
 ///
-/// # Panics
-///
-/// Panics if `argv` does not parse, which for a caller passing a literal
-/// argument list is a bug in that list rather than a runtime condition.
+/// Malformed arguments print a diagnostic and return 2. Help and version
+/// requests print to stdout and return 0, without terminating the caller.
 #[krabka_macros::argv_entrypoint]
 pub async fn run_from_args() -> i32 {
     run_from_args_with_records(argv, Vec::new()).await
@@ -99,11 +97,15 @@ pub async fn run_from_args() -> i32 {
 /// format; [`run_with_records`] documents where `extra` lands in the seed
 /// stream.
 ///
-/// # Panics
-///
-/// Panics if `argv` does not parse, which for a caller passing a literal
-/// argument list is a bug in that list rather than a runtime condition.
+/// Malformed arguments print a diagnostic and return 2. Help and version
+/// requests print to stdout and return 0, without terminating the caller.
 #[krabka_macros::argv_entrypoint]
 pub async fn run_from_args_with_records(extra: Vec<MetadataRecord>) -> i32 {
-    run_with_records(Cli::parse_from(argv).args, extra).await
+    match Cli::try_parse_from(argv) {
+        Ok(cli) => run_with_records(cli.args, extra).await,
+        Err(error) => {
+            let _ = error.print();
+            if error.use_stderr() { 2 } else { 0 }
+        }
+    }
 }

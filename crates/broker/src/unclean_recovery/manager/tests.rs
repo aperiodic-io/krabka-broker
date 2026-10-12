@@ -28,6 +28,8 @@ use crate::{
     unclean_recovery::{BackgroundRecovery, selection::ElectionBasis},
 };
 
+mod commit_fencing;
+
 /// A metadata source over `image` whose controller leader is `leader`.
 ///
 /// These paths read only the leader, the image, and what `run_recovery`
@@ -208,7 +210,7 @@ fn approved_job() -> RecoveryJob {
 
 async fn commit_fixture_election(
     manager: &UncleanRecoveryManager,
-    image: &MetadataImage,
+    image: &Arc<MetadataImage>,
     job: &RecoveryJob,
     election: Election,
 ) -> RecoveryOutcome {

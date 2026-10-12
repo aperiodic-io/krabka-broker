@@ -25,6 +25,41 @@ krabka_macros::remote_started_segment!(synthetic_started_segment, krabka_remote_
 krabka_macros::remote_metadata_missing!(check_missing_partition, krabka_remote_storage);
 
 #[tokio::test(flavor = "multi_thread")]
+async fn epoch_lists_follow_assignment_and_readiness_for_cached_segments() {
+    let log = HwmFlakyLog::new(4);
+    let (manager, partition) = seeded_manager(log.clone()).await;
+    manager.reconcile_assignment(&[partition]).await;
+    wait_ready(&manager, &tp()).await;
+    let expected = manager
+        .list_remote_log_segments_by_epoch(&tp(), LeaderEpoch(0))
+        .unwrap();
+    assert!(expected.len() == 1);
+    manager.reconcile_assignment(&[]).await;
+    assert!(
+        manager
+            .list_remote_log_segments_by_epoch(&tp(), LeaderEpoch(0))
+            .unwrap()
+            .is_empty()
+    );
+    log.set_fail_hwm(true);
+    manager.reconcile_assignment(&[partition]).await;
+    assert!(
+        matches!(manager.list_remote_log_segments_by_epoch(&tp(), LeaderEpoch(0)),
+        Err(RemoteStorageError::NotReady { partition: found }) if found == partition)
+    );
+    log.set_fail_hwm(false);
+    manager.reconcile_assignment(&[partition]).await;
+    wait_ready(&manager, &tp()).await;
+    assert!(
+        manager
+            .list_remote_log_segments_by_epoch(&tp(), LeaderEpoch(0))
+            .unwrap()
+            == expected
+    );
+    manager.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn add_then_remove_drives_assignment_and_readiness() {
     let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
     let (m, mp) = seeded_manager(log).await;

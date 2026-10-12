@@ -419,8 +419,16 @@ pub struct LogConfig {
     /// `max_timestamp + delivery_clock_uncertainty <= now`. If the clock
     /// reads `c` while true time is somewhere in `[c - e, c + e]`, then
     /// `c >= activation + e` proves true time has reached the activation
-    /// instant. Delivery is therefore never early, and it is late by at most
-    /// `2 * delivery_clock_uncertainty`.
+    /// instant. Provided the declared bound holds, this test does not deliver
+    /// early. The clock test's additional delay is at most twice the bound;
+    /// polling, unavailable storage and an earlier pending batch can delay
+    /// delivery further.
+    ///
+    /// Changes are prospective for the published delivery prefix: increasing
+    /// this bound or moving the clock backward does not retract offsets the
+    /// in-memory watermark already released. The new bound governs subsequent
+    /// advances and pending batches. A restart rebuilds that watermark from
+    /// retained records using the current bound; the watermark is not durable.
     #[default(DEFAULT_DELIVERY_CLOCK_UNCERTAINTY)]
     pub delivery_clock_uncertainty: Time,
 }

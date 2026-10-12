@@ -14,7 +14,10 @@ use krabka_security::Principal;
 use krabka_units::{millis, minutes, secs};
 use qubit_clock::ManualMonotonicClock;
 use uuid::Uuid;
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{body_json, method},
+};
 
 use super::*;
 use crate::test_support::sasl_principal;
@@ -64,15 +67,6 @@ macro_rules! request_fixture {
 fn check_alice_authorization(auth: &OpaAuthorizer, expected: AuthorizationResult) {
     request_fixture!(image, p, h, "alice");
     assert!(auth.authorize(&image, &req(&p, &h, "t")) == expected);
-}
-
-async fn failing_registry() -> MockServer {
-    let mock = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(500))
-        .mount(&mock)
-        .await;
-    mock
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -175,20 +169,33 @@ async fn nonpositive_cache_ttl_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn http_error_with_allow_on_error_true_returns_allow() {
-    let mock = failing_registry().await;
-
-    // allow_on_error=true → 500 maps to Allow.
-    let auth = authorizer(HashSet::new(), opa_url(&mock), true);
-    check_alice_authorization(&auth, AuthorizationResult::Allow);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn http_error_with_allow_on_error_false_returns_deny() {
-    let mock = failing_registry().await;
-
-    let auth = authorizer(HashSet::new(), opa_url(&mock), false);
-    check_alice_authorization(&auth, AuthorizationResult::Deny);
+async fn http_error_status_uses_and_caches_the_error_policy_regardless_of_body() {
+    for status in [401, 403, 500, 503] {
+        for body_result in [false, true] {
+            for allow_on_error in [false, true] {
+                let mock = MockServer::start().await;
+                Mock::given(method("POST"))
+                    .respond_with(
+                        ResponseTemplate::new(status)
+                            .set_body_json(serde_json::json!({"result": body_result})),
+                    )
+                    .expect(1)
+                    .mount(&mock)
+                    .await;
+                let auth = authorizer(HashSet::new(), opa_url(&mock), allow_on_error);
+                let expected = if allow_on_error {
+                    AuthorizationResult::Allow
+                } else {
+                    AuthorizationResult::Deny
+                };
+                // A valid decision body on an error response must not override
+                // the error policy. The second call reuses that policy decision.
+                for _ in 0..2 {
+                    check_alice_authorization(&auth, expected);
+                }
+            }
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -248,4 +255,29 @@ async fn decision_ttl_reports_the_configured_cache_expiry() {
         false,
     );
     assert!(auth.decision_ttl() == Some(Duration::from_secs(60)));
+}
+
+/// A policy matching the published plugin's action and principal paths must
+/// receive those fields, rather than an undefined custom `input.request`.
+#[tokio::test(flavor = "multi_thread")]
+async fn published_kafka_plugin_policy_receives_action_and_context() {
+    let mock = MockServer::start().await;
+    let expected = serde_json::json!({"input": {
+        "action": { "operation": "READ", "resourcePattern": {
+            "resourceType": "TOPIC", "name": "orders", "patternType": "LITERAL", "unknown": false
+        }, "resourceReferenceCount": 1, "logIfAllowed": true, "logIfDenied": true },
+        "requestContext": { "principal": { "principalType": "User", "name": "alice" },
+            "clientAddress": "/1.2.3.4" }
+    }});
+    Mock::given(method("POST"))
+        .and(body_json(expected))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"result": true})))
+        .expect(1)
+        .mount(&mock)
+        .await;
+    let auth = authorizer(HashSet::new(), opa_url(&mock), false);
+    request_fixture!(image, principal, host, "alice");
+    assert!(
+        auth.authorize(&image, &req(&principal, &host, "orders")) == AuthorizationResult::Allow
+    );
 }

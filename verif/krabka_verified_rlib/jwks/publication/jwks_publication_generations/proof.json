@@ -5,7 +5,7 @@
       "vc_is_multiple_of": { "prover": "alt-ergo", "time": 0.007 },
       "vc_jwks_publication_generations": {
         "prover": "alt-ergo",
-        "time": 0.02
+        "time": 0.051
       }
     }
   }

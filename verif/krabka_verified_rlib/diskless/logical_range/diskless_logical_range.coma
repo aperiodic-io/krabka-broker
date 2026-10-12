@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 194 0 194 86 *)
+(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 195 0 195 86 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
@@ -6,16 +6,16 @@ let%span slog_index = "/workspace/crates/verified/src/log_index.rs" 13 19 14 48
 let%span slog_index'0 = "/workspace/crates/verified/src/log_index.rs" 15 18 15 43
 let%span slog_index'1 = "/workspace/crates/verified/src/log_index.rs" 16 18 16 89
 let%span slog_index'2 = "/workspace/crates/verified/src/log_index.rs" 17 18 18 49
-let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 195 13 195 69
-let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 196 13 196 14
-let%span slogical_range'1 = "/workspace/crates/verified/src/diskless/logical_range.rs" 199 21 199 22
-let%span slogical_range'2 = "/workspace/crates/verified/src/diskless/logical_range.rs" 199 16 199 22
-let%span slogical_range'3 = "/workspace/crates/verified/src/diskless/logical_range.rs" 200 20 200 34
-let%span slogical_range'4 = "/workspace/crates/verified/src/diskless/logical_range.rs" 200 20 200 36
-let%span slogical_range'5 = "/workspace/crates/verified/src/diskless/logical_range.rs" 202 19 202 32
-let%span slogical_range'6 = "/workspace/crates/verified/src/diskless/logical_range.rs" 179 11 180 40
-let%span slogical_range'7 = "/workspace/crates/verified/src/diskless/logical_range.rs" 181 11 182 39
-let%span slogical_range'8 = "/workspace/crates/verified/src/diskless/logical_range.rs" 183 10 192 1
+let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 196 13 196 51
+let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 197 13 197 14
+let%span slogical_range'1 = "/workspace/crates/verified/src/diskless/logical_range.rs" 200 21 200 22
+let%span slogical_range'2 = "/workspace/crates/verified/src/diskless/logical_range.rs" 200 16 200 22
+let%span slogical_range'3 = "/workspace/crates/verified/src/diskless/logical_range.rs" 201 20 201 34
+let%span slogical_range'4 = "/workspace/crates/verified/src/diskless/logical_range.rs" 201 20 201 36
+let%span slogical_range'5 = "/workspace/crates/verified/src/diskless/logical_range.rs" 203 19 203 32
+let%span slogical_range'6 = "/workspace/crates/verified/src/diskless/logical_range.rs" 180 11 181 40
+let%span slogical_range'7 = "/workspace/crates/verified/src/diskless/logical_range.rs" 182 11 183 39
+let%span slogical_range'8 = "/workspace/crates/verified/src/diskless/logical_range.rs" 184 10 193 1
 
 use creusot.slice.Slice64
 use creusot.int.Int64
@@ -56,7 +56,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let diskless_logical_range [#"/workspace/crates/verified/src/diskless/logical_range.rs" 194 0 194 86]
+let diskless_logical_range [#"/workspace/crates/verified/src/diskless/logical_range.rs" 195 0 195 86]
   (entries: Slice64.slice tup2_i64_i64) (requested: Int64.t) (return (x: t_Option_usize)) =
 {[@stop_split] [@expl:diskless_logical_range requires] ([@stop_split] [@expl:diskless_logical_range requires #0] [%#slogical_range'6] forall i: int. 0
           <= i

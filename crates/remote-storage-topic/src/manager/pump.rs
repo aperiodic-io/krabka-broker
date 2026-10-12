@@ -9,21 +9,24 @@
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use krabka_remote_storage::{InmemoryRemoteLogMetadataManager, RemoteLogMetadataManager};
-use tokio::sync::watch;
+use krabka_remote_storage::{
+    InmemoryRemoteLogMetadataManager, RemoteLogMetadataManager, RemoteStorageError,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use super::mutations::MutationWaiters;
 use crate::{log::MetadataEventStream, serde::MetadataEvent};
 
 pub async fn pump_loop(
     mut stream: MetadataEventStream,
     inner: Arc<InmemoryRemoteLogMetadataManager>,
     applied: Arc<std::sync::Mutex<Vec<i64>>>,
-    applied_tx: watch::Sender<u64>,
+    mutation_waiters: Arc<MutationWaiters>,
     shutdown: CancellationToken,
 ) {
-    let mut version: u64 = 0;
+    // A closed stream also closes local mutation waits and the snapshotter.
+    let _close_on_exit = shutdown.clone().drop_guard();
     loop {
         let next = tokio::select! {
             biased;
@@ -31,31 +34,30 @@ pub async fn pump_loop(
             n = stream.next() => n,
         };
         let Some(record) = next else { return };
-        if !record.tombstone {
+        let mut waiters = tokio::select! {
+            biased;
+            () = shutdown.cancelled() => return,
+            waiters = mutation_waiters.lock() => waiters,
+        };
+        let outcome = if record.tombstone {
+            Ok(())
+        } else {
             match MetadataEvent::decode(&record.payload) {
-                Ok(MetadataEvent::AddSegment(md)) => {
-                    if let Err(e) = inner.add_remote_log_segment_metadata(md) {
-                        warn!(error = ?e, partition = record.partition, offset = record.offset,
-                              "topic-based RLMM: add replay rejected");
-                    }
-                }
-                Ok(MetadataEvent::UpdateSegment(u)) => {
-                    if let Err(e) = inner.update_remote_log_segment_metadata(u) {
-                        warn!(error = ?e, partition = record.partition, offset = record.offset,
-                              "topic-based RLMM: update replay rejected");
-                    }
-                }
+                Ok(MetadataEvent::AddSegment(md)) => inner.add_remote_log_segment_metadata(md),
+                Ok(MetadataEvent::UpdateSegment(u)) => inner.update_remote_log_segment_metadata(u),
                 Ok(MetadataEvent::PartitionDelete(d)) => {
-                    if let Err(e) = inner.put_remote_partition_delete_metadata(d) {
-                        warn!(error = ?e, partition = record.partition, offset = record.offset,
-                              "topic-based RLMM: partition-delete replay rejected");
-                    }
+                    inner.put_remote_partition_delete_metadata(d)
                 }
-                Err(e) => {
-                    warn!(error = ?e, partition = record.partition, offset = record.offset,
-                          "topic-based RLMM: failed to decode event");
-                }
+                Err(error) => Err(RemoteStorageError::InvalidArgument(error.to_string())),
             }
+        };
+        if let Err(error) = &outcome {
+            warn!(
+                ?error,
+                partition = record.partition,
+                offset = record.offset,
+                "topic-based RLMM: replay rejected"
+            );
         }
         if let Ok(idx) = usize::try_from(record.partition) {
             let mut a = applied.lock().expect("applied mutex poisoned");
@@ -63,8 +65,9 @@ pub async fn pump_loop(
                 a[idx] = record.offset;
             }
         }
-        version = version.wrapping_add(1);
-        let _ = applied_tx.send(version);
+        if let Some(reply) = waiters.remove(&(record.partition, record.offset)) {
+            let _ = reply.send(outcome);
+        }
     }
 }
 

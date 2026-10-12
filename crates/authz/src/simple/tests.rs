@@ -292,6 +292,218 @@ mod authorize_by_resource_type {
         );
     }
 
+    #[test]
+    fn prefix_grants_survive_finite_literal_and_narrower_prefix_exclusions() {
+        for (case, exclusions, witness, expected) in [
+            (
+                "literal collision with the former synthetic probe",
+                vec![
+                    (PatternType::Literal, "ord"),
+                    (PatternType::Literal, "ord\u{10ffff}"),
+                ],
+                "orders",
+                AuthorizationResult::Allow,
+            ),
+            (
+                "narrower prefix collision with the former probe",
+                vec![
+                    (PatternType::Literal, "ord"),
+                    (PatternType::Prefixed, "ord\u{10ffff}"),
+                    (PatternType::Prefixed, "order"),
+                    (PatternType::Prefixed, "ord-"),
+                ],
+                "ordinary",
+                AuthorizationResult::Allow,
+            ),
+            (
+                "the same prefix denies every descendant",
+                vec![(PatternType::Prefixed, "ord")],
+                "orders",
+                AuthorizationResult::Deny,
+            ),
+            (
+                "a broader prefix denies every descendant",
+                vec![(PatternType::Prefixed, "or")],
+                "orders",
+                AuthorizationResult::Deny,
+            ),
+            (
+                "the wildcard denies every descendant",
+                vec![(PatternType::Literal, "*")],
+                "orders",
+                AuthorizationResult::Deny,
+            ),
+        ] {
+            let grant = topic_acl(AclSetup {
+                op: AclOperation::Write,
+                pattern: PatternType::Prefixed,
+                name: "ord",
+                ..Default::default()
+            });
+            let denies = exclusions.into_iter().map(|(pattern, name)| {
+                topic_acl(AclSetup {
+                    permission: PermissionType::Deny,
+                    op: AclOperation::Write,
+                    pattern,
+                    name,
+                    ..Default::default()
+                })
+            });
+            let image = acl_image(std::iter::once(grant).chain(denies));
+            let caller = AliceAuthorizer::default();
+            assert2::check!(
+                caller.authorize(&image, witness, AclOperation::Write) == expected,
+                "{case}: concrete resource"
+            );
+            assert2::check!(
+                caller.authorize_by_resource_type(&image, ResourceType::Topic, AclOperation::Write)
+                    == expected,
+                "{case}: resource type"
+            );
+        }
+    }
+
+    #[test]
+    fn many_finite_exclusions_cannot_hide_a_remaining_prefix_grant() {
+        for count in [1, 32, 256] {
+            let mut entries = vec![topic_acl(AclSetup {
+                op: AclOperation::Write,
+                pattern: PatternType::Prefixed,
+                name: "ord",
+                ..Default::default()
+            })];
+            for index in 0..count {
+                for pattern in [PatternType::Literal, PatternType::Prefixed] {
+                    entries.push(topic_acl(AclSetup {
+                        permission: PermissionType::Deny,
+                        op: AclOperation::Write,
+                        pattern,
+                        name: &format!("ord-{index}"),
+                        ..Default::default()
+                    }));
+                }
+            }
+            entries.push(topic_acl(AclSetup {
+                permission: PermissionType::Deny,
+                op: AclOperation::Write,
+                name: "ord",
+                ..Default::default()
+            }));
+            let image = acl_image(entries);
+            let caller = AliceAuthorizer::default();
+            caller.check(
+                &image,
+                "orders",
+                AclOperation::Write,
+                AuthorizationResult::Allow,
+            );
+            caller.check_resource_type(
+                &image,
+                ResourceType::Topic,
+                AclOperation::Write,
+                AuthorizationResult::Allow,
+            );
+        }
+    }
+
+    #[test]
+    fn literal_and_wildcard_grants_follow_kafka_pattern_dominance() {
+        for (grant, denied_pattern, denied_name, expected) in [
+            (
+                "orders",
+                PatternType::Literal,
+                "orders",
+                AuthorizationResult::Deny,
+            ),
+            (
+                "orders",
+                PatternType::Prefixed,
+                "ord",
+                AuthorizationResult::Deny,
+            ),
+            (
+                "orders",
+                PatternType::Prefixed,
+                "orders-",
+                AuthorizationResult::Allow,
+            ),
+            (
+                "*",
+                PatternType::Literal,
+                "hardcode",
+                AuthorizationResult::Allow,
+            ),
+            (
+                "*",
+                PatternType::Prefixed,
+                "hard",
+                AuthorizationResult::Allow,
+            ),
+            ("*", PatternType::Literal, "*", AuthorizationResult::Deny),
+        ] {
+            let image = acl_image([
+                topic_acl(AclSetup {
+                    op: AclOperation::Write,
+                    name: grant,
+                    ..Default::default()
+                }),
+                topic_acl(AclSetup {
+                    permission: PermissionType::Deny,
+                    op: AclOperation::Write,
+                    pattern: denied_pattern,
+                    name: denied_name,
+                    ..Default::default()
+                }),
+            ]);
+            check_resource_type_access(&image, ResourceType::Topic, AclOperation::Write, expected);
+        }
+    }
+
+    #[test]
+    fn resource_type_denials_match_the_caller_host_operation_and_type() {
+        for excluded in [
+            AclSetup {
+                principal: "User:bob",
+                op: AclOperation::Write,
+                ..Default::default()
+            },
+            AclSetup {
+                host: "192.0.2.1",
+                op: AclOperation::Write,
+                ..Default::default()
+            },
+            AclSetup {
+                op: AclOperation::Read,
+                ..Default::default()
+            },
+            AclSetup {
+                rt: ResourceType::Group,
+                op: AclOperation::Write,
+                ..Default::default()
+            },
+        ] {
+            let image = acl_image([
+                topic_acl(AclSetup {
+                    op: AclOperation::Write,
+                    pattern: PatternType::Prefixed,
+                    name: "ord",
+                    ..Default::default()
+                }),
+                topic_acl(AclSetup {
+                    permission: PermissionType::Deny,
+                    name: "*",
+                    ..excluded
+                }),
+            ]);
+            check_resource_type_access(
+                &image,
+                ResourceType::Topic,
+                AclOperation::Write,
+                AuthorizationResult::Allow,
+            );
+        }
+    }
+
     /// Kafka's default `authorizeByResourceType` first authorizes the
     /// hard-coded topic name `hardcode`. Under
     /// `allow.everyone.if.no.acl.found` that probe is allowed whenever no

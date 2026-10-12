@@ -65,10 +65,10 @@ pub struct KipAnnotation {
 /// `crates/`.
 pub const MIXED_QUORUM_KEY: &str = "mixed-quorum";
 
-/// The key of the KIP whose forwarding half the same decision rules out. The
-/// controller listener serves `Envelope`; nothing in the tree builds one,
-/// because a Krabka broker reaches its controller over the krabka-private
-/// `SubmitChange` RPC, and a JVM controller is not a peer krabka speaks to.
+/// The KIP-590 forwarding row. Broker admin handlers build an `Envelope`
+/// carrying the client's identity before the active Krabka controller plans
+/// metadata-dependent operations. Interoperation with JVM controllers remains
+/// outside the mixed-quorum scope decision.
 pub const FORWARDING_KEY: &str = "KIP-590";
 
 /// Where the out-of-scope decision for mixed quorums and JVM-side forwarding
@@ -658,7 +658,7 @@ pub const KIP_ANNOTATIONS: &[KipAnnotation] = &[
             "crates/broker/tests/kip590_envelope.rs",
             "crates/broker/tests/jvm_role_separated_admin.rs",
         ],
-        note: "The broker side of KIP-590 is not needed: a Krabka broker reaches its controller over the krabka-private `SubmitChange` RPC (`crates/broker/src/metadata_source/observer_source.rs`), and a JVM controller is outside the compatibility target (crates/raft/src/lib.rs:54).",
+        note: "Metadata-dependent admin operations are forwarded in an Envelope carrying the client identity and planned on the active Krabka controller. JVM controller interoperation remains outside the compatibility target (crates/raft/src/lib.rs:54).",
     },
     KipAnnotation {
         key: "KIP-595",
@@ -1586,8 +1586,9 @@ static CATALOG_BY_KEY: std::sync::LazyLock<std::collections::BTreeMap<i16, Catal
 /// exempt in Kafka -- every version of it reaches `KafkaApis`, which answers
 /// `UNSUPPORTED_VERSION` -- so it is never disabled here. A version outside
 /// the decodable range is not this function's concern: [`dispatched_apis`]
-/// refuses it first. A krabka-private api key, at or above 1000, is not in
-/// the catalog and never disabled.
+/// refuses it first. Catalogued krabka-private keys treat their whole
+/// decodable range as released. Other private dispatch entries have no
+/// catalog row and are not disabled by this lookup.
 #[must_use]
 pub fn is_disabled_version(api_key: i16, version: i16, gates: VersionGates) -> bool {
     if api_key == krabka_protocol::owned::api_versions_request::API_KEY {

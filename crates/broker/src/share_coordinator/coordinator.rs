@@ -17,10 +17,11 @@
 //! the keys of that partition. When the broker stops leading the partition,
 //! the coordinator drops the keys and answers `NOT_COORDINATOR`.
 //!
-//! Each state-machine method holds a read guard on the leadership map from
-//! its status check to its last in-memory change. A load or an unload takes
-//! the write guard, so it never interleaves with an operation that is still
-//! running on the same partition.
+//! Operations on one state partition run serially, including initialization
+//! of a key that has no state cell yet. Each method holds a read guard on the
+//! leadership map from its status check to its last in-memory change. A load
+//! or an unload takes the write guard, so it never interleaves with an operation
+//! that is still running on the same partition.
 //!
 //! An operation answers only when the records of its partition are
 //! committed, as a write of Kafka's `CoordinatorRuntime` does. The coordinator
@@ -32,6 +33,11 @@
 //! gets a new leader or a new leader epoch before that, the operation answers
 //! `NOT_COORDINATOR`. If the wait takes longer than
 //! `share.coordinator.write.timeout.ms`, it answers `COORDINATOR_NOT_AVAILABLE`.
+//! An append that times out or loses its caller can still complete in the
+//! writer. Its shard stops serving operations and wakes the supervisor to
+//! drain prior writer commands and replay, including when metadata has not
+//! changed. Requests during recovery answer `COORDINATOR_LOAD_IN_PROGRESS`;
+//! a retry wakes another bounded recovery attempt after a failed load.
 //!
 //! This file holds the coordinator's identity: the shared types, the struct,
 //! and the leadership and partitioning accessors. The state machine lives in
@@ -51,7 +57,7 @@ use krabka_ids::PartitionIndex;
 use krabka_log::Offset;
 use krabka_metadata::MetadataImage;
 use qubit_clock::WallClock;
-use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock, RwLockReadGuard};
 
 pub(crate) mod jobs;
 mod persist;
@@ -196,8 +202,8 @@ pub(crate) const UNINITIALIZED_START_OFFSET: i64 = -1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoadStatus {
     /// The metadata image names this broker as leader, but the partition log
-    /// is not open locally yet. The next refresh after the log opens starts
-    /// the load.
+    /// is not open locally yet, or an indeterminate append still needs a
+    /// successful writer barrier and replay. The next refresh retries load.
     Pending,
     /// A replay of the partition log runs.
     Loading,
@@ -234,10 +240,11 @@ pub(super) struct Term {
     pub(super) leader_epoch: i32,
 }
 
-/// A read guard on the leadership map, held while one state partition is
-/// active, and the term that the partition serves.
+/// The serialized operation and leadership guards of one active state
+/// partition, and the term that the partition serves.
 pub(super) struct Active<'a> {
     _led: RwLockReadGuard<'a, LeaderPartitions>,
+    _operation: OwnedMutexGuard<()>,
     pub(super) term: Term,
 }
 
@@ -265,6 +272,15 @@ pub(crate) struct ShareCoordinator {
     /// The `__share_group_state` partitions this broker leads, with the load
     /// status of each.
     leader_partitions: RwLock<LeaderPartitions>,
+    /// Serializes shard operations even when their logical key is absent.
+    /// The map has at most one entry per configured state partition.
+    operation_locks: DashMap<PartitionIndex, Arc<Mutex<()>>>,
+    /// An accepted append may outlive its caller without applying live state.
+    /// Only a writer barrier followed by successful replay clears this fence.
+    uncertain_appends: DashMap<PartitionIndex, ()>,
+    /// Wakes recovery without requiring a metadata change. Failed attempts
+    /// wait for the next client retry or metadata change rather than spinning.
+    recovery_needed: tokio::sync::Notify,
     /// Source of [`LedPartition::generation`].
     next_generation: AtomicU64,
     config: ShareCoordinatorConfig,
@@ -299,6 +315,9 @@ impl ShareCoordinator {
             partitions,
             state: DashMap::new(),
             leader_partitions: RwLock::new(HashMap::new()),
+            operation_locks: DashMap::new(),
+            uncertain_appends: DashMap::new(),
+            recovery_needed: tokio::sync::Notify::new(),
             next_generation: AtomicU64::new(0),
             config,
             wall_clock,
@@ -308,6 +327,12 @@ impl ShareCoordinator {
     /// The current time in milliseconds since the epoch.
     fn now_ms(&self) -> i64 {
         epoch_millis(self.wall_clock.now())
+    }
+
+    /// Wait for an indeterminate append or a client retry to request a
+    /// bounded replay against the supervisor's current metadata image.
+    pub(crate) async fn recovery_requested(&self) {
+        self.recovery_needed.notified().await;
     }
 
     /// Applies the leadership of `image` to the led partitions.
@@ -350,6 +375,10 @@ impl ShareCoordinator {
                 let reload = entry
                     .is_some_and(|e| matches!(e.status, LoadStatus::Pending | LoadStatus::Failed))
                     && local;
+                let reload = reload
+                    || (local
+                        && entry.is_some_and(|e| e.status == LoadStatus::Active)
+                        && self.uncertain_appends.contains_key(&partition));
                 if !new_term && !reload {
                     continue;
                 }
@@ -401,6 +430,8 @@ impl ShareCoordinator {
                     entry.leader_epoch != *leader_epoch
                         || (matches!(entry.status, LoadStatus::Pending | LoadStatus::Failed)
                             && self.partitions.contains(bootstrap::TOPIC, *partition))
+                        || (entry.status == LoadStatus::Active
+                            && self.uncertain_appends.contains_key(partition))
                 })
             })
     }
@@ -419,7 +450,15 @@ impl ShareCoordinator {
             .read()
             .await
             .get(&state_partition)
-            .map(|led| led.status)
+            .map(|led| {
+                if led.status == LoadStatus::Active
+                    && self.uncertain_appends.contains_key(&state_partition)
+                {
+                    LoadStatus::Pending
+                } else {
+                    led.status
+                }
+            })
     }
 
     /// Returns a read guard on the leadership map, and the term of
@@ -434,7 +473,21 @@ impl ShareCoordinator {
         &self,
         state_partition: PartitionIndex,
     ) -> Result<Active<'_>, ShareErrorCode> {
+        let operation = self
+            .operation_locks
+            .entry(state_partition)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        // Wait before taking the leadership guard, so an unload can proceed
+        // while this operation is queued. Check the active term after the wait.
+        let operation = operation.lock_owned().await;
         let led = self.leader_partitions.read().await;
+        if led.contains_key(&state_partition)
+            && self.uncertain_appends.contains_key(&state_partition)
+        {
+            self.recovery_needed.notify_one();
+            return Err(COORDINATOR_LOAD_IN_PROGRESS);
+        }
         match led.get(&state_partition).copied() {
             Some(LedPartition {
                 status: LoadStatus::Active,
@@ -442,6 +495,7 @@ impl ShareCoordinator {
                 ..
             }) => Ok(Active {
                 _led: led,
+                _operation: operation,
                 term: Term {
                     partition: state_partition,
                     leader_epoch,

@@ -86,13 +86,14 @@ pub(super) fn published_trim_bounds_remote_breach_cleanup(
     let mut rows: Vec<RemoteRetentionSegment> = Vec::new();
     let mut i = 0usize;
     #[invariant(i@ <= finished@.len() && rows@.len() == i@)]
-    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> rows@[j].size == finished@[j].2
+    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> !rows@[j].blocked && rows@[j].size == finished@[j].2
         && !rows@[j].time_expired && rows@[j].log_start_breached == match checkpoint {
             None => false, Some(floor) => finished@[j].1@ < floor@,
         })]
     #[variant(finished@.len() - i@)]
     while i < finished.len() {
         rows.push(RemoteRetentionSegment {
+            blocked: false,
             log_start_breached: matches!(checkpoint, Some(floor) if finished[i].1 < floor),
             time_expired: false,
             size: finished[i].2,

@@ -5,7 +5,7 @@
 //! A write-once archive evicts nothing, so the pass ends before it lists.
 
 use krabka_ids::LeaderEpoch;
-use krabka_log::{LogConfig, Offset, SegmentExport};
+use krabka_log::{DeliveryPolicy, LogConfig, Offset, SegmentExport};
 use krabka_remote_storage::{RemoteLogSegmentMetadata, RemoteLogSegmentState, TopicIdPartition};
 use krabka_units::{
     ByteSize, Time,
@@ -18,6 +18,23 @@ use tracing::warn;
 
 use super::{NO_BYTES, archive::ArchiveMode, delete::delete_one_segment};
 use crate::metrics::RemoteTierPath;
+
+/// The archive's delete policy and the first segment whose activation scan
+/// did not prove it due. Its identity bounds every retention axis.
+#[derive(Clone, Copy)]
+pub(crate) struct RetentionProtection {
+    archive: ArchiveMode,
+    first_blocked: Option<uuid::Uuid>,
+}
+
+impl From<ArchiveMode> for RetentionProtection {
+    fn from(archive: ArchiveMode) -> Self {
+        Self {
+            archive,
+            first_blocked: None,
+        }
+    }
+}
 
 /// KIP-405: compute the set of finished remote segments the topic no longer
 /// keeps, in oldest-first order. The walk **stops at the first segment it
@@ -59,12 +76,14 @@ use crate::metrics::RemoteTierPath;
 ///
 /// The caller must already have filtered to `CopySegmentFinished` and sorted
 /// by `start_offset`.
+/// `protection.first_blocked` identifies the first scheduled candidate whose
+/// stored headers did not prove every batch active. All axes stop before it.
 ///
 /// [`ArchiveMode::WriteOnce`] evicts nothing, whatever the topic's retention
 /// settings and log start say: remote retention is a delete, and a write-once
 /// archive has none to give.
 pub(crate) fn remote_retention_eviction_set(
-    archive: ArchiveMode,
+    protection: RetentionProtection,
     finished: &[RemoteLogSegmentMetadata],
     retention: Option<Time>,
     retention_size: Option<ByteSize>,
@@ -88,6 +107,7 @@ pub(crate) fn remote_retention_eviction_set(
     let facts: Vec<RemoteRetentionSegment> = finished
         .iter()
         .map(|md| RemoteRetentionSegment {
+            blocked: protection.first_blocked == Some(md.remote_log_segment_id().id),
             log_start_breached: matches!(
                 deleted_below,
                 Some(floor) if md.end_offset() < floor.0
@@ -99,7 +119,7 @@ pub(crate) fn remote_retention_eviction_set(
         })
         .collect();
     let len = remote_retention_prefix(
-        archive != ArchiveMode::WriteOnce,
+        protection.archive != ArchiveMode::WriteOnce,
         &facts,
         size_debt.bytes_u64(),
     );
@@ -290,8 +310,27 @@ pub(crate) async fn remote_retention_pass(
         .map(RemoteLogSegmentMetadata::end_offset)
         .max();
 
+    let mut protection = RetentionProtection::from(archive);
+    let candidate = remote_retention_eviction_set(
+        protection,
+        &finished,
+        retention,
+        retention_size,
+        deleted_below,
+        now_ms,
+        local.only_local_size(highest_offset_in_remote_storage),
+    );
+    if log_config.delivery_policy == DeliveryPolicy::Scheduled {
+        protection.first_blocked = super::delivery::first_pending_remote_segment(
+            &candidate,
+            rsm,
+            log_config.delivery_clock_uncertainty,
+            now_ms,
+        )
+        .await;
+    }
     let evict = remote_retention_eviction_set(
-        archive,
+        protection,
         &finished,
         retention,
         retention_size,

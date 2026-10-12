@@ -122,7 +122,7 @@ pub fn promote_log(io: &dyn LogIo, dir: &Path, base: i64) -> Result<(), LogError
 /// Step 4, second half: rename every sidecar swap onto its final name.
 ///
 /// An offset or time index with neither form is created empty:
-/// `Segment::open` accepts an empty sparse index, and the open-time tail scan
+/// `Segment::open_unscanned` accepts an empty sparse index, and the open-time tail scan
 /// rebuilds it. A missing `.txnindex` is left missing, because a segment with
 /// no aborted transaction has none.
 ///

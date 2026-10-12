@@ -39,6 +39,8 @@ use crate::{
 const TOPIC: &str = "orders";
 const VERSION: i16 = elect_leaders_response::MAX_VERSION;
 
+mod commit_fencing;
+
 crate::test_support::context_helper!(client_id = "kafka-leader-election");
 
 fn gated_config() -> BreakGlassConfig {

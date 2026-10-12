@@ -19,8 +19,10 @@ use crate::transaction::first_unstable_frontier;
         && visibility.effective_lso@ == lso@.min(w.hw@)
         && visibility.response_lso@ == lso@.min(w.hw@)
         && visibility.response_hw@ == w.hw@
-        && visibility.read_committed_aborts && !visibility.out_of_range
-        && visibility.empty == (w.log_start@ >= w.hw@.min(w.deliverable@))
+        && visibility.read_committed_aborts
+        && visibility.out_of_range == (w.log_start@ > w.log_end@)
+        && visibility.empty == (w.log_start@ <= w.log_end@
+            && w.log_start@ >= w.hw@.min(w.deliverable@))
         && (forall<i: Int> 0 <= i && i < starts@.len()
             ==> visibility.limit_offset@ <= starts@[i]@),
 })]

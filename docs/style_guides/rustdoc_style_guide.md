@@ -225,4 +225,4 @@ Check for:
 5. **Feature flag references** — are conditional compilation features still valid?
 6. **Behavioural and KIP claims** — does the code do what the doc says, and does the referenced KIP still describe that behaviour?
 
-You should do this pass whenever you write docs or refactor code. The weekly `docs-freshness` CI job re-derives the generated reference from live code and flags drift. But that job catches the generated docs, not your hand-written rustdoc. The correctness pass is how your hand-written rustdoc stays true.
+You should do this pass whenever you write docs or refactor code. The `checks` job in [ci.yml](../../.github/workflows/ci.yml) compares generated references and quoted snippets on pull requests, pushes to `main`, and manual runs. Those checks cover generated documentation; hand-written rustdoc still needs this correctness pass.

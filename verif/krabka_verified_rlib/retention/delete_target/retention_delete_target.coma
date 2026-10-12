@@ -1,9 +1,9 @@
-(* #"/workspace/crates/verified/src/retention/delete_target.rs" 78 0 78 71 *)
+(* #"/workspace/crates/verified/src/retention/delete_target.rs" 84 0 84 71 *)
 
-let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 80 29 80 37
-let%span sdelete_target'0 = "/workspace/crates/verified/src/retention/delete_target.rs" 80 53 80 54
-let%span sdelete_target'1 = "/workspace/crates/verified/src/retention/delete_target.rs" 80 46 80 54
-let%span sdelete_target'2 = "/workspace/crates/verified/src/retention/delete_target.rs" 72 10 76 1
+let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 86 29 86 37
+let%span sdelete_target'0 = "/workspace/crates/verified/src/retention/delete_target.rs" 86 53 86 54
+let%span sdelete_target'1 = "/workspace/crates/verified/src/retention/delete_target.rs" 86 46 86 54
+let%span sdelete_target'2 = "/workspace/crates/verified/src/retention/delete_target.rs" 78 10 82 1
 
 use creusot.int.Int64
 use creusot.prelude.Any
@@ -27,7 +27,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let retention_delete_target [#"/workspace/crates/verified/src/retention/delete_target.rs" 78 0 78 71]
+let retention_delete_target [#"/workspace/crates/verified/src/retention/delete_target.rs" 84 0 84 71]
   (last_offset: t_Option_i64) (return (x: t_Option_i64)) = (! bb0
   [ bb0 = any [ br0 -> {last_offset = None} (! bb3) | br1 (x0: Int64.t) -> {last_offset = Some x0} (! bb4) ]
   | bb4 = s0

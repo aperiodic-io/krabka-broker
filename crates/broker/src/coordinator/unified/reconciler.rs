@@ -100,7 +100,7 @@ pub struct EpochExhausted;
 ///
 /// Returns [`EpochExhausted`] when the epoch must move and cannot; the group
 /// is then unchanged.
-pub fn update_subscription_metadata(
+pub(crate) fn update_subscription_metadata(
     group: &mut GroupState,
     input: &ReconcileInput,
     bump: bool,
@@ -123,7 +123,7 @@ pub fn update_subscription_metadata(
 ///
 /// Returns [`EpochExhausted`] when the epoch cannot move; the group is then
 /// unchanged.
-pub fn bump_with_metadata_hash(
+pub(crate) fn bump_with_metadata_hash(
     group: &mut GroupState,
     input: &ReconcileInput,
 ) -> Result<(), EpochExhausted> {
@@ -141,7 +141,7 @@ pub fn bump_with_metadata_hash(
 ///
 /// It returns the members whose target changed, sorted: the members for which
 /// Kafka writes a `ConsumerGroupTargetAssignmentMember` record.
-pub fn compute_target(
+pub(crate) fn compute_target(
     group: &mut GroupState,
     input: &ReconcileInput,
     assignor: &dyn Assignor,
@@ -186,7 +186,7 @@ pub fn compute_target(
 /// resolved to, which is what Kafka's `ConsumerGroup.subscribedTopicNames`
 /// counts.
 #[must_use]
-pub fn metadata_hash(group: &GroupState, input: &ReconcileInput) -> i64 {
+pub(crate) fn metadata_hash(group: &GroupState, input: &ReconcileInput) -> i64 {
     let mut topics: BTreeSet<&str> = BTreeSet::new();
     for member in group.members.values() {
         topics.extend(member.subscribed_topic_names.iter().map(String::as_str));
@@ -248,8 +248,8 @@ fn resolve_subscribed_topic_ids(
     out.into_iter().collect()
 }
 
-#[must_use]
-pub fn membership_topic_ids(group: &GroupState, input: &ReconcileInput) -> HashSet<Uuid> {
+#[cfg(test)]
+fn membership_topic_ids(group: &GroupState, input: &ReconcileInput) -> HashSet<Uuid> {
     let mut out = HashSet::new();
     for m in group.members.values() {
         collect_subscribed_topic_ids(group, m, &input.topic_id_by_name, &mut out);

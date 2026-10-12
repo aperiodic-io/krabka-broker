@@ -49,13 +49,13 @@
               { "prover": "alt-ergo", "time": 0.041 },
               { "prover": "alt-ergo", "time": 0.042 },
               { "prover": "z3", "time": 0.028 },
-              { "prover": "alt-ergo", "time": 0.024 }
+              { "prover": "alt-ergo", "time": 0.052 }
             ]
           }
         ]
       },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_elim_Break'0": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_elim_Break'0": { "prover": "alt-ergo", "time": 0.025 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.018 },
       "vc_elim_Continue'0": { "prover": "alt-ergo", "time": 0.014 },
       "vc_from_residual_Option_tup4_i64_i64_Vec_tup2_u64_i64_Global_Vec_i64_Global": {

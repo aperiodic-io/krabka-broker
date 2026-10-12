@@ -80,6 +80,20 @@ async fn get_missing_maps_to_not_found() {
 }
 
 #[tokio::test]
+async fn capped_get_accepts_the_limit_and_rejects_one_byte_over() {
+    let c = client();
+    let key = Path::from("capped");
+    c.put(&key, Bytes::from_static(b"123"), PutRequest::default())
+        .await
+        .unwrap();
+    assert!(c.get_capped(&key, 3).await.unwrap().as_ref() == b"123");
+    assert!(matches!(
+        c.get_capped(&key, 2).await.unwrap_err(),
+        ObjectStoreError::TooLarge { .. }
+    ));
+}
+
+#[tokio::test]
 async fn head_and_list_and_delete() {
     let c = client();
     let key = Path::from("p/x");
@@ -613,6 +627,42 @@ async fn put_from_path_aborts_when_cancelled() {
             .await
     });
     cancel_after_progress(task, &store.parts).await;
+    check_aborted_upload(&store).await;
+}
+
+#[tokio::test]
+async fn multipart_backpressure_bounds_pending_parts_and_cancellation_aborts() {
+    let (client, store) = failing_client(true);
+    let file = local_file(&[1; 400]);
+    let task = tokio::spawn(async move {
+        client
+            .put_from_path(
+                &Path::from("seg/bounded"),
+                file.path(),
+                8,
+                4,
+                PutRequest::default(),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let parts = store.parts.load(std::sync::atomic::Ordering::SeqCst);
+            assert!(parts <= MULTIPART_MAX_CONCURRENCY);
+            if parts == MULTIPART_MAX_CONCURRENCY {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("upload reached its capacity");
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+        assert!(store.parts.load(std::sync::atomic::Ordering::SeqCst) == MULTIPART_MAX_CONCURRENCY);
+    }
+    task.abort();
+    let _ = task.await;
     check_aborted_upload(&store).await;
 }
 

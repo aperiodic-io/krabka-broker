@@ -150,6 +150,86 @@ fn needed_metadata_partitions_covers_led_and_followed() {
     );
 }
 
+#[tokio::test]
+async fn topic_assignment_uses_discovered_count_after_config_changes() {
+    use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
+    use krabka_remote_storage_topic::{
+        InProcessMetadataEventLog, TopicBasedRemoteLogMetadataManager,
+    };
+    use uuid::Uuid;
+
+    let topic_id = Uuid::from_u128(0xABCD);
+    let node = krabka_audit::NodeId(7);
+    let image_for = |partition| {
+        let mut image = MetadataImage::new(Uuid::from_u128(1));
+        image.apply(&MetadataRecord::V1Topic(TopicRecord {
+            name: "orders".into(),
+            topic_id,
+            partitions: 3,
+            replication_factor: 1,
+        }));
+        image.apply(&MetadataRecord::V1Partition(replicated_partition(
+            ReplicatedPartitionSetup {
+                partition: krabka_ids::PartitionIndex(partition),
+                leader: node,
+                replicas: &[node],
+                ..Default::default()
+            },
+        )));
+        image
+    };
+    // The topic already exists with three partitions; the restarted broker's
+    // provisioning config has been changed to fifty.
+    let changed_config = KafkaRlmmConfig {
+        num_partitions: 50,
+        ..Default::default()
+    };
+    let first_image = image_for(0);
+    let first_expected = needed_metadata_partitions(&first_image, node, 3);
+    assert!(
+        first_expected
+            != needed_metadata_partitions(&first_image, node, changed_config.num_partitions)
+    );
+    let snapshot_dir = tempdir().unwrap();
+    let manager = TopicBasedRemoteLogMetadataManager::start(
+        InProcessMetadataEventLog::new(3),
+        tokio::runtime::Handle::current(),
+        snapshot_dir.path().join("manager"),
+        std::time::Duration::from_hours(1),
+    )
+    .unwrap();
+    let (image_tx, image_rx) = tokio::sync::watch::channel(Arc::new(first_image));
+    let shutdown = CancellationToken::new();
+    let assignment = tokio::spawn(run_topic_assignment(
+        manager.clone(),
+        node,
+        image_rx,
+        std::time::Duration::from_secs(1),
+        shutdown.clone(),
+    ));
+    for (expected, next_image) in [
+        (first_expected, None),
+        (
+            needed_metadata_partitions(&image_for(1), node, 3),
+            Some(image_for(1)),
+        ),
+    ] {
+        if let Some(image) = next_image {
+            image_tx.send(Arc::new(image)).unwrap();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while manager.assigned_metadata_partitions() != expected {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("discovered-count assignment reconciled");
+    }
+    shutdown.cancel();
+    assignment.await.unwrap();
+    manager.shutdown();
+}
+
 #[test]
 fn rlmm_backoff_doubles_then_caps() {
     use std::time::Duration;

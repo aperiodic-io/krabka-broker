@@ -17,7 +17,8 @@ use crate::{
 /// registration update that persists the loss, and returns any offset-aware
 /// recovery jobs (KIP-966) for the caller to enqueue. It runs on the
 /// controller leader only, and the caller gates on leadership. A submit
-/// failure is logged and does not propagate.
+/// failure is logged and returns no recovery jobs; a later heartbeat rebuilds
+/// the plan from the current image.
 pub(crate) async fn failover_offline_dirs(
     controller: &std::sync::Arc<dyn MetadataSource>,
     broker: krabka_raft::NodeId,
@@ -31,9 +32,10 @@ pub(crate) async fn failover_offline_dirs(
     let mut changes = plan.changes;
     changes.extend(retire_offline_dirs(&image, broker, offline));
     if !changes.is_empty()
-        && let Err(e) = controller.submit_change(changes).await
+        && let Err(e) = controller.submit_change_if_image(changes, image).await
     {
         tracing::warn!(error = %e, "offline-dir failover submit_change failed");
+        return Vec::new();
     }
     plan.recoveries
 }
@@ -141,6 +143,86 @@ mod tests {
         // No change submitted and no recovery needed.
         assert!(source.submitted_records().is_empty());
         assert!(recoveries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn offline_dir_failover_discards_stale_records_and_recovery_jobs() {
+        let bad = Uuid::from_u128(0xBAD);
+        let good = Uuid::from_u128(0x600D);
+        for deferred in [false, true] {
+            let mut old = two_replica_image(&[bad, good]);
+            old.apply(&MetadataRecord::V1BrokerRegistration(registration(
+                1,
+                &[bad, good],
+            )));
+            if deferred {
+                old.apply(&MetadataRecord::V1Partition(PartitionRecord {
+                    isr: vec![krabka_audit::NodeId(1)],
+                    ..old.partition("t", 0).expect("partition").clone()
+                }));
+                old.apply(&MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
+                    topic: "t".into(),
+                    overrides: maplit::btreemap! {"unclean.recovery.strategy".into() => "Balanced".into()},
+                }));
+            }
+            let mut newer = old.clone();
+            let expected = PartitionRecord {
+                leader: krabka_audit::NodeId(2),
+                isr: vec![krabka_audit::NodeId(2)],
+                leader_epoch: krabka_metadata::LeaderEpoch(9),
+                partition_epoch: 4,
+                ..old.partition("t", 0).expect("partition").clone()
+            };
+            newer.apply(&MetadataRecord::V1Partition(expected.clone()));
+            newer.apply(&MetadataRecord::V1BrokerRegistration(registration(
+                1,
+                &[good],
+            )));
+            let source = Arc::new(
+                FakeMetadataSource::builder()
+                    .image(old.clone())
+                    .leader(Some(krabka_audit::NodeId(1)))
+                    .before_guarded_submit(move |source| source.set_image(newer))
+                    .build(),
+            );
+            let controller: Arc<dyn MetadataSource> = source.clone();
+            let liveness = liveness_with(&[krabka_audit::NodeId(1), krabka_audit::NodeId(2)]).await;
+            let offline = maplit::hashset! {bad};
+            let metrics = BrokerMetrics::new();
+            let original = compute_offline_dir_failover_changes(
+                &old,
+                krabka_audit::NodeId(1),
+                &offline,
+                &liveness,
+                &metrics,
+            )
+            .await;
+            let expected_jobs = if deferred {
+                vec![("t".into(), 0, RecoveryStrategy::Balanced)]
+            } else {
+                Vec::new()
+            };
+            assert!(original.recoveries == expected_jobs);
+            let recoveries = failover_offline_dirs(
+                &controller,
+                krabka_audit::NodeId(1),
+                &offline,
+                &liveness,
+                &metrics,
+            )
+            .await;
+            assert!(recoveries.is_empty());
+            assert!(source.submitted_records().is_empty());
+            assert!(source.current_image().partition("t", 0) == Some(&expected));
+            assert!(
+                source
+                    .current_image()
+                    .broker(krabka_audit::NodeId(1))
+                    .expect("registration")
+                    .log_dirs
+                    == vec![good]
+            );
+        }
     }
 
     /// The registration record a broker publishes for `node_id` over `dirs`.

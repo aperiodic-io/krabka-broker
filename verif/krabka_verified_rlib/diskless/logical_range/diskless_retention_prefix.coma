@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 98 0 103 10 *)
+(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 99 0 104 10 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
@@ -9,52 +9,52 @@ let%span snum'2 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span sconvert = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/convert.rs" 274 26 274 51
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 104 16 104 36
-let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 105 15 105 16
-let%span slogical_range'1 = "/workspace/crates/verified/src/diskless/logical_range.rs" 107 21 107 41
-let%span slogical_range'2 = "/workspace/crates/verified/src/diskless/logical_range.rs" 107 44 107 45
-let%span slogical_range'3 = "/workspace/crates/verified/src/diskless/logical_range.rs" 107 21 107 45
-let%span slogical_range'4 = "/workspace/crates/verified/src/diskless/logical_range.rs" 109 27 109 63
-let%span slogical_range'5 = "/workspace/crates/verified/src/diskless/logical_range.rs" 116 30 116 35
-let%span slogical_range'6 = "/workspace/crates/verified/src/diskless/logical_range.rs" 117 30 117 36
-let%span slogical_range'7 = "/workspace/crates/verified/src/diskless/logical_range.rs" 121 22 121 49
-let%span slogical_range'8 = "/workspace/crates/verified/src/diskless/logical_range.rs" 122 28 122 43
-let%span slogical_range'9 = "/workspace/crates/verified/src/diskless/logical_range.rs" 120 24 120 56
-let%span slogical_range'10 = "/workspace/crates/verified/src/diskless/logical_range.rs" 119 24 119 71
-let%span slogical_range'11 = "/workspace/crates/verified/src/diskless/logical_range.rs" 118 24 118 52
-let%span slogical_range'12 = "/workspace/crates/verified/src/diskless/logical_range.rs" 123 30 124 82
-let%span slogical_range'13 = "/workspace/crates/verified/src/diskless/logical_range.rs" 125 38 125 56
-let%span slogical_range'14 = "/workspace/crates/verified/src/diskless/logical_range.rs" 125 27 125 57
-let%span slogical_range'15 = "/workspace/crates/verified/src/diskless/logical_range.rs" 125 16 125 57
-let%span slogical_range'16 = "/workspace/crates/verified/src/diskless/logical_range.rs" 126 27 126 28
-let%span slogical_range'17 = "/workspace/crates/verified/src/diskless/logical_range.rs" 126 16 126 28
-let%span slogical_range'18 = "/workspace/crates/verified/src/diskless/logical_range.rs" 128 32 128 50
-let%span slogical_range'19 = "/workspace/crates/verified/src/diskless/logical_range.rs" 128 12 128 51
-let%span slogical_range'20 = "/workspace/crates/verified/src/diskless/logical_range.rs" 133 18 133 24
-let%span slogical_range'21 = "/workspace/crates/verified/src/diskless/logical_range.rs" 144 14 144 32
-let%span slogical_range'22 = "/workspace/crates/verified/src/diskless/logical_range.rs" 142 16 143 72
-let%span slogical_range'23 = "/workspace/crates/verified/src/diskless/logical_range.rs" 135 16 141 5
-let%span slogical_range'24 = "/workspace/crates/verified/src/diskless/logical_range.rs" 134 16 134 35
-let%span slogical_range'25 = "/workspace/crates/verified/src/diskless/logical_range.rs" 146 22 147 66
-let%span slogical_range'26 = "/workspace/crates/verified/src/diskless/logical_range.rs" 148 26 148 43
-let%span slogical_range'27 = "/workspace/crates/verified/src/diskless/logical_range.rs" 150 29 150 48
-let%span slogical_range'28 = "/workspace/crates/verified/src/diskless/logical_range.rs" 151 20 151 25
-let%span slogical_range'29 = "/workspace/crates/verified/src/diskless/logical_range.rs" 153 30 153 44
-let%span slogical_range'30 = "/workspace/crates/verified/src/diskless/logical_range.rs" 153 19 153 45
-let%span slogical_range'31 = "/workspace/crates/verified/src/diskless/logical_range.rs" 156 20 156 25
-let%span slogical_range'32 = "/workspace/crates/verified/src/diskless/logical_range.rs" 162 26 162 48
-let%span slogical_range'33 = "/workspace/crates/verified/src/diskless/logical_range.rs" 165 15 165 16
-let%span slogical_range'34 = "/workspace/crates/verified/src/diskless/logical_range.rs" 165 8 165 16
-let%span slogical_range'35 = "/workspace/crates/verified/src/diskless/logical_range.rs" 89 11 89 52
-let%span slogical_range'36 = "/workspace/crates/verified/src/diskless/logical_range.rs" 90 11 90 55
-let%span slogical_range'37 = "/workspace/crates/verified/src/diskless/logical_range.rs" 91 10 91 42
-let%span slogical_range'38 = "/workspace/crates/verified/src/diskless/logical_range.rs" 92 10 92 71
-let%span slogical_range'39 = "/workspace/crates/verified/src/diskless/logical_range.rs" 93 10 94 68
-let%span slogical_range'40 = "/workspace/crates/verified/src/diskless/logical_range.rs" 95 10 96 75
-let%span slogical_range'41 = "/workspace/crates/verified/src/diskless/logical_range.rs" 10 10 10 15
-let%span slogical_range'42 = "/workspace/crates/verified/src/diskless/logical_range.rs" 13 8 17 9
-let%span slogical_range'43 = "/workspace/crates/verified/src/diskless/logical_range.rs" 56 8 66 13
-let%span slogical_range'44 = "/workspace/crates/verified/src/diskless/logical_range.rs" 30 8 30 89
+let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 105 16 105 36
+let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 106 15 106 16
+let%span slogical_range'1 = "/workspace/crates/verified/src/diskless/logical_range.rs" 108 21 108 41
+let%span slogical_range'2 = "/workspace/crates/verified/src/diskless/logical_range.rs" 108 44 108 45
+let%span slogical_range'3 = "/workspace/crates/verified/src/diskless/logical_range.rs" 108 21 108 45
+let%span slogical_range'4 = "/workspace/crates/verified/src/diskless/logical_range.rs" 110 27 110 63
+let%span slogical_range'5 = "/workspace/crates/verified/src/diskless/logical_range.rs" 117 30 117 35
+let%span slogical_range'6 = "/workspace/crates/verified/src/diskless/logical_range.rs" 118 30 118 36
+let%span slogical_range'7 = "/workspace/crates/verified/src/diskless/logical_range.rs" 122 22 122 49
+let%span slogical_range'8 = "/workspace/crates/verified/src/diskless/logical_range.rs" 123 28 123 43
+let%span slogical_range'9 = "/workspace/crates/verified/src/diskless/logical_range.rs" 121 24 121 56
+let%span slogical_range'10 = "/workspace/crates/verified/src/diskless/logical_range.rs" 120 24 120 71
+let%span slogical_range'11 = "/workspace/crates/verified/src/diskless/logical_range.rs" 119 24 119 52
+let%span slogical_range'12 = "/workspace/crates/verified/src/diskless/logical_range.rs" 124 30 125 82
+let%span slogical_range'13 = "/workspace/crates/verified/src/diskless/logical_range.rs" 126 38 126 56
+let%span slogical_range'14 = "/workspace/crates/verified/src/diskless/logical_range.rs" 126 27 126 57
+let%span slogical_range'15 = "/workspace/crates/verified/src/diskless/logical_range.rs" 126 16 126 57
+let%span slogical_range'16 = "/workspace/crates/verified/src/diskless/logical_range.rs" 127 27 127 28
+let%span slogical_range'17 = "/workspace/crates/verified/src/diskless/logical_range.rs" 127 16 127 28
+let%span slogical_range'18 = "/workspace/crates/verified/src/diskless/logical_range.rs" 129 32 129 50
+let%span slogical_range'19 = "/workspace/crates/verified/src/diskless/logical_range.rs" 129 12 129 51
+let%span slogical_range'20 = "/workspace/crates/verified/src/diskless/logical_range.rs" 134 18 134 24
+let%span slogical_range'21 = "/workspace/crates/verified/src/diskless/logical_range.rs" 145 14 145 32
+let%span slogical_range'22 = "/workspace/crates/verified/src/diskless/logical_range.rs" 143 16 144 72
+let%span slogical_range'23 = "/workspace/crates/verified/src/diskless/logical_range.rs" 136 16 142 5
+let%span slogical_range'24 = "/workspace/crates/verified/src/diskless/logical_range.rs" 135 16 135 35
+let%span slogical_range'25 = "/workspace/crates/verified/src/diskless/logical_range.rs" 147 22 148 66
+let%span slogical_range'26 = "/workspace/crates/verified/src/diskless/logical_range.rs" 149 26 149 43
+let%span slogical_range'27 = "/workspace/crates/verified/src/diskless/logical_range.rs" 151 29 151 48
+let%span slogical_range'28 = "/workspace/crates/verified/src/diskless/logical_range.rs" 152 20 152 25
+let%span slogical_range'29 = "/workspace/crates/verified/src/diskless/logical_range.rs" 154 30 154 44
+let%span slogical_range'30 = "/workspace/crates/verified/src/diskless/logical_range.rs" 154 19 154 45
+let%span slogical_range'31 = "/workspace/crates/verified/src/diskless/logical_range.rs" 157 20 157 25
+let%span slogical_range'32 = "/workspace/crates/verified/src/diskless/logical_range.rs" 163 26 163 48
+let%span slogical_range'33 = "/workspace/crates/verified/src/diskless/logical_range.rs" 166 15 166 16
+let%span slogical_range'34 = "/workspace/crates/verified/src/diskless/logical_range.rs" 166 8 166 16
+let%span slogical_range'35 = "/workspace/crates/verified/src/diskless/logical_range.rs" 90 11 90 52
+let%span slogical_range'36 = "/workspace/crates/verified/src/diskless/logical_range.rs" 91 11 91 55
+let%span slogical_range'37 = "/workspace/crates/verified/src/diskless/logical_range.rs" 92 10 92 42
+let%span slogical_range'38 = "/workspace/crates/verified/src/diskless/logical_range.rs" 93 10 93 71
+let%span slogical_range'39 = "/workspace/crates/verified/src/diskless/logical_range.rs" 94 10 95 68
+let%span slogical_range'40 = "/workspace/crates/verified/src/diskless/logical_range.rs" 96 10 97 75
+let%span slogical_range'41 = "/workspace/crates/verified/src/diskless/logical_range.rs" 11 10 11 15
+let%span slogical_range'42 = "/workspace/crates/verified/src/diskless/logical_range.rs" 14 8 18 9
+let%span slogical_range'43 = "/workspace/crates/verified/src/diskless/logical_range.rs" 57 8 67 13
+let%span slogical_range'44 = "/workspace/crates/verified/src/diskless/logical_range.rs" 31 8 31 89
 
 use creusot.slice.Slice64
 use creusot.int.Int64
@@ -128,7 +128,7 @@ let len_u64 (self_: Slice64.slice UInt64.t) (return (x: UInt64.t)) = any
 
 constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
 
-function indexed_bytes [#"/workspace/crates/verified/src/diskless/logical_range.rs" 11 0 11 60] (byte_lens: Seq.seq UInt64.t) (count: int) : int
+function indexed_bytes [#"/workspace/crates/verified/src/diskless/logical_range.rs" 12 0 12 60] (byte_lens: Seq.seq UInt64.t) (count: int) : int
 
 axiom indexed_bytes_def:
   forall byte_lens: Seq.seq UInt64.t, count: int [indexed_bytes byte_lens count]. indexed_bytes byte_lens count
@@ -158,11 +158,11 @@ let checked_sub'0 (self_: UInt128.t) (rhs: UInt128.t) (return (x: t_Option_u128)
       -> UInt128.t'int r = UInt128.t'int self_ - UInt128.t'int rhs)}
     (! return {result}) ]
 
-function size_debt_before [#"/workspace/crates/verified/src/diskless/logical_range.rs" 28 0 28 72] (byte_lens: Seq.seq UInt64.t) (budget: UInt64.t) (i: int) : int
+function size_debt_before [#"/workspace/crates/verified/src/diskless/logical_range.rs" 29 0 29 72] (byte_lens: Seq.seq UInt64.t) (budget: UInt64.t) (i: int) : int
  = [%#slogical_range'44] indexed_bytes byte_lens (Seq.length byte_lens) - UInt64.t'int budget
   - indexed_bytes byte_lens i
 
-predicate expirable [#"/workspace/crates/verified/src/diskless/logical_range.rs" 48 0 54 9] (max_timestamps: Seq.seq Int64.t) (byte_lens: Seq.seq UInt64.t) (last_offsets: Seq.seq Int64.t) (policy: t_DisklessRetentionPolicy) (i: int) =
+predicate expirable [#"/workspace/crates/verified/src/diskless/logical_range.rs" 49 0 55 9] (max_timestamps: Seq.seq Int64.t) (byte_lens: Seq.seq UInt64.t) (last_offsets: Seq.seq Int64.t) (policy: t_DisklessRetentionPolicy) (i: int) =
   [%#slogical_range'43] Int64.to_int (Seq.get last_offsets i) < Int64.to_int policy.log_start_offset
   \/ match policy.retention_bytes with
       | Some'0 budget -> ge_log_Int (size_debt_before byte_lens budget i - UInt64.t'int (Seq.get byte_lens i)) 0
@@ -187,7 +187,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let diskless_retention_prefix [#"/workspace/crates/verified/src/diskless/logical_range.rs" 98 0 103 10]
+let diskless_retention_prefix [#"/workspace/crates/verified/src/diskless/logical_range.rs" 99 0 104 10]
   (max_timestamps: Slice64.slice Int64.t) (byte_lens: Slice64.slice UInt64.t) (last_offsets: Slice64.slice Int64.t)
   (policy: t_DisklessRetentionPolicy) (return (x: UInt64.t)) =
 {[@stop_split] [@expl:diskless_retention_prefix requires] ([@stop_split] [@expl:diskless_retention_prefix requires #0] [%#slogical_range'35] Seq.length (Slice64.view max_timestamps)

@@ -24,8 +24,8 @@ let%span sreplay_start'2 = "/workspace/crates/verified/src/producer_snapshot/rep
 let%span ssequence_decision = "/workspace/crates/verified/src/producer/sequence_decision.rs" 8 16 8 47
 let%span ssnapshot_transaction_valid = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 12 16 12 55
 let%span ssnapshot_transaction_valid'0 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 50 8 57 9
-let%span ssnapshot_transaction_valid'1 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 192 8 197 56
-let%span ssnapshot_transaction_valid'2 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 207 8 210 73
+let%span ssnapshot_transaction_valid'1 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 199 8 204 56
+let%span ssnapshot_transaction_valid'2 = "/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 214 8 217 73
 let%span sproducer_snapshot = "/workspace/crates/verified/src/producer_snapshot.rs" 33 8 34 88
 let%span sproducer_snapshot'0 = "/workspace/crates/verified/src/producer_snapshot.rs" 23 8 24 37
 let%span sproducer_snapshot'1 = "/workspace/crates/verified/src/producer_snapshot.rs" 47 16 49 54
@@ -322,7 +322,7 @@ let elim_Some'1 (_x: t_Option_ProducerSnapshotEntryFacts) (return (f0'5: t_Produ
       end}
     any) ]
 
-predicate snapshot_last_record_valid [#"/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 190 0 190 98] (snapshot_offset: int) (entry: t_ProducerSnapshotEntryFacts) =
+predicate snapshot_last_record_valid [#"/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 197 0 197 98] (snapshot_offset: int) (entry: t_ProducerSnapshotEntryFacts) =
   [%#ssnapshot_transaction_valid'1] Int64.to_int entry.last_offset = - 1
     /\ Int32.to_int entry.last_sequence = - 1 /\ Int32.to_int entry.offset_delta = 0
   \/ ge_log_Int (Int64.to_int entry.last_offset) 0
@@ -331,7 +331,7 @@ predicate snapshot_last_record_valid [#"/workspace/crates/verified/src/producer_
   /\ ge_log_Int (Int64.to_int entry.last_offset) (Int32.to_int entry.offset_delta)
   /\ Int64.to_int entry.last_offset < snapshot_offset
 
-predicate snapshot_transaction_valid [#"/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 205 0 205 98] (snapshot_offset: int) (entry: t_ProducerSnapshotEntryFacts) =
+predicate snapshot_transaction_valid [#"/workspace/crates/verified/src/producer_snapshot/snapshot_transaction_valid.rs" 212 0 212 98] (snapshot_offset: int) (entry: t_ProducerSnapshotEntryFacts) =
   [%#ssnapshot_transaction_valid'2] Int64.to_int entry.current_txn_first_offset = - 1
   \/ ge_log_Int (Int64.to_int entry.current_txn_first_offset) 0
   /\ Int64.to_int entry.current_txn_first_offset < snapshot_offset

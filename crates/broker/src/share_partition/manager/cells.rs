@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use krabka_ids::PartitionIndex;
 use krabka_log::Offset;
+use krabka_remote_storage::TopicIdPartition;
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -17,10 +18,11 @@ use super::{
     persistence::{fences_the_partition, persister_error_code},
 };
 use crate::{
-    codes::{OFFSET_NOT_AVAILABLE, from_broker_error},
+    codes::{KAFKA_STORAGE_ERROR, OFFSET_NOT_AVAILABLE, REQUEST_TIMED_OUT, from_broker_error},
+    config_keys::resolve_remote_list_offsets_timeout,
     coordinator::unified::streams::config::ShareAutoOffsetReset,
-    error::BrokerError,
-    share_partition::state::AcquisitionState,
+    handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
+    share_partition::{source::diskless_logical_start, state::AcquisitionState},
     time_util::{duration_millis, now_ms},
 };
 
@@ -183,28 +185,68 @@ impl SharePartitionLeaderManager {
         let Some(local) = local else {
             return Ok(Offset(0));
         };
-        let log_start = local.log_start_offset();
+        let config = local
+            .log
+            .lock()
+            .expect("log mutex poisoned")
+            .config_snapshot();
+        let log_start = if local.diskless
+            && let Some(reader) = self.diskless_read.get()
+        {
+            diskless_logical_start(reader, &local, topic_id)
+                .await
+                .map_err(|error| from_broker_error(&error))?
+        } else if config.remote_storage_enable
+            && let Some(reader) = self.remote_reader.get()
+        {
+            let tp = TopicIdPartition::new(topic_id, local.topic.clone(), partition);
+            let remote = tokio::time::timeout(
+                resolve_remote_list_offsets_timeout(&image, self.node_id),
+                reader.earliest_offset(&tp),
+            )
+            .await
+            .map_err(|_| REQUEST_TIMED_OUT)?
+            .map_err(|_| KAFKA_STORAGE_ERROR)?;
+            let log = local.log.lock().expect("log mutex poisoned");
+            Offset(remote.map_or(log.log_start_offset().0, |remote| {
+                remote.min(log.log_start_offset().0)
+            }))
+            .max(log.established_log_start().unwrap_or(Offset(0)))
+        } else {
+            local.log_start_offset()
+        };
         match strategy {
             ShareAutoOffsetReset::Earliest => Ok(log_start),
             ShareAutoOffsetReset::Latest => Ok(local.high_watermark().await.max(log_start)),
             ShareAutoOffsetReset::ByDuration(duration) => {
                 let target = now_ms().saturating_sub(duration_millis(duration));
-                let found = {
-                    let log = local.log.lock().expect("log mutex poisoned");
-                    log.offset_for_timestamp_checked(target)
-                };
+                let tp = TopicIdPartition::new(topic_id, local.topic.clone(), partition);
+                let found = resolve_timestamp_with_sources(
+                    &local,
+                    &tp,
+                    target,
+                    resolve_remote_list_offsets_timeout(&image, self.node_id),
+                    self.remote_reader
+                        .get()
+                        .filter(|_| config.remote_storage_enable)
+                        .map(Arc::as_ref),
+                    self.diskless_read
+                        .get()
+                        .filter(|_| local.diskless)
+                        .map(Arc::as_ref),
+                )
+                .await?;
                 // A compressed record above the topic's trunk
                 // `max.decompressed.message.bytes` fails the lookup:
                 // `UnifiedLog.fetchOffsetByTimestamp` throws
                 // `InvalidRecordException` through
                 // `ReplicaManager.fetchOffsetForTimestamp` into the share
                 // partition's initialization.
-                let found = found.map_err(|error| from_broker_error(&BrokerError::from(error)))?;
                 // Every record predates the window: Kafka's
                 // `ShareFetchUtils.offsetForTimestamp` throws, and the
                 // initialization of the share partition fails.
-                found
-                    .map(|(offset, _)| offset.max(log_start))
+                (found.0 >= 0)
+                    .then_some(Offset(found.0).max(log_start))
                     .ok_or(OFFSET_NOT_AVAILABLE)
             }
         }
@@ -308,20 +350,29 @@ impl SharePartitionLeaderManager {
 #[cfg(test)]
 mod tests {
 
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use assert2::assert;
-    use krabka_log::Offset;
+    use bytes::Bytes;
+    use krabka_ids::PartitionIndex;
+    use krabka_log::{LogConfig, Offset};
     use krabka_metadata::{GroupConfigRecord, MetadataImage, MetadataRecord, NodeId, TopicRecord};
+    use krabka_protocol::records::{Record, RecordBatch};
+    use krabka_remote_storage::TopicIdPartition;
+    use krabka_units::bytes;
 
     use crate::{
         codes,
         coordinator::unified::streams::config::KEY_SHARE_AUTO_OFFSET_RESET,
+        handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
+        partition::test_support::test_partition,
         partition_registry::PartitionRegistry,
+        remote_reader::test_support::{sparse_remote_segment_reader_with_max_timestamp, tp},
         share_partition::{
             manager::test_support::{
                 DataPartitionSetup, manager, manager_with_image_and_partitions, open_data_partition,
             },
+            source::test_support::diskless_partition,
             state::AcquisitionState,
         },
         test_support::append_partition_batch,
@@ -329,6 +380,84 @@ mod tests {
     };
 
     krabka_macros::single_replica_partition_fixture!(partition_record);
+
+    #[tokio::test]
+    async fn diskless_initialization_resolves_earliest_and_duration_from_wal_history() {
+        let record_time = now_ms() - 30 * 60 * 1_000;
+        let (partition, reader, tid, _dir) = diskless_partition(record_time).await;
+        // This is the real flusher's trim seam, not tiered segment eviction:
+        // its established local checkpoint must not hide readable WAL bytes.
+        assert!(partition.log.lock().unwrap().established_log_start() == Some(Offset(2)));
+        assert!(reader.index.lock().await.delete_floor(tid, 0) == 0);
+        let registry = Arc::new(PartitionRegistry::new());
+        registry.insert("t".into(), PartitionIndex(0), Arc::clone(&partition));
+        let mgr = manager_with_image_and_partitions(
+            image_with_strategies(
+                tid,
+                [("earliest", "earliest"), ("duration", "by_duration:PT1H")],
+            ),
+            registry,
+        );
+        mgr.set_read_sources(None, Some(reader.clone()));
+        for floor in [0, 1] {
+            reader.index.lock().await.raise_delete_floor(tid, 0, floor);
+            assert!(
+                resolve_timestamp_with_sources(
+                    &partition,
+                    &TopicIdPartition::new(tid, "t", 0),
+                    record_time - 1,
+                    Duration::from_secs(1),
+                    None,
+                    Some(&reader),
+                )
+                .await
+                    == Ok((floor, record_time))
+            );
+            for group in ["earliest", "duration"] {
+                assert!(
+                    mgr.initial_start_offset(group, tid, 0).await == Ok(Offset(floor)),
+                    "{group} floor {floor}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn duration_initialization_selects_an_archived_match_before_local_data() {
+        let (reader, _archive) = sparse_remote_segment_reader_with_max_timestamp(2_400);
+        let tid = tp().topic_id;
+        let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
+        {
+            let mut log = partition.log.lock().unwrap();
+            log.set_config(LogConfig {
+                segment_size: bytes(1),
+                remote_storage_enable: true,
+                ..log.config_snapshot()
+            });
+            for _ in 0..18 {
+                log.append(&mut RecordBatch {
+                    base_timestamp: 3_000,
+                    max_timestamp: 3_000,
+                    records: vec![Record {
+                        value: Some(Bytes::from_static(b"local")),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })
+                .unwrap();
+            }
+            log.delete_local_segments_through(Offset(17)).unwrap();
+        }
+        partition.replica_state.lock().await.hw = Offset(18);
+        let registry = Arc::new(PartitionRegistry::new());
+        registry.insert("t".into(), PartitionIndex(0), Arc::new(partition));
+        let mgr = manager_with_image_and_partitions(
+            image_with_strategies(tid, [("duration", "by_duration:P100000D")]),
+            registry,
+        );
+        mgr.set_read_sources(Some(Arc::new(reader)), None);
+        assert!(mgr.initial_start_offset("duration", tid, 0).await == Ok(Offset(10)));
+    }
 
     /// Every `share.auto.offset.reset` strategy, resolved against one real
     /// log: two records stamped three hours ago at offsets 0-1, two stamped

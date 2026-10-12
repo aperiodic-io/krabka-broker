@@ -20,7 +20,7 @@ use super::{
 /// `/metrics` route. This function spawns the server and returns after the
 /// bind.
 /// # Errors
-/// Returns an error when telemetry input is malformed, a query cannot be evaluated, or the configured storage or export backend fails.
+/// Returns an error if the listener cannot bind or the HTTP server fails.
 pub async fn serve_admin(addr: SocketAddr, extra: Router) -> std::io::Result<()> {
     serve_router(addr, pprof_router().merge(extra)).await
 }
@@ -104,7 +104,12 @@ fn admin_address(default_addr: &str) -> SocketAddr {
 /// This function reads `KRABKA_ADMIN_LISTEN_ADDR` and falls back to
 /// `default_addr`.
 /// # Errors
-/// Returns an error when telemetry input is malformed, a query cannot be evaluated, or the configured storage or export backend fails.
+/// Returns an error if the listener cannot bind or the HTTP server fails.
+///
+/// # Panics
+///
+/// Panics if the environment variable, or `default_addr` when it is absent,
+/// is not a socket address.
 pub async fn serve_admin_from_env(default_addr: &str) -> std::io::Result<()> {
     serve_admin_from_env_with(default_addr, Router::new()).await
 }
@@ -115,9 +120,11 @@ pub async fn serve_admin_from_env(default_addr: &str) -> std::io::Result<()> {
 /// Prometheus metrics call this function with their `/metrics` router, and the
 /// exporter thus shares the admin port.
 /// # Errors
-/// Returns an error when telemetry input is malformed, a query cannot be evaluated, or the configured storage or export backend fails.
+/// Returns an error if the listener cannot bind or the HTTP server fails.
 /// # Panics
-/// Panics if synchronized telemetry state is poisoned or validated columnar data is missing a required field.
+/// Panics if `KRABKA_ADMIN_LISTEN_ADDR`, or `default_addr` when it is absent,
+/// is not a socket address. Router merging also panics if `extra` conflicts
+/// with an existing profiling route.
 pub async fn serve_admin_from_env_with(default_addr: &str, extra: Router) -> std::io::Result<()> {
     let addr = admin_address(default_addr);
     serve_admin(addr, extra).await
@@ -129,7 +136,7 @@ pub async fn serve_admin_from_env_with(default_addr: &str, extra: Router) -> std
 /// Returns an error for invalid profiling configuration or listener failure.
 ///
 /// # Panics
-/// Panics when `KRABKA_ADMIN_LISTEN_ADDR` is not a socket address. This
+/// Panics when `KRABKA_ADMIN_LISTEN_ADDR`, or the fallback `default_addr`, is not a socket address. This
 /// behavior is the same as the default-compatible wrapper's behavior.
 pub async fn serve_admin_from_env_with_config(
     default_addr: &str,
@@ -146,7 +153,7 @@ pub async fn serve_admin_from_env_with_config(
 /// Returns an error for invalid profiling configuration or listener failure.
 ///
 /// # Panics
-/// Panics when `KRABKA_ADMIN_LISTEN_ADDR` is not a socket address.
+/// Panics when `KRABKA_ADMIN_LISTEN_ADDR`, or the fallback `default_addr`, is not a socket address.
 pub async fn spawn_admin_from_env_with_config(
     default_addr: &str,
     extra: Router,

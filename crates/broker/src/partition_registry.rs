@@ -143,6 +143,32 @@ impl PartitionRegistry {
         removed
     }
 
+    /// Delete one captured runtime while holding its topic and partition locks.
+    /// An already removed runtime permits idempotent directory cleanup; a
+    /// replacement runtime is left intact. `cleanup` runs before these locks
+    /// are released, so a new materializer cannot reopen the old directory.
+    pub(crate) fn remove_captured_with_cleanup(
+        &self,
+        topic: &str,
+        partition: PartitionIndex,
+        captured: &Arc<Partition>,
+        cleanup: impl FnOnce(),
+    ) {
+        use dashmap::mapref::entry::Entry;
+        let inner = self.inner.entry(Arc::from(topic)).or_default();
+        match inner.entry(partition) {
+            Entry::Occupied(slot) if Arc::ptr_eq(slot.get(), captured) => {
+                cleanup();
+                slot.remove();
+            }
+            Entry::Vacant(slot) => {
+                cleanup();
+                drop(slot);
+            }
+            Entry::Occupied(_) => {}
+        }
+    }
+
     /// Materializes a partition atomically, and only when the registry does
     /// not hold it. It runs `build` UNDER the per-key lock, so two concurrent
     /// materializations of the same (topic, partition) can never both build.
@@ -389,6 +415,39 @@ mod tests {
             reg.materialize_if_vacant::<String>("t", PartitionIndex(2), || Err("boom".to_string()));
         assert!(err == Err("boom".to_string()));
         assert!(!reg.contains("t", PartitionIndex(2)));
+    }
+
+    #[tokio::test]
+    async fn captured_cleanup_preserves_a_replacement_runtime_and_directory() {
+        let dir = tempdir().unwrap();
+        let reg = PartitionRegistry::new();
+        let index = PartitionIndex(0);
+        let captured = fixture_partition(dir.path(), "orders", index);
+        reg.insert("orders".into(), index, Arc::clone(&captured));
+        let replacement = fixture_partition(dir.path(), "orders", index);
+        reg.insert("orders".into(), index, Arc::clone(&replacement));
+        let canonical = partition_dir(dir.path(), "orders", index.get());
+        let marker = canonical.join("replacement-marker");
+        std::fs::write(&marker, b"new generation").unwrap();
+
+        reg.remove_captured_with_cleanup("orders", index, &captured, || {
+            std::fs::remove_dir_all(&canonical).unwrap();
+        });
+
+        assert!(marker.exists());
+        assert!(Arc::ptr_eq(
+            &reg.get("orders", index).unwrap(),
+            &replacement
+        ));
+
+        // The metadata watcher may have removed the captured runtime already.
+        // Its absent slot still permits idempotent cleanup before recreation.
+        reg.remove("orders", index);
+        reg.remove_captured_with_cleanup("orders", index, &captured, || {
+            std::fs::remove_dir_all(&canonical).unwrap();
+        });
+        assert!(!canonical.exists());
+        assert!(reg.get("orders", index).is_none());
     }
 
     #[test]

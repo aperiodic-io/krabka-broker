@@ -27,7 +27,7 @@
         "prover": "alt-ergo",
         "time": 0.012
       },
-      "vc_trim_steps_converge": { "prover": "alt-ergo", "time": 0.005 }
+      "vc_trim_steps_converge": { "prover": "alt-ergo", "time": 0.02 }
     }
   }
 }

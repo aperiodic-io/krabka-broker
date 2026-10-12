@@ -11,13 +11,11 @@
 //! snapshot. A corrupt or truncated file decodes to an error and never to a
 //! panic, and the caller then falls back to a full replay.
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
+use assert2::assert;
 use bytes::{BufMut, BytesMut};
-use krabka_remote_storage::{
-    PartitionDump, RemoteLogSegmentMetadata, RemotePartitionDeleteState, RlmmCacheDump,
-    TopicIdPartition,
-};
+use krabka_remote_storage::{PartitionDump, RlmmCacheDump};
 use krabka_units::prelude::{ByteSize, ByteSizeExt as _, bytes as byte_size};
 use tracing::instrument;
 
@@ -57,10 +55,17 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Encode this snapshot into freshly-allocated bytes.
-    #[must_use]
+    ///
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    ///
+    /// Panics if `committed_offsets` contains more than `i32::MAX + 1` offsets,
+    /// because its partition indices must fit in the encoded `i32` field.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
+        assert!(
+            self.committed_offsets.len() <= i32::MAX as usize + 1,
+            "snapshot partition index exceeds i32::MAX"
+        );
         let mut buf = BytesMut::with_capacity(ENCODE_BUFFER_HINT.bytes_usize());
         buf.put_u16(SNAPSHOT_FORMAT_VERSION);
         // Committed offsets.
@@ -105,11 +110,7 @@ impl Snapshot {
     /// Returns [`SnapshotError`] for any malformed input: a bad version, a
     /// short or truncated buffer, a contained event that fails to decode, or
     /// trailing bytes after the declared entries.
-    /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
     pub fn decode(bytes: &[u8]) -> Result<Self, SnapshotError> {
-        use std::collections::BTreeMap;
-
         let mut r = Reader::new(bytes);
         let version = read_u16(&mut r)?;
         if version != SNAPSHOT_FORMAT_VERSION {
@@ -117,6 +118,11 @@ impl Snapshot {
         }
         let n_offsets = usize::try_from(read_uvarint(&mut r)?)
             .map_err(|_| CodecError::LengthOverflow(u64::MAX))?;
+        // Every offset entry takes an i32 partition and an i64 offset. Check
+        // the input before allocating from its untrusted count.
+        if n_offsets > r.remaining() / 12 {
+            return Err(CodecError::UnexpectedEof(bytes.len()).into());
+        }
         let mut committed_offsets = vec![-1i64; n_offsets];
         for _ in 0..n_offsets {
             let p = r.read_i32()?;
@@ -133,14 +139,7 @@ impl Snapshot {
             .map_err(|_| CodecError::LengthOverflow(u64::MAX))?;
 
         // Accumulate per-partition while preserving first-seen order.
-        let mut order: Vec<TopicIdPartition> = Vec::new();
-        let mut by_tp: BTreeMap<
-            (uuid::Uuid, i32),
-            (
-                Vec<RemoteLogSegmentMetadata>,
-                Option<RemotePartitionDeleteState>,
-            ),
-        > = BTreeMap::new();
+        let mut by_tp: BTreeMap<(uuid::Uuid, i32), (usize, PartitionDump)> = BTreeMap::new();
         for _ in 0..n_entries {
             let len = usize::try_from(read_uvarint(&mut r)?)
                 .map_err(|_| CodecError::LengthOverflow(u64::MAX))?;
@@ -149,20 +148,43 @@ impl Snapshot {
                 MetadataEvent::AddSegment(md) => {
                     let tp = md.remote_log_segment_id().topic_id_partition.clone();
                     let key = (tp.topic_id, tp.partition);
-                    if !by_tp.contains_key(&key) {
-                        order.push(tp.clone());
-                    }
-                    by_tp.entry(key).or_default().0.push(md);
+                    let ordinal = by_tp.len();
+                    by_tp
+                        .entry(key)
+                        .or_insert_with(|| {
+                            (
+                                ordinal,
+                                PartitionDump {
+                                    topic_id_partition: tp,
+                                    segments: Vec::new(),
+                                    delete_state: None,
+                                },
+                            )
+                        })
+                        .1
+                        .segments
+                        .push(md);
                 }
                 MetadataEvent::PartitionDelete(d) => {
                     let key = (
                         d.topic_id_partition.topic_id,
                         d.topic_id_partition.partition,
                     );
-                    if !by_tp.contains_key(&key) {
-                        order.push(d.topic_id_partition.clone());
-                    }
-                    by_tp.entry(key).or_default().1 = Some(d.state);
+                    let ordinal = by_tp.len();
+                    by_tp
+                        .entry(key)
+                        .or_insert_with(|| {
+                            (
+                                ordinal,
+                                PartitionDump {
+                                    topic_id_partition: d.topic_id_partition,
+                                    segments: Vec::new(),
+                                    delete_state: None,
+                                },
+                            )
+                        })
+                        .1
+                        .delete_state = Some(d.state);
                 }
                 MetadataEvent::UpdateSegment(_) => {
                     // Snapshots only ever encode Add + PartitionDelete;
@@ -177,17 +199,11 @@ impl Snapshot {
         if r.remaining() != 0 {
             return Err(SnapshotError::TrailingBytes(r.remaining()));
         }
-        let partitions = order
+        let mut ordered: Vec<_> = by_tp.into_values().collect();
+        ordered.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+        let partitions = ordered
             .into_iter()
-            .map(|tp| {
-                let key = (tp.topic_id, tp.partition);
-                let (segments, delete_state) = by_tp.remove(&key).expect("key present");
-                PartitionDump {
-                    topic_id_partition: tp,
-                    segments,
-                    delete_state,
-                }
-            })
+            .map(|(_, partition)| partition)
             .collect();
         Ok(Self {
             committed_offsets,
@@ -299,6 +315,24 @@ mod tests {
     }
 
     #[test]
+    fn decode_preserves_first_seen_partition_order() {
+        let mut snap = sample_snapshot();
+        snap.dump.partitions = [2, 0, 1]
+            .into_iter()
+            .map(|partition| {
+                let mut topic_id_partition = tp();
+                topic_id_partition.partition = partition;
+                PartitionDump {
+                    topic_id_partition,
+                    segments: Vec::new(),
+                    delete_state: Some(RemotePartitionDeleteState::DeletePartitionMarked),
+                }
+            })
+            .collect();
+        assert!(Snapshot::decode(&snap.encode()).unwrap() == snap);
+    }
+
+    #[test]
     fn truncated_file_is_error_not_panic() {
         let bytes = sample_snapshot().encode();
         let err = Snapshot::decode(&bytes[..bytes.len() - 3]).unwrap_err();
@@ -306,6 +340,26 @@ mod tests {
             err,
             SnapshotError::Malformed(_) | SnapshotError::TrailingBytes(_)
         ));
+    }
+
+    #[test]
+    fn offset_counts_are_bounded_by_the_encoded_entries() {
+        for count in [1, 2, u64::MAX] {
+            let mut bytes = BytesMut::new();
+            bytes.put_u16(SNAPSHOT_FORMAT_VERSION);
+            write_uvarint(count, &mut bytes);
+            assert!(matches!(
+                Snapshot::decode(&bytes),
+                Err(SnapshotError::Malformed(
+                    CodecError::UnexpectedEof(_) | CodecError::LengthOverflow(_)
+                ))
+            ));
+        }
+        let snapshot = Snapshot {
+            committed_offsets: vec![-1],
+            dump: RlmmCacheDump::default(),
+        };
+        assert!(Snapshot::decode(&snapshot.encode()).unwrap() == snapshot);
     }
 
     #[test]

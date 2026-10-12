@@ -13,7 +13,7 @@ use crate::{
         fencing::{RegistrationChange, registration_change},
     },
     leader_election::test_support::{
-        ElectionSetup, expected_clean_election, fake_source, fencing_updates, img_with_partition,
+        ElectionSetup, expected_clean_election, fencing_updates, img_with_partition,
         one_partition_change, partition_batches, recovery_handle_for_tests, register_brokers,
     },
     metadata_source::MetadataSource,
@@ -35,7 +35,13 @@ impl TickFixture {
     fn new(image: MetadataImage, leader: u64, was_leader: bool) -> Self {
         let clock = TestClock::new();
         Self {
-            source: fake_source(image, Some(NodeId(leader))),
+            source: Arc::new(
+                FakeMetadataSource::builder()
+                    .image(image)
+                    .leader(Some(NodeId(leader)))
+                    .controller_node_id(NodeId(2))
+                    .build(),
+            ),
             liveness: Arc::new(ControllerLivenessState::with_test_clock(
                 std::time::Duration::from_millis(10),
                 &clock,

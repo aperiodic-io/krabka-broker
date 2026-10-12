@@ -5,6 +5,7 @@
 //! reconciler records. Both halves share the `ready_targets` map and the
 //! HWM-unknown sentinel, so they belong in one module.
 
+use krabka_remote_storage::RemoteStorageError;
 use tracing::warn;
 
 use super::TopicBasedRemoteLogMetadataManager;
@@ -26,11 +27,12 @@ const HWM_UNKNOWN: i64 = i64::MAX;
 /// read methods
 /// ([`RemoteLogMetadataManager::remote_log_segment_metadata`](krabka_remote_storage::RemoteLogMetadataManager::remote_log_segment_metadata),
 /// [`RemoteLogMetadataManager::list_remote_log_segments`](krabka_remote_storage::RemoteLogMetadataManager::list_remote_log_segments),
+/// [`RemoteLogMetadataManager::list_remote_log_segments_by_epoch`](krabka_remote_storage::RemoteLogMetadataManager::list_remote_log_segments_by_epoch),
 /// [`RemoteLogMetadataManager::highest_offset_for_epoch`](krabka_remote_storage::RemoteLogMetadataManager::highest_offset_for_epoch)).
 pub enum ReadGate {
     /// This broker does not consume the metadata partition, because it
     /// neither leads nor follows any covered user-partition. Answer
-    /// `Ok(None)`.
+    /// a miss (`Ok(None)` or an empty list).
     Unassigned,
     /// Assigned, but the consumer pump has not reached the assignment-time
     /// HWM. Answer with the retryable `Err(NotReady)`.
@@ -89,7 +91,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// for readiness). Sorted ascending.
     #[must_use]
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    /// Panics if the assignment-readiness mutex is poisoned.
     pub fn assigned_metadata_partitions(&self) -> Vec<i32> {
         let mut v: Vec<i32> = self
             .ready_targets
@@ -131,7 +133,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// calls it from its reconciler task on the runtime, never from a
     /// `spawn_blocking` thread.
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    /// Panics if the assignment-readiness mutex is poisoned.
     pub async fn reconcile_assignment(&self, desired: &[i32]) {
         use std::collections::HashSet;
         let want: HashSet<i32> = desired.iter().copied().collect();
@@ -214,11 +216,22 @@ impl TopicBasedRemoteLogMetadataManager {
             }
         }
         for mp in have.difference(&want).copied() {
+            let mut waiters = self.mutation_waiters.lock().await;
             self.assignment.remove(mp);
             self.ready_targets
                 .lock()
                 .expect("ready_targets poisoned")
                 .remove(&mp);
+            let keys: Vec<_> = waiters
+                .keys()
+                .copied()
+                .filter(|(partition, _)| *partition == mp)
+                .collect();
+            for key in keys {
+                if let Some(reply) = waiters.remove(&key) {
+                    let _ = reply.send(Err(RemoteStorageError::NotReady { partition: mp }));
+                }
+            }
         }
     }
 }

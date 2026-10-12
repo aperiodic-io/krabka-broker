@@ -17,6 +17,7 @@ use krabka_remote_storage::{
     ArchiveVerifyReport, ChainHead, ChainStamp, RemoteLogSegmentState, WormChainRecord,
     parse_partition_dir_name,
 };
+use krabka_remote_storage_topic::Snapshot;
 use uuid::Uuid;
 
 use crate::{
@@ -47,6 +48,15 @@ pub struct FormatTargetOutcome {
 pub async fn format_target(
     args: &RestoreArgs,
     inventory: &ArchiveInventory,
+) -> Result<FormatTargetOutcome, RestoreError> {
+    format_target_with_snapshot(args, inventory, None).await
+}
+
+/// Format from retained authenticated bytes when supplied, without reopening the source path.
+pub(crate) async fn format_target_with_snapshot(
+    args: &RestoreArgs,
+    inventory: &ArchiveInventory,
+    authenticated_snapshot: Option<&[u8]>,
 ) -> Result<FormatTargetOutcome, RestoreError> {
     let node_id = args.target.node_id.ok_or_else(|| {
         RestoreError::InvalidArgument(
@@ -81,8 +91,11 @@ pub async fn format_target(
         format_argv.push(listener.clone());
     }
 
-    let snapshot_records =
-        read_metadata_snapshot(args.archive.metadata_snapshot.as_deref()).await?;
+    let snapshot_records = read_metadata_snapshot(
+        args.archive.metadata_snapshot.as_deref(),
+        authenticated_snapshot,
+    )
+    .await?;
     let (extra, metadata) = seed_metadata_records(
         inventory,
         node_id,
@@ -111,10 +124,22 @@ pub fn seed_rlmm_snapshot(
     args: &RestoreArgs,
     authenticated: Option<&ArchiveVerifyReport>,
 ) -> Result<(), RestoreError> {
+    seed_rlmm_snapshot_from(args, authenticated, None)
+}
+
+/// Seed from the decoded authenticated snapshot when supplied, without reopening its path.
+pub(crate) fn seed_rlmm_snapshot_from(
+    args: &RestoreArgs,
+    authenticated: Option<&ArchiveVerifyReport>,
+    authenticated_snapshot: Option<&Snapshot>,
+) -> Result<(), RestoreError> {
     let Some(path) = args.archive.rlmm_snapshot.as_ref() else {
         return Ok(());
     };
-    let mut snapshot = load_snapshot(path)?;
+    let mut snapshot = match authenticated_snapshot {
+        Some(snapshot) => snapshot.clone(),
+        None => load_snapshot(path)?,
+    };
     snapshot.committed_offsets.fill(-1);
     snapshot
         .dump
@@ -199,17 +224,24 @@ fn seed_authenticated_chain_tips(
 
 async fn read_metadata_snapshot(
     path: Option<&Path>,
+    authenticated_snapshot: Option<&[u8]>,
 ) -> Result<Option<Vec<MetadataRecord>>, RestoreError> {
     let Some(path) = path else {
         return Ok(None);
     };
-    let bytes = tokio::fs::read(path).await.map_err(|error| {
-        RestoreError::Io(std::io::Error::new(
-            error.kind(),
-            format!("cannot read metadata snapshot {}: {error}", path.display()),
-        ))
-    })?;
-    krabka_raft::deserialize_metadata_snapshot(&bytes)
+    let loaded;
+    let bytes = if let Some(bytes) = authenticated_snapshot {
+        bytes
+    } else {
+        loaded = tokio::fs::read(path).await.map_err(|error| {
+            RestoreError::Io(std::io::Error::new(
+                error.kind(),
+                format!("cannot read metadata snapshot {}: {error}", path.display()),
+            ))
+        })?;
+        &loaded
+    };
+    krabka_raft::deserialize_metadata_snapshot(bytes)
         .map(Some)
         .map_err(|error| RestoreError::MetadataSnapshot {
             path: path.to_path_buf(),
@@ -391,17 +423,17 @@ mod tests {
     use assert2::check;
     use krabka_metadata::{
         AclEntry, AclOperation, ClientQuotaRecord, FeatureLevelRecord, FeaturesEpochRecord,
-        PatternType, PermissionType, QuotaEntity, ResourceType, ScramCredentialRecord,
-        TopicConfigRecord,
+        MetadataImage, PatternType, PermissionType, QuotaEntity, ResourceType,
+        ScramCredentialRecord, TopicConfigRecord,
     };
     use krabka_remote_storage::{
-        PartitionDump, RemotePartitionDeleteState, RlmmCacheDump, TopicIdPartition,
+        PartitionDump, RemotePartitionDeleteState, RlmmCacheDump, Sha256Digest, TopicIdPartition,
     };
-    use krabka_remote_storage_topic::snapshot::Snapshot;
     use krabka_security::SaslMechanism;
 
     use super::*;
     use crate::{
+        authenticate_captured_snapshot,
         discover::UnrecognizedKeys,
         materialize::test_support::{args_from, partition_inventory},
     };
@@ -495,6 +527,80 @@ mod tests {
         .expect("restored snapshot exists");
         check!(restored.committed_offsets == vec![-1]);
         check!(restored.dump == dump);
+    }
+
+    #[tokio::test]
+    async fn authenticated_snapshots_are_consumed_after_the_source_paths_change() {
+        let source = tempfile::tempdir().expect("source");
+        let target = tempfile::tempdir().expect("target");
+        let metadata_path = source.path().join("metadata.checkpoint");
+        let rlmm_path = source.path().join("snapshot");
+        let mut image = MetadataImage::default();
+        image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
+            name: "metadata.version".to_owned(),
+            level: 25,
+        }));
+        let metadata_bytes =
+            krabka_raft::serialize_metadata_snapshot(&image, 42).expect("metadata");
+        let snapshot = Snapshot {
+            committed_offsets: vec![19],
+            dump: RlmmCacheDump {
+                partitions: vec![PartitionDump {
+                    topic_id_partition: TopicIdPartition::new(Uuid::from_u128(7), "orders", 0),
+                    segments: Vec::new(),
+                    delete_state: Some(RemotePartitionDeleteState::DeletePartitionMarked),
+                }],
+            },
+        };
+        let rlmm_bytes = snapshot.encode();
+        std::fs::write(&metadata_path, &metadata_bytes).unwrap();
+        std::fs::write(&rlmm_path, &rlmm_bytes).unwrap();
+        let retained_metadata = authenticate_captured_snapshot(
+            Some(&metadata_path),
+            Some(Sha256Digest::of(&metadata_bytes)),
+            true,
+            "metadata",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let retained_rlmm = authenticate_captured_snapshot(
+            Some(&rlmm_path),
+            Some(Sha256Digest::of(&rlmm_bytes)),
+            true,
+            "RLMM",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        std::fs::write(&metadata_path, b"changed metadata").unwrap();
+        std::fs::write(&rlmm_path, b"changed RLMM").unwrap();
+        check!(
+            read_metadata_snapshot(Some(&metadata_path), Some(&retained_metadata))
+                .await
+                .unwrap()
+                == Some(krabka_raft::deserialize_metadata_snapshot(&metadata_bytes).unwrap())
+        );
+        let args = args_from(
+            &["--rlmm-snapshot", &rlmm_path.display().to_string()],
+            target.path(),
+        );
+        seed_rlmm_snapshot_from(
+            &args,
+            None,
+            Some(&Snapshot::decode(&retained_rlmm).unwrap()),
+        )
+        .unwrap();
+        let restored = Snapshot::load(&target.path().join("remote-log-metadata/snapshot"))
+            .unwrap()
+            .unwrap();
+        check!(
+            restored
+                == Snapshot {
+                    committed_offsets: vec![-1],
+                    ..snapshot
+                }
+        );
     }
 
     #[test]
@@ -751,7 +857,7 @@ mod tests {
             .path()
             .join("missing.checkpoint");
 
-        let result = read_metadata_snapshot(Some(&missing)).await;
+        let result = read_metadata_snapshot(Some(&missing), None).await;
 
         let error = result.unwrap_err();
         check!(error.exit_code() == crate::error::EXIT_MATERIALIZE);
@@ -764,7 +870,7 @@ mod tests {
         let path = dir.path().join("metadata.checkpoint");
         std::fs::write(&path, b"not a metadata snapshot").expect("write corrupt snapshot");
 
-        let error = read_metadata_snapshot(Some(&path)).await.unwrap_err();
+        let error = read_metadata_snapshot(Some(&path), None).await.unwrap_err();
 
         check!(error.exit_code() == crate::error::EXIT_INTEGRITY);
         check!(matches!(

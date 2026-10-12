@@ -1,11 +1,11 @@
-//! Handler dispatch. One module per API key implements:
+//! Handler dispatch. Each API module owns its admission and response behavior.
 //!
-//!   `pub async fn handle(broker: &Broker, version: i16, req_bytes: &[u8])
-//!       -> Result<bytes::Bytes, BrokerError>`
-//!
-//! Handlers decode the request, do their work, encode the response, and
-//! return the encoded bytes. The bytes are ready to send after
-//! `network::dispatch` prepends the response header.
+//! Most crate-private handlers receive a decoded request and a
+//! [`RequestContext`] and return a response struct. The registry generates
+//! adapters that decode the wire body and encode that response. APIs that
+//! forward a request untouched or need a custom codec instead receive the raw
+//! body and return encoded bytes. The network dispatcher prepends the response
+//! header to those bytes.
 //!
 //! The modules that do not name one api key hold what the handlers share: the
 //! wire type aliases, the krabka-private api keys, the response encoders, the
@@ -30,6 +30,8 @@ mod acl_test_support;
 
 mod acl_gates;
 mod admin_audit;
+#[cfg(test)]
+mod controller_mutation_tests;
 mod coordinator_routing;
 mod partition_transition;
 #[cfg(test)]
@@ -166,25 +168,21 @@ pub(crate) mod produce;
 pub(crate) mod push_telemetry;
 pub(crate) mod remove_raft_voter;
 pub(crate) mod renew_delegation_token;
-// KIP-932 ShareGroupDescribe (api_key 77). Intercepted inline in
-// `network::dispatch` so the handler receives the per-connection principal +
-// peer `SocketAddr` for the per-group Describe ACL gate.
+// KIP-932 ShareGroupDescribe (api_key 77), with a per-group Describe ACL gate.
 pub(crate) mod share_group_describe;
 // KIP-932 share-group membership (api_key 76).
 pub(crate) mod share_group_heartbeat;
-// KIP-932 admin offset RPCs (api_key 90/91/92). Intercepted inline in
-// `network::dispatch` for the per-group Describe/Alter/Delete ACL gates.
+// KIP-932 admin offset RPCs (api_key 90/91/92), with per-group
+// Describe/Alter/Delete ACL gates.
 pub(crate) mod alter_share_group_offsets;
 pub(crate) mod delete_share_group_offsets;
 pub(crate) mod describe_share_group_offsets;
-// KIP-932 ShareAcknowledge (api_key 79). Intercepted inline in
-// `network::dispatch` for the per-topic Read ACL gate.
+// KIP-932 ShareAcknowledge (api_key 79), with a per-topic Read ACL gate.
 pub(crate) mod share_acknowledge;
-// KIP-932 ShareFetch (api_key 78). Intercepted inline in `network::dispatch`
-// for the per-topic Read ACL gate.
+// KIP-932 ShareFetch (api_key 78), with a per-topic Read ACL gate.
 pub(crate) mod share_fetch;
-// KIP-1071 StreamsGroupDescribe (api_key 89). Plain 4-arg handler mirroring
-// consumer_group_describe; it does not apply a per-group Describe ACL gate.
+// KIP-1071 StreamsGroupDescribe (api_key 89), with per-group and
+// topology-topic Describe ACL gates.
 pub(crate) mod streams_group_describe;
 // KIP-1071 streams-group membership / rebalance protocol (api_key 88).
 pub(crate) mod streams_group_heartbeat;
@@ -196,8 +194,6 @@ pub(crate) mod unregister_broker;
 // KIP-1312 admin RPC to drop a controller registration (api_key 94, Kafka
 // trunk).
 pub(crate) mod unregister_controller;
-// KIP-584 feature finalization (api_key 57). Intercepted inline in
-// `network::dispatch` so the handler receives the per-connection principal +
-// peer `SocketAddr` for the Cluster:Alter ACL gate.
+// KIP-584 feature finalization (api_key 57), with a Cluster:Alter ACL gate.
 pub(crate) mod update_features;
 pub(crate) mod update_raft_voter;

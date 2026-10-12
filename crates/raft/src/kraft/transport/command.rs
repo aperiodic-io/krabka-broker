@@ -6,6 +6,8 @@
 //! reply payloads that those handle ops carry back, [`MetadataFetchSlice`] and
 //! [`QuorumStateSnapshot`], live here with them.
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 use tokio::sync::oneshot;
 
@@ -164,6 +166,7 @@ pub enum Command {
     /// rejection.
     SubmitChange {
         records: Vec<krabka_metadata::MetadataRecord>,
+        expected_image: Option<Arc<krabka_metadata::MetadataImage>>,
         reply: oneshot::Sender<Result<SubmitChangeResult, RaftError>>,
     },
     /// Handle op: compare and mutate delegation-token state in one engine turn.

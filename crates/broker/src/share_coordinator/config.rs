@@ -22,8 +22,8 @@ pub struct ShareCoordinatorConfig {
     /// Kafka's `share.coordinator.snapshot.update.records.per.snapshot`.
     #[default(500)]
     pub snapshot_update_records_per_snapshot: u32,
-    /// Kafka's `share.coordinator.load.buffer.size`: the most bytes one
-    /// recovery read of a state partition asks for.
+    /// Kafka's `share.coordinator.load.buffer.size`: the byte window of one
+    /// recovery read. A larger first batch is read whole to ensure progress.
     #[default(mebibytes(5))]
     pub load_buffer_size: ByteSize,
     /// Kafka's `share.coordinator.write.timeout.ms`: how long an append to

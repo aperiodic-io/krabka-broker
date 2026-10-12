@@ -151,6 +151,9 @@ pub async fn run_with_sequencer(
             },
         };
         match msg {
+            WriterMessage::Barrier { ack } => {
+                let _ = ack.send(());
+            }
             WriterMessage::Produce(first) => {
                 handle_produce(
                     (&topic, partition),

@@ -13,8 +13,8 @@ let%span stransaction = "/workspace/crates/verified/src/transaction.rs" 9 8 14 8
 let%span stransaction'0 = "/workspace/crates/verified/src/transaction.rs" 252 16 253 85
 let%span ssequence = "/workspace/crates/verified/src/sequence.rs" 14 16 14 72
 let%span ssequence'0 = "/workspace/crates/verified/src/sequence.rs" 21 16 22 44
-let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 14 10 25 1
-let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 26 10 29 1
+let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 15 10 28 1
+let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 29 10 32 1
 let%span stime_index = "/workspace/crates/verified/src/composition/time_index.rs" 17 8 20 129
 let%span stime_index'0 = "/workspace/crates/verified/src/composition/time_index.rs" 92 16 92 80
 let%span stime_index'1 = "/workspace/crates/verified/src/composition/time_index.rs" 27 16 27 67
@@ -98,9 +98,10 @@ let committed_fetch_excludes_unstable (starts: Slice64.slice Int64.t) (w: t_Fetc
         /\ Int64.to_int visibility.response_lso = MinMax.min (Int64.to_int lso'0) (Int64.to_int w.hw)
         /\ Int64.to_int visibility.response_hw = Int64.to_int w.hw
         /\ visibility.read_committed_aborts
-        /\ not visibility.out_of_range
+        /\ visibility.out_of_range = gt_log_Int (Int64.to_int w.log_start) (Int64.to_int w.log_end)
         /\ visibility.empty
-          = ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable))
+          = (Int64.to_int w.log_start <= Int64.to_int w.log_end
+          /\ ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable)))
         /\ (forall i: int. 0 <= i /\ i < Seq.length (Slice64.view starts)
           -> Int64.to_int visibility.limit_offset <= Int64.to_int (Seq.get (Slice64.view starts) i))
         end)

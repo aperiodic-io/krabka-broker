@@ -1,10 +1,10 @@
-(* #"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 30 0 34 25 *)
+(* #"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 31 0 35 25 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span srecord_coordinates = "/workspace/crates/verified/src/restore/record_coordinates.rs" 124 10 133 1
-let%span sshould_capture_first_downgrade = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 41 21 41 81
-let%span sshould_capture_first_downgrade'0 = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 10 10 28 1
+let%span sshould_capture_first_downgrade = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 42 21 42 65
+let%span sshould_capture_first_downgrade'0 = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 11 10 29 1
 
 use creusot.int.Int64
 use creusot.int.Int32
@@ -62,7 +62,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let replay_batch_cursor_decision [#"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 30 0 34 25]
+let replay_batch_cursor_decision [#"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 31 0 35 25]
   (cursor: Int64.t) (end': Int64.t) (batch: t_Option_tup2_i64_i32) (return (x: t_ReplayCursorDecision)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &_9 <- Int64.ge cursor end' ] s1 | s1 = any [ br0 -> {_9 = false} (! bb2) | br1 -> {_9} (! bb1) ] ]

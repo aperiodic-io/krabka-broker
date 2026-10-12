@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use assert2::{assert, check};
 use krabka_protocol::owned::create_partitions_response::CreatePartitionsResponse;
+use krabka_units::convert::TimeExt as _;
 
 use super::*;
 use crate::{
@@ -309,6 +310,97 @@ async fn strict_create_partitions_rejects_after_quota_exhaustion() {
             == 5
     );
     broker_handle.shutdown().await;
+}
+
+/// Reuse one growth reservation across a known-stale guarded attempt and a
+/// fresh retry. The independent request uses another principal and grows the
+/// topic before the stale attempt reaches controller admission.
+#[tokio::test]
+async fn a_conflicting_growth_refunds_only_its_obsolete_partition_delta() {
+    for concurrent_count in [9, 10] {
+        seeded_partition_topic!(
+            (broker_handle, _dir, broker),
+            SeedTopicSetup::single_partition("metered")
+        );
+        seed_controller_quota(&broker_handle, 2.0).await;
+        request_identity!((p, peer), principal("admin"));
+        let ctx = test_context(&p, &peer);
+        let stale = broker.controller.current_image();
+        let quota = Mutex::new(ctx.controller_mutation_quota(&broker, &stale, true));
+        let growth = GrowthContext {
+            broker: &broker,
+            ctx: &ctx,
+            quota: &quota,
+            charged: AtomicU64::new(0),
+            prior_delay: Time::ZERO,
+            validate_only: false,
+        };
+        let topic = topic_req(PartitionTopicSetup {
+            name: "metered",
+            count: TopicPartitionCount(10),
+            ..Default::default()
+        });
+        let concurrent = principal("unmetered");
+        let response = drive(
+            &broker,
+            &request(
+                vec![topic_req(PartitionTopicSetup {
+                    name: "metered",
+                    count: TopicPartitionCount(concurrent_count),
+                    ..Default::default()
+                })],
+                PartitionMutation::Apply,
+            ),
+            &test_context(&concurrent, &peer),
+        )
+        .await;
+        assert!(response.results[0].error_code == codes::NONE);
+        assert!(matches!(
+            grow_topic(&growth, &topic, stale).await,
+            Err(RaftError::StaleMetadataImage)
+        ));
+        assert!(growth.charged.load(Ordering::Relaxed) == 9);
+
+        let retried = grow_topic(&growth, &topic, broker.controller.current_image())
+            .await
+            .unwrap();
+        assert!(
+            retried.error_code
+                == if concurrent_count == 9 {
+                    codes::NONE
+                } else {
+                    codes::INVALID_PARTITIONS
+                }
+        );
+        assert!(growth.charged.load(Ordering::Relaxed) == u64::from(concurrent_count == 9));
+
+        // A request may consume the remaining burst, including one overdraft,
+        // but the next request must still be refused and report real debt.
+        let next_count = if concurrent_count == 9 { 12 } else { 13 };
+        for (count, expected) in [
+            (next_count, codes::NONE),
+            (next_count + 1, codes::THROTTLING_QUOTA_EXCEEDED),
+        ] {
+            let answer = drive(
+                &broker,
+                &request(
+                    vec![topic_req(PartitionTopicSetup {
+                        name: "metered",
+                        count: TopicPartitionCount(count),
+                        ..Default::default()
+                    })],
+                    PartitionMutation::Apply,
+                ),
+                &ctx,
+            )
+            .await;
+            assert!(answer.results[0].error_code == expected);
+            if expected == codes::THROTTLING_QUOTA_EXCEEDED {
+                assert!(answer.throttle_time_ms > 0 && answer.throttle_time_ms <= 500);
+            }
+        }
+        broker_handle.shutdown().await;
+    }
 }
 
 /// Commit topic `grow` with one partition on the remote brokers 3 and 4, so
@@ -693,4 +785,43 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
         broker_handle.shutdown().await;
     }
     assert!(actual == expected);
+}
+
+/// Both operations initially observe the same count. Only one may create the
+/// new indices; the other must see the committed count on its next attempt.
+#[tokio::test]
+async fn concurrent_growth_revalidates_partition_count_before_append() {
+    seeded_partition_topic!(
+        (handle, _dir, broker),
+        SeedTopicSetup::single_partition("t")
+    );
+    let p = principal("admin");
+    let h = peer();
+    let ctx = test_context(&p, &h);
+    let req = request(
+        vec![topic_req(PartitionTopicSetup::default())],
+        PartitionMutation::Apply,
+    );
+    let (first, second) = tokio::join!(drive(&broker, &req, &ctx), drive(&broker, &req, &ctx));
+    let mut got = [first, second];
+    got.sort_unstable_by_key(|response| response.results[0].error_code);
+    let expected = [
+        expected_response(vec![expected_result("t", codes::NONE, None)]),
+        expected_response(vec![expected_result(
+            "t",
+            codes::INVALID_PARTITIONS,
+            Some("Topic already has 3 partition(s).".into()),
+        )]),
+    ];
+    assert!(got == expected);
+    assert!(
+        broker
+            .controller
+            .current_image()
+            .topic("t")
+            .expect("topic")
+            .partitions
+            == 3
+    );
+    handle.shutdown().await;
 }

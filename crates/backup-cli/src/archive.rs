@@ -1,5 +1,5 @@
 //! The archive the capture is written to: the `--archive-*` flags turned into
-//! an object store, plus the three operations this tool needs from it.
+//! an object store, plus the operations this tool needs from it.
 //!
 //! The flags carry the names `krabka restore` gives them, because the capture
 //! is written into the archive the restore reads and an operator must not have
@@ -8,7 +8,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 pub use krabka_object_store::ArchiveArgs;
-use krabka_object_store::{ObjectOps, ObjectStoreClient, PutRequest, build_object_store};
+use krabka_object_store::{ObjectOps, ObjectStoreClient, PutMode, PutRequest, build_object_store};
 use object_store::path::Path;
 
 use crate::error::BackupError;
@@ -55,6 +55,24 @@ impl Archive {
         Ok(())
     }
 
+    /// Create a capture object, refusing to replace an existing object.
+    ///
+    /// # Errors
+    /// Returns [`BackupError::ObjectStore`] when the key already exists or the write fails.
+    pub async fn put_new(&self, relative: &str, bytes: Vec<u8>) -> Result<(), BackupError> {
+        self.client
+            .put(
+                &self.key(relative),
+                bytes.into(),
+                PutRequest {
+                    mode: PutMode::Create,
+                    ..PutRequest::default()
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Read one object whole.
     ///
     /// # Errors
@@ -63,6 +81,18 @@ impl Archive {
     /// read fails.
     pub async fn get(&self, relative: &str) -> Result<Vec<u8>, BackupError> {
         Ok(self.client.get(&self.key(relative)).await?.to_vec())
+    }
+
+    /// Read an archive-relative object within an independent byte limit.
+    ///
+    /// # Errors
+    /// Returns [`BackupError::ObjectStore`] when the object is absent, exceeds `max_bytes`, changes during the read, or cannot be read.
+    pub async fn get_capped(&self, relative: &str, max_bytes: u64) -> Result<Vec<u8>, BackupError> {
+        Ok(self
+            .client
+            .get_capped(&self.key(relative), max_bytes)
+            .await?
+            .to_vec())
     }
 
     /// Read an exact object key, refusing oversized bodies before buffering.
@@ -75,17 +105,11 @@ impl Archive {
         key: &str,
         max_bytes: u64,
     ) -> Result<Vec<u8>, BackupError> {
-        let key = Path::from(key);
-        let meta = self.client.head(&key).await?;
-        if meta.size > max_bytes {
-            return Err(krabka_object_store::ObjectStoreError::TooLarge {
-                key,
-                size: meta.size,
-                max_bytes,
-            }
-            .into());
-        }
-        Ok(self.client.get(&key).await?.to_vec())
+        Ok(self
+            .client
+            .get_capped(&Path::from(key), max_bytes)
+            .await?
+            .to_vec())
     }
 
     /// The distinct directory names one level below `relative`.
@@ -116,7 +140,15 @@ impl Archive {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use assert2::check;
+    use bytes::Bytes;
+    use krabka_object_store::{
+        ObjectStoreClient, ObjectStoreError,
+        fault::{FaultInjectingStore, FaultPolicy},
+    };
+    use object_store::{ObjectStoreExt as _, PutPayload, path::Path};
 
     use super::{Archive, ArchiveArgs, BTreeSet};
     use crate::error::{BackupError, EXIT_BAD_ARGUMENT};
@@ -217,6 +249,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn capture_objects_cannot_replace_a_completed_object() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = Archive::open(&local_args(root.path())).unwrap();
+        archive
+            .put_new("capture/manifest.json", b"first".to_vec())
+            .await
+            .unwrap();
+        check!(
+            archive
+                .put_new("capture/manifest.json", b"second".to_vec())
+                .await
+                .is_err()
+        );
+        check!(archive.get("capture/manifest.json").await.unwrap() == b"first");
+    }
+
+    async fn archive_that_grows_during_get(key: &str, prefix: Option<&str>) -> Archive {
+        let store = Arc::new(
+            FaultInjectingStore::new(
+                Arc::new(object_store::memory::InMemory::new()),
+                FaultPolicy::none(),
+            )
+            .with_get_overwrite(Bytes::from_static(b"123456")),
+        );
+        store
+            .put(&Path::from(key), PutPayload::from_static(b"123"))
+            .await
+            .unwrap();
+        Archive {
+            client: ObjectStoreClient::new(store),
+            prefix: prefix.map(str::to_owned),
+        }
+    }
+
+    #[tokio::test]
+    async fn capped_relative_reads_apply_the_prefix_and_detect_growth() {
+        let archive = archive_that_grows_during_get("prod/document", Some("prod")).await;
+        check!(matches!(
+            archive.get_capped("document", 5).await,
+            Err(BackupError::ObjectStore(
+                ObjectStoreError::Precondition { .. }
+            ))
+        ));
+    }
+
+    #[tokio::test]
     async fn an_absolute_read_rejects_an_oversized_object_before_fetching_it() {
         let root = tempfile::tempdir().expect("archive root");
         std::fs::write(root.path().join("wal.ckwl"), b"oversized").expect("write object");
@@ -228,5 +306,18 @@ mod tests {
             .expect_err("object exceeds the cap");
 
         check!(error.to_string().contains("exceeds cap of 4 bytes"));
+    }
+
+    #[tokio::test]
+    async fn an_absolute_read_rejects_growth_between_head_and_get() {
+        let archive = archive_that_grows_during_get("wal.ckwl", None).await;
+        let error = archive
+            .get_absolute_capped("wal.ckwl", 5)
+            .await
+            .unwrap_err();
+        check!(matches!(
+            error,
+            BackupError::ObjectStore(ObjectStoreError::Precondition { .. })
+        ));
     }
 }

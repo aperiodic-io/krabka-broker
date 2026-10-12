@@ -80,7 +80,7 @@ let%span slocal_bytes'0 = "/workspace/crates/verified/src/retention/local_bytes.
 let%span slocal_bytes'1 = "/workspace/crates/verified/src/retention/local_bytes.rs" 23 10 24 81
 let%span slocal_bytes'2 = "/workspace/crates/verified/src/retention/local_bytes.rs" 7 10 7 15
 let%span slocal_bytes'3 = "/workspace/crates/verified/src/retention/local_bytes.rs" 10 8 12 9
-let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 72 10 76 1
+let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 78 10 82 1
 
 use creusot.slice.Slice64
 use creusot.int.Int64

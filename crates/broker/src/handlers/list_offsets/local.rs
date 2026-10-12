@@ -40,15 +40,21 @@ use crate::partition::Partition;
 /// adds, and [`resolve_partition`](super::resolve::resolve_partition) takes the
 /// lower of the two, so on every topic that does not schedule delivery the
 /// answer is Kafka's.
-pub(super) fn latest_offset(partition: &Partition, policy: DeliveryPolicy, local_end: i64) -> i64 {
-    if policy == DeliveryPolicy::Scheduled {
-        partition
-            .delivery
-            .publish_now(&partition.log)
-            .map_or(local_end, |delivery| delivery.watermark.0)
-    } else {
-        local_end
+///
+/// `Some` confirms the recompute still observed scheduled delivery. Archive
+/// resolution uses that fact too, so an immediate-mode transition cannot keep
+/// a scheduled cap after the local recompute has discarded it.
+pub(super) fn scheduled_latest_offset(
+    partition: &Partition,
+    policy: DeliveryPolicy,
+) -> Option<i64> {
+    if policy != DeliveryPolicy::Scheduled {
+        return None;
     }
+    partition
+        .delivery
+        .publish_now(&partition.log)
+        .map(|delivery| delivery.watermark.0)
 }
 
 pub(super) fn leader_epoch_for_offset(partition: &Partition, offset: i64) -> i32 {
@@ -278,6 +284,241 @@ mod tests {
         check!(list_partition(&broker, SCHEDULED, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
 
         broker_handle.shutdown().await;
+    }
+
+    fn tiered_delivery_partition(
+        logs: &tempfile::TempDir,
+        topic: &str,
+        leader: krabka_ids::NodeId,
+        policy: DeliveryPolicy,
+    ) -> (
+        Arc<qubit_clock::ManualMonotonicClock>,
+        Arc<Partition>,
+        krabka_log::LogConfig,
+    ) {
+        use krabka_log::LogConfig;
+        use krabka_units::{bytes, millis};
+
+        use crate::delivery::test_support::{
+            DeliveryPartitionSetup, batch_at, partition_with_batches,
+        };
+
+        let timeline = qubit_clock::ManualMonotonicClock::new_shared();
+        let clock: Arc<dyn qubit_clock::WallClock> = timeline.new_wall_clock(wall_at(NOW_MS));
+        let config = LogConfig {
+            segment_size: bytes(1),
+            remote_storage_enable: true,
+            delivery_policy: policy,
+            delivery_clock_uncertainty: millis(u32::try_from(BOUND_MS).unwrap()),
+            ..LogConfig::default()
+        };
+        let partition = partition_with_batches(
+            logs,
+            &clock,
+            DeliveryPartitionSetup {
+                topic,
+                config: config.clone(),
+                leader,
+                batches: vec![
+                    batch_at(NOW_MS - 1_000),
+                    batch_at(NOW_MS + 10_000),
+                    batch_at(NOW_MS - 1_000),
+                ],
+            },
+        );
+        (timeline, partition, config)
+    }
+
+    #[tokio::test]
+    async fn scheduled_latest_keeps_pending_records_after_local_retention_pressure() {
+        use krabka_ids::{LeaderEpoch, Offset};
+        use krabka_remote_storage::TopicIdPartition;
+        use krabka_units::bytes;
+
+        use crate::{
+            api_catalog::UnstableApiVersions,
+            remote_log_manager::{
+                ArchiveMode, LocalRetentionBounds, copy_eligible, local_retention_pass,
+                test_support::{local_backends, tier},
+            },
+        };
+
+        const TOPIC: &str = "scheduled-latest-retention";
+        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        let logs = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        let (timeline, partition, mut config) = tiered_delivery_partition(
+            &logs,
+            TOPIC,
+            krabka_ids::NodeId(7),
+            DeliveryPolicy::Scheduled,
+        );
+        config.local_retention_size = Some(bytes(0));
+        partition.log.lock().unwrap().set_config(config.clone());
+        register(&broker.partitions, &partition);
+        install_partition_leader_record(&broker_handle, TOPIC, broker.config.node_id.get()).await;
+        partition
+            .install_leader_change(broker.config.node_id.get(), 0)
+            .await;
+        let topic_id = broker
+            .controller
+            .current_image()
+            .topic(TOPIC)
+            .unwrap()
+            .topic_id;
+        let tp = TopicIdPartition::new(topic_id, TOPIC, 0);
+        let (rsm, rlmm) = local_backends(remote.path());
+        let exports = {
+            let mut log = partition.log.lock().unwrap();
+            log.sync().unwrap();
+            log.tierable_segments()
+        };
+        assert!(
+            copy_eligible(
+                &tier(ArchiveMode::Mutable, &rsm, &rlmm),
+                &tp,
+                1,
+                LeaderEpoch(0),
+                exports.clone()
+            )
+            .await
+                == 2
+        );
+        assert!(
+            local_retention_pass(
+                &tp,
+                &partition,
+                &exports,
+                &config,
+                &rlmm,
+                LocalRetentionBounds {
+                    now_ms: NOW_MS,
+                    high_watermark: Offset(6)
+                },
+                UnstableApiVersions::Disabled
+            ) == 1
+        );
+        assert!(partition.log.lock().unwrap().local_log_start_offset() == Offset(2));
+        test_ctx!(ctx, "admin");
+        assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+        timeline
+            .advance(std::time::Duration::from_millis(
+                u64::try_from(10_000 + BOUND_MS).unwrap(),
+            ))
+            .unwrap();
+        assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(6));
+        broker_handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn scheduled_latest_finds_a_pending_archive_after_legacy_eviction_or_a_mode_change() {
+        use krabka_ids::{LeaderEpoch, Offset};
+        use krabka_log::LogConfig;
+        use krabka_remote_storage::TopicIdPartition;
+
+        use crate::{
+            handlers::list_offsets::test_support::remote_topic,
+            remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier},
+        };
+        for initial_policy in [DeliveryPolicy::Scheduled, DeliveryPolicy::Immediate] {
+            const TOPIC: &str = "scheduled-latest-archived";
+            let (broker_handle, client, _dirs) = remote_topic(TOPIC, vec![]).await;
+            let broker = broker_handle.broker_arc_for_test();
+            let logs = tempfile::tempdir().unwrap();
+            let (timeline, partition, config) = tiered_delivery_partition(
+                &logs,
+                TOPIC,
+                krabka_ids::NodeId(broker.config.node_id.get()),
+                initial_policy,
+            );
+            register(&broker.partitions, &partition);
+            let topic_id = broker
+                .controller
+                .current_image()
+                .topic(TOPIC)
+                .unwrap()
+                .topic_id;
+            let tp = TopicIdPartition::new(topic_id, TOPIC, 0);
+            let reader = broker.remote_reader.as_ref().unwrap();
+            let exports = {
+                let mut log = partition.log.lock().unwrap();
+                log.sync().unwrap();
+                log.tierable_segments()
+            };
+            assert!(
+                copy_eligible(
+                    &tier(ArchiveMode::Mutable, &reader.rsm, &reader.rlmm),
+                    &tp,
+                    1,
+                    LeaderEpoch(0),
+                    exports
+                )
+                .await
+                    == 2
+            );
+            {
+                let mut log = partition.log.lock().unwrap();
+                // Reproduce eviction by older code, or legal eviction while
+                // the topic still delivered immediately, then enable scheduling.
+                assert!(log.log_end_offset() == Offset(6));
+                assert!(log.delete_local_segments_through(Offset(4)).unwrap() == 2);
+                assert!(log.local_log_start_offset() == Offset(4));
+                assert!(log.log_end_offset() == Offset(6));
+                log.set_config(LogConfig {
+                    delivery_policy: DeliveryPolicy::Scheduled,
+                    ..config.clone()
+                });
+            }
+            assert!(Arc::ptr_eq(
+                &broker
+                    .partitions
+                    .get(TOPIC, krabka_ids::PartitionIndex(0))
+                    .unwrap(),
+                &partition,
+            ));
+            assert!(partition.high_watermark().await == Offset(6));
+            test_ctx!(ctx, "admin");
+            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+            assert!(
+                super::super::v0::latest_offsets_for_test(&broker, TOPIC).await
+                    == (codes::NONE, vec![2])
+            );
+            partition.log.lock().unwrap().set_config(LogConfig {
+                delivery_policy: DeliveryPolicy::Immediate,
+                ..config.clone()
+            });
+            // The earlier Scheduled snapshot must not survive a recompute
+            // that observes the topic's switch back to immediate delivery.
+            assert!(scheduled_latest_offset(&partition, DeliveryPolicy::Scheduled).is_none());
+            {
+                let log = partition.log.lock().unwrap();
+                assert!(log.config_snapshot().delivery_policy == DeliveryPolicy::Immediate);
+                assert!(log.log_end_offset() == Offset(6));
+            }
+            assert!(partition.high_watermark().await == Offset(6));
+            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(6));
+            assert!(
+                super::super::v0::latest_offsets_for_test(&broker, TOPIC).await
+                    == (codes::NONE, vec![6])
+            );
+            partition.log.lock().unwrap().set_config(LogConfig {
+                delivery_policy: DeliveryPolicy::Scheduled,
+                ..config
+            });
+            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+            timeline
+                .advance(std::time::Duration::from_millis(
+                    u64::try_from(10_000 + BOUND_MS - 1).unwrap(),
+                ))
+                .unwrap();
+            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+            timeline
+                .advance(std::time::Duration::from_millis(1))
+                .unwrap();
+            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(6));
+            drop(client);
+            broker_handle.shutdown().await;
+        }
     }
 
     #[tokio::test]

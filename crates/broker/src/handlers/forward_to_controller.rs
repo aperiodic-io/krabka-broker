@@ -15,7 +15,10 @@
 //! controller's, and a write built from a stale image rolls the newer state
 //! back.
 
+use std::{future::Future, sync::Arc, time::Duration};
+
 use bytes::{Bytes, BytesMut};
+use krabka_metadata::MetadataImage;
 use krabka_protocol::{
     Decode, Encode,
     owned::{
@@ -23,6 +26,7 @@ use krabka_protocol::{
         envelope_response::{self, EnvelopeResponse},
     },
 };
+use krabka_raft::RaftError;
 
 use crate::{
     broker::Broker,
@@ -30,12 +34,87 @@ use crate::{
     envelope::{self, ForwardedPrincipal, ForwardedRequest},
     error::BrokerError,
     handlers::{ApiKeyCode, RequestContext},
+    metadata_source::MetadataSource,
 };
 
 /// `Errors.UNKNOWN_SERVER_ERROR.message()`, which the
 /// `UnknownServerException` `ForwardingManagerImpl` builds carries.
 const UNKNOWN_SERVER_ERROR_MESSAGE: &str =
     "The server experienced an unexpected error when processing the request.";
+
+/// Rebuild a controller mutation after conflicting metadata or a pending tail.
+///
+/// `operation` must submit with `submit_change_if_image`; each attempt gets a
+/// fresh authoritative image. The deadline covers admission and commit waits.
+///
+/// # Errors
+/// Returns the deadline error outside the operation's own result.
+pub(crate) async fn guarded_operation<T, F, Fut>(
+    broker: &Broker,
+    deadline: tokio::time::Instant,
+    operation: F,
+) -> Result<Result<T, RaftError>, tokio::time::error::Elapsed>
+where
+    F: FnMut(Arc<MetadataImage>) -> Fut,
+    Fut: Future<Output = Result<T, RaftError>> + Send,
+{
+    guarded_operation_on_source(broker.controller.as_ref(), deadline, operation).await
+}
+
+/// Metadata-source seam shared by the broker wrapper and race regressions.
+///
+/// # Errors
+/// Returns the deadline error outside the operation's own result.
+pub(super) async fn guarded_operation_on_source<T, F, Fut>(
+    source: &dyn MetadataSource,
+    deadline: tokio::time::Instant,
+    mut operation: F,
+) -> Result<Result<T, RaftError>, tokio::time::error::Elapsed>
+where
+    F: FnMut(Arc<MetadataImage>) -> Fut,
+    Fut: Future<Output = Result<T, RaftError>> + Send,
+{
+    tokio::time::timeout_at(deadline, async {
+        loop {
+            let mut images = source.watch_image();
+            let image = images.borrow_and_update().clone();
+            let result = operation(image).await;
+            match result {
+                Err(RaftError::StaleMetadataImage | RaftError::UncommittedTail) => {
+                    tokio::select! {
+                        changed = images.changed() => {
+                            changed.map_err(|_| RaftError::LeaderUnknown)?;
+                        }
+                        () = tokio::time::sleep(Duration::from_millis(10)) => {},
+                    }
+                }
+                other => return other,
+            }
+        }
+    })
+    .await
+}
+
+/// Route a typed controller-listener request through its own response codec.
+/// Broker-listener requests continue to preprocessing and forwarding; a
+/// controller listener refuses mutations after this node loses leadership.
+macro_rules! controller_listener_dispatch {
+    ($broker:ident, $ctx:ident, $req:ident, $version:ident, $handle:path, $refusal:path) => {
+        if $ctx.connection_id == $crate::controller_admin::CONTROLLER_ADMIN_CONNECTION_ID {
+            if !$crate::handlers::forward_to_controller::is_active_controller($broker) {
+                return $crate::handlers::encode_response(
+                    &$refusal(&$req, $crate::codes::NOT_CONTROLLER, None),
+                    $version,
+                );
+            }
+            return $crate::handlers::encode_response(
+                &$handle($broker, $req, $version, $ctx).await?,
+                $version,
+            );
+        }
+    };
+}
+pub(super) use controller_listener_dispatch;
 
 /// `ControllerExceptions.newWrongControllerException`'s message, the one a
 /// request that only the active controller may run carries when it reaches

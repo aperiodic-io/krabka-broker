@@ -15,12 +15,12 @@ most of an hour:
 CLI runs; nothing here is required to build the repository.
 
 The `lint` task is not the whole Clippy story. Its aspect sees Bazel targets,
-and narrows them to what a change touched, so three things stay outside it: the
-benches under `crates/broker/benches` and `crates/log/benches`, which have no
-Bazel target at all; the test and binary targets a change left alone; and
-`krabka-protocol`'s build script, which `MODULE.bazel` pins with
-`gen_build_script = "off"` and which only runs under Cargo. CI's `cargo` job
-covers those with `cargo clippy --workspace --all-targets`.
+and narrows them to what a change touched, so the test, binary and benchmark
+targets a change left alone may be omitted. The broker and log benches have
+Bazel targets, but Cargo also checks their Cargo-specific dependency graph.
+Cargo alone runs `krabka-protocol`'s build script, which `MODULE.bazel` pins
+with `gen_build_script = "off"`. CI's `cargo` job covers the full Cargo graph
+with `cargo clippy --workspace --all-targets`.
 """
 
 def config(ctx: ConfigContext):

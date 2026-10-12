@@ -9,6 +9,17 @@ struct Seq(u64);
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, PrimitiveCmp)]
 struct EpochMs(pub i64);
 
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, PrimitiveCmp)]
+struct DomainSeq<const DOMAIN: u8>(u64);
+
+#[test]
+fn const_generic_domains_compare_from_both_sides() {
+    assert!(DomainSeq::<1>(3) == 3_u64);
+    assert!(3_u64 == DomainSeq::<2>(3));
+    assert!(DomainSeq::<1>(3) < 4_u64);
+    assert!(2_u64 < DomainSeq::<2>(3));
+}
+
 #[test]
 fn compares_with_the_inner_type_from_either_side() {
     assert!(Seq(3) == 3_u64);

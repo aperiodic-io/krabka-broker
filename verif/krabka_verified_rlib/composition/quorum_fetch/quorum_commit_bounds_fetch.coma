@@ -1,15 +1,15 @@
-(* #"/workspace/crates/verified/src/composition/quorum_fetch.rs" 20 0 27 15 *)
+(* #"/workspace/crates/verified/src/composition/quorum_fetch.rs" 21 0 28 15 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
-let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 169 10 169 63
-let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 170 10 171 97
-let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 83
-let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 175 58
-let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 176 74
-let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 177 10 181 1
-let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 182 10 182 36
-let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 183 10 183 59
+let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 93
+let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 174 97
+let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 175 10 175 83
+let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 178 58
+let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 179 10 179 74
+let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 180 10 184 1
+let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 185 10 185 36
+let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 186 10 186 59
 let%span sfetch'7 = "/workspace/crates/verified/src/broker/fetch.rs" 120 16 120 42
 let%span sfetch'8 = "/workspace/crates/verified/src/broker/fetch.rs" 133 8 139 9
 let%span sfailover = "/workspace/crates/verified/src/consensus/failover.rs" 196 10 196 17
@@ -17,20 +17,20 @@ let%span sfailover'0 = "/workspace/crates/verified/src/consensus/failover.rs" 19
 let%span sfailover'1 = "/workspace/crates/verified/src/consensus/failover.rs" 181 10 181 15
 let%span sfailover'2 = "/workspace/crates/verified/src/consensus/failover.rs" 184 8 190 9
 let%span sfailover'3 = "/workspace/crates/verified/src/consensus/failover.rs" 175 8 175 48
-let%span squorum_fetch = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 28 13 35 5
-let%span squorum_fetch'0 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 37 25 37 30
-let%span squorum_fetch'1 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 37 32 37 36
-let%span squorum_fetch'2 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 37 8 37 79
-let%span squorum_fetch'3 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 41 12 43 13
-let%span squorum_fetch'4 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 7 29 7 80
-let%span squorum_fetch'5 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 8 29 8 75
-let%span squorum_fetch'6 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 9 29 9 51
-let%span squorum_fetch'7 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 10 29 11 36
-let%span squorum_fetch'8 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 12 28 12 76
-let%span squorum_fetch'9 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 13 28 13 50
-let%span squorum_fetch'10 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 14 28 14 82
-let%span squorum_fetch'11 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 15 28 17 22
-let%span squorum_fetch'12 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 18 28 19 93
+let%span squorum_fetch = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 29 13 36 5
+let%span squorum_fetch'0 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 38 25 38 30
+let%span squorum_fetch'1 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 38 32 38 36
+let%span squorum_fetch'2 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 38 8 38 79
+let%span squorum_fetch'3 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 42 12 44 13
+let%span squorum_fetch'4 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 8 29 8 80
+let%span squorum_fetch'5 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 9 29 9 75
+let%span squorum_fetch'6 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 10 29 10 51
+let%span squorum_fetch'7 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 11 29 12 36
+let%span squorum_fetch'8 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 13 28 13 76
+let%span squorum_fetch'9 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 14 28 14 50
+let%span squorum_fetch'10 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 15 28 15 82
+let%span squorum_fetch'11 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 16 28 18 22
+let%span squorum_fetch'12 = "/workspace/crates/verified/src/composition/quorum_fetch.rs" 19 28 20 93
 let%span swatermark = "/workspace/crates/verified/src/consensus/watermark.rs" 65 11 65 69
 let%span swatermark'0 = "/workspace/crates/verified/src/consensus/watermark.rs" 66 11 66 64
 let%span swatermark'1 = "/workspace/crates/verified/src/consensus/watermark.rs" 67 11 67 78
@@ -134,7 +134,8 @@ let fetch_visibility (is_follower: bool) (read_committed: bool) (w: t_FetchWater
   (return (x: t_FetchVisibility)) = any
   [ return (result: t_FetchVisibility) ->
   {[@stop_split] [@expl:fetch_visibility ensures] ([@stop_split] [@expl:fetch_visibility ensures #0] [%#sfetch] result.out_of_range
-      = (Int64.to_int fetch_offset < Int64.to_int w.log_start))
+      = (Int64.to_int fetch_offset < Int64.to_int w.log_start
+      \/ gt_log_Int (Int64.to_int fetch_offset) (Int64.to_int w.log_end)))
     /\ ([@stop_split] [@expl:fetch_visibility ensures #1] [%#sfetch'0] result.empty
       = (not result.out_of_range
       /\ ge_log_Int (Int64.to_int fetch_offset) (if is_follower then
@@ -176,7 +177,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let quorum_commit_bounds_fetch [#"/workspace/crates/verified/src/composition/quorum_fetch.rs" 20 0 27 15]
+let quorum_commit_bounds_fetch [#"/workspace/crates/verified/src/composition/quorum_fetch.rs" 21 0 28 15]
   (followers: Slice64.slice Int64.t) (majority: UInt64.t) (epoch_start: Int64.t) (current': Int64.t)
   (leader_counts: bool) (w: t_FetchWatermarks) (return (x: tup2_i64_i64)) =
 {[@stop_split] [@expl:quorum_commit_bounds_fetch requires] ([@stop_split] [@expl:quorum_commit_bounds_fetch requires #0] [%#squorum_fetch'4] 1

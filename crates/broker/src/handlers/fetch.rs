@@ -360,7 +360,8 @@ fn cluster_authorization_failed() -> FetchResponse {
 /// property tests in isolation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct VisibilityWindow {
-    /// `fetch_offset < log_start`. The caller returns `OFFSET_OUT_OF_RANGE`.
+    /// `fetch_offset < log_start` or `fetch_offset > log_end`. The caller
+    /// returns `OFFSET_OUT_OF_RANGE`; the log end itself is a valid empty read.
     pub out_of_range: bool,
     /// `fetch_offset >= upper_bound`. There is nothing to read, and no bytes
     /// go out.

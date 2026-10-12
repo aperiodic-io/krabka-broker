@@ -59,28 +59,26 @@ pub(super) fn reconcile_with_snapshot(
     args: &RestoreArgs,
     path: &std::path::Path,
 ) -> Result<(), RestoreError> {
-    reconcile_with_snapshot_policy(partitions, args, path, false)
+    reconcile_with_snapshot_policy(partitions, args, &load_snapshot(path)?, false)
 }
 
 /// Reconcile a WORM archive with a snapshot whose digest was authenticated by
 /// the signed capture boundary. Immutable objects for completed deletions are
 /// expected and are excluded from restore.
-pub(crate) fn reconcile_authenticated_with_snapshot(
+pub(crate) fn reconcile_authenticated_snapshot(
     partitions: &mut Vec<PartitionInventory>,
     args: &RestoreArgs,
-    path: &std::path::Path,
+    snapshot: &Snapshot,
 ) -> Result<(), RestoreError> {
-    reconcile_with_snapshot_policy(partitions, args, path, true)
+    reconcile_with_snapshot_policy(partitions, args, snapshot, true)
 }
 
 fn reconcile_with_snapshot_policy(
     partitions: &mut Vec<PartitionInventory>,
     args: &RestoreArgs,
-    path: &std::path::Path,
+    snapshot: &Snapshot,
     retain_deleted_objects: bool,
 ) -> Result<(), RestoreError> {
-    let snapshot = load_snapshot(path)?;
-
     let mut dumps: HashMap<(Uuid, i32), &PartitionDump> = HashMap::new();
     for dump in &snapshot.dump.partitions {
         if args.selects_topic(&dump.topic_id_partition.topic) {

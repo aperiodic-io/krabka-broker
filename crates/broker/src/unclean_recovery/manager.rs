@@ -12,7 +12,7 @@ use krabka_metadata::{
     LeaderRecoveryState, MetadataImage, MetadataRecord, PartitionRecord, PartitionRecoveryRecord,
 };
 use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use krabka_raft::NodeId;
+use krabka_raft::{NodeId, RaftError};
 use krabka_units::convert::TimeExt as _;
 use krabka_verified::unclean_recovery_commit_admission;
 use tokio::sync::{Mutex, mpsc};
@@ -41,7 +41,7 @@ mod tests;
 ///
 /// It receives [`RecoveryJob`] values, dedups the in-flight work for each
 /// partition, queries surviving replicas for their log state, and elects one
-/// of them through `submit_change`: an eligible leader replica if one
+/// of them through an image-guarded submission: an eligible leader replica if one
 /// answered, and otherwise the most complete log that did.
 pub(crate) struct UncleanRecoveryManager {
     controller: Arc<dyn MetadataSource>,
@@ -290,11 +290,13 @@ impl UncleanRecoveryManager {
     /// rather than anything it writes: only a fallback to the most complete
     /// surviving log counts on the unclean-leader-election meter or reads as a
     /// break-glass bypass, because only that one can drop a committed record.
-    /// The `PartitionRecord` is the same either way.
+    /// The `PartitionRecord` is the same either way. Admission keeps the
+    /// planning image across audit awaits; a changed image, controller, or
+    /// pending Raft tail rejects this selection without forwarding it.
     async fn commit_elected_leader(
         &self,
         job: &RecoveryJob,
-        image: &MetadataImage,
+        image: &Arc<MetadataImage>,
         pr: &PartitionRecord,
         election: Election,
         selected: (i32, &[u64], bool),
@@ -347,13 +349,6 @@ impl UncleanRecoveryManager {
             warn!(%error, "unclean recovery refused by fail-closed audit policy");
             return RecoveryOutcome::AuditUnavailable;
         }
-        warn!(
-            topic = %job.topic,
-            partition = job.partition,
-            leader = winner.0,
-            basis = election.basis.describe(),
-            "unclean recovery elected a leader"
-        );
         // KIP-966: `ElrPublisher` recomputes the published state from the
         // record. An ELR member stays in the set the rules carry forward; a
         // most-complete-log winner need not hold every committed record, so
@@ -370,10 +365,27 @@ impl UncleanRecoveryManager {
             ));
         }
         ElrPublisher::new(image).extend(&mut changes);
-        if let Err(e) = self.controller.submit_change(changes).await {
-            warn!(error = %e, "unclean recovery submit_change failed");
-            return RecoveryOutcome::NoEligibleReplica;
+        if let Err(error) = self
+            .controller
+            .submit_change_if_image(changes, Arc::clone(image))
+            .await
+        {
+            warn!(%error, "unclean recovery guarded submission failed");
+            return match error {
+                RaftError::StaleMetadataImage
+                | RaftError::UncommittedTail
+                | RaftError::NotLeader { .. }
+                | RaftError::LeaderUnknown => RecoveryOutcome::Stale,
+                _ => RecoveryOutcome::NoEligibleReplica,
+            };
         }
+        warn!(
+            topic = %job.topic,
+            partition = job.partition,
+            leader = winner.0,
+            basis = election.basis.describe(),
+            "unclean recovery elected a leader"
+        );
         if election.basis.loses_data() {
             self.metrics.record_unclean_leader_election();
         }

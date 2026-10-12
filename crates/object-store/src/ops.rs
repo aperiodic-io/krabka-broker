@@ -85,6 +85,12 @@ pub trait ObjectOps: Send + Sync {
     /// Fetch a whole object.
     async fn get(&self, key: &Path) -> Result<Bytes, ObjectStoreError>;
 
+    /// Fetch a whole object with a byte limit enforced before buffering its body.
+    ///
+    /// Bind the GET to the HEAD version or etag when the backend provides one,
+    /// and reject an oversized response while streaming even without either.
+    async fn get_capped(&self, key: &Path, max_bytes: u64) -> Result<Bytes, ObjectStoreError>;
+
     /// Fetch a byte range of an object.
     async fn get_range(&self, key: &Path, range: GetRange) -> Result<Bytes, ObjectStoreError>;
 

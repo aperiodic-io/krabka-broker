@@ -6,6 +6,8 @@
 //! and the topic id. The cascade itself runs afterwards, so the two steps are
 //! separate functions that the handler calls on either side of the commit.
 
+use std::sync::Arc;
+
 use krabka_ids::PartitionIndex;
 use krabka_remote_storage::TopicIdPartition;
 
@@ -13,6 +15,7 @@ use crate::{
     broker::Broker,
     partition_registry::PartitionRegistry,
     remote_log_manager::{ArchiveMode, cascade_remote_partition_delete},
+    remote_reader::RemoteReader,
 };
 
 /// Snapshots the `(topic_id, partition_id)` of every tiered partition of
@@ -58,10 +61,13 @@ pub(super) fn tiered_partitions(
 /// A write-once archive keeps every archived byte: the cascade clears the
 /// broker's metadata but deletes nothing. Deleting a topic must not erase a
 /// compliance archive.
-pub(super) fn spawn_remote_cascades(broker: &Broker, tiered_to_cascade: Vec<TopicIdPartition>) {
-    if let Some(reader) = broker.remote_reader.as_ref() {
-        let broker_id = broker.config.broker_id;
-        let archive = ArchiveMode::from_worm(broker.config.remote_storage_worm.as_ref());
+pub(super) fn spawn_remote_cascades(
+    reader: Option<Arc<RemoteReader>>,
+    broker_id: i32,
+    archive: ArchiveMode,
+    tiered_to_cascade: Vec<TopicIdPartition>,
+) {
+    if let Some(reader) = reader {
         for tp in tiered_to_cascade {
             let rsm = reader.rsm.clone();
             let rlmm = reader.rlmm.clone();

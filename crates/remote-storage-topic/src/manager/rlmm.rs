@@ -2,13 +2,10 @@
 //! manager, with the publish-and-wait bridge its mutation methods use.
 //!
 //! Every mutation serializes an event, publishes it to the metadata log, and
-//! blocks until the consumer pump has applied the published offset, so the
-//! bridge belongs beside the trait methods that depend on it. Each gated read
+//! blocks until the consumer pump returns the result of applying the published
+//! offset. The bridge lives in the sibling `mutations` module. Each gated read
 //! consults [`ReadGate`] before it delegates to the inner cache.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
 use krabka_ids::LeaderEpoch;
 use krabka_remote_storage::{
     InmemoryRemoteLogMetadataManager, RemoteLogMetadataManager, RemoteLogSegmentMetadata,
@@ -17,7 +14,7 @@ use krabka_remote_storage::{
 };
 
 use super::{TopicBasedRemoteLogMetadataManager, assignment::ReadGate};
-use crate::{error::MetadataLogError, partitioning::metadata_partition_for, serde::MetadataEvent};
+use crate::{partitioning::metadata_partition_for, serde::MetadataEvent};
 
 impl TopicBasedRemoteLogMetadataManager {
     /// Apply the assignment/readiness gate before consulting cached metadata.
@@ -35,41 +32,6 @@ impl TopicBasedRemoteLogMetadataManager {
             ReadGate::NotReady => Err(RemoteStorageError::NotReady { partition: mp }),
             ReadGate::Ready => read(&self.inner),
         }
-    }
-
-    async fn wait_for_offset(&self, partition: i32, offset: i64) {
-        let idx = usize::try_from(partition).expect("partition non-negative");
-        let mut rx = self.applied_tx.subscribe();
-        loop {
-            {
-                let applied = self.applied.lock().expect("applied mutex poisoned");
-                if applied[idx] >= offset {
-                    return;
-                }
-            }
-            if rx.changed().await.is_err() {
-                return;
-            }
-        }
-    }
-
-    fn publish_and_wait(
-        &self,
-        tp: &TopicIdPartition,
-        event: Bytes,
-    ) -> Result<(), RemoteStorageError> {
-        let partition = metadata_partition_for(tp, self.log.partition_count());
-        let log = Arc::clone(&self.log);
-        // Caller is on a non-runtime (spawn_blocking) thread; block_on
-        // is safe and gives us the assigned offset to wait on.
-        self.runtime.block_on(async {
-            let offset = log
-                .publish(partition, event)
-                .await
-                .map_err(MetadataLogError::into_storage)?;
-            self.wait_for_offset(partition, offset).await;
-            Ok::<_, RemoteStorageError>(())
-        })
     }
 }
 
@@ -138,8 +100,9 @@ impl RemoteLogMetadataManager for TopicBasedRemoteLogMetadataManager {
         topic_id_partition: &TopicIdPartition,
         leader_epoch: LeaderEpoch,
     ) -> Result<Vec<RemoteLogSegmentMetadata>, RemoteStorageError> {
-        self.inner
-            .list_remote_log_segments_by_epoch(topic_id_partition, leader_epoch)
+        self.read_if_ready(topic_id_partition, |inner| {
+            inner.list_remote_log_segments_by_epoch(topic_id_partition, leader_epoch)
+        })
     }
 
     fn put_remote_partition_delete_metadata(
@@ -154,6 +117,8 @@ impl RemoteLogMetadataManager for TopicBasedRemoteLogMetadataManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use assert2::assert;
     use krabka_remote_storage::RemotePartitionDeleteState;
 

@@ -68,6 +68,8 @@ pub struct S3RemoteStorage {
     multipart_threshold: ByteSize,
     /// Per-part size used by the multipart path.
     multipart_chunk_size: ByteSize,
+    /// Upper bound on a buffered index read, checked before and during GET.
+    max_index_bytes: u64,
     /// `Some` when this backend is a write-once archive.
     worm: Option<WormMode>,
     pub(crate) worm_bucket: WormBucket,

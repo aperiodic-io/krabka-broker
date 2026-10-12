@@ -15,7 +15,7 @@ let%span sleader_epoch = "/workspace/crates/verified/src/leader_epoch.rs" 71 8 8
 let%span sleader_epoch'0 = "/workspace/crates/verified/src/leader_epoch.rs" 43 8 43 87
 let%span sleader_epoch'1 = "/workspace/crates/verified/src/leader_epoch.rs" 31 8 33 82
 let%span sbroker = "/workspace/crates/verified/src/broker.rs" 15 8 18 82
-let%span sbroker'0 = "/workspace/crates/verified/src/broker.rs" 33 8 35 83
+let%span sbroker'0 = "/workspace/crates/verified/src/broker.rs" 34 8 37 81
 let%span sepoch_replay = "/workspace/crates/verified/src/composition/epoch_replay.rs" 56 21 56 22
 let%span sepoch_replay'0 = "/workspace/crates/verified/src/composition/epoch_replay.rs" 60 8 60 83
 let%span sepoch_replay'1 = "/workspace/crates/verified/src/composition/epoch_replay.rs" 60 8 60 84
@@ -141,13 +141,13 @@ predicate clamped_fetch_watermarks [#"/workspace/crates/verified/src/broker.rs" 
   /\ Int64.to_int bounded.lso = MinMax.min (Int64.to_int original.lso) (Int64.to_int bounded.log_end)
   /\ Int64.to_int bounded.deliverable = MinMax.min (Int64.to_int original.deliverable) (Int64.to_int bounded.log_end)
 
-predicate committed_fetch_response [#"/workspace/crates/verified/src/broker.rs" 25 0 31 9] (view: t_FetchVisibility) (hw'0: Int64.t) (lso'0: Int64.t) (deliverable'0: Int64.t) (floor: int) =
+predicate committed_fetch_response [#"/workspace/crates/verified/src/broker.rs" 25 0 32 9] (view: t_FetchVisibility) (hw'0: Int64.t) (lso'0: Int64.t) (deliverable'0: Int64.t) (floor: int) (log_end'0: int) =
   [%#sbroker'0] view.response_hw = hw'0
   /\ Int64.to_int view.response_lso = MinMax.min (Int64.to_int hw'0) (Int64.to_int lso'0)
   /\ Int64.to_int view.effective_lso = MinMax.min (Int64.to_int hw'0) (Int64.to_int lso'0)
   /\ view.read_committed_aborts
-  /\ not view.out_of_range
-  /\ view.empty = ge_log_Int floor (MinMax.min (Int64.to_int hw'0) (Int64.to_int deliverable'0))
+  /\ view.out_of_range = gt_log_Int floor log_end'0
+  /\ view.empty = (floor <= log_end'0 /\ ge_log_Int floor (MinMax.min (Int64.to_int hw'0) (Int64.to_int deliverable'0)))
 
 let validated_epochs_bound_truncated_fetch (entries: Slice64.slice t_EpochEntry) (requested: Int32.t)
   (segment_base: Int64.t) (w: t_FetchWatermarks)
@@ -166,7 +166,7 @@ let validated_epochs_bound_truncated_fetch (entries: Slice64.slice t_EpochEntry)
       /\ clamped_fetch_watermarks w bounded
       /\ Int64.to_int visibility.limit_offset
         = MinMax.min (MinMax.min (Int64.to_int bounded.hw) (Int64.to_int bounded.lso)) (Int64.to_int bounded.deliverable)
-      /\ committed_fetch_response visibility bounded.hw bounded.lso bounded.deliverable (Int64.to_int w.log_start)
+      /\ committed_fetch_response visibility bounded.hw bounded.lso bounded.deliverable (Int64.to_int w.log_start) (Int64.to_int bounded.log_end)
       end}
     (! return {result}) ]
 
@@ -500,7 +500,7 @@ let resolved_epoch_bounds_retained_replay [#"/workspace/crates/verified/src/comp
       /\ clamped_fetch_watermarks w bounded
       /\ Int64.to_int visibility.limit_offset
         = MinMax.min (MinMax.min (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.lso)) (Int64.to_int w.deliverable)) (Int64.to_int bounded.log_end)
-      /\ committed_fetch_response visibility bounded.hw bounded.lso bounded.deliverable (Int64.to_int w.log_start)
+      /\ committed_fetch_response visibility bounded.hw bounded.lso bounded.deliverable (Int64.to_int w.log_start) (Int64.to_int bounded.log_end)
       /\ 0 <= Int64.to_int local_start
       /\ Int64.to_int local_start <= Int64.to_int cursor
       /\ Int64.to_int w.log_start <= Int64.to_int cursor

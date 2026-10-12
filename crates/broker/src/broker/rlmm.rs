@@ -218,7 +218,7 @@ pub(super) async fn bootstrap_topic_rlmm(
     runtime: tokio::runtime::Handle,
     metrics: BrokerMetrics,
     node_id: krabka_metadata::NodeId,
-    mut image_rx: tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>>,
+    image_rx: tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>>,
     shutdown: CancellationToken,
 ) {
     let log_cfg = metadata_log_config(
@@ -290,11 +290,24 @@ pub(super) async fn bootstrap_topic_rlmm(
     metrics.tiered_storage_rlmm_topic_backed.set(1);
     tracing::info!("topic-backed RemoteLogMetadataManager activated");
 
+    run_topic_assignment(manager, node_id, image_rx, cfg.reconcile_tick, shutdown).await;
+}
+
+async fn run_topic_assignment(
+    manager: Arc<krabka_remote_storage_topic::TopicBasedRemoteLogMetadataManager>,
+    node_id: krabka_metadata::NodeId,
+    mut image_rx: tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>>,
+    reconcile_tick: std::time::Duration,
+    shutdown: CancellationToken,
+) {
+    // An existing metadata topic can differ from the provisioning config,
+    // including after a configuration change across a broker restart.
+    let partition_count = manager.metadata_partition_count();
+
     // Publish the leadership-derived needed-set on a watch; re-emit whenever
     // the metadata image changes. The initial value is the current image's
     // set, so the bootstrap assignment is leadership-derived (not all
     // partitions).
-    let partition_count = cfg.cfg.num_partitions;
     let initial =
         needed_metadata_partitions(&image_rx.borrow_and_update(), node_id, partition_count);
     let (set_tx, set_rx) = tokio::sync::watch::channel(initial);
@@ -303,7 +316,7 @@ pub(super) async fn bootstrap_topic_rlmm(
     // them before the Tokio runtime drops.
     let image_watcher =
         watch_rlmm_needed_partitions(image_rx, set_tx, node_id, partition_count, shutdown.clone());
-    let reconciler = run_rlmm_reconciler(manager, set_rx, cfg.reconcile_tick, shutdown);
+    let reconciler = run_rlmm_reconciler(manager, set_rx, reconcile_tick, shutdown);
     tokio::join!(image_watcher, reconciler);
 }
 

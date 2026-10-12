@@ -24,7 +24,26 @@ use crate::{
             cordoned_log_dirs_error, elr_min_isr_error, validate_dynamic_broker_configs,
         },
     },
+    cordoned_log_dirs::CORDONED_LOG_DIRS,
 };
+
+/// Check broker identity and directory membership on the client-addressed node.
+pub(super) fn preprocess_broker_resource(
+    resource: &AlterConfigsResource,
+    context: BrokerConfigContext<'_>,
+) -> Result<(), (i16, String)> {
+    let node = context.resource_node(&resource.resource_name)?;
+    if node != krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID {
+        let values = resource
+            .configs
+            .iter()
+            .filter(|c| c.name == CORDONED_LOG_DIRS)
+            .map(|c| (c.name.clone(), c.value.clone().unwrap_or_default()))
+            .collect();
+        cordoned_log_dirs_error(&values, context.log_dirs)?;
+    }
+    Ok(())
+}
 
 /// The records one `AlterConfigs` `BROKER` resource stages. `log_dirs` are
 /// this node's log directories, which a named-broker `cordoned.log.dirs` must

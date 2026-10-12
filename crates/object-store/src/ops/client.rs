@@ -23,7 +23,11 @@ mod tests;
 use crate::{
     error::ObjectStoreError,
     ops::{ObjectOps, ObjectStream, PutOutcome, PutRequest},
+    read::read_capped,
 };
+
+// Bound the payload retained by multipart tasks to eight chunks per upload.
+const MULTIPART_MAX_CONCURRENCY: usize = 8;
 
 /// The single concrete [`ObjectOps`] implementation.
 ///
@@ -182,6 +186,7 @@ impl ObjectOps for ObjectStoreClient {
         let mut hasher = req.digest.then(Sha256::new);
         let mut size_bytes = 0u64;
         loop {
+            writer.wait_for_capacity(MULTIPART_MAX_CONCURRENCY).await?;
             let n = file.read(&mut buf).await?;
             if n == 0 {
                 break;
@@ -240,6 +245,10 @@ impl ObjectOps for ObjectStoreClient {
 
     async fn get(&self, key: &Path) -> Result<Bytes, ObjectStoreError> {
         Ok(self.inner.get(key).await?.bytes().await?)
+    }
+
+    async fn get_capped(&self, key: &Path, max_bytes: u64) -> Result<Bytes, ObjectStoreError> {
+        read_capped(&self.inner, key, max_bytes).await
     }
 
     async fn get_range(&self, key: &Path, range: GetRange) -> Result<Bytes, ObjectStoreError> {

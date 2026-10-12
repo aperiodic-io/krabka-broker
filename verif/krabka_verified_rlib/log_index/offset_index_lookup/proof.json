@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_offset_index_lookup": { "prover": "z3", "time": 0.017 },
-      "vc_upper_offset_cursor": { "prover": "alt-ergo", "time": 0.01 }
+      "vc_upper_offset_cursor": { "prover": "alt-ergo", "time": 0.02 }
     }
   }
 }

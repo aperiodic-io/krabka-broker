@@ -32,6 +32,8 @@ use krabka_protocol::{
     owned::{
         fetch_request::{FetchPartition, FetchRequest, FetchTopic},
         fetch_response::FetchResponse,
+        list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
+        list_offsets_response::ListOffsetsResponse,
     },
     primitives::uuid::Uuid as WireUuid,
 };
@@ -204,7 +206,7 @@ impl LagPoller {
     ///
     /// A partition whose watermark cannot be read is absent from the result,
     /// and therefore has no series this pass. The probe is batched by leader,
-    /// so a pass costs one round trip per remote broker rather than one per
+    /// so a pass costs two round trips per remote broker rather than two per
     /// partition.
     async fn high_watermarks(
         &self,
@@ -241,8 +243,8 @@ impl LagPoller {
         watermarks
     }
 
-    /// One payload-free `Fetch` against `leader` covering every partition it
-    /// leads in this pass.
+    /// Resolve valid offsets with `ListOffsets`, then probe high watermarks
+    /// with one zero-budget `Fetch` covering that leader's successful rows.
     ///
     /// The exchange is bounded by [`SAMPLE_WAIT`]: an unreachable leader must
     /// cost this pass its own series rather than the pass itself, because the
@@ -257,7 +259,7 @@ impl LagPoller {
             .broker(leader)
             .ok_or_else(|| format!("unknown leader broker {leader}"))?;
         let (host, port) = registered_listener_endpoint(broker, &self.listener_name);
-        let Some((request, names)) = probe_request(image, partitions) else {
+        let Some(offset_request) = probe_offsets_request(image, partitions) else {
             return Ok(HashMap::new());
         };
         let options = ConnectionOptions {
@@ -276,6 +278,14 @@ impl LagPoller {
                 )
                 .await
                 .map_err(|error| error.to_string())?;
+            let offsets: ListOffsetsResponse = connection
+                .send(offset_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            let Some((request, names)) = probe_request(image, partitions, &offsets) else {
+                connection.close();
+                return Ok(HashMap::new());
+            };
             let response: FetchResponse = connection
                 .send(request)
                 .await
@@ -289,20 +299,65 @@ impl LagPoller {
     }
 }
 
+/// Read-committed LATEST gives each partition its stable consumer boundary.
+/// Group topics in name order and fence both exchanges with the same epochs.
+fn probe_offsets_request(
+    image: &MetadataImage,
+    partitions: &[TopicPartition],
+) -> Option<ListOffsetsRequest> {
+    let mut topics: BTreeMap<&str, ListOffsetsTopic> = BTreeMap::new();
+    for (topic, partition) in partitions {
+        let Some(record) = image.partition(topic, *partition) else {
+            continue;
+        };
+        if image.topic(topic).is_none() {
+            continue;
+        }
+        topics
+            .entry(topic.as_str())
+            .or_insert_with(|| ListOffsetsTopic {
+                name: topic.clone(),
+                ..Default::default()
+            })
+            .partitions
+            .push(ListOffsetsPartition {
+                partition_index: *partition,
+                current_leader_epoch: record.leader_epoch.0,
+                timestamp: -1,
+                ..Default::default()
+            });
+    }
+    (!topics.is_empty()).then(|| ListOffsetsRequest {
+        replica_id: -1,
+        isolation_level: 1,
+        topics: topics.into_values().collect(),
+        ..Default::default()
+    })
+}
+
 /// The `Fetch` that asks one leader for the high watermark of each of
 /// `partitions`, and the topic names its reply has to be read back through.
 ///
-/// `None` when the image names none of the partitions any more, which is the
-/// probe having nothing left to ask. The request is built apart from the
-/// sending because its shape is the part that has to be right: it asks past
-/// the end of every partition so that the reply carries watermarks and no
-/// records, and Fetch v13 dropped the topic name from the response, so the
-/// names it carries across are what make the reply readable at all. Topics go
-/// in name order so that one pass's request is the same bytes as the next.
+/// Skip failed, missing or negative `ListOffsets` rows. Fetch v13 dropped the
+/// topic name from the response, so carry names by UUID across both exchanges.
+/// Topics go in name order. A zero byte budget asks for no payload, though
+/// first-batch progress can still return records if the visible end advances
+/// between the exchanges; the sampler discards them and reads only watermarks.
 fn probe_request<'a>(
     image: &MetadataImage,
     partitions: &'a [TopicPartition],
+    offsets: &ListOffsetsResponse,
 ) -> Option<(FetchRequest, HashMap<WireUuid, &'a str>)> {
+    let offsets: HashMap<_, _> = offsets
+        .topics
+        .iter()
+        .flat_map(|topic| {
+            topic.partitions.iter().filter_map(|row| {
+                (row.error_code == codes::NONE && row.offset >= 0)
+                    .then_some(((topic.name.as_str(), row.partition_index), row.offset))
+            })
+        })
+        .collect();
     let mut topics: BTreeMap<&str, FetchTopic> = BTreeMap::new();
     let mut names: HashMap<WireUuid, &str> = HashMap::new();
     for (topic, partition) in partitions {
@@ -310,6 +365,9 @@ fn probe_request<'a>(
             continue;
         };
         let Some(topic_id) = image.topic(topic).map(|topic| topic.topic_id) else {
+            continue;
+        };
+        let Some(&fetch_offset) = offsets.get(&(topic.as_str(), *partition)) else {
             continue;
         };
         names.insert(WireUuid(*topic_id.as_bytes()), topic.as_str());
@@ -324,10 +382,7 @@ fn probe_request<'a>(
             .push(FetchPartition {
                 partition: *partition,
                 current_leader_epoch: record.leader_epoch.0,
-                // A consumer Fetch reports the high watermark even when it
-                // returns no records, so asking past the end keeps this
-                // metadata probe payload-free.
-                fetch_offset: i64::MAX,
+                fetch_offset,
                 partition_max_bytes: 0,
                 ..Default::default()
             });
@@ -341,7 +396,7 @@ fn probe_request<'a>(
             max_wait_ms: 0,
             min_bytes: 0,
             max_bytes: 0,
-            isolation_level: 0,
+            isolation_level: 1,
             topics: topics.into_values().collect(),
             ..Default::default()
         },

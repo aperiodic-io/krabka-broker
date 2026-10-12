@@ -152,7 +152,7 @@ mod tests {
     /// A segment whose maximum timestamp is unknown must be walked, never
     /// skipped.
     ///
-    /// `Segment::open` is the no-scan load, and it leaves `max_timestamp` at
+    /// The no-scan loader leaves `max_timestamp` at
     /// its sentinel. `Log::open` follows it with `restore_max_timestamp`, but
     /// an active segment opened with `validate_on_open` off does not, and it
     /// keeps the sentinel over real batches. Reading that sentinel as an old
@@ -174,7 +174,7 @@ mod tests {
         ));
 
         // The no-scan load: real bytes on disk, maximum still unknown.
-        let seg = Segment::open(dir.path(), Offset(0)).unwrap();
+        let seg = Segment::open_unscanned(dir.path(), Offset(0)).unwrap();
         assert2::assert!(seg.max_timestamp == i64::MIN);
 
         // 9_000 is in the future against this clock, so the batch is waiting.

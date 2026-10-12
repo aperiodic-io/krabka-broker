@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 
 use tokio::net::TcpStream;
 
-use super::serve_connection_stream;
+use super::{serve_connection_stream, write_idle::WriteIdle};
 use crate::{
     broker::Broker,
     config::ListenerSpec,
@@ -113,7 +113,9 @@ pub async fn serve_connection_on_listener(
             return;
         }
 
-        let handshake = acceptor.accept(stream);
+        // rustls can make ciphertext progress while its outer poll_flush
+        // remains pending. Track the socket writes beneath its buffer.
+        let handshake = acceptor.accept(WriteIdle::new(stream, idle));
         // A required certificate was checked by rustls; optional/disabled certificates may be absent.
         // A presented DN with no configured mapping still closes the connection.
         let Some((tls_stream, mtls_principal)) =

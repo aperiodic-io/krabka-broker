@@ -119,6 +119,18 @@ impl WalIndexCache {
             .unwrap_or(0)
     }
 
+    /// Snapshot indexed ranges in offset order for an exact timestamp scan.
+    /// Object reads happen after releasing the projection mutex.
+    pub(crate) fn timestamp_ranges(
+        &self,
+        topic_id: Uuid,
+        partition: i32,
+    ) -> Vec<(String, WalIndexEntry)> {
+        self.by_topic_partition
+            .get(&(topic_id, partition))
+            .map_or_else(Vec::new, |entries| entries.values().cloned().collect())
+    }
+
     /// Partitions of `topic_id` that still carry a floor, so a deleted topic's
     /// floors can be tombstoned rather than left on the index topic forever.
     #[must_use]

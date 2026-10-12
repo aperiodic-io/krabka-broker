@@ -1,8 +1,9 @@
 //! The audit trail for `DeleteTopics`.
 //!
 //! Only topics that actually went away are auditable, so the response rows are
-//! filtered down to the successful, named ones before a single
-//! `AdminOperation` record is emitted for the request.
+//! filtered down to the successful, named ones. Each owned deletion task
+//! emits its `AdminOperation` record after commit and cleanup, even when the
+//! client stops waiting before the commit completes.
 
 use krabka_protocol::owned::delete_topics_response::DeletableTopicResult;
 
@@ -25,7 +26,7 @@ pub(super) fn deleted_topic_resources(
         .collect()
 }
 
-/// Emits one `DeleteTopics` `AdminOperation` record for the deleted topics,
+/// Emits a `DeleteTopics` `AdminOperation` record for committed deletions,
 /// or nothing when the request deleted none.
 pub(super) fn audit_deleted_topics(
     audit_log: &krabka_audit::AuditLog,

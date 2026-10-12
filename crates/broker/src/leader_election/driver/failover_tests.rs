@@ -16,6 +16,7 @@ use crate::{
     },
     metadata_source::MetadataSource,
     metrics::BrokerMetrics,
+    test_support::FakeMetadataSource,
     unclean_recovery::UncleanRecoveryHandle,
 };
 
@@ -75,6 +76,65 @@ async fn on_broker_dead_submits_failover_when_this_controller_is_leader() {
     let pr = one_partition_change(&batches[0]);
     assert!(pr.leader == 2);
     assert!(pr.partition_epoch == 1);
+}
+
+#[tokio::test]
+async fn a_failover_plan_cannot_overwrite_an_intervening_election_or_controller() {
+    for loses_leadership in [false, true] {
+        let old = img_with_partition(ElectionSetup::default());
+        let mut newer = old.clone();
+        let expected = PartitionRecord {
+            leader: NodeId(3),
+            isr: vec![NodeId(3)],
+            leader_epoch: LeaderEpoch(6),
+            partition_epoch: 1,
+            ..old.partition("t", 0).expect("old partition").clone()
+        };
+        newer.apply(&krabka_metadata::MetadataRecord::V1Partition(
+            expected.clone(),
+        ));
+        let source = Arc::new(
+            FakeMetadataSource::builder()
+                .image(old)
+                .leader(Some(NodeId(7)))
+                .before_guarded_submit(move |source| {
+                    source.set_image(newer);
+                    if loses_leadership {
+                        source.set_leader(Some(NodeId(8)));
+                    }
+                })
+                .build(),
+        );
+        let controller: Arc<dyn MetadataSource> = source.clone();
+        let liveness = liveness_with_alive(&[2, 3]).await;
+        let metrics = BrokerMetrics::new();
+        let recovery = recovery_handle_for_tests();
+        let stale = on_broker_dead(
+            &controller,
+            NodeId(7),
+            NodeId(1),
+            &liveness,
+            &metrics,
+            &recovery,
+        )
+        .await;
+        assert!(matches!(stale, Err(BrokerError::Replication(_))));
+        assert!(source.submitted().is_empty());
+        assert!(source.current_image().partition("t", 0) == Some(&expected));
+        // A later sweep/edge uses the new authority; it cannot resurrect the
+        // obsolete leader or rewrite the already completed election.
+        on_broker_dead(
+            &controller,
+            NodeId(7),
+            NodeId(1),
+            &liveness,
+            &metrics,
+            &recovery,
+        )
+        .await
+        .expect("fresh failover is a no-op");
+        assert!(source.submitted().is_empty());
+    }
 }
 
 #[tokio::test(start_paused = true)]

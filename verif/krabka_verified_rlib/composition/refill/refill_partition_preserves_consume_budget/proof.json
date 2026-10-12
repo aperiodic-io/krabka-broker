@@ -5,8 +5,23 @@
       "vc_plan_consume": { "prover": "alt-ergo", "time": 0.007 },
       "vc_quota_refill": { "prover": "alt-ergo", "time": 0.009 },
       "vc_refill_partition_preserves_consume_budget": {
-        "prover": "cvc4",
-        "time": 0.357
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.032 },
+              { "prover": "alt-ergo", "time": 0.038 },
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "z3", "time": 0.005 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "z3", "time": 0.015 },
+              { "prover": "z3", "time": 0.011 }
+            ]
+          }
+        ]
       }
     }
   }

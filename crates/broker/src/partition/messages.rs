@@ -127,6 +127,9 @@ pub struct ProducerAppendCheck {
 /// here keeps replication appends ordered with produce appends.
 #[derive(Debug)]
 pub enum WriterMessage {
+    /// Acknowledge after every earlier writer command has completed. This
+    /// orders coordinator recovery after an append whose reply was abandoned.
+    Barrier { ack: oneshot::Sender<()> },
     /// Append a batch and assign `base_offset` from the log. The `Produce`
     /// handler sends this message.
     Produce(ProduceJob),

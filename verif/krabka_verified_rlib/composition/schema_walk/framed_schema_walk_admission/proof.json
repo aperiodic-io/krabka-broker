@@ -9,16 +9,16 @@
       "vc_len_SchemaWalkField": { "prover": "alt-ergo", "time": 0.016 },
       "vc_new_tup3_SchemaFieldAction_Option_u32_bool": {
         "prover": "alt-ergo",
-        "time": 0.004
+        "time": 0.023
       },
       "vc_push_tup3_SchemaFieldAction_Option_u32_bool": {
         "prover": "alt-ergo",
-        "time": 0.008
+        "time": 0.021
       },
       "vc_schema_batch_admission": { "prover": "alt-ergo", "time": 0.019 },
       "vc_schema_failure_decision": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_schema_field_action": { "prover": "alt-ergo", "time": 0.01 },
-      "vc_schema_frame_id": { "prover": "alt-ergo", "time": 0.02 }
+      "vc_schema_field_action": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_schema_frame_id": { "prover": "alt-ergo", "time": 0.009 }
     }
   }
 }

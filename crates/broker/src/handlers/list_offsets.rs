@@ -15,7 +15,7 @@
 //!
 //! KFC-1 changes one sentinel and no other: on a topic that schedules
 //! delivery, LATEST reports the partition's delivery watermark instead of its
-//! log end offset. See [`latest_offset`](self::local::latest_offset).
+//! log end offset. See [`scheduled_latest_offset`](self::local::scheduled_latest_offset).
 //!
 //! KIP-320 fences the whole request the way Fetch does: a partition row that
 //! carries a `current_leader_epoch` (v4 and up) is answered with
@@ -60,7 +60,7 @@ mod remote;
 mod resolve;
 mod response;
 mod sentinels;
-mod timestamp;
+pub(crate) mod timestamp;
 mod v0;
 
 #[cfg(test)]

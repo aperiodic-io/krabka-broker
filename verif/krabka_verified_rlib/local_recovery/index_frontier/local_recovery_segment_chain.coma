@@ -1,26 +1,26 @@
-(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 67 0 67 58 *)
+(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 68 0 68 58 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 68 16 68 22
-let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 73 14 73 31
-let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 74 14 74 25
-let%span sindex_frontier'2 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 70 16 72 54
-let%span sindex_frontier'3 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 69 16 69 34
-let%span sindex_frontier'4 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 11 75 19
-let%span sindex_frontier'5 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 22 75 23
-let%span sindex_frontier'6 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 32 75 33
-let%span sindex_frontier'7 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 47 75 48
-let%span sindex_frontier'8 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 43 75 48
-let%span sindex_frontier'9 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 37 75 49
-let%span sindex_frontier'10 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 53 75 61
-let%span sindex_frontier'11 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 78 13 78 14
-let%span sindex_frontier'12 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 78 8 78 14
-let%span sindex_frontier'13 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 19 76 24
-let%span sindex_frontier'14 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 80 4 80 8
-let%span sindex_frontier'15 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 63 10 65 51
+let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 69 16 69 22
+let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 74 14 74 31
+let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 75 14 75 25
+let%span sindex_frontier'2 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 71 16 73 54
+let%span sindex_frontier'3 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 70 16 70 34
+let%span sindex_frontier'4 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 11 76 19
+let%span sindex_frontier'5 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 22 76 23
+let%span sindex_frontier'6 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 32 76 33
+let%span sindex_frontier'7 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 47 76 48
+let%span sindex_frontier'8 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 43 76 48
+let%span sindex_frontier'9 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 37 76 49
+let%span sindex_frontier'10 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 76 53 76 61
+let%span sindex_frontier'11 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 79 13 79 14
+let%span sindex_frontier'12 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 79 8 79 14
+let%span sindex_frontier'13 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 77 19 77 24
+let%span sindex_frontier'14 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 81 4 81 8
+let%span sindex_frontier'15 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 64 10 66 51
 
 use creusot.int.UInt64
 use seq.Seq
@@ -51,7 +51,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let local_recovery_segment_chain [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 67 0 67 58]
+let local_recovery_segment_chain [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 68 0 68 58]
   (bases: Slice64.slice Int64.t) (return (x: bool)) = (! bb0
   [ bb0 = s0 [ s0 = [ &i <- [%#sindex_frontier] (0: UInt64.t) ] s1 | s1 = bb1 ]
   | bb1 = bb1invariant

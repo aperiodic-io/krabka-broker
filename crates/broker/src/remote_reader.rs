@@ -21,14 +21,16 @@ use krabka_remote_storage::{
 
 mod aborted_txns;
 mod blocking;
+mod delivery;
 mod fetch;
 mod partition_read;
 mod pool;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 mod tiered_offsets;
 mod timestamp_lookup;
 
+pub(crate) use delivery::segment_activation_frontier;
 pub(crate) use pool::ReaderPool;
 
 /// One decoded aborted-transaction entry from a remote segment's `.txnindex`.

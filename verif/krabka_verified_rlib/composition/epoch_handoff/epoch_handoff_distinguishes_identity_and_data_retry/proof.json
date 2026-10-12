@@ -7,8 +7,18 @@
         "time": 0.014
       },
       "vc_epoch_handoff_distinguishes_identity_and_data_retry": {
-        "prover": "cvc4",
-        "time": 0.372
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.014 },
+              { "prover": "alt-ergo", "time": 0.01 },
+              { "prover": "z3", "time": 0.015 },
+              { "prover": "z3", "time": 0.014 }
+            ]
+          }
+        ]
       },
       "vc_init_producer_id_identity_decision": {
         "prover": "alt-ergo",

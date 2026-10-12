@@ -15,17 +15,17 @@ let%span sconvert'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557
 let%span stransaction = "/workspace/crates/verified/src/transaction.rs" 273 16 273 99
 let%span stransaction'0 = "/workspace/crates/verified/src/transaction.rs" 9 8 14 86
 let%span stransaction'1 = "/workspace/crates/verified/src/transaction.rs" 252 16 253 85
-let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 14 10 25 1
-let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 26 10 29 1
-let%span stransaction_fetch'1 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 44 11 44 72
-let%span stransaction_fetch'2 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 45 11 45 73
-let%span stransaction_fetch'3 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 46 11 46 83
-let%span stransaction_fetch'4 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 47 10 48 55
-let%span stransaction_fetch'5 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 49 10 50 38
-let%span stransaction_fetch'6 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 51 10 51 125
-let%span stransaction_fetch'7 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 52 10 58 1
-let%span stransaction_fetch'8 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 59 10 62 22
-let%span stransaction_fetch'9 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 113 16 115 35
+let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 15 10 28 1
+let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 29 10 32 1
+let%span stransaction_fetch'1 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 47 11 47 72
+let%span stransaction_fetch'2 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 48 11 48 73
+let%span stransaction_fetch'3 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 49 11 49 83
+let%span stransaction_fetch'4 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 50 10 51 55
+let%span stransaction_fetch'5 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 52 10 53 38
+let%span stransaction_fetch'6 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 54 10 54 125
+let%span stransaction_fetch'7 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 55 10 61 1
+let%span stransaction_fetch'8 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 62 10 65 22
+let%span stransaction_fetch'9 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 116 16 118 35
 let%span smarker = "/workspace/crates/verified/src/transaction/marker.rs" 12 10 14 63
 let%span smarker'0 = "/workspace/crates/verified/src/transaction/marker.rs" 118 10 119 44
 let%span smarker'1 = "/workspace/crates/verified/src/transaction/marker.rs" 120 10 122 61
@@ -144,9 +144,10 @@ let committed_fetch_excludes_unstable (starts: Slice64.slice Int64.t) (w: t_Fetc
         /\ Int64.to_int visibility.response_lso = MinMax.min (Int64.to_int lso'0) (Int64.to_int w.hw)
         /\ Int64.to_int visibility.response_hw = Int64.to_int w.hw
         /\ visibility.read_committed_aborts
-        /\ not visibility.out_of_range
+        /\ visibility.out_of_range = gt_log_Int (Int64.to_int w.log_start) (Int64.to_int w.log_end)
         /\ visibility.empty
-          = ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable))
+          = (Int64.to_int w.log_start <= Int64.to_int w.log_end
+          /\ ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable)))
         /\ (forall i: int. 0 <= i /\ i < Seq.length (Slice64.view starts)
           -> Int64.to_int visibility.limit_offset <= Int64.to_int (Seq.get (Slice64.view starts) i))
         end)
@@ -277,7 +278,7 @@ predicate pending_starts_before_marker [#"/workspace/crates/verified/src/transac
   [%#stransaction] forall i: int. 0 <= i /\ i < Seq.length starts
     -> 0 <= Int64.to_int (Seq.get starts i) /\ Int64.to_int (Seq.get starts i) <= base
 
-predicate committed_producer_marker [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 106 0 112 9] (is_control: bool) (key: Seq.seq UInt8.t) (producer: tup3_i64_i64_i64) (high_watermark: int) (marker_last: int) =
+predicate committed_producer_marker [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 109 0 115 9] (is_control: bool) (key: Seq.seq UInt8.t) (producer: tup3_i64_i64_i64) (high_watermark: int) (marker_last: int) =
   [%#stransaction_fetch'9] is_control
   /\ ge_log_Int (Seq.length key) 4
   /\ UInt8.t'int (Seq.get key 2) = 0

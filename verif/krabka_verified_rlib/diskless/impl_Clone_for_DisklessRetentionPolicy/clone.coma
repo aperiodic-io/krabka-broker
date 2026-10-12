@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/lib.rs" 31 29 31 46 *)
+(* #"/workspace/crates/verified/src/lib.rs" 34 29 34 46 *)
 
 (* <diskless::DisklessRetentionPolicy as std::clone::Clone> *)
 
@@ -20,7 +20,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_DisklessRetentionPolicy [#"/workspace/crates/verified/src/lib.rs" 31 29 31 46]
+let clone_DisklessRetentionPolicy [#"/workspace/crates/verified/src/lib.rs" 34 29 34 46]
   (self: t_DisklessRetentionPolicy) (return (x: t_DisklessRetentionPolicy)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_DisklessRetentionPolicy = Any.any_l () | & self: t_DisklessRetentionPolicy = self ])

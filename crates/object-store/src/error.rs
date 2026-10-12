@@ -26,7 +26,7 @@ pub enum ObjectStoreError {
     TooLarge {
         /// The object that breached the cap.
         key: object_store::path::Path,
-        /// The object's actual size in bytes.
+        /// The metadata size or the bytes observed when streaming exceeded the cap.
         size: u64,
         /// The cap in bytes.
         max_bytes: u64,
@@ -35,12 +35,12 @@ pub enum ObjectStoreError {
     /// the key.
     #[error("object already exists: {0}")]
     AlreadyExists(ObjectPath),
-    /// A conditional write's precondition did not hold.
+    /// A conditional read or write's precondition did not hold.
     #[error("precondition failed for `{key}`: {reason}")]
     Precondition {
         /// The object whose precondition was evaluated.
         key: ObjectPath,
-        /// Why the backend rejected the write.
+        /// Why the backend rejected the operation.
         reason: String,
     },
     /// Any other backend error. The error becomes a string, so the public

@@ -16,6 +16,7 @@ fn check_plan(
     let facts: Vec<_> = rows
         .iter()
         .map(|&(_, end, size, expired)| RemoteRetentionSegment {
+            blocked: false,
             size,
             time_expired: expired,
             log_start_breached: published.is_some_and(|floor| end < floor),

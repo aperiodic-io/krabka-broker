@@ -19,8 +19,9 @@ use krabka_units::{ByteSize, convert::ByteSizeExt as _, mebibytes};
 
 use super::record::SourceRecord;
 use crate::{
-    blocking::spawn_blocking, metrics::BrokerMetrics, partition::Partition,
-    remote_reader::RemoteReader,
+    blocking::spawn_blocking, diskless::read::DisklessReadHandle, metrics::BrokerMetrics,
+    partition::Partition, remote_reader::RemoteReader,
+    share_partition::source::diskless_logical_start,
 };
 
 /// The most bytes of one log read. Most dead-letter ranges are one record, so
@@ -119,17 +120,18 @@ impl Collector {
     }
 }
 
-/// The remote tier of a source partition, which serves the offsets below its
-/// local log start (KIP-405).
+/// The archive and diskless WAL sources of a partition, which can retain
+/// records below its local log start.
 pub(super) struct SourceTier<'a> {
-    pub(super) reader: &'a RemoteReader,
+    pub(super) reader: Option<&'a RemoteReader>,
+    pub(super) diskless: Option<&'a DisklessReadHandle>,
     pub(super) metrics: &'a BrokerMetrics,
     pub(super) tp: TopicIdPartition,
 }
 
 /// Reads the raw batches of `[first, last]` from the log of `partition`, off
-/// the reactor thread, or from the remote tier when only the tier holds
-/// `first`. A remote read can return batches past `last`, and the collector
+/// the reactor thread, or from the archive or WAL when local storage no longer
+/// holds `first`. A cold read can return batches past `last`, and the collector
 /// leaves them out.
 async fn read_raw(
     partition: &Arc<Partition>,
@@ -137,10 +139,39 @@ async fn read_raw(
     first: i64,
     last: i64,
 ) -> Option<bytes::Bytes> {
-    if let Some(tier) = tier.filter(|_| RemoteReader::serves(partition, Offset(first))) {
+    let local_start = partition
+        .log
+        .lock()
+        .expect("log mutex poisoned")
+        .local_log_start_offset();
+    if partition.diskless
+        && let Some(tier) = tier
+        && let Some(reader) = tier.diskless
+        && Offset(first) < local_start
+    {
+        let floor = diskless_logical_start(reader, partition, tier.tp.topic_id)
+            .await
+            .ok()?;
+        if Offset(first) < floor {
+            return None;
+        }
+        return reader
+            .read_records(
+                tier.tp.topic_id,
+                partition.index.0,
+                first,
+                MAX_FETCH.bytes_usize(),
+            )
+            .await
+            .ok()
+            .flatten();
+    }
+    if let Some((tier, reader)) = tier
+        .filter(|_| RemoteReader::serves(partition, Offset(first)))
+        .and_then(|tier| tier.reader.map(|reader| (tier, reader)))
+    {
         let max_bytes = usize::try_from(MAX_FETCH.bytes_u64()).unwrap_or(usize::MAX);
-        return match tier
-            .reader
+        return match reader
             .read_partition(partition, &tier.tp, Offset(first), max_bytes, tier.metrics)
             .await
         {
@@ -220,6 +251,63 @@ mod tests {
         partition_registry::PartitionRegistry,
         share_partition::manager::test_support::{DataPartitionSetup, open_data_partition},
     };
+
+    #[tokio::test]
+    async fn diskless_dead_letters_copy_trimmed_payloads_and_respect_deleted_offsets() {
+        use crate::share_partition::source::test_support::diskless_partition;
+
+        let (partition, reader, topic_id, _dir) = diskless_partition(1_000).await;
+        let metrics = BrokerMetrics::new();
+        let tier = SourceTier {
+            reader: None,
+            diskless: Some(&reader),
+            metrics: &metrics,
+            tp: TopicIdPartition::new(topic_id, "t", 0),
+        };
+        assert!(
+            fetch(
+                Some(&partition),
+                Some(&tier),
+                (0, 1),
+                1 << 20,
+                RecordDecompressionPolicy::default()
+            )
+            .await
+                == Fetched {
+                    records: records(&[(0, b"cold-0"), (1, b"cold-1")]),
+                    last_resolved: 1
+                }
+        );
+        reader.index.lock().await.raise_delete_floor(topic_id, 0, 1);
+        assert!(
+            fetch(
+                Some(&partition),
+                Some(&tier),
+                (0, 0),
+                1 << 20,
+                RecordDecompressionPolicy::default()
+            )
+            .await
+                == Fetched {
+                    records: BTreeMap::new(),
+                    last_resolved: 0
+                }
+        );
+        assert!(
+            fetch(
+                Some(&partition),
+                Some(&tier),
+                (1, 1),
+                1 << 20,
+                RecordDecompressionPolicy::default()
+            )
+            .await
+                == Fetched {
+                    records: records(&[(1, b"cold-1")]),
+                    last_resolved: 1
+                }
+        );
+    }
 
     fn records(pairs: &[(i64, &'static [u8])]) -> BTreeMap<i64, SourceRecord> {
         pairs

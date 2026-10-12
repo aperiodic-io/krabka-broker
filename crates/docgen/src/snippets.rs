@@ -11,44 +11,47 @@ use std::path::Path;
 /// The function removes the markers and trims the common leading indentation.
 ///
 /// # Errors
-/// Returns an error string if either marker is missing.
+/// Returns an error string if a marker is missing, repeated, or out of order.
 pub fn extract(source: &str, anchor: &str) -> Result<String, String> {
-    let begin = format!("docs:begin {anchor}");
-    let end = format!("docs:end {anchor}");
+    let begin = format!("// docs:begin {anchor}");
+    let end = format!("// docs:end {anchor}");
     let mut lines = Vec::new();
     let mut inside = false;
+    let mut completed = false;
     for line in source.lines() {
-        if line.contains(&begin) {
+        if line.trim() == begin {
+            if inside || completed {
+                return Err(format!("anchor {anchor}: repeated begin marker"));
+            }
             inside = true;
             continue;
         }
-        if line.contains(&end) {
+        if line.trim() == end {
             if !inside {
                 return Err(format!("anchor {anchor}: end before begin"));
             }
-            let indent = lines
-                .iter()
-                .filter(|l: &&String| !l.trim().is_empty())
-                .map(|l| l.len() - l.trim_start().len())
-                .min()
-                .unwrap_or(0);
-            let body: Vec<String> = lines
-                .iter()
-                .map(|l: &String| {
-                    if l.len() >= indent {
-                        l[indent..].to_string()
-                    } else {
-                        l.clone()
-                    }
-                })
-                .collect();
-            return Ok(body.join("\n"));
+            inside = false;
+            completed = true;
+            continue;
         }
         if inside {
             lines.push(line.to_string());
         }
     }
-    Err(format!("anchor {anchor}: markers not found in source"))
+    if !completed || inside {
+        return Err(format!("anchor {anchor}: markers not found in source"));
+    }
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+        .min()
+        .unwrap_or(0);
+    Ok(lines
+        .iter()
+        .map(|line| line.get(indent..).unwrap_or(line))
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 /// Rewrite every `<!-- snippet: <relpath>#<anchor> --> ... <!-- /snippet -->`
@@ -98,6 +101,22 @@ mod tests {
     fn extract_trims_indent_and_markers() {
         let src = "fn main() {\n    // docs:begin foo\n    let x = 1;\n    // docs:end foo\n}\n";
         assert2::assert!(extract(src, "foo").unwrap() == "let x = 1;");
+    }
+
+    #[test]
+    fn extract_requires_an_exact_comment_marker_and_unique_pair() {
+        let source = "// docs:begin foobar\nwrong();\n// docs:end foobar\n\
+                      // docs:begin foo\nright();\n// docs:end foo\n";
+        assert2::assert!(extract(source, "foo").unwrap() == "right();");
+        for invalid in [
+            "// docs:begin foobar\nwrong();\n// docs:end foobar\n",
+            "let s = \"// docs:begin foo\";\nwrong();\nlet e = \"// docs:end foo\";\n",
+            "// docs:begin foo\n// docs:begin foo\n// docs:end foo\n",
+            "// docs:begin foo\none();\n// docs:end foo\n// docs:begin foo\ntwo();\n// docs:end foo\n",
+            "// docs:end foo\n// docs:begin foo\n",
+        ] {
+            assert2::assert!(extract(invalid, "foo").is_err());
+        }
     }
 
     #[test]

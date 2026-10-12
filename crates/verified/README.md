@@ -8,8 +8,7 @@ written in Rust.
 
 ## Overview
 
-Every function in this crate is a total, synchronous, allocation-light kernel,
-and Creusot proves its functional contract. A host crate maps its state into
+The kernels are synchronous and allocation-light. Creusot proves their functional contracts under the stated preconditions. Normal Rust builds do not enforce the proof preconditions; invalid inputs can panic. A host crate maps its state into
 the kernel's inputs, calls the kernel, and applies the decision. There is no
 second copy of any decision in a host crate.
 

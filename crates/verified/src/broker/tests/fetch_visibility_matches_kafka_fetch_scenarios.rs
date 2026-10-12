@@ -238,3 +238,44 @@ fn fetch_visibility_caps_only_a_consumer_at_the_delivery_watermark() {
         );
     }
 }
+
+#[test]
+fn fetch_offsets_above_log_end_are_out_of_range_for_every_fetcher() {
+    let watermarks = FetchWatermarks {
+        log_start: 2,
+        hw: 8,
+        lso: 7,
+        log_end: 10,
+        deliverable: 8,
+    };
+    // Kafka accepts LEO itself as an empty read; offsets beyond LEO are errors,
+    // independently of isolation, transaction visibility and scheduling.
+    for (is_follower, read_committed, limit, effective_lso, aborts) in [
+        (false, false, 8, 7, false),
+        (false, true, 7, 7, true),
+        (true, false, 10, 7, false),
+        (true, true, 10, 7, false),
+    ] {
+        for (offset, out_of_range, empty) in [
+            (1, true, false),
+            (2, false, false),
+            (9, false, !is_follower),
+            (10, false, true),
+            (11, true, false),
+            (i64::MAX, true, false),
+        ] {
+            assert!(
+                fetch_visibility(is_follower, read_committed, watermarks, offset)
+                    == FetchVisibility {
+                        out_of_range,
+                        empty,
+                        limit_offset: limit,
+                        effective_lso,
+                        read_committed_aborts: aborts,
+                        response_hw: 8,
+                        response_lso: 7,
+                    }
+            );
+        }
+    }
+}

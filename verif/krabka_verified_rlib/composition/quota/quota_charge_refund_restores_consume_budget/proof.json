@@ -10,7 +10,7 @@
         "prover": "alt-ergo",
         "time": 0.012
       },
-      "vc_plan_consume": { "prover": "alt-ergo", "time": 0.005 },
+      "vc_plan_consume": { "prover": "alt-ergo", "time": 0.022 },
       "vc_quota_charge": { "prover": "alt-ergo", "time": 0.005 },
       "vc_quota_charge_refund_restores_consume_budget": {
         "prover": "z3",

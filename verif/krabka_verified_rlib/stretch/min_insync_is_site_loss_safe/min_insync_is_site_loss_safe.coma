@@ -1,19 +1,19 @@
-(* #"/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 218 0 218 81 *)
+(* #"/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 226 0 226 81 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
-let%span smin_insync_is_site_loss_safe = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 219 20 219 50
-let%span smin_insync_is_site_loss_safe'0 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 222 23 222 37
-let%span smin_insync_is_site_loss_safe'1 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 223 4 223 56
-let%span smin_insync_is_site_loss_safe'2 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 209 11 209 34
-let%span smin_insync_is_site_loss_safe'3 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 210 11 210 40
-let%span smin_insync_is_site_loss_safe'4 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 211 10 216 1
-let%span smin_insync_is_site_loss_safe'5 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 146 11 146 34
-let%span smin_insync_is_site_loss_safe'6 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 147 11 147 40
-let%span smin_insync_is_site_loss_safe'7 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 148 10 148 59
-let%span smin_insync_is_site_loss_safe'8 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 149 10 150 60
-let%span smin_insync_is_site_loss_safe'9 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 151 10 151 22
-let%span smin_insync_is_site_loss_safe'10 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 152 10 152 23
-let%span smin_insync_is_site_loss_safe'11 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 153 10 153 38
+let%span smin_insync_is_site_loss_safe = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 227 20 227 50
+let%span smin_insync_is_site_loss_safe'0 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 230 23 230 37
+let%span smin_insync_is_site_loss_safe'1 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 231 4 231 56
+let%span smin_insync_is_site_loss_safe'2 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 217 11 217 34
+let%span smin_insync_is_site_loss_safe'3 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 218 11 218 40
+let%span smin_insync_is_site_loss_safe'4 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 219 10 224 1
+let%span smin_insync_is_site_loss_safe'5 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 154 11 154 34
+let%span smin_insync_is_site_loss_safe'6 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 155 11 155 40
+let%span smin_insync_is_site_loss_safe'7 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 156 10 156 59
+let%span smin_insync_is_site_loss_safe'8 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 157 10 158 60
+let%span smin_insync_is_site_loss_safe'9 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 159 10 159 22
+let%span smin_insync_is_site_loss_safe'10 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 160 10 160 23
+let%span smin_insync_is_site_loss_safe'11 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 161 10 161 38
 let%span smin_insync_is_site_loss_safe'12 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 27 10 27 12
 let%span smin_insync_is_site_loss_safe'13 = "/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 30 8 35 9
 
@@ -61,7 +61,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let min_insync_is_site_loss_safe [#"/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 218 0 218 81]
+let min_insync_is_site_loss_safe [#"/workspace/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs" 226 0 226 81]
   (rf: Int64.t) (sites: Int64.t) (min_insync: Int64.t) (return (x: bool)) =
 {[@stop_split] [@expl:min_insync_is_site_loss_safe requires] ([@stop_split] [@expl:min_insync_is_site_loss_safe requires #0] [%#smin_insync_is_site_loss_safe'2] ge_log_Int (Int64.to_int rf) 1
     /\ Int64.to_int rf <= 1024)

@@ -41,8 +41,9 @@ impl Controller {
 
     /// Like [`Self::start`], but adopts a caller-supplied, already-bound
     /// controller listener instead of binding `controller_listen_addr` itself.
-    /// The supplied listener's local address MUST equal
-    /// `config.controller_listen_addr`.
+    /// On native targets, the controller reports the listener's actual local
+    /// address. On WASI, it reports `config.controller_listen_addr`, which
+    /// should match the adopted socket because its address cannot be queried.
     ///
     /// # Errors
     /// Returns an error if the listener, storage, or controller cannot start.

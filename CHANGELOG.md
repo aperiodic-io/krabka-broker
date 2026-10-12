@@ -25,12 +25,81 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ### Fixed
 
+- Controller-side admission prevents stale topic UUID deletes and incremental
+  config updates from affecting recreated topics or overwriting newer settings.
+- Request byte limits reserve capacity before allocating and reading a frame
+  body, including connections waiting for request-count capacity.
+- Scheduled retention preserves pending records in both tiers. LATEST offsets
+  account for pending archived batches, and timestamp lookup after reopen uses
+  the durable deletion floor instead of the local cache boundary.
+- Fetch offsets above the log end return `OFFSET_OUT_OF_RANGE`; fetching at the
+  log end remains valid and empty.
+- Compressed legacy batches preserve sparse offsets and reject unrepresentable
+  offset or timestamp arithmetic instead of overflowing.
+- Remote snapshot decoding checks entry counts before allocation. Restore and
+  backup reads enforce caps against the fetched object, including overwrite
+  races. Object-lock control-plane calls honor retry and timeout settings.
+- OPA rejects HTTP error responses before interpreting decisions, and
+  resource-type ACL authorization follows Kafka's pattern dominance rules.
+- The public regex resolver exposes its result type, and public sealed-segment
+  opens restore readable bounds while rejecting corrupt tails without trimming.
+- Telemetry guard drop shuts down exporters and stops its heartbeat. Schema
+  rendering bounds cyclic references, including recursive arrays.
+- API comments, workflow comments, installation instructions and the runnable
+  Raft README example match the implementation. CI checks quoted snippets in
+  crate READMEs as well as documentation pages.
+- **Controller admission:** CreatePartitions, legacy AlterConfigs, AlterPartition
+  and automatic/manual leader elections use authoritative controller planning
+  and guarded submission to preserve newer assignments, leadership, ISR and
+  configuration. Controller role/epoch transitions invalidate admitted terms.
+- **Share groups:** Initial state operations serialize absent-key fencing and
+  deletion/recreation. Timed-out or cancelled writes fence the shard until a
+  FIFO writer barrier and same-term replay restore its active generation.
+  Replay includes oversized first batches instead of
+  activating a partial prefix. ShareFetch, duration initialization and
+  dead-letter retrieval include retained diskless WAL and archived history.
+- **Fetch and offsets:** Response byte limits permit an oversized first batch
+  only before any response records exist. ListOffsets timestamp lookup includes
+  diskless WAL with exact logical-floor scans, and v0 scheduled LATEST includes
+  archived pending batches. Stalled response writes close after the configured
+  no-progress window and release request queue capacity.
+- **Remote storage:** Index-cache fills publish atomically, multipart uploads
+  apply bounded backpressure, and remote index reads enforce an independent
+  byte cap. RLMM assignment uses the discovered metadata-topic partition count;
+  initial consumer connections retry, epoch-list reads enforce readiness, and
+  mutations report application errors or interrupted waits.
+- **Backup and restore:** Unique sortable capture IDs and create-only writes
+  preserve concurrent captures while keeping older captures discoverable.
+  Latest selection ignores incomplete captures without committed manifests.
+  Independent document caps bound backup reads. Continue-on-corrupt preserves
+  surviving offsets on both sides of an interior gap, and authenticated
+  snapshots are consumed from the exact retained bytes rather than mutable paths.
+- **Authorization and libraries:** OPA uses the Kafka-plugin v1.5.1 action
+  schema and its documented available-context subset. Generic derive expansions
+  preserve type parameters and where clauses, and in-process formatter argument
+  errors return exit codes without terminating the caller.
+- **Workflows and documentation:** Trusted publication stops before its OIDC
+  token expires and supports a full rerun with a refreshed pending plan. Missing
+  known-failure system tests fail, snippet anchors match exactly, and release,
+  benchmark, Clippy, profiling, stamp-helper and API comments describe the
+  implemented behavior and preconditions.
 - Queued ordinary Produce batches under `preallocate=true` share one aligned
   Direct I/O write when they fit in the active segment and total at most 1 MiB.
   This reduces synchronous writes and repeated block padding under load.
 - Sendfile fetches read only batch headers when scanning large batches, avoiding
   synchronous reads of cold payload pages during backlog consumption. Small
   batches retain buffered header scans.
+
+### Changed
+
+- The unstable Rust API `krabka_records_legacy::parsed_from_v2` returns a
+  `Result` so callers can handle invalid coordinates.
+- Consumer-group reconciliation helpers that depend on internal state are
+  crate-visible. `RemoteRetentionSegment` carries a `blocked` delivery fact
+  for the verified retention decision.
+- Live scheduled clock-bound changes apply prospectively without retracting the
+  released delivery prefix. A restart rebuilds the unpersisted watermark using
+  the current clock and bound, so changed assumptions can yield a lower prefix.
 
 ## [1.0.2] - 2026-10-10
 

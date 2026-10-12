@@ -107,18 +107,7 @@ impl ControllerMutationQuota {
             .bucket
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let now = std::time::Instant::now();
-        // The time since the last charge refills at the rate the bucket had
-        // then, and a change of rate or window keeps that balance, capped at
-        // the new capacity: Kafka's `TokenBucket` keeps its `tokens` when the
-        // quota changes, so a bucket in debt stays in debt (#1241).
-        let refilled = (bucket.tokens
-            + now.duration_since(bucket.updated_at).as_secs_f64() * bucket.rate)
-            .min(bucket.rate * bucket.window_secs);
-        bucket.tokens = refilled.min(limit.rate * limit.window_secs);
-        bucket.rate = limit.rate;
-        bucket.window_secs = limit.window_secs;
-        bucket.updated_at = now;
+        refresh_bucket(&mut bucket, limit);
 
         let refill = |tokens: f64| Time::from_secs_f64((-tokens / limit.rate).max(0.0));
         if self.strict && bucket.tokens < 0.0 {
@@ -132,6 +121,45 @@ impl ControllerMutationQuota {
             let delay = refill(bucket.tokens);
             drop(bucket);
             self.delay = self.delay.max(delay);
+        }
+        Ok(())
+    }
+
+    /// Reconcile one uncommitted topic's reservation after guarded admission
+    /// rejects a stale image. `previous` is only this topic's accepted charge;
+    /// `prior_delay` is the request's maximum before that topic was charged.
+    /// Other topics' tokens and throttle maxima remain accounted for.
+    ///
+    /// # Errors
+    /// Returns [`ThrottlingQuotaExceeded`] if a strict quota refuses an
+    /// additional charge. A smaller or unchanged reservation adds no charge.
+    pub(crate) fn reconcile_record(
+        &mut self,
+        previous: u64,
+        current: u64,
+        prior_delay: Time,
+    ) -> Result<(), ThrottlingQuotaExceeded> {
+        self.delay = prior_delay;
+        if previous == 0 && current == 0 {
+            return Ok(());
+        }
+        if current > previous {
+            return self.record(current - previous);
+        }
+        let Some(limit) = &self.limit else {
+            return Ok(());
+        };
+        let mut bucket = limit
+            .bucket
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        refresh_bucket(&mut bucket, limit);
+        bucket.tokens = (bucket.tokens + super::u64_to_f64(previous - current))
+            .min(limit.rate * limit.window_secs);
+        if current > 0 && !self.strict && bucket.tokens < 0.0 {
+            self.delay = self
+                .delay
+                .max(Time::from_secs_f64(-bucket.tokens / limit.rate));
         }
         Ok(())
     }
@@ -151,6 +179,19 @@ impl ControllerMutationQuota {
         });
         super::QuotaDelay::new(self.delay, user, client_id)
     }
+}
+
+/// Refill at the previous rate before applying a new rate/capacity. Existing
+/// debt survives quota changes, matching Kafka's token bucket (#1241).
+fn refresh_bucket(bucket: &mut ControllerMutationBucket, limit: &Limit) {
+    let now = std::time::Instant::now();
+    let refilled = (bucket.tokens
+        + now.duration_since(bucket.updated_at).as_secs_f64() * bucket.rate)
+        .min(bucket.rate * bucket.window_secs);
+    bucket.tokens = refilled.min(limit.rate * limit.window_secs);
+    bucket.rate = limit.rate;
+    bucket.window_secs = limit.window_secs;
+    bucket.updated_at = now;
 }
 
 /// Consume `mutations` from the permissive `controller_mutation_rate` bucket
@@ -188,6 +229,60 @@ mod tests {
     use crate::quota::QuotaDelay;
 
     crate::quota::test_support::image_builder!(img_with_quota, "controller_mutation_rate");
+
+    fn retry_quota() -> ControllerMutationQuota {
+        ControllerMutationQuota::new(&QuotaRequest {
+            image: &img_with_quota(vec![("user", Some("alice"))], 2.0),
+            buckets: &QuotaBuckets::new(),
+            principal: "alice",
+            client_id: None,
+            window: secs(1),
+            strict: false,
+        })
+    }
+
+    #[test]
+    fn smaller_retry_charge_removes_its_obsolete_permissive_delay() {
+        let mut quota = retry_quota();
+        quota.record(9).unwrap();
+        assert!(quota.delay() > secs(3));
+        quota.reconcile_record(9, 1, Time::ZERO).unwrap();
+        assert!(quota.delay() == Time::ZERO);
+        quota.record(2).unwrap();
+        assert!(quota.delay() > millis(400) && quota.delay() <= millis(500));
+    }
+
+    #[test]
+    fn canceled_retry_keeps_prior_topics_delay_without_charging_unrelated_debt() {
+        let mut quota = retry_quota();
+        quota.record(3).unwrap();
+        let prior_delay = quota.delay();
+        quota.record(9).unwrap();
+        quota.reconcile_record(9, 1, prior_delay).unwrap();
+        assert!(quota.delay() > prior_delay && quota.delay() <= secs(1));
+        quota.reconcile_record(1, 0, prior_delay).unwrap();
+        assert!(quota.delay() == prior_delay);
+        assert!(quota.limit.as_ref().unwrap().bucket.lock().unwrap().tokens < 0.0);
+        quota.reconcile_record(0, 0, Time::ZERO).unwrap();
+        assert!(quota.delay() == Time::ZERO);
+    }
+
+    #[test]
+    fn a_refilled_retry_refund_cannot_credit_more_than_bucket_capacity() {
+        let mut quota = retry_quota();
+        quota.record(9).unwrap();
+        quota
+            .limit
+            .as_ref()
+            .unwrap()
+            .bucket
+            .lock()
+            .unwrap()
+            .updated_at -= std::time::Duration::from_secs(20);
+        quota.reconcile_record(9, 1, Time::ZERO).unwrap();
+        quota.record(3).unwrap();
+        assert!(quota.delay() == millis(500));
+    }
 
     #[test]
     fn zero_mutations_returns_zero_delay() {

@@ -166,15 +166,15 @@ Compaction cannot be closed the same way, so the broker rejects the combination.
 
 A read that the local log cannot serve is the one read path the watermark cannot cap.
 
-The broker reaches the tiered path only after a local read answers `OFFSET_OUT_OF_RANGE`, which means the requested offset is below the local log start. The watermark never goes below the local log start, so every offset the tiered path can serve is already below it, and an offset cap there would be dead code. What is not closed by that argument is the lifecycle itself. Tiered storage owns the eviction of a segment that it has copied, and that eviction does not consult the delivery watermark. A pending batch that left local disk would raise the log start past it, and the record would become visible early.
+The broker reaches the tiered path only after a local read answers `OFFSET_OUT_OF_RANGE`, which means the requested offset is below the local log start. The watermark never goes below the local log start, so every offset the tiered path can serve is already below it, and an offset cap there would be dead code. Tiered local retention also stops at the delivery watermark, so a pending batch stays local and `LATEST` continues to name it. Remote retention checks stored batch headers before removing a scheduled segment; a pending batch or unreadable activation evidence stops the deletion prefix, even when the byte budget is exceeded. Retention timestamps can fall back to file modification time, so they are not sufficient activation evidence.
 
-So the tiered path checks the batch instead of the offset. Each remote batch carries its own maximum timestamp, which is the same field the watermark is derived from, so the evidence survives the copy. A batch that is not due yet is not served.
+The tiered fetch path also checks the batch instead of the offset. Each remote batch carries its own maximum timestamp, which is the same field the watermark is derived from, so the evidence survives the copy. A batch that is not due yet is not served.
 
 The answer to that fetch is an empty partition and no error, which is the answer the local path gives for a pending batch. `OFFSET_OUT_OF_RANGE` would send the consumer to its `auto.offset.reset` policy, and the consumer would lose the record it is waiting for. The record is due later, not never.
 
 ### ListOffsets
 
-On a scheduled topic, `LATEST` returns the delivery watermark.
+On a scheduled topic, `LATEST` returns the delivery watermark. If older eviction behavior or a change from immediate to scheduled delivery has left pending batches only in the archive, the lookup derives that part of the watermark from their stored headers too. An unavailable archive frontier fails the lookup rather than returning an offset that skips waiting records.
 
 The reason is the same one that forces offset order. A consumer that seeks to end sets its position to the value `LATEST` gives it. If that value were the log end offset, the consumer would step over every pending record in one move. Those records would then be unreachable for it forever. With the delivery watermark, seek-to-end lands the consumer on the first pending record, and the consumer receives it when it activates. Seek-to-end means "start with what is not yet delivered", which is what a caller on a scheduled topic wants.
 
@@ -182,7 +182,7 @@ Two honest notes belong with that.
 
 First, this value can move backwards across a leader change, by up to twice the declared clock bound. The old leader and the new leader can read clocks that differ by up to `2e` and still be inside their bounds. The new leader can then compute a watermark up to `2e` behind the one a client saw a moment earlier. A client that calls `LATEST` on both sides of a leader change can see the smaller value second. The effect is bounded, and it gives a re-delivery and not a loss. An operator who wants a smaller bound lowers `delivery_clock_uncertainty`.
 
-Second, krabka's `LATEST` returns the log end offset rather than the high watermark. That is a divergence from Kafka that exists today, and this KFC does not change it. On a scheduled topic the delivery watermark is the cap that applies on top of that behaviour.
+Second, an ordinary consumer's `LATEST` is capped at the high watermark, or at the last stable offset under `read_committed`, as in Kafka. On a scheduled topic the delivery watermark adds a cap to that bound. Replication requests still resolve against the log end.
 
 ### Cost on an Ordinary Topic Is Zero
 

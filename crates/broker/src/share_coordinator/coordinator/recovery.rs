@@ -14,6 +14,7 @@ use bytes::Bytes;
 use krabka_ids::PartitionIndex;
 use krabka_log::Offset;
 use krabka_metadata::MetadataImage;
+use krabka_protocol::records::RecordBatch;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -67,15 +68,26 @@ impl ShareCoordinator {
         let read_max = self.config.load_buffer_size;
         let updates_per_snapshot = self.config.snapshot_update_records_per_snapshot;
         let replayed = match self.partitions.get(bootstrap::TOPIC, state_partition) {
-            Some(part) => spawn_blocking(move || {
-                replay_partition(&part, state_partition, read_max, updates_per_snapshot)
-            })
-            .await
-            .unwrap_or_else(|error| {
-                Err(BrokerError::Share(format!(
-                    "__share_group_state-{state_partition} replay task failed: {error}"
-                )))
-            }),
+            Some(part) => {
+                // A timed-out or cancelled append can remain in the writer's
+                // mailbox. Reading the log before this barrier would publish
+                // stale state even if the previous operation lock is free.
+                match tokio::time::timeout(self.config.write_timeout, part.writer_barrier()).await {
+                    Ok(Ok(())) => spawn_blocking(move || {
+                        replay_partition(&part, state_partition, read_max, updates_per_snapshot)
+                    })
+                    .await
+                    .unwrap_or_else(|error| {
+                        Err(BrokerError::Share(format!(
+                            "__share_group_state-{state_partition} replay task failed: {error}"
+                        )))
+                    }),
+                    Ok(Err(error)) => Err(error),
+                    Err(_) => Err(BrokerError::Share(format!(
+                        "__share_group_state-{state_partition} writer barrier timed out"
+                    ))),
+                }
+            }
             None => Err(BrokerError::Share(format!(
                 "__share_group_state-{state_partition} is not open locally"
             ))),
@@ -116,6 +128,7 @@ impl ShareCoordinator {
                 for (key, state) in replayed {
                     self.state.insert(key, Arc::new(Mutex::new(state)));
                 }
+                self.uncertain_appends.remove(&state_partition);
                 entry.status = LoadStatus::Active;
                 info!(
                     partition = state_partition.get(),
@@ -123,7 +136,14 @@ impl ShareCoordinator {
                 );
             }
             Err(error) => {
-                entry.status = LoadStatus::Failed;
+                // An indeterminate append must never expose the old live
+                // state. Keep requests in LOAD_IN_PROGRESS, and let the next
+                // metadata refresh retry the bounded barrier and replay.
+                entry.status = if self.uncertain_appends.contains_key(&state_partition) {
+                    LoadStatus::Pending
+                } else {
+                    LoadStatus::Failed
+                };
                 warn!(
                     partition = state_partition.get(),
                     %error,
@@ -159,13 +179,13 @@ fn replay_partition(
     let mut replayed = HashMap::new();
     let mut offset = part.log_start_offset();
     loop {
-        let out = part.read_log(offset, read_max)?;
+        let batches = read_replay_batches(part, offset, read_max)?;
 
-        if out.batches.is_empty() {
+        if batches.is_empty() {
             break;
         }
 
-        for batch in &out.batches {
+        for batch in &batches {
             if !batch.attributes.is_control_batch() {
                 for rec in &batch.records {
                     let rec_offset = Offset(batch.base_offset + i64::from(rec.offset_delta));
@@ -195,6 +215,33 @@ fn replay_partition(
         }
     }
     Ok(replayed)
+}
+
+/// The load budget is a read window, not a maximum record-batch size. The raw
+/// reader includes the first eligible batch whole even if it exceeds the
+/// window, so a small buffer never looks like the end of the log.
+fn read_replay_batches(
+    part: &Partition,
+    offset: Offset,
+    read_max: krabka_units::ByteSize,
+) -> Result<Vec<RecordBatch>, BrokerError> {
+    let raw = {
+        let log = part
+            .log
+            .lock()
+            .map_err(|_| BrokerError::Share("log mutex poisoned".into()))?;
+        log.read_raw(offset, log.log_end_offset(), read_max)?
+    };
+    let mut cursor = raw.bytes.as_ref();
+    let mut batches = Vec::new();
+    while !cursor.is_empty() {
+        batches.push(RecordBatch::decode(&mut cursor).map_err(|error| {
+            BrokerError::Share(format!(
+                "share-state batch at {offset} does not decode: {error}"
+            ))
+        })?);
+    }
+    Ok(batches)
 }
 
 /// Reads the key of one record as `CoordinatorRecordSerde.deserialize` does,

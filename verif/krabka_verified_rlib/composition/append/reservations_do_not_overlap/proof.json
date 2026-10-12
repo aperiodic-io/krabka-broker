@@ -20,7 +20,7 @@
         "time": 0.184
       },
       "vc_reserve_offsets": { "prover": "alt-ergo", "time": 0.008 },
-      "vc_wal_reservation_frontier": { "prover": "alt-ergo", "time": 0.01 }
+      "vc_wal_reservation_frontier": { "prover": "alt-ergo", "time": 0.021 }
     }
   }
 }

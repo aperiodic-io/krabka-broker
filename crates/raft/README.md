@@ -1,6 +1,5 @@
 # krabka-raft
 
-[![Crates.io](https://img.shields.io/crates/v/krabka-raft.svg)](https://crates.io/crates/krabka-raft)
 [API documentation](https://krabka-io.github.io/krabka-broker/krabka-raft/krabka_raft/index.html)
 [![CI](https://github.com/robot-head/crabka/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-head/crabka/actions/workflows/ci.yml)
 
@@ -11,31 +10,41 @@ This crate is part of [Krabka](https://github.com/robot-head/crabka), a Rust imp
 ## Install
 
 ```sh
-cargo add krabka-raft
+cargo add krabka-raft --path ../krabka-broker/crates/raft
 ```
 
-For workspace development, use the path dependency from this repository instead.
+This crate is not published by this repository. Adjust the path to your local checkout. Workspace development uses the path dependencies declared in this repository.
 
 ## Usage example
 
-Exercise the KRaft quorum state machine in a deterministic unit test:
+Run the [typed-input example](examples/quorum_state.rs) without starting a controller:
 
+<!-- snippet: raft/examples/quorum_state.rs#quorum_state -->
 ```rust
+use assert2::assert;
 use krabka_metadata::{KRaftVersionRange, Voter, VoterEndpoint, VoterSet};
-use krabka_raft::kraft::{QuorumState, QuorumStateMachine};
+use krabka_raft::kraft::{NodeId, QuorumState, QuorumStateMachine};
+use krabka_units::prelude::millis;
 use uuid::Uuid;
 
-let voters = VoterSet::new(vec![Voter {
-    id: 1,
-    directory_id: Uuid::new_v4(),
-    endpoints: vec![VoterEndpoint { name: "CONTROLLER".into(), host: "127.0.0.1".into(), port: 9093 }],
-    kraft_version: KRaftVersionRange { min: 0, max: 1 },
-}]).unwrap();
-let state = QuorumState::bootstrap(Uuid::new_v4(), voters);
-let machine = QuorumStateMachine::new(1, state, 1_000);
-
-assert!(machine.is_voter());
+fn main() {
+    let node = NodeId(1);
+    let voters = VoterSet::from_voters([Voter {
+        id: node,
+        directory_id: Uuid::new_v4(),
+        endpoints: vec![VoterEndpoint {
+            name: "CONTROLLER".into(),
+            host: "127.0.0.1".into(),
+            port: 9093,
+        }],
+        kraft_version: KRaftVersionRange { min: 0, max: 1 },
+    }]);
+    let state = QuorumState::bootstrap(Uuid::new_v4(), voters);
+    let machine = QuorumStateMachine::new(node, state, millis(1_000));
+    assert!(machine.is_voter());
+}
 ```
+<!-- /snippet -->
 
 ## Documentation
 

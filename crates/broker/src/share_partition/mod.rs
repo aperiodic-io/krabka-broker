@@ -9,4 +9,5 @@ pub(crate) mod dlq;
 pub(crate) mod group_settings;
 pub mod manager;
 pub mod session;
+pub(crate) mod source;
 pub mod state;

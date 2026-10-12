@@ -30,8 +30,8 @@ concurrency:
 
 jobs:
   # Automated storage microbenchmarks for krabka-log.
-  # Bazel's defs.bzl does not currently provide a crate_bench rule, so this
-  # workflow runs cargo bench directly using the repository's pinned toolchain.
+  # Bazel's crate_bench macro compiles and lints this suite. This lane measures
+  # it through Cargo using the repository's pinned toolchain.
   micro-benchmarks:
     name: broker · storage microbenchmarks
     runs-on: ubuntu-latest
@@ -69,13 +69,11 @@ jobs:
 
       # Benchmark summary JSON and raw logs are archived as build artifacts for
       # historical trend tracking and comparative regression analysis across PRs.
-      # Note: automated regression threshold gating is still deferred, and not to
-      # CodSpeed -- that needs an account and a repository secret this project does
-      # not have. The `bench` job in `ci.yml` is what keeps a criterion baseline
-      # across runs (`--save-baseline main`, nightly, over every bench target in
-      # `krabka-broker` and `krabka-log`); a threshold would be built on that
-      # rather than on this per-pull-request lane, whose shared-runner wall-clock
-      # times vary by up to ±24%.
+      # This per-pull-request lane archives measurements without a regression
+      # verdict because shared-runner wall-clock times vary by up to ±24%.
+      # The nightly/manual `bench` job in ci.yml alternates four reference and
+      # candidate runs on one host, then fails on regressions beyond its
+      # variance-calibrated tolerance with a 10% floor.
       - name: Upload Benchmark Results
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

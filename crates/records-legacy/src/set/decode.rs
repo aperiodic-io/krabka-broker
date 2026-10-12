@@ -123,18 +123,18 @@ fn decode_into(
             let start_len = out.len();
             decode_into(&inner_bytes, out, false, policy)?;
 
-            // v1 wrapper-offset rewriting (KIP-32): inner offsets are
-            // relative (0..count-1); absolute offset for inner[i] is
-            // wrapper_offset - (count-1) + i. v0 wrappers always carry
-            // absolute inner offsets, so leave them as-is.
-            if matches!(msg.magic, Magic::V1) {
-                // No `count > 0` guard: at zero the loop below has nothing to
-                // walk and `base_abs` goes unread, so the guard only decided
-                // whether to compute a value nobody looks at.
-                let count = i64::try_from(out.len() - start_len).unwrap_or(i64::MAX);
-                let base_abs = offset - (count - 1);
-                for (i, rec) in out[start_len..].iter_mut().enumerate() {
-                    rec.offset = Offset(base_abs + i64::try_from(i).unwrap_or(i64::MAX));
+            // KIP-32 anchors the last relative inner offset at the wrapper
+            // offset. Retained records can have gaps after compaction.
+            // An empty wrapper has no offsets to reconstruct.
+            if matches!(msg.magic, Magic::V1)
+                && let Some(last) = out[start_len..].last()
+            {
+                let base_abs = i128::from(offset) - i128::from(last.offset.0);
+                for rec in &mut out[start_len..] {
+                    let absolute = base_abs + i128::from(rec.offset.0);
+                    rec.offset = Offset(i64::try_from(absolute).map_err(|_| {
+                        LegacyRecordsError::Malformed("absolute inner offset exceeds i64".into())
+                    })?);
                 }
             }
         }
@@ -156,6 +156,69 @@ mod tests {
             test_support::{compressed_bytes, decode_bytes, sample_records_v1},
         },
     };
+
+    fn v1_wrapper(inner_offsets: &[i64], wrapper_offset: i64) -> BytesMut {
+        let inner: Vec<_> = inner_offsets
+            .iter()
+            .map(|&offset| ParsedRecord {
+                offset: Offset(offset),
+                timestamp: Some(10),
+                key: None,
+                value: Some(Bytes::from_static(b"v")),
+            })
+            .collect();
+        let mut flat = BytesMut::new();
+        encode_flat_message_set(inner, Magic::V1, &mut flat);
+        let wrapper = Message {
+            magic: Magic::V1,
+            attributes: attrs_with_compression(0, CompressionType::Gzip),
+            timestamp: Some(10),
+            key: None,
+            value: Some(krabka_compression::compress(CompressionType::Gzip, &flat).unwrap()),
+        };
+        let mut wire = BytesMut::new();
+        wire.put_i64(wrapper_offset);
+        wire.put_i32(i32::try_from(wrapper.encoded_len()).unwrap());
+        wrapper.encode_into(&mut wire);
+        wire
+    }
+
+    #[test]
+    fn sparse_v1_wrapper_anchors_last_inner_offset_without_closing_gaps() {
+        // Construct the inner MessageSet independently of the compressed-set
+        // encoder: Kafka retains relative gaps when compaction removes a row.
+        for (inner, outer, absolute) in [
+            ([0, 2], 102, [100, 102]),
+            ([3, 5], 102, [100, 102]),
+            ([i64::MIN, i64::MIN + 2], i64::MAX, [i64::MAX - 2, i64::MAX]),
+        ] {
+            let wire = v1_wrapper(&inner, outer);
+            let decoded = decode_bytes(&wire);
+            let expected: Vec<_> = absolute
+                .into_iter()
+                .map(|offset| ParsedRecord {
+                    offset: Offset(offset),
+                    timestamp: Some(10),
+                    key: None,
+                    value: Some(Bytes::from_static(b"v")),
+                })
+                .collect();
+            assert2::assert!(decoded == expected);
+        }
+    }
+
+    #[test]
+    fn v1_wrapper_rejects_unrepresentable_offsets_and_accepts_empty_extremes() {
+        let wire = v1_wrapper(&[0, 1], i64::MIN);
+        assert2::assert!(matches!(
+            decode_message_set(&mut &wire[..], wire.len()),
+            Err(LegacyRecordsError::Malformed(_))
+        ));
+        for outer in [i64::MIN, i64::MAX] {
+            let wire = v1_wrapper(&[], outer);
+            assert2::assert!(decode_bytes(&wire).is_empty());
+        }
+    }
 
     #[test]
     fn slice_length_lifts_to_a_byte_count() {
@@ -222,8 +285,6 @@ mod tests {
     // exact framing. These do: precise `needed` counts, error-variant
     // boundaries, the decompression-cap floor, and the v1 inner-offset rewrite.
     //
-    // `if count > 0` (the v1 rewrite guard) is an equivalent mutant under
-    // `>= 0`: the rewrite loop is empty when count == 0, so both behave alike.
 
     #[test]
     fn decode_message_set_short_buffer_reports_needed() {
@@ -299,11 +360,10 @@ mod tests {
     }
 
     #[test]
-    fn v1_inner_offset_rewrite_uses_inner_count() {
+    fn v1_inner_offset_rewrite_leaves_preceding_flat_records_unchanged() {
         // A set with a flat record FOLLOWED by a compressed v1 wrapper: when the
         // wrapper is decoded, `out` already holds the flat record (start_len >
-        // 0). The inner-offset rewrite must use the inner count (out.len() -
-        // start_len), not out.len() + start_len.
+        // 0). Offset reconstruction applies only to the wrapper's inner set.
         let mut buf = BytesMut::new();
         let flat = ParsedRecord {
             offset: Offset(50),

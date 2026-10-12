@@ -45,8 +45,8 @@ pub(crate) enum RecoveryOutcome {
     /// Recovery was unnecessary. The leader is alive, or this node is not the
     /// controller leader, or the partition is gone.
     NotNeeded,
-    /// A newer leader already exists, so this recovery is stale and the URM
-    /// aborted it.
+    /// The selection or controller admission changed before commit, so the
+    /// URM aborted this attempt. A fresh job must select against current state.
     Stale,
     /// Another recovery for the same `(topic, partition)` is already running.
     InProgress,

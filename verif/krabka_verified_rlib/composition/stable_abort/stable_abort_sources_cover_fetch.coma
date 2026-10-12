@@ -14,8 +14,8 @@ let%span svec = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creu
 let%span sfuture_log_swap_admission = "/workspace/crates/verified/src/storage/future_log_swap_admission.rs" 108 10 108 30
 let%span sfuture_log_swap_admission'0 = "/workspace/crates/verified/src/storage/future_log_swap_admission.rs" 109 10 109 29
 let%span sfuture_log_swap_admission'1 = "/workspace/crates/verified/src/storage/future_log_swap_admission.rs" 110 10 110 53
-let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 14 10 25 1
-let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 26 10 29 1
+let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 15 10 28 1
+let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 29 10 32 1
 let%span sabort_union = "/workspace/crates/verified/src/composition/abort_union.rs" 22 11 22 21
 let%span sabort_union'0 = "/workspace/crates/verified/src/composition/abort_union.rs" 23 10 34 1
 let%span srestored_aborts = "/workspace/crates/verified/src/composition/restored_aborts.rs" 16 16 20 76
@@ -91,9 +91,10 @@ let committed_fetch_excludes_unstable (starts: Slice64.slice Int64.t) (w: t_Fetc
         /\ Int64.to_int visibility.response_lso = MinMax.min (Int64.to_int lso'0) (Int64.to_int w.hw)
         /\ Int64.to_int visibility.response_hw = Int64.to_int w.hw
         /\ visibility.read_committed_aborts
-        /\ not visibility.out_of_range
+        /\ visibility.out_of_range = gt_log_Int (Int64.to_int w.log_start) (Int64.to_int w.log_end)
         /\ visibility.empty
-          = ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable))
+          = (Int64.to_int w.log_start <= Int64.to_int w.log_end
+          /\ ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable)))
         /\ (forall i: int. 0 <= i /\ i < Seq.length (Slice64.view starts)
           -> Int64.to_int visibility.limit_offset <= Int64.to_int (Seq.get (Slice64.view starts) i))
         end)

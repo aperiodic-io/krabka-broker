@@ -1,9 +1,9 @@
 //! Constructors for a segment and the tail recovery that an active segment
 //! needs when it is reopened.
 //!
-//! These are the three ways a [`Segment`] comes into existence -- a fresh
-//! create, a no-scan open, and an active open that walks the trailing bytes --
-//! together with the walk itself.
+//! Fresh segments are created, sealed segments are validated for reading,
+//! and active segments recover their tail. Log recovery also uses a private
+//! no-scan loader before it supplies the sealed segment bounds.
 
 use std::{
     fs::{File, OpenOptions},
@@ -123,7 +123,7 @@ impl Segment {
         validate: bool,
         index_interval: ByteSize,
     ) -> Result<Self, LogError> {
-        let mut seg = Self::open(dir, base_offset)?;
+        let mut seg = Self::open_unscanned(dir, base_offset)?;
         if validate {
             seg.recover_active_tail(index_interval)?;
         }
@@ -248,21 +248,37 @@ impl Segment {
         })
     }
 
-    /// Open an existing segment for reading. This is lightweight and does no
-    /// full scan.
+    /// Open an existing segment for reading and refuse further appends.
     ///
-    /// The log and index files must already exist on disk. The segment starts
-    /// with `last_offset = base_offset - 1` and `max_timestamp = i64::MIN`
-    /// until tail recovery through [`Segment::open_active`] fills them in.
+    /// Scans the batches to restore the last offset and maximum timestamp. A corrupt or incomplete batch returns an error without truncating the file. Use [`Segment::open_active`] to recover a writable segment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the segment or its indexes cannot be opened, its batches cannot be read, or its offset chain or batch bytes are corrupt.
     #[instrument(
         level = "debug",
         skip_all,
         fields(dir = %dir.display(), base_offset = base_offset.0),
         err,
     )]
-    /// # Errors
-    /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
     pub fn open(dir: &Path, base_offset: Offset) -> Result<Self, LogError> {
+        let mut segment = Self::open_unscanned(dir, base_offset)?;
+        let scanned = segment.scan_valid_tail(DEFAULT_INDEX_INTERVAL)?;
+        if scanned.valid_end != segment.log_size {
+            return Err(LogError::Corrupt(
+                "sealed segment contains an invalid batch".into(),
+            ));
+        }
+        segment.last_offset = scanned.last_offset;
+        segment.max_timestamp = scanned.max_timestamp;
+        segment.max_timestamp_offset = scanned.max_timestamp_offset;
+        segment.sealed = true;
+        Ok(segment)
+    }
+
+    // Log recovery supplies sealed bounds from the following segment and
+    // restores timestamps separately, without decoding every record body.
+    pub(crate) fn open_unscanned(dir: &Path, base_offset: Offset) -> Result<Self, LogError> {
         let log_path = name::log_path(dir, base_offset.0);
         let log_file = OpenOptions::new().read(true).write(true).open(&log_path)?;
         let metadata = log_file.metadata()?;
@@ -415,7 +431,7 @@ mod tests {
     fn unvalidated_open_reports_last_offset_as_base_minus_one() {
         let dir = tempdir().unwrap();
         Segment::create(dir.path(), Offset(10)).unwrap();
-        let seg = Segment::open(dir.path(), Offset(10)).unwrap();
+        let seg = Segment::open_unscanned(dir.path(), Offset(10)).unwrap();
         assert2::assert!(seg.last_offset() == Offset(9));
     }
 }

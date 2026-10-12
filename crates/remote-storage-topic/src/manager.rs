@@ -29,18 +29,19 @@ use std::sync::Arc;
 
 use krabka_remote_storage::{InmemoryRemoteLogMetadataManager, RemoteStorageError};
 use krabka_units::prelude::{StdDurationExt as _, TimeExt as _};
-use tokio::{runtime::Handle, sync::watch, task::JoinHandle};
+use tokio::{runtime::Handle, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 mod assignment;
+mod mutations;
 mod persistence;
 mod pump;
 mod rlmm;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use self::pump::pump_loop;
+use self::{mutations::MutationWaiters, pump::pump_loop};
 use crate::{
     log::{AssignmentHandle, MetadataEventLog},
     snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
@@ -57,7 +58,7 @@ pub struct TopicBasedRemoteLogMetadataManager {
     log: Arc<dyn MetadataEventLog>,
     inner: Arc<InmemoryRemoteLogMetadataManager>,
     applied: Arc<std::sync::Mutex<Vec<i64>>>,
-    applied_tx: watch::Sender<u64>,
+    mutation_waiters: Arc<MutationWaiters>,
     runtime: Handle,
     shutdown: CancellationToken,
     pump: std::sync::Mutex<Option<JoinHandle<()>>>,
@@ -84,13 +85,18 @@ pub struct TopicBasedRemoteLogMetadataManager {
     /// Presence means this manager is currently assigned that partition.
     /// Reads for a user-partition that hashes into it return
     /// [`RemoteStorageError::NotReady`] until `applied[mp] >= target - 1`.
-    /// The map is empty for managers that never call
-    /// [`Self::reconcile_assignment`], and every read then delegates straight
-    /// to `inner`.
+    /// An empty map means no partition is assigned and every read is a miss.
     ready_targets: Arc<std::sync::Mutex<std::collections::HashMap<i32, i64>>>,
 }
 
 impl TopicBasedRemoteLogMetadataManager {
+    /// Actual partition count of the opened metadata topic. An existing
+    /// topic's count takes precedence over its provisioning configuration.
+    #[must_use]
+    pub fn metadata_partition_count(&self) -> i32 {
+        self.log.partition_count()
+    }
+
     /// Load any on-disk snapshot into the cache and spawn the consumer
     /// pump with an empty assignment. The manager consumes nothing until the
     /// broker drives [`Self::reconcile_assignment`].
@@ -109,7 +115,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// empty. It returns a `Result` so the bootstrap contract stays stable if
     /// `start` regains a fallible step.
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    /// Panics if the event log reports a negative partition count.
     pub fn start(
         log: Arc<dyn MetadataEventLog>,
         runtime: Handle,
@@ -120,7 +126,7 @@ impl TopicBasedRemoteLogMetadataManager {
         // one over; the cadence is a time extent everywhere below this line.
         let snapshot_interval = snapshot_interval.as_time();
         let n = usize::try_from(log.partition_count()).expect("partition_count fits in usize");
-        let (applied_tx, _) = watch::channel(0u64);
+        let mutation_waiters = Arc::new(MutationWaiters::default());
         let inner = Arc::new(InmemoryRemoteLogMetadataManager::new());
         let shutdown = CancellationToken::new();
 
@@ -168,7 +174,7 @@ impl TopicBasedRemoteLogMetadataManager {
             stream,
             Arc::clone(&inner),
             Arc::clone(&applied),
-            applied_tx.clone(),
+            Arc::clone(&mutation_waiters),
             shutdown.clone(),
         ));
 
@@ -176,7 +182,7 @@ impl TopicBasedRemoteLogMetadataManager {
             log,
             inner,
             applied,
-            applied_tx,
+            mutation_waiters,
             runtime,
             shutdown,
             pump: std::sync::Mutex::new(Some(pump)),
@@ -231,8 +237,8 @@ impl TopicBasedRemoteLogMetadataManager {
     }
 
     /// Cancel the consumer pump. Read methods continue to work against
-    /// whatever the pump applied before shutdown. Mutation methods time out
-    /// or fail to make progress.
+    /// whatever the pump applied before shutdown. Pending and subsequent
+    /// mutation methods return a closed-log error.
     pub fn shutdown(&self) {
         self.shutdown.cancel();
     }
@@ -241,7 +247,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// captures everything applied so far. It is safe to call this once on a
     /// graceful shutdown.
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    /// Panics if a task-handle, applied-offset, or partition-cache mutex is poisoned.
     pub async fn shutdown_and_flush(&self) {
         self.shutdown.cancel();
         // Take the handle out of the lock BEFORE awaiting it, so the

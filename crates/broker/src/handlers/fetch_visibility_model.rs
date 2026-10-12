@@ -248,7 +248,7 @@ fn assert_fetch_contract(
     // Valid targets.
     assert!(limit_offset >= 0 && win_response_hw >= 0 && win_response_lso >= 0);
     // out_of_range / empty correctness.
-    assert!(w.out_of_range == (fetch_offset < s.log_start));
+    assert!(w.out_of_range == (fetch_offset < s.log_start || fetch_offset > s.log_end));
     let upper = if is_follower {
         s.log_end
     } else {

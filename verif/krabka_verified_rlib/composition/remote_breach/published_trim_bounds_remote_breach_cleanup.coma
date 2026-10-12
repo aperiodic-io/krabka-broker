@@ -31,12 +31,12 @@ let%span scomposition = "/workspace/crates/verified/src/composition.rs" 229 16 2
 let%span scomposition'0 = "/workspace/crates/verified/src/composition.rs" 309 16 309 42
 let%span sremote_retention_model = "/workspace/crates/verified/src/retention/remote_retention_model.rs" 183 10 183 28
 let%span sremote_retention_model'0 = "/workspace/crates/verified/src/retention/remote_retention_model.rs" 186 8 200 9
-let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 19 10 23 1
-let%span sdelete_target'0 = "/workspace/crates/verified/src/retention/delete_target.rs" 24 10 24 36
-let%span sdelete_target'1 = "/workspace/crates/verified/src/retention/delete_target.rs" 25 10 25 43
-let%span sdelete_target'2 = "/workspace/crates/verified/src/retention/delete_target.rs" 26 10 26 65
-let%span sdelete_target'3 = "/workspace/crates/verified/src/retention/delete_target.rs" 27 10 30 73
-let%span sdelete_target'4 = "/workspace/crates/verified/src/retention/delete_target.rs" 88 16 89 144
+let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 22 10 26 1
+let%span sdelete_target'0 = "/workspace/crates/verified/src/retention/delete_target.rs" 27 10 27 36
+let%span sdelete_target'1 = "/workspace/crates/verified/src/retention/delete_target.rs" 28 10 28 43
+let%span sdelete_target'2 = "/workspace/crates/verified/src/retention/delete_target.rs" 29 10 29 65
+let%span sdelete_target'3 = "/workspace/crates/verified/src/retention/delete_target.rs" 30 10 33 74
+let%span sdelete_target'4 = "/workspace/crates/verified/src/retention/delete_target.rs" 94 16 95 145
 let%span sremote_breach = "/workspace/crates/verified/src/composition/remote_breach.rs" 69 25 69 60
 let%span sremote_breach'0 = "/workspace/crates/verified/src/composition/remote_breach.rs" 74 20 74 42
 let%span sremote_breach'1 = "/workspace/crates/verified/src/composition/remote_breach.rs" 74 20 74 56
@@ -49,26 +49,27 @@ let%span sremote_breach'7 = "/workspace/crates/verified/src/composition/remote_b
 let%span sremote_breach'8 = "/workspace/crates/verified/src/composition/remote_breach.rs" 94 14 94 28
 let%span sremote_breach'9 = "/workspace/crates/verified/src/composition/remote_breach.rs" 89 16 92 9
 let%span sremote_breach'10 = "/workspace/crates/verified/src/composition/remote_breach.rs" 88 16 88 58
-let%span sremote_breach'11 = "/workspace/crates/verified/src/composition/remote_breach.rs" 96 68 96 79
-let%span sremote_breach'12 = "/workspace/crates/verified/src/composition/remote_breach.rs" 96 68 96 81
-let%span sremote_breach'13 = "/workspace/crates/verified/src/composition/remote_breach.rs" 98 18 98 29
-let%span sremote_breach'14 = "/workspace/crates/verified/src/composition/remote_breach.rs" 98 18 98 31
-let%span sremote_breach'15 = "/workspace/crates/verified/src/composition/remote_breach.rs" 97 26 97 31
-let%span sremote_breach'16 = "/workspace/crates/verified/src/composition/remote_breach.rs" 95 8 99 10
-let%span sremote_breach'17 = "/workspace/crates/verified/src/composition/remote_breach.rs" 100 13 100 14
-let%span sremote_breach'18 = "/workspace/crates/verified/src/composition/remote_breach.rs" 100 8 100 14
-let%span sremote_breach'19 = "/workspace/crates/verified/src/composition/remote_breach.rs" 102 57 102 62
-let%span sremote_breach'20 = "/workspace/crates/verified/src/composition/remote_breach.rs" 102 64 102 65
-let%span sremote_breach'21 = "/workspace/crates/verified/src/composition/remote_breach.rs" 102 16 102 66
-let%span sremote_breach'22 = "/workspace/crates/verified/src/composition/remote_breach.rs" 103 18 103 85
-let%span sremote_breach'23 = "/workspace/crates/verified/src/composition/remote_breach.rs" 104 18 104 99
-let%span sremote_breach'24 = "/workspace/crates/verified/src/composition/remote_breach.rs" 27 11 27 66
-let%span sremote_breach'25 = "/workspace/crates/verified/src/composition/remote_breach.rs" 28 11 28 116
-let%span sremote_breach'26 = "/workspace/crates/verified/src/composition/remote_breach.rs" 29 11 29 99
-let%span sremote_breach'27 = "/workspace/crates/verified/src/composition/remote_breach.rs" 30 10 59 1
+let%span sremote_breach'11 = "/workspace/crates/verified/src/composition/remote_breach.rs" 97 68 97 79
+let%span sremote_breach'12 = "/workspace/crates/verified/src/composition/remote_breach.rs" 97 68 97 81
+let%span sremote_breach'13 = "/workspace/crates/verified/src/composition/remote_breach.rs" 99 18 99 29
+let%span sremote_breach'14 = "/workspace/crates/verified/src/composition/remote_breach.rs" 99 18 99 31
+let%span sremote_breach'15 = "/workspace/crates/verified/src/composition/remote_breach.rs" 96 21 96 26
+let%span sremote_breach'16 = "/workspace/crates/verified/src/composition/remote_breach.rs" 98 26 98 31
+let%span sremote_breach'17 = "/workspace/crates/verified/src/composition/remote_breach.rs" 95 8 100 10
+let%span sremote_breach'18 = "/workspace/crates/verified/src/composition/remote_breach.rs" 101 13 101 14
+let%span sremote_breach'19 = "/workspace/crates/verified/src/composition/remote_breach.rs" 101 8 101 14
+let%span sremote_breach'20 = "/workspace/crates/verified/src/composition/remote_breach.rs" 103 57 103 62
+let%span sremote_breach'21 = "/workspace/crates/verified/src/composition/remote_breach.rs" 103 64 103 65
+let%span sremote_breach'22 = "/workspace/crates/verified/src/composition/remote_breach.rs" 103 16 103 66
+let%span sremote_breach'23 = "/workspace/crates/verified/src/composition/remote_breach.rs" 104 18 104 85
+let%span sremote_breach'24 = "/workspace/crates/verified/src/composition/remote_breach.rs" 105 18 105 99
+let%span sremote_breach'25 = "/workspace/crates/verified/src/composition/remote_breach.rs" 27 11 27 66
+let%span sremote_breach'26 = "/workspace/crates/verified/src/composition/remote_breach.rs" 28 11 28 116
+let%span sremote_breach'27 = "/workspace/crates/verified/src/composition/remote_breach.rs" 29 11 29 99
+let%span sremote_breach'28 = "/workspace/crates/verified/src/composition/remote_breach.rs" 30 10 59 1
 let%span sremote_bytes = "/workspace/crates/verified/src/retention/remote_bytes.rs" 8 10 8 15
 let%span sremote_bytes'0 = "/workspace/crates/verified/src/retention/remote_bytes.rs" 11 8 14 9
-let%span sretention = "/workspace/crates/verified/src/retention.rs" 72 16 72 65
+let%span sretention = "/workspace/crates/verified/src/retention.rs" 75 16 75 65
 
 use creusot.int.Int64
 use creusot.int.UInt64
@@ -244,7 +245,7 @@ let delete_records_trim_application (requested'0: Int64.t) (wal_start: Int64.t) 
       end}
     (! return {result}) ]
 
-type t_RemoteRetentionSegment = { log_start_breached: bool; time_expired: bool; size: UInt64.t }
+type t_RemoteRetentionSegment = { blocked: bool; log_start_breached: bool; time_expired: bool; size: UInt64.t }
 
 constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
 
@@ -296,7 +297,7 @@ function remote_retention_model [#"/workspace/crates/verified/src/retention/remo
 
 axiom remote_retention_model_def:
   forall segments: Seq.seq t_RemoteRetentionSegment, i: int, debt: int [remote_retention_model segments i debt]. remote_retention_model segments i debt
-    = ([%#sremote_retention_model'0] if ge_log_Int i (Seq.length segments) then
+    = ([%#sremote_retention_model'0] if ge_log_Int i (Seq.length segments) \/ (Seq.get segments i).blocked then
       i
     else
       if (Seq.get segments i).log_start_breached then
@@ -318,7 +319,7 @@ axiom remote_retention_model_def:
 
     )
 
-predicate remote_charge_funded [#"/workspace/crates/verified/src/retention.rs" 71 0 71 78] (debt: int) (charged: int) (next_charge: int) =
+predicate remote_charge_funded [#"/workspace/crates/verified/src/retention.rs" 74 0 74 78] (debt: int) (charged: int) (next_charge: int) =
   [%#sretention] gt_log_Int debt 0 /\ charged < debt /\ next_charge <= debt
 
 function remote_prefix_charge [#"/workspace/crates/verified/src/retention/remote_bytes.rs" 9 0 9 85] (segments: Seq.seq t_RemoteRetentionSegment) (count: int) : int
@@ -336,11 +337,12 @@ axiom remote_prefix_charge_def:
       )
     )
 
-predicate retention_prefix_funded [#"/workspace/crates/verified/src/retention/delete_target.rs" 87 0 87 96] (segments: Seq.seq t_RemoteRetentionSegment) (debt: int) (count: int) =
+predicate retention_prefix_funded [#"/workspace/crates/verified/src/retention/delete_target.rs" 93 0 93 96] (segments: Seq.seq t_RemoteRetentionSegment) (debt: int) (count: int) =
   [%#sdelete_target'4] forall i: int. 0 <= i /\ i < count
-    -> (Seq.get segments i).log_start_breached
+    -> not (Seq.get segments i).blocked
+    /\ ((Seq.get segments i).log_start_breached
     \/ (Seq.get segments i).time_expired
-    \/ remote_charge_funded debt (remote_prefix_charge segments i) (remote_prefix_charge segments (i + 1))
+    \/ remote_charge_funded debt (remote_prefix_charge segments i) (remote_prefix_charge segments (i + 1)))
 
 let remote_retention_prefix (deletes_allowed: bool) (segments: Slice64.slice t_RemoteRetentionSegment)
   (size_debt: UInt64.t) (return (x: UInt64.t)) = any
@@ -354,7 +356,8 @@ let remote_retention_prefix (deletes_allowed: bool) (segments: Slice64.slice t_R
     /\ ([@stop_split] [@expl:remote_retention_prefix ensures #3] [%#sdelete_target'2] retention_prefix_funded (Slice64.view segments) (UInt64.t'int size_debt) (UInt64.t'int result))
     /\ ([@stop_split] [@expl:remote_retention_prefix ensures #4] [%#sdelete_target'3] deletes_allowed
       /\ UInt64.t'int result < Seq.length (Slice64.view segments)
-    -> not (Seq.get (Slice64.view segments) (UInt64.t'int result)).log_start_breached
+    -> (Seq.get (Slice64.view segments) (UInt64.t'int result)).blocked
+    \/ not (Seq.get (Slice64.view segments) (UInt64.t'int result)).log_start_breached
     /\ not (Seq.get (Slice64.view segments) (UInt64.t'int result)).time_expired
     /\ (UInt64.t'int size_debt = 0
     \/ ge_log_Int (remote_prefix_charge (Slice64.view segments) (UInt64.t'int result)) (UInt64.t'int size_debt)
@@ -413,13 +416,13 @@ let published_trim_bounds_remote_breach_cleanup [#"/workspace/crates/verified/sr
   (facts: t_DeleteRecordsTrimFacts) (stores: tup2_i64_i64) (previous: t_Option_i64) (applied: Slice64.slice bool)
   (published: bool) (deletes_allowed: bool) (finished: Slice64.slice tup3_i64_i64_u64)
   (return (x: t_Result_tup5_i64_tup2_i64_i64_Option_i64_Vec_RemoteRetentionSegment_Global_usize_DeleteRecordsTrimDecision)) =
-{[@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires] ([@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires #0] [%#sremote_breach'24] trim_store_frontiers_valid facts (Int64.to_int stores.f0) (Int64.to_int stores.f1))
-  /\ ([@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires #1] [%#sremote_breach'25] match previous with
+{[@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires] ([@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires #0] [%#sremote_breach'25] trim_store_frontiers_valid facts (Int64.to_int stores.f0) (Int64.to_int stores.f1))
+  /\ ([@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires #1] [%#sremote_breach'26] match previous with
       | None -> true
       | Some floor -> 0 <= Int64.to_int floor
       /\ Int64.to_int floor <= Int64.to_int stores.f0 /\ Int64.to_int floor <= Int64.to_int stores.f1
       end)
-  /\ ([@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires #2] [%#sremote_breach'26] finished_ranges_valid (Seq.length (Slice64.view finished)) (fun (i: int) -> { f0 = (Seq.get (Slice64.view finished) i).f0'1;
+  /\ ([@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup requires #2] [%#sremote_breach'27] finished_ranges_valid (Seq.length (Slice64.view finished)) (fun (i: int) -> { f0 = (Seq.get (Slice64.view finished) i).f0'1;
                                                                                                                                                                                         f1 = (Seq.get (Slice64.view finished) i).f1'1 }))}
   (! bb0
   [ bb0 = s0
@@ -468,7 +471,8 @@ let published_trim_bounds_remote_breach_cleanup [#"/workspace/crates/verified/sr
         <= Seq.length (Slice64.view finished)
       /\ Seq.length (view_Vec_RemoteRetentionSegment_Global rows) = UInt64.t'int i}
       {[@expl:loop invariant #1] [%#sremote_breach'9] forall j: int. 0 <= j /\ j < UInt64.t'int i
-        -> (Seq.get (view_Vec_RemoteRetentionSegment_Global rows) j).size = (Seq.get (Slice64.view finished) j).f2'1
+        -> not (Seq.get (view_Vec_RemoteRetentionSegment_Global rows) j).blocked
+        /\ (Seq.get (view_Vec_RemoteRetentionSegment_Global rows) j).size = (Seq.get (Slice64.view finished) j).f2'1
         /\ not (Seq.get (view_Vec_RemoteRetentionSegment_Global rows) j).time_expired
         /\ (Seq.get (view_Vec_RemoteRetentionSegment_Global rows) j).log_start_breached
         = match checkpoint with
@@ -502,23 +506,26 @@ let published_trim_bounds_remote_breach_cleanup [#"/workspace/crates/verified/sr
         | s3 = {[@expl:index in bounds] [%#sremote_breach'13] _98} s4
         | s4 = Slice64.get [%#sremote_breach'14] <tup3_i64_i64_u64> {finished} {_96}
             (fun (r: tup3_i64_i64_u64) -> [ &_95 <- r.f2'1 ] s5)
-        | s5 = [ &_83 <- { log_start_breached = _84; time_expired = ([%#sremote_breach'15] false); size = _95 } ] s6
+        | s5 = [ &_83 <- { blocked = ([%#sremote_breach'15] false);
+                           log_start_breached = _84;
+                           time_expired = ([%#sremote_breach'16] false);
+                           size = _95 } ] s6
         | s6 = MutBorrow.borrow_mut <t_Vec_RemoteRetentionSegment_Global> {rows}
             (fun (_bor: MutBorrow.t t_Vec_RemoteRetentionSegment_Global) -> [ &_82 <- _bor ] [ &rows <- _bor.final ] s7)
-        | s7 = push_RemoteRetentionSegment [%#sremote_breach'16] {_82} {_83} (fun (_x: ()) -> [ &_81 <- _x ] s8)
-        | s8 = UInt64.add [%#sremote_breach'18] {i} {[%#sremote_breach'17] (1: UInt64.t)}
+        | s7 = push_RemoteRetentionSegment [%#sremote_breach'17] {_82} {_83} (fun (_x: ()) -> [ &_81 <- _x ] s8)
+        | s8 = UInt64.add [%#sremote_breach'19] {i} {[%#sremote_breach'18] (1: UInt64.t)}
             (fun (_x: UInt64.t) -> [ &i <- _x ] s9)
         | s9 = bb21 ] ] ]
   | bb34 = s0
     [ s0 = [ &_105 <- rows ] s1
-    | s1 = deref_Vec_RemoteRetentionSegment_Global [%#sremote_breach'19] {_105}
+    | s1 = deref_Vec_RemoteRetentionSegment_Global [%#sremote_breach'20] {_105}
         (fun (_x: Slice64.slice t_RemoteRetentionSegment) -> [ &_103 <- _x ] s2)
-    | s2 = remote_retention_prefix [%#sremote_breach'21] {deletes_allowed} {_103} {[%#sremote_breach'20] (0: UInt64.t)}
+    | s2 = remote_retention_prefix [%#sremote_breach'22] {deletes_allowed} {_103} {[%#sremote_breach'21] (0: UInt64.t)}
         (fun (_x: UInt64.t) -> [ &count <- _x ] s3)
-    | s3 = {[@expl:assertion] [%#sremote_breach'22] forall j: int. 0 <= j /\ j < UInt64.t'int count
+    | s3 = {[@expl:assertion] [%#sremote_breach'23] forall j: int. 0 <= j /\ j < UInt64.t'int count
         -> (Seq.get (view_Vec_RemoteRetentionSegment_Global rows) j).log_start_breached}
       s4
-    | s4 = {[@expl:assertion] [%#sremote_breach'23] deletes_allowed
+    | s4 = {[@expl:assertion] [%#sremote_breach'24] deletes_allowed
         /\ UInt64.t'int count < Seq.length (Slice64.view finished)
       -> not (Seq.get (view_Vec_RemoteRetentionSegment_Global rows) (UInt64.t'int count)).log_start_breached}
       s5
@@ -569,7 +576,7 @@ let published_trim_bounds_remote_breach_cleanup [#"/workspace/crates/verified/sr
   | & variant_old_bb21: int = Any.any_l () ])
   [ return
     (result: t_Result_tup5_i64_tup2_i64_i64_Option_i64_Vec_RemoteRetentionSegment_Global_usize_DeleteRecordsTrimDecision) ->
-  {[@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup ensures] [%#sremote_breach'27] match result with
+  {[@stop_split] [@expl:published_trim_bounds_remote_breach_cleanup ensures] [%#sremote_breach'28] match result with
       | Err error -> trim_rejection facts error
       | Ok plan -> let canonical = MinMax.max (MinMax.max (trim_frontier facts) (Int64.to_int stores.f0)) (Int64.to_int stores.f1) in trim_well_formed facts
       /\ (Int64.to_int facts.requested = - 1 \/ Int64.to_int facts.requested <= Int64.to_int facts.high_watermark)

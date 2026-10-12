@@ -2,7 +2,7 @@
 //! writes through.
 //!
 //! Combined and controller nodes back it with a live `ControllerHandle`,
-//! which is an openraft voter. Broker-only nodes back it with a
+//! which is a handwritten `KRaft` voter. Broker-only nodes back it with a
 //! `MetadataObserver`, a true `KRaft` observer, plus a write-forwarding
 //! path to the controller quorum. Handlers depend only on this trait.
 
@@ -101,6 +101,18 @@ pub trait MetadataSource: Send + Sync {
         &self,
         records: Vec<MetadataRecord>,
     ) -> Result<SubmitChangeResult, RaftError>;
+    /// Submit a leader-local mutation only if its admission image remains current.
+    /// Observer-backed sources must forward the original request to the controller
+    /// before planning such a mutation.
+    async fn submit_change_if_image(
+        &self,
+        _records: Vec<MetadataRecord>,
+        _expected_image: Arc<MetadataImage>,
+    ) -> Result<SubmitChangeResult, RaftError> {
+        Err(RaftError::NotLeader {
+            current_leader: *self.watch_leader().borrow(),
+        })
+    }
     async fn submit_delegation_token_mutations(
         &self,
         _mutations: Vec<DelegationTokenMutation>,

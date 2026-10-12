@@ -159,6 +159,8 @@ def outcomes(entries, results):
 
 def verdict(outcome):
     """`pass`, `regression`, `known failure` or `fixed`."""
+    if outcome.status not in ["PASS", "FAIL"]:
+        return "regression"
     passed = outcome.status == "PASS"
     if outcome.entry.get("known_failure") == None:
         return "pass" if passed else "regression"

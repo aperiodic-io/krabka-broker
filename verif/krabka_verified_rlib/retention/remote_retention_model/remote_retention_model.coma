@@ -9,7 +9,7 @@ use creusot.int.UInt64
 use seq.Seq
 use int.Int
 
-type t_RemoteRetentionSegment = { log_start_breached: bool; time_expired: bool; size: UInt64.t }
+type t_RemoteRetentionSegment = { blocked: bool; log_start_breached: bool; time_expired: bool; size: UInt64.t }
 
 predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
 
@@ -39,25 +39,28 @@ function remote_retention_model [#"/workspace/crates/verified/src/retention/remo
 goal vc_remote_retention_model: if ge_log_Int i (Seq.length segments) then
     true
   else
-    if (Seq.get segments i).log_start_breached then
-      [@expl:variant decreases] well_founded_relation_Int ([%#sremote_retention_model] Seq.length segments
-      - i) ([%#sremote_retention_model] Seq.length segments - (i + 1))
+    if (Seq.get segments i).blocked then
+      true
     else
-      if (Seq.get segments i).time_expired then
-        if UInt64.t'int (Seq.get segments i).size <= debt then
-          [@expl:variant decreases] well_founded_relation_Int ([%#sremote_retention_model] Seq.length segments
-          - i) ([%#sremote_retention_model] Seq.length segments - (i + 1))
-        else
-          [@expl:variant decreases] well_founded_relation_Int ([%#sremote_retention_model] Seq.length segments
-          - i) ([%#sremote_retention_model] Seq.length segments - (i + 1))
-
+      if (Seq.get segments i).log_start_breached then
+        [@expl:variant decreases] well_founded_relation_Int ([%#sremote_retention_model] Seq.length segments
+        - i) ([%#sremote_retention_model] Seq.length segments - (i + 1))
       else
-        if gt_log_Int debt 0 then
+        if (Seq.get segments i).time_expired then
           if UInt64.t'int (Seq.get segments i).size <= debt then
             [@expl:variant decreases] well_founded_relation_Int ([%#sremote_retention_model] Seq.length segments
             - i) ([%#sremote_retention_model] Seq.length segments - (i + 1))
           else
-            true
+            [@expl:variant decreases] well_founded_relation_Int ([%#sremote_retention_model] Seq.length segments
+            - i) ([%#sremote_retention_model] Seq.length segments - (i + 1))
 
         else
-          true
+          if gt_log_Int debt 0 then
+            if UInt64.t'int (Seq.get segments i).size <= debt then
+              [@expl:variant decreases] well_founded_relation_Int ([%#sremote_retention_model] Seq.length segments
+              - i) ([%#sremote_retention_model] Seq.length segments - (i + 1))
+            else
+              true
+
+          else
+            true

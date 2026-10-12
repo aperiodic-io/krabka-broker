@@ -941,6 +941,19 @@ mod tests {
         }
     }
 
+    fn expected_offset_out_of_range() -> PartitionData {
+        PartitionData {
+            error_code: OFFSET_OUT_OF_RANGE,
+            high_watermark: -1,
+            last_stable_offset: -1,
+            log_start_offset: -1,
+            aborted_transactions: None,
+            preferred_read_replica: -1,
+            records: Some(RecordsPayload::Raw(Bytes::new())),
+            ..PartitionData::default()
+        }
+    }
+
     /// [`super::do_read`] hands the bounds its plan decided to the blocking
     /// read and fills the response from what came back. The three cases are
     /// the three shapes the plan has: a range to serve, nothing to serve
@@ -967,6 +980,7 @@ mod tests {
             high_watermark: limit.0,
             last_stable_offset: limit.0,
             log_start_offset: 0,
+            aborted_transactions: None,
             records: Some(RecordsPayload::Raw(records.clone())),
             ..PartitionData::default()
         };
@@ -982,18 +996,20 @@ mod tests {
                 },
             ),
             (
-                "past the high watermark",
+                "past the log end",
                 limit.0 + 1,
                 0,
-                PartitionData {
-                    records: None,
-                    ..served
-                },
+                expected_offset_out_of_range(),
             ),
         ];
 
         for (name, fetch_offset, expected_bytes, expected) in cases {
-            let mut out = PartitionData::default();
+            // Match the row initialized by the production planner: reads
+            // outside committed consumer isolation leave this list null.
+            let mut out = PartitionData {
+                aborted_transactions: None,
+                ..PartitionData::default()
+            };
             let bytes = super::do_read(
                 &partition,
                 consumer_request(fetch_offset),
@@ -1003,6 +1019,50 @@ mod tests {
             .await;
             assert!(bytes == expected_bytes, "{name}");
             assert!(out == expected, "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn do_read_distinguishes_log_end_from_offsets_above_it_for_every_fetcher() {
+        let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
+        {
+            let mut log = partition.log.lock().expect("log mutex poisoned");
+            log.append(&mut default_records_batch(&[b"first", b"second"]))
+                .expect("append two records");
+        }
+        // LEO is 2 while HW and LSO trail it at 1.
+        partition.replica_state.lock().await.hw = Offset(1);
+        for (follower, committed) in [(false, false), (false, true), (true, false), (true, true)] {
+            for (offset, expected) in [
+                (
+                    2,
+                    PartitionData {
+                        high_watermark: 1,
+                        last_stable_offset: 1,
+                        log_start_offset: 0,
+                        aborted_transactions: (committed && !follower).then(Vec::new),
+                        ..PartitionData::default()
+                    },
+                ),
+                (3, expected_offset_out_of_range()),
+            ] {
+                let request = super::ReadRequest {
+                    is_follower_fetch: follower,
+                    read_committed: committed,
+                    ..consumer_request(offset)
+                };
+                let mut out = PartitionData {
+                    aborted_transactions: None,
+                    ..PartitionData::default()
+                };
+                let bytes =
+                    super::do_read(&partition, request, &LogDirRegistry::default(), &mut out).await;
+                assert!(bytes == 0);
+                assert!(
+                    out == expected,
+                    "follower={follower}, committed={committed}, offset={offset}"
+                );
+            }
         }
     }
 
@@ -1075,8 +1135,8 @@ mod tests {
         }
     }
 
-    /// The one plan shape that serves nothing and still reports an error: a
-    /// fetch below the log start, which is where a consumer resuming from an
+    /// A fetch below the log start reports an error and serves nothing. A
+    /// consumer resuming from an
     /// offset retention has already deleted lands. Kafka answers it with
     /// `LogReadResult(Errors)` on a partition with no remote tier, so every
     /// offset in the row is -1 and the records are empty, whether the reader

@@ -74,13 +74,14 @@ pub(super) fn completed_remote_retention_bounds_floor(
     let mut facts: Vec<RemoteRetentionSegment> = Vec::new();
     let mut i = 0usize;
     #[invariant(i@ <= finished@.len() && facts@.len() == i@)]
-    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> facts@[j].size == finished@[j].2
+    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> !facts@[j].blocked && facts@[j].size == finished@[j].2
         && facts@[j].time_expired == finished@[j].3 && facts@[j].log_start_breached == match deleted_below {
             None => false, Some(floor) => finished@[j].1@ < floor@,
         })]
     #[variant(finished@.len() - i@)]
     while i < finished.len() {
         facts.push(RemoteRetentionSegment {
+            blocked: false,
             log_start_breached: matches!(deleted_below, Some(floor) if finished[i].1 < floor),
             time_expired: finished[i].3,
             size: finished[i].2,

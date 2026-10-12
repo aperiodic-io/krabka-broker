@@ -1,10 +1,10 @@
-(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 31 0 31 97 *)
+(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 32 0 32 97 *)
 
-let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 24 10 24 84
-let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 25 10 25 84
-let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 26 10 27 86
-let%span sindex_frontier'2 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 28 10 29 87
-let%span sindex_frontier'3 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 14 16 14 66
+let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 25 10 25 84
+let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 26 10 26 84
+let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 27 10 28 86
+let%span sindex_frontier'2 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 29 10 30 87
+let%span sindex_frontier'3 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 15 16 15 66
 
 use creusot.prelude.Any
 
@@ -12,14 +12,14 @@ type t_LocalRecoverySwapFacts = { log_cleaned_exists: bool; log_swap_exists: boo
 
 type t_LocalRecoverySwapAction = AbortSwap | CompleteSwap | PromoteSidecars | Reject
 
-predicate swap_committed [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 13 0 13 60] (facts: t_LocalRecoverySwapFacts) =
+predicate swap_committed [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 14 0 14 60] (facts: t_LocalRecoverySwapFacts) =
   [%#sindex_frontier'3] facts.log_swap_exists /\ not facts.log_cleaned_exists
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let local_recovery_swap_action [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 31 0 31 97]
+let local_recovery_swap_action [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 32 0 32 97]
   (facts: t_LocalRecoverySwapFacts) (return (x: t_LocalRecoverySwapAction)) = (! bb0
   [ bb0 = any [ br0 -> {facts.log_cleaned_exists = false} (! bb2) | br1 -> {facts.log_cleaned_exists} (! bb1) ]
   | bb1 = s0 [ s0 = [ &_ret <- AbortSwap ] s1 | s1 = return {_ret} ]

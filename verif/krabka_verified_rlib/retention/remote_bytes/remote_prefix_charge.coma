@@ -9,7 +9,7 @@ use creusot.int.UInt64
 use seq.Seq
 use int.Int
 
-type t_RemoteRetentionSegment = { log_start_breached: bool; time_expired: bool; size: UInt64.t }
+type t_RemoteRetentionSegment = { blocked: bool; log_start_breached: bool; time_expired: bool; size: UInt64.t }
 
 predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
 

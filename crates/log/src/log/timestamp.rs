@@ -85,7 +85,7 @@ impl Log {
     pub fn offset_for_timestamp(&self, target_ts: i64) -> Option<(Offset, i64)> {
         let scan_window = self.config.read().unwrap().timestamp_scan_window;
         // With no limit the scan has nothing to refuse.
-        self.scan_offset_for_timestamp(target_ts, scan_window, None)
+        self.scan_offset_for_timestamp(target_ts, scan_window, None, self.log_start_offset())
             .ok()
             .flatten()
     }
@@ -109,8 +109,31 @@ impl Log {
         &self,
         target_ts: i64,
     ) -> Result<Option<(Offset, i64)>, LogError> {
+        self.offset_for_timestamp_checked_from(target_ts, self.log_start_offset())
+    }
+
+    /// [`Self::offset_for_timestamp_checked`] restricted to offsets at or above
+    /// `minimum`, also respecting this log's own start offset.
+    ///
+    /// A caller with an authoritative deletion floor from another storage
+    /// projection can search the remaining records exactly without changing
+    /// this log's state or clamping an earlier hit to a different record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LogError::RecordTooLarge`] when a compressed record the scan
+    /// reads exceeds the configured decompressed-record limit.
+    ///
+    /// # Panics
+    ///
+    /// Panics when another thread poisoned the log configuration lock.
+    pub fn offset_for_timestamp_checked_from(
+        &self,
+        target_ts: i64,
+        minimum: Offset,
+    ) -> Result<Option<(Offset, i64)>, LogError> {
         let (scan_window, limit) = self.timestamp_scan_settings();
-        self.scan_offset_for_timestamp(target_ts, scan_window, limit)
+        self.scan_offset_for_timestamp(target_ts, scan_window, limit, minimum)
     }
 
     /// The scan window and the record limit of the log's current configuration.
@@ -124,8 +147,9 @@ impl Log {
         target_ts: i64,
         scan_window: ByteSize,
         limit: Option<ByteSize>,
+        minimum: Offset,
     ) -> Result<Option<(Offset, i64)>, LogError> {
-        let minimum = self.log_start_offset();
+        let minimum = self.log_start_offset().max(minimum);
         for seg in &self.segments {
             // A sealed segment restores its maximum on open, so the unknown
             // sentinel survives only where the segment holds no readable

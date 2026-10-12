@@ -6,7 +6,7 @@
         "prover": "alt-ergo",
         "time": 0.031
       },
-      "vc_len_tup2_i64_i64": { "prover": "alt-ergo", "time": 0.008 }
+      "vc_len_tup2_i64_i64": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

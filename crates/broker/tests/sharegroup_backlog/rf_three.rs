@@ -331,7 +331,10 @@ async fn rf_three_remote_leader_uses_committed_high_watermark() {
                 current_leader_epoch: leader_epoch.0,
                 ..fetch_partition(FetchPartitionSetup {
                     partition: krabka_ids::PartitionIndex(data_partition),
-                    offset: krabka_ids::Offset(i64::MAX),
+                    // The probe uses a valid position before the five
+                    // uncommitted records, so Fetch reports the committed
+                    // high-watermark without reading their payload.
+                    offset: krabka_ids::Offset(0),
                     maximum: FetchByteLimit(0),
                 })
             },

@@ -29,6 +29,9 @@ model_types! {
 
     /// What the remote retention walk knows about one finished remote segment.
     pub struct RemoteRetentionSegment {
+        /// A scheduled batch is not due, or its activation cannot be established.
+        /// Every retention axis stops before this segment.
+        pub blocked: bool,
         /// The segment's whole offset range lies below the log start offset.
         pub log_start_breached: bool,
         /// The segment breaches `retention.ms`.

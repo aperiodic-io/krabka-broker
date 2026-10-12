@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_abs_diff'0": { "prover": "alt-ergo", "time": 0.008 },
+      "vc_abs_diff'0": { "prover": "alt-ergo", "time": 0.021 },
       "vc_branch_Option_i64": { "prover": "alt-ergo", "time": 0.016 },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.018 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.019 },

@@ -19,7 +19,7 @@ use std::{
 use krabka_metadata::{AclOperation, MetadataImage};
 use krabka_security::Principal;
 
-use super::consumer_state::ResolvedRegularExpression;
+pub use super::consumer_state::ResolvedRegularExpression;
 use crate::{
     authorizer::{AuthorizationResult, Authorizer, authorize_topics_logged},
     re2j::compile_full_match,

@@ -130,6 +130,11 @@ krabka_macros::dispatch_table! {
     // unregister apis forward them untouched to the active controller, and
     // `ListOffsets` reads v0, which the owned codec does not model, by hand.
     context:
+        AlterConfigs => crate::handlers::alter_configs::dispatch,
+        CreatePartitions => crate::handlers::create_partitions::dispatch,
+        ElectLeaders => crate::handlers::elect_leaders::dispatch,
+        DeleteTopics => crate::handlers::delete_topics::dispatch,
+        IncrementalAlterConfigs => crate::handlers::incremental_alter_configs::dispatch,
         UnregisterBroker,
         UnregisterController,
         AddRaftVoter,
@@ -165,9 +170,6 @@ krabka_macros::dispatch_table! {
         StreamsGroupDescribe,
         DescribeLogDirs,
         DescribeTopicPartitions,
-        DeleteTopics,
-        AlterConfigs,
-        IncrementalAlterConfigs,
         DeleteRecords,
         DescribeShareGroupOffsets,
         AlterPartition,
@@ -176,12 +178,10 @@ krabka_macros::dispatch_table! {
         FindCoordinator,
         ShareFetch,
         ShareAcknowledge,
-        CreatePartitions,
         OffsetFetch,
         EndTxn => crate::txn::handlers::end_txn::handle,
         CreateAcls,
         DeleteAcls,
-        ElectLeaders,
         AlterPartitionReassignments,
         AlterClientQuotas,
         AddPartitionsToTxn => crate::txn::handlers::add_partitions_to_txn::handle;

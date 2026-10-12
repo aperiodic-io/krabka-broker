@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_branch_Option_usize": { "prover": "alt-ergo", "time": 0.006 },
+      "vc_branch_Option_usize": { "prover": "alt-ergo", "time": 0.02 },
       "vc_constructed_index_retained_candidate": {
         "tactic": "compute_specified",
         "children": [
@@ -59,12 +59,12 @@
       },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.012 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_from_i64": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_from_i64": { "prover": "alt-ergo", "time": 0.006 },
       "vc_from_residual_Option_usize": {
         "prover": "alt-ergo",
         "time": 0.017
       },
-      "vc_index_slice_i64": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_index_slice_i64": { "prover": "alt-ergo", "time": 0.01 },
       "vc_index_slice_u32": { "prover": "alt-ergo", "time": 0.014 },
       "vc_indexed_timestamp_scan_finds_first": {
         "prover": "alt-ergo",

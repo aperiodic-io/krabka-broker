@@ -11,6 +11,62 @@ use assert2::check;
 
 use super::*;
 
+#[test]
+fn simultaneous_fills_never_publish_partial_cached_bytes() {
+    let (_dir, cache) = test_cache(4 * 1024 * 1024);
+    let segment = Uuid::new_v4();
+    let expected = vec![7; 1024 * 1024];
+    let fill_barrier = std::sync::Barrier::new(16);
+    std::thread::scope(|scope| {
+        for _ in 0..16 {
+            scope.spawn(|| {
+                let (bytes, _) = cache
+                    .get_or_fetch(segment, IndexType::Transaction, || {
+                        fill_barrier.wait();
+                        Ok(expected.clone())
+                    })
+                    .expect("fill");
+                check!(bytes == expected);
+                for _ in 0..32 {
+                    let (bytes, outcome) = cache
+                        .get_or_fetch(segment, IndexType::Transaction, || {
+                            panic!("published entry must stay cached")
+                        })
+                        .expect("hit");
+                    check!(outcome == IndexCacheOutcome::Hit);
+                    check!(bytes == expected);
+                }
+            });
+        }
+    });
+    check!(cache.stats().entries == 1);
+    check!(cache.stats().bytes == expected.len() as u64);
+}
+
+#[test]
+fn stale_temporary_paths_do_not_prevent_cache_replacement() {
+    let (directory, cache) = test_cache(1024);
+    let segment = Uuid::new_v4();
+    cache
+        .get_or_fetch(segment, IndexType::Offset, || Ok(vec![7; 32]))
+        .unwrap();
+    let key = CacheKey {
+        segment_id: segment,
+        index_type: IndexType::Offset,
+    };
+    let path = entry_path(&directory.path().join(REMOTE_INDEX_CACHE_DIR), key);
+    std::fs::create_dir(path.with_extension("tmp")).unwrap();
+    cache.store(key, &path, &[9; 64]);
+    let (bytes, outcome) = cache
+        .get_or_fetch(segment, IndexType::Offset, || {
+            panic!("replacement must be cached")
+        })
+        .unwrap();
+    check!(bytes == vec![9; 64]);
+    check!(outcome == IndexCacheOutcome::Hit);
+    check!(cache.stats().bytes == 64);
+}
+
 /// A fetcher that counts its calls and returns `len` bytes.
 fn counting_fetch(
     calls: &Arc<AtomicUsize>,

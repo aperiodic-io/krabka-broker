@@ -1,16 +1,26 @@
 (* #"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 68 0 68 61 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
-let%span squorum_survives_any_single_site_loss = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 69 18 69 73
-let%span squorum_survives_any_single_site_loss'0 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 70 18 70 90
-let%span squorum_survives_any_single_site_loss'1 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 71 18 72 95
-let%span squorum_survives_any_single_site_loss'2 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 73 18 74 95
-let%span squorum_survives_any_single_site_loss'3 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 64 11 64 38
-let%span squorum_survives_any_single_site_loss'4 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 65 11 65 71
-let%span squorum_survives_any_single_site_loss'5 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 66 10 67 90
-let%span squorum_survives_any_single_site_loss'6 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 8 10 8 15
-let%span squorum_survives_any_single_site_loss'7 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 11 8 15 9
-let%span squorum_survives_any_single_site_loss'8 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 25 16 25 38
+let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
+let%span squorum_survives_any_single_site_loss = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 71 8 71 78
+let%span squorum_survives_any_single_site_loss'0 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 74 18 74 73
+let%span squorum_survives_any_single_site_loss'1 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 75 18 75 90
+let%span squorum_survives_any_single_site_loss'2 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 76 18 77 95
+let%span squorum_survives_any_single_site_loss'3 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 78 18 79 95
+let%span squorum_survives_any_single_site_loss'4 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 64 11 64 38
+let%span squorum_survives_any_single_site_loss'5 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 65 11 65 71
+let%span squorum_survives_any_single_site_loss'6 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 66 10 67 90
+let%span squorum_survives_any_single_site_loss'7 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 45 10 45 15
+let%span squorum_survives_any_single_site_loss'8 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 42 11 42 41
+let%span squorum_survives_any_single_site_loss'9 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 43 11 43 60
+let%span squorum_survives_any_single_site_loss'10 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 44 10 44 35
+let%span squorum_survives_any_single_site_loss'11 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 47 4 50 5
+let%span squorum_survives_any_single_site_loss'12 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 25 16 25 38
+let%span squorum_survives_any_single_site_loss'13 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 8 10 8 15
+let%span squorum_survives_any_single_site_loss'14 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 11 8 15 9
+let%span squorum_survives_any_single_site_loss'15 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 33 11 33 41
+let%span squorum_survives_any_single_site_loss'16 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 34 10 34 74
+let%span squorum_survives_any_single_site_loss'17 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 35 54 35 56
 
 use creusot.int.Int64
 use seq.Seq
@@ -18,21 +28,56 @@ use creusot.slice.Slice64
 use creusot.prelude.Any
 use int.Int
 
+predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
+
+meta "rewrite_def" predicate ge_log_Int
+
 function sum_prefix [#"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 9 0 9 49] (s: Seq.seq Int64.t) (limit: int) : int
 
 axiom sum_prefix_def: forall s: Seq.seq Int64.t, limit: int [sum_prefix s limit]. sum_prefix s limit
-    = ([%#squorum_survives_any_single_site_loss'7] if limit <= 0 then
+    = ([%#squorum_survives_any_single_site_loss'14] if limit <= 0 then
       0
     else
       sum_prefix s (limit - 1) + Int64.to_int (Seq.get s (limit - 1))
     )
 
+predicate gt_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord'0] other < self
+
+meta "rewrite_def" predicate gt_log_Int
+
+function lemma_sum_prefix_step [#"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 35 0 35 53] (s: Seq.seq Int64.t) (limit: int) : ()
+ = [%#squorum_survives_any_single_site_loss'17] ()
+
+axiom lemma_sum_prefix_step_spec: forall s: Seq.seq Int64.t, limit: int. ([%#squorum_survives_any_single_site_loss'15] 1
+        <= limit
+      /\ limit <= Seq.length s)
+    -> ([%#squorum_survives_any_single_site_loss'16] sum_prefix s limit
+    = sum_prefix s (limit - 1) + Int64.to_int (Seq.get s (limit - 1)))
+
+function lemma_sum_prefix_nonnegative [#"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 46 0 46 60] (s: Seq.seq Int64.t) (limit: int) : ()
+
+axiom lemma_sum_prefix_nonnegative_def:
+  forall s: Seq.seq Int64.t, limit: int [lemma_sum_prefix_nonnegative s limit]. ([%#squorum_survives_any_single_site_loss'8] 0
+        <= limit
+      /\ limit <= Seq.length s)
+    -> ([%#squorum_survives_any_single_site_loss'9] forall k: int. 0 <= k /\ k < limit
+        -> ge_log_Int (Int64.to_int (Seq.get s k)) 0)
+    -> lemma_sum_prefix_nonnegative s limit
+    = ([%#squorum_survives_any_single_site_loss'11] if gt_log_Int limit 0 then
+      let _ = lemma_sum_prefix_nonnegative s (limit - 1) in let _ = lemma_sum_prefix_step s limit in ()
+    else
+      ()
+    )
+
+axiom lemma_sum_prefix_nonnegative_spec:
+  forall s: Seq.seq Int64.t, limit: int. ([%#squorum_survives_any_single_site_loss'8] 0 <= limit
+      /\ limit <= Seq.length s)
+    -> ([%#squorum_survives_any_single_site_loss'9] forall k: int. 0 <= k /\ k < limit
+        -> ge_log_Int (Int64.to_int (Seq.get s k)) 0)
+    -> ([%#squorum_survives_any_single_site_loss'10] ge_log_Int (sum_prefix s limit) 0)
+
 function sum_all [#"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 24 0 24 34] (s: Seq.seq Int64.t) : int
- = [%#squorum_survives_any_single_site_loss'8] sum_prefix s (Seq.length s)
-
-predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
-
-meta "rewrite_def" predicate ge_log_Int
+ = [%#squorum_survives_any_single_site_loss'12] sum_prefix s (Seq.length s)
 
 meta "compute_max_steps" 1000000
 
@@ -40,33 +85,36 @@ meta "select_lsinst" "all"
 
 let lemma_two_sites_never_survive [#"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 68 0 68 61]
   (voters_per_site: Slice64.slice Int64.t) (return (x: ())) =
-{[@stop_split] [@expl:lemma_two_sites_never_survive requires] ([@stop_split] [@expl:lemma_two_sites_never_survive requires #0] [%#squorum_survives_any_single_site_loss'3] Seq.length (Slice64.view voters_per_site)
+{[@stop_split] [@expl:lemma_two_sites_never_survive requires] ([@stop_split] [@expl:lemma_two_sites_never_survive requires #0] [%#squorum_survives_any_single_site_loss'4] Seq.length (Slice64.view voters_per_site)
     = 2)
-  /\ ([@stop_split] [@expl:lemma_two_sites_never_survive requires #1] [%#squorum_survives_any_single_site_loss'4] forall k: int. 0
+  /\ ([@stop_split] [@expl:lemma_two_sites_never_survive requires #1] [%#squorum_survives_any_single_site_loss'5] forall k: int. 0
         <= k
       /\ k < 2 -> ge_log_Int (Int64.to_int (Seq.get (Slice64.view voters_per_site) k)) 0)}
   (! bb0
   [ bb0 = s0
-    [ s0 = {[@expl:assertion] [%#squorum_survives_any_single_site_loss] sum_prefix (Slice64.view voters_per_site) 1
-      = Int64.to_int (Seq.get (Slice64.view voters_per_site) 0)}
+    [ s0 =
+      {[@expl:assertion] [%#squorum_survives_any_single_site_loss] let _ = lemma_sum_prefix_nonnegative (Slice64.view voters_per_site) (Seq.length (Slice64.view voters_per_site)) in ge_log_Int (sum_all (Slice64.view voters_per_site)) 0}
       s1
-    | s1 = {[@expl:assertion] [%#squorum_survives_any_single_site_loss'0] sum_all (Slice64.view voters_per_site)
+    | s1 = {[@expl:assertion] [%#squorum_survives_any_single_site_loss'0] sum_prefix (Slice64.view voters_per_site) 1
+      = Int64.to_int (Seq.get (Slice64.view voters_per_site) 0)}
+      s2
+    | s2 = {[@expl:assertion] [%#squorum_survives_any_single_site_loss'1] sum_all (Slice64.view voters_per_site)
       = Int64.to_int (Seq.get (Slice64.view voters_per_site) 0)
       + Int64.to_int (Seq.get (Slice64.view voters_per_site) 1)}
-      s2
-    | s2 =
-      {[@expl:assertion] [%#squorum_survives_any_single_site_loss'1] ge_log_Int (Int64.to_int (Seq.get (Slice64.view voters_per_site) 0)) (Int64.to_int (Seq.get (Slice64.view voters_per_site) 1))
-      -> 2 * (sum_all (Slice64.view voters_per_site) - Int64.to_int (Seq.get (Slice64.view voters_per_site) 0))
-      <= sum_all (Slice64.view voters_per_site)}
       s3
     | s3 =
-      {[@expl:assertion] [%#squorum_survives_any_single_site_loss'2] ge_log_Int (Int64.to_int (Seq.get (Slice64.view voters_per_site) 1)) (Int64.to_int (Seq.get (Slice64.view voters_per_site) 0))
-      -> 2 * (sum_all (Slice64.view voters_per_site) - Int64.to_int (Seq.get (Slice64.view voters_per_site) 1))
+      {[@expl:assertion] [%#squorum_survives_any_single_site_loss'2] ge_log_Int (Int64.to_int (Seq.get (Slice64.view voters_per_site) 0)) (Int64.to_int (Seq.get (Slice64.view voters_per_site) 1))
+      -> 2 * (sum_all (Slice64.view voters_per_site) - Int64.to_int (Seq.get (Slice64.view voters_per_site) 0))
       <= sum_all (Slice64.view voters_per_site)}
       s4
-    | s4 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & voters_per_site: Slice64.slice Int64.t = voters_per_site ])
+    | s4 =
+      {[@expl:assertion] [%#squorum_survives_any_single_site_loss'3] ge_log_Int (Int64.to_int (Seq.get (Slice64.view voters_per_site) 1)) (Int64.to_int (Seq.get (Slice64.view voters_per_site) 0))
+      -> 2 * (sum_all (Slice64.view voters_per_site) - Int64.to_int (Seq.get (Slice64.view voters_per_site) 1))
+      <= sum_all (Slice64.view voters_per_site)}
+      s5
+    | s5 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & voters_per_site: Slice64.slice Int64.t = voters_per_site ])
   [ return (result: ()) ->
-  {[@stop_split] [@expl:lemma_two_sites_never_survive ensures] [%#squorum_survives_any_single_site_loss'5] exists k: int. 0
+  {[@stop_split] [@expl:lemma_two_sites_never_survive ensures] [%#squorum_survives_any_single_site_loss'6] exists k: int. 0
         <= k
       /\ k < Seq.length (Slice64.view voters_per_site)
       /\ 2 * (sum_all (Slice64.view voters_per_site) - Int64.to_int (Seq.get (Slice64.view voters_per_site) k))

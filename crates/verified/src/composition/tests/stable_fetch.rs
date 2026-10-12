@@ -14,8 +14,8 @@ fn visibility_oracle(starts: &[i64], w: FetchWatermarks) -> Option<(i64, FetchVi
     Some((
         lso,
         FetchVisibility {
-            out_of_range: false,
-            empty: w.log_start >= w.hw.min(w.deliverable),
+            out_of_range: w.log_start > w.log_end,
+            empty: w.log_start <= w.log_end && w.log_start >= w.hw.min(w.deliverable),
             limit_offset: lso.min(w.hw).min(w.deliverable),
             effective_lso: lso.min(w.hw),
             read_committed_aborts: true,

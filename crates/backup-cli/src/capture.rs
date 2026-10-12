@@ -11,6 +11,8 @@
 
 use std::path::{Path, PathBuf};
 
+use uuid::Uuid;
+
 use crate::manifest::CAPTURE_ROOT;
 
 /// The RLMM snapshot's path under a log directory.
@@ -111,12 +113,10 @@ pub fn newest_metadata_checkpoint(log_dir: &Path) -> Option<PathBuf> {
 /// The id a capture taken at `now_ms` carries, which is also its directory
 /// name inside the archive.
 ///
-/// It is the epoch millisecond, zero-padded so that the plain lexicographic
-/// order of the directory names is their chronological order. That is what
-/// makes `--capture latest` a listing and a `max`, with nothing to parse.
+/// The zero-padded epoch millisecond orders captures across timestamps; a random UUID suffix distinguishes concurrent captures and repeated clock values. Legacy timestamp-only names retain their position in the same listing, and `--capture latest` still needs only a lexicographic maximum.
 #[must_use]
 pub fn capture_id(now_ms: u64) -> String {
-    format!("{now_ms:016}")
+    format!("{now_ms:016}-{}", Uuid::new_v4().simple())
 }
 
 /// The archive-relative key of one artifact inside one capture.
@@ -219,7 +219,11 @@ mod tests {
         check!(early < late);
         check!(capture_id(0) < early);
         check!(
-            capture_key(&early, "manifest.json") == "restore-inputs/0001700000000000/manifest.json"
+            capture_key(&early, "manifest.json") == format!("restore-inputs/{early}/manifest.json")
         );
+        check!(early.starts_with("0001700000000000-"));
+        check!(early != capture_id(1_700_000_000_000));
+        check!("0001700000000000" < early.as_str());
+        check!(early.as_str() < "0001700000000001");
     }
 }

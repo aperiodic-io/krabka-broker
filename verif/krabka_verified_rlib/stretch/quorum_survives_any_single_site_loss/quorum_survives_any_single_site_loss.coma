@@ -1,38 +1,38 @@
-(* #"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 105 0 105 76 *)
+(* #"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 110 0 110 76 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span squorum_survives_any_single_site_loss = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 106 12 106 33
-let%span squorum_survives_any_single_site_loss'0 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 108 25 108 26
-let%span squorum_survives_any_single_site_loss'1 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 109 16 109 17
-let%span squorum_survives_any_single_site_loss'2 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 113 14 113 21
-let%span squorum_survives_any_single_site_loss'3 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 112 16 112 50
-let%span squorum_survives_any_single_site_loss'4 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 111 16 111 58
-let%span squorum_survives_any_single_site_loss'5 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 110 16 110 24
-let%span squorum_survives_any_single_site_loss'6 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 115 22 116 71
-let%span squorum_survives_any_single_site_loss'7 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 117 17 117 35
-let%span squorum_survives_any_single_site_loss'8 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 117 8 117 35
-let%span squorum_survives_any_single_site_loss'9 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 118 13 118 14
-let%span squorum_survives_any_single_site_loss'10 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 118 8 118 14
-let%span squorum_survives_any_single_site_loss'11 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 121 16 121 17
-let%span squorum_survives_any_single_site_loss'12 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 122 23 122 27
-let%span squorum_survives_any_single_site_loss'13 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 128 14 128 21
-let%span squorum_survives_any_single_site_loss'14 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 126 16 127 95
-let%span squorum_survives_any_single_site_loss'15 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 125 16 125 51
-let%span squorum_survives_any_single_site_loss'16 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 124 16 124 52
-let%span squorum_survives_any_single_site_loss'17 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 123 16 123 24
-let%span squorum_survives_any_single_site_loss'18 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 130 24 130 42
-let%span squorum_survives_any_single_site_loss'19 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 130 15 130 43
-let%span squorum_survives_any_single_site_loss'20 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 130 11 130 12
-let%span squorum_survives_any_single_site_loss'21 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 130 11 130 43
-let%span squorum_survives_any_single_site_loss'22 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 131 23 131 28
-let%span squorum_survives_any_single_site_loss'23 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 133 13 133 14
-let%span squorum_survives_any_single_site_loss'24 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 133 8 133 14
-let%span squorum_survives_any_single_site_loss'25 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 99 11 99 41
-let%span squorum_survives_any_single_site_loss'26 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 100 11 101 65
-let%span squorum_survives_any_single_site_loss'27 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 102 10 103 91
+let%span squorum_survives_any_single_site_loss = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 111 12 111 33
+let%span squorum_survives_any_single_site_loss'0 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 113 25 113 26
+let%span squorum_survives_any_single_site_loss'1 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 114 16 114 17
+let%span squorum_survives_any_single_site_loss'2 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 118 14 118 21
+let%span squorum_survives_any_single_site_loss'3 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 117 16 117 50
+let%span squorum_survives_any_single_site_loss'4 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 116 16 116 58
+let%span squorum_survives_any_single_site_loss'5 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 115 16 115 24
+let%span squorum_survives_any_single_site_loss'6 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 120 22 121 71
+let%span squorum_survives_any_single_site_loss'7 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 122 17 122 35
+let%span squorum_survives_any_single_site_loss'8 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 122 8 122 35
+let%span squorum_survives_any_single_site_loss'9 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 123 13 123 14
+let%span squorum_survives_any_single_site_loss'10 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 123 8 123 14
+let%span squorum_survives_any_single_site_loss'11 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 126 16 126 17
+let%span squorum_survives_any_single_site_loss'12 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 127 23 127 27
+let%span squorum_survives_any_single_site_loss'13 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 133 14 133 21
+let%span squorum_survives_any_single_site_loss'14 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 131 16 132 95
+let%span squorum_survives_any_single_site_loss'15 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 130 16 130 51
+let%span squorum_survives_any_single_site_loss'16 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 129 16 129 52
+let%span squorum_survives_any_single_site_loss'17 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 128 16 128 24
+let%span squorum_survives_any_single_site_loss'18 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 135 24 135 42
+let%span squorum_survives_any_single_site_loss'19 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 135 15 135 43
+let%span squorum_survives_any_single_site_loss'20 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 135 11 135 12
+let%span squorum_survives_any_single_site_loss'21 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 135 11 135 43
+let%span squorum_survives_any_single_site_loss'22 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 136 23 136 28
+let%span squorum_survives_any_single_site_loss'23 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 138 13 138 14
+let%span squorum_survives_any_single_site_loss'24 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 138 8 138 14
+let%span squorum_survives_any_single_site_loss'25 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 104 11 104 41
+let%span squorum_survives_any_single_site_loss'26 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 105 11 106 65
+let%span squorum_survives_any_single_site_loss'27 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 107 10 108 91
 let%span squorum_survives_any_single_site_loss'28 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 8 10 8 15
 let%span squorum_survives_any_single_site_loss'29 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 11 8 15 9
 let%span squorum_survives_any_single_site_loss'30 = "/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 25 16 25 38
@@ -78,7 +78,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let quorum_survives_any_single_site_loss [#"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 105 0 105 76]
+let quorum_survives_any_single_site_loss [#"/workspace/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs" 110 0 110 76]
   (voters_per_site: Slice64.slice Int64.t) (return (x: bool)) =
 {[@stop_split] [@expl:quorum_survives_any_single_site_loss requires] ([@stop_split] [@expl:quorum_survives_any_single_site_loss requires #0] [%#squorum_survives_any_single_site_loss'25] Seq.length (Slice64.view voters_per_site)
     <= 1024)

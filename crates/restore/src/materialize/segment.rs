@@ -60,6 +60,17 @@ pub async fn write_segment(
     segment: &VerifiedSegment,
     predicates: &Predicates,
 ) -> Result<SegmentOutcome, RestoreError> {
+    write_segment_after_skip(args, partition, segment, predicates, false).await
+}
+
+/// Write a segment, allowing a forward offset gap only after discovery skipped a corrupt predecessor.
+pub(crate) async fn write_segment_after_skip(
+    args: &RestoreArgs,
+    partition: &TopicIdPartition,
+    segment: &VerifiedSegment,
+    predicates: &Predicates,
+    skipped_predecessor: bool,
+) -> Result<SegmentOutcome, RestoreError> {
     let partition_ref = PartitionRef {
         topic: partition.topic.clone(),
         partition: partition.partition,
@@ -91,7 +102,7 @@ pub async fn write_segment(
         Some(Log::open(&dir, LogConfig::default())?)
     };
     if let Some(log) = log.as_mut() {
-        align_log_to_segment(log, segment, partition)?;
+        align_log_to_segment(log, segment, partition, skipped_predecessor)?;
     }
 
     let raw: &[u8] = &segment.log;
@@ -168,7 +179,7 @@ pub async fn write_segment(
 
 /// Align `log`'s end offset to `segment`'s declared base offset before any of its batches are appended.
 ///
-/// `Log::append_at`/`Log::append_verbatim_at` take an offset at or above `log.log_end_offset()`, as Kafka's `appendAsFollower` does for a compacted leader's holes, but a restore has no hole to explain: a segment that starts past the end of what was written means an earlier segment is missing, so this function insists on an aligned log. Segments arrive in base-offset order within a partition, so the common case is already aligned. The one legitimate exception is the very first segment written into a brand-new, still-empty target log, when the archive's first surviving base offset is not zero: `Log::open` always starts a fresh directory's active segment at offset zero, so that case needs one `reset_to` to slide the empty log's base up to match. Anything else — a log that already holds data whose end offset does not match this segment's base offset — is a sequencing bug upstream, not a case this function may paper over by resetting: `reset_to` is destructive, and calling it here would discard whatever an earlier call already wrote for this partition.
+/// Ordinary segments must align. After `--continue-on-corrupt` skips a predecessor, a later segment may leave a forward hole: follower append preserves its original offsets without resetting the restored prefix. A fresh empty log alone may reset from zero to the first surviving base. Backward or unexplained gaps remain errors.
 ///
 /// # Errors
 ///
@@ -177,6 +188,7 @@ fn align_log_to_segment(
     log: &mut Log,
     segment: &VerifiedSegment,
     partition: &TopicIdPartition,
+    skipped_predecessor: bool,
 ) -> Result<(), RestoreError> {
     let leo = log.log_end_offset();
     if leo == segment.facts.base_offset {
@@ -184,6 +196,9 @@ fn align_log_to_segment(
     }
     if leo == Offset(0) {
         log.reset_to(segment.facts.base_offset)?;
+        return Ok(());
+    }
+    if skipped_predecessor && leo < segment.facts.base_offset {
         return Ok(());
     }
     Err(RestoreError::InvalidArgument(format!(
@@ -361,6 +376,46 @@ mod tests {
         check!(read.batches[0].records == vec![record(0, "keep0")]);
         check!(read.batches[1].base_offset == 3);
         check!(read.batches[1].records == vec![record(0, "keep3")]);
+    }
+
+    #[tokio::test]
+    async fn a_skipped_predecessor_preserves_filtered_prefix_and_compacted_suffix_offsets() {
+        let (_target, args, partition, predicates) =
+            materialization_context(&["--exclude-key", "^drop$"]);
+        let prefix = batch(0, vec![record(0, "head"), record_with_key(2, "drop")]);
+        write_segment(
+            &args,
+            &partition,
+            &verified_segment(0, std::slice::from_ref(&prefix)),
+            &predicates,
+        )
+        .await
+        .unwrap();
+        let suffix = batch(20, vec![record(2, "tail")]);
+        let segment = verified_segment(20, std::slice::from_ref(&suffix));
+        check!(
+            write_segment(&args, &partition, &segment, &predicates)
+                .await
+                .is_err()
+        );
+        write_segment_after_skip(&args, &partition, &segment, &predicates, true)
+            .await
+            .unwrap();
+        let restored = reopen_orders(&args);
+        check!(restored.log_end_offset() == Offset(23));
+        check!(
+            restored
+                .read(Offset(0), LogConfig::default().segment_size)
+                .unwrap()
+                .batches
+                == vec![
+                    RecordBatch {
+                        records: vec![record(0, "head")],
+                        ..prefix
+                    },
+                    suffix,
+                ]
+        );
     }
 
     #[tokio::test]

@@ -87,44 +87,61 @@ async fn handle_returns_topic_partition_response_and_commits_isr_change() {
     broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
     seed_partition(&broker).await;
     test_ctx!(ctx, "replica");
-    let req = request_with_topics(
-        &broker,
-        vec![ReqTopicData {
-            topic_id: wire_topic_id(),
-            partitions: vec![ReqPartitionData {
-                partition_index: 0,
-                leader_epoch: 5,
-                new_isr: vec![1],
-                partition_epoch: 0,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }],
-    );
+    let req = single_partition_request(&broker);
     let resp = super::handle(&broker, req, version, &ctx)
         .await
         .expect("handle");
 
-    let expected = unthrottled_wire!(AlterPartitionResponse {
-        error_code: codes::NONE,
-        topics: vec![tagged_wire!(RespTopicData {
-            topic_id: wire_topic_id(),
-            partitions: vec![tagged_wire!(RespPartitionData {
-                partition_index: 0,
-                error_code: codes::NONE,
-                leader_id: 1,
-                leader_epoch: 5,
-                isr: vec![1],
-                leader_recovery_state: 0,
-                partition_epoch: 1,
-            })],
-        })],
-    });
+    let expected = accepted_isr_response();
     assert!(resp == expected);
 
     let image = broker.controller.current_image();
     let committed = image.partition("t", 0).expect("partition committed");
     assert!(committed.partition_epoch == 1);
+    broker_handle.shutdown().await;
+}
+
+/// Both requests name the same partition epoch. Exactly one may advance it;
+/// the other must rebuild admission after the first commit and be fenced.
+#[tokio::test]
+async fn concurrent_isr_updates_revalidate_the_partition_epoch_at_append() {
+    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
+    seed_partition(&broker).await;
+    test_ctx!(ctx, "replica");
+    let request = single_partition_request(&broker);
+    let (first, second) = tokio::join!(
+        super::handle(&broker, request.clone(), 2, &ctx),
+        super::handle(&broker, request, 2, &ctx),
+    );
+    let mut responses = [
+        first.expect("first response"),
+        second.expect("second response"),
+    ];
+    responses.sort_unstable_by_key(|response| response.topics[0].partitions[0].error_code);
+    let expected = [
+        accepted_isr_response(),
+        unthrottled_wire!(AlterPartitionResponse {
+            error_code: codes::NONE,
+            topics: vec![tagged_wire!(RespTopicData {
+                topic_id: wire_topic_id(),
+                partitions: vec![RespPartitionData {
+                    partition_index: 0,
+                    error_code: codes::INVALID_UPDATE_VERSION,
+                    ..Default::default()
+                }],
+            })],
+        }),
+    ];
+    assert!(responses == expected);
+    assert!(
+        broker
+            .controller
+            .current_image()
+            .partition("t", 0)
+            .expect("partition")
+            .partition_epoch
+            == 1
+    );
     broker_handle.shutdown().await;
 }
 
@@ -289,4 +306,39 @@ async fn a_stale_sender_broker_epoch_refuses_the_whole_request() {
     let image = broker.controller.current_image();
     assert!(image.partition("t", 0).expect("seeded").partition_epoch == 0);
     broker_handle.shutdown().await;
+}
+
+fn single_partition_request(broker: &Broker) -> AlterPartitionRequest {
+    request_with_topics(
+        broker,
+        vec![ReqTopicData {
+            topic_id: wire_topic_id(),
+            partitions: vec![ReqPartitionData {
+                partition_index: 0,
+                leader_epoch: 5,
+                new_isr: vec![1],
+                partition_epoch: 0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    )
+}
+
+fn accepted_isr_response() -> AlterPartitionResponse {
+    unthrottled_wire!(AlterPartitionResponse {
+        error_code: codes::NONE,
+        topics: vec![tagged_wire!(RespTopicData {
+            topic_id: wire_topic_id(),
+            partitions: vec![tagged_wire!(RespPartitionData {
+                partition_index: 0,
+                error_code: codes::NONE,
+                leader_id: 1,
+                leader_epoch: 5,
+                isr: vec![1],
+                leader_recovery_state: 0,
+                partition_epoch: 1,
+            })],
+        })],
+    })
 }

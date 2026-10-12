@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_advance_high_watermark": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_advance_high_watermark": { "prover": "alt-ergo", "time": 0.009 },
       "vc_branch_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_i32_Global_Option_tup3_i64_tup2_usize_usize_u64": {
         "prover": "alt-ergo",
         "time": 0.015
@@ -10,12 +10,12 @@
       "vc_control_history_frontier": { "prover": "alt-ergo", "time": 0.022 },
       "vc_deref_Vec_i64_Global": { "prover": "alt-ergo", "time": 0.015 },
       "vc_elim_Break": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.01 },
+      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.028 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.021 },
       "vc_from_i64": { "prover": "alt-ergo", "time": 0.017 },
       "vc_from_residual_Option_tup4_VoterReconfigurationPlan_Vec_u64_Global_Vec_tup3_i64_bool_bool_Global_Option_tup5_i64_i64_usize_bool_u64": {
         "prover": "alt-ergo",
-        "time": 0.014
+        "time": 0.03
       },
       "vc_frontier_reaches": { "prover": "alt-ergo", "time": 0.013 },
       "vc_in_half_open_window": { "prover": "alt-ergo", "time": 0.014 },
@@ -62,7 +62,7 @@
               { "prover": "alt-ergo", "time": 0.034 },
               { "prover": "alt-ergo", "time": 0.028 },
               { "prover": "alt-ergo", "time": 0.046 },
-              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.057 },
               { "prover": "alt-ergo", "time": 0.045 },
               { "prover": "z3", "time": 0.094 }
             ]

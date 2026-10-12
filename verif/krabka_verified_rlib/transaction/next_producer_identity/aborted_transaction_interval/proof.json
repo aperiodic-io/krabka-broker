@@ -11,7 +11,7 @@
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.005 },
       "vc_from_residual_Option_tup2_i64_i64": {
         "prover": "alt-ergo",
-        "time": 0.008
+        "time": 0.02
       }
     }
   }

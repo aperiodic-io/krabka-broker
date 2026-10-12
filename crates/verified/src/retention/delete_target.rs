@@ -10,12 +10,15 @@ use super::{remote_prefix_charge, remote_retention_model};
 /// `size_debt` is the total size minus `retention.bytes`, or zero when
 /// `retention.bytes` is unset or not exceeded. A tier that accepts no delete
 /// (`deletes_allowed` false) selects nothing.
+/// A blocked row stops the prefix even when its floor, time or size axis
+/// would otherwise select it.
 ///
 /// The result equals `remote_retention_model` from the oldest segment.
 /// That fold states the Kafka rule. Independent bounds justify every selected
 /// row by a floor/time breach or a funded charged prefix, and require the first
-/// kept row to fail all three axes. Zero debt cannot delete an unbreached empty
-/// row; an expired oversized row exhausts debt without restarting size deletion.
+/// kept row to be blocked or fail all three axes. Zero debt cannot delete an
+/// unbreached empty row; an expired oversized row exhausts debt without
+/// restarting size deletion.
 #[ensures(result@ == if deletes_allowed {
     remote_retention_model(segments@, 0, size_debt@)
 } else {
@@ -25,9 +28,9 @@ use super::{remote_prefix_charge, remote_retention_model};
 #[ensures(!deletes_allowed ==> result@ == 0)]
 #[ensures(retention_prefix_funded(segments@, size_debt@, result@))]
 #[ensures(deletes_allowed && result@ < segments@.len()
-    ==> !segments@[result@].log_start_breached && !segments@[result@].time_expired
+    ==> segments@[result@].blocked || (!segments@[result@].log_start_breached && !segments@[result@].time_expired
         && (size_debt@ == 0 || remote_prefix_charge(segments@, result@) >= size_debt@
-            || remote_prefix_charge(segments@, result@ + 1) > size_debt@))]
+            || remote_prefix_charge(segments@, result@ + 1) > size_debt@)))]
 #[must_use]
 pub fn remote_retention_prefix(
     deletes_allowed: bool,
@@ -50,6 +53,9 @@ pub fn remote_retention_prefix(
     #[variant(segments@.len() - len@)]
     while len < segments.len() {
         let segment = segments[len];
+        if segment.blocked {
+            break;
+        }
         if segment.log_start_breached {
             // Deleted below the floor; the size debt is untouched.
         } else if segment.time_expired {
@@ -85,7 +91,7 @@ pub fn retention_delete_target(last_offset: Option<i64>) -> Option<i64> {
 open_logic! {
 /// Each deleted row breaches the floor or time policy, or fits the charged size debt.
 fn retention_prefix_funded(segments: Seq<RemoteRetentionSegment>, debt: Int, count: Int) -> bool {
-    pearlite! { forall<i: Int> 0 <= i && i < count ==> segments[i].log_start_breached
-    || segments[i].time_expired || (super::remote_charge_funded(debt, remote_prefix_charge(segments, i), remote_prefix_charge(segments, i + 1))) }
+    pearlite! { forall<i: Int> 0 <= i && i < count ==> !segments[i].blocked && (segments[i].log_start_breached
+    || segments[i].time_expired || (super::remote_charge_funded(debt, remote_prefix_charge(segments, i), remote_prefix_charge(segments, i + 1)))) }
 }
 }

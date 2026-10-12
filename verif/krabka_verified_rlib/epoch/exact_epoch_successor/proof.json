@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_exact_epoch_successor": { "prover": "alt-ergo", "time": 0.02 }
+      "vc_exact_epoch_successor": { "prover": "alt-ergo", "time": 0.01 }
     }
   }
 }

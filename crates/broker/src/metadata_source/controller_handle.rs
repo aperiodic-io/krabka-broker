@@ -1,6 +1,6 @@
 //! The [`MetadataSource`] implementation for a live `ControllerHandle`, which
 //! is what combined and controller nodes run. Every method delegates straight
-//! to the openraft voter, so it lives apart from the broker-only observer path.
+//! to the handwritten `KRaft` voter, so it lives apart from the broker-only observer path.
 
 use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
 
@@ -54,6 +54,13 @@ impl MetadataSource for ControllerHandle {
         records: Vec<MetadataRecord>,
     ) -> Result<SubmitChangeResult, RaftError> {
         ControllerHandle::submit_change(self, records).await
+    }
+    async fn submit_change_if_image(
+        &self,
+        records: Vec<MetadataRecord>,
+        expected_image: Arc<MetadataImage>,
+    ) -> Result<SubmitChangeResult, RaftError> {
+        ControllerHandle::submit_change_if_image(self, records, expected_image).await
     }
     async fn submit_delegation_token_mutations(
         &self,

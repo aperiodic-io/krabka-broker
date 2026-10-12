@@ -1,7 +1,7 @@
-(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 174 0 174 87 *)
+(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 175 0 175 87 *)
 
-let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 175 4 175 32
-let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 172 10 172 50
+let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 176 4 176 32
+let%span slogical_range'0 = "/workspace/crates/verified/src/diskless/logical_range.rs" 173 10 173 50
 
 use creusot.prelude.Any
 
@@ -9,7 +9,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let diskless_object_reclaimable [#"/workspace/crates/verified/src/diskless/logical_range.rs" 174 0 174 87]
+let diskless_object_reclaimable [#"/workspace/crates/verified/src/diskless/logical_range.rs" 175 0 175 87]
   (referenced: bool) (grace_elapsed: bool) (return (x: bool)) = (! bb0
   [ bb0 = any [ br0 -> {referenced = false} (! bb1) | br1 -> {referenced} (! bb2) ]
   | bb2 = s0 [ s0 = [ &_ret <- [%#slogical_range] false ] s1 | s1 = return {_ret} ]

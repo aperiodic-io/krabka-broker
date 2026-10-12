@@ -17,6 +17,21 @@
 /// Windows has no safe `sendfile` or `TransmitFile`, so the
 /// `tcp_for_sendfile` method is compiled out and sendfile is never used.
 pub trait SendfileSink {
+    /// Whether the underlying transport already enforces a no-progress write
+    /// deadline. A buffered protocol delegates this to its byte transport.
+    fn write_idle_is_enforced(&self) -> bool {
+        false
+    }
+    crate::sendfile_cfg! {
+        /// Maximum time a sendfile response write may make no progress.
+        /// Direct streams have no deadline; the connection loop supplies its
+        /// listener policy. Buffered writes enforce their deadline through
+        /// `AsyncWrite` instead.
+        fn write_idle_window(&self) -> Option<std::time::Duration> {
+            None
+        }
+    }
+
     /// `true` when this stream can serve a records region with the kernel
     /// `sendfile(2)`, that is, a plaintext `TcpStream` on a SENDFILE-alias
     /// platform. Always `false` on TLS and on Windows. The fetch handler uses
@@ -52,7 +67,16 @@ impl SendfileSink for tokio::net::TcpStream {
     }
 }
 
-impl SendfileSink for tokio_rustls::server::TlsStream<tokio::net::TcpStream> {
+impl<S: SendfileSink> SendfileSink for tokio_rustls::server::TlsStream<S> {
+    fn write_idle_is_enforced(&self) -> bool {
+        self.get_ref().0.write_idle_is_enforced()
+    }
+
+    crate::sendfile_cfg! {
+        fn write_idle_window(&self) -> Option<std::time::Duration> {
+            self.get_ref().0.write_idle_window()
+        }
+    }
     // Userspace TLS: rustls encrypts in userspace, so file bytes must pass
     // through the rustls buffer — there is no kernel file→socket path. This is
     // the non-kTLS fallback (the broker's `ktls_enabled` startup probe returned

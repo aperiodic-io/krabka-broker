@@ -24,7 +24,7 @@
       },
       "vc_restored_abort_sources_cover_committed_fetch": {
         "prover": "alt-ergo",
-        "time": 0.02
+        "time": 0.009
       },
       "vc_stable_abort_sources_cover_fetch": {
         "prover": "z3",

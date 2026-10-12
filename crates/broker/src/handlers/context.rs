@@ -76,6 +76,9 @@ pub(crate) struct RequestContext<'a> {
     /// It is `false` unless the dispatch loop set it with
     /// [`RequestContext::with_pre_authentication`].
     pub pre_authentication: bool,
+    /// Set only by controller dispatch after authorizing and unwrapping a
+    /// KIP-590 Envelope. Broker-local config preprocessing has already run.
+    pub forwarded: bool,
 }
 
 /// Connection attributes a KIP-714 telemetry handler needs to match a
@@ -111,6 +114,7 @@ impl<'a> RequestContext<'a> {
             close_after_response: std::sync::atomic::AtomicBool::new(false),
             request_size: 0,
             pre_authentication: false,
+            forwarded: false,
         }
     }
 

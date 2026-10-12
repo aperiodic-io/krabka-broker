@@ -5,10 +5,11 @@
 //! validation and the cross-key combination rules both apply to the map this
 //! module builds, and neither reads the topic's current overrides.
 //!
-//! Two rules do read them. `krabka.diskless` is fixed when the topic is
+//! Storage transition rules do read them. `krabka.diskless` is fixed when the topic is
 //! created, and a replacement that simply omits it would otherwise turn a
 //! diskless topic back into a local-log one, so the resulting map is compared
-//! against the stored one. See
+//! against the stored one. Disabling remote storage also checks whether
+//! the stored config requires explicit deletion consent. See
 //! [`crate::config_keys::validate_diskless_unchanged`].
 //!
 //! ELR is partition metadata, as it is in Kafka, so config replacement cannot

@@ -189,6 +189,7 @@ fn the_walk_rolls_a_breached_active_segment_only_where_kafka_would() {
             .map(|ex| u32::try_from(ex.size.bytes_u64()).unwrap())
             .sum();
         let local = LocalSegments {
+            delivery_watermark: None,
             sealed: &case.sealed,
             active: case
                 .active
@@ -272,6 +273,7 @@ fn a_future_timestamp_is_aged_by_the_file_only_under_the_unstable_flag() {
             })
         }];
         let local = LocalSegments {
+            delivery_watermark: None,
             sealed: &exports,
             active: Some(ActiveSegmentExport {
                 base_offset: Offset(10),
@@ -751,6 +753,65 @@ async fn future_stamped_segments_leave_the_disk_only_under_trunks_rule() {
             exports.len()
         );
     }
+}
+
+#[tokio::test]
+async fn scheduled_local_retention_keeps_the_pending_prefix_until_its_clock_bound() {
+    use crate::delivery::test_support::{DeliveryPartitionSetup, partition_with_batches, wall_at};
+
+    let log_dir = tempfile::tempdir().unwrap();
+    let remote_dir = tempfile::tempdir().unwrap();
+    let timeline = qubit_clock::ManualMonotonicClock::new_shared();
+    let clock: Arc<dyn qubit_clock::WallClock> = timeline.new_wall_clock(wall_at(2_099));
+    let config = LogConfig {
+        segment_size: bytes(1),
+        remote_storage_enable: true,
+        delivery_policy: DeliveryPolicy::Scheduled,
+        delivery_clock_uncertainty: millis(100),
+        local_retention_size: Some(bytes(0)),
+        ..LogConfig::default()
+    };
+    let batches = [1_000, 2_000, 1_000]
+        .into_iter()
+        .map(|timestamp| {
+            let mut record = batch(2);
+            record.base_timestamp = timestamp;
+            record.max_timestamp = timestamp;
+            record
+        })
+        .collect();
+    let partition = partition_with_batches(
+        &log_dir,
+        &clock,
+        DeliveryPartitionSetup {
+            topic: "orders",
+            config: config.clone(),
+            leader: krabka_ids::NodeId(1),
+            batches,
+        },
+    );
+    // Reopen after constructing the partition so neither the fixture's initial
+    // publication nor a cached timestamp can authorize the eviction.
+    {
+        let mut log = partition.log.lock().unwrap();
+        log.sync().unwrap();
+        let reopened = Log::open(log.dir(), config).unwrap();
+        assert!(reopened.log_end_offset() == Offset(6));
+        *log = reopened;
+    }
+    let (exports, _) = partition_snapshot(&partition);
+    let (_rsm, rlmm) = archived_backends(remote_dir.path(), &exports).await;
+    let before_due = pass_over(&partition, &rlmm, 2_099).await;
+    check!(before_due.removed == 1);
+    check!(before_due.local_log_start == Offset(2));
+    {
+        let mut log = partition.log.lock().unwrap();
+        check!(log.advance_delivery_watermark(2_099).watermark == Offset(2));
+        check!(log.read(Offset(2), bytes(4096)).unwrap().batches[0].max_timestamp == 2_000);
+    }
+    let due = pass_over(&partition, &rlmm, 2_100).await;
+    check!(due.removed == 1);
+    check!(due.local_log_start == Offset(4));
 }
 
 // Where one local-retention pass left a log: what it removed, its

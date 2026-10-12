@@ -317,7 +317,7 @@ impl ReplicatorSupervisor {
     pub(crate) async fn run(self) {
         let mut rx = self.controller.watch_image();
         let mut first_reconcile = true;
-        loop {
+        'reconciles: loop {
             let image = rx.borrow().clone();
             if first_reconcile {
                 self.reconcile(&image).await;
@@ -329,11 +329,29 @@ impl ReplicatorSupervisor {
                     () = self.reconcile(&image) => {}
                 }
             }
-            tokio::select! {
-                () = self.shutdown.cancelled() => break,
-                res = rx.changed() => {
-                    if res.is_err() {
+            loop {
+                tokio::select! {
+                    () = self.shutdown.cancelled() => break 'reconciles,
+                    res = rx.changed() => {
+                        if res.is_err() {
+                            break 'reconciles;
+                        }
                         break;
+                    }
+                    () = async {
+                        match &self.share_coordinator {
+                            Some(coordinator) => coordinator.recovery_requested().await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        // A lost append reply must recover on the state
+                        // coordinator even if its metadata image is unchanged.
+                        // Refresh only the coordinator: a full reconcile can
+                        // enqueue configuration work behind the blocked writer.
+                        if let Some(coordinator) = &self.share_coordinator {
+                            let image = rx.borrow().clone();
+                            drop(coordinator.refresh_leader_partitions(&image).await);
+                        }
                     }
                 }
             }
@@ -371,13 +389,119 @@ impl ReplicatorSupervisor {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use assert2::assert;
     use krabka_ids::PartitionIndex;
+    use krabka_log::Offset;
 
     use super::*;
-    use crate::replicator_supervisor::test_support::{
-        broker_record, image_with, partition_record, supervisor_fixture, topic_record,
+    use crate::{
+        codes,
+        replicator_supervisor::test_support::{
+            broker_record, image_with, partition_record, supervisor_fixture, topic_record,
+        },
+        share_coordinator::{
+            bootstrap,
+            config::ShareCoordinatorConfig,
+            coordinator::{LoadStatus, ShareStateError, message, test_support::image_with_topic},
+        },
     };
+
+    async fn await_share_status(coordinator: &ShareCoordinator, expected: LoadStatus) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if coordinator.load_status(PartitionIndex(0)).await == Some(expected) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("share recovery reaches the expected status");
+    }
+
+    /// The remote state coordinator receives no metadata update when its
+    /// accepted append outlives an RPC. Its supervisor must recover on the
+    /// uncertainty notice, then retry a failed barrier on the next RPC.
+    #[tokio::test]
+    async fn unchanged_metadata_recovers_an_indeterminate_share_append_and_client_retry() {
+        let image = image_with(&[
+            topic_record(SupervisorTopicSetup {
+                topic: bootstrap::TOPIC,
+                ..Default::default()
+            }),
+            partition_record(SupervisorPartitionSetup::single_replica(
+                bootstrap::TOPIC,
+                NodeId(2),
+            )),
+        ]);
+        let (mut supervisor, partitions, _reporter, _dir) = supervisor_fixture(image);
+        let coordinator = Arc::new(ShareCoordinator::new(
+            krabka_metadata::NodeId(2),
+            Arc::clone(&partitions),
+            ShareCoordinatorConfig {
+                state_topic_num_partitions: 1,
+                write_timeout: Duration::from_millis(100),
+                ..Default::default()
+            },
+        ));
+        supervisor.share_coordinator = Some(Arc::clone(&coordinator));
+        let shutdown = supervisor.shutdown.clone();
+        let metadata = supervisor.controller.watch_image();
+        let task = supervisor.spawn();
+        await_share_status(&coordinator, LoadStatus::Active).await;
+        let partition = partitions.get(bootstrap::TOPIC, PartitionIndex(0)).unwrap();
+
+        // The real writer retains this accepted append while its reply waits
+        // for the HW update. A FIFO barrier cannot pass the suspended writer.
+        let hw = partition.replica_state.lock().await;
+        let topic_id = uuid::Uuid::from_bytes([73; 16]);
+        let topic_image = image_with_topic(topic_id, 1);
+        assert!(
+            coordinator
+                .initialize(&topic_image, "g", topic_id, 0, 2, Offset(10))
+                .await
+                == Err(ShareStateError::Operation {
+                    code: codes::COORDINATOR_NOT_AVAILABLE,
+                    message: message::REQUEST_TIMED_OUT,
+                })
+        );
+        // No RPC or metadata refresh triggers this first recovery attempt.
+        await_share_status(&coordinator, LoadStatus::Loading).await;
+        await_share_status(&coordinator, LoadStatus::Pending).await;
+        assert!(!metadata.has_changed().unwrap());
+
+        drop(hw);
+        assert!(
+            coordinator
+                .initialize(&topic_image, "g", topic_id, 0, 1, Offset(20))
+                .await
+                == Err(ShareStateError::Operation {
+                    code: codes::COORDINATOR_LOAD_IN_PROGRESS,
+                    message: message::COORDINATOR_LOAD_IN_PROGRESS,
+                })
+        );
+        await_share_status(&coordinator, LoadStatus::Active).await;
+        assert!(
+            coordinator.read_summary("g", topic_id, 0).await == Ok(Some((2, 0, Offset(10), 0)))
+        );
+        assert!(
+            coordinator
+                .initialize(&topic_image, "g", topic_id, 0, 1, Offset(20))
+                .await
+                == Err(ShareStateError::Refused {
+                    code: codes::FENCED_STATE_EPOCH,
+                    message: message::FENCED_STATE_EPOCH,
+                })
+        );
+        assert!(!metadata.has_changed().unwrap());
+        shutdown.cancel();
+        task.await.unwrap();
+        let writer = partition.take_writer_handle().unwrap();
+        writer.abort();
+        let _ = writer.await;
+    }
 
     #[test]
     fn resolve_leader_endpoint_prefers_matching_listener() {

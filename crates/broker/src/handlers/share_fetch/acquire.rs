@@ -27,11 +27,13 @@ use super::{
 use crate::{
     broker::Broker,
     codes,
+    diskless::read::DisklessReadHandle,
     error::BrokerError,
     partition::Partition,
     share_partition::{
         group_settings::GroupShareSettings,
         manager::{SharePartitionLeaderManager, persistence::fences_the_partition},
+        source::diskless_logical_start,
         state::AcquisitionState,
     },
 };
@@ -238,6 +240,7 @@ struct GrowAndAcquireArgs<'a> {
     mode: AcquireMode,
     now: Instant,
     tier: Option<TieredSource<'a>>,
+    diskless: Option<(&'a DisklessReadHandle, uuid::Uuid)>,
 }
 
 /// Grows the readable window, promotes due deferrals, and acquires records
@@ -264,6 +267,7 @@ async fn grow_and_acquire(
         mode,
         now,
         tier,
+        diskless,
     } = args;
     grow_readable_window(
         st,
@@ -298,6 +302,7 @@ async fn grow_and_acquire(
         max_attempts: settings.delivery_count_limit,
         mode,
         tier,
+        diskless,
     };
     acquire_read_records(out, part, st, &request).await
 }
@@ -494,6 +499,10 @@ async fn acquire_pass(
             mode,
             now,
             tier: tier.clone(),
+            diskless: broker
+                .diskless_read
+                .as_deref()
+                .map(|reader| (reader, p.topic_id)),
         };
         // This pass's records land in `fresh`, then join what earlier passes
         // put in the row.
@@ -506,23 +515,26 @@ async fn acquire_pass(
             // below it, move the SPSO (and the SPEO, if the window had not
             // grown that far). An Acquired record below the new start
             // stays locked until it times out.
-            st.advance_past_log_start(part.log_start_offset());
-            fresh = PartitionData::default();
-            // Retry once in place, now that the SPSO/scan floor is
-            // repaired: without this, a repair that leaves readable
-            // records at the new log start would still report 0
-            // acquired, and the caller (which only long-polls when the
-            // WHOLE pass acquires nothing) would park for the full
-            // max_wait_ms even though a retry right now would already
-            // find them.
-            outcome = grow_and_acquire(&mut st, &mut fresh, grow_and_acquire_args()).await;
-            if outcome.as_ref().is_err_and(log_start_moved_past_spso) {
-                // The log start moved again between the two attempts.
-                // Report the partition as caught up with no records
-                // rather than failing the whole request.
-                st.advance_past_log_start(part.log_start_offset());
-                fresh = PartitionData::default();
-                outcome = Ok(0);
+            let floor = match broker.diskless_read.as_deref().filter(|_| part.diskless) {
+                Some(reader) => diskless_logical_start(reader, &part, p.topic_id).await,
+                None => Ok(part.log_start_offset()),
+            };
+            match floor {
+                Ok(floor) => {
+                    st.advance_past_log_start(floor);
+                    fresh = PartitionData::default();
+                    // Retry immediately so a repaired floor with readable
+                    // records does not park for the full long-poll timeout.
+                    outcome = grow_and_acquire(&mut st, &mut fresh, grow_and_acquire_args()).await;
+                    if outcome.as_ref().is_err_and(log_start_moved_past_spso) {
+                        // A concurrent floor move is retried on the next pass.
+                        // The local-only WAL trim frontier cannot establish
+                        // the logical deletion floor.
+                        fresh = PartitionData::default();
+                        outcome = Ok(0);
+                    }
+                }
+                Err(error) => outcome = Err(error),
             }
         }
         let acquired_count = match outcome {

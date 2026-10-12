@@ -34,7 +34,7 @@ type ScheduledStablePrefix = (i64, i64, FetchVisibility, FetchVisibility);
         && ((starts@.len() == 0 && lso@ == w.log_end@)
             || exists<i: Int> 0 <= i && i < starts@.len() && lso@ == starts@[i]@)
         && consumer.limit_offset@ == w.hw@.min(lso@).min(delivery@)
-        && crate::broker::committed_fetch_response(consumer, w.hw, lso, delivery, w.log_start@)
+        && crate::broker::committed_fetch_response(consumer, w.hw, lso, delivery, w.log_start@, w.log_end@)
         && follower.limit_offset == w.log_end && follower.response_hw == w.hw
         && follower.response_lso@ == w.hw@.min(lso@) && follower.effective_lso == lso
         && !follower.read_committed_aborts && !follower.out_of_range

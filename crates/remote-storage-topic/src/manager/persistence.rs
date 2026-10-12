@@ -124,7 +124,7 @@ mod tests {
         log::{InProcessMetadataEventLog, MetadataEventLog},
         manager::test_support::{
             finish, on_blocking, snapshot_test_dir, start_manager_in, start_seeded_manager_in,
-            started, tp,
+            started, tp, wait_ready,
         },
         partitioning::metadata_partition_for,
         serde::MetadataEvent,
@@ -167,6 +167,32 @@ mod tests {
             );
             check!(TopicBasedRemoteLogMetadataManager::resume_start_offset(committed).is_err());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oversized_snapshot_count_falls_back_to_replay() {
+        let dir = snapshot_test_dir("oversized-count");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(SNAPSHOT_FILE_NAME),
+            [0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1],
+        )
+        .unwrap();
+        let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
+        let mp = metadata_partition_for(&tp(), log.partition_count());
+        log.publish(mp, MetadataEvent::AddSegment(started(10, 0, 99)).encode())
+            .await
+            .unwrap();
+        log.publish(mp, MetadataEvent::UpdateSegment(finish(10)).encode())
+            .await
+            .unwrap();
+        let manager = start_manager_in(log, dir.clone()).unwrap();
+        check!(manager.committed_offset(mp) == -1);
+        manager.reconcile_assignment(&[mp]).await;
+        wait_ready(&manager, &tp()).await;
+        check!(manager.list_remote_log_segments(&tp()).unwrap().len() == 1);
+        manager.shutdown_and_flush().await;
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

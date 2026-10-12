@@ -183,7 +183,7 @@ open_logic! {
 #[variant(segments.len() - i)]
 pub fn remote_retention_model(segments: Seq<RemoteRetentionSegment>, i: Int, debt: Int) -> Int {
     pearlite! {
-        if i >= segments.len() {
+        if i >= segments.len() || segments[i].blocked {
             i
         } else if segments[i].log_start_breached {
             remote_retention_model(segments, i + 1, debt)

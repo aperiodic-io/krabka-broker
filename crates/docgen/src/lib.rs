@@ -4,7 +4,8 @@
 //! These structures are the broker config schema, the topic configs, the
 //! protocol API catalog, and the recorded traces of the `KRaft` simulator.
 //! The tool links the broker as a library. It does not spawn the broker
-//! binary and it does not read Rust source.
+//! binary. Reference generation does not read Rust source; snippet
+//! synchronization reads the source regions that Markdown pages name.
 //!
 //! `docs/docgen-contract.md` names every entry point the renderers read.
 //! `crates/broker/tests/docgen_contract.rs` holds the broker to that shape.

@@ -305,11 +305,12 @@ jobs:
   # `cargo nextest run --workspace` before a push; this is what makes those two
   # commands a merge gate rather than an honour system.
   #
-  # It is not a duplicate of the Bazel Clippy aspect. Three bodies of code are
-  # outside what that aspect can see:
+  # It also checks the Cargo dependency graph, and covers targets omitted by
+  # the impacted-target Bazel Clippy invocation:
   #
-  #   * the benches -- `crates/broker/benches/*.rs` and `crates/log/benches/`
-  #     have no Bazel target at all, so nothing else in CI compiles them;
+  #   * the benches under `crates/broker/benches` and `crates/log/benches`,
+  #     including their Cargo-specific dependencies. Bazel also compiles and
+  #     lints them through `crate_bench`;
   #   * the test and binary targets a change did not touch, which `aspect lint`
   #     narrows away on a pull request and `--all-targets` does not;
   #   * `krabka-protocol`'s build script, which `MODULE.bazel` pins with
@@ -377,9 +378,9 @@ jobs:
       # It includes `--benches`, so every `[[bench]]` target in
       # `crates/broker` and `crates/log` is type-checked on every pull request
       # and a bench that stops building fails here. The `bench` job below runs
-      # them, and only on a schedule -- so this is the whole of the
-      # pull-request-time guarantee, and a `cargo bench --no-run` step beside
-      # it would buy nothing.
+      # them on a schedule or dispatch. Bazel's `crate_bench` also compiles and
+      # lints them; a `cargo bench --no-run` step beside this would repeat the
+      # Cargo compilation check.
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -544,12 +545,17 @@ jobs:
           out="$(mktemp -d)"
           trap 'rm -rf "${out}"' EXIT
           bazel run --symlink_prefix=/ //crates/docgen:krabka-docgen -- all --out "${out}"
-      # The same tool rewrites every fenced block a page marks with `<!-- snippet: <path>#<anchor> -->` from the source region that carries the matching markers. It is idempotent, so a tree in sync does not change. A source edit that moved a quoted region does change it, and this fails.
+      # The same tool rewrites every fenced block a page or crate README marks
+      # with `<!-- snippet: <path>#<anchor> -->` from the source region carrying
+      # the matching markers. A tree in sync does not change; stale quotes fail
+      # the diff against the checked-in docs and crate READMEs.
       - name: quoted source snippets are current
         run: |
           bazel run --symlink_prefix=/ //crates/docgen:krabka-docgen -- \
             snippets --content "${PWD}/docs" --crates "${PWD}/crates"
-          git diff --exit-code -- docs
+          bazel run --symlink_prefix=/ //crates/docgen:krabka-docgen -- \
+            snippets --content "${PWD}/crates" --crates "${PWD}/crates"
+          git diff --exit-code -- docs crates
       # Every docs/KFCs/KFC-*.md carries the README's seven headings in order and a Status that matches the README index; the `the tasks' own tests` step above runs the unit tests that prove the check fails on a missing heading or a status mismatch.
       - name: KFC template
         run: aspect check-kfcs

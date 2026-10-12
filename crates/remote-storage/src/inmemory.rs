@@ -40,7 +40,7 @@ impl InmemoryRemoteLogMetadataManager {
     /// the order and the epoch index.
     #[must_use]
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    /// Panics if the partition-cache mutex is poisoned.
     pub fn export(&self) -> RlmmCacheDump {
         let guard = self.partitions.lock().expect("metadata mutex poisoned");
         let mut partitions: Vec<PartitionDump> = guard
@@ -82,7 +82,7 @@ impl InmemoryRemoteLogMetadataManager {
     /// overwrites existing partitions.
     ///
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    /// Panics if the partition-cache mutex is poisoned.
     pub fn import(&self, dump: RlmmCacheDump) {
         let mut guard = self.partitions.lock().expect("metadata mutex poisoned");
         for p in dump.partitions {

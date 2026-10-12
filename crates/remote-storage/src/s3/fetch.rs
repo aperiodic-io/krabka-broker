@@ -1,7 +1,7 @@
 //! Remote reads: a byte range of a segment body, and a whole index object.
 //!
-//! Each read derives one key and issues one request: an absent object is a
-//! miss, with no second key to try. Both pass the write-only archive guard
+//! Each read derives one key: an absent object is a miss, with no second key
+//! to try. Index reads check metadata before a capped download. Both pass the write-only archive guard
 //! first, which refuses the read before a key is derived or a request leaves
 //! the process.
 
@@ -19,7 +19,7 @@ fn object_bytes(
     metadata: &RemoteLogSegmentMetadata,
 ) -> Result<Vec<u8>, RemoteStorageError> {
     match result {
-        Ok(bytes) => Ok(bytes.to_vec()),
+        Ok(bytes) => Ok(bytes.into()),
         Err(ObjectStoreError::NotFound(_)) => Err(RemoteStorageError::SegmentNotFound(
             metadata.remote_log_segment_id().clone(),
         )),
@@ -68,7 +68,7 @@ impl S3RemoteStorage {
         object_bytes(Self::block_os(self.ops.get_range(&key, range)), metadata)
     }
 
-    /// Reads one whole index object of a segment.
+    /// Reads one whole index object within the configured memory limit.
     pub(super) fn fetch_index_bytes(
         &self,
         metadata: &RemoteLogSegmentMetadata,
@@ -76,7 +76,10 @@ impl S3RemoteStorage {
     ) -> Result<Vec<u8>, RemoteStorageError> {
         self.refuse_read_when_write_only()?;
         let key = self.index_key(metadata, index_type);
-        object_bytes(Self::block_os(self.ops.get(&key)), metadata)
+        object_bytes(
+            Self::block_os(self.ops.get_capped(&key, self.max_index_bytes)),
+            metadata,
+        )
     }
 }
 
@@ -85,11 +88,11 @@ mod tests {
     use std::sync::Arc;
 
     use assert2::{assert, check};
-    use krabka_object_store::fault::StoreOp;
+    use krabka_object_store::{ObjectOps as _, PutRequest, fault::StoreOp};
     use object_store::{ObjectStore, memory::InMemory};
     use tempfile::TempDir;
 
-    use super::{IndexType, RemoteStorageError, WormError};
+    use super::{IndexType, RemoteStorageError, S3RemoteStorage, WormError};
     use crate::{
         s3::test_support::{
             SeededCopySetup, StampedMetadataSetup, WormAccess, counting_rsm, rsm, sample_metadata,
@@ -98,6 +101,45 @@ mod tests {
         storage_manager::RemoteStorageManager,
         test_support::{TransactionIndex, check_sample_indexes},
     };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn whole_index_reads_enforce_the_configured_cap_for_every_index_type() {
+        let (store, counter) = counting_rsm();
+        let store = store.with_max_index_bytes(4);
+        let md = sample_metadata(uuid::Uuid::from_u128(11));
+        for index in IndexType::ALL {
+            let key = store.index_key(&md, index);
+            store
+                .ops
+                .put(
+                    &key,
+                    bytes::Bytes::from_static(b"12345"),
+                    PutRequest::default(),
+                )
+                .await
+                .unwrap();
+        }
+        tokio::task::spawn_blocking(move || {
+            for index in IndexType::ALL {
+                let before = counter.attempts(StoreOp::Get);
+                let error = store.fetch_index(&md, index).unwrap_err();
+                let key = store.index_key(&md, index);
+                assert!(matches!(error, RemoteStorageError::Backend(ref message)
+                    if message == &format!("object `{key}` is 5 bytes, exceeds cap of 4 bytes")));
+                // Refuse at HEAD, before downloading the body.
+                assert!(counter.attempts(StoreOp::Get) - before == 1);
+                S3RemoteStorage::block_os(store.ops.put(
+                    &key,
+                    bytes::Bytes::from_static(b"1234"),
+                    PutRequest::default(),
+                ))
+                .unwrap();
+                assert!(store.fetch_index(&md, index).unwrap() == b"1234");
+            }
+        })
+        .await
+        .unwrap();
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn missing_object_is_one_request() {

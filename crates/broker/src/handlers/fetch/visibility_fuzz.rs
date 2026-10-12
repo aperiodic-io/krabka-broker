@@ -48,7 +48,7 @@ proptest! {
             w.effective_lso.0,
         );
         prop_assert!(limit_offset >= 0 && response_hw >= 0 && response_lso >= 0);
-        prop_assert_eq!(w.out_of_range, fo < log_start);
+        prop_assert_eq!(w.out_of_range, fo < log_start || fo > log_end);
         // Every fetcher is told the partition's own high watermark and last
         // stable offset (Kafka's `Partition.readRecords`), and neither moves
         // with the delivery watermark, so consumer lag stays honest and a

@@ -4,7 +4,7 @@ This guide defines the style and content expectations for per-crate `README.md` 
 
 ## Purpose
 
-Each crate README is the **entry point for someone who sees the crate for the first time**. It answers: "what is this, why does it exist, and how do I use it?" Krabka publishes its crates to crates.io with release-plz, so READMEs serve two audiences:
+Each crate README is the **entry point for someone who sees the crate for the first time**. It answers: "what is this, why does it exist, and how do I use it?" A `vX.Y.Z` tag starts [publish.yml](../../.github/workflows/publish.yml), which publishes workspace members without `publish = false` to crates.io. READMEs serve two audiences:
 
 - **crates.io and docs.rs readers** — people who evaluate whether to use the crate.
 - **Internal developers** — people who need to understand a crate's role in the Krabka workspace.

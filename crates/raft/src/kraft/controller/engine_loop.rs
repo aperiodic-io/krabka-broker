@@ -3,6 +3,8 @@
 //! core [`Action`] it produces, and the timer reconciliation that follows a
 //! role change.
 
+use std::sync::Arc;
+
 use krabka_ids::Offset;
 use krabka_units::prelude::TimeExt as _;
 use tokio::{
@@ -182,7 +184,13 @@ impl Engine {
             }
             Command::Inbound(inbound) => self.on_inbound(inbound),
             Command::Timer(tick) => self.on_timer(tick),
-            Command::SubmitChange { records, reply } => self.on_submit_change(&records, reply),
+            Command::SubmitChange {
+                records,
+                expected_image,
+                reply,
+            } => {
+                self.on_submit_change_if_image(&records, expected_image.as_ref(), reply);
+            }
             Command::SubmitDelegationTokenMutations { mutations, reply } => {
                 self.on_submit_delegation_token_mutations(&mutations, reply);
             }
@@ -484,6 +492,16 @@ impl Engine {
     pub fn fail_waiters_on_leadership_loss(&mut self) {
         let is_leader = self.core.role().is_leader();
         let epoch = self.core.quorum_state().leader_epoch;
+        if self.was_leader != is_leader || self.held_epoch != epoch {
+            // An admission image also identifies the authority that planned
+            // the mutation. Invalidate it on role/epoch changes even when no
+            // metadata records changed. This runs before the next command,
+            // including while the new leader's control batch is uncommitted.
+            // Preserve the published contents: self.image can include a
+            // downgrade whose checkpoint has not yet made it publishable.
+            let published = self.image_tx.borrow().as_ref().clone();
+            self.image_tx.send_replace(Arc::new(published));
+        }
         let lost_leadership = should_fail_waiters_on_leadership_change(
             self.was_leader,
             is_leader,

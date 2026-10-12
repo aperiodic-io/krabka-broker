@@ -1013,10 +1013,21 @@ mod request_budget {
             .await
             .expect("send an oversized frame");
 
-        check!(
-            served.client.next().await.is_none(),
-            "the connection must close"
-        );
+        // Refusal now happens before reading the body. TCP can reset the
+        // connection when it closes with unread bytes instead of sending EOF.
+        match served.client.next().await {
+            None => {}
+            Some(Err(error)) => {
+                check!(
+                    matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+                    ),
+                    "the unread oversized body must close the connection: {error}"
+                );
+            }
+            Some(Ok(_)) => panic!("an oversized body must receive no response"),
+        }
         served
             .loop_task
             .await

@@ -320,10 +320,9 @@ impl Segment {
             .collect()
     }
 
-    /// Restore `max_timestamp` for a segment loaded through the no-scan
-    /// [`Segment::open`] path.
+    /// Restore `max_timestamp` for a segment loaded without a scan.
     ///
-    /// `open` leaves the field at its unknown sentinel. Retention compares
+    /// The no-scan loader leaves the field at its unknown sentinel. Retention compares
     /// that sentinel against the age cutoff, so without this call every
     /// reopened segment looks older than any window and the first
     /// [`Log::tick`](crate::Log::tick) after a restart deletes all of them.

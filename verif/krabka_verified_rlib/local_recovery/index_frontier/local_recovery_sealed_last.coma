@@ -1,11 +1,11 @@
-(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 89 0 89 75 *)
+(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 90 0 90 75 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
-let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 90 14 90 15
-let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 93 25 93 26
-let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 93 13 93 26
-let%span sindex_frontier'2 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 84 10 87 1
+let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 91 14 91 15
+let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 94 25 94 26
+let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 94 13 94 26
+let%span sindex_frontier'2 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 85 10 88 1
 
 use creusot.int.Int64
 use creusot.prelude.Any
@@ -25,7 +25,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let local_recovery_sealed_last [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 89 0 89 75]
+let local_recovery_sealed_last [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 90 0 90 75]
   (base: Int64.t) (next_base: Int64.t) (return (x: t_Option_i64)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &_6 <- Int64.lt base ([%#sindex_frontier] (0: Int64.t)) ] s1

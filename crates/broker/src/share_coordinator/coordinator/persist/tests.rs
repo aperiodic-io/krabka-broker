@@ -23,6 +23,11 @@ use crate::share_coordinator::{
 fn append_errors_answer_as_kafka() {
     let rows = [
         (
+            AppendError::NeedsReplay(PartitionIndex(3)),
+            codes::COORDINATOR_LOAD_IN_PROGRESS,
+            message::COORDINATOR_LOAD_IN_PROGRESS,
+        ),
+        (
             AppendError::NotLocal(PartitionIndex(3)),
             codes::COORDINATOR_NOT_AVAILABLE,
             message::UNKNOWN_TOPIC_OR_PARTITION,
@@ -69,6 +74,7 @@ const TERM: Term = Term {
 /// The outcome of a write, as a comparable value.
 fn outcome<T>(result: Result<T, AppendError>) -> Result<(), &'static str> {
     result.map(drop).map_err(|error| match error {
+        AppendError::NeedsReplay(_) => "needs replay",
         AppendError::NotLocal(_) => "not local",
         AppendError::NotLeader(_) => "not leader",
         AppendError::Failed(_) => "failed",

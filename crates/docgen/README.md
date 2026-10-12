@@ -14,7 +14,7 @@ values and turns each into one Zola markdown page:
 - the protocol API catalog, from `krabka_broker::api_catalog::supported_apis`,
 - the recorded `KRaft` failure traces, from `krabka_raft::scenarios`.
 
-The tool does not spawn the broker binary and it does not read Rust source.
+Reference generation does not spawn the broker binary or read Rust source. The `snippets` command reads the source regions that Markdown pages name.
 [`docs/docgen-contract.md`](../../docs/docgen-contract.md) names every entry
 point above, and `crates/broker/tests/docgen_contract.rs` holds the broker to
 that shape. A rename in the broker fails that test before it fails here.
@@ -37,6 +37,8 @@ regions they name:
 ```sh
 bazel run //crates/docgen:krabka-docgen -- \
     snippets --content "${PWD}/docs" --crates "${PWD}/crates"
+bazel run //crates/docgen:krabka-docgen -- \
+    snippets --content "${PWD}/crates" --crates "${PWD}/crates"
 ```
 
 `bazel run` puts the binary's own runfiles tree on the working directory, so
@@ -45,10 +47,10 @@ both paths are absolute.
 A page opts into a snippet with a pair of HTML comments, and the source region
 carries the matching pair of `docs:begin` / `docs:end` markers:
 
-```markdown
-<!-- snippet: log/examples/append.rs#append -->
-<!-- /snippet -->
-```
+The opening comment is `<!--` followed by
+`snippet: raft/examples/quorum_state.rs#quorum_state -->`; the closing comment
+is `<!--` followed by `/snippet -->`. The spelling is split here because the
+scanner also reads examples inside Markdown fences.
 
 The `snippets` command is idempotent. CI runs it in place and fails when the
 working tree changes, so a source edit that a page quotes cannot land on its

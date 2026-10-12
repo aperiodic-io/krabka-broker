@@ -26,6 +26,7 @@ use tracing::Instrument as _;
 mod accept;
 mod fetch;
 mod guards;
+mod receive;
 mod registry;
 mod response;
 /// Benchmark seam over the response-framing path, driven by
@@ -36,6 +37,7 @@ pub(crate) mod sasl;
 mod session;
 #[cfg(test)]
 mod test_support;
+mod write_idle;
 
 /// The broker-wide `queued.max.request.bytes` budget (#412).
 ///
@@ -70,40 +72,6 @@ impl RequestByteBudget {
     }
 }
 
-/// What the `queued.max.request.bytes` budget said about one frame.
-enum RequestBytes {
-    /// The frame may be handled. The permit, when there is one, is the budget
-    /// it spent.
-    Granted(Option<tokio::sync::OwnedSemaphorePermit>),
-    /// The frame is larger than the whole budget, so no amount of waiting can
-    /// admit it.
-    TooLarge,
-}
-
-/// Charges `frame_bytes` against the broker-wide request-byte budget, waiting
-/// for room when there is none.
-///
-/// `None` for the budget means the knob is off, which is Kafka's default, and
-/// every frame is granted immediately.
-async fn acquire_request_bytes(broker: &Broker, frame_bytes: usize) -> RequestBytes {
-    let Some(budget) = broker.queued_request_bytes.as_ref() else {
-        return RequestBytes::Granted(None);
-    };
-    if frame_bytes > budget.total {
-        return RequestBytes::TooLarge;
-    }
-    // A zero-byte frame is not a request the codec would hand back, but taking
-    // no permits for one would let it through the budget unmeasured either
-    // way, and `acquire_many(0)` is a no-op that would say "granted" without
-    // proving the budget has room.
-    let wanted = u32::try_from(frame_bytes).unwrap_or(u32::MAX).max(1);
-    match budget.permits.clone().acquire_many_owned(wanted).await {
-        Ok(permit) => RequestBytes::Granted(Some(permit)),
-        // The semaphore is never closed, and the size was checked above.
-        Err(_) => RequestBytes::TooLarge,
-    }
-}
-
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -117,6 +85,7 @@ use self::{
     response::{ResponseShape, apply_request_quota, encode_response},
     sasl::{SaslFrameOutcome, SaslListener, try_handle_sasl_frame},
     session::{FrameWaitPolicy, RequestLimits, initial_connection_auth, next_connection_frame},
+    write_idle::WriteIdle,
 };
 use crate::{
     api_catalog::{INTER_BROKER_ONLY_APIS, ListenerKind, is_disabled_version},
@@ -367,7 +336,7 @@ fn is_inter_broker_api_on_client_listener(
 /// Generic per-connection request loop.
 ///
 /// `S` is the post-handshake byte stream: `TcpStream` for plaintext listeners,
-/// and `tokio_rustls::server::TlsStream<TcpStream>` for TLS listeners. `spec`
+/// and a rustls stream over a write-idle-tracked socket for userspace TLS. `spec`
 /// carries the listener's protocol, so the loop initialises `ConnectionAuth`
 /// correctly and gates pre-auth requests on SASL listeners.
 // each api_key intercept arm adds ~15 lines.
@@ -381,7 +350,9 @@ async fn serve_connection_stream<S>(
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static + SendfileSink,
 {
     let limits = RequestLimits::of(&broker.config);
-    let mut framed: Framed<S, _> = Framed::new(stream, codec::codec(limits.request_max()));
+    let stream =
+        WriteIdle::for_response(stream, broker.config.connections_max_idle_for(&spec.name));
+    let mut framed = Framed::new(stream, codec::codec(limits.request_max()));
     let is_sasl_listener = spec.protocol.requires_sasl();
     let sasl_mechanisms =
         resolve_sasl_mechanisms_for_listener(&spec, &broker.config.enabled_sasl_mechanisms)
@@ -435,14 +406,23 @@ async fn serve_connection_stream<S>(
     let mut sasl_session = sasl::SaslSession::default();
 
     loop {
-        framed
-            .codec_mut()
-            .set_max_request_bytes(limits.for_auth(&auth));
-        let Some(frame) =
-            next_connection_frame(&mut framed, &auth, mute_until.take(), &frame_wait).await
+        let Some(received) = next_connection_frame(
+            &mut framed,
+            &auth,
+            mute_until.take(),
+            &frame_wait,
+            (limits.for_auth(&auth), broker.queued_request_bytes.as_ref()),
+        )
+        .await
         else {
             break;
         };
+        let receive::RequestFrame {
+            bytes: frame,
+            byte_permit,
+        } = received;
+        // The body already holds its byte budget, including while it waits
+        // for request execution capacity.
         // `queued.max.requests`: Kafka's bound is the depth of the request
         // queue, so the wait belongs after the read and not before it. A
         // connection sitting idle has nothing queued and must hold no
@@ -451,29 +431,8 @@ async fn serve_connection_stream<S>(
         let Ok(permit) = broker.queued_requests_sem.clone().acquire_owned().await else {
             break;
         };
-        // KIP-style `queued.max.request.bytes`: charge the frame against the
-        // broker-wide byte budget and hold it until the response is written,
-        // so a client that opens a hundred connections and sends a hundred
-        // megabytes on each cannot make the broker hold all of it at once.
-        let bytes_permit = match acquire_request_bytes(&broker, frame.len()).await {
-            RequestBytes::Granted(permit) => permit,
-            RequestBytes::TooLarge => {
-                // No response can ever free enough room, so waiting would be
-                // waiting forever. The codec refuses a frame over
-                // `socket.request.max.bytes` the same way.
-                tracing::warn!(
-                    peer = %peer,
-                    frame_bytes = frame.len(),
-                    "frame exceeds queued.max.request.bytes, closing"
-                );
-                broker
-                    .metrics
-                    .record_connection_close(ConnectionCloseReason::DecodeError);
-                break;
-            }
-        };
         let _queued_guard =
-            QueuedRequestGuard::new(permit, bytes_permit, &broker.metrics, frame.len());
+            QueuedRequestGuard::new(permit, byte_permit, &broker.metrics, frame.len());
         // After a `SaslHandshake` v0 the exchange carries raw size-prefixed
         // SASL tokens with no Kafka request header, both ways.
         // A failed v0 exchange closes with no response.

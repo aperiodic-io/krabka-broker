@@ -28,11 +28,13 @@ pub(crate) fn committed_fetch_response(
     lso: i64,
     deliverable: i64,
     floor: Int,
+    log_end: Int,
 ) -> bool {
     pearlite! {
         view.response_hw == hw && view.response_lso@ == hw@.min(lso@)
             && view.effective_lso@ == hw@.min(lso@) && view.read_committed_aborts
-            && !view.out_of_range && view.empty == (floor >= hw@.min(deliverable@))
+            && view.out_of_range == (floor > log_end)
+            && view.empty == (floor <= log_end && floor >= hw@.min(deliverable@))
     }
 }
 }

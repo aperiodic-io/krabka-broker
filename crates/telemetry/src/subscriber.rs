@@ -16,9 +16,9 @@ type StdoutLayer = Box<dyn Layer<Registry> + Send + Sync>;
 
 /// Owns the OTLP `SdkTracerProvider`, so shutdown flushes the spans.
 ///
-/// A drop of the guard also flushes: the provider shuts down when its last
-/// clone drops. But call [`TelemetryGuard::shutdown`] explicitly before exit,
-/// so the exporter delivers the final batch before the process ends.
+/// Dropping the guard stops the heartbeat and shuts down both exporters,
+/// including when another provider clone remains alive. Call
+/// [`TelemetryGuard::shutdown`] before exit to deliver the final batch.
 #[must_use = "hold the guard for the process lifetime and call shutdown() before exit"]
 pub struct TelemetryGuard {
     provider: Option<SdkTracerProvider>,
@@ -43,20 +43,30 @@ impl TelemetryGuard {
     /// Flush and shut down the OTLP exporters for traces and logs.
     ///
     /// This function does nothing when OTLP is disabled.
-    pub fn shutdown(self) {
-        if let Some(task) = self.heartbeat_task {
+    pub fn shutdown(mut self) {
+        self.shutdown_providers();
+    }
+
+    fn shutdown_providers(&mut self) {
+        if let Some(task) = self.heartbeat_task.take() {
             task.abort();
         }
-        if let Some(provider) = self.provider
+        if let Some(provider) = self.provider.take()
             && let Err(e) = provider.shutdown()
         {
             tracing::warn!(error = %e, "OTLP tracer provider shutdown error");
         }
-        if let Some(logger_provider) = self.logger_provider
+        if let Some(logger_provider) = self.logger_provider.take()
             && let Err(e) = logger_provider.shutdown()
         {
             tracing::warn!(error = %e, "OTLP logger provider shutdown error");
         }
+    }
+}
+
+impl Drop for TelemetryGuard {
+    fn drop(&mut self) {
+        self.shutdown_providers();
     }
 }
 
@@ -306,5 +316,34 @@ mod tests {
 
         assert2::assert!(calls.load(SeqCst) == 1);
         drop(held_clone);
+    }
+
+    #[tokio::test]
+    async fn telemetry_guard_drop_shuts_down_providers_and_stops_the_heartbeat() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(ShutdownCountingSpanExporter {
+                calls: calls.clone(),
+            })
+            .build();
+        let held_clone = provider.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (finished, stopped) = tokio::sync::oneshot::channel::<()>();
+        let heartbeat_task = tokio::spawn(async move {
+            let _finished = finished;
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        ready.await.unwrap();
+        drop(TelemetryGuard {
+            provider: Some(provider),
+            logger_provider: None,
+            heartbeat_task: Some(heartbeat_task),
+            log_levels: LogLevelController::new("info").0,
+        });
+        assert2::assert!(calls.load(SeqCst) == 1);
+        assert2::assert!(stopped.await.is_err());
+        drop(held_clone);
+        assert2::assert!(calls.load(SeqCst) == 1);
     }
 }

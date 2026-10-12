@@ -12,67 +12,68 @@ let%span scomposition = "/workspace/crates/verified/src/composition.rs" 229 16 2
 let%span scomposition'0 = "/workspace/crates/verified/src/composition.rs" 309 16 309 42
 let%span sremote_retention_model = "/workspace/crates/verified/src/retention/remote_retention_model.rs" 183 10 183 28
 let%span sremote_retention_model'0 = "/workspace/crates/verified/src/retention/remote_retention_model.rs" 186 8 200 9
-let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 19 10 23 1
-let%span sdelete_target'0 = "/workspace/crates/verified/src/retention/delete_target.rs" 24 10 24 36
-let%span sdelete_target'1 = "/workspace/crates/verified/src/retention/delete_target.rs" 25 10 25 43
-let%span sdelete_target'2 = "/workspace/crates/verified/src/retention/delete_target.rs" 26 10 26 65
-let%span sdelete_target'3 = "/workspace/crates/verified/src/retention/delete_target.rs" 27 10 30 73
-let%span sdelete_target'4 = "/workspace/crates/verified/src/retention/delete_target.rs" 88 16 89 144
+let%span sdelete_target = "/workspace/crates/verified/src/retention/delete_target.rs" 22 10 26 1
+let%span sdelete_target'0 = "/workspace/crates/verified/src/retention/delete_target.rs" 27 10 27 36
+let%span sdelete_target'1 = "/workspace/crates/verified/src/retention/delete_target.rs" 28 10 28 43
+let%span sdelete_target'2 = "/workspace/crates/verified/src/retention/delete_target.rs" 29 10 29 65
+let%span sdelete_target'3 = "/workspace/crates/verified/src/retention/delete_target.rs" 30 10 33 74
+let%span sdelete_target'4 = "/workspace/crates/verified/src/retention/delete_target.rs" 94 16 95 145
 let%span sremote_bytes = "/workspace/crates/verified/src/retention/remote_bytes.rs" 8 10 8 15
 let%span sremote_bytes'0 = "/workspace/crates/verified/src/retention/remote_bytes.rs" 11 8 14 9
-let%span sretention = "/workspace/crates/verified/src/retention.rs" 72 16 72 65
+let%span sretention = "/workspace/crates/verified/src/retention.rs" 75 16 75 65
 let%span sremote_delete = "/workspace/crates/verified/src/composition/remote_delete.rs" 74 49 74 59
 let%span sremote_delete'0 = "/workspace/crates/verified/src/composition/remote_delete.rs" 75 16 75 22
 let%span sremote_delete'1 = "/workspace/crates/verified/src/composition/remote_delete.rs" 81 14 81 34
 let%span sremote_delete'2 = "/workspace/crates/verified/src/composition/remote_delete.rs" 82 14 82 28
 let%span sremote_delete'3 = "/workspace/crates/verified/src/composition/remote_delete.rs" 77 16 80 9
 let%span sremote_delete'4 = "/workspace/crates/verified/src/composition/remote_delete.rs" 76 16 76 59
-let%span sremote_delete'5 = "/workspace/crates/verified/src/composition/remote_delete.rs" 84 71 84 82
-let%span sremote_delete'6 = "/workspace/crates/verified/src/composition/remote_delete.rs" 84 71 84 84
-let%span sremote_delete'7 = "/workspace/crates/verified/src/composition/remote_delete.rs" 85 26 85 37
-let%span sremote_delete'8 = "/workspace/crates/verified/src/composition/remote_delete.rs" 85 26 85 39
-let%span sremote_delete'9 = "/workspace/crates/verified/src/composition/remote_delete.rs" 86 18 86 29
-let%span sremote_delete'10 = "/workspace/crates/verified/src/composition/remote_delete.rs" 86 18 86 31
-let%span sremote_delete'11 = "/workspace/crates/verified/src/composition/remote_delete.rs" 83 8 87 10
-let%span sremote_delete'12 = "/workspace/crates/verified/src/composition/remote_delete.rs" 88 13 88 14
-let%span sremote_delete'13 = "/workspace/crates/verified/src/composition/remote_delete.rs" 88 8 88 14
-let%span sremote_delete'14 = "/workspace/crates/verified/src/composition/remote_delete.rs" 90 59 90 65
-let%span sremote_delete'15 = "/workspace/crates/verified/src/composition/remote_delete.rs" 90 18 90 77
-let%span sremote_delete'16 = "/workspace/crates/verified/src/composition/remote_delete.rs" 92 25 92 29
-let%span sremote_delete'17 = "/workspace/crates/verified/src/composition/remote_delete.rs" 93 8 93 9
-let%span sremote_delete'18 = "/workspace/crates/verified/src/composition/remote_delete.rs" 103 14 103 27
-let%span sremote_delete'19 = "/workspace/crates/verified/src/composition/remote_delete.rs" 101 16 102 71
-let%span sremote_delete'20 = "/workspace/crates/verified/src/composition/remote_delete.rs" 100 16 100 82
-let%span sremote_delete'21 = "/workspace/crates/verified/src/composition/remote_delete.rs" 99 16 99 91
-let%span sremote_delete'22 = "/workspace/crates/verified/src/composition/remote_delete.rs" 97 16 98 56
-let%span sremote_delete'23 = "/workspace/crates/verified/src/composition/remote_delete.rs" 96 16 96 68
-let%span sremote_delete'24 = "/workspace/crates/verified/src/composition/remote_delete.rs" 95 16 95 65
-let%span sremote_delete'25 = "/workspace/crates/verified/src/composition/remote_delete.rs" 94 16 94 87
-let%span sremote_delete'26 = "/workspace/crates/verified/src/composition/remote_delete.rs" 104 29 104 44
-let%span sremote_delete'27 = "/workspace/crates/verified/src/composition/remote_delete.rs" 105 12 105 24
-let%span sremote_delete'28 = "/workspace/crates/verified/src/composition/remote_delete.rs" 111 59 111 70
-let%span sremote_delete'29 = "/workspace/crates/verified/src/composition/remote_delete.rs" 111 59 111 72
-let%span sremote_delete'30 = "/workspace/crates/verified/src/composition/remote_delete.rs" 111 74 111 85
-let%span sremote_delete'31 = "/workspace/crates/verified/src/composition/remote_delete.rs" 111 74 111 87
-let%span sremote_delete'32 = "/workspace/crates/verified/src/composition/remote_delete.rs" 111 12 111 88
-let%span sremote_delete'33 = "/workspace/crates/verified/src/composition/remote_delete.rs" 112 22 113 64
-let%span sremote_delete'34 = "/workspace/crates/verified/src/composition/remote_delete.rs" 115 12 115 61
-let%span sremote_delete'35 = "/workspace/crates/verified/src/composition/remote_delete.rs" 119 13 119 14
-let%span sremote_delete'36 = "/workspace/crates/verified/src/composition/remote_delete.rs" 119 8 119 14
-let%span sremote_delete'37 = "/workspace/crates/verified/src/composition/remote_delete.rs" 44 11 44 24
-let%span sremote_delete'38 = "/workspace/crates/verified/src/composition/remote_delete.rs" 45 11 45 97
-let%span sremote_delete'39 = "/workspace/crates/verified/src/composition/remote_delete.rs" 46 11 46 99
-let%span sremote_delete'40 = "/workspace/crates/verified/src/composition/remote_delete.rs" 47 10 50 121
-let%span sremote_delete'41 = "/workspace/crates/verified/src/composition/remote_delete.rs" 51 10 56 91
-let%span sremote_delete'42 = "/workspace/crates/verified/src/composition/remote_delete.rs" 57 10 57 47
-let%span sremote_delete'43 = "/workspace/crates/verified/src/composition/remote_delete.rs" 58 10 60 89
-let%span sremote_delete'44 = "/workspace/crates/verified/src/composition/remote_delete.rs" 61 10 65 71
-let%span sremote_delete'45 = "/workspace/crates/verified/src/composition/remote_delete.rs" 15 16 16 97
-let%span sremote_delete'46 = "/workspace/crates/verified/src/composition/remote_delete.rs" 23 16 23 98
-let%span sremote_delete'47 = "/workspace/crates/verified/src/composition/remote_delete.rs" 32 11 32 43
-let%span sremote_delete'48 = "/workspace/crates/verified/src/composition/remote_delete.rs" 33 10 34 54
-let%span sremote_delete'49 = "/workspace/crates/verified/src/composition/remote_delete.rs" 35 84 35 86
-let%span sremote_delete'50 = "/workspace/crates/verified/src/composition/remote_delete.rs" 132 16 133 121
+let%span sremote_delete'5 = "/workspace/crates/verified/src/composition/remote_delete.rs" 85 71 85 82
+let%span sremote_delete'6 = "/workspace/crates/verified/src/composition/remote_delete.rs" 85 71 85 84
+let%span sremote_delete'7 = "/workspace/crates/verified/src/composition/remote_delete.rs" 86 26 86 37
+let%span sremote_delete'8 = "/workspace/crates/verified/src/composition/remote_delete.rs" 86 26 86 39
+let%span sremote_delete'9 = "/workspace/crates/verified/src/composition/remote_delete.rs" 87 18 87 29
+let%span sremote_delete'10 = "/workspace/crates/verified/src/composition/remote_delete.rs" 87 18 87 31
+let%span sremote_delete'11 = "/workspace/crates/verified/src/composition/remote_delete.rs" 84 21 84 26
+let%span sremote_delete'12 = "/workspace/crates/verified/src/composition/remote_delete.rs" 83 8 88 10
+let%span sremote_delete'13 = "/workspace/crates/verified/src/composition/remote_delete.rs" 89 13 89 14
+let%span sremote_delete'14 = "/workspace/crates/verified/src/composition/remote_delete.rs" 89 8 89 14
+let%span sremote_delete'15 = "/workspace/crates/verified/src/composition/remote_delete.rs" 91 59 91 65
+let%span sremote_delete'16 = "/workspace/crates/verified/src/composition/remote_delete.rs" 91 18 91 77
+let%span sremote_delete'17 = "/workspace/crates/verified/src/composition/remote_delete.rs" 93 25 93 29
+let%span sremote_delete'18 = "/workspace/crates/verified/src/composition/remote_delete.rs" 94 8 94 9
+let%span sremote_delete'19 = "/workspace/crates/verified/src/composition/remote_delete.rs" 104 14 104 27
+let%span sremote_delete'20 = "/workspace/crates/verified/src/composition/remote_delete.rs" 102 16 103 71
+let%span sremote_delete'21 = "/workspace/crates/verified/src/composition/remote_delete.rs" 101 16 101 82
+let%span sremote_delete'22 = "/workspace/crates/verified/src/composition/remote_delete.rs" 100 16 100 91
+let%span sremote_delete'23 = "/workspace/crates/verified/src/composition/remote_delete.rs" 98 16 99 56
+let%span sremote_delete'24 = "/workspace/crates/verified/src/composition/remote_delete.rs" 97 16 97 68
+let%span sremote_delete'25 = "/workspace/crates/verified/src/composition/remote_delete.rs" 96 16 96 65
+let%span sremote_delete'26 = "/workspace/crates/verified/src/composition/remote_delete.rs" 95 16 95 87
+let%span sremote_delete'27 = "/workspace/crates/verified/src/composition/remote_delete.rs" 105 29 105 44
+let%span sremote_delete'28 = "/workspace/crates/verified/src/composition/remote_delete.rs" 106 12 106 24
+let%span sremote_delete'29 = "/workspace/crates/verified/src/composition/remote_delete.rs" 112 59 112 70
+let%span sremote_delete'30 = "/workspace/crates/verified/src/composition/remote_delete.rs" 112 59 112 72
+let%span sremote_delete'31 = "/workspace/crates/verified/src/composition/remote_delete.rs" 112 74 112 85
+let%span sremote_delete'32 = "/workspace/crates/verified/src/composition/remote_delete.rs" 112 74 112 87
+let%span sremote_delete'33 = "/workspace/crates/verified/src/composition/remote_delete.rs" 112 12 112 88
+let%span sremote_delete'34 = "/workspace/crates/verified/src/composition/remote_delete.rs" 113 22 114 64
+let%span sremote_delete'35 = "/workspace/crates/verified/src/composition/remote_delete.rs" 116 12 116 61
+let%span sremote_delete'36 = "/workspace/crates/verified/src/composition/remote_delete.rs" 120 13 120 14
+let%span sremote_delete'37 = "/workspace/crates/verified/src/composition/remote_delete.rs" 120 8 120 14
+let%span sremote_delete'38 = "/workspace/crates/verified/src/composition/remote_delete.rs" 44 11 44 24
+let%span sremote_delete'39 = "/workspace/crates/verified/src/composition/remote_delete.rs" 45 11 45 97
+let%span sremote_delete'40 = "/workspace/crates/verified/src/composition/remote_delete.rs" 46 11 46 99
+let%span sremote_delete'41 = "/workspace/crates/verified/src/composition/remote_delete.rs" 47 10 50 121
+let%span sremote_delete'42 = "/workspace/crates/verified/src/composition/remote_delete.rs" 51 10 56 91
+let%span sremote_delete'43 = "/workspace/crates/verified/src/composition/remote_delete.rs" 57 10 57 47
+let%span sremote_delete'44 = "/workspace/crates/verified/src/composition/remote_delete.rs" 58 10 60 89
+let%span sremote_delete'45 = "/workspace/crates/verified/src/composition/remote_delete.rs" 61 10 65 71
+let%span sremote_delete'46 = "/workspace/crates/verified/src/composition/remote_delete.rs" 15 16 16 97
+let%span sremote_delete'47 = "/workspace/crates/verified/src/composition/remote_delete.rs" 23 16 23 98
+let%span sremote_delete'48 = "/workspace/crates/verified/src/composition/remote_delete.rs" 32 11 32 43
+let%span sremote_delete'49 = "/workspace/crates/verified/src/composition/remote_delete.rs" 33 10 34 54
+let%span sremote_delete'50 = "/workspace/crates/verified/src/composition/remote_delete.rs" 35 84 35 86
+let%span sremote_delete'51 = "/workspace/crates/verified/src/composition/remote_delete.rs" 133 16 134 121
 let%span sremote_floor = "/workspace/crates/verified/src/retention/remote_floor.rs" 8 10 8 31
 let%span sremote_floor'0 = "/workspace/crates/verified/src/retention/remote_floor.rs" 9 10 10 64
 let%span sremote_floor'1 = "/workspace/crates/verified/src/retention/remote_floor.rs" 11 10 11 90
@@ -90,7 +91,7 @@ use int.Int
 
 type t_Vec_RemoteRetentionSegment_Global
 
-type t_RemoteRetentionSegment = { log_start_breached: bool; time_expired: bool; size: UInt64.t }
+type t_RemoteRetentionSegment = { blocked: bool; log_start_breached: bool; time_expired: bool; size: UInt64.t }
 
 constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
 
@@ -152,7 +153,7 @@ function remote_retention_model [#"/workspace/crates/verified/src/retention/remo
 
 axiom remote_retention_model_def:
   forall segments: Seq.seq t_RemoteRetentionSegment, i: int, debt: int [remote_retention_model segments i debt]. remote_retention_model segments i debt
-    = ([%#sremote_retention_model'0] if ge_log_Int i (Seq.length segments) then
+    = ([%#sremote_retention_model'0] if ge_log_Int i (Seq.length segments) \/ (Seq.get segments i).blocked then
       i
     else
       if (Seq.get segments i).log_start_breached then
@@ -174,7 +175,7 @@ axiom remote_retention_model_def:
 
     )
 
-predicate remote_charge_funded [#"/workspace/crates/verified/src/retention.rs" 71 0 71 78] (debt: int) (charged: int) (next_charge: int) =
+predicate remote_charge_funded [#"/workspace/crates/verified/src/retention.rs" 74 0 74 78] (debt: int) (charged: int) (next_charge: int) =
   [%#sretention] gt_log_Int debt 0 /\ charged < debt /\ next_charge <= debt
 
 function remote_prefix_charge [#"/workspace/crates/verified/src/retention/remote_bytes.rs" 9 0 9 85] (segments: Seq.seq t_RemoteRetentionSegment) (count: int) : int
@@ -192,11 +193,12 @@ axiom remote_prefix_charge_def:
       )
     )
 
-predicate retention_prefix_funded [#"/workspace/crates/verified/src/retention/delete_target.rs" 87 0 87 96] (segments: Seq.seq t_RemoteRetentionSegment) (debt: int) (count: int) =
+predicate retention_prefix_funded [#"/workspace/crates/verified/src/retention/delete_target.rs" 93 0 93 96] (segments: Seq.seq t_RemoteRetentionSegment) (debt: int) (count: int) =
   [%#sdelete_target'4] forall i: int. 0 <= i /\ i < count
-    -> (Seq.get segments i).log_start_breached
+    -> not (Seq.get segments i).blocked
+    /\ ((Seq.get segments i).log_start_breached
     \/ (Seq.get segments i).time_expired
-    \/ remote_charge_funded debt (remote_prefix_charge segments i) (remote_prefix_charge segments (i + 1))
+    \/ remote_charge_funded debt (remote_prefix_charge segments i) (remote_prefix_charge segments (i + 1)))
 
 let remote_retention_prefix (deletes_allowed: bool) (segments: Slice64.slice t_RemoteRetentionSegment)
   (size_debt: UInt64.t) (return (x: UInt64.t)) = any
@@ -210,7 +212,8 @@ let remote_retention_prefix (deletes_allowed: bool) (segments: Slice64.slice t_R
     /\ ([@stop_split] [@expl:remote_retention_prefix ensures #3] [%#sdelete_target'2] retention_prefix_funded (Slice64.view segments) (UInt64.t'int size_debt) (UInt64.t'int result))
     /\ ([@stop_split] [@expl:remote_retention_prefix ensures #4] [%#sdelete_target'3] deletes_allowed
       /\ UInt64.t'int result < Seq.length (Slice64.view segments)
-    -> not (Seq.get (Slice64.view segments) (UInt64.t'int result)).log_start_breached
+    -> (Seq.get (Slice64.view segments) (UInt64.t'int result)).blocked
+    \/ not (Seq.get (Slice64.view segments) (UInt64.t'int result)).log_start_breached
     /\ not (Seq.get (Slice64.view segments) (UInt64.t'int result)).time_expired
     /\ (UInt64.t'int size_debt = 0
     \/ ge_log_Int (remote_prefix_charge (Slice64.view segments) (UInt64.t'int result)) (UInt64.t'int size_debt)
@@ -220,13 +223,13 @@ let remote_retention_prefix (deletes_allowed: bool) (segments: Slice64.slice t_R
 constant const_MAX'0: Int64.t = (9223372036854775807: Int64.t)
 
 predicate deletion_prefix_connected [#"/workspace/crates/verified/src/composition/remote_delete.rs" 14 0 14 96] (rows: Seq.seq tup4_i64_i64_u64_bool) (initial: Int64.t) (count: int) =
-  [%#sremote_delete'45] forall j: int. 0 <= j /\ j < count
+  [%#sremote_delete'46] forall j: int. 0 <= j /\ j < count
     -> Int64.to_int (Seq.get rows j).f1 < Int64.to_int const_MAX'0
     /\ (Int64.to_int (Seq.get rows j).f0 <= Int64.to_int initial
     \/ (exists k: int. 0 <= k /\ k < j /\ Int64.to_int (Seq.get rows j).f0 <= Int64.to_int (Seq.get rows k).f1 + 1))
 
 predicate deleted_prefix_covers [#"/workspace/crates/verified/src/composition/remote_delete.rs" 22 0 22 91] (rows: Seq.seq tup4_i64_i64_u64_bool) (count: int) (offset: int) =
-  [%#sremote_delete'46] exists j: int. 0 <= j
+  [%#sremote_delete'47] exists j: int. 0 <= j
     /\ j < count /\ Int64.to_int (Seq.get rows j).f0 <= offset /\ offset <= Int64.to_int (Seq.get rows j).f1
 
 let len_bool (self_: Slice64.slice bool) (return (x: UInt64.t)) = any
@@ -258,11 +261,11 @@ let remote_retention_floor_step (current': Int64.t) (contiguous: bool) (start: I
     (! return {result}) ]
 
 function lemma_deleted_prefix_covers_extend [#"/workspace/crates/verified/src/composition/remote_delete.rs" 35 0 35 83] (rows: Seq.seq tup4_i64_i64_u64_bool) (count: int) : ()
- = [%#sremote_delete'49] ()
+ = [%#sremote_delete'50] ()
 
 axiom lemma_deleted_prefix_covers_extend_spec:
-  forall rows: Seq.seq tup4_i64_i64_u64_bool, count: int. ([%#sremote_delete'47] 0 <= count /\ count < Seq.length rows)
-    -> ([%#sremote_delete'48] forall offset: int. deleted_prefix_covers rows count offset
+  forall rows: Seq.seq tup4_i64_i64_u64_bool, count: int. ([%#sremote_delete'48] 0 <= count /\ count < Seq.length rows)
+    -> ([%#sremote_delete'49] forall offset: int. deleted_prefix_covers rows count offset
       -> deleted_prefix_covers rows (count + 1) offset)
 
 type tup4_Vec_RemoteRetentionSegment_Global_usize_usize_i64 = {
@@ -280,8 +283,8 @@ predicate finished_ranges_valid [#"/workspace/crates/verified/src/composition.rs
   [%#scomposition] forall i: int. 0 <= i /\ i < count
     -> offset_range_valid (Int64.to_int (Map.get ranges i).f0'2) (Int64.to_int (Map.get ranges i).f1'2)
 
-predicate deletion_prefix_requested [#"/workspace/crates/verified/src/composition/remote_delete.rs" 126 0 131 9] (facts: Seq.seq t_RemoteRetentionSegment) (finished: Seq.seq tup4_i64_i64_u64_bool) (debt: int) (count: int) =
-  [%#sremote_delete'50] forall i: int. 0 <= i /\ i < count
+predicate deletion_prefix_requested [#"/workspace/crates/verified/src/composition/remote_delete.rs" 127 0 132 9] (facts: Seq.seq t_RemoteRetentionSegment) (finished: Seq.seq tup4_i64_i64_u64_bool) (debt: int) (count: int) =
+  [%#sremote_delete'51] forall i: int. 0 <= i /\ i < count
     -> (Seq.get facts i).log_start_breached
     \/ (Seq.get finished i).f3
     \/ remote_charge_funded debt (remote_prefix_charge facts i) (remote_prefix_charge facts (i + 1))
@@ -294,12 +297,12 @@ let completed_remote_retention_bounds_floor [#"/workspace/crates/verified/src/co
   (current': Int64.t) (deleted_below: t_Option_i64) (deletes_allowed: bool)
   (finished: Slice64.slice tup4_i64_i64_u64_bool) (size_debt: UInt64.t) (completed: Slice64.slice bool)
   (return (x: tup4_Vec_RemoteRetentionSegment_Global_usize_usize_i64)) =
-{[@stop_split] [@expl:completed_remote_retention_bounds_floor requires] ([@stop_split] [@expl:completed_remote_retention_bounds_floor requires #0] [%#sremote_delete'37] ge_log_Int (Int64.to_int current') 0)
-  /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor requires #1] [%#sremote_delete'38] match deleted_below with
+{[@stop_split] [@expl:completed_remote_retention_bounds_floor requires] ([@stop_split] [@expl:completed_remote_retention_bounds_floor requires #0] [%#sremote_delete'38] ge_log_Int (Int64.to_int current') 0)
+  /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor requires #1] [%#sremote_delete'39] match deleted_below with
       | None -> true
       | Some floor -> 0 <= Int64.to_int floor /\ Int64.to_int floor <= Int64.to_int current'
       end)
-  /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor requires #2] [%#sremote_delete'39] finished_ranges_valid (Seq.length (Slice64.view finished)) (fun (i: int) -> { f0'2 = (Seq.get (Slice64.view finished) i).f0;
+  /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor requires #2] [%#sremote_delete'40] finished_ranges_valid (Seq.length (Slice64.view finished)) (fun (i: int) -> { f0'2 = (Seq.get (Slice64.view finished) i).f0;
                                                                                                                                                                                     f1'2 = (Seq.get (Slice64.view finished) i).f1 }))}
   (! bb0
   [ bb0 = s0
@@ -316,7 +319,8 @@ let completed_remote_retention_bounds_floor [#"/workspace/crates/verified/src/co
         <= Seq.length (Slice64.view finished)
       /\ Seq.length (view_Vec_RemoteRetentionSegment_Global facts) = UInt64.t'int i}
       {[@expl:loop invariant #1] [%#sremote_delete'3] forall j: int. 0 <= j /\ j < UInt64.t'int i
-        -> (Seq.get (view_Vec_RemoteRetentionSegment_Global facts) j).size = (Seq.get (Slice64.view finished) j).f2
+        -> not (Seq.get (view_Vec_RemoteRetentionSegment_Global facts) j).blocked
+        /\ (Seq.get (view_Vec_RemoteRetentionSegment_Global facts) j).size = (Seq.get (Slice64.view finished) j).f2
         /\ (Seq.get (view_Vec_RemoteRetentionSegment_Global facts) j).time_expired
           = (Seq.get (Slice64.view finished) j).f3
         /\ (Seq.get (view_Vec_RemoteRetentionSegment_Global facts) j).log_start_breached
@@ -357,90 +361,93 @@ let completed_remote_retention_bounds_floor [#"/workspace/crates/verified/src/co
         | s8 = {[@expl:index in bounds] [%#sremote_delete'9] _70} s9
         | s9 = Slice64.get [%#sremote_delete'10] <tup4_i64_i64_u64_bool> {finished} {_68}
             (fun (r: tup4_i64_i64_u64_bool) -> [ &_67 <- r.f2 ] s10)
-        | s10 = [ &_51 <- { log_start_breached = _52; time_expired = _63; size = _67 } ] s11
+        | s10 = [ &_51 <- { blocked = ([%#sremote_delete'11] false);
+                            log_start_breached = _52;
+                            time_expired = _63;
+                            size = _67 } ] s11
         | s11 = MutBorrow.borrow_mut <t_Vec_RemoteRetentionSegment_Global> {facts}
             (fun (_bor: MutBorrow.t t_Vec_RemoteRetentionSegment_Global) ->
               [ &_50 <- _bor ] [ &facts <- _bor.final ] s12)
-        | s12 = push_RemoteRetentionSegment [%#sremote_delete'11] {_50} {_51} (fun (_x: ()) -> [ &_49 <- _x ] s13)
-        | s13 = UInt64.add [%#sremote_delete'13] {i} {[%#sremote_delete'12] (1: UInt64.t)}
+        | s12 = push_RemoteRetentionSegment [%#sremote_delete'12] {_50} {_51} (fun (_x: ()) -> [ &_49 <- _x ] s13)
+        | s13 = UInt64.add [%#sremote_delete'14] {i} {[%#sremote_delete'13] (1: UInt64.t)}
             (fun (_x: UInt64.t) -> [ &i <- _x ] s14)
         | s14 = bb2 ] ] ]
   | bb16 = s0
     [ s0 = [ &_77 <- facts ] s1
-    | s1 = deref_Vec_RemoteRetentionSegment_Global [%#sremote_delete'14] {_77}
+    | s1 = deref_Vec_RemoteRetentionSegment_Global [%#sremote_delete'15] {_77}
         (fun (_x: Slice64.slice t_RemoteRetentionSegment) -> [ &_75 <- _x ] s2)
-    | s2 = remote_retention_prefix [%#sremote_delete'15] {deletes_allowed} {_75} {size_debt}
+    | s2 = remote_retention_prefix [%#sremote_delete'16] {deletes_allowed} {_75} {size_debt}
         (fun (_x: UInt64.t) -> [ &planned <- _x ] s3)
     | s3 = [ &floor'1 <- current' ] s4
-    | s4 = [ &contiguous <- [%#sremote_delete'16] true ] s5
-    | s5 = [ &i <- [%#sremote_delete'17] (0: UInt64.t) ] s6
+    | s4 = [ &contiguous <- [%#sremote_delete'17] true ] s5
+    | s5 = [ &i <- [%#sremote_delete'18] (0: UInt64.t) ] s6
     | s6 = bb19 ]
   | bb19 = bb19invariant
     [ bb19 =
-      {[@expl:loop variant] well_founded_relation_Int variant_old_bb19 ([%#sremote_delete'18] UInt64.t'int planned
+      {[@expl:loop variant] well_founded_relation_Int variant_old_bb19 ([%#sremote_delete'19] UInt64.t'int planned
       - UInt64.t'int i)}
       bb19invariant
-    | bb19invariant = {[@expl:loop invariant #0] [%#sremote_delete'25] UInt64.t'int i <= UInt64.t'int planned
+    | bb19invariant = {[@expl:loop invariant #0] [%#sremote_delete'26] UInt64.t'int i <= UInt64.t'int planned
       /\ UInt64.t'int planned <= Seq.length (Slice64.view finished)
       /\ UInt64.t'int i <= Seq.length (Slice64.view completed)}
-      {[@expl:loop invariant #1] [%#sremote_delete'24] forall j: int. 0 <= j /\ j < UInt64.t'int i
+      {[@expl:loop invariant #1] [%#sremote_delete'25] forall j: int. 0 <= j /\ j < UInt64.t'int i
         -> Seq.get (Slice64.view completed) j}
-      {[@expl:loop invariant #2] [%#sremote_delete'23] Int64.to_int current' <= Int64.to_int floor'1
+      {[@expl:loop invariant #2] [%#sremote_delete'24] Int64.to_int current' <= Int64.to_int floor'1
       /\ (UInt64.t'int i = 0 -> floor'1 = current')}
-      {[@expl:loop invariant #3] [%#sremote_delete'22] forall offset: int. Int64.to_int current' <= offset
+      {[@expl:loop invariant #3] [%#sremote_delete'23] forall offset: int. Int64.to_int current' <= offset
           /\ offset < Int64.to_int floor'1 -> deleted_prefix_covers (Slice64.view finished) (UInt64.t'int i) offset}
-      {[@expl:loop invariant #4] [%#sremote_delete'21] contiguous
+      {[@expl:loop invariant #4] [%#sremote_delete'22] contiguous
       -> (forall j: int. 0 <= j /\ j < UInt64.t'int i
         -> Int64.to_int (Seq.get (Slice64.view finished) j).f1 < Int64.to_int floor'1)}
-      {[@expl:loop invariant #5] [%#sremote_delete'20] not contiguous
+      {[@expl:loop invariant #5] [%#sremote_delete'21] not contiguous
       -> not deletion_prefix_connected (Slice64.view finished) current' (UInt64.t'int i)}
-      {[@expl:loop invariant #6] [%#sremote_delete'19] forall n: int. 0 <= n
+      {[@expl:loop invariant #6] [%#sremote_delete'20] forall n: int. 0 <= n
           /\ n <= UInt64.t'int i /\ deletion_prefix_connected (Slice64.view finished) current' n
         -> (forall j: int. 0 <= j /\ j < n
           -> Int64.to_int (Seq.get (Slice64.view finished) j).f1 < Int64.to_int floor'1)}
-      (! [ &variant_old_bb19 <- [%#sremote_delete'18] UInt64.t'int planned - UInt64.t'int i ] s0)
+      (! [ &variant_old_bb19 <- [%#sremote_delete'19] UInt64.t'int planned - UInt64.t'int i ] s0)
       [ s0 = [ &_118 <- UInt64.lt i planned ] s1
       | s1 = any [ br0 -> {_118 = false} (! bb33) | br1 -> {_118} (! bb21) ] ]
       [ bb21 = s0
-        [ s0 = len_bool [%#sremote_delete'26] {completed} (fun (_x: UInt64.t) -> [ &_123 <- _x ] s1)
+        [ s0 = len_bool [%#sremote_delete'27] {completed} (fun (_x: UInt64.t) -> [ &_123 <- _x ] s1)
         | s1 = [ &_121 <- UInt64.lt i _123 ] s2
         | s2 = any [ br0 -> {_121 = false} (! bb33) | br1 -> {_121} (! bb23) ] ]
       | bb23 = s0
         [ s0 = [ &_127 <- i ] s1
         | s1 = [ &_128 <- Slice64.length completed ] s2
         | s2 = [ &_129 <- UInt64.lt _127 _128 ] s3
-        | s3 = {[@expl:index in bounds] [%#sremote_delete'27] _129} s4
-        | s4 = Slice64.get [%#sremote_delete'27] <bool> {completed} {_127} (fun (r: bool) -> [ &_126 <- r ] s5)
+        | s3 = {[@expl:index in bounds] [%#sremote_delete'28] _129} s4
+        | s4 = Slice64.get [%#sremote_delete'28] <bool> {completed} {_127} (fun (r: bool) -> [ &_126 <- r ] s5)
         | s5 = any [ br0 -> {_126 = false} (! bb33) | br1 -> {_126} (! bb26) ] ]
       | bb26 = s0
         [ s0 = [ &previous <- floor'1 ] s1
         | s1 = [ &_139 <- i ] s2
         | s2 = [ &_140 <- Slice64.length finished ] s3
         | s3 = [ &_141 <- UInt64.lt _139 _140 ] s4
-        | s4 = {[@expl:index in bounds] [%#sremote_delete'28] _141} s5
-        | s5 = Slice64.get [%#sremote_delete'29] <tup4_i64_i64_u64_bool> {finished} {_139}
+        | s4 = {[@expl:index in bounds] [%#sremote_delete'29] _141} s5
+        | s5 = Slice64.get [%#sremote_delete'30] <tup4_i64_i64_u64_bool> {finished} {_139}
             (fun (r: tup4_i64_i64_u64_bool) -> [ &_138 <- r.f0 ] s6)
         | s6 = [ &_143 <- i ] s7
         | s7 = [ &_144 <- Slice64.length finished ] s8
         | s8 = [ &_145 <- UInt64.lt _143 _144 ] s9
-        | s9 = {[@expl:index in bounds] [%#sremote_delete'30] _145} s10
-        | s10 = Slice64.get [%#sremote_delete'31] <tup4_i64_i64_u64_bool> {finished} {_143}
+        | s9 = {[@expl:index in bounds] [%#sremote_delete'31] _145} s10
+        | s10 = Slice64.get [%#sremote_delete'32] <tup4_i64_i64_u64_bool> {finished} {_143}
             (fun (r: tup4_i64_i64_u64_bool) -> [ &_142 <- r.f1 ] s11)
-        | s11 = remote_retention_floor_step [%#sremote_delete'32] {floor'1} {contiguous} {_138} {_142}
+        | s11 = remote_retention_floor_step [%#sremote_delete'33] {floor'1} {contiguous} {_138} {_142}
             (fun (_x: tup2_i64_bool) -> [ &_135 <- _x ] s12)
         | s12 = [ &floor'1 <- _135.f0'0 ] s13
         | s13 = [ &contiguous <- _135.f1'0 ] s14
-        | s14 = {[@expl:assertion] [%#sremote_delete'33] forall offset: int. Int64.to_int previous <= offset
+        | s14 = {[@expl:assertion] [%#sremote_delete'34] forall offset: int. Int64.to_int previous <= offset
               /\ offset < Int64.to_int floor'1
             -> deleted_prefix_covers (Slice64.view finished) (UInt64.t'int i + 1) offset}
           s15
         | s15 =
-          {[@expl:assertion] [%#sremote_delete'34] let _ = lemma_deleted_prefix_covers_extend (Slice64.view finished) (UInt64.t'int i) in forall offset: int. Int64.to_int current'
+          {[@expl:assertion] [%#sremote_delete'35] let _ = lemma_deleted_prefix_covers_extend (Slice64.view finished) (UInt64.t'int i) in forall offset: int. Int64.to_int current'
                 <= offset
               /\ offset < Int64.to_int floor'1
             -> deleted_prefix_covers (Slice64.view finished) (UInt64.t'int i + 1) offset}
           s16
-        | s16 = UInt64.add [%#sremote_delete'36] {i} {[%#sremote_delete'35] (1: UInt64.t)}
+        | s16 = UInt64.add [%#sremote_delete'37] {i} {[%#sremote_delete'36] (1: UInt64.t)}
             (fun (_x: UInt64.t) -> [ &i <- _x ] s17)
         | s17 = bb19 ] ] ]
   | bb33 = s0 [ s0 = [ &_ret <- { f0'1 = facts; f1'1 = planned; f2'1 = i; f3'1 = floor'1 } ] s1 | s1 = return {_ret} ] ]
@@ -499,7 +506,7 @@ let completed_remote_retention_bounds_floor [#"/workspace/crates/verified/src/co
   | & variant_old_bb2: int = Any.any_l ()
   | & variant_old_bb19: int = Any.any_l () ])
   [ return (result: tup4_Vec_RemoteRetentionSegment_Global_usize_usize_i64) ->
-  {[@stop_split] [@expl:completed_remote_retention_bounds_floor ensures] ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #0] [%#sremote_delete'40] Seq.length (view_Vec_RemoteRetentionSegment_Global result.f0'1)
+  {[@stop_split] [@expl:completed_remote_retention_bounds_floor ensures] ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #0] [%#sremote_delete'41] Seq.length (view_Vec_RemoteRetentionSegment_Global result.f0'1)
         = Seq.length (Slice64.view finished)
       /\ UInt64.t'int result.f1'1 <= Seq.length (Slice64.view finished)
       /\ (forall i: int. 0 <= i /\ i < Seq.length (Slice64.view finished)
@@ -512,7 +519,7 @@ let completed_remote_retention_bounds_floor [#"/workspace/crates/verified/src/co
           | None -> false
           | Some floor -> Int64.to_int (Seq.get (Slice64.view finished) i).f1 < Int64.to_int floor
           end))
-    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #1] [%#sremote_delete'41] deletion_prefix_requested (view_Vec_RemoteRetentionSegment_Global result.f0'1) (Slice64.view finished) (UInt64.t'int size_debt) (UInt64.t'int result.f1'1)
+    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #1] [%#sremote_delete'42] deletion_prefix_requested (view_Vec_RemoteRetentionSegment_Global result.f0'1) (Slice64.view finished) (UInt64.t'int size_debt) (UInt64.t'int result.f1'1)
       /\ (deletes_allowed /\ UInt64.t'int result.f1'1 < Seq.length (Slice64.view finished)
         -> not (Seq.get (view_Vec_RemoteRetentionSegment_Global result.f0'1) (UInt64.t'int result.f1'1)).log_start_breached
         /\ not (Seq.get (Slice64.view finished) (UInt64.t'int result.f1'1)).f3
@@ -525,16 +532,16 @@ let completed_remote_retention_bounds_floor [#"/workspace/crates/verified/src/co
           /\ n <= Seq.length (Slice64.view finished)
           /\ deletion_prefix_requested (view_Vec_RemoteRetentionSegment_Global result.f0'1) (Slice64.view finished) (UInt64.t'int size_debt) n
         -> n <= UInt64.t'int result.f1'1))
-    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #2] [%#sremote_delete'42] not deletes_allowed
+    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #2] [%#sremote_delete'43] not deletes_allowed
       -> UInt64.t'int result.f1'1 = 0)
-    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #3] [%#sremote_delete'43] UInt64.t'int result.f2'1
+    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #3] [%#sremote_delete'44] UInt64.t'int result.f2'1
         <= UInt64.t'int result.f1'1
       /\ UInt64.t'int result.f2'1 <= Seq.length (Slice64.view completed)
       /\ (forall i: int. 0 <= i /\ i < UInt64.t'int result.f2'1 -> Seq.get (Slice64.view completed) i)
       /\ (UInt64.t'int result.f2'1 < UInt64.t'int result.f1'1
         /\ UInt64.t'int result.f2'1 < Seq.length (Slice64.view completed)
       -> not Seq.get (Slice64.view completed) (UInt64.t'int result.f2'1)))
-    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #4] [%#sremote_delete'44] Int64.to_int current'
+    /\ ([@stop_split] [@expl:completed_remote_retention_bounds_floor ensures #4] [%#sremote_delete'45] Int64.to_int current'
       <= Int64.to_int result.f3'1
     /\ (UInt64.t'int result.f2'1 = 0 -> result.f3'1 = current')
     /\ (forall offset: int. Int64.to_int current' <= offset /\ offset < Int64.to_int result.f3'1

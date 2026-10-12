@@ -2,7 +2,7 @@
 //! implementation can be replaced atomically after construction.
 //!
 //! It lets [`crate::TopicBasedRemoteLogMetadataManager`] take over from
-//! [`krabka_remote_storage::InmemoryRemoteLogMetadataManager`] *after* the
+//! [`crate::NotReadyRlmm`] *after* the
 //! broker's listener accept loop is serving, so the manager's loopback
 //! `AdminClient` call to provision `__remote_log_metadata` has a server to
 //! talk to. Until a caller calls [`SwappableRlmm::swap`], every RLMM method
@@ -12,12 +12,12 @@
 //! ## Invariant during the swap window
 //!
 //! Trait calls between construction and the first `swap` go to the
-//! placeholder, which is usually an in-memory manager. Once `swap` returns,
-//! every later call uses the new implementation. The swap is atomic from the
-//! trait's point of view. A caller never sees the placeholder for one method
-//! and the replacement for the next within the same logical operation,
-//! because each trait method snapshots the inner [`Arc`] under a read lock
-//! and releases the lock before it delegates.
+//! placeholder, which is normally [`crate::NotReadyRlmm`]. Once `swap` returns,
+//! every later call uses the new implementation. Each trait method snapshots
+//! the inner [`Arc`] under a read lock and releases the lock before it
+//! delegates. A call already in progress can finish on the old implementation
+//! after the swap. Separate calls within a larger operation can therefore use
+//! different implementations.
 
 use std::sync::{Arc, RwLock};
 
@@ -45,7 +45,7 @@ impl SwappableRlmm {
     /// Replace the backing implementation. The next trait call
     /// observes the new one.
     /// # Panics
-    /// Panics if an internal lock is poisoned or validated block metadata is inconsistent with its index.
+    /// Panics if the backing-implementation lock is poisoned.
     pub fn swap(&self, new: Arc<dyn RemoteLogMetadataManager>) {
         *self
             .inner

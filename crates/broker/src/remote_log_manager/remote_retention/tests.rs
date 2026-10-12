@@ -111,7 +111,7 @@ fn synth_remote_md(
 #[test]
 fn remote_retention_eviction_set_returns_empty_when_no_segments() {
     let out = remote_retention_eviction_set(
-        ArchiveMode::Mutable,
+        ArchiveMode::Mutable.into(),
         &[],
         Some(millis(1)),
         Some(bytes(1)),
@@ -120,6 +120,85 @@ fn remote_retention_eviction_set_returns_empty_when_no_segments() {
         NO_BYTES,
     );
     assert!(out.is_empty());
+}
+
+#[tokio::test]
+async fn scheduled_remote_retention_checks_stored_activation_before_size_eviction() {
+    let local = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    let config = LogConfig {
+        segment_size: bytes(1),
+        remote_storage_enable: true,
+        delivery_policy: DeliveryPolicy::Scheduled,
+        delivery_clock_uncertainty: millis(100),
+        retention_size: Some(bytes(0)),
+        ..LogConfig::default()
+    };
+    let mut log = krabka_log::Log::open(local.path(), config.clone()).unwrap();
+    for timestamp in [1_000, 2_000, 1_000] {
+        let mut batch = fixtures::batch(2);
+        batch.base_timestamp = timestamp;
+        batch.max_timestamp = timestamp;
+        log.append(&mut batch).unwrap();
+    }
+    log.sync().unwrap();
+    let mut exports = log.tierable_segments();
+    check!(exports.len() == 2);
+    // Metadata can contain a retention fallback or stale maximum after an
+    // unscanned reopen. The stored batch header is the activation evidence.
+    for export in &mut exports {
+        export.max_timestamp = 0;
+    }
+    let (rsm, rlmm) = archived_backends(remote.path(), &exports).await;
+    let before_due = empty_retention_pass(
+        &config,
+        (Offset(0), None),
+        2_099,
+        ArchiveMode::Mutable,
+        &rsm,
+        &rlmm,
+    )
+    .await;
+    check!(before_due.deleted == 1 && before_due.log_start == Some(Offset(2)));
+    let remaining = rlmm.list_remote_log_segments(&tp()).unwrap();
+    check!(remaining.len() == 1 && remaining[0].start_offset() == 2);
+    let due = empty_retention_pass(
+        &config,
+        (Offset(2), Some(Offset(2))),
+        2_100,
+        ArchiveMode::Mutable,
+        &rsm,
+        &rlmm,
+    )
+    .await;
+    check!(due.deleted == 1 && due.log_start == Some(Offset(4)));
+    check!(rlmm.list_remote_log_segments(&tp()).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn scheduled_remote_retention_holds_unreadable_activation_evidence() {
+    let (rlmm, rsm_impl, rsm) = refusing_backends();
+    let config = LogConfig {
+        delivery_policy: DeliveryPolicy::Scheduled,
+        retention_size: Some(bytes(0)),
+        ..LogConfig::default()
+    };
+    let result = empty_retention_pass(
+        &config,
+        (NO_FLOOR, None),
+        10_000,
+        ArchiveMode::Mutable,
+        &rsm,
+        &rlmm,
+    )
+    .await;
+    check!(result == RemoteRetentionOutcome::default());
+    check!(
+        rsm_impl
+            .deletes_attempted
+            .load(std::sync::atomic::Ordering::Relaxed)
+            == 0
+    );
 }
 
 /// Kafka's `isSegmentBreachedByRetentionTime`: a segment goes when its
@@ -147,7 +226,7 @@ fn remote_time_retention_follows_kafkas_cleanup_until() {
     ] {
         let segments = vec![synth_remote_md(10, 0, 9, max_ts, 100)];
         let out = remote_retention_eviction_set(
-            ArchiveMode::Mutable,
+            ArchiveMode::Mutable.into(),
             &segments,
             Some(millis(retention_ms)),
             None,
@@ -179,7 +258,7 @@ fn local_bytes_not_yet_copied_count_toward_the_remote_size_budget() {
         ),
     ] {
         let out = remote_retention_eviction_set(
-            ArchiveMode::Mutable,
+            ArchiveMode::Mutable.into(),
             &segments,
             None,
             Some(bytes(200)),
@@ -234,7 +313,7 @@ fn maximum_retention_window_keeps_the_host_time_comparison() {
 
     check!(
         remote_retention_eviction_set(
-            ArchiveMode::Mutable,
+            ArchiveMode::Mutable.into(),
             &segments,
             Some(Time::from_millis(i64::MAX)),
             None,
@@ -252,7 +331,7 @@ fn time_window_evictions(
     deleted_below: Option<Offset>,
 ) -> Vec<RemoteLogSegmentMetadata> {
     remote_retention_eviction_set(
-        ArchiveMode::Mutable,
+        ArchiveMode::Mutable.into(),
         segments,
         Some(millis(500)),
         None,
@@ -289,7 +368,7 @@ fn remote_retention_eviction_set_size_based_deletes_only_what_the_debt_covers() 
     ];
     for (name, budget, expected_len) in cases {
         let out = remote_retention_eviction_set(
-            ArchiveMode::Mutable,
+            ArchiveMode::Mutable.into(),
             &segs,
             None,
             budget,
@@ -305,7 +384,7 @@ fn remote_retention_eviction_set_size_based_deletes_only_what_the_debt_covers() 
 fn remote_retention_eviction_set_equal_size_budget_keeps_all_segments() {
     let segs = vec![synth_remote_md(10, 0, 9, 100, 100)];
     let out = remote_retention_eviction_set(
-        ArchiveMode::Mutable,
+        ArchiveMode::Mutable.into(),
         &segs,
         None,
         Some(bytes(100)),
@@ -322,7 +401,7 @@ fn remote_retention_eviction_set_time_and_size_take_union_of_either() {
     // Time-window: seg0+seg1 qualify (max_ts<500). Budget very generous
     // so size-based evicts nothing. Result is the time-window prefix.
     let out = remote_retention_eviction_set(
-        ArchiveMode::Mutable,
+        ArchiveMode::Mutable.into(),
         &segs,
         Some(millis(500)),
         Some(bytes(10_000)),
@@ -347,7 +426,7 @@ fn a_time_deletion_is_charged_against_the_size_debt() {
     ];
     for (name, budget, expected_len) in cases {
         let out = remote_retention_eviction_set(
-            ArchiveMode::Mutable,
+            ArchiveMode::Mutable.into(),
             &segs,
             Some(millis(500)),
             Some(bytes(budget)),
@@ -365,7 +444,7 @@ fn remote_retention_eviction_set_none_settings_disable_axis() {
     // No time or size → no eviction.
     assert!(
         remote_retention_eviction_set(
-            ArchiveMode::Mutable,
+            ArchiveMode::Mutable.into(),
             &segs,
             None,
             None,
@@ -515,7 +594,7 @@ fn remote_retention_eviction_set_is_empty_for_a_write_once_archive() {
     for (name, retention, retention_size, now, mutable_len) in cases {
         check!(
             remote_retention_eviction_set(
-                ArchiveMode::Mutable,
+                ArchiveMode::Mutable.into(),
                 &segs,
                 retention,
                 retention_size,
@@ -529,7 +608,7 @@ fn remote_retention_eviction_set_is_empty_for_a_write_once_archive() {
         );
         check!(
             remote_retention_eviction_set(
-                ArchiveMode::WriteOnce,
+                ArchiveMode::WriteOnce.into(),
                 &segs,
                 retention,
                 retention_size,
@@ -670,7 +749,7 @@ fn a_segment_below_the_log_start_is_evicted_whatever_retention_says() {
     for (name, floor, retention, retention_size, expected) in cases {
         check!(
             remote_retention_eviction_set(
-                ArchiveMode::Mutable,
+                ArchiveMode::Mutable.into(),
                 &segs,
                 retention,
                 retention_size,
@@ -684,7 +763,7 @@ fn a_segment_below_the_log_start_is_evicted_whatever_retention_says() {
         );
         check!(
             remote_retention_eviction_set(
-                ArchiveMode::WriteOnce,
+                ArchiveMode::WriteOnce.into(),
                 &segs,
                 retention,
                 retention_size,

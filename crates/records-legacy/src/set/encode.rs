@@ -54,10 +54,11 @@ pub fn encode_flat_message_set<B: BufMut, I: IntoIterator<Item = ParsedRecord>>(
 /// Encode a `MessageSet` wrapped in a single compressed outer message.
 ///
 /// The inner set is uncompressed and contains one message per record. It
-/// follows the KIP-32 conventions: v1 inner offsets are relative,
-/// `0..N-1`.
+/// follows the KIP-32 conventions: v1 inner offsets are relative to the
+/// first record, preserving gaps left by compaction.
 /// # Errors
 /// Returns `Malformed` if `codec` is `CompressionType::Zstd`, which v0/v1 cannot represent.
+/// Returns `Malformed` if a v1 relative offset exceeds `i64`.
 /// Returns a compression error if the codec cannot compress the inner set.
 pub fn encode_compressed_message_set<B: BufMut>(
     records: &[ParsedRecord],
@@ -82,12 +83,14 @@ pub fn encode_compressed_message_set<B: BufMut>(
 
     // Build inner uncompressed MessageSet.
     let mut inner = BytesMut::new();
-    let count = i64::try_from(records.len()).unwrap_or(i64::MAX);
-    for (i, r) in records.iter().enumerate() {
+    let base_offset = records[0].offset.0;
+    for r in records {
         let inner_offset = match magic {
             Magic::V0 => r.offset.0,
-            // v1: relative 0..count-1
-            Magic::V1 => i64::try_from(i).unwrap_or(i64::MAX),
+            // KIP-32 preserves the original distance between retained records.
+            Magic::V1 => r.offset.0.checked_sub(base_offset).ok_or_else(|| {
+                LegacyRecordsError::Malformed("relative inner offset exceeds i64".into())
+            })?,
         };
         let msg = message_for_record(r.clone(), magic);
         let msg_len = msg.encoded_len();
@@ -129,7 +132,6 @@ pub fn encode_compressed_message_set<B: BufMut>(
     buf.put_i64(wrapper_offset);
     buf.put_i32(i32::try_from(wrapper_len).unwrap_or(i32::MAX));
     wrapper.encode_into(buf);
-    let _ = count;
     Ok(())
 }
 
@@ -143,6 +145,46 @@ mod tests {
         decode_message_set,
         test_support::{compressed_bytes, decode_bytes, sample_records_v0, sample_records_v1},
     };
+
+    #[test]
+    fn compressed_v1_writes_relative_sparse_offsets() {
+        let mut records = sample_records_v1();
+        records[0].offset = Offset(100);
+        records[1].offset = Offset(102);
+        records[2].offset = Offset(105);
+        let wire = compressed_bytes(&records, Magic::V1, CompressionType::Gzip);
+        let mut cur = &wire[..];
+        assert2::assert!(cur.get_i64() == 105);
+        let size = usize::try_from(cur.get_i32()).unwrap();
+        let wrapper = Message::decode_from(&mut cur, size).unwrap();
+        let inner = krabka_compression::decompress(
+            CompressionType::Gzip,
+            &wrapper.value.unwrap(),
+            krabka_units::mebibytes(1),
+        )
+        .unwrap();
+        let decoded = decode_bytes(&inner);
+        let mut expected = records.clone();
+        for (record, offset) in expected.iter_mut().zip([0, 2, 5]) {
+            record.offset = Offset(offset);
+        }
+        assert2::assert!(decoded == expected);
+        assert2::assert!(decode_bytes(&wire) == records);
+    }
+
+    #[test]
+    fn compressed_v1_rejects_unrepresentable_relative_span() {
+        let mut records = sample_records_v1();
+        records[0].offset = Offset(i64::MIN);
+        records[1].offset = Offset(0);
+        records[2].offset = Offset(i64::MAX);
+        let mut wire = BytesMut::new();
+        assert2::assert!(matches!(
+            encode_compressed_message_set(&records, Magic::V1, CompressionType::Gzip, &mut wire),
+            Err(LegacyRecordsError::Malformed(_))
+        ));
+        assert2::assert!(wire.is_empty());
+    }
 
     #[test]
     fn message_set_roundtrips() {

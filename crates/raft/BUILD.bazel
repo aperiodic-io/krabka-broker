@@ -1,4 +1,4 @@
-load("//bazel:defs.bzl", "crate_library", "crate_tests")
+load("//bazel:defs.bzl", "crate_binary", "crate_library", "crate_tests")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -6,6 +6,13 @@ package(default_visibility = ["//visibility:public"])
 exports_files(["Cargo.toml"])
 
 crate_library(name = "raft")
+
+# The README snippet uses this runnable example, so API changes compile here.
+crate_binary(
+    name = "quorum-state-example",
+    crate_root = "examples/quorum_state.rs",
+    lib = ":raft",
+)
 
 crate_tests(
     # The engine simulation drives real elections against real timers. Starved

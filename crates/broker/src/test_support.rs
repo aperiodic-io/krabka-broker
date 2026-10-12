@@ -21,6 +21,8 @@
 //! `LogCapture` records what one piece of work logs, for the tests that check
 //! the level of a log line.
 
+pub(crate) mod paused_audit;
+
 use std::{
     collections::BTreeSet,
     io,
@@ -1845,6 +1847,9 @@ pub(crate) use test_ctx;
 type SubmitOutcome =
     Box<dyn Fn(&[MetadataRecord]) -> Result<SubmitChangeResult, RaftError> + Send + Sync>;
 
+/// One intervening metadata or leadership change before guarded admission.
+type BeforeGuardedSubmit = Box<dyn FnOnce(&FakeMetadataSource) + Send>;
+
 /// The metadata authority that this crate's unit tests read from and write
 /// through.
 ///
@@ -1877,8 +1882,10 @@ pub(crate) struct FakeMetadataSource {
     controller_bound_addr: SocketAddr,
     term: u64,
     owns_controller_epoch: bool,
+    controller_node_id: Option<NodeId>,
     submitted: Mutex<Vec<Vec<MetadataRecord>>>,
     on_submit: SubmitOutcome,
+    before_guarded_submit: Mutex<Option<BeforeGuardedSubmit>>,
     stall_submits: bool,
     current_image_calls: AtomicUsize,
     controller_bound_addr_calls: AtomicUsize,
@@ -1936,10 +1943,12 @@ impl FakeMetadataSource {
         FakeMetadataSourceBuilder {
             image: Arc::new(MetadataImage::new(uuid::Uuid::nil())),
             leader: None,
+            controller_node_id: None,
             controller_bound_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
             term: 0,
             owns_controller_epoch: true,
             on_submit: None,
+            before_guarded_submit: None,
             stall_submits: false,
         }
     }
@@ -2010,14 +2019,25 @@ impl FakeMetadataSource {
 pub(crate) struct FakeMetadataSourceBuilder {
     image: Arc<MetadataImage>,
     leader: Option<NodeId>,
+    controller_node_id: Option<NodeId>,
     controller_bound_addr: SocketAddr,
     term: u64,
     owns_controller_epoch: bool,
     on_submit: Option<SubmitOutcome>,
+    before_guarded_submit: Option<BeforeGuardedSubmit>,
     stall_submits: bool,
 }
 
 impl FakeMetadataSourceBuilder {
+    /// Run one intervening change immediately before the first image/leader
+    /// comparison. Later attempts see the changed authority normally.
+    pub(crate) fn before_guarded_submit(
+        mut self,
+        change: impl FnOnce(&FakeMetadataSource) + Send + 'static,
+    ) -> Self {
+        self.before_guarded_submit = Some(Box::new(change));
+        self
+    }
     /// Serve `image` as the current metadata.
     pub(crate) fn image(mut self, image: impl Into<Arc<MetadataImage>>) -> Self {
         self.image = image.into();
@@ -2033,6 +2053,13 @@ impl FakeMetadataSourceBuilder {
     /// `quorum_state().current_leader`.
     pub(crate) fn leader(mut self, leader: Option<NodeId>) -> Self {
         self.leader = leader;
+        self
+    }
+
+    /// Identify the local controller independently of the initial leader.
+    /// Defaults to the initial leader for fixtures that start as leader.
+    pub(crate) fn controller_node_id(mut self, node_id: NodeId) -> Self {
+        self.controller_node_id = Some(node_id);
         self
     }
 
@@ -2091,10 +2118,12 @@ impl FakeMetadataSourceBuilder {
             controller_bound_addr: self.controller_bound_addr,
             term: self.term,
             owns_controller_epoch: self.owns_controller_epoch,
+            controller_node_id: self.controller_node_id.or(self.leader),
             submitted: Mutex::new(Vec::new()),
             on_submit: self
                 .on_submit
                 .unwrap_or_else(|| Box::new(|_| Ok(SubmitChangeResult::default()))),
+            before_guarded_submit: Mutex::new(self.before_guarded_submit),
             stall_submits: self.stall_submits,
             current_image_calls: AtomicUsize::new(0),
             controller_bound_addr_calls: AtomicUsize::new(0),
@@ -2165,6 +2194,34 @@ impl MetadataSource for FakeMetadataSource {
             .expect("the submitted batches are not poisoned")
             .push(records);
         outcome
+    }
+
+    async fn submit_change_if_image(
+        &self,
+        records: Vec<MetadataRecord>,
+        expected_image: Arc<MetadataImage>,
+    ) -> Result<SubmitChangeResult, RaftError> {
+        let change = self
+            .before_guarded_submit
+            .lock()
+            .expect("guarded submit hook is not poisoned")
+            .take();
+        if let Some(change) = change {
+            change(self);
+        }
+        let leader = *self.leader_tx.borrow();
+        if !self.owns_controller_epoch
+            || self.controller_node_id.is_none()
+            || leader != self.controller_node_id
+        {
+            return Err(RaftError::NotLeader {
+                current_leader: leader,
+            });
+        }
+        if !Arc::ptr_eq(&self.image_tx.borrow(), &expected_image) {
+            return Err(RaftError::StaleMetadataImage);
+        }
+        self.submit_change(records).await
     }
 
     async fn change_membership(&self, _new_voters: BTreeSet<NodeId>) -> Result<(), RaftError> {

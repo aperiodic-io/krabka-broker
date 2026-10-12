@@ -408,8 +408,12 @@ impl Log {
     /// Callers can use this method through `&self`. The `Arc<RwLock<…>>`
     /// wrapper permits mutation of the inner value without an exclusive
     /// borrow on the `Log`.
+    ///
+    /// Delivery settings apply to subsequent watermark advances. Changing
+    /// clock uncertainty does not retract the already published delivery
+    /// prefix; see [`LogConfig::delivery_clock_uncertainty`].
     /// # Panics
-    /// Panics if synchronized log state is poisoned or a segment previously validated as nonempty is unexpectedly missing its required batch or index entry.
+    /// Panics when another thread poisoned the log configuration lock.
     pub fn set_config(&self, new: LogConfig) {
         *self.config.write().unwrap() = new;
     }

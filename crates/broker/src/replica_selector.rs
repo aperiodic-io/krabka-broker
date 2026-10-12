@@ -55,7 +55,7 @@ impl ReplicaSelectorKind {
     /// Parse the `replica.selector` config value. Accepts `"leader"` and
     /// `"rack-aware"`. Returns `Err(value)` on anything else.
     /// # Errors
-    /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
+    /// Returns an error if the trimmed string is neither `leader` nor `rack-aware`.
     pub fn from_config_str(s: &str) -> Result<Self, String> {
         match s.trim() {
             "leader" => Ok(Self::Leader),

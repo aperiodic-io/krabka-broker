@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lemma_round_robin_load": { "prover": "alt-ergo", "time": 0.012 }
+      "vc_lemma_round_robin_load": { "prover": "alt-ergo", "time": 0.027 }
     }
   }
 }

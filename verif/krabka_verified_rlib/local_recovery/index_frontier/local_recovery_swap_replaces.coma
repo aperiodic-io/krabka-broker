@@ -1,8 +1,8 @@
-(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 53 0 57 9 *)
+(* #"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 54 0 58 9 *)
 
-let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 58 4 58 87
-let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 58 33 58 87
-let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 50 10 51 66
+let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 59 4 59 87
+let%span sindex_frontier'0 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 59 33 59 87
+let%span sindex_frontier'1 = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 51 10 52 66
 
 use creusot.int.Int64
 use creusot.prelude.Any
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let local_recovery_swap_replaces [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 53 0 57 9]
+let local_recovery_swap_replaces [#"/workspace/crates/verified/src/local_recovery/index_frontier.rs" 54 0 58 9]
   (swap_base: Int64.t) (swap_next: Int64.t) (segment_base: Int64.t) (return (x: bool)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &_8 <- segment_base = swap_base ] s1 | s1 = any [ br0 -> {_8 = false} (! bb2) | br1 -> {_8} (! bb1) ] ]

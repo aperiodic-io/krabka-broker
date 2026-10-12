@@ -13,10 +13,9 @@
 //! so a suite that asserts on which call failed asserts on a fact rather than
 //! on a seed.
 //!
-//! This is a testing seam. Nothing in the broker's serving path constructs it;
-//! [`build_faulty_object_store`] is the only builder, and it exists so a test
-//! can hand a fault policy to code that only knows how to take an
-//! `Arc<dyn ObjectStore>`.
+//! This is a testing seam. Nothing in the broker's serving path constructs it.
+//! Tests can wrap an existing store directly or use [`build_faulty_object_store`]
+//! to hand a fault policy to code that takes an `Arc<dyn ObjectStore>`.
 
 use std::{
     collections::BTreeMap,
@@ -27,6 +26,7 @@ use std::{
     time::Duration,
 };
 
+use bytes::Bytes;
 use futures_util::stream::{BoxStream, StreamExt as _};
 use object_store::{
     CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
@@ -227,6 +227,7 @@ pub struct FaultInjectingStore {
     inner: Arc<dyn ObjectStore>,
     policy: FaultPolicy,
     counters: Counters,
+    get_replacement: Option<Bytes>,
 }
 
 fn failed_stream<T: Send + 'static>(
@@ -245,7 +246,19 @@ impl FaultInjectingStore {
             inner,
             policy,
             counters: Counters::default(),
+            get_replacement: None,
         }
+    }
+
+    /// Overwrite the requested object immediately before each GET.
+    ///
+    /// HEAD calls still report the existing object. This injects a deterministic
+    /// overwrite between a metadata check and its read, for consistency drills.
+    /// The write bypasses put faults and uses the inner store's normal overwrite.
+    #[must_use]
+    pub fn with_get_overwrite(mut self, replacement: Bytes) -> Self {
+        self.get_replacement = Some(replacement);
+        self
     }
 
     /// How many calls of class `op` have reached this store, failed ones
@@ -311,6 +324,17 @@ impl ObjectStore for FaultInjectingStore {
         options: GetOptions,
     ) -> object_store::Result<GetResult> {
         self.enter(StoreOp::Get, location).await?;
+        if !options.head
+            && let Some(replacement) = &self.get_replacement
+        {
+            self.inner
+                .put_opts(
+                    location,
+                    PutPayload::from_bytes(replacement.clone()),
+                    PutOptions::default(),
+                )
+                .await?;
+        }
         self.inner.get_opts(location, options).await
     }
 
@@ -404,6 +428,32 @@ mod tests {
 
     fn memory(policy: FaultPolicy) -> Arc<FaultInjectingStore> {
         build_faulty_object_store(&ObjectStoreConfig::InMemory, policy).unwrap()
+    }
+
+    #[tokio::test]
+    async fn get_overwrite_changes_the_body_after_head_without_changing_head_itself() {
+        let inner: Arc<dyn ObjectStore> = Arc::new(object_store::memory::InMemory::new());
+        let key = Path::from("mutable");
+        inner
+            .put(&key, PutPayload::from_static(b"old"))
+            .await
+            .unwrap();
+        let store = FaultInjectingStore::new(inner, FaultPolicy::none())
+            .with_get_overwrite(Bytes::from_static(b"replacement"));
+        check!(store.head(&key).await.unwrap().size == 3);
+        check!(
+            store
+                .get(&key)
+                .await
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap()
+                .as_ref()
+                == b"replacement"
+        );
+        check!(store.head(&key).await.unwrap().size == 11);
+        check!(store.attempts(StoreOp::Get) == 3);
     }
 
     /// A rate is a schedule, not a coin flip: the same rate must fail the same

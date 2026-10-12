@@ -7,7 +7,7 @@
         "time": 0.01
       },
       "vc_deref_Vec_i64_Global": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.01 },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.02 },
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.01 },
       "vc_first_timestamp_index": { "prover": "alt-ergo", "time": 0.01 },
       "vc_from_i64": { "prover": "alt-ergo", "time": 0.019 },

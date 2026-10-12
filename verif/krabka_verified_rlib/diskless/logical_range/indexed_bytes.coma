@@ -1,9 +1,9 @@
-(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 11 0 11 60 *)
+(* #"/workspace/crates/verified/src/diskless/logical_range.rs" 12 0 12 60 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
-let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 10 10 10 15
+let%span slogical_range = "/workspace/crates/verified/src/diskless/logical_range.rs" 11 10 11 15
 
 use creusot.int.UInt64
 use seq.Seq
@@ -30,7 +30,7 @@ constant byte_lens : Seq.seq UInt64.t
 
 constant count : int
 
-function indexed_bytes [#"/workspace/crates/verified/src/diskless/logical_range.rs" 11 0 11 60] (byte_lens: Seq.seq UInt64.t) (count: int) : int
+function indexed_bytes [#"/workspace/crates/verified/src/diskless/logical_range.rs" 12 0 12 60] (byte_lens: Seq.seq UInt64.t) (count: int) : int
 
 goal vc_indexed_bytes: if count <= 0 then
     true

@@ -8,12 +8,13 @@ use std::sync::Arc;
 
 use assert2::{assert, check};
 use krabka_protocol::owned::{
-    alter_configs_request::AlterableConfig,
+    alter_configs_request::{AlterConfigsRequest, AlterableConfig},
     alter_configs_response::{AlterConfigsResourceResponse, AlterConfigsResponse},
 };
 
 use super::{
     RESOURCE_TYPE_BROKER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+    dispatch,
     test_support::{
         broker_resource, client_metrics_resource, drive_many, drive_one, group_resource, resource,
     },
@@ -24,13 +25,99 @@ use crate::{
     coordinator::unified::streams::config::{
         KEY_NUM_STANDBY_REPLICAS, KEY_TASK_OFFSET_INTERVAL_MS,
     },
-    handlers::alter_configs::test_support::{
-        image_with_client_metrics_config, image_with_group_config, image_with_topic_config,
-        topic_resource,
+    handlers::{
+        alter_configs::test_support::{
+            image_with_client_metrics_config, image_with_group_config, image_with_topic_config,
+            topic_resource,
+        },
+        decode_request, encode_response,
     },
-    test_support::DenyAll,
+    test_support::{
+        DenyAll, context_helper, start_broker_with_authorizer as start_broker, test_ctx,
+    },
     throttle::LEADER_THROTTLED_RATE_KEY,
 };
+
+context_helper!(client_id = "admin-client");
+
+/// Local preprocessing errors retain their positions among controller results,
+/// including both occurrences of a duplicate resource.
+#[tokio::test]
+async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
+    broker_fixture!((handle, _dir, broker), allow_all, context(ctx, "admin"));
+    let rows = [
+        (
+            broker_resource("2", &[]),
+            tagged_wire!(AlterConfigsResourceResponse {
+                resource_type: RESOURCE_TYPE_BROKER,
+                resource_name: "2".into(),
+                error_code: codes::INVALID_REQUEST,
+                error_message: Some("Unexpected broker id, expected 1, but received 2".into())
+            }),
+        ),
+        (
+            broker_resource("1", &[]),
+            tagged_wire!(AlterConfigsResourceResponse {
+                resource_type: RESOURCE_TYPE_BROKER,
+                resource_name: "1".into(),
+                error_code: codes::NONE,
+                error_message: None
+            }),
+        ),
+        (
+            topic_resource("duplicate", &[]),
+            tagged_wire!(AlterConfigsResourceResponse {
+                resource_type: RESOURCE_TYPE_TOPIC,
+                resource_name: "duplicate".into(),
+                error_code: codes::INVALID_REQUEST,
+                error_message: Some("Each resource must appear at most once.".into())
+            }),
+        ),
+        (
+            resource(77, "unsupported"),
+            tagged_wire!(AlterConfigsResourceResponse {
+                resource_type: 77,
+                resource_name: "unsupported".into(),
+                error_code: codes::INVALID_REQUEST,
+                error_message: Some("Unknown resource type 77".into())
+            }),
+        ),
+        (
+            topic_resource("missing", &[]),
+            tagged_wire!(AlterConfigsResourceResponse {
+                resource_type: RESOURCE_TYPE_TOPIC,
+                resource_name: "missing".into(),
+                error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                error_message: Some("The topic 'missing' does not exist.".into())
+            }),
+        ),
+        (
+            topic_resource("duplicate", &[]),
+            tagged_wire!(AlterConfigsResourceResponse {
+                resource_type: RESOURCE_TYPE_TOPIC,
+                resource_name: "duplicate".into(),
+                error_code: codes::INVALID_REQUEST,
+                error_message: Some("Each resource must appear at most once.".into())
+            }),
+        ),
+    ];
+    for order in [[0, 1, 2, 3, 4, 5], [5, 4, 3, 2, 1, 0]] {
+        let request = AlterConfigsRequest {
+            resources: order.iter().map(|&index| rows[index].0.clone()).collect(),
+            validate_only: true,
+            ..Default::default()
+        };
+        let bytes = encode_response(&request, 2).unwrap();
+        let bytes = Box::pin(dispatch(&broker, 2, &bytes, &ctx)).await.unwrap();
+        let response = decode_request::<AlterConfigsResponse>(&bytes, 2).unwrap();
+        let expected = AlterConfigsResponse {
+            responses: order.iter().map(|&index| rows[index].1.clone()).collect(),
+            ..Default::default()
+        };
+        assert!(response == expected);
+    }
+    handle.shutdown().await;
+}
 
 macro_rules! invalid_config_row {
     (($response:ident, $row:ident), $request:expr) => {

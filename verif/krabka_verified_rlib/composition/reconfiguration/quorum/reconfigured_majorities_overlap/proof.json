@@ -29,10 +29,10 @@
             "children": [
               { "prover": "alt-ergo", "time": 0.021 },
               { "prover": "alt-ergo", "time": 0.022 },
-              { "prover": "alt-ergo", "time": 0.022 },
-              { "prover": "z3", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "z3", "time": 0.008 },
               { "prover": "alt-ergo", "time": 0.026 },
-              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.012 },
               { "prover": "alt-ergo", "time": 0.029 },
               { "prover": "alt-ergo", "time": 0.031 },
               { "prover": "alt-ergo", "time": 0.032 },

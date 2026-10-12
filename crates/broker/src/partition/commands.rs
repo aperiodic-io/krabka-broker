@@ -24,6 +24,13 @@ pub(crate) enum ProduceBatchError {
 }
 
 impl Partition {
+    /// Wait until the writer has completed every command accepted before this
+    /// barrier. A dropped acknowledgement or closed writer is an error; the
+    /// caller may bound or cancel the wait without changing the log.
+    pub(crate) async fn writer_barrier(&self) -> Result<(), BrokerError> {
+        self.ask_writer(|ack| WriterMessage::Barrier { ack }).await
+    }
+
     /// [`ask`] the writer task, and report a dead writer or a dropped
     /// acknowledgement as [`BrokerError::Replication`].
     async fn ask_writer<T>(

@@ -44,9 +44,9 @@ pub(crate) fn is_invalid_receive(error: &std::io::Error) -> bool {
 ///
 /// Decoding refuses a request whose size prefix exceeds the current request
 /// limit, before its body is read, as Kafka's `NetworkReceive.readFrom` does
-/// with `socket.request.max.bytes`. [`KafkaCodec::set_max_request_bytes`]
-/// changes the limit for the next frame: the connection loop holds a peer that
-/// has not finished authenticating to `sasl.server.max.receive.size`.
+/// with `socket.request.max.bytes`. The connection loop reads requests directly
+/// and applies its authentication-dependent receive limit before reserving and
+/// reading the body; it uses this codec only to encode responses.
 ///
 /// Encoding has no configurable limit. A response is bounded only by its int32
 /// size prefix, see [`response_frame_length`].
@@ -55,6 +55,7 @@ pub struct KafkaCodec {
     requests: LengthDelimitedCodec,
 }
 
+#[cfg(test)]
 impl KafkaCodec {
     /// Sets the largest request frame the next [`Decoder::decode`] accepts.
     pub fn set_max_request_bytes(&mut self, max_request_bytes: usize) {

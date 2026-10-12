@@ -44,7 +44,7 @@ type EpochTruncation = Result<Option<(i32, FetchWatermarks, FetchVisibility)>, (
         && segment_base@ <= bounded.log_end@ && bounded.log_end@ <= w.log_end@ && found@ <= requested@
         && clamped_fetch_watermarks(w, bounded)
         && visibility.limit_offset@ == bounded.hw@.min(bounded.lso@).min(bounded.deliverable@)
-        && committed_fetch_response(visibility, bounded.hw, bounded.lso, bounded.deliverable, w.log_start@),
+        && committed_fetch_response(visibility, bounded.hw, bounded.lso, bounded.deliverable, w.log_start@, bounded.log_end@),
 })]
 pub(super) fn validated_epochs_bound_truncated_fetch(
     entries: &[EpochEntry],

@@ -143,6 +143,14 @@ pub fn lemma_site_load_at_most_first(rf, sites, site) from 0 {
 /// on three sites leave 2, because each site holds one replica. Three replicas
 /// on two sites leave 1, because two of the three replicas share a site. One
 /// site leaves 0, because the loss of that site is the loss of the partition.
+///
+/// The proof assumes both `rf` and `sites` are in `1..=1024`. Normal Rust
+/// builds do not check that proof precondition.
+///
+/// # Panics
+///
+/// Panics when `sites` is zero. Arithmetic outside the proof bounds can panic
+/// when overflow checks are enabled.
 #[requires(rf@ >= 1 && rf@ <= 1024)]
 #[requires(sites@ >= 1 && sites@ <= 1024)]
 #[ensures(result@ == rf@ - round_robin_load(rf@, sites@, 0))]

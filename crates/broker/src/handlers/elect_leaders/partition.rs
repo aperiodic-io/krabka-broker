@@ -42,7 +42,7 @@ pub(super) async fn elect_one(
     // KIP-966: an UNCLEAN election on a topic that opted into an offset-aware
     // recovery strategy is routed through the Unclean Recovery Manager, which
     // polls surviving replicas for their log state before electing. The URM
-    // owns `submit_change` for these, so we must NOT push a record into the
+    // owns the guarded election append for these, so we must NOT push a record into the
     // batch here — we just await the outcome and translate it to a
     // per-partition row.
     let strategy = resolve_recovery_strategy(env.image, topic);

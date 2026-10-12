@@ -28,7 +28,7 @@ use krabka_log::{Log, LogConfig, name};
 use krabka_protocol::records::{CRC_COVERAGE_START, Record, RecordBatch};
 use krabka_remote_storage::{
     LocalTieredStorage, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
-    RemoteLogSegmentState, RemoteStorageManager as _, TopicIdPartition,
+    RemoteLogSegmentState, RemoteStorageManager as _, TopicIdPartition, kafka_uuid,
 };
 use krabka_restore::{Cli, EXIT_BAD_ARGUMENTS, EXIT_INTEGRITY, RestoreArgs, RestoreError, restore};
 use uuid::Uuid;
@@ -85,8 +85,20 @@ fn archive_segment(
     topic_id: Uuid,
     segment_id: Uuid,
 ) -> ArchivedSegment {
+    archive_segment_at(archive_root, topic, partition, topic_id, segment_id, 0)
+}
+
+fn archive_segment_at(
+    archive_root: &StdPath,
+    topic: &str,
+    partition: i32,
+    topic_id: Uuid,
+    segment_id: Uuid,
+    base_offset: i64,
+) -> ArchivedSegment {
     let local = tempfile::tempdir().expect("local log tempdir");
     let mut log = Log::open(local.path(), tiny_segment_config()).expect("open local log");
+    log.reset_to(Offset(base_offset)).unwrap();
     log.append(&mut long_batch()).expect("append first batch");
     log.append(&mut long_batch())
         .expect("append second batch, rolling the first into a sealed segment");
@@ -101,7 +113,7 @@ fn archive_segment(
     // The full local log holds both batches; only the sealed one (the first)
     // was archived, so the comparison fixture keeps just that range.
     let full_read = log
-        .read(Offset(0), LogConfig::default().segment_size)
+        .read(Offset(base_offset), LogConfig::default().segment_size)
         .expect("read back the local log");
     let original_batches: Vec<RecordBatch> = full_read
         .batches
@@ -139,7 +151,7 @@ fn archive_segment(
         .copy_log_segment_data(
             &metadata,
             &export_segment_data(&export, ProducerSnapshotExport::Include, || {
-                Bytes::from_static(b"0\n1\n0 0\n")
+                Bytes::from(format!("0\n1\n0 {base_offset}\n"))
             }),
         )
         .expect("archive the segment");
@@ -391,6 +403,53 @@ async fn continue_on_corrupt_skips_only_the_damaged_segment_and_restores_the_res
     // `write_segment` never created a directory for it.
     let damaged_dir = name::partition_dir(&log_dir, "orders-damaged", 0);
     check!(!damaged_dir.exists());
+}
+
+#[tokio::test]
+async fn continue_on_corrupt_preserves_both_sides_of_an_interior_gap() {
+    let archive = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let log_dir = target.path().join("restored");
+    let topic_id = Uuid::from_u128(10);
+    let mut expected = Vec::new();
+    let mut damaged_id = Uuid::nil();
+    for base in 0..3 {
+        let segment_id = Uuid::new_v4();
+        let segment = archive_segment_at(archive.path(), "orders", 0, topic_id, segment_id, base);
+        if base == 1 {
+            damaged_id = segment_id;
+            let log = find_one_file(archive.path(), |path| {
+                has_extension(path, "log")
+                    && path.to_string_lossy().contains(&kafka_uuid(segment_id))
+            });
+            corrupt_crc_covered_byte(&log);
+        } else {
+            expected.extend(segment.original_batches);
+        }
+    }
+    let report = restore(&restore_args(
+        archive.path(),
+        &log_dir,
+        &["--continue-on-corrupt"],
+    ))
+    .await
+    .unwrap();
+    check!(report.skipped.len() == 1);
+    check!(report.skipped[0].segment_id == damaged_id);
+    check!(report.partitions[0].segments.len() == 2);
+    let restored = Log::open(
+        name::partition_dir(&log_dir, "orders", 0),
+        LogConfig::default(),
+    )
+    .unwrap();
+    check!(restored.log_end_offset() == Offset(3));
+    check!(
+        restored
+            .read(Offset(0), LogConfig::default().segment_size)
+            .unwrap()
+            .batches
+            == expected
+    );
 }
 
 #[tokio::test]

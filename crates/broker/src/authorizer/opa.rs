@@ -1,5 +1,5 @@
-//! OPA authorizer. POSTs Strimzi-compatible JSON to a
-//! configurable OPA decision endpoint. It adds a super-user bypass, an
+//! OPA authorizer. POSTs the Kafka-plugin action and available request context
+//! as JSON to a configurable OPA decision endpoint. It adds a super-user bypass, an
 //! LRU+TTL decision cache, and a fail-open-or-closed policy.
 //!
 //! The trait method [`Authorizer::authorize`] is synchronous, because sync

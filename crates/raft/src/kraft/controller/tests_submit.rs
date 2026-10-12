@@ -2,7 +2,7 @@
 //! waiters it parks, and how those waiters resolve, fail on leadership loss,
 //! or take a per-record rejection scoped to their own appended range.
 
-use std::time::Duration as StdDuration;
+use std::{sync::Arc, time::Duration as StdDuration};
 
 use assert2::{assert, check};
 use krabka_ids::Offset;
@@ -75,6 +75,167 @@ fn direct_single_voter_submit_applies_image_and_resolves_waiter() {
     check!(engine.image.topic("direct").is_some());
     check!(engine.log.hwm() == engine.log.log_end_offset());
     check!(engine.commit_waiters.is_empty());
+}
+
+/// A deletion admitted for an old generation cannot delete its replacement.
+#[test]
+fn guarded_delete_rejects_a_recreated_topic() {
+    use krabka_metadata::{DeleteTopicRecord, MetadataRecord};
+
+    let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
+    let _images = engine.image_tx.subscribe();
+    let mut created =
+        super::test_support::submit_on_engine(&mut engine, &topic_record_named("orders", 1));
+    assert!(matches!(created.try_recv(), Ok(Ok(_))));
+    let expected = engine.image_tx.borrow().clone();
+    let delete = MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
+        name: "orders".into(),
+    });
+    let mut replaced = super::test_support::submit_on_engine(
+        &mut engine,
+        &[vec![delete.clone()], topic_record_named("orders", 2)].concat(),
+    );
+    assert!(matches!(replaced.try_recv(), Ok(Ok(_))));
+    let end = engine.log.log_end_offset();
+    let (reply, mut result) = oneshot::channel();
+    engine.on_submit_change_if_image(&[delete], Some(&expected), reply);
+    assert!(matches!(
+        result.try_recv(),
+        Ok(Err(RaftError::StaleMetadataImage))
+    ));
+    assert!(engine.log.log_end_offset() == end);
+    assert!(
+        engine
+            .image
+            .topic("orders")
+            .expect("replacement remains")
+            .topic_id
+            == uuid::Uuid::from_u128(2)
+    );
+}
+
+/// A stale whole-map config record is refused before it can tombstone a
+/// disjoint change. A fresh rebuild commits both settings.
+#[test]
+fn guarded_config_rejects_stale_maps_and_accepts_a_fresh_merge() {
+    use krabka_metadata::{MetadataRecord, TopicConfigRecord};
+
+    let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
+    let _images = engine.image_tx.subscribe();
+    let mut created = super::test_support::submit_on_engine(&mut engine, &topic_record("orders"));
+    assert!(matches!(created.try_recv(), Ok(Ok(_))));
+    let expected = engine.image_tx.borrow().clone();
+    let config = |entries: &[(&str, &str)]| {
+        MetadataRecord::V1TopicConfig(TopicConfigRecord {
+            topic: "orders".into(),
+            overrides: entries
+                .iter()
+                .map(|(key, value)| ((*key).into(), (*value).into()))
+                .collect(),
+        })
+    };
+    let mut updated = super::test_support::submit_on_engine(
+        &mut engine,
+        &[config(&[("cleanup.policy", "compact")])],
+    );
+    assert!(matches!(updated.try_recv(), Ok(Ok(_))));
+    let (reply, mut result) = oneshot::channel();
+    engine.on_submit_change_if_image(
+        &[config(&[("retention.ms", "30000")])],
+        Some(&expected),
+        reply,
+    );
+    assert!(matches!(
+        result.try_recv(),
+        Ok(Err(RaftError::StaleMetadataImage))
+    ));
+    let expected = engine.image_tx.borrow().clone();
+    let merged = config(&[("cleanup.policy", "compact"), ("retention.ms", "30000")]);
+    let (reply, mut result) = oneshot::channel();
+    engine.on_submit_change_if_image(std::slice::from_ref(&merged), Some(&expected), reply);
+    assert!(matches!(result.try_recv(), Ok(Ok(_))));
+    assert!(let MetadataRecord::V1TopicConfig(merged) = merged);
+    assert!(engine.image.topic_config("orders") == Some(&merged.overrides));
+}
+
+/// Image contents can remain identical across a leadership cycle; admission
+/// from its old authority must still be discarded before append.
+#[tokio::test]
+async fn guarded_change_rejects_old_authority_after_a_term_cycle_without_metadata_changes() {
+    let (mut engine, _dir) = build_engine_only(EngineSetup::default());
+    let elect = |engine: &mut Engine| {
+        engine.on_event(Event::ElectionTimeout);
+        for _ in 0..2 {
+            engine.on_event(Event::ReceiveVoteResponse {
+                from: NodeId(2),
+                epoch: engine.core.quorum_state().leader_epoch,
+                vote_granted: true,
+            });
+        }
+        assert!(engine.core.role().is_leader());
+    };
+    elect(&mut engine);
+    engine.advance_and_apply(engine.log.log_end_offset());
+    let original = engine.image_tx.borrow().clone();
+    let original_epoch = engine.core.quorum_state().leader_epoch;
+    // No watch receiver is retained: send_replace must keep the admission
+    // identity current even when nobody is watching the image yet.
+    engine.on_event(Event::ReceiveBeginQuorumEpoch {
+        leader_id: NodeId(2),
+        leader_epoch: original_epoch + 1,
+    });
+    assert!(!engine.core.role().is_leader());
+    let follower_image = engine.image_tx.borrow().clone();
+    assert!(!Arc::ptr_eq(&original, &follower_image));
+    assert!(original.as_ref() == follower_image.as_ref());
+    elect(&mut engine);
+    let new_authority = engine.image_tx.borrow().clone();
+    assert!(!Arc::ptr_eq(&follower_image, &new_authority));
+    assert!(original.as_ref() == new_authority.as_ref());
+    // The old guard is stale even before the new term's barrier commits.
+    for before_commit in [true, false] {
+        if !before_commit {
+            engine.advance_and_apply(engine.log.log_end_offset());
+        }
+        let end = engine.log.log_end_offset();
+        let (reply, mut result) = oneshot::channel();
+        engine.on_submit_change_if_image(&topic_record("stale"), Some(&original), reply);
+        assert!(matches!(
+            result.try_recv(),
+            Ok(Err(RaftError::StaleMetadataImage))
+        ));
+        assert!(engine.log.log_end_offset() == end);
+        assert!(engine.image.topic("stale").is_none());
+    }
+    let fresh = engine.image_tx.borrow().clone();
+    let (reply, mut result) = oneshot::channel();
+    engine.on_submit_change_if_image(&topic_record("fresh"), Some(&fresh), reply);
+    engine.advance_and_apply(engine.log.log_end_offset());
+    assert!(matches!(result.try_recv(), Ok(Ok(_))));
+    assert!(engine.image.topic("fresh").is_some());
+}
+
+#[tokio::test]
+async fn guarded_change_waits_for_no_uncommitted_mutations() {
+    let (ctrl, _dir) = super::test_support::three_voter_leader().await;
+    let pending = super::test_support::pending_submission(&ctrl, topic_record("pending")).await;
+    let image = ctrl.current_image();
+    let result = ctrl
+        .submit_change_if_image(topic_record("guarded"), image)
+        .await;
+    assert!(matches!(result, Err(RaftError::UncommittedTail)));
+    commit_pending(&ctrl, NodeId(2)).await;
+    assert!(pending.await.expect("pending task").is_ok());
+    let image = ctrl.current_image();
+    let writer = ctrl.clone();
+    let guarded = tokio::spawn(async move {
+        writer
+            .submit_change_if_image(topic_record("guarded"), image)
+            .await
+    });
+    acknowledge_tip(&ctrl, NodeId(2)).await;
+    assert!(guarded.await.expect("guarded task").is_ok());
+    ctrl.shutdown().await;
 }
 
 #[test]

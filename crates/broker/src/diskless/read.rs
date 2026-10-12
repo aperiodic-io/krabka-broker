@@ -1,9 +1,10 @@
 //! Diskless WAL cold-read path from flushed object-store runs.
 
-use std::sync::Arc;
+use std::{fmt::Display, io, sync::Arc};
 
 use bytes::Bytes;
 use krabka_protocol::records::{RecordBatch, RecordsPayload};
+use krabka_remote_storage::{RemoteStorageError, first_record_at_or_after_timestamp};
 use krabka_verified::{DisklessBatchStep, diskless_batch_step};
 use object_store::{GetOptions, GetRange, ObjectStore, path::Path};
 use tokio::sync::Mutex as AsyncMutex;
@@ -104,7 +105,7 @@ impl DisklessReadHandle {
             .map(Some)
     }
 
-    async fn read_records(
+    pub(crate) async fn read_records(
         &self,
         topic_id: Uuid,
         partition: i32,
@@ -124,6 +125,83 @@ impl DisklessReadHandle {
         };
         Ok(Some(records))
     }
+
+    /// Find the first exact record at or after the timestamp and logical floor
+    /// across committed WAL runs. Index maxima only prune impossible ranges;
+    /// the answer comes from decoded records, including append-time semantics.
+    pub(crate) async fn offset_for_timestamp(
+        &self,
+        topic_id: Uuid,
+        partition: i32,
+        timestamp: i64,
+        minimum: i64,
+        max_record_body: Option<usize>,
+    ) -> Result<Option<(i64, i64)>, RemoteStorageError> {
+        if self.index_log().is_some_and(|log| !log.is_valid()) {
+            return Err(wal_timestamp_error("WAL index projection is unavailable"));
+        }
+        let (minimum, ranges) = {
+            let index = self.index.lock().await;
+            (
+                minimum.max(index.delete_floor(topic_id, partition)),
+                index.timestamp_ranges(topic_id, partition),
+            )
+        };
+        if ranges
+            .iter()
+            .any(|(_, entry)| entry.first_offset > entry.last_offset)
+            || ranges
+                .windows(2)
+                .any(|pair| pair[0].1.last_offset >= pair[1].1.first_offset)
+        {
+            return Err(wal_timestamp_error(
+                "WAL index ranges overlap or are inverted",
+            ));
+        }
+        for (key, entry) in ranges {
+            if entry.last_offset < minimum
+                || (entry.max_timestamp_ms != -1 && entry.max_timestamp_ms < timestamp)
+            {
+                continue;
+            }
+            let end = entry
+                .byte_start
+                .checked_add(u64::from(entry.byte_len))
+                .ok_or_else(|| wal_timestamp_error("WAL byte range overflow"))?;
+            let data = self
+                .store
+                .get_opts(
+                    &Path::from(key),
+                    GetOptions {
+                        range: Some(GetRange::Bounded(entry.byte_start..end)),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(wal_timestamp_error)?
+                .bytes()
+                .await
+                .map_err(wal_timestamp_error)?;
+            if let Some(found) = first_record_at_or_after_timestamp(
+                &data,
+                minimum.max(entry.first_offset),
+                timestamp,
+                max_record_body,
+            )? {
+                if found.0 > entry.last_offset {
+                    return Err(wal_timestamp_error("WAL record exceeds indexed range"));
+                }
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
+    }
+}
+
+fn wal_timestamp_error(error: impl Display) -> RemoteStorageError {
+    RemoteStorageError::Io(io::Error::other(format!(
+        "diskless WAL timestamp lookup: {error}"
+    )))
 }
 
 /// Tries to satisfy a local `OFFSET_OUT_OF_RANGE` fetch from the diskless WAL
@@ -277,6 +355,182 @@ mod tests {
             batch.encode(&mut bytes).unwrap();
         }
         bytes.freeze()
+    }
+
+    async fn timestamp_handle(topic_id: Uuid, batches: &[RecordBatch]) -> DisklessReadHandle {
+        let data = encode_batches(batches);
+        let store: Arc<dyn ObjectStore> = Arc::new(object_store::memory::InMemory::new());
+        store
+            .put(&Path::from("timestamps"), PutPayload::from(data.clone()))
+            .await
+            .unwrap();
+        let mut index = WalIndexCache::default();
+        index.apply(&WalFlushRecord {
+            object_key: "timestamps".into(),
+            format_version: WalFlushRecord::FORMAT_VERSION,
+            entries: vec![super::super::wal_index::WalIndexEntry {
+                topic_id,
+                partition: 0,
+                first_offset: batches[0].base_offset,
+                last_offset: batches.last().unwrap().base_offset
+                    + i64::from(batches.last().unwrap().last_offset_delta),
+                byte_start: 0,
+                byte_len: u32::try_from(data.len()).unwrap(),
+                max_timestamp_ms: batches
+                    .iter()
+                    .map(|batch| batch.max_timestamp)
+                    .max()
+                    .unwrap(),
+            }],
+        });
+        DisklessReadHandle::new(Arc::new(AsyncMutex::new(index)), store)
+    }
+
+    #[tokio::test]
+    async fn wal_timestamp_lookup_decodes_exact_records_and_honors_deletion_floor() {
+        let id = Uuid::from_u128(93);
+        let mut records = batch(10, b"value");
+        records.base_timestamp = 100;
+        records.max_timestamp = 900;
+        records.last_offset_delta = 2;
+        records.records = [900, 200, 600]
+            .into_iter()
+            .enumerate()
+            .map(|(index, time)| Record {
+                offset_delta: i32::try_from(index).unwrap(),
+                timestamp_delta: time - 100,
+                ..Record::default()
+            })
+            .collect();
+        let handle = timestamp_handle(id, &[records.clone()]).await;
+        assert!(
+            handle
+                .offset_for_timestamp(id, 0, 500, 0, None)
+                .await
+                .unwrap()
+                == Some((10, 900))
+        );
+        handle.index.lock().await.raise_delete_floor(id, 0, 11);
+        assert!(
+            handle
+                .offset_for_timestamp(id, 0, 500, 0, None)
+                .await
+                .unwrap()
+                == Some((12, 600))
+        );
+        assert!(
+            handle
+                .offset_for_timestamp(id, 0, 901, 0, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        records.attributes = records
+            .attributes
+            .with_timestamp_type(krabka_protocol::records::TimestampType::LogAppendTime);
+        let append_time = timestamp_handle(id, &[records]).await;
+        assert!(
+            append_time
+                .offset_for_timestamp(id, 0, 500, 11, None)
+                .await
+                .unwrap()
+                == Some((11, 900))
+        );
+    }
+
+    #[tokio::test]
+    async fn wal_timestamp_lookup_enforces_record_limit_and_reports_missing_objects() {
+        let id = Uuid::from_u128(94);
+        let mut compressed = batch(0, b"");
+        compressed.records[0].value = Some(Bytes::from(vec![0; 4096]));
+        compressed.max_timestamp = 200;
+        compressed.base_timestamp = 200;
+        compressed.attributes = compressed
+            .attributes
+            .with_compression(CompressionType::Gzip);
+        let handle = timestamp_handle(id, &[compressed]).await;
+        assert!(matches!(
+            handle.offset_for_timestamp(id, 0, 100, 0, Some(100)).await,
+            Err(RemoteStorageError::RecordTooLarge { .. })
+        ));
+        handle
+            .store
+            .delete(&Path::from("timestamps"))
+            .await
+            .unwrap();
+        assert!(
+            handle
+                .offset_for_timestamp(id, 0, 100, 0, None)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn combined_timestamp_lookup_finds_evicted_wal_records_before_local_matches() {
+        use krabka_remote_storage::TopicIdPartition;
+
+        use crate::{
+            handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
+            partition::test_support::test_partition,
+        };
+        let id = Uuid::from_u128(95);
+        let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
+        let mut archived = Vec::new();
+        {
+            let mut log = partition.log.lock().unwrap();
+            log.set_config(LogConfig {
+                segment_size: krabka_units::bytes(1),
+                ..log.config_snapshot()
+            });
+            for time in [100, 200, 300, 400] {
+                let mut record = batch(0, b"value");
+                record.max_timestamp = time;
+                record.base_timestamp = time;
+                log.append(&mut record).unwrap();
+                archived.push(record);
+            }
+            log.delete_local_segments_through(krabka_ids::Offset(2))
+                .unwrap();
+            assert!(log.local_log_start_offset() == krabka_ids::Offset(2));
+            assert!(log.established_log_start().is_none());
+        }
+        let handle = timestamp_handle(id, &archived[..2]).await;
+        let tp = TopicIdPartition::new(id, "orders", 0);
+        let resolve = |target| {
+            resolve_timestamp_with_sources(
+                &partition,
+                &tp,
+                target,
+                std::time::Duration::from_secs(5),
+                None,
+                Some(&handle),
+            )
+        };
+        assert!(resolve(150).await == Ok((1, 200)));
+        assert!(resolve(250).await == Ok((2, 300)));
+        assert!(resolve(450).await == Ok((-1, -1)));
+        // The authoritative WAL floor can precede the local trim. Search
+        // again above that floor; clamping offset 2 would keep timestamp 300
+        // attached to record 3, whose timestamp is actually 400.
+        handle.index.lock().await.raise_delete_floor(id, 0, 3);
+        assert!(
+            partition
+                .log
+                .lock()
+                .unwrap()
+                .established_log_start()
+                .is_none()
+        );
+        assert!(resolve(150).await == Ok((3, 400)));
+        partition
+            .log
+            .lock()
+            .unwrap()
+            .set_log_start_offset(krabka_ids::Offset(3))
+            .unwrap();
+        assert!(resolve(150).await == Ok((3, 400)));
     }
 
     fn round_trip_partition(topic_id: WireUuid, partition: PartitionData) -> PartitionData {

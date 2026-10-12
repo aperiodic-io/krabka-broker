@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/broker.rs" 41 19 41 36 *)
+(* #"/workspace/crates/verified/src/broker.rs" 43 19 43 36 *)
 
 (* <broker::ReplicaFetchFacts as std::clone::Clone> *)
 
@@ -18,7 +18,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_ReplicaFetchFacts [#"/workspace/crates/verified/src/broker.rs" 41 19 41 36] (self: t_ReplicaFetchFacts)
+let clone_ReplicaFetchFacts [#"/workspace/crates/verified/src/broker.rs" 43 19 43 36] (self: t_ReplicaFetchFacts)
   (return (x: t_ReplicaFetchFacts)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_ReplicaFetchFacts = Any.any_l () | & self: t_ReplicaFetchFacts = self ])

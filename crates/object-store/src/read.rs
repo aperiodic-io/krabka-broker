@@ -1,13 +1,14 @@
 //! Capped buffered reads.
 //!
 //! The module does a `head()` on an object, rejects the object if it exceeds a
-//! byte cap, then does a `get()`. It centralises the OOM guard that runs before
+//! byte cap, then does a conditional, streaming GET. It centralises the OOM guard that runs before
 //! the code buffers a whole object, such as an index snapshot, into memory.
 
 use std::sync::Arc;
 
-use bytes::Bytes;
-use object_store::{ObjectStoreExt as _, path::Path};
+use bytes::{Bytes, BytesMut};
+use futures_util::TryStreamExt as _;
+use object_store::{GetOptions, ObjectStoreExt as _, path::Path};
 
 use super::{error::ObjectStoreError, object_store_api as object_store};
 
@@ -16,11 +17,14 @@ use super::{error::ObjectStoreError, object_store_api as object_store};
 /// The function does a `head()` first, so it refuses an oversized object
 /// *before* it buffers any bytes. This is the guard against OOM on a corrupt or
 /// malicious object.
+/// The GET uses the HEAD version and etag when available. Its response size
+/// and streamed chunks are also checked, so an overwrite cannot bypass the cap.
 ///
 /// # Errors
 ///
 /// - [`ObjectStoreError::TooLarge`] if the object is larger than `max_bytes`.
 /// - [`ObjectStoreError::NotFound`] if the object does not exist.
+/// - [`ObjectStoreError::Precondition`] if its etag changed after the HEAD.
 /// - [`ObjectStoreError::Backend`] for any other backend failure.
 pub async fn read_capped(
     store: &Arc<dyn object_store::ObjectStore>,
@@ -35,14 +39,47 @@ pub async fn read_capped(
             max_bytes,
         });
     }
-    Ok(store.get(key).await?.bytes().await?)
+    let result = store
+        .get_opts(
+            key,
+            GetOptions {
+                version: meta.version,
+                if_match: meta.e_tag,
+                ..GetOptions::default()
+            },
+        )
+        .await?;
+    if result.meta.size > max_bytes {
+        return Err(ObjectStoreError::TooLarge {
+            key: key.clone(),
+            size: result.meta.size,
+            max_bytes,
+        });
+    }
+    let mut stream = result.into_stream();
+    let mut bytes = BytesMut::new();
+    while let Some(chunk) = stream.try_next().await? {
+        let size = u64::try_from(bytes.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+        if size > max_bytes {
+            return Err(ObjectStoreError::TooLarge {
+                key: key.clone(),
+                size,
+                max_bytes,
+            });
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes.freeze())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, atomic::Ordering::SeqCst};
 
     use assert2::assert;
+    use futures_util::StreamExt as _;
     use object_store::{PutPayload, path::Path};
 
     use super::{object_store, *};
@@ -86,5 +123,140 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ObjectStoreError::NotFound(_)));
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum Race {
+        Etag,
+        Version,
+        Metadata,
+        Body,
+    }
+
+    #[derive(Debug)]
+    struct ChangingStore {
+        inner: object_store::memory::InMemory,
+        race: Race,
+        chunks: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl std::fmt::Display for ChangingStore {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("ChangingStore")
+        }
+    }
+
+    #[krabka_macros::object_store_delegate(
+        put_multipart_opts,
+        delete_stream,
+        list,
+        list_with_delimiter,
+        copy_opts
+    )]
+    #[async_trait::async_trait]
+    impl object_store::ObjectStore for ChangingStore {
+        async fn put_opts(
+            &self,
+            location: &Path,
+            payload: PutPayload,
+            opts: object_store::PutOptions,
+        ) -> object_store::Result<object_store::PutResult> {
+            self.inner.put_opts(location, payload, opts).await
+        }
+
+        async fn get_opts(
+            &self,
+            location: &Path,
+            options: GetOptions,
+        ) -> object_store::Result<object_store::GetResult> {
+            if options.head {
+                let mut result = self.inner.get_opts(location, options).await?;
+                if matches!(self.race, Race::Version) {
+                    result.meta.version = Some("original".into());
+                } else if !matches!(self.race, Race::Etag) {
+                    result.meta.e_tag = None;
+                }
+                return Ok(result);
+            }
+            if matches!(self.race, Race::Version) {
+                assert!(options.version.as_deref() == Some("original"));
+                let original = self
+                    .inner
+                    .get_opts(
+                        location,
+                        GetOptions {
+                            version: None,
+                            ..options
+                        },
+                    )
+                    .await?;
+                self.inner
+                    .put(location, PutPayload::from_static(b"123456789"))
+                    .await?;
+                return Ok(original);
+            }
+            self.inner
+                .put(location, PutPayload::from_static(b"123456789"))
+                .await?;
+            let mut result = self.inner.get_opts(location, options).await?;
+            if matches!(self.race, Race::Body) {
+                result.meta.size = 3;
+                let chunks = self.chunks.clone();
+                result.payload = object_store::GetResultPayload::Stream(
+                    futures_util::stream::iter((0..3).map(|_| Ok(Bytes::from_static(b"123"))))
+                        .inspect(move |_| {
+                            chunks.fetch_add(1, SeqCst);
+                        })
+                        .boxed(),
+                );
+            }
+            Ok(result)
+        }
+    }
+
+    #[tokio::test]
+    async fn overwrite_between_head_and_get_cannot_bypass_the_cap() {
+        for race in [Race::Etag, Race::Metadata, Race::Body] {
+            let changing = Arc::new(ChangingStore {
+                inner: object_store::memory::InMemory::new(),
+                race,
+                chunks: Arc::default(),
+            });
+            let key = Path::from("changing");
+            changing
+                .put(&key, PutPayload::from_static(b"123"))
+                .await
+                .unwrap();
+            let store: Arc<dyn object_store::ObjectStore> = changing.clone();
+            let error = read_capped(&store, &key, 5).await.unwrap_err();
+            match race {
+                Race::Etag => assert!(matches!(error, ObjectStoreError::Precondition { .. })),
+                Race::Version => unreachable!("the versioned case returns the original bytes"),
+                Race::Metadata => {
+                    assert!(matches!(error, ObjectStoreError::TooLarge { size: 9, .. }));
+                }
+                Race::Body => {
+                    assert!(matches!(error, ObjectStoreError::TooLarge { size: 6, .. }));
+                    assert!(changing.chunks.load(SeqCst) == 2);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn versioned_get_reads_the_head_version_after_an_overwrite() {
+        let changing = Arc::new(ChangingStore {
+            inner: object_store::memory::InMemory::new(),
+            race: Race::Version,
+            chunks: Arc::default(),
+        });
+        let key = Path::from("versioned");
+        changing
+            .put(&key, PutPayload::from_static(b"123"))
+            .await
+            .unwrap();
+        let store: Arc<dyn object_store::ObjectStore> = changing.clone();
+        assert!(read_capped(&store, &key, 5).await.unwrap().as_ref() == b"123");
+        assert!(changing.inner.head(&key).await.unwrap().size == 9);
     }
 }

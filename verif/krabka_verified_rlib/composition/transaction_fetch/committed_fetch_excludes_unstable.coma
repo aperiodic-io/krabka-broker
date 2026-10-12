@@ -1,15 +1,15 @@
-(* #"/workspace/crates/verified/src/composition/transaction_fetch.rs" 30 0 33 50 *)
+(* #"/workspace/crates/verified/src/composition/transaction_fetch.rs" 33 0 36 35 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
-let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 169 10 169 63
-let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 170 10 171 97
-let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 83
-let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 175 58
-let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 176 74
-let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 177 10 181 1
-let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 182 10 182 36
-let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 183 10 183 59
+let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 93
+let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 174 97
+let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 175 10 175 83
+let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 178 58
+let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 179 10 179 74
+let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 180 10 184 1
+let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 185 10 185 36
+let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 186 10 186 59
 let%span sfetch'7 = "/workspace/crates/verified/src/broker/fetch.rs" 120 16 120 42
 let%span sfetch'8 = "/workspace/crates/verified/src/broker/fetch.rs" 133 8 139 9
 let%span sops = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/ops.rs" 688 18 691 9
@@ -18,13 +18,13 @@ let%span sops'1 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span snext_producer_identity = "/workspace/crates/verified/src/transaction/next_producer_identity.rs" 12 10 15 1
 let%span stransaction = "/workspace/crates/verified/src/transaction.rs" 9 8 14 86
 let%span stransaction'0 = "/workspace/crates/verified/src/transaction.rs" 252 16 253 85
-let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 34 14 34 54
-let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 34 14 34 55
-let%span stransaction_fetch'1 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 35 38 35 43
-let%span stransaction_fetch'2 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 35 45 35 49
-let%span stransaction_fetch'3 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 35 21 35 93
-let%span stransaction_fetch'4 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 14 10 25 1
-let%span stransaction_fetch'5 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 26 10 29 1
+let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 37 14 37 54
+let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 37 14 37 55
+let%span stransaction_fetch'1 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 38 38 38 43
+let%span stransaction_fetch'2 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 38 45 38 49
+let%span stransaction_fetch'3 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 38 21 38 93
+let%span stransaction_fetch'4 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 15 10 28 1
+let%span stransaction_fetch'5 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 29 10 32 1
 
 use creusot.slice.Slice64
 use creusot.int.Int64
@@ -152,7 +152,8 @@ let fetch_visibility (is_follower: bool) (read_committed: bool) (w: t_FetchWater
   (return (x: t_FetchVisibility)) = any
   [ return (result: t_FetchVisibility) ->
   {[@stop_split] [@expl:fetch_visibility ensures] ([@stop_split] [@expl:fetch_visibility ensures #0] [%#sfetch] result.out_of_range
-      = (Int64.to_int fetch_offset < Int64.to_int w.log_start))
+      = (Int64.to_int fetch_offset < Int64.to_int w.log_start
+      \/ gt_log_Int (Int64.to_int fetch_offset) (Int64.to_int w.log_end)))
     /\ ([@stop_split] [@expl:fetch_visibility ensures #1] [%#sfetch'0] result.empty
       = (not result.out_of_range
       /\ ge_log_Int (Int64.to_int fetch_offset) (if is_follower then
@@ -189,7 +190,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let committed_fetch_excludes_unstable [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 30 0 33 50]
+let committed_fetch_excludes_unstable [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 33 0 36 35]
   (starts: Slice64.slice Int64.t) (w: t_FetchWatermarks) (return (x: t_Option_tup2_i64_FetchVisibility)) = (! bb0
   [ bb0 = s0
     [ s0 = first_unstable_offset [%#stransaction_fetch] {starts} {w.log_end}
@@ -239,9 +240,10 @@ let committed_fetch_excludes_unstable [#"/workspace/crates/verified/src/composit
         /\ Int64.to_int visibility.response_lso = MinMax.min (Int64.to_int lso'0) (Int64.to_int w.hw)
         /\ Int64.to_int visibility.response_hw = Int64.to_int w.hw
         /\ visibility.read_committed_aborts
-        /\ not visibility.out_of_range
+        /\ visibility.out_of_range = gt_log_Int (Int64.to_int w.log_start) (Int64.to_int w.log_end)
         /\ visibility.empty
-          = ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable))
+          = (Int64.to_int w.log_start <= Int64.to_int w.log_end
+          /\ ge_log_Int (Int64.to_int w.log_start) (MinMax.min (Int64.to_int w.hw) (Int64.to_int w.deliverable)))
         /\ (forall i: int. 0 <= i /\ i < Seq.length (Slice64.view starts)
           -> Int64.to_int visibility.limit_offset <= Int64.to_int (Seq.get (Slice64.view starts) i))
         end)

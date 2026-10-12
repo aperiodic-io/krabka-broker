@@ -41,6 +41,15 @@ pub fn stamp_ranges_valid(bases: &[i64], lasts: &[i64]) -> bool {
 }
 
 /// Return the sorted insertion position for one nonoverlapping range.
+///
+/// `bases` and `lasts` must have equal lengths and describe sorted,
+/// individually ordered, pairwise nonoverlapping inclusive ranges. Use
+/// [`stamp_ranges_valid`] to check these preconditions before calling.
+///
+/// # Panics
+///
+/// May panic if `lasts` is shorter than `bases`. Proof annotations do not
+/// validate inputs in ordinary Rust builds.
 #[requires(sorted_disjoint(bases@, lasts@))]
 #[ensures(match result {
     Some(index) => index@ <= bases@.len()
@@ -78,6 +87,13 @@ pub fn stamp_range_insertion_index(
 }
 
 /// Find the first range with both exact inclusive boundaries.
+///
+/// `bases` and `lasts` must have equal lengths.
+///
+/// # Panics
+///
+/// May panic if `lasts` is shorter than `bases`; equal lengths are a caller
+/// precondition, not a runtime check.
 #[requires(stamp_range_arrays_parallel(bases@, lasts@))]
 #[ensures(match result {
     Some(index) => index@ < bases@.len()
@@ -107,6 +123,13 @@ pub fn exact_stamp_range_index(
 }
 
 /// Find the first inclusive range that covers `offset`.
+///
+/// `bases` and `lasts` must have equal lengths.
+///
+/// # Panics
+///
+/// May panic if `lasts` is shorter than `bases`; equal lengths are a caller
+/// precondition, not a runtime check.
 #[requires(stamp_range_arrays_parallel(bases@, lasts@))]
 #[ensures(match result {
     Some(index) => index@ < bases@.len()

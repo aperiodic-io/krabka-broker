@@ -1,17 +1,17 @@
-(* #"/workspace/crates/verified/src/lib.rs" 31 29 31 46 *)
+(* #"/workspace/crates/verified/src/lib.rs" 34 29 34 46 *)
 
 (* <retention::RemoteRetentionSegment as std::clone::Clone> *)
 
 use creusot.int.UInt64
 use creusot.prelude.Any
 
-type t_RemoteRetentionSegment = { log_start_breached: bool; time_expired: bool; size: UInt64.t }
+type t_RemoteRetentionSegment = { blocked: bool; log_start_breached: bool; time_expired: bool; size: UInt64.t }
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_RemoteRetentionSegment [#"/workspace/crates/verified/src/lib.rs" 31 29 31 46] (self: t_RemoteRetentionSegment)
+let clone_RemoteRetentionSegment [#"/workspace/crates/verified/src/lib.rs" 34 29 34 46] (self: t_RemoteRetentionSegment)
   (return (x: t_RemoteRetentionSegment)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_RemoteRetentionSegment = Any.any_l () | & self: t_RemoteRetentionSegment = self ])

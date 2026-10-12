@@ -116,8 +116,30 @@ impl KraftController {
         &self,
         records: Vec<krabka_metadata::MetadataRecord>,
     ) -> Result<SubmitChangeResult, RaftError> {
-        self.ask(|reply| Command::SubmitChange { records, reply })
-            .await?
+        self.ask(|reply| Command::SubmitChange {
+            records,
+            expected_image: None,
+            reply,
+        })
+        .await?
+    }
+
+    /// Submit a leader-local mutation only while its admission image is current.
+    /// Pending metadata must commit before a caller can plan a guarded mutation.
+    ///
+    /// # Errors
+    /// Returns a leadership, stale-image, uncommitted-tail, or submission error.
+    pub async fn submit_change_if_image(
+        &self,
+        records: Vec<krabka_metadata::MetadataRecord>,
+        expected_image: Arc<MetadataImage>,
+    ) -> Result<SubmitChangeResult, RaftError> {
+        self.ask(|reply| Command::SubmitChange {
+            records,
+            expected_image: Some(expected_image),
+            reply,
+        })
+        .await?
     }
 
     /// Submit generation-bound delegation-token mutations.

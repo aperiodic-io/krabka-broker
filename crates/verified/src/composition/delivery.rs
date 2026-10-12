@@ -70,7 +70,7 @@ type ScheduledPrefix = (i64, FetchVisibility, FetchVisibility);
             && frontier@ == batches@[i].0@
             && !scheduled_activation_due(activations@[i]@, uncertainty@, now@))
         && consumer.limit_offset@ == w.hw@.min(w.lso@).min(frontier@)
-        && committed_fetch_response(consumer, w.hw, w.lso, frontier, w.log_start@)
+        && committed_fetch_response(consumer, w.hw, w.lso, frontier, w.log_start@, w.log_end@)
         && follower.limit_offset == w.log_end && follower.response_hw == w.hw
         && follower.response_lso@ == w.hw@.min(w.lso@) && follower.effective_lso == w.lso
         && !follower.read_committed_aborts && !follower.out_of_range

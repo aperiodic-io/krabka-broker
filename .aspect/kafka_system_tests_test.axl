@@ -159,7 +159,10 @@ def _test_verdicts_compare_status_with_expectation(_ctx):
         ("NOT RUN", None, "regression"),
         ("FLAKY", None, "regression"),
         ("FAIL", "times out", "known failure"),
-        ("NOT RUN", "times out", "known failure"),
+        ("NOT RUN", "times out", "regression"),
+        ("SKIP", "times out", "regression"),
+        ("ABORT", "times out", "regression"),
+        ("FLAKY", "times out", "regression"),
         ("PASS", "times out", "fixed"),
     ]
     for status, known_failure, want in cases:

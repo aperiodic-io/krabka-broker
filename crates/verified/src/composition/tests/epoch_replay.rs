@@ -63,8 +63,8 @@ fn epoch_oracle(
         ..w
     };
     let visibility = FetchVisibility {
-        out_of_range: false,
-        empty: w.log_start >= bounded.hw.min(bounded.deliverable),
+        out_of_range: w.log_start > cut,
+        empty: w.log_start <= cut && w.log_start >= bounded.hw.min(bounded.deliverable),
         limit_offset: w.hw.min(w.lso).min(w.deliverable).min(cut),
         effective_lso: bounded.hw.min(bounded.lso),
         read_committed_aborts: true,

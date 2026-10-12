@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/lib.rs" 31 29 31 46 *)
+(* #"/workspace/crates/verified/src/lib.rs" 34 29 34 46 *)
 
 (* <uniform_assignor::SubscriberLoad as std::clone::Clone> *)
 
@@ -11,7 +11,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_SubscriberLoad [#"/workspace/crates/verified/src/lib.rs" 31 29 31 46] (self: t_SubscriberLoad)
+let clone_SubscriberLoad [#"/workspace/crates/verified/src/lib.rs" 34 29 34 46] (self: t_SubscriberLoad)
   (return (x: t_SubscriberLoad)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_SubscriberLoad = Any.any_l () | & self: t_SubscriberLoad = self ])

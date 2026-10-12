@@ -48,6 +48,7 @@ use krabka_remote_storage::{
     AuthenticatedArchive, Sha256Digest, TrustedManifestKeys, VerifyRequest, authenticate_archive,
     diskless::CAPTURE_HEAD_NAME,
 };
+use krabka_remote_storage_topic::Snapshot;
 
 mod args;
 mod backend;
@@ -226,17 +227,12 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
             .chain_heads
             .insert(CAPTURE_HEAD_NAME.to_owned(), head.clone());
     }
-    let (metadata_authenticated, rlmm_authenticated) =
-        authenticate_snapshots(args, diskless_capture.as_ref(), trusted.is_some()).await?;
-    if rlmm_authenticated && has_classic {
-        let rlmm_snapshot = args.archive.rlmm_snapshot.as_deref().ok_or_else(|| {
-            RestoreError::Integrity("authenticated RLMM snapshot has no path".to_owned())
-        })?;
-        discover::reconcile_authenticated_with_snapshot(
-            &mut archive.partitions,
-            args,
-            rlmm_snapshot,
-        )?;
+    let AuthenticatedSnapshots {
+        metadata: metadata_bytes,
+        rlmm: rlmm_snapshot,
+    } = authenticate_snapshots(args, diskless_capture.as_ref(), trusted.is_some()).await?;
+    if let Some(snapshot) = rlmm_snapshot.as_ref().filter(|_| has_classic) {
+        discover::reconcile_authenticated_snapshot(&mut archive.partitions, args, snapshot)?;
         if archive.partitions.is_empty() {
             return Err(RestoreError::EmptyArchive {
                 prefix: store.prefix().unwrap_or("").to_owned(),
@@ -252,20 +248,22 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
         });
     }
     let predicates = Predicates::from_args(args)?;
-    let format = format_target(args, &archive).await?;
-    seed_rlmm_snapshot(
+    let format =
+        materialize::format_target_with_snapshot(args, &archive, metadata_bytes.as_deref()).await?;
+    materialize::seed_rlmm_snapshot_from(
         args,
         authenticated
             .as_ref()
             .and_then(|(archive, _)| archive.as_ref())
             .map(AuthenticatedArchive::report),
+        rlmm_snapshot.as_ref(),
     )?;
 
     let mut consumed_authenticated_objects = std::collections::BTreeSet::new();
-    if metadata_authenticated {
+    if metadata_bytes.is_some() {
         consumed_authenticated_objects.insert("cluster-metadata.checkpoint".to_owned());
     }
-    if rlmm_authenticated {
+    if rlmm_snapshot.is_some() {
         consumed_authenticated_objects.insert("rlmm-snapshot".to_owned());
     }
     let mut partitions = Vec::with_capacity(archive.partitions.len());
@@ -275,6 +273,7 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
             continue;
         }
         let mut segments = Vec::with_capacity(entry.segments.len());
+        let mut skipped_predecessor = false;
         for segment in &entry.segments {
             let verification = match &authenticated {
                 Some((Some(authenticated), _)) => {
@@ -300,6 +299,7 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
                         segment_id: segment.segment_id,
                         reason: error.to_string(),
                     });
+                    skipped_predecessor = true;
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -308,7 +308,17 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
                 consumed_authenticated_objects
                     .extend(segment.artifacts().map(|object| object.key.to_string()));
             }
-            segments.push(write_segment(args, &entry.partition, &verified, &predicates).await?);
+            segments.push(
+                materialize::write_segment_after_skip(
+                    args,
+                    &entry.partition,
+                    &verified,
+                    &predicates,
+                    skipped_predecessor,
+                )
+                .await?,
+            );
+            skipped_predecessor = false;
         }
         partitions.push(PartitionReport {
             topic: entry.partition.topic.clone(),
@@ -351,11 +361,16 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
     })
 }
 
+struct AuthenticatedSnapshots {
+    metadata: Option<Vec<u8>>,
+    rlmm: Option<Snapshot>,
+}
+
 async fn authenticate_snapshots(
     args: &RestoreArgs,
     capture: Option<&krabka_remote_storage::diskless::DisklessWalCapture>,
     authenticated_restore: bool,
-) -> Result<(bool, bool), RestoreError> {
+) -> Result<AuthenticatedSnapshots, RestoreError> {
     let metadata = authenticate_captured_snapshot(
         args.archive.metadata_snapshot.as_deref(),
         capture.and_then(|capture| capture.metadata_snapshot_sha256),
@@ -363,14 +378,27 @@ async fn authenticate_snapshots(
         "--metadata-snapshot",
     )
     .await?;
-    let rlmm = authenticate_captured_snapshot(
+    let rlmm_bytes = authenticate_captured_snapshot(
         args.archive.rlmm_snapshot.as_deref(),
         capture.and_then(|capture| capture.rlmm_snapshot_sha256),
         authenticated_restore,
         "--rlmm-snapshot",
     )
     .await?;
-    Ok((metadata, rlmm))
+    let rlmm_snapshot = rlmm_bytes
+        .as_deref()
+        .map(|bytes| {
+            Snapshot::decode(bytes).map_err(|error| {
+                RestoreError::Integrity(format!(
+                    "cannot decode authenticated RLMM snapshot: {error}"
+                ))
+            })
+        })
+        .transpose()?;
+    Ok(AuthenticatedSnapshots {
+        metadata,
+        rlmm: rlmm_snapshot,
+    })
 }
 
 async fn authenticate_captured_snapshot(
@@ -378,12 +406,12 @@ async fn authenticate_captured_snapshot(
     expected: Option<Sha256Digest>,
     authenticated_restore: bool,
     flag: &str,
-) -> Result<bool, RestoreError> {
+) -> Result<Option<Vec<u8>>, RestoreError> {
     let Some(path) = path else {
-        return Ok(false);
+        return Ok(None);
     };
     if !authenticated_restore {
-        return Ok(false);
+        return Ok(None);
     }
     let expected = expected.ok_or_else(|| RestoreError::Authenticity {
         reason: format!("{flag} is not bound to the signed diskless capture"),
@@ -397,7 +425,7 @@ async fn authenticate_captured_snapshot(
             ),
         });
     }
-    Ok(true)
+    Ok(Some(bytes))
 }
 
 async fn authenticate_source(

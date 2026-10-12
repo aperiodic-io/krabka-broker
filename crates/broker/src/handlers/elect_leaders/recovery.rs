@@ -35,7 +35,7 @@ use crate::{
 ///
 /// # KFC-9: the approval is spent before the recovery starts
 ///
-/// The URM owns the `submit_change` that elects the leader, and it runs after
+/// The URM owns the guarded append that elects the leader, and it runs after
 /// this handler answers, so there is no batch to carry the consume in. The
 /// broker appends the consume on its own first instead. Consume-then-transition
 /// is the safe order of the two: a crash between them loses the approval, where

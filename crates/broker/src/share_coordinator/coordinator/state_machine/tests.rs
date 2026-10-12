@@ -97,6 +97,84 @@ async fn initialize_then_summary() {
     assert!(summary == Ok(Some((5, 0, Offset(100), 0))));
 }
 
+/// A shard serializes first initialization through its append, even before a
+/// state cell exists. A queued initialization must validate the installed
+/// epoch and use the next snapshot epoch, as replay does.
+#[tokio::test]
+async fn concurrent_first_initializes_preserve_epoch_fencing_and_replay() {
+    for trunk in [false, true] {
+        for next_epoch in [1, 3] {
+            let dir = tempdir().unwrap();
+            let (coord, registry, _clock) = configured_coordinator(
+                dir.path(),
+                ShareCoordinatorConfig {
+                    state_topic_num_partitions: 1,
+                    ..rules(trunk)
+                },
+            );
+            lead_all(&coord).await;
+            let image = image_with_topic(TOPIC, 1);
+            let partition = registry
+                .get(SHARE_STATE_TOPIC, coord.state_partition_for("g", &TOPIC, 0))
+                .expect("state partition is open");
+            // The first request reaches its append while the logical key is
+            // still absent. Pause that append at the metadata transition seam.
+            let transition = partition.replication_target.write().await;
+            let first = coord.initialize(&image, "g", TOPIC, 0, 2, Offset(10));
+            let next = coord.initialize(&image, "g", TOPIC, 0, next_epoch, Offset(20));
+            tokio::pin!(first, next);
+            tokio::select! {
+                biased;
+                result = &mut first => panic!("paused append completed: {result:?}"),
+                () = tokio::task::yield_now() => {}
+            }
+            assert!(coord.entry("g", TOPIC, 0).is_none());
+            tokio::select! {
+                biased;
+                result = &mut next => panic!("queued initialize completed: {result:?}"),
+                () = tokio::task::yield_now() => {}
+            }
+            drop(transition);
+            let (first, next) = tokio::join!(first, next);
+            let expected_next = if next_epoch == 1 {
+                Err(refused(
+                    codes::FENCED_STATE_EPOCH,
+                    message::FENCED_STATE_EPOCH,
+                ))
+            } else {
+                Ok(())
+            };
+            assert!((first, next) == (Ok(()), expected_next));
+            let expected = if next_epoch == 1 {
+                (2, 0, Offset(10), 0)
+            } else {
+                (3, 0, Offset(20), 0)
+            };
+            assert!(coord.read_summary("g", TOPIC, 0).await == Ok(Some(expected)));
+            let snapshots: Vec<_> =
+                logged_records(&coord, coord.state_partition_for("g", &TOPIC, 0))
+                    .into_iter()
+                    .filter_map(|(_, record)| match record {
+                        Logged::Snapshot(snapshot) => {
+                            Some((snapshot.snapshot_epoch, snapshot.state_epoch))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+            let expected_snapshots = if next_epoch == 1 {
+                vec![(0, 2)]
+            } else {
+                vec![(0, 2), (1, 3)]
+            };
+            assert!(snapshots == expected_snapshots);
+            coord.reload_all_partitions_for_test().await;
+            assert!(coord.read_summary("g", TOPIC, 0).await == Ok(Some(expected)));
+            let entry = coord.entry("g", TOPIC, 0).expect("state replayed");
+            assert!(entry.lock().await.fence_state_epoch == expected.0);
+        }
+    }
+}
+
 /// `InitializeShareGroupState` creates the state key, which writes its group id
 /// with an `INT16` length. A group id of 32767 bytes is initialized and deleted.
 /// A longer one is refused with the internal error, as Kafka answers a record

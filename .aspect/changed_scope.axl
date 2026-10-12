@@ -1,24 +1,22 @@
-"""Decide whether a change needs the Rust jobs at all.
+"""Decide whether a change reaches the Rust build or its test inputs.
 
-The build, test, clippy and coverage jobs are the floor of this repository's
-CI: they compile the whole workspace, and they cost the same twenty minutes
-whether the pull request rewrote the log layer or fixed a typo in a design doc.
-Most of what lands here is neither -- a KFC, a style guide, a README, a
-workflow -- and none of it can change what `cargo` or `bazel` produce.
+CI uses this decision to skip coverage on documentation-only pull requests.
+Build, Clippy and daemon-free tests still run. A KFC, style guide, README or
+workflow change usually cannot move the coverage numbers; source, build rules
+and test fixtures can.
 
-So this task answers one question for the workflow that gates those jobs: does
-anything in the diff reach the Rust build? `container-suites` answers the much
-finer question of *which* container suites a change needs; this is the coarse
-gate in front of it, and the two are deliberately separate. A wrong answer here
-skips everything, so the rules below are deliberately generous: a file counts
+This task asks whether anything in the diff reaches the Rust build.
+`container-suites` separately answers which container suites a change needs.
+A wrong answer here could omit a useful coverage run, so the rules are
+deliberately generous: a file counts
 if it plausibly reaches a compiler, a linker, a Bazel rule or a test fixture,
 and only a `.md` under `crates/` is carved back out.
 
 It fails open. An unresolvable `--base` -- an empty one, a shallow clone that
 does not reach the merge base, a branch force-pushed out from under the runner
--- means the diff is unknown, and an unknown diff runs everything. The cost of
-being wrong in that direction is one slow pull request; the cost of being wrong
-in the other is a merge nobody compiled.
+-- means the diff is unknown, and an unknown diff runs coverage. The cost of
+being wrong in that direction is one slower pull request; the other direction
+can hide a coverage regression.
 
     aspect changed-scope --base origin/main
 """
@@ -60,14 +58,11 @@ BUILD_PREFIXES = ["bazel/", "packaging/", "tools/"]
 # parse them against what the code produces.
 #
 # They have to be listed because the `crates/` rule below cannot see them, and
-# the `.md` carve-out would drop `config-reference.md` even if it could. What
-# makes the omission unsafe rather than merely slow is which job runs those
-# four suites: only `coverage` does, because the `ci` job's `test` step is
-# narrowed to `--test_tag_filters=timing-sensitive`. A schema edited here and
-# skipped here is a schema no Rust contract test ever checks -- and
-# `aspect generate-config-reference` would still pass, because it regenerates
-# the reference *from* the schema rather than checking the schema against
-# `FileConfig`.
+# the `.md` carve-out would drop `config-reference.md` even if it could.
+# These inputs can change test behavior and coverage, so they need the same
+# scope decision as source changes. The `ci` job's daemon-free tests run their
+# Rust contract checks even when coverage is skipped. Regenerating the
+# reference *from* the schema alone does not compare it against `FileConfig`.
 #
 # The two directories are whole prefixes rather than the seven exact files, so
 # that a file added to one of those `data` attributes is covered before anyone
@@ -75,8 +70,8 @@ BUILD_PREFIXES = ["bazel/", "packaging/", "tools/"]
 # `bench/scenarios/` is the same kind of input from outside `docs/`:
 # `crates/bench-driver/BUILD.bazel` names `//bench:scenarios` in the `data` of
 # its test targets, and `scenario_files` loads every one of those YAML files
-# through the driver's own `Scenario` type. A scenario edited alone would
-# otherwise skip the suite that is the only reader of it.
+# through the driver's own `Scenario` type. A scenario edited alone must
+# therefore qualify for coverage just as a test-source change does.
 DATA_FILES = ["docs/config-reference.md", "docs/config-schema.json"]
 DATA_PREFIXES = ["bench/scenarios/", "docs/examples/", "docs/operations/"]
 
@@ -101,11 +96,11 @@ def touches_rust(paths):
     return False
 
 def decide(base_resolved, paths):
-    """Whether the Rust jobs must run, given a diff that may not exist.
+    """Whether coverage should run, given a diff that may not exist.
 
     `base_resolved` is whether Git could turn the `--base` this task was handed
     into a commit. When it could not, `paths` says nothing about the change and
-    the only safe answer is the whole build: this is the fail-open case, and it
+    the conservative answer is to run coverage: this is the fail-open case, and it
     is a branch of its own rather than an empty list flowing through
     `touches_rust`, because an empty diff and an unknown diff are opposite
     answers.

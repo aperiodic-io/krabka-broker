@@ -57,7 +57,7 @@ Clippy is a hard gate. CI runs:
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Every warning is an error, across all targets. Fix the lint. Do not suppress it. If a lint genuinely does not apply, use a narrowly-scoped `#[allow(...)]` on the specific item, not a crate-wide allow, and add a `//` comment that gives the reason.
+Every warning is an error, across all targets. Fix the lint. Never add `#[allow(clippy::...)]` or an equivalent Clippy suppression, including scoped exceptions. This is the policy in [CLAUDE.md](../../CLAUDE.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 The workspace sets lint levels **once**, in the `[workspace.lints]` table. Every crate inherits them through `[lints] workspace = true`. The current policy is:
 
@@ -65,7 +65,7 @@ The workspace sets lint levels **once**, in the `[workspace.lints]` table. Every
 - `clippy::pedantic = "warn"` — the pedantic group is on, so expect Clippy to be stricter than its defaults.
 - A small set of pedantic lints stay relaxed on purpose: `module_name_repetitions`, `missing_errors_doc`, and `missing_panics_doc`. The workspace `Cargo.toml` documents them. Do not add to the list without a discussion first.
 
-Do not add per-crate lint configuration. A crate that needs a different lint level almost always wants a scoped `#[allow]` on the item instead.
+Do not add per-crate lint configuration or scoped Clippy suppressions. Fix warnings under the shared workspace policy.
 
 ## Naming
 

@@ -1,6 +1,5 @@
 # krabka-records-legacy
 
-[![Crates.io](https://img.shields.io/crates/v/krabka-records-legacy.svg)](https://crates.io/crates/krabka-records-legacy)
 [API documentation](https://krabka-io.github.io/krabka-broker/krabka-records-legacy/krabka_records_legacy/index.html)
 [![CI](https://github.com/robot-head/crabka/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-head/crabka/actions/workflows/ci.yml)
 
@@ -13,10 +12,10 @@ This crate is part of [Krabka](https://github.com/robot-head/crabka), a Rust imp
 ## Install
 
 ```sh
-cargo add krabka-records-legacy
+cargo add krabka-records-legacy --path ../krabka-broker/crates/records-legacy
 ```
 
-For workspace development, use the path dependency from this repository instead.
+This crate is not published by this repository. Adjust the path to your local checkout. Workspace development uses the path dependencies declared in this repository.
 
 ## Usage example
 

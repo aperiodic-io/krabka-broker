@@ -32,6 +32,7 @@ const fn blocked(expired: bool, size: u64) -> LocalRetentionSegment {
 /// A finished remote segment with the given axes.
 const fn remote(log_start_breached: bool, time_expired: bool, size: u64) -> RemoteRetentionSegment {
     RemoteRetentionSegment {
+        blocked: false,
         log_start_breached,
         time_expired,
         size,
@@ -45,3 +46,20 @@ mod delete_target_rejects_offset_exhaustion;
 mod remote_charge;
 
 mod remote_floor;
+
+#[test]
+fn a_blocked_remote_segment_stops_every_retention_axis() {
+    for (floor, time) in [(false, false), (true, false), (false, true), (true, true)] {
+        let segments = [
+            remote(false, true, 10),
+            RemoteRetentionSegment {
+                blocked: true,
+                ..remote(floor, time, 10)
+            },
+            remote(true, true, 10),
+        ];
+        for debt in [0, 10, 100] {
+            check!(remote_retention_prefix(true, &segments, debt) == 1);
+        }
+    }
+}

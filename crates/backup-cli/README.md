@@ -85,9 +85,9 @@ krabka-backup restore-offsets \
 | `verify` | `--capture <id\|latest>` | Re-reads each artifact and checks its size and SHA-256 against the manifest. |
 | `restore-offsets` | `--capture <id\|latest>`, `-b <host:port>`, `--command-config <file>`, `--dry-run`, `--worm-key-id <id> --worm-public-key <path> --worm-expect-head <hex>` | Commits the captured offsets into a restored cluster. A signed diskless capture requires the trust triple and binds the offsets to that boundary. |
 
-A capture id is the epoch millisecond, zero-padded, so the plain alphabetical
-order of the directory names is their time order and `latest` is a listing and a
-maximum.
+A capture id has a zero-padded epoch millisecond followed by a random UUID suffix. Concurrent captures and repeated clock values receive different identities, and capture writes refuse to overwrite existing objects. `latest` is still a listing and a maximum; older timestamp-only captures remain discoverable. Captures within the same millisecond have no time order beyond their common timestamp.
+
+Archive reads enforce independent limits before buffering: 8 MiB for manifests, 64 MiB for group offsets, 512 MiB for metadata/RLMM snapshots, and 256 MiB for diskless capture documents and other artifacts. Manifest-declared sizes cannot raise these limits.
 
 ## What a capture holds
 

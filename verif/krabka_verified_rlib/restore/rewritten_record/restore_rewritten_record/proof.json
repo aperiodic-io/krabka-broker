@@ -11,7 +11,7 @@
       "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.024 },
       "vc_from_residual_Option_tup2_i64_i64": {
         "prover": "alt-ergo",
-        "time": 0.024
+        "time": 0.009
       },
       "vc_is_some_and_i32": { "prover": "alt-ergo", "time": 0.011 },
       "vc_restore_record_coordinates": {

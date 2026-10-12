@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_candidate_has_majority": { "prover": "z3", "time": 0.022 },
+      "vc_candidate_has_majority": { "prover": "z3", "time": 0.006 },
       "vc_len_i64": { "prover": "alt-ergo", "time": 0.007 }
     }
   }

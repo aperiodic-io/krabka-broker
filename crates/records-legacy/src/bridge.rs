@@ -33,22 +33,47 @@ use crate::{
 /// Each emitted [`ParsedRecord`] gets its absolute offset as
 /// `base_offset + offset_delta`. For a v1 target, each record also gets
 /// its absolute timestamp as `base_timestamp + timestamp_delta`.
-#[must_use]
-pub fn parsed_from_v2(batch: &RecordBatch, target: Magic) -> Vec<ParsedRecord> {
+///
+/// # Errors
+/// Returns an error if an absolute offset or timestamp exceeds `i64`.
+pub fn parsed_from_v2(
+    batch: &RecordBatch,
+    target: Magic,
+) -> Result<Vec<ParsedRecord>, LegacyRecordsError> {
     if batch.attributes.is_control_batch() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     batch
         .records
         .iter()
-        .map(|r| ParsedRecord {
-            offset: Offset(batch.base_offset + i64::from(r.offset_delta)),
-            timestamp: match target {
-                Magic::V0 => None,
-                Magic::V1 => Some(batch.base_timestamp + r.timestamp_delta),
-            },
-            key: r.key.clone(),
-            value: r.value.clone(),
+        .map(|r| {
+            Ok(ParsedRecord {
+                offset: Offset(
+                    batch
+                        .base_offset
+                        .checked_add(i64::from(r.offset_delta))
+                        .ok_or_else(|| {
+                            LegacyRecordsError::Malformed(
+                                "absolute record offset exceeds i64".into(),
+                            )
+                        })?,
+                ),
+                timestamp: match target {
+                    Magic::V0 => None,
+                    Magic::V1 => Some(
+                        batch
+                            .base_timestamp
+                            .checked_add(r.timestamp_delta)
+                            .ok_or_else(|| {
+                                LegacyRecordsError::Malformed(
+                                    "absolute record timestamp exceeds i64".into(),
+                                )
+                            })?,
+                    ),
+                },
+                key: r.key.clone(),
+                value: r.value.clone(),
+            })
         })
         .collect()
 }
@@ -62,9 +87,10 @@ pub fn parsed_from_v2(batch: &RecordBatch, target: Magic) -> Vec<ParsedRecord> {
 /// already decompressed those records.
 ///
 /// # Errors
-/// Returns an error if this function cannot encode the legacy message set.
+/// Returns an error if an absolute offset or timestamp exceeds `i64`, or if
+/// this function cannot encode the legacy message set.
 pub fn v2_to_legacy(batch: &RecordBatch, target: Magic) -> Result<Bytes, LegacyRecordsError> {
-    let records = parsed_from_v2(batch, target);
+    let records = parsed_from_v2(batch, target)?;
     let mut out = BytesMut::new();
     if records.is_empty() {
         return Ok(out.freeze());
@@ -93,7 +119,8 @@ pub fn v2_to_legacy(batch: &RecordBatch, target: Magic) -> Result<Bytes, LegacyR
 ///
 /// # Errors
 /// Returns an error if this function cannot decode the legacy message set.
-/// Returns an error if the offsets overflow the v2 delta fields.
+/// Returns an error if offsets exceed the v2 delta fields or timestamp
+/// differences exceed `i64`.
 pub fn legacy_to_v2(set_bytes: &[u8]) -> Result<RecordBatch, LegacyRecordsError> {
     legacy_to_v2_with_policy(set_bytes, RecordDecompressionPolicy::default())
 }
@@ -104,7 +131,7 @@ pub fn legacy_to_v2(set_bytes: &[u8]) -> Result<RecordBatch, LegacyRecordsError>
 ///
 /// Returns an error if this function cannot decode the legacy message set
 /// within the limits in `policy`. Returns an error if the offsets overflow
-/// the v2 delta fields.
+/// the v2 delta fields or timestamp differences exceed `i64`.
 pub fn legacy_to_v2_with_policy(
     set_bytes: &[u8],
     policy: RecordDecompressionPolicy,
@@ -135,7 +162,7 @@ pub fn legacy_to_v2_with_policy(
         .last()
         .ok_or_else(|| LegacyRecordsError::Malformed("legacy record set is empty".into()))?
         .offset;
-    let last_offset_delta = i32::try_from(last_offset.0 - base_offset.0)
+    let last_offset_delta = i32::try_from(i128::from(last_offset.0) - i128::from(base_offset.0))
         .map_err(|_| LegacyRecordsError::Malformed("last offset delta exceeds i32".into()))?;
 
     let out_records: Vec<Record> = records
@@ -143,10 +170,15 @@ pub fn legacy_to_v2_with_policy(
         .map(|r| {
             Ok(Record {
                 attributes: 0,
-                timestamp_delta: r.timestamp.map_or(0, |ts| ts - base_timestamp),
-                offset_delta: i32::try_from(r.offset.0 - base_offset.0).map_err(|_| {
-                    LegacyRecordsError::Malformed("record offset delta exceeds i32".into())
+                timestamp_delta: r.timestamp.map_or(Ok(0), |ts| {
+                    ts.checked_sub(base_timestamp).ok_or_else(|| {
+                        LegacyRecordsError::Malformed("record timestamp delta exceeds i64".into())
+                    })
                 })?,
+                offset_delta: i32::try_from(i128::from(r.offset.0) - i128::from(base_offset.0))
+                    .map_err(|_| {
+                        LegacyRecordsError::Malformed("record offset delta exceeds i32".into())
+                    })?,
                 key: r.key.clone(),
                 value: r.value.clone(),
                 headers: Vec::new(),
@@ -222,6 +254,79 @@ mod tests {
                     headers: vec![],
                 },
             ],
+        }
+    }
+
+    fn flat_v1(offsets: &[i64], timestamps: &[i64]) -> BytesMut {
+        let records = offsets
+            .iter()
+            .zip(timestamps)
+            .map(|(&offset, &timestamp)| ParsedRecord {
+                offset: Offset(offset),
+                timestamp: Some(timestamp),
+                key: None,
+                value: None,
+            });
+        let mut wire = BytesMut::new();
+        encode_flat_message_set(records, Magic::V1, &mut wire);
+        wire
+    }
+
+    #[test]
+    fn up_conversion_rejects_extreme_offset_and_timestamp_deltas() {
+        for (offsets, timestamps) in [
+            (vec![i64::MIN, i64::MAX], vec![0, 0]),
+            (vec![i64::MAX, i64::MIN], vec![0, 0]),
+            (vec![0, i64::MAX, 1], vec![0, 0, 0]),
+            (vec![0, 1], vec![i64::MIN, i64::MAX]),
+        ] {
+            let wire = flat_v1(&offsets, &timestamps);
+            assert2::assert!(matches!(
+                legacy_to_v2(&wire),
+                Err(LegacyRecordsError::Malformed(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn conversion_preserves_representable_extreme_coordinates() {
+        for base in [i64::MIN, i64::MAX - 1] {
+            let wire = flat_v1(&[base, base + 1], &[base, base + 1]);
+            let batch = legacy_to_v2(&wire).unwrap();
+            assert2::assert!(batch.base_offset == base && batch.last_offset_delta == 1);
+            assert2::assert!(batch.base_timestamp == base && batch.max_timestamp == base + 1);
+            assert2::assert!(
+                batch
+                    .records
+                    .iter()
+                    .map(|r| (r.offset_delta, r.timestamp_delta))
+                    .collect::<Vec<_>>()
+                    == vec![(0, 0), (1, 1)]
+            );
+            assert2::assert!(v2_to_legacy(&batch, Magic::V1).unwrap() == wire);
+        }
+    }
+
+    #[test]
+    fn down_conversion_rejects_absolute_coordinate_overflow() {
+        for (base, delta) in [(i64::MAX, 1), (i64::MIN, -1)] {
+            let mut batch = v2_batch(CompressionType::None);
+            batch.base_offset = base;
+            batch.records[0].offset_delta = delta;
+            assert2::assert!(matches!(
+                v2_to_legacy(&batch, Magic::V0),
+                Err(LegacyRecordsError::Malformed(_))
+            ));
+            batch.base_offset = 0;
+            batch.records[0].offset_delta = 0;
+            batch.base_timestamp = base;
+            batch.records[0].timestamp_delta = i64::from(delta);
+            assert2::assert!(matches!(
+                v2_to_legacy(&batch, Magic::V1),
+                Err(LegacyRecordsError::Malformed(_))
+            ));
+            // v0 does not encode timestamps and therefore needs no timestamp arithmetic.
+            assert2::assert!(v2_to_legacy(&batch, Magic::V0).is_ok());
         }
     }
 

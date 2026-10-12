@@ -317,7 +317,20 @@ impl RemoteIndexCache {
         if size > self.max_bytes {
             return;
         }
-        if let Err(error) = std::fs::write(path, bytes) {
+        // Publish a completed file, never truncate a path that a cache hit
+        // may already be reading. Keep publication and eviction serialized
+        // so an old eviction cannot unlink a newly inserted entry.
+        let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+        if let Err(error) = std::fs::write(&temporary, bytes) {
+            remove_quietly(&temporary);
+            tracing::debug!(error = %error, path = %path.display(),
+                "remote index cache: temporary entry not stored");
+            return;
+        }
+        let mut state = self.state.lock().expect("remote index cache lock poisoned");
+        let published = std::fs::rename(&temporary, path);
+        if let Err(error) = published {
+            remove_quietly(&temporary);
             tracing::debug!(
                 error = %error,
                 path = %path.display(),
@@ -326,7 +339,6 @@ impl RemoteIndexCache {
             return;
         }
         let evicted = {
-            let mut state = self.state.lock().expect("remote index cache lock poisoned");
             state.forget(key);
             let mut evicted = Vec::new();
             while state.total_bytes + size > self.max_bytes {
@@ -352,6 +364,7 @@ impl RemoteIndexCache {
                 remove_quietly(&entry_path(root, *victim));
             }
         }
+        drop(state);
         self.evictions.fetch_add(
             u64::try_from(evicted.len()).unwrap_or(u64::MAX),
             Ordering::Relaxed,

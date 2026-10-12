@@ -222,7 +222,9 @@ async fn authenticated_rlmm_excludes_objects_retained_after_completed_deletion()
     let store = open_archive(&args).expect("store");
     let mut result = inventory(&store, &args).await.expect("inventory");
 
-    reconcile_authenticated_with_snapshot(&mut result.partitions, &args, &snap_path)
+    let authenticated_snapshot = load_snapshot(&snap_path).expect("snapshot");
+    std::fs::write(&snap_path, b"changed after authentication").expect("change source path");
+    reconcile_authenticated_snapshot(&mut result.partitions, &args, &authenticated_snapshot)
         .expect("authenticated reconciliation");
     check!(result.partitions.is_empty());
 }

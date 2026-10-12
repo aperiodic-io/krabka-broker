@@ -34,6 +34,27 @@ enum Role {
     Resigned,
 }
 
+#[derive(EnumStr)]
+#[enum_str(label_value)]
+enum GenericEvent<T>
+where
+    T: Clone,
+{
+    Value(T),
+    Missing,
+}
+
+#[test]
+fn generic_payload_preserves_the_type_arguments_and_where_clause() {
+    let value = GenericEvent::Value(String::from("payload"));
+    assert!(value.as_str() == "Value");
+    assert!(GenericEvent::<String>::Missing.as_str() == "Missing");
+    let GenericEvent::Value(payload) = value else {
+        panic!("value variant")
+    };
+    assert!(payload == "payload");
+}
+
 /// The remaining cases, and a bare `parse`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumStr)]
 #[enum_str(case = "UPPERCASE", parse)]

@@ -1,4 +1,4 @@
-//! The shared subscription loop that pushes every published `MetadataImage`
+//! The shared subscription loop that applies the latest published `MetadataImage`
 //! into an image-derived cache, kept separate from the metadata traits because
 //! it is the one piece of this module that neither reads nor writes the
 //! controller log itself.
@@ -9,15 +9,15 @@ use krabka_metadata::MetadataImage;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-/// Apply `apply` to the image `images` currently holds, then to every image
-/// published after it, until `shutdown` fires or the publisher goes away.
+/// Apply `apply` to the current image and each observed latest image until
+/// shutdown or the publisher closes. Rapid updates can coalesce.
 /// `task` names the loop in the shutdown log.
 ///
 /// Every broker runs one of these per image-derived cache (throttle rates,
 /// quota buckets), not only the controller leader. Taking the receiver rather
 /// than the whole [`MetadataSource`](super::MetadataSource) keeps the read of
-/// the new image on the same channel that woke the loop, so no image can slip
-/// past between the wake-up and the read.
+/// latest image on the same channel that woke the loop. Intermediate images
+/// can be skipped, so the callback should rebuild from the complete image.
 pub(crate) async fn watch_image_loop(
     mut images: watch::Receiver<Arc<MetadataImage>>,
     task: &str,
@@ -80,7 +80,7 @@ mod tests {
     use super::*;
 
     /// The loop both callers share: it must apply the image already in the
-    /// channel before waiting, apply every image published after it, and stop
+    /// channel before waiting, apply each update observed in this test, and stop
     /// on cancellation rather than on the next publish.
     #[tokio::test]
     async fn watch_image_loop_applies_current_then_each_published_image() {

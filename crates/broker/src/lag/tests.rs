@@ -9,7 +9,10 @@ use krabka_ids::LeaderEpoch;
 use krabka_log::Offset;
 use krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord, TopicRecord};
 use krabka_protocol::{
-    owned::fetch_response::{FetchableTopicResponse, PartitionData},
+    owned::{
+        fetch_response::{FetchableTopicResponse, PartitionData},
+        list_offsets_response::{ListOffsetsPartitionResponse, ListOffsetsTopicResponse},
+    },
     records::RecordBatch,
 };
 
@@ -32,6 +35,7 @@ use crate::{
     test_support::{
         FakeMetadataSource, RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup,
         UnixMillis, open_partition, repeated_records_batch, single_partition_topic,
+        started_controller_broker,
     },
 };
 
@@ -571,10 +575,8 @@ async fn an_uncommitted_partition_gets_no_series() {
     check!(published_group_lag(&metrics, "billing") == None);
 }
 
-/// The probe asks past the end of every partition it names, at the leader
-/// epoch the image holds, and carries the topic ids its reply has to be read
-/// back through. Nothing about the request may pull records: it is a metadata
-/// read that happens to travel as a `Fetch`.
+/// Resolve the committed boundary first, then fetch at that valid position
+/// with the same isolation and epoch, preserving the UUID-to-name mapping.
 #[test]
 fn the_probe_asks_for_watermarks_and_no_records() {
     let topic_id = WireUuid(*uuid::Uuid::from_u128(1).as_bytes());
@@ -584,14 +586,14 @@ fn the_probe_asks_for_watermarks_and_no_records() {
         max_wait_ms: 0,
         min_bytes: 0,
         max_bytes: 0,
-        isolation_level: 0,
+        isolation_level: 1,
         topics: vec![FetchTopic {
             topic: TOPIC.into(),
             topic_id,
             partitions: vec![FetchPartition {
                 partition: 0,
                 current_leader_epoch: 1,
-                fetch_offset: i64::MAX,
+                fetch_offset: 7,
                 partition_max_bytes: 0,
                 ..Default::default()
             }],
@@ -600,11 +602,161 @@ fn the_probe_asks_for_watermarks_and_no_records() {
         ..Default::default()
     };
 
-    let (request, names) =
-        probe_request(&coordinator_image(), &wanted).expect("the image names the partition");
+    let offsets = probe_offset_rows(vec![probe_offset_row(0, codes::NONE, 7)]);
+    let (request, names) = probe_request(&coordinator_image(), &wanted, &offsets)
+        .expect("the image and offset reply name the partition");
 
     check!(request == expected);
     check!(names == HashMap::from([(topic_id, TOPIC)]));
+}
+
+fn probe_offset_row(index: i32, error_code: i16, offset: i64) -> ListOffsetsPartitionResponse {
+    ListOffsetsPartitionResponse {
+        partition_index: index,
+        error_code,
+        timestamp: -1,
+        offset,
+        leader_epoch: 1,
+        ..Default::default()
+    }
+}
+
+fn probe_offset_rows(partitions: Vec<ListOffsetsPartitionResponse>) -> ListOffsetsResponse {
+    ListOffsetsResponse {
+        topics: vec![ListOffsetsTopicResponse {
+            name: TOPIC.into(),
+            partitions,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_probe_batches_read_committed_latest_offsets_before_fetching() {
+    let wanted = [(TOPIC.to_string(), 0), ("ghost".to_string(), 0)];
+    let expected = ListOffsetsRequest {
+        replica_id: -1,
+        isolation_level: 1,
+        topics: vec![ListOffsetsTopic {
+            name: TOPIC.into(),
+            partitions: vec![ListOffsetsPartition {
+                partition_index: 0,
+                current_leader_epoch: 1,
+                timestamp: -1,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    assert!(probe_offsets_request(&coordinator_image(), &wanted) == Some(expected));
+}
+
+/// Failed, negative and missing offset replies must not manufacture an
+/// invalid Fetch coordinate or suppress other successful partitions.
+#[test]
+fn the_probe_skips_unavailable_offset_rows_and_preserves_partition_order() {
+    let mut image = replica_image();
+    for partition in 2..5 {
+        image.apply(&MetadataRecord::V1Partition(PartitionRecord {
+            topic: TOPIC.into(),
+            partition,
+            leader: LEADER,
+            leader_epoch: LeaderEpoch(1),
+            ..Default::default()
+        }));
+    }
+    let wanted: Vec<_> = [3, 0, 2, 1, 4]
+        .into_iter()
+        .map(|index| (TOPIC.into(), index))
+        .collect();
+    let offsets = probe_offset_rows(vec![
+        probe_offset_row(2, codes::NONE, -1),
+        probe_offset_row(1, codes::NONE, 9),
+        probe_offset_row(0, codes::NOT_LEADER_OR_FOLLOWER, -1),
+        probe_offset_row(3, codes::NONE, 11),
+    ]);
+    let (request, _) = probe_request(&image, &wanted, &offsets).expect("two healthy partitions");
+    let expected = FetchRequest {
+        replica_id: -1,
+        max_wait_ms: 0,
+        min_bytes: 0,
+        max_bytes: 0,
+        isolation_level: 1,
+        topics: vec![FetchTopic {
+            topic: TOPIC.into(),
+            topic_id: WireUuid(*uuid::Uuid::from_u128(1).as_bytes()),
+            partitions: vec![
+                FetchPartition {
+                    partition: 3,
+                    current_leader_epoch: 1,
+                    fetch_offset: 11,
+                    partition_max_bytes: 0,
+                    ..Default::default()
+                },
+                FetchPartition {
+                    partition: 1,
+                    current_leader_epoch: 1,
+                    fetch_offset: 9,
+                    partition_max_bytes: 0,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    assert!(request == expected);
+    assert!(probe_request(&image, &wanted, &ListOffsetsResponse::default()).is_none());
+}
+
+/// A real leader rejects the old `i64::MAX` coordinate. The sampler's batched
+/// ListOffsets/Fetch exchange must still report its high watermark.
+#[tokio::test]
+async fn remote_watermark_probe_resolves_a_valid_fetch_boundary() {
+    let (handle, dir, broker) = Box::pin(started_controller_broker()).await;
+    let partition = led_partition(dir.path(), TOPIC, 0);
+    partition.install_leader_change(LEADER.0, 1).await;
+    install_isr(&partition).await;
+    append_records(&partition, 5);
+    follower_fetches_everything(&partition).await;
+    broker
+        .partitions
+        .insert(TOPIC.into(), PartitionIndex(0), partition);
+    broker
+        .controller
+        .submit_change(vec![
+            MetadataRecord::V1Topic(single_partition_topic(TOPIC, uuid::Uuid::from_u128(1))),
+            MetadataRecord::V1Partition(PartitionRecord {
+                topic: TOPIC.into(),
+                partition: 0,
+                leader: LEADER,
+                replicas: vec![LEADER],
+                isr: vec![LEADER],
+                leader_epoch: LeaderEpoch(1),
+                ..Default::default()
+            }),
+        ])
+        .await
+        .expect("publish probed partition");
+    let metadata = Arc::clone(&broker.controller);
+    let probe = poller(
+        coordinator(Arc::clone(&metadata)),
+        metadata,
+        Arc::new(PartitionRegistry::new()),
+        BrokerMetrics::new(),
+    );
+    let watermarks = probe
+        .probe_high_watermarks(
+            &broker.controller.current_image(),
+            LEADER,
+            &[(TOPIC.into(), 0)],
+        )
+        .await
+        .expect("real leader probe");
+    assert!(watermarks == HashMap::from([((TOPIC.to_string(), 0), 5)]));
+    handle.shutdown().await;
 }
 
 /// A partition the image has stopped naming leaves the probe nothing to ask,
@@ -613,7 +765,15 @@ fn the_probe_asks_for_watermarks_and_no_records() {
 fn a_probe_for_a_partition_the_image_dropped_has_nothing_to_ask() {
     let wanted = [("ghost".to_string(), 0)];
 
-    check!(probe_request(&coordinator_image(), &wanted).is_none());
+    check!(probe_offsets_request(&coordinator_image(), &wanted).is_none());
+    check!(
+        probe_request(
+            &coordinator_image(),
+            &wanted,
+            &ListOffsetsResponse::default()
+        )
+        .is_none()
+    );
 }
 
 /// A watermark this broker cannot read costs that partition its series for the

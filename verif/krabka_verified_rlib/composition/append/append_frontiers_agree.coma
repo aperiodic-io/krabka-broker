@@ -29,7 +29,7 @@ let%span sfuture_log_swap_admission = "/workspace/crates/verified/src/storage/fu
 let%span sproduce = "/workspace/crates/verified/src/produce.rs" 16 10 24 1
 let%span soffset_allocator = "/workspace/crates/verified/src/offset_allocator.rs" 94 10 94 87
 let%span soffset_allocator'0 = "/workspace/crates/verified/src/offset_allocator.rs" 95 10 96 55
-let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 100 10 118 1
+let%span sindex_frontier = "/workspace/crates/verified/src/local_recovery/index_frontier.rs" 101 10 119 1
 
 use creusot.int.Int64
 use creusot.int.Int32

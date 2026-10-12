@@ -2,6 +2,8 @@
 //! records against a scratch image, the append that assigns their offsets, and
 //! the parked commit waiters that the high watermark later resolves or fails.
 
+use std::sync::Arc;
+
 use krabka_ids::Offset;
 use krabka_metadata::{
     BreakGlassProposalRecord, DelegationToken, DelegationTokenRecord, DeleteDelegationTokenRecord,
@@ -24,6 +26,34 @@ use crate::{
 };
 
 impl Engine {
+    /// Checks a handler's admission image in the same engine turn as the append.
+    /// No precomputed mutation crosses a leadership change or an uncommitted tail.
+    pub fn on_submit_change_if_image(
+        &mut self,
+        records: &[MetadataRecord],
+        expected_image: Option<&Arc<MetadataImage>>,
+        reply: oneshot::Sender<Result<SubmitChangeResult, RaftError>>,
+    ) {
+        if let Some(expected) = expected_image {
+            let error = if !self.core.role().is_leader() {
+                Some(RaftError::NotLeader {
+                    current_leader: self.core.quorum_state().leader_id,
+                })
+            } else if !Arc::ptr_eq(expected, &self.image_tx.borrow()) {
+                Some(RaftError::StaleMetadataImage)
+            } else if self.log.hwm() < self.log.log_end_offset() {
+                Some(RaftError::UncommittedTail)
+            } else {
+                None
+            };
+            if let Some(error) = error {
+                let _ = reply.send(Err(error));
+                return;
+            }
+        }
+        self.on_submit_change(records, reply);
+    }
+
     fn token_generation_matches(
         expected: &DelegationTokenRecord,
         replacement: &DelegationTokenRecord,

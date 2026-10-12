@@ -20,7 +20,7 @@
 //! share-group dead-letter queue (KIP-1191), and `toggle` clears the manager
 //! when the finalized `share.version` drops to 0.
 
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use dashmap::DashMap;
 use krabka_metadata::NodeId;
@@ -28,8 +28,10 @@ use tokio::sync::Mutex;
 
 use crate::{
     coordinator::unified::share::config::ShareGroupConfig,
+    diskless::read::DisklessReadHandle,
     metadata_source::MetadataSource,
     partition_registry::PartitionRegistry,
+    remote_reader::RemoteReader,
     share_coordinator::persister_client::SharePersister,
     share_partition::{dlq::DlqSink, session::ShareSessionCache, state::AcquisitionState},
 };
@@ -70,6 +72,8 @@ pub(crate) struct SharePartitionLeaderManager {
     /// This manager, for the tasks that finish a dead-letter write after the
     /// request that began it has answered.
     me: Weak<Self>,
+    remote_reader: OnceLock<Arc<RemoteReader>>,
+    diskless_read: OnceLock<Arc<DisklessReadHandle>>,
 }
 
 impl std::fmt::Debug for SharePartitionLeaderManager {
@@ -104,7 +108,23 @@ impl SharePartitionLeaderManager {
                 dead_letter::MAX_CONCURRENT_DEAD_LETTER_WRITES,
             ),
             me: me.clone(),
+            remote_reader: OnceLock::new(),
+            diskless_read: OnceLock::new(),
         })
+    }
+
+    /// Install the cold sources once the broker runtime has constructed them.
+    pub(crate) fn set_read_sources(
+        &self,
+        remote: Option<Arc<RemoteReader>>,
+        diskless: Option<Arc<DisklessReadHandle>>,
+    ) {
+        if let Some(reader) = remote {
+            let _ = self.remote_reader.set(reader);
+        }
+        if let Some(reader) = diskless {
+            let _ = self.diskless_read.set(reader);
+        }
     }
 }
 

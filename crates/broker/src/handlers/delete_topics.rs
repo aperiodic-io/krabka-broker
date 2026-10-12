@@ -1,5 +1,5 @@
 //! `DeleteTopics` (`api_key=20`). This handler routes through
-//! `Controller::submit_change`, so the metadata quorum records every topic
+//! `Controller::submit_change_if_image`, so the metadata quorum records every topic
 //! deletion before the broker tears down the partition dirs and the in-memory
 //! state.
 //!
@@ -32,23 +32,30 @@
 //! the remote-tier snapshot and cascade in `tiering`, and the audit record in
 //! `audit`.
 
-use krabka_audit::PrivilegedPhase;
-use krabka_metadata::BreakGlassAction;
+use std::time::Duration;
+
+use bytes::Bytes;
 use krabka_protocol::owned::{
-    delete_topics_request::DeleteTopicsRequest, delete_topics_response::DeleteTopicsResponse,
+    delete_topics_request::{self, DeleteTopicsRequest},
+    delete_topics_response::DeleteTopicsResponse,
 };
 use krabka_raft::RaftError;
-use krabka_verified::FreezeMutationKind;
 
 use crate::{
-    break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
+    broker::Broker,
     codes,
-    time_util::now_ms,
+    controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
+    error::BrokerError,
+    handlers::{
+        RequestContext, decode_request, encode_response,
+        forward_to_controller::{guarded_operation, is_active_controller, to_active_controller},
+    },
 };
 
 mod audit;
 mod authz;
 mod gate;
+mod operation;
 mod request;
 mod teardown;
 mod tiering;
@@ -60,25 +67,55 @@ mod test_support;
 mod tests;
 
 use self::{
-    audit::{audit_deleted_topics, deleted_topic_resources},
     authz::{Admission, admit_row, topic_access},
-    gate::{consumed_proposal_id, delete_topic_records},
+    operation::{delete_topic_once, generation_refusal, vanished_code},
     request::{ValidatedTopics, resolve_topic_names},
-    teardown::remove_local_partitions,
-    tiering::{spawn_remote_cascades, tiered_partitions},
     wire::{
-        delete_topic_result, delete_topics_response, random_seed, refused_topic_result,
-        request_error_results, shuffle_rows,
+        delete_topic_result, delete_topics_response, random_seed, request_error_results,
+        shuffle_rows,
     },
 };
+
+/// Forward the original request before resolving its topic ids or authorizing it.
+pub(crate) async fn dispatch(
+    broker: &Broker,
+    version: i16,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> Result<Bytes, BrokerError> {
+    let req = decode_request::<DeleteTopicsRequest>(req_bytes, version)?;
+    if ctx.connection_id != CONTROLLER_ADMIN_CONNECTION_ID
+        && let Some(answer) = to_active_controller(
+            broker,
+            delete_topics_request::API_KEY,
+            req_bytes,
+            version,
+            ctx,
+            |code, _| {
+                encode_response(
+                    &delete_topics_response(request_error_results(&req, code), 0),
+                    version,
+                )
+            },
+        )
+        .await
+    {
+        return answer;
+    }
+    if !is_active_controller(broker) {
+        return encode_response(
+            &delete_topics_response(request_error_results(&req, codes::NOT_CONTROLLER), 0),
+            version,
+        );
+    }
+    encode_response(&handle(broker, req, version, ctx).await?, version)
+}
 
 context_handler! {
     DeleteTopicsRequest => DeleteTopicsResponse,
     (broker, req, version, ctx),
     {
         let controller = &broker.controller;
-        let partitions = broker.partitions.clone();
-        let log_dirs = broker.config.all_log_dirs();
 
         // Kafka's `ControllerApis.deleteTopics` refuses the whole request when
         // `delete.topic.enable` is false, ahead of every other check: below v3
@@ -128,9 +165,10 @@ context_handler! {
         // survives is the set of existing topics the principal may delete.
         let mut admitted = Vec::with_capacity(name_list.len());
         for row in name_list {
+            let requested_by_id = row.1;
             match admit_row(row, &image, &access) {
                 Admission::Answer(result) => results.push(result),
-                Admission::Delete { name, topic_id } => admitted.push((name, topic_id)),
+                Admission::Delete { name, topic_id } => admitted.push((name, topic_id, requested_by_id)),
             }
         }
 
@@ -140,161 +178,42 @@ context_handler! {
         // every topic after it.
         let mut quota = ctx.controller_mutation_quota(broker, &image, version >= 5);
 
-        for (name, wire_topic_id) in admitted {
-            let partition_count = image.partitions_of(&name).count() as u64;
-            if quota.record(partition_count).is_err() {
-                results.push(delete_topic_result(
-                    Some(name),
-                    wire_topic_id,
-                    codes::THROTTLING_QUOTA_EXCEEDED,
-                ));
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(u64::try_from(req.timeout_ms).unwrap_or(0));
+        for (name, wire_topic_id, requested_by_id) in admitted {
+            let image = controller.current_image();
+            if let Some(row) = generation_refusal(&image, &name, wire_topic_id, requested_by_id) {
+                results.push(row);
                 continue;
             }
-
-            // KFC-9: a write freeze refuses every operation that removes data
-            // from the topic it covers, and it answers ahead of the two-person
-            // rule. That order is the rule: a break-glass approval to delete does
-            // not defeat a freeze, and a deletion the freeze refuses must not
-            // spend an approval on its way to being refused.
-            //
-            // Like the produce gate, this refusal emits no privileged-action audit
-            // event. A freeze is not a break-glass act, and the registry entry that
-            // caused the refusal is already in the metadata log and in the audit
-            // record of the freeze that set it.
-            if let crate::freeze::resolve::FreezeMutationResolution::Frozen(record) =
-                crate::freeze::resolve::resolve_freeze_mutation(
-                    &image,
-                    &name,
-                    true,
-                    FreezeMutationKind::DeleteTopic,
-                )
-            {
-                let verdict = crate::freeze::resolve::FreezeVerdict::from(record);
-                let message = verdict.removal_message();
-                tracing::warn!(topic = %name, refusal = %message, "DeleteTopics refused by a freeze");
-                results.push(refused_topic_result(
-                    name,
-                    wire_topic_id,
-                    codes::POLICY_VIOLATION,
-                    message,
-                ));
+            // An internal retry does not charge the same admission twice.
+            if quota.record(image.partitions_of(&name).count() as u64).is_err() {
+                results.push(delete_topic_result(Some(name), wire_topic_id, codes::THROTTLING_QUOTA_EXCEEDED));
                 continue;
             }
-
-            // KFC-9: the two-person rule, and the records this append carries. It
-            // runs before the broker snapshots any partition state, because a
-            // deletion the broker will refuse has no reason to walk the topic's
-            // logs.
-            let records =
-                match delete_topic_records(&image, &broker.config.break_glass, &name, now_ms()) {
-                    Ok(records) => records,
-                    Err(denial) => {
-                        let message = denial.to_string();
-                        crate::handlers::partition_transition::audit_refusal(
-                            broker,
-                            ctx,
-                            BreakGlassAction::DeleteTopic,
-                            || &name,
-                            &denial,
-                            &message,
-                        );
-                        results.push(refused_topic_result(
-                            name,
-                            wire_topic_id,
-                            codes::POLICY_VIOLATION,
-                            message,
-                        ));
-                        continue;
-                    }
-                };
-            let proposal_id = records.first().and_then(consumed_proposal_id);
-            if let Err(error) = require_transition(
-                &broker.audit_log,
-                &broker.config.break_glass,
-                ctx,
-                &GatedTransition {
-                    action: BreakGlassAction::DeleteTopic,
-                    target: &name,
-                    phase: PrivilegedPhase::Applied,
-                    proposal_id,
-                    reason: "topic deletion admitted",
-                },
-            )
-            .await
-            {
-                let message = format!("privileged action refused: {error}");
-                results.push(refused_topic_result(
-                    name,
-                    wire_topic_id,
-                    codes::POLICY_VIOLATION,
-                    message,
-                ));
-                continue;
-            }
-
-            // Snapshot every local partition before committing the metadata
-            // deletion. The metadata image watcher can remove registry entries as
-            // soon as the commit becomes visible; enumerating afterward races that
-            // watcher and can leave the on-disk log directory behind. A later
-            // create of the same topic name would then reopen the deleted topic's
-            // WAL, including stale transactional visibility state.
-            let local_partitions = partitions.partitions_of(&name);
-            let topic_id = image.topic(&name).map(|topic| topic.topic_id);
-
-            let tiered_to_cascade =
-                tiered_partitions(broker, &partitions, &image, &name, &local_partitions);
-
-            let res = controller.submit_change(records).await;
-
-            let error_code = match res {
-                Ok(_) => {
-                    // Committed to quorum — tear down in-memory state and dirs.
-                    remove_local_partitions(
-                        broker,
-                        &partitions,
-                        &log_dirs,
-                        &name,
-                        topic_id,
-                        local_partitions,
-                    );
-                    // Now that the local tear-down is done, cascade the remote tier.
-                    spawn_remote_cascades(broker, tiered_to_cascade);
-                    audit_transition(
-                        &broker.audit_log,
-                        &broker.config.break_glass,
-                        ctx,
-                        &GatedTransition {
-                            action: BreakGlassAction::DeleteTopic,
-                            target: &name,
-                            phase: PrivilegedPhase::Applied,
-                            proposal_id,
-                            reason: "topic deleted",
+            let attempt = guarded_operation(broker, deadline, |image|
+                delete_topic_once(broker, ctx, &name, wire_topic_id, requested_by_id, image)).await;
+            let row = match attempt {
+                Ok(Ok(row)) => row,
+                failure => {
+                    let code = match failure {
+                        Err(_) => codes::REQUEST_TIMED_OUT,
+                        Ok(Err(RaftError::Metadata(krabka_metadata::MetadataError::UnknownTopic(_)))) => vanished_code(requested_by_id),
+                        Ok(Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown)) => codes::NOT_CONTROLLER,
+                        Ok(Err(error)) => {
+                            tracing::error!(topic = %name, %error, "DeleteTopics guarded submission failed");
+                            crate::handlers::submit_failure_code(&error, codes::UNKNOWN_SERVER_ERROR)
                         },
-                    );
-                    codes::NONE
-                }
-                // The topic went away after this request read the image. Kafka's
-                // controller deletes by id, so it answers the id miss.
-                Err(RaftError::Metadata(krabka_metadata::MetadataError::UnknownTopic(_))) => {
-                    codes::UNKNOWN_TOPIC_ID
-                }
-                Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown) => codes::NOT_CONTROLLER,
-                Err(e) => {
-                    tracing::error!(topic = %name, error = %e, "DeleteTopics submit_change failed");
-                    crate::handlers::submit_failure_code(&e, codes::UNKNOWN_SERVER_ERROR)
+                        Ok(Ok(_)) => unreachable!("successful row handled above"),
+                    };
+                    delete_topic_result(Some(name), wire_topic_id, code)
                 }
             };
-
-            results.push(delete_topic_result(Some(name), wire_topic_id, error_code));
+            results.push(row);
         }
         shuffle_rows(&mut results, random_seed());
 
-        // Audit: emit one AdminOperation record for the successfully-deleted topics.
-        audit_deleted_topics(
-            broker.audit_log.as_ref(),
-            ctx,
-            deleted_topic_resources(&results),
-        );
+        // Each committed deletion audits from its owned completion task,
+        // including a commit that finishes after this request times out.
 
         // KIP-599: the controller-mutation delay goes to the dispatch loop, which
         // resolves it with the KIP-124 request quota in one metrics call and

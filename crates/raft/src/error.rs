@@ -95,6 +95,11 @@ pub enum RaftError {
     #[error("change rejected: {0}")]
     ChangeRejected(String),
 
+    /// A leader-local mutation was planned from an image that has since changed.
+    /// The caller must read a fresh image and repeat its admission checks.
+    #[error("the metadata image changed before the mutation was submitted")]
+    StaleMetadataImage,
+
     /// The leader refused a compare-and-set because its log holds records
     /// that are not committed yet.
     ///

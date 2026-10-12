@@ -14,13 +14,13 @@
         "prover": "alt-ergo",
         "time": 0.021
       },
-      "vc_len_tup2_i64_i32": { "prover": "alt-ergo", "time": 0.008 },
+      "vc_len_tup2_i64_i32": { "prover": "alt-ergo", "time": 0.024 },
       "vc_restore_batch_step": { "prover": "alt-ergo", "time": 0.02 },
       "vc_scheduled_delivery_visible": {
         "prover": "alt-ergo",
         "time": 0.016
       },
-      "vc_scheduled_prefix_bounds_fetch": { "prover": "z3", "time": 0.231 },
+      "vc_scheduled_prefix_bounds_fetch": { "prover": "z3", "time": 0.092 },
       "vc_segment_maximum_proves_delivery": {
         "prover": "alt-ergo",
         "time": 0.015

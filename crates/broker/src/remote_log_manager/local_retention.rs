@@ -24,7 +24,7 @@
 
 use std::sync::Arc;
 
-use krabka_log::{ActiveSegmentExport, LogConfig, Offset, SegmentExport};
+use krabka_log::{ActiveSegmentExport, DeliveryPolicy, LogConfig, Offset, SegmentExport};
 use krabka_remote_storage::{RemoteLogMetadataManager, RemoteLogSegmentState, TopicIdPartition};
 use krabka_units::{
     ByteSize, Time,
@@ -73,6 +73,9 @@ pub(crate) struct LocalSegments<'a> {
     pub active: Option<ActiveSegmentExport>,
     /// Bytes of the whole local log, the active segment included.
     pub size: ByteSize,
+    /// The actual batch activation frontier, recomputed under the log lock.
+    /// `None` on immediate topics.
+    pub delivery_watermark: Option<Offset>,
 }
 
 /// What one local-retention pass does to a tiered log.
@@ -110,6 +113,9 @@ pub(crate) struct LocalRetentionDecision {
 /// a segment of a tiered topic by its file's `lastModified()` instead, so
 /// producer clock skew cannot pin local disk forever; that anchor applies only
 /// under `unstable.api.versions.enable`, which is what `unstable` carries.
+/// Scheduled delivery additionally stops both axes at the actual batch
+/// activation frontier, including clock uncertainty. A retention timestamp
+/// or a copied remote segment cannot authorize evicting a pending batch.
 ///
 /// Kafka's walk ends at the active segment. The remote tier never holds it,
 /// so it is never eligible for deletion (`isSegmentEligibleForDeletion`). When
@@ -140,7 +146,10 @@ pub(crate) fn local_retention_decision(
         .sealed
         .iter()
         .map(|ex| LocalRetentionSegment {
-            blocked: !matches!(covered_through, Some(through) if ex.last_offset.0 <= through),
+            blocked: !matches!(covered_through, Some(through) if ex.last_offset.0 <= through)
+                || local
+                    .delivery_watermark
+                    .is_some_and(|watermark| ex.last_offset >= watermark),
             expired: expired(ex.max_timestamp, ex.last_modified_ms),
             size: ex.size.bytes_u64(),
         })
@@ -202,6 +211,7 @@ pub(crate) fn local_retention_target(
             sealed: exports,
             active: None,
             size: local_log_size,
+            delivery_watermark: None,
         },
         covered_through,
         effective_local,
@@ -301,12 +311,15 @@ pub(crate) fn local_retention_pass(
             bounds.high_watermark >= log.log_end_offset()
                 && walk_reaches(exports, active, log.local_log_start_offset())
         });
+        let delivery_watermark = (log_config.delivery_policy == DeliveryPolicy::Scheduled)
+            .then(|| log.advance_delivery_watermark(bounds.now_ms).watermark);
         let decision = local_retention_decision(
             unstable,
             &LocalSegments {
                 sealed: exports,
                 active,
                 size: log.size(),
+                delivery_watermark,
             },
             covered_through,
             effective_local,

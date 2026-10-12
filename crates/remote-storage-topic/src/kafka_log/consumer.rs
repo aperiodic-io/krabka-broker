@@ -13,6 +13,7 @@
 
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{Arc, Mutex as StdMutex},
 };
 
@@ -117,6 +118,34 @@ pub(super) fn metadata_event_channel(
     mpsc::channel(capacity.capacity())
 }
 
+async fn connect_with_retry<T, E, F, Fut>(
+    cancel: &CancellationToken,
+    backoff: std::time::Duration,
+    mut connect: F,
+) -> Option<T>
+where
+    E: std::fmt::Display,
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    loop {
+        let result = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return None,
+            result = connect() => result,
+        };
+        match result {
+            Ok(client) => return Some(client),
+            Err(error) => warn!(%error, "metadata consumer: connect failed; retrying"),
+        }
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => return None,
+            () = tokio::time::sleep(backoff) => {}
+        }
+    }
+}
+
 /// Manual single-partition fetch loop over a dedicated connection.
 ///
 /// A dedicated connection per partition keeps the metadata consumer off any
@@ -131,21 +160,19 @@ async fn partition_fetch_loop(
     start_offset: i64,
     cancel: CancellationToken,
 ) {
-    let client = match Client::builder()
-        .bootstrap(state.bootstrap.clone())
-        .client_id(state.client_id.clone())
-        .dispatch_queue_capacity(state.dispatch_queue_capacity.get())
-        .frame_max(state.frame_max.size())
-        .maybe_security(state.security.clone())
-        .metadata_scope(METADATA_TOPIC_SCOPE)
-        .build()
-        .await
-    {
-        Ok(client) => client,
-        Err(error) => {
-            warn!(%error, partition, "metadata consumer: connect failed");
-            return;
-        }
+    let Some(client) = connect_with_retry(&cancel, state.fetch_retry_backoff.to_std(), || {
+        Client::builder()
+            .bootstrap(state.bootstrap.clone())
+            .client_id(state.client_id.clone())
+            .dispatch_queue_capacity(state.dispatch_queue_capacity.get())
+            .frame_max(state.frame_max.size())
+            .maybe_security(state.security.clone())
+            .metadata_scope(METADATA_TOPIC_SCOPE)
+            .build()
+    })
+    .await
+    else {
+        return;
     };
     client.metadata_topics().set([state.topic.as_str()]);
 
@@ -212,7 +239,12 @@ async fn partition_fetch_loop(
                                 tombstone,
                             };
                             next_offset = r.offset + 1;
-                            if state.tx.send(record).await.is_err() {
+                            let sent = tokio::select! {
+                                biased;
+                                () = cancel.cancelled() => return,
+                                result = state.tx.send(record) => result,
+                            };
+                            if sent.is_err() {
                                 return; // stream dropped
                             }
                         }
@@ -235,6 +267,60 @@ mod tests {
 
     use super::*;
     use crate::kafka_log::config::METADATA_TOPIC;
+
+    #[tokio::test]
+    async fn initial_connection_retries_without_reassignment() {
+        let cancel = CancellationToken::new();
+        let mut attempts = 0;
+        let client = connect_with_retry(&cancel, std::time::Duration::ZERO, || {
+            attempts += 1;
+            std::future::ready(if attempts == 1 {
+                Err("temporary connection failure")
+            } else {
+                Ok(42)
+            })
+        })
+        .await;
+        assert!(client == Some(42));
+        assert!(attempts == 2);
+    }
+
+    #[tokio::test]
+    async fn initial_connection_and_retry_delay_are_cancellable() {
+        let cancel = CancellationToken::new();
+        let pending = connect_with_retry::<(), &str, _, _>(
+            &cancel,
+            std::time::Duration::from_secs(3600),
+            std::future::pending,
+        );
+        tokio::pin!(pending);
+        tokio::select! {
+            biased;
+            result = &mut pending => panic!("pending connection completed: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        cancel.cancel();
+        assert!(pending.await.is_none());
+
+        let cancel = CancellationToken::new();
+        let started = tokio::sync::Notify::new();
+        let retrying = connect_with_retry::<(), _, _, _>(
+            &cancel,
+            std::time::Duration::from_secs(3600),
+            || {
+                started.notify_one();
+                std::future::ready(Err("temporary connection failure"))
+            },
+        );
+        tokio::pin!(retrying);
+        tokio::select! {
+            biased;
+            result = &mut retrying => panic!("retry ended: {result:?}"),
+            () = started.notified() => {}
+        }
+        cancel.cancel();
+        assert!(retrying.await.is_none());
+    }
 
     #[test]
     fn metadata_event_channel_uses_configured_capacity() {

@@ -92,8 +92,8 @@ impl Log {
         let mut active: Option<Segment> = None;
         for (i, base) in base_offsets.iter().enumerate() {
             if i + 1 < base_offsets.len() {
-                let mut seg = Segment::open(&dir, Offset(*base))?;
-                // `Segment::open` is a no-scan load that leaves
+                let mut seg = Segment::open_unscanned(&dir, Offset(*base))?;
+                // The no-scan loader leaves
                 // `last_offset = base - 1`. A sealed segment's true last offset
                 // is one below the next segment's base; set it so `read_raw`
                 // (which skips a segment whose `last_offset() < fetch_offset`)
@@ -103,7 +103,7 @@ impl Log {
                 let last = krabka_verified::local_recovery_sealed_last(*base, base_offsets[i + 1])
                     .ok_or_else(|| LogError::Corrupt("invalid sealed segment boundary".into()))?;
                 seg.seal_at(Offset(last));
-                // `Segment::open` also leaves `max_timestamp` unknown. Without
+                // The no-scan loader also leaves `max_timestamp` unknown. Without
                 // this restore, retention would age every reopened segment by
                 // its file's modification time -- Kafka's `largestTimestamp()`
                 // fallback for a segment with no record timestamp -- instead

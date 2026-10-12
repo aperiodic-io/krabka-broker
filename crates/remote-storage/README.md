@@ -1,6 +1,5 @@
 # krabka-remote-storage
 
-[![Crates.io](https://img.shields.io/crates/v/krabka-remote-storage.svg)](https://crates.io/crates/krabka-remote-storage)
 [API documentation](https://krabka-io.github.io/krabka-broker/krabka-remote-storage/krabka_remote_storage/index.html)
 [![CI](https://github.com/robot-head/crabka/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-head/crabka/actions/workflows/ci.yml)
 
@@ -11,10 +10,10 @@ This crate is part of [Krabka](https://github.com/robot-head/crabka), a Rust imp
 ## Install
 
 ```sh
-cargo add krabka-remote-storage
+cargo add krabka-remote-storage --path ../krabka-broker/crates/remote-storage
 ```
 
-For workspace development, use the path dependency from this repository instead.
+This crate is not published by this repository. Adjust the path to your local checkout. Workspace development uses the path dependencies declared in this repository.
 
 ## Usage example
 

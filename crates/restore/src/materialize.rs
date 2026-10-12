@@ -20,14 +20,16 @@
 //! preserved. That third case is not optional:
 //! [`Log::append_at`](krabka_log::Log::append_at) and
 //! [`Log::append_verbatim_at`](krabka_log::Log::append_verbatim_at) both
-//! require `offset == log_end_offset()`, so skipping a batch's write entirely
-//! leaves the target log's end offset behind the archive's and makes every
-//! later batch in the partition unappendable. Under `--dry-run` it does the
-//! same work and writes nothing.
+//! preserve forward offset gaps. Empty filtered batches retain the archived span,
+//! while segment alignment allows a forward gap only after an explicitly skipped
+//! corrupt predecessor, preserving the offsets on both sides of the loss. Under
+//! `--dry-run` it does the same work and writes nothing.
 
 mod format;
 pub(crate) mod prepare;
 mod segment;
+pub(crate) use format::{format_target_with_snapshot, seed_rlmm_snapshot_from};
+pub(crate) use segment::write_segment_after_skip;
 #[cfg(test)]
 mod test_support;
 

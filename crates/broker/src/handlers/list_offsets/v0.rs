@@ -10,10 +10,13 @@ use krabka_protocol::primitives::{
 use super::{
     bound::{fetch_bound, last_fetchable_offset},
     leadership::resolve_for_broker,
-    local::latest_offset,
     remote::concurrently,
+    resolve::{LatestContext, resolve_latest},
 };
-use crate::{broker::Broker, codes, error::BrokerError, handlers::RequestContext};
+use crate::{
+    broker::Broker, codes, config_keys::resolve_remote_list_offsets_timeout, error::BrokerError,
+    handlers::RequestContext,
+};
 
 const LATEST_TIMESTAMP: i64 = -1;
 
@@ -109,11 +112,13 @@ async fn resolve_partition(
         Err(error_code) => return error_response(request.index, error_code),
     };
 
-    let (local_end, policy, offsets) = {
+    let (local_end, local_start, deleted_below, config, offsets) = {
         let log = partition.log.lock().expect("log mutex poisoned");
         (
             log.log_end_offset().0,
-            log.config_snapshot().delivery_policy,
+            log.local_log_start_offset().0,
+            log.established_log_start(),
+            log.config_snapshot(),
             log.legacy_offsets_before(request.timestamp, max_num_offsets),
         )
     };
@@ -125,7 +130,25 @@ async fn resolve_partition(
         return error_response(request.index, codes::KAFKA_STORAGE_ERROR);
     };
     if request.timestamp == LATEST_TIMESTAMP {
-        upper = upper.min(latest_offset(&partition, policy, local_end));
+        let image = broker.controller.current_image();
+        let remote_topic_id = image
+            .topic(topic)
+            .filter(|_| config.remote_storage_enable)
+            .map(|topic| topic.topic_id);
+        let timeout = resolve_remote_list_offsets_timeout(&image, broker.config.node_id);
+        match resolve_latest(LatestContext {
+            broker,
+            partition: &partition,
+            topic: (topic, request.index),
+            remote_timeout: timeout,
+            remote_topic_id,
+            snapshot: (&config, local_end, local_start, deleted_below),
+        })
+        .await
+        {
+            Ok(latest) => upper = upper.min(latest),
+            Err(error) => return error_response(request.index, error),
+        }
     }
     if offsets.iter().any(|offset| offset.0 > upper) {
         offsets = std::iter::once(krabka_ids::Offset(upper))
@@ -196,6 +219,22 @@ pub(super) async fn handle(
     }));
 
     Ok(encode(&topics))
+}
+
+#[cfg(test)]
+pub(super) async fn latest_offsets_for_test(broker: &Broker, topic: &str) -> (i16, Vec<i64>) {
+    let response = resolve_partition(
+        broker,
+        topic,
+        PartitionRequest {
+            index: 0,
+            timestamp: LATEST_TIMESTAMP,
+            max_num_offsets: 1,
+        },
+        -1,
+    )
+    .await;
+    (response.error_code, response.offsets)
 }
 
 #[cfg(test)]

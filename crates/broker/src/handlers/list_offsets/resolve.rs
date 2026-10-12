@@ -29,7 +29,7 @@ use super::{
     bound::{FetchBound, fetchable_offsets},
     diskless::diskless_earliest_candidate,
     leadership::resolve_for_broker,
-    local::{latest_offset, leader_epoch_for_offset},
+    local::{leader_epoch_for_offset, scheduled_latest_offset},
     remote::await_remote,
     response::error_response,
     sentinels::{UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP, timestamp_kind},
@@ -168,6 +168,59 @@ async fn resolve_earliest_pending_upload(
             tracing::warn!(topic = ctx.topic_name, partition = ctx.index,
                 error = %error, "list_offsets: remote earliest_pending_upload failed");
             Ok(None)
+        }
+    }
+}
+
+/// The local snapshot and archive lookup needed to resolve scheduled LATEST.
+pub(super) struct LatestContext<'a> {
+    pub(super) broker: &'a Broker,
+    pub(super) partition: &'a Partition,
+    pub(super) topic: (&'a str, i32),
+    pub(super) remote_timeout: Duration,
+    pub(super) remote_topic_id: Option<uuid::Uuid>,
+    /// Config, log end, local floor and established deletion floor, all read
+    /// under the same log mutex hold.
+    pub(super) snapshot: (
+        &'a krabka_log::LogConfig,
+        i64,
+        i64,
+        Option<krabka_log::Offset>,
+    ),
+}
+
+pub(super) async fn resolve_latest(ctx: LatestContext<'_>) -> Result<i64, i16> {
+    let (log_config, local_end, local_log_start, deleted_below) = ctx.snapshot;
+    let scheduled = scheduled_latest_offset(ctx.partition, log_config.delivery_policy);
+    let latest = scheduled.unwrap_or(local_end);
+    let Some((reader, id)) = ctx.broker.remote_reader.as_ref().zip(ctx.remote_topic_id) else {
+        return Ok(latest);
+    };
+    if scheduled.is_none() || local_log_start <= deleted_below.map_or(0, |floor| floor.0) {
+        return Ok(latest);
+    }
+    // Older brokers, or an immediate topic switched to scheduled, may already
+    // have evicted a pending batch. LATEST must stop at that archived batch.
+    let (topic_name, index) = ctx.topic;
+    let tp = krabka_remote_storage::TopicIdPartition::new(id, topic_name, index);
+    match await_remote(
+        ctx.remote_timeout,
+        reader.delivery_watermark(
+            &tp,
+            deleted_below.unwrap_or(krabka_log::Offset(0)),
+            krabka_log::Offset(local_log_start),
+            log_config.delivery_clock_uncertainty,
+            ctx.partition.delivery.now_ms(),
+        ),
+    )
+    .await
+    {
+        None => Err(codes::REQUEST_TIMED_OUT),
+        Some(Ok(frontier)) => Ok(frontier.map_or(latest, |pending| latest.min(pending.0))),
+        Some(Err(error)) => {
+            tracing::warn!(topic = topic_name, partition = index, %error,
+                "list_offsets: archived delivery frontier unavailable");
+            Err(codes::KAFKA_STORAGE_ERROR)
         }
     }
 }
@@ -314,6 +367,26 @@ fn apply_selection(
     }
 }
 
+/// Log coordinates and policy read together before any remote lookup awaits.
+struct PartitionLogSnapshot {
+    local_start: i64,
+    deleted_below: Option<krabka_log::Offset>,
+    local_end: i64,
+    local_log_start: i64,
+    log_config: krabka_log::LogConfig,
+}
+
+fn partition_log_snapshot(partition: &Partition) -> PartitionLogSnapshot {
+    let log = partition.log.lock().expect("log mutex poisoned");
+    PartitionLogSnapshot {
+        local_start: log.log_start_offset().0,
+        deleted_below: log.established_log_start(),
+        local_end: log.log_end_offset().0,
+        local_log_start: log.local_log_start_offset().0,
+        log_config: log.config_snapshot(),
+    }
+}
+
 pub(super) async fn resolve_partition(
     broker: &Broker,
     topic_name: &str,
@@ -356,16 +429,13 @@ pub(super) async fn resolve_partition(
         Ok(partition) => partition,
         Err(error_code) => return error_response(index, error_code),
     };
-    let (local_start, deleted_below, local_end, local_log_start, log_config) = {
-        let log = partition.log.lock().expect("log mutex poisoned");
-        (
-            log.log_start_offset().0,
-            log.established_log_start(),
-            log.log_end_offset().0,
-            log.local_log_start_offset().0,
-            log.config_snapshot(),
-        )
-    };
+    let PartitionLogSnapshot {
+        local_start,
+        deleted_below,
+        local_end,
+        local_log_start,
+        log_config,
+    } = partition_log_snapshot(&partition);
     let remote_enabled = log_config.remote_storage_enable;
     let diskless = partition.diskless && broker.diskless_read.is_some();
     let topic_id = if (remote_enabled && broker.remote_reader.is_some()) || diskless {
@@ -414,10 +484,19 @@ pub(super) async fn resolve_partition(
             // new epoch, but LATEST must not wait for that.
             // `Partition.scala:1473-1475`.
             response.leader_epoch = partition.current_leader_epoch.load(Ordering::Acquire);
-            (
-                latest_offset(&partition, log_config.delivery_policy, local_end),
-                UNKNOWN_TIMESTAMP,
-            )
+            match resolve_latest(LatestContext {
+                broker,
+                partition: &partition,
+                topic: (topic_name, index),
+                remote_timeout,
+                remote_topic_id,
+                snapshot: (&log_config, local_end, local_log_start, deleted_below),
+            })
+            .await
+            {
+                Ok(latest) => (latest, UNKNOWN_TIMESTAMP),
+                Err(error_code) => return error_response(index, error_code),
+            }
         }
         ListOffsetsKind::EarliestLocal => {
             let offset = if remote_enabled {
@@ -515,7 +594,7 @@ pub(super) async fn resolve_partition(
                 &partition,
                 topic_name,
                 index,
-                remote_topic_id,
+                topic_id,
                 request.timestamp,
                 remote_timeout,
             )

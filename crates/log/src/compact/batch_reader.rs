@@ -12,7 +12,7 @@ use crate::{error::LogError, name, segment::Segment};
 ///
 /// It avoids `Segment::read`, because that path returns early when the
 /// segment's in-memory `last_offset` is stale. A sealed segment loaded from
-/// disk through `Segment::open` has `last_offset = base_offset - 1` until a
+/// disk through `Segment::open_unscanned` has `last_offset = base_offset - 1` until a
 /// tail scan fills it in, so `Segment::read(base_offset, ..)` would
 /// short-circuit to an empty result.
 pub(super) fn read_all_batches(seg: &Segment) -> Result<Vec<RecordBatch>, LogError> {

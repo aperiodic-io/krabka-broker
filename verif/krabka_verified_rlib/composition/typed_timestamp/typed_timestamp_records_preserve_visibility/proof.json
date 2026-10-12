@@ -17,7 +17,7 @@
       },
       "vc_timestamp_record_coordinates": {
         "prover": "alt-ergo",
-        "time": 0.008
+        "time": 0.024
       },
       "vc_timestamp_record_time": { "prover": "alt-ergo", "time": 0.013 },
       "vc_typed_timestamp_records_preserve_visibility": {

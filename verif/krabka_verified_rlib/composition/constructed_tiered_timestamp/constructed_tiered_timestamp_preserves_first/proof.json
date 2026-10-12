@@ -22,7 +22,7 @@
         "prover": "alt-ergo",
         "time": 0.015
       },
-      "vc_map_usize": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_map_usize": { "prover": "alt-ergo", "time": 0.008 },
       "vc_map_usize'0": { "prover": "alt-ergo", "time": 0.021 },
       "vc_unwrap_or_tup2_i64_i64": { "prover": "alt-ergo", "time": 0.019 }
     }

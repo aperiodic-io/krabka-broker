@@ -28,6 +28,7 @@ fn check_plan(
         let rows: Vec<_> = finished
             .iter()
             .map(|&(_, end, size)| RemoteRetentionSegment {
+                blocked: false,
                 log_start_breached: checkpoint.is_some_and(|floor| end < floor),
                 time_expired: false,
                 size,

@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_clone_TargetVoter": { "prover": "alt-ergo", "time": 0.01 }
+      "vc_clone_TargetVoter": { "prover": "alt-ergo", "time": 0.02 }
     }
   }
 }

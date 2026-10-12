@@ -4,7 +4,7 @@
     "Coma": {
       "vc_clone_ProducerIdBlockAllocationDecision": {
         "prover": "alt-ergo",
-        "time": 0.01
+        "time": 0.023
       }
     }
   }

@@ -248,6 +248,9 @@ jobs:
             echo 'CARGO_REGISTRY_TOKEN is not set: publishing through trusted publishing.'
             echo mode=oidc >>"${GITHUB_OUTPUT}"
           fi
+          # Start the upload budget before OIDC authentication, including the
+          # action's own time in the token-age bound.
+          echo "started_at=$(date +%s)" >>"${GITHUB_OUTPUT}"
 
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         if: steps.credential.outputs.mode == 'oidc'
@@ -256,8 +259,11 @@ jobs:
       # One crate at a time, in dependency order. `cargo publish` waits until a
       # crate is in the index before it returns, so the next crate resolves
       # it. The plan job already verified every package, so this run does not
-      # build them again; that keeps the upload inside the 30-minute life of a
-      # trusted-publishing token.
+      # build them again. An OIDC-authenticated batch has a 20-minute budget,
+      # starting before authentication, below the token's 30-minute lifetime.
+      # It bounds uploads, index waits, and rate-limit sleeps together. Rerun
+      # all jobs after an exhausted batch to obtain a fresh token and refresh
+      # the plan so it skips uploaded versions.
       #
       # crates.io rate-limits uploads, and a new crate name has the lowest
       # limit: a burst of five, then one every ten minutes. A 429 answer waits
@@ -267,16 +273,34 @@ jobs:
         env:
           CRATES: ${{ needs.plan.outputs.crates }}
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+          CREDENTIAL_MODE: ${{ steps.credential.outputs.mode }}
+          AUTH_STARTED_AT: ${{ steps.credential.outputs.started_at }}
         run: |
           set -o pipefail
+          budget_exhausted() {
+            echo '::error::Trusted-publishing upload budget exhausted. Use Re-run all jobs to authenticate again and refresh the plan, which skips versions already published.'
+            exit 1
+          }
           for crate in ${CRATES}; do
             for attempt in 1 2 3 4 5 6 7; do
-              if cargo publish --locked --no-verify -p "${crate}" 2>&1 | tee "${RUNNER_TEMP}/publish.log"; then
+              command=(cargo publish --locked --no-verify -p "${crate}")
+              if [ "${CREDENTIAL_MODE}" = oidc ]; then
+                remaining=$((AUTH_STARTED_AT + 1200 - $(date +%s)))
+                [ "${remaining}" -gt 0 ] || budget_exhausted
+                command=(timeout --foreground --kill-after=5s "${remaining}s" "${command[@]}")
+              fi
+              if "${command[@]}" 2>&1 | tee "${RUNNER_TEMP}/publish.log"; then
                 break
+              fi
+              if [ "${CREDENTIAL_MODE}" = oidc ] && [ "$(date +%s)" -ge "$((AUTH_STARTED_AT + 1200))" ]; then
+                budget_exhausted
               fi
               if ! grep -q '429' "${RUNNER_TEMP}/publish.log" || [ "${attempt}" = 7 ]; then
                 echo "::error::cargo publish failed for ${crate}"
                 exit 1
+              fi
+              if [ "${CREDENTIAL_MODE}" = oidc ] && [ "$((AUTH_STARTED_AT + 1200 - $(date +%s)))" -le 600 ]; then
+                budget_exhausted
               fi
               echo "crates.io rate-limited ${crate} (attempt ${attempt}); waiting ten minutes"
               sleep 600

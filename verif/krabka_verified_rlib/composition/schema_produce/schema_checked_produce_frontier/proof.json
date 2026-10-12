@@ -3,8 +3,8 @@
   "proofs": {
     "Coma": {
       "vc_branch_Option_i64": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.011 },
-      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.008 },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.021 },
       "vc_framed_schema_walk_admission": {
         "prover": "alt-ergo",
         "time": 0.013

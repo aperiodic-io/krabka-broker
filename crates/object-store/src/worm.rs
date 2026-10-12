@@ -1,11 +1,12 @@
 //! S3 control-plane checks required before enabling a WORM writer.
 
+use object_store::RetryConfig;
 use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::{
     GcsConfig, ObjectStoreError, S3Config,
     build::{build_gcs_store, build_s3_store},
-    multipart::{read_ok_body, s3_bucket_url, s3_http_client, signed_s3_get_xml},
+    multipart::{backend, read_ok_body, s3_bucket_url, s3_http_client, signed_s3_get_xml},
 };
 
 #[derive(Deserialize)]
@@ -129,11 +130,25 @@ pub async fn verify_gcs_worm_bucket(cfg: &GcsConfig) -> Result<(), ObjectStoreEr
         .extend(["storage", "v1", "b", &cfg.bucket]);
     url.query_pairs_mut()
         .append_pair("fields", "versioning,retentionPolicy");
-    let mut request = reqwest::Client::new().get(url);
+    let client = reqwest::Client::builder()
+        .timeout(cfg.request_timeout)
+        .connect_timeout(cfg.connect_timeout)
+        .build()
+        .map_err(backend)?;
+    let mut request = client.get(url);
     if !credential.bearer.is_empty() {
         request = request.bearer_auth(&credential.bearer);
     }
-    let body = read_ok_body(request, "GCS Buckets.get").await?;
+    let body = read_ok_body(
+        request,
+        "GCS Buckets.get",
+        &RetryConfig {
+            max_retries: cfg.max_retries,
+            retry_timeout: cfg.retry_timeout,
+            ..RetryConfig::default()
+        },
+    )
+    .await?;
     let policy: GcsBucketPolicy = serde_json::from_slice(&body)
         .map_err(|error| ObjectStoreError::Backend(format!("GCS Buckets.get: {error}")))?;
     validate_gcs_policy(cfg, policy)
@@ -190,10 +205,12 @@ async fn get_bucket_xml<T: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use assert2::check;
 
     use super::*;
-    use crate::test_support::{s3_config, serve_http_pages};
+    use crate::test_support::{http_listener, read_request, s3_config, serve_http_pages};
 
     const GCS_TEST_KEY: &str = r#"{
         "private_key":"unused",
@@ -366,6 +383,52 @@ mod tests {
                 .unwrap_err();
             check!(error.to_string().contains(reason), "{reason}: {error}");
             server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn bucket_checks_obey_request_and_retry_deadlines() {
+        for (gcs, retry_deadline) in [(false, false), (true, false), (false, true), (true, true)] {
+            let (listener, endpoint) = http_listener().await;
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_request(&mut socket).await;
+                std::future::pending::<()>().await;
+            });
+            let request_timeout = if retry_deadline {
+                Duration::from_secs(2)
+            } else {
+                Duration::from_millis(25)
+            };
+            let retry_timeout = if retry_deadline {
+                Duration::from_millis(25)
+            } else {
+                Duration::from_secs(2)
+            };
+            let result = tokio::time::timeout(Duration::from_secs(1), async {
+                if gcs {
+                    let mut cfg = gcs_cfg(endpoint);
+                    cfg.request_timeout = request_timeout;
+                    cfg.retry_timeout = retry_timeout;
+                    cfg.max_retries = 0;
+                    verify_gcs_worm_bucket(&cfg).await
+                } else {
+                    let mut cfg = s3_config("bucket", endpoint);
+                    cfg.request_timeout = request_timeout;
+                    cfg.retry_timeout = retry_timeout;
+                    cfg.max_retries = 0;
+                    verify_s3_worm_bucket(&cfg).await
+                }
+            })
+            .await;
+            server.abort();
+            let error = result
+                .expect("configured deadline must expire before the test guard")
+                .unwrap_err();
+            check!(matches!(error, ObjectStoreError::Backend(_)));
+            if retry_deadline {
+                check!(error.to_string().contains("retry deadline exceeded"));
+            }
         }
     }
 }

@@ -5,7 +5,10 @@
 //!
 //! The idle deadline is a property of the listener, applies whatever the
 //! connection's auth state, and is re-armed from `Instant::now()` on every
-//! pass through [`next_connection_frame`] — that is, after every frame read.
+//! prefix and body read. Waiting for the broker byte budget pauses the idle window.
+//! Response writes have the same no-progress window, enforced by `WriteIdle`
+//! and the sendfile drainer; a client that stops reading cannot retain queue
+//! permits forever. Successful writes re-arm it, and handler time is excluded.
 //!
 //! The KIP-368 SASL session deadline is deliberately not armed here. Kafka
 //! runs no timer against it either: an expired session closes on the next
@@ -16,16 +19,17 @@
 //! the broker itself imposed to shed load never counts as the client falling
 //! silent.
 //!
-//! The idle window covers a connection only from the moment it reaches this
-//! loop. On a TLS listener the handshake that runs before it is held to the
+//! On a TLS listener the handshake that runs before this loop is held to the
 //! same window by `accept::handshake_within_idle_window`, so a peer that opens
 //! the socket and never negotiates is reclaimed too.
 
-use bytes::Bytes;
-use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
+use super::{
+    RequestByteBudget,
+    receive::{ReceiveError, RequestFrame, receive_request},
+};
 use crate::{
     config::BrokerConfig,
     metrics::BrokerMetrics,
@@ -168,8 +172,8 @@ pub(super) struct FrameWaitPolicy {
 /// a throttled client from timing out its in-flight request and retrying into
 /// the quota that is shedding load.
 ///
-/// The idle window is armed once the mute has drained, so the broker's own
-/// backpressure never spends the client's idle budget. The KIP-368 session
+/// The idle window is armed once the mute has drained and again after the
+/// byte-budget wait, so broker backpressure does not spend the client's idle budget. The KIP-368 session
 /// deadline is not armed here at all: Kafka closes an expired session on the
 /// request that arrives past it, which the dispatch loop does with
 /// `ConnectionAuth::expired_for_request`.
@@ -178,7 +182,8 @@ pub(super) async fn next_connection_frame<S>(
     auth: &ConnectionAuth,
     mute_until: Option<tokio::time::Instant>,
     policy: &FrameWaitPolicy,
-) -> Option<Bytes>
+    (maximum, budget): (usize, Option<&RequestByteBudget>),
+) -> Option<RequestFrame>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -187,16 +192,10 @@ where
     if let Some(mute_until) = mute_until {
         tokio::time::sleep_until(mute_until).await;
     }
-    // Armed after the mute has drained, so every frame read resets the idle
-    // window and a pause the broker imposed is not charged to the client.
-    let idle_deadline = policy
-        .idle
-        .map(|window| tokio::time::Instant::now() + window);
-    let frame_result = tokio::select! {
-        biased;
-        () = crate::time_util::sleep_until_opt(idle_deadline) => {
-            // Kafka's `Selector.maybeCloseOldestConnection` logs an idle close
-            // at TRACE. DEBUG keeps it with the other lines of the connection.
+    let frame_result = receive_request(framed.get_mut(), maximum, budget, policy.idle).await;
+    match frame_result {
+        Ok(Some(frame)) => Some(frame),
+        Err(ReceiveError::Idle) => {
             tracing::debug!(
                 principal = principal_or_anonymous(auth).name.as_str(),
                 peer = %policy.peer,
@@ -206,13 +205,9 @@ where
             policy
                 .metrics
                 .record_connection_close(ConnectionCloseReason::Idle);
-            return None;
-        },
-        next = framed.next() => next,
-    };
-    match frame_result {
-        Some(Ok(bytes)) => Some(bytes.freeze()),
-        Some(Err(error)) => {
+            None
+        }
+        Err(ReceiveError::Io(error)) => {
             tracing::warn!(%error, peer = %policy.peer, "frame decode error, closing");
             policy
                 .metrics
@@ -234,7 +229,7 @@ where
             }
             None
         }
-        None => {
+        Ok(None) => {
             policy
                 .metrics
                 .record_connection_close(ConnectionCloseReason::PeerClosed);

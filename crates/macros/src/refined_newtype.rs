@@ -145,6 +145,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     }
 
     let ident = item.ident;
+    let (impl_generics, type_generics, where_clause) = item.generics.split();
     let vis = item.vis;
     let rule = args.rule.0;
     let getter = args
@@ -177,10 +178,10 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         },
     );
     let validate = if string_error {
-        moxy::template! { .and_then({{ ident }}::new) }
+        moxy::template! { .and_then(<{{ ident }} {{ type_generics }}>::new) }
     } else {
         moxy::template! {
-            .and_then(|value| {{ ident }}::new(value).map_err(|error| ::std::string::ToString::to_string(&error)))
+            .and_then(|value| <{{ ident }} {{ type_generics }}>::new(value).map_err(|error| ::std::string::ToString::to_string(&error)))
         }
     };
     let parse = moxy::template! {
@@ -252,7 +253,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         }),
     };
     Ok(moxy::template! {
-        impl {{ ident }} {
+        impl {{ impl_generics }} {{ ident }} {{ type_generics }} {{ where_clause }} {
             /// Validate `value` against the type's rule and wrap it.
             ///
             /// # Errors
@@ -281,7 +282,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         }
 
         @if let Some(default_value) = &default_value {
-            impl ::core::default::Default for {{ ident }} {
+            impl {{ impl_generics }} ::core::default::Default for {{ ident }} {{ type_generics }} {{ where_clause }} {
                 fn default() -> Self {
                     Self::new({{ default_value }}).expect({{ default_expect }})
                 }
@@ -289,7 +290,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         }
 
         @if let Some(quantity) = &quantity {
-            impl ::core::convert::TryFrom<{{ quantity.ty }}> for {{ ident }} {
+            impl {{ impl_generics }} ::core::convert::TryFrom<{{ quantity.ty }}> for {{ ident }} {{ type_generics }} {{ where_clause }} {
                 type Error = ::std::string::String;
 
                 fn try_from(value: {{ quantity.ty }}) -> ::core::result::Result<Self, Self::Error> {
@@ -299,7 +300,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         }
 
         @if from_str {
-            impl ::core::str::FromStr for {{ ident }} {
+            impl {{ impl_generics }} ::core::str::FromStr for {{ ident }} {{ type_generics }} {{ where_clause }} {
                 type Err = ::std::string::String;
 
                 fn from_str(value: &str) -> ::core::result::Result<Self, Self::Err> {
@@ -309,7 +310,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         }
 
         @if let Some(display) = &display {
-            impl ::core::fmt::Display for {{ ident }} {
+            impl {{ impl_generics }} ::core::fmt::Display for {{ ident }} {{ type_generics }} {{ where_clause }} {
                 fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     {{ display }}
                 }
@@ -318,7 +319,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 
         @if let Some((name, doc)) = &parse_fn {
             #[doc = {{ doc }}]
-            {{ vis }} fn {{ name }}(value: &str) -> ::core::result::Result<{{ ident }}, ::std::string::String> {
+            {{ vis }} fn {{ name }} {{ impl_generics }}(value: &str) -> ::core::result::Result<{{ ident }} {{ type_generics }}, ::std::string::String> {{ where_clause }} {
                 {{ parse }}
             }
         }

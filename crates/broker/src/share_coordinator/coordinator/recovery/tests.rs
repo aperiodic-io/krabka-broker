@@ -2,19 +2,26 @@
 //! the round trip from a written state back into memory, and the per-record
 //! and inter-batch offset arithmetic that the replay cursor depends on.
 
+use arc_swap::ArcSwap;
 use assert2::{assert, check};
+use krabka_log::{Log, LogConfig};
 use krabka_protocol::records::{Record, RecordBatch};
 use tempfile::tempdir;
 
 use super::*;
 use crate::{
+    codes,
     handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+    log_dir_status::LogDirRegistry,
     partition::Partition,
     partition_registry::PartitionRegistry,
+    partition_writer,
+    producer_state::ProducerState,
     share_coordinator::{
         config::ShareCoordinatorConfig,
         coordinator::{
-            ShareStateError,
+            ShareStateError, Term, message,
+            persist::AppendError,
             test_support::{
                 batch, coordinator, image_with_topic, lead_all, open_state_partition,
                 open_state_partitions, share_write,
@@ -24,6 +31,152 @@ use crate::{
         persistence::{StateBatch, encode_state_key},
     },
 };
+
+/// An accepted Produce stays in the real writer's FIFO while its caller
+/// expires or cancels. Neither a lower epoch nor a replay of the currently
+/// empty log may publish state until that command has completed.
+#[tokio::test(start_paused = true)]
+async fn abandoned_append_fences_the_shard_until_writer_barrier_and_replay() {
+    for cancelled in [false, true] {
+        let dir = tempdir().unwrap();
+        let registry = Arc::new(PartitionRegistry::new());
+        let release_writer = Arc::new(tokio::sync::Notify::new());
+        let gate = Arc::clone(&release_writer);
+        let part = Arc::new(Partition::writer_fixture(
+            bootstrap::TOPIC,
+            Arc::new(std::sync::Mutex::new(
+                Log::open(dir.path(), LogConfig::default()).unwrap(),
+            )),
+            Arc::new(ArcSwap::from_pointee(dir.path().to_path_buf())),
+            move |identity, storage, rx, signals| {
+                tokio::spawn(async move {
+                    gate.notified().await;
+                    partition_writer::run(
+                        identity,
+                        storage,
+                        rx,
+                        signals,
+                        (
+                            LogDirRegistry::default(),
+                            Arc::new(ProducerState::new()),
+                            None,
+                        ),
+                    )
+                    .await;
+                })
+            },
+        ));
+        registry.insert(
+            bootstrap::TOPIC.into(),
+            PartitionIndex(0),
+            Arc::clone(&part),
+        );
+        let coordinator = Arc::new(ShareCoordinator::new(
+            krabka_metadata::NodeId(1),
+            registry,
+            ShareCoordinatorConfig {
+                state_topic_num_partitions: 1,
+                write_timeout: std::time::Duration::from_secs(1),
+                ..Default::default()
+            },
+        ));
+        lead_all(&coordinator).await;
+        let topic_id = uuid::Uuid::from_bytes([7; 16]);
+        let image = image_with_topic(topic_id, 1);
+        let mut higher = Box::pin(coordinator.initialize(&image, "g", topic_id, 0, 2, Offset(10)));
+        tokio::select! {
+            biased;
+            result = &mut higher => panic!("paused writer completed initialize: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        assert!(part.writer_tx.capacity() == part.writer_tx.max_capacity() - 1);
+        if cancelled {
+            drop(higher);
+        } else {
+            tokio::time::advance(std::time::Duration::from_secs(1)).await;
+            assert!(
+                higher.await
+                    == Err(ShareStateError::Operation {
+                        code: codes::COORDINATOR_NOT_AVAILABLE,
+                        message: message::REQUEST_TIMED_OUT,
+                    })
+            );
+        }
+        let unavailable = Err(ShareStateError::Operation {
+            code: codes::COORDINATOR_LOAD_IN_PROGRESS,
+            message: message::COORDINATOR_LOAD_IN_PROGRESS,
+        });
+        // A multi-record background job can retain its active guard after
+        // its first append times out. The append seam fences that job too.
+        let accepted_commands = part.writer_tx.capacity();
+        assert!(matches!(
+            coordinator
+                .persist_record(
+                    Term {
+                        partition: PartitionIndex(0),
+                        leader_epoch: 0
+                    },
+                    ShareStateKey {
+                        record_type: KEY_SHARE_SNAPSHOT,
+                        group_id: "another-key".into(),
+                        topic_id,
+                        partition: 0,
+                    },
+                    None,
+                )
+                .await,
+            Err(AppendError::NeedsReplay(_))
+        ));
+        assert!(part.writer_tx.capacity() == accepted_commands);
+        assert!(
+            coordinator
+                .initialize(&image, "g", topic_id, 0, 1, Offset(20))
+                .await
+                == unavailable
+        );
+        assert!(
+            coordinator.read_summary("g", topic_id, 0).await
+                == Err(codes::COORDINATOR_LOAD_IN_PROGRESS)
+        );
+        assert!(part.log_end_offset() == Offset(0));
+
+        let leadership = state_partition_image(0, 1, 0);
+        // A bounded recovery attempt before the writer is released must not
+        // mistake the empty log for a completed replay.
+        refresh_and_wait(&coordinator, &leadership).await;
+        assert!(coordinator.load_status(PartitionIndex(0)).await == Some(LoadStatus::Pending));
+        assert!(
+            coordinator
+                .initialize(&image, "g", topic_id, 0, 1, Offset(20))
+                .await
+                == unavailable
+        );
+
+        tokio::time::resume();
+        release_writer.notify_one();
+        refresh_and_wait(&coordinator, &leadership).await;
+        assert!(
+            coordinator.read_summary("g", topic_id, 0).await == Ok(Some((2, 0, Offset(10), 0)))
+        );
+        assert!(
+            coordinator
+                .initialize(&image, "g", topic_id, 0, 1, Offset(20))
+                .await
+                == Err(ShareStateError::Refused {
+                    code: codes::FENCED_STATE_EPOCH,
+                    message: message::FENCED_STATE_EPOCH,
+                })
+        );
+        coordinator.reload_all_partitions_for_test().await;
+        assert!(
+            coordinator.read_summary("g", topic_id, 0).await == Ok(Some((2, 0, Offset(10), 0)))
+        );
+        let writer = part.take_writer_handle().unwrap();
+        writer.abort();
+        let _ = writer.await;
+        tokio::time::pause();
+    }
+}
 
 #[tokio::test]
 async fn recover_honors_nondefault_read_bound() {
@@ -56,21 +209,58 @@ async fn recover_honors_nondefault_read_bound() {
         write_timestamp: 0,
         state_batches: vec![],
     };
+    let mut prefix = RecordBatch::default();
+    prefix.records.push(Record {
+        key: Some(encode_state_key(&key).unwrap()),
+        value: Some(
+            ShareSnapshotValue {
+                state_epoch: 1,
+                start_offset: Offset(1),
+                ..snapshot.clone()
+            }
+            .encode(),
+        ),
+        ..Record::default()
+    });
+    partition.produce_batch(prefix).await.unwrap();
     let mut batch = RecordBatch::default();
     batch.records.push(Record {
         key: Some(encode_state_key(&key).unwrap()),
         value: Some(snapshot.encode()),
         ..Record::default()
     });
-    // Padding that pushes the batch past the bounded read: a record of a type
+    // Padding that pushes the batch past the initial read window: a record of a type
     // the share-state loader does not know, which it skips.
     batch.records.push(Record {
+        offset_delta: 1,
         key: Some(Bytes::from_static(&[0x7f, 0xff])),
         value: Some(Bytes::from(vec![0; 2_048])),
         ..Record::default()
     });
     batch.last_offset_delta = 1;
     partition.produce_batch(batch).await.unwrap();
+    let mut suffix = RecordBatch::default();
+    suffix.records.push(Record {
+        key: Some(
+            encode_state_key(&ShareStateKey {
+                record_type: KEY_SHARE_UPDATE,
+                ..key
+            })
+            .unwrap(),
+        ),
+        value: Some(
+            ShareUpdateValue {
+                snapshot_epoch: 0,
+                leader_epoch: 5,
+                start_offset: Offset(7),
+                delivery_complete_count: 8,
+                state_batches: vec![],
+            }
+            .encode(),
+        ),
+        ..Record::default()
+    });
+    partition.produce_batch(suffix).await.unwrap();
 
     let image = state_partition_image(state_partition, 1, 0);
     let bounded = Arc::new(ShareCoordinator::new(
@@ -82,7 +272,7 @@ async fn recover_honors_nondefault_read_bound() {
         },
     ));
     bounded.recover(&image).await.unwrap();
-    assert!(bounded.read_summary("bounded", topic_id, 0).await == Ok(None));
+    assert!(bounded.read_summary("bounded", topic_id, 0).await == Ok(Some((3, 5, Offset(7), 8))));
 
     let unbounded = Arc::new(ShareCoordinator::new(
         krabka_audit::NodeId(1),
@@ -93,7 +283,7 @@ async fn recover_honors_nondefault_read_bound() {
         },
     ));
     unbounded.recover(&image).await.unwrap();
-    assert!(unbounded.read_summary("bounded", topic_id, 0).await == Ok(Some((3, 4, Offset(5), 6))));
+    assert!(unbounded.read_summary("bounded", topic_id, 0).await == Ok(Some((3, 5, Offset(7), 8))));
 }
 
 #[tokio::test]

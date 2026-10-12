@@ -15,20 +15,24 @@
 
 use std::{collections::HashSet, net::SocketAddr};
 
-use krabka_metadata::{AclOperation, PermissionType, ResourceType};
+use krabka_metadata::{AclOperation, PatternType, PermissionType, ResourceType};
 use krabka_security::Principal;
 use krabka_verified::{
     AclDecision, acl_decision,
     authz::{AclDefault, AclFacts},
 };
 
+mod coverage;
 mod matching;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::matching::{matches_host, matches_operation, matches_principal, matches_resource};
+use self::{
+    coverage::DeniedNames,
+    matching::{matches_host, matches_operation, matches_principal, matches_resource},
+};
 use crate::{AclSource, AuthorizationRequest, AuthorizationResult, Authorizer, jdk_host_address};
 
 /// The resource name Kafka's default `authorizeByResourceType` probes first,
@@ -146,16 +150,11 @@ impl Authorizer for SimpleAclAuthorizer {
     /// Otherwise it scans every stored entry of `resource_type` for an ALLOW ACL, matching
     /// `principal`, `host`, and `operation`, that no DENY covers.
     ///
-    /// For each such ALLOW entry, the resource name its own pattern names is
-    /// a resource that grant covers -- a literal names itself, and a prefixed
-    /// pattern's own prefix is a name it covers by definition. Running the
-    /// ordinary [`Self::authorize`] decision against that one candidate name
-    /// reuses its ordering (super-user bypass, deny-wins) and its resource
-    /// matching, so a DENY that reaches that candidate -- an exact-pattern
-    /// DENY, a DENY on the `*` wildcard, or a broader PREFIXED DENY -- is
-    /// exactly the DENY that would also apply if a real resource used that
-    /// name. This is Kafka's `AclAuthorizer.authorizeByResourceType`: an ALLOW
-    /// grants only when some concrete resource it covers survives that scan.
+    /// A literal ALLOW needs its exact name to survive the matching DENYs.
+    /// Kafka checks a prefix ALLOW only against dominating DENY prefixes and
+    /// the DENY wildcard; literal exclusions cannot dominate a prefix grant.
+    /// A wildcard ALLOW survives unless a wildcard DENY exists. These pattern
+    /// checks need no synthetic name that another ACL could happen to deny.
     #[tracing::instrument(
         level = "debug",
         skip_all,
@@ -200,42 +199,31 @@ impl Authorizer for SimpleAclAuthorizer {
         let user_pattern = format!("User:{}", principal.name);
         let host_str = jdk_host_address(host.ip());
         let cidr_hosts_supported = source.cidr_hosts_supported();
-        for entry in source.acls_of_type(resource_type) {
-            if entry.permission_type != PermissionType::Allow
-                || !matches_principal(entry, &user_pattern)
-                || !matches_host(entry, &host_str, host.ip(), cidr_hosts_supported)
-                || !matches_operation(entry.operation, operation, entry.permission_type)
-            {
-                continue;
-            }
-            // Testing only the ALLOW entry's own stored name misses a
-            // PREFIXED grant when a LITERAL DENY happens to name that exact
-            // prefix string: e.g. ALLOW prefixed "ord" plus DENY literal
-            // "ord" would report the whole grant denied, even though
-            // "orders" and every other name under the prefix is still
-            // allowed. Test the prefix name itself (for a LITERAL entry,
-            // the only resource it can ever grant) and, for a PREFIXED
-            // entry, a synthetic name that is strictly under the prefix but
-            // cannot equal any real LITERAL ACL name, so a LITERAL DENY on
-            // the bare prefix string cannot shadow the grant it does not
-            // actually cover.
-            let mut candidate_names = vec![entry.resource_name.clone()];
-            if entry.pattern_type == krabka_metadata::PatternType::Prefixed {
-                candidate_names.push(format!("{}\u{10ffff}", entry.resource_name));
-            }
-            for resource_name in &candidate_names {
-                let candidate = AuthorizationRequest {
-                    principal,
-                    host,
-                    resource_type,
-                    resource_name: resource_name.as_str(),
-                    operation,
-                };
-                if self.authorize(source, &candidate) == AuthorizationResult::Allow {
-                    span.record("decision", "allow-acl");
-                    return AuthorizationResult::Allow;
+        let applicable: Vec<_> = source
+            .acls_of_type(resource_type)
+            .filter(|entry| {
+                matches_principal(entry, &user_pattern)
+                    && matches_host(entry, &host_str, host.ip(), cidr_hosts_supported)
+                    && matches_operation(entry.operation, operation, entry.permission_type)
+            })
+            .collect();
+        let denied = DeniedNames::new(
+            applicable
+                .iter()
+                .copied()
+                .filter(|entry| entry.permission_type == PermissionType::Deny),
+        );
+        let uncovered = applicable.iter().any(|entry| {
+            entry.permission_type == PermissionType::Allow
+                && match entry.pattern_type {
+                    PatternType::Literal if entry.resource_name == "*" => denied.allows_wildcard(),
+                    PatternType::Literal => denied.allows_literal(&entry.resource_name),
+                    PatternType::Prefixed => denied.allows_prefix(&entry.resource_name),
                 }
-            }
+        });
+        if uncovered {
+            span.record("decision", "allow-acl");
+            return AuthorizationResult::Allow;
         }
         span.record("decision", "deny-default");
         AuthorizationResult::Deny

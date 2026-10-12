@@ -11,7 +11,7 @@
       "vc_elim_Continue'0": { "prover": "alt-ergo", "time": 0.018 },
       "vc_from_residual_Option_LocalRecoveryStep": {
         "prover": "alt-ergo",
-        "time": 0.024
+        "time": 0.004
       },
       "vc_local_recovery_batch_step": { "prover": "alt-ergo", "time": 0.115 },
       "vc_restore_batch_step": { "prover": "alt-ergo", "time": 0.007 }

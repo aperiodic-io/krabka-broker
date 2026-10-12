@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_compute_horizon": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_compute_horizon": { "prover": "alt-ergo", "time": 0.008 },
       "vc_saturating_add": { "prover": "alt-ergo", "time": 0.009 }
     }
   }

@@ -358,6 +358,11 @@ impl Broker {
         if let Some(reader) = runtime.remote_reader.as_ref() {
             dead_letters.set_remote_reader(Arc::clone(reader));
         }
+        if let Some(reader) = runtime.diskless_read.as_ref() {
+            dead_letters.set_diskless_reader(Arc::clone(reader));
+        }
+        share_partition_leaders
+            .set_read_sources(runtime.remote_reader.clone(), runtime.diskless_read.clone());
 
         // The controller listener is already accepting connections, but the
         // audit log only exists now. Publish it so controller SASL logins

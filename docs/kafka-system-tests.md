@@ -147,8 +147,9 @@ it fails. The task gives each entry one of four verdicts:
 | Verdict | Expectation | Result |
 | :--- | :--- | :--- |
 | pass | pass | `PASS` |
-| regression | pass | `FAIL`, or `NOT RUN` |
-| known failure | `known_failure` | not `PASS` |
+| regression | pass | Any result other than `PASS` |
+| regression | `known_failure` | Missing, skipped, aborted, or other non-executed results |
+| known failure | `known_failure` | Observed `FAIL` |
 | fixed | `known_failure` | `PASS` |
 
 The task exits with status 1 if one or more entries is a regression. When an

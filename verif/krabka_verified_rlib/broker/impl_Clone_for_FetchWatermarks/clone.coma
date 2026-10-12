@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/broker.rs" 41 19 41 36 *)
+(* #"/workspace/crates/verified/src/broker.rs" 43 19 43 36 *)
 
 (* <broker::FetchWatermarks as std::clone::Clone> *)
 
@@ -11,7 +11,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_FetchWatermarks [#"/workspace/crates/verified/src/broker.rs" 41 19 41 36] (self: t_FetchWatermarks)
+let clone_FetchWatermarks [#"/workspace/crates/verified/src/broker.rs" 43 19 43 36] (self: t_FetchWatermarks)
   (return (x: t_FetchWatermarks)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_FetchWatermarks = Any.any_l () | & self: t_FetchWatermarks = self ])

@@ -113,7 +113,7 @@ use scheduled::batch_at;
 
 /// Retention must not mistake a reopened sealed segment for an ancient one.
 ///
-/// `Segment::open` does no scan, so a sealed segment arrives with no
+/// `Segment::open_unscanned` does no scan, so a sealed segment arrives with no
 /// timestamp of its own. If the log leaves it that way, every sealed segment
 /// reports a timestamp below any retention cutoff, and the first `tick` after
 /// a restart deletes all of them. Only the "never drop the last segment"

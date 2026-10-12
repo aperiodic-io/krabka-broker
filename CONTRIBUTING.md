@@ -81,7 +81,8 @@ repository:
 ## Benchmarks
 
 `cargo bench -p krabka-broker` and `cargo bench -p krabka-log` are the
-microbenchmarks. There is no `crate_bench` rule, so Cargo runs them.
+microbenchmarks. Bazel's `crate_bench` macro compiles and lints the same suites;
+`bazel run //crates/log:log_bench` runs the storage suite on demand.
 
 [`bench/`](bench/README.md) is the cluster harness. It runs
 `krabka-bench-driver` as a Kubernetes Job against a Krabka cluster and a

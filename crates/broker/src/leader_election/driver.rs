@@ -232,7 +232,10 @@ async fn fail_over_dead_broker(
         // Bound the commit. A stall here would wedge the liveness ticker, and
         // with it every later edge and sweep. On elapse the caller logs the
         // error and the sweep retries on the next tick.
-        let submit = controller.submit_change(plan.changes);
+        // The liveness scan awaited other tasks. Never append its old leader,
+        // ISR or epochs after another metadata mutation won the race. The next
+        // sweep rebuilds a refused plan from the current image.
+        let submit = controller.submit_change_if_image(plan.changes, image);
         match tokio::time::timeout(FAILOVER_SUBMIT_TIMEOUT, submit).await {
             Ok(result) => {
                 result.map_err(|e| BrokerError::Replication(format!("submit_change: {e}")))?;

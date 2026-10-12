@@ -70,6 +70,7 @@ mod archive;
 mod copy;
 mod copy_segment;
 mod delete;
+mod delivery;
 mod leader_epoch;
 mod local_retention;
 mod remote_retention;

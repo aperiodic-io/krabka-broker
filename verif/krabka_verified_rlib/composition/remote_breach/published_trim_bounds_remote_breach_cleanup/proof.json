@@ -25,7 +25,7 @@
       },
       "vc_published_trim_bounds_remote_breach_cleanup": {
         "prover": "z3",
-        "time": 0.164
+        "time": 0.079
       },
       "vc_push_RemoteRetentionSegment": {
         "prover": "alt-ergo",

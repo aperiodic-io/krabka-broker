@@ -163,10 +163,13 @@ pub fn fetch_limit_model(is_follower: bool, read_committed: bool, w: FetchWaterm
 /// - `response_hw` and `response_lso` do not move with it, so consumer lag
 ///   stays honest and KIP-227 watermark monotonicity is untouched.
 ///
+/// Offsets below the log start or above the log end are out of range.
+/// An offset equal to the log end remains a valid empty fetch.
+///
 /// There is no precondition. The consumer bound is proved outright: whatever
 /// the caller passes, a consumer never reads at or past the high watermark, the
 /// delivery watermark, or, under `read_committed`, the last stable offset.
-#[ensures(result.out_of_range == (fetch_offset@ < w.log_start@))]
+#[ensures(result.out_of_range == (fetch_offset@ < w.log_start@ || fetch_offset@ > w.log_end@))]
 #[ensures(result.empty == (!result.out_of_range
     && fetch_offset@ >= if is_follower { w.log_end@ } else { offset_min(w.hw@, w.deliverable@) }))]
 #[ensures(result.limit_offset@ == fetch_limit_model(is_follower, read_committed, w))]
@@ -204,7 +207,7 @@ pub fn fetch_visibility(
         visible
     };
     let upper_bound = if is_follower { w.log_end } else { visible };
-    let out_of_range = fetch_offset < w.log_start;
+    let out_of_range = fetch_offset < w.log_start || fetch_offset > w.log_end;
     FetchVisibility {
         out_of_range,
         empty: !out_of_range && fetch_offset >= upper_bound,

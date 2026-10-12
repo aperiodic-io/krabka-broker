@@ -5,14 +5,14 @@ let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span soption = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/option.rs" 63 18 63 43
 let%span swell_founded = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/well_founded.rs" 43 8 43 33
 let%span sslice = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/slice.rs" 331 18 331 22
-let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 169 10 169 63
-let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 170 10 171 97
-let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 83
-let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 175 58
-let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 176 74
-let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 177 10 181 1
-let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 182 10 182 36
-let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 183 10 183 59
+let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 93
+let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 174 97
+let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 175 10 175 83
+let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 178 58
+let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 179 10 179 74
+let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 180 10 184 1
+let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 185 10 185 36
+let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 186 10 186 59
 let%span sfetch'7 = "/workspace/crates/verified/src/broker/fetch.rs" 120 16 120 42
 let%span sfetch'8 = "/workspace/crates/verified/src/broker/fetch.rs" 133 8 139 9
 let%span ssequence = "/workspace/crates/verified/src/sequence.rs" 14 16 14 72
@@ -157,7 +157,8 @@ let fetch_visibility (is_follower: bool) (read_committed: bool) (w: t_FetchWater
   (return (x: t_FetchVisibility)) = any
   [ return (result: t_FetchVisibility) ->
   {[@stop_split] [@expl:fetch_visibility ensures] ([@stop_split] [@expl:fetch_visibility ensures #0] [%#sfetch] result.out_of_range
-      = (Int64.to_int fetch_offset < Int64.to_int w.log_start))
+      = (Int64.to_int fetch_offset < Int64.to_int w.log_start
+      \/ gt_log_Int (Int64.to_int fetch_offset) (Int64.to_int w.log_end)))
     /\ ([@stop_split] [@expl:fetch_visibility ensures #1] [%#sfetch'0] result.empty
       = (not result.out_of_range
       /\ ge_log_Int (Int64.to_int fetch_offset) (if is_follower then

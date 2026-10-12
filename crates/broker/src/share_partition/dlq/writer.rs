@@ -62,6 +62,7 @@ use crate::{
     codes,
     config::BrokerConfig,
     config_keys::{BrokerLogDefaults, resolve_max_message_bytes},
+    diskless::read::DisklessReadHandle,
     metadata_source::MetadataSource,
     metrics::BrokerMetrics,
     network::client::InterBrokerClient,
@@ -381,6 +382,7 @@ pub struct DlqWriter {
     /// tier holds (KIP-405). Empty on a broker with no tiered storage, and
     /// until the broker has built its reader.
     remote_reader: std::sync::OnceLock<Arc<RemoteReader>>,
+    diskless_read: std::sync::OnceLock<Arc<DisklessReadHandle>>,
 }
 
 impl DlqWriter {
@@ -414,6 +416,7 @@ impl DlqWriter {
             decompression: config.record_decompression_policy().unwrap_or_default(),
             metrics,
             remote_reader: std::sync::OnceLock::new(),
+            diskless_read: std::sync::OnceLock::new(),
         }
     }
 
@@ -424,6 +427,11 @@ impl DlqWriter {
     /// changes nothing.
     pub(crate) fn set_remote_reader(&self, reader: Arc<RemoteReader>) {
         let _ = self.remote_reader.set(reader);
+    }
+
+    /// Install the diskless WAL source for records trimmed from local storage.
+    pub(crate) fn set_diskless_reader(&self, reader: Arc<DisklessReadHandle>) {
+        let _ = self.diskless_read.set(reader);
     }
 
     /// The `max.message.bytes` of `topic`, as this node runs it.
@@ -564,8 +572,9 @@ impl DlqSink for DlqWriter {
         let source = self
             .partitions
             .get(&source_topic, PartitionIndex(request.source_partition));
-        let tier = self.remote_reader.get().map(|reader| SourceTier {
-            reader,
+        let tier = Some(SourceTier {
+            reader: self.remote_reader.get().map(Arc::as_ref),
+            diskless: self.diskless_read.get().map(Arc::as_ref),
             metrics: &self.metrics,
             tp: krabka_remote_storage::TopicIdPartition::new(
                 request.topic_id,

@@ -26,6 +26,21 @@ use crate::{
 };
 
 impl S3RemoteStorage {
+    /// Largest index read by default: Kafka's Java `ByteBuffer` capacity
+    /// fits in a signed `int`, so an index larger than this cannot be loaded
+    /// by Kafka. The cap applies before buffering and during streaming.
+    pub const DEFAULT_MAX_INDEX_BYTES: u64 = i32::MAX as u64;
+
+    /// Set a lower memory limit for whole index reads, including snapshots
+    /// and epoch checkpoints. Values above [`Self::DEFAULT_MAX_INDEX_BYTES`]
+    /// use that ceiling. An object above the limit returns an error; it is
+    /// never truncated. Zero permits only empty objects.
+    #[must_use]
+    pub fn with_max_index_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_index_bytes = max_bytes.min(Self::DEFAULT_MAX_INDEX_BYTES);
+        self
+    }
+
     /// Wraps an arbitrary `ObjectStore`, for example
     /// `object_store::memory::InMemory` for tests. Use
     /// [`Self::from_s3_config`] for the production S3 path. Multipart
@@ -39,6 +54,7 @@ impl S3RemoteStorage {
             prefix,
             multipart_threshold: ByteSize::from_bytes(DEFAULT_MULTIPART_THRESHOLD),
             multipart_chunk_size: size_from_usize(DEFAULT_MULTIPART_CHUNK_SIZE),
+            max_index_bytes: Self::DEFAULT_MAX_INDEX_BYTES,
             worm: None,
             worm_bucket: WormBucket::Unverified,
         }

@@ -93,6 +93,9 @@ pull_image = use_repo_rule("@rules_img//img:pull.bzl", "pull")
         name = name,
         digest = digest,
         layer_handling = "eager",
+        # The mirror can serve an image's manifest while missing a blob.
+        # Keep it first, then fetch the same pinned bytes from Docker Hub.
+        registries = ["index.docker.io"] if registry == "mirror.gcr.io" else [],
         registry = registry,
         repository = repository,
         tag = tag,

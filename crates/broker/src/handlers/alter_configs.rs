@@ -20,8 +20,10 @@
 //! per-resource work lives in `resource`, and the record builders it
 //! dispatches to live in `topic_configs` and `broker_configs`.
 
+use bytes::Bytes;
 use krabka_protocol::owned::{
-    alter_configs_request::AlterConfigsRequest, alter_configs_response::AlterConfigsResponse,
+    alter_configs_request::{self, AlterConfigsRequest, AlterConfigsResource},
+    alter_configs_response::{AlterConfigsResourceResponse, AlterConfigsResponse},
 };
 
 mod broker_configs;
@@ -37,20 +39,164 @@ mod tests;
 
 use self::resource::process_resource;
 use crate::{
-    codes::{INVALID_CONFIG, INVALID_REQUEST, NONE, NOT_CONTROLLER, UNKNOWN_SERVER_ERROR},
-    config_keys::{MIN_INSYNC_REPLICAS, is_controller_managed_topic_config},
+    broker::Broker,
+    codes::{INVALID_CONFIG, INVALID_REQUEST},
+    config_keys::{
+        MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext,
+        is_controller_managed_topic_config,
+    },
+    error::BrokerError,
     handlers::{
-        audit_resource,
+        RequestContext, audit_resource, config_resource_refusal, decode_request,
         describe_configs::{
             RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
             RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
         },
+        encode_response,
+        forward_to_controller::{controller_listener_dispatch, to_active_controller},
+        response_encoding::ErrorRow as _,
     },
 };
+
+/// Preprocess node-local broker inputs before forwarding full replacements.
+pub(crate) async fn dispatch(
+    broker: &Broker,
+    version: i16,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> Result<Bytes, BrokerError> {
+    let mut req = decode_request::<AlterConfigsRequest>(req_bytes, version)?;
+    controller_listener_dispatch!(
+        broker,
+        ctx,
+        req,
+        version,
+        self::handle,
+        self::request_refusal
+    );
+    let duplicates = duplicate_resource_flags(
+        req.resources
+            .iter()
+            .map(|r| (r.resource_type, r.resource_name.as_str())),
+    );
+    let mut indexed_responses = Vec::new();
+    let mut forwarded_indices = Vec::new();
+    req.resources = std::mem::take(&mut req.resources)
+        .into_iter()
+        .zip(duplicates)
+        .enumerate()
+        .filter_map(|(index, (resource, duplicate))| {
+            if let Some(refusal) = preprocess_resource(broker, ctx, &resource, duplicate) {
+                indexed_responses.push((index, refusal));
+                None
+            } else {
+                forwarded_indices.push(index);
+                Some(resource)
+            }
+        })
+        .collect();
+    let mut response = if req.resources.is_empty() {
+        AlterConfigsResponse::default()
+    } else {
+        let body = encode_response(&req, version)?;
+        match to_active_controller(
+            broker,
+            alter_configs_request::API_KEY,
+            &body,
+            version,
+            ctx,
+            |code, message| encode_response(&request_refusal(&req, code, message), version),
+        )
+        .await
+        {
+            Some(answer) => decode_request::<AlterConfigsResponse>(&answer?, version)?,
+            None => handle(broker, req, version, ctx).await?,
+        }
+    };
+    indexed_responses.extend(forwarded_indices.into_iter().zip(response.responses));
+    indexed_responses.sort_unstable_by_key(|(index, _)| *index);
+    response.responses = indexed_responses.into_iter().map(|(_, row)| row).collect();
+    encode_response(&response, version)
+}
+
+fn request_refusal(
+    req: &AlterConfigsRequest,
+    code: i16,
+    message: Option<&str>,
+) -> AlterConfigsResponse {
+    AlterConfigsResponse {
+        responses: req
+            .resources
+            .iter()
+            .map(|r| AlterConfigsResourceResponse {
+                resource_type: r.resource_type,
+                resource_name: r.resource_name.clone(),
+                error_code: code,
+                error_message: message.map(str::to_owned),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
+fn preprocess_resource(
+    broker: &Broker,
+    ctx: &RequestContext<'_>,
+    resource: &AlterConfigsResource,
+    duplicate: bool,
+) -> Option<AlterConfigsResourceResponse> {
+    let shape = validate_resource_shape(
+        duplicate,
+        resource
+            .configs
+            .iter()
+            .map(|c| (c.name.as_str(), c.value.is_none())),
+    );
+    let image = broker.controller.current_image();
+    let result = shape.clone().and_then(|()| {
+        if resource.resource_type != RESOURCE_TYPE_BROKER {
+            return Ok(());
+        }
+        broker_configs::preprocess_broker_resource(
+            resource,
+            BrokerConfigContext {
+                image: &image,
+                serving: broker.config.node_id,
+                log_dirs: &broker.config.broker_log_dirs(),
+                unstable: broker.config.features.unstable_api_versions,
+            },
+        )
+    });
+    let (code, message) = result.err()?;
+    let (code, message) = if shape.is_err() {
+        (code, message)
+    } else {
+        config_resource_refusal(
+            broker.config.authorizer.as_ref(),
+            &image,
+            ctx,
+            (resource.resource_type, &resource.resource_name),
+            false,
+        )
+        .unwrap_or((code, message))
+    };
+    Some(
+        AlterConfigsResourceResponse {
+            resource_type: resource.resource_type,
+            resource_name: resource.resource_name.clone(),
+            ..Default::default()
+        }
+        .with_error(code, message),
+    )
+}
 
 /// Both config APIs validate and audit resources in request order.
 macro_rules! config_alter_handler {
     ($request:ty => $($response:ident)::+, $operation:literal, $audit:path, $process:path) => {
+        $crate::handlers::alter_configs::config_alter_handler!($request => $($response)::+, $operation, $audit, $process, false);
+    };
+    ($request:ty => $($response:ident)::+, $operation:literal, $audit:path, $process:path, $audits_in_process:expr) => {
         pub(crate) async fn handle(
             broker: &crate::broker::Broker,
             req: $request,
@@ -68,7 +214,7 @@ macro_rules! config_alter_handler {
                 let named = $audit(&resource, &image);
                 let response = $process(broker, &image, ctx, resource, validate_only, is_duplicate).await;
                 // A dry run stores nothing and cannot claim a changed resource.
-                if response.error_code == crate::codes::NONE && !validate_only {
+                if response.error_code == crate::codes::NONE && !validate_only && !$audits_in_process {
                     audited.extend(named);
                 }
                 responses.push(response);
@@ -80,47 +226,7 @@ macro_rules! config_alter_handler {
 }
 pub(super) use config_alter_handler;
 
-config_alter_handler!(AlterConfigsRequest => AlterConfigsResponse, "AlterConfigs", audit_resources_for, process_resource);
-
-/// Shape checks precede authorization for both config APIs; refused rows retain their resource.
-macro_rules! config_resource_preamble {
-    (($out:ident, $broker:ident, $image:ident, $ctx:ident, $resource:ident), $($row:ident)::+, $include_logger:expr, $shape:expr) => {
-        let mut $out = $($row)::+ {
-            resource_type: $resource.resource_type,
-            resource_name: $resource.resource_name.clone(),
-            error_code: crate::codes::NONE,
-            error_message: None,
-            ..Default::default()
-        };
-        if let Err((code, message)) = $shape {
-            return $out.with_error(code, message);
-        }
-        if let Some((code, message)) = crate::handlers::config_resource_refusal(
-            $broker.config.authorizer.as_ref(), $image, $ctx,
-            ($resource.resource_type, &$resource.resource_name), $include_logger,
-        ) {
-            return $out.with_error(code, message);
-        }
-    };
-}
-pub(super) use config_resource_preamble;
-
-/// Both mutation APIs map controller submission failures to the same Kafka code.
-pub(super) fn submission_code<T>(
-    result: Result<T, krabka_raft::RaftError>,
-    log_failure: impl FnOnce(krabka_raft::RaftError),
-) -> i16 {
-    match result {
-        Ok(_) => NONE,
-        Err(krabka_raft::RaftError::NotLeader { .. } | krabka_raft::RaftError::LeaderUnknown) => {
-            NOT_CONTROLLER
-        }
-        Err(error) => {
-            log_failure(error);
-            UNKNOWN_SERVER_ERROR
-        }
-    }
-}
+config_alter_handler!(AlterConfigsRequest => AlterConfigsResponse, "AlterConfigs", audit_resources_for, process_resource, true);
 
 /// Names the audited resource and the keys the request changes on it.
 ///

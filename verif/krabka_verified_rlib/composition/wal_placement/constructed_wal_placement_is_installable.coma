@@ -39,7 +39,7 @@ let%span swal_placement'13 = "/workspace/crates/verified/src/composition/wal_pla
 let%span swal_placement'14 = "/workspace/crates/verified/src/composition/wal_placement.rs" 33 10 33 71
 let%span swal_placement'15 = "/workspace/crates/verified/src/composition/wal_placement.rs" 34 10 36 44
 let%span swal_placement'16 = "/workspace/crates/verified/src/composition/wal_placement.rs" 17 8 22 237
-let%span swal = "/workspace/crates/verified/src/wal.rs" 34 16 35 72
+let%span swal = "/workspace/crates/verified/src/wal.rs" 31 16 32 72
 
 use creusot.slice.Slice64
 use creusot.int.UInt64
@@ -65,7 +65,7 @@ predicate gt_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other
 
 meta "rewrite_def" predicate gt_log_Int
 
-predicate placement_identities_distinct [#"/workspace/crates/verified/src/wal.rs" 33 0 33 71] (selected: Seq.seq tup2_u64_u64) =
+predicate placement_identities_distinct [#"/workspace/crates/verified/src/wal.rs" 30 0 30 71] (selected: Seq.seq tup2_u64_u64) =
   [%#swal] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length selected
     -> (Seq.get selected i).f0 <> (Seq.get selected j).f0 /\ (Seq.get selected i).f1 <> (Seq.get selected j).f1
 

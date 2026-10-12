@@ -6,14 +6,20 @@
 
 use std::{future::Future, time::Duration};
 
-use krabka_remote_storage::RemoteStorageError;
+use krabka_ids::Offset;
+use krabka_remote_storage::{RemoteStorageError, TopicIdPartition};
 use krabka_units::prelude::ByteSizeExt;
+use krabka_verified::list_offsets::earliest_timestamp_candidate;
+use tokio::time::Instant;
 
 use super::{
     remote::await_remote,
     sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
 };
-use crate::{broker::Broker, codes, partition::Partition};
+use crate::{
+    broker::Broker, codes, diskless::read::DisklessReadHandle, partition::Partition,
+    remote_reader::RemoteReader,
+};
 
 /// Resolve a positive request timestamp to `(offset, record timestamp)`, or to
 /// the error code the partition's row carries.
@@ -33,33 +39,101 @@ pub(super) async fn resolve_timestamp_offset(
     timestamp: i64,
     remote_timeout: Duration,
 ) -> Result<(i64, i64), i16> {
-    let minimum = partition
+    let remote_enabled = partition
         .log
         .lock()
         .expect("log mutex poisoned")
-        .log_start_offset()
-        .0;
-    let remote = broker
-        .remote_reader
-        .as_ref()
-        .zip(topic_id)
-        .map(|(reader, id)| {
-            let topic_partition = krabka_remote_storage::TopicIdPartition::new(
-                id,
-                topic_name.to_string(),
-                partition_index,
-            );
-            move |max_record_body| async move {
-                reader
-                    .offset_for_timestamp(&topic_partition, timestamp, minimum, max_record_body)
-                    .await
-            }
-        });
-    lookup_timestamp(
-        (partition, topic_name, partition_index),
+        .config_snapshot()
+        .remote_storage_enable;
+    resolve_timestamp_with_sources(
+        partition,
+        &TopicIdPartition::new(topic_id.unwrap_or_default(), topic_name, partition_index),
         timestamp,
         remote_timeout,
+        broker
+            .remote_reader
+            .as_deref()
+            .filter(|_| remote_enabled && topic_id.is_some()),
+        broker
+            .diskless_read
+            .as_deref()
+            .filter(|_| partition.diskless && topic_id.is_some()),
+    )
+    .await
+}
+
+/// Resolve record time across readable local, tiered and WAL sources.
+/// Callers pass only sources enabled for this partition. Archive reads are
+/// bounded by the established deletion floor. Diskless flushing
+/// advances that local checkpoint while WAL records remain readable, so its
+/// committed index deletion floor alone bounds the WAL and local candidates.
+pub(crate) async fn resolve_timestamp_with_sources(
+    partition: &Partition,
+    tp: &TopicIdPartition,
+    timestamp: i64,
+    remote_timeout: Duration,
+    remote_reader: Option<&RemoteReader>,
+    diskless_read: Option<&DisklessReadHandle>,
+) -> Result<(i64, i64), i16> {
+    let started = Instant::now();
+    let mut minimum = partition
+        .log
+        .lock()
+        .expect("log mutex poisoned")
+        // Only a checkpointed deletion floor bounds the archive. The floor
+        // inferred from surviving local files can sit above readable tiered
+        // records after a restart.
+        .established_log_start()
+        .map_or(0, |offset| offset.0);
+    let wal = if let Some(handle) = diskless_read {
+        // A diskless flusher uses trim_to_offset after publishing WAL bytes.
+        // That establishes the local checkpoint but does not delete the WAL.
+        // DeleteRecords publishes this authoritative index floor before trim.
+        minimum = handle
+            .index
+            .lock()
+            .await
+            .delete_floor(tp.topic_id, tp.partition);
+        let limit = partition
+            .log
+            .lock()
+            .expect("log mutex poisoned")
+            .config_snapshot()
+            .max_decompressed_record
+            .map(ByteSizeExt::bytes_usize);
+        match await_remote(
+            remote_timeout,
+            handle.offset_for_timestamp(tp.topic_id, tp.partition, timestamp, minimum, limit),
+        )
+        .await
+        {
+            None => return Err(codes::REQUEST_TIMED_OUT),
+            Some(Ok(found)) => found,
+            Some(Err(RemoteStorageError::RecordTooLarge { .. })) => {
+                return Err(codes::INVALID_RECORD);
+            }
+            Some(Err(error)) => {
+                tracing::warn!(topic = tp.topic, partition = tp.partition, %error, "WAL timestamp lookup failed");
+                return Err(codes::KAFKA_STORAGE_ERROR);
+            }
+        }
+    } else {
+        None
+    };
+    let remote = remote_reader.map(|reader| {
+        move |max_record_body| async move {
+            reader
+                .offset_for_timestamp(tp, timestamp, minimum, max_record_body)
+                .await
+        }
+    });
+    lookup_timestamp(
+        (partition, tp.topic.as_str(), tp.partition),
+        timestamp,
+        remote_timeout.saturating_sub(started.elapsed()),
         remote,
+        wal,
+        minimum,
     )
     .await
 }
@@ -70,17 +144,21 @@ pub(super) async fn resolve_timestamp_offset(
 /// `remote` is `None` for a broker with no remote tier. Otherwise it reads the
 /// tier for the partition, given the topic's decompressed-record limit in
 /// bytes, which this function takes from the partition's log configuration.
+/// `wal_found` contributes an already resolved exact WAL candidate, so an
+/// earlier archived record can avoid reading unrelated later local batches.
 async fn lookup_timestamp<Read, Answer>(
     (partition, topic_name, partition_index): (&Partition, &str, i32),
     timestamp: i64,
     remote_timeout: Duration,
     remote: Option<Read>,
+    wal_found: Option<(i64, i64)>,
+    minimum: i64,
 ) -> Result<(i64, i64), i16>
 where
     Read: FnOnce(Option<usize>) -> Answer,
     Answer: Future<Output = Result<Option<(i64, i64)>, RemoteStorageError>>,
 {
-    let mut remote_found = None;
+    let mut remote_found = wal_found;
     if let Some(read) = remote {
         let max_record_body = partition
             .log
@@ -91,7 +169,10 @@ where
             .map(ByteSizeExt::bytes_usize);
         match await_remote(remote_timeout, read(max_record_body)).await {
             None => return Err(codes::REQUEST_TIMED_OUT),
-            Some(Ok(Some(offset_and_timestamp))) => remote_found = Some(offset_and_timestamp),
+            Some(Ok(Some(offset_and_timestamp))) => {
+                remote_found =
+                    earliest_timestamp_candidate(remote_found, Some(offset_and_timestamp));
+            }
             Some(Ok(None)) => {}
             Some(Err(error @ RemoteStorageError::RecordTooLarge { .. })) => {
                 tracing::warn!(topic = topic_name, partition = partition_index,
@@ -110,9 +191,9 @@ where
         // need both candidates: failed copies can leave holes in the tier.
         return Ok(found);
     }
-    let found = log.offset_for_timestamp_checked(timestamp);
+    let found = log.offset_for_timestamp_checked_from(timestamp, Offset(minimum));
     match found {
-        Ok(found) => Ok(krabka_verified::list_offsets::earliest_timestamp_candidate(
+        Ok(found) => Ok(earliest_timestamp_candidate(
             remote_found,
             found.map(|(offset, matched)| (offset.0, matched)),
         )
@@ -211,8 +292,15 @@ mod tests {
             });
             let had_remote = remote.is_some();
 
-            let got =
-                lookup_timestamp((&partition, "t", 0), 500, Duration::from_secs(5), remote).await;
+            let got = lookup_timestamp(
+                (&partition, "t", 0),
+                500,
+                Duration::from_secs(5),
+                remote,
+                None,
+                0,
+            )
+            .await;
 
             assert!(got == expected, "{name}");
             // The reader is handed the topic's limit in bytes.
@@ -288,6 +376,111 @@ mod tests {
             })
             .expect("finish segment");
         id
+    }
+
+    #[tokio::test]
+    async fn archived_timestamp_survives_reopen_and_respects_a_checkpointed_delete_floor() {
+        use krabka_log::{Log, LogConfig};
+        use krabka_protocol::records::{Record, RecordBatch};
+
+        use crate::remote_log_manager::{ProducerSnapshotExport, export_segment_data};
+
+        const TOPIC: &str = "timestamp-reopened-archive";
+        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
+        let broker_arc = broker.broker_arc_for_test();
+        let partition = broker_arc
+            .partitions
+            .get(TOPIC, krabka_ids::PartitionIndex(0))
+            .unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let config = LogConfig {
+            segment_size: bytes(1),
+            remote_storage_enable: true,
+            ..LogConfig::default()
+        };
+        let mut log = Log::open(source.path(), config.clone()).unwrap();
+        for timestamp in [1_000, 1_600, 2_400] {
+            log.append(&mut RecordBatch {
+                partition_leader_epoch: 0,
+                last_offset_delta: 1,
+                base_timestamp: timestamp,
+                max_timestamp: timestamp,
+                records: vec![
+                    Record::default(),
+                    Record {
+                        offset_delta: 1,
+                        ..Record::default()
+                    },
+                ],
+                ..RecordBatch::default()
+            })
+            .unwrap();
+        }
+        log.sync().unwrap();
+        let id = broker_arc
+            .controller
+            .current_image()
+            .topic(TOPIC)
+            .unwrap()
+            .topic_id;
+        let reader = broker_arc.remote_reader.as_ref().unwrap();
+        for export in log.tierable_segments() {
+            let data = export_segment_data(&export, ProducerSnapshotExport::Include, || {
+                bytes::Bytes::from_static(b"0\n1\n0 0\n")
+            });
+            copy_timestamp_segment(
+                reader,
+                &data,
+                TimestampSegmentSetup {
+                    topic_partition: TopicIdPartition::new(id, TOPIC, 0),
+                    bounds: export.base_offset..=export.last_offset,
+                    size: export.size,
+                    ..TimestampSegmentSetup::default()
+                },
+            );
+        }
+        log.delete_local_segments_through(Offset(4)).unwrap();
+        drop(log);
+        let reopened = Log::open(source.path(), config.clone()).unwrap();
+        assert!(reopened.log_start_offset() == Offset(4));
+        assert!(reopened.established_log_start().is_none());
+        *partition.log.lock().unwrap() = reopened;
+        partition.replica_state.lock().await.hw = Offset(6);
+        assert!(
+            list_one(&client, TOPIC, 1_500).await
+                == ListOffsetsPartitionResponse {
+                    partition_index: 0,
+                    error_code: codes::NONE,
+                    timestamp: 1_600,
+                    offset: 2,
+                    leader_epoch: 0,
+                    ..ListOffsetsPartitionResponse::default()
+                }
+        );
+
+        // A real DeleteRecords floor is durable and still bounds remote hits.
+        partition
+            .log
+            .lock()
+            .unwrap()
+            .set_log_start_offset(Offset(5))
+            .unwrap();
+        let reopened = Log::open(source.path(), config).unwrap();
+        assert!(reopened.established_log_start() == Some(Offset(5)));
+        *partition.log.lock().unwrap() = reopened;
+        assert!(
+            list_one(&client, TOPIC, 1_000).await
+                == ListOffsetsPartitionResponse {
+                    partition_index: 0,
+                    error_code: codes::NONE,
+                    timestamp: 2_400,
+                    offset: 5,
+                    leader_epoch: 0,
+                    ..ListOffsetsPartitionResponse::default()
+                }
+        );
+        drop(client);
+        broker.shutdown().await;
     }
 
     #[tokio::test]

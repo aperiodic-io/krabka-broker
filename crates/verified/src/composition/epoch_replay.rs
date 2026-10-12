@@ -33,7 +33,7 @@ type EpochSnapshotReplay = (i32, FetchWatermarks, FetchVisibility, Option<usize>
         && found@ <= requested@ && segment_base@ <= bounded.log_end@ && bounded.log_end@ <= w.log_end@
         && clamped_fetch_watermarks(w, bounded)
         && visibility.limit_offset@ == w.hw@.min(w.lso@).min(w.deliverable@).min(bounded.log_end@)
-        && committed_fetch_response(visibility, bounded.hw, bounded.lso, bounded.deliverable, w.log_start@)
+        && committed_fetch_response(visibility, bounded.hw, bounded.lso, bounded.deliverable, w.log_start@, bounded.log_end@)
         && 0 <= local_start@ && local_start@ <= cursor@ && w.log_start@ <= cursor@ && cursor@ <= bounded.log_end@
         && match selected {
             None => cursor@ == w.log_start@.max(local_start@)

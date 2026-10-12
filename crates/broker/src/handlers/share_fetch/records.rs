@@ -16,7 +16,7 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
-use krabka_log::{Offset, RawRead};
+use krabka_log::{LogError, Offset, RawRead};
 use krabka_protocol::{
     owned::share_fetch_response::{AcquiredRecords, PartitionData},
     records::{Attributes, HEADER_LEN, RecordBatchHeader, RecordsPayload},
@@ -27,10 +27,14 @@ use zerocopy::FromBytes as _;
 use super::tiered::TieredSource;
 use crate::{
     blocking::spawn_blocking,
+    diskless::read::DisklessReadHandle,
     error::BrokerError,
     partition::Partition,
     remote_reader::RemoteReader,
-    share_partition::state::{AcquireShape, AcquiredRange, AcquisitionState},
+    share_partition::{
+        source::diskless_logical_start,
+        state::{AcquireShape, AcquiredRange, AcquisitionState},
+    },
 };
 
 /// What one acquire step may take from a share partition.
@@ -55,6 +59,8 @@ pub(super) struct AcquireRequest<'a> {
     /// The remote tier of a tiered partition (KIP-405), which serves the
     /// offsets below the local log start.
     pub(super) tier: Option<TieredSource<'a>>,
+    /// The durable WAL index and object source of a diskless partition.
+    pub(super) diskless: Option<(&'a DisklessReadHandle, uuid::Uuid)>,
 }
 
 /// Kafka's `ShareAcquireMode` with the request's `BatchSize`.
@@ -119,28 +125,62 @@ pub(super) async fn acquire_read_records(
     let Some(from) = state.first_acquirable_offset(request.max_attempts) else {
         return Ok(0);
     };
-    let read = match &request.tier {
-        // An offset below an established log start stays with the local
-        // read, whose `OffsetTooLow` moves the share-partition start offset
-        // past it.
-        Some(tier) if RemoteReader::serves(partition, from) => {
-            let Some(read) = tier.read(partition, from, request.max_bytes).await? else {
-                return Ok(0);
-            };
-            for (first, last) in &read.unreadable {
-                state.archive_internal(*first, *last);
+    if from >= request.upper {
+        return Ok(0);
+    }
+    let local_start = partition
+        .log
+        .lock()
+        .expect("log mutex poisoned")
+        .local_log_start_offset();
+    let read = if partition.diskless
+        && let Some((reader, topic_id)) = request.diskless
+        && from < local_start
+    {
+        let floor = diskless_logical_start(reader, partition, topic_id).await?;
+        if from < floor {
+            return Err(LogError::OffsetTooLow {
+                requested: from,
+                log_start: floor,
             }
-            for (first, last) in &read.not_due {
-                state.defer_internal(*first, *last);
-            }
-            read.bytes
+            .into());
         }
-        _ => {
-            let Some(read) = read_raw(partition, from, request.upper, request.max_bytes).await?
-            else {
-                return Ok(0);
-            };
-            read.bytes
+        reader
+            .read_records(
+                topic_id,
+                partition.index.0,
+                from.0,
+                usize::try_from(request.max_bytes.max(0)).unwrap_or(0),
+            )
+            .await?
+            .ok_or_else(|| {
+                BrokerError::Txn("diskless share record is absent from the WAL index".into())
+            })?
+    } else {
+        match &request.tier {
+            // An offset below an established log start stays with the local
+            // read, whose `OffsetTooLow` moves the share-partition start offset
+            // past it.
+            Some(tier) if RemoteReader::serves(partition, from) => {
+                let Some(read) = tier.read(partition, from, request.max_bytes).await? else {
+                    return Ok(0);
+                };
+                for (first, last) in &read.unreadable {
+                    state.archive_internal(*first, *last);
+                }
+                for (first, last) in &read.not_due {
+                    state.defer_internal(*first, *last);
+                }
+                read.bytes
+            }
+            _ => {
+                let Some(read) =
+                    read_raw(partition, from, request.upper, request.max_bytes).await?
+                else {
+                    return Ok(0);
+                };
+                read.bytes
+            }
         }
     };
     let read_bytes = batches_within(&read, request.max_bytes, request.min_one_batch)?;
@@ -583,6 +623,81 @@ mod tests {
         delivery::test_support::{NOW_MS, ScheduleSetup, scheduled_partition, wall_at},
         test_support::UnixMillis,
     };
+
+    #[tokio::test]
+    async fn diskless_share_acquisition_reads_cold_records_and_honors_deletion_floor() {
+        use crate::share_partition::source::test_support::diskless_partition;
+
+        let (partition, reader, topic_id, _dir) = diskless_partition(1_000).await;
+        for floor in [0, 1] {
+            reader
+                .index
+                .lock()
+                .await
+                .raise_delete_floor(topic_id, 0, floor);
+            let mut state = AcquisitionState::new(Offset(0));
+            state.materialize(Offset(3), 10);
+            let request = AcquireRequest {
+                member: "member",
+                max_records: 10,
+                max_bytes: 1 << 20,
+                min_one_batch: true,
+                upper: Offset(3),
+                now: Instant::now(),
+                lock_duration: Duration::from_secs(30),
+                max_attempts: 5,
+                mode: AcquireMode::RecordLimit,
+                tier: None,
+                diskless: Some((&reader, topic_id)),
+            };
+            let mut out = PartitionData::default();
+            if floor > 0 {
+                assert!(matches!(
+                    acquire_read_records(&mut out, &partition, &mut state, &request).await,
+                    Err(BrokerError::Log(LogError::OffsetTooLow { .. }))
+                ));
+                state.advance_past_log_start(Offset(floor));
+            }
+            let count = acquire_read_records(&mut out, &partition, &mut state, &request)
+                .await
+                .unwrap();
+            assert!(count == 2 - floor);
+            assert!(
+                out.acquired_records
+                    == vec![AcquiredRecords {
+                        first_offset: floor,
+                        last_offset: 1,
+                        delivery_count: 1,
+                        ..Default::default()
+                    }]
+            );
+            let Some(RecordsPayload::Raw(bytes)) = out.records else {
+                panic!("WAL batch bytes")
+            };
+            assert!(
+                batch_bounds(&bytes).unwrap()
+                    == (floor..2)
+                        .map(|offset| (offset, offset))
+                        .collect::<Vec<_>>()
+            );
+            let mut warm = PartitionData::default();
+            assert!(
+                acquire_read_records(&mut warm, &partition, &mut state, &request)
+                    .await
+                    .unwrap()
+                    == 1
+            );
+            assert!(
+                warm.acquired_records
+                    == vec![AcquiredRecords {
+                        first_offset: 2,
+                        last_offset: 2,
+                        delivery_count: 1,
+                        ..Default::default()
+                    }]
+            );
+        }
+    }
 
     #[tokio::test]
     async fn only_the_batches_that_are_not_due_are_reported_as_pending() {

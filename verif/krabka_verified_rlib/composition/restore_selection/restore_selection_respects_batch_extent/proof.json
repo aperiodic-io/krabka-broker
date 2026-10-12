@@ -22,7 +22,7 @@
       "vc_push_usize": { "prover": "alt-ergo", "time": 0.02 },
       "vc_restore_batch_filter_decision": {
         "prover": "alt-ergo",
-        "time": 0.021
+        "time": 0.01
       },
       "vc_restore_record_coordinates": {
         "prover": "alt-ergo",
@@ -62,9 +62,9 @@
               { "prover": "alt-ergo", "time": 0.012 },
               { "prover": "alt-ergo", "time": 0.034 },
               { "prover": "alt-ergo", "time": 0.019 },
-              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.036 },
               { "prover": "z3", "time": 0.016 },
-              { "prover": "alt-ergo", "time": 0.01 }
+              { "prover": "alt-ergo", "time": 0.026 }
             ]
           }
         ]

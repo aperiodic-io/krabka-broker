@@ -7,7 +7,7 @@
 //! that is valid even on `EAGAIN`.
 
 crate::sendfile_cfg! {
-    use crate::error::BrokerError;
+    use crate::{error::BrokerError, time_util::sleep_until_opt};
 }
 
 crate::sendfile_cfg! {
@@ -30,6 +30,7 @@ crate::sendfile_cfg! {
     pub(super) async fn sendfile_region(
         tcp: &tokio::net::TcpStream,
         region: &krabka_protocol::records::FileRegion,
+        idle: Option<std::time::Duration>,
     ) -> Result<(), BrokerError> {
         use std::io::ErrorKind;
         use std::os::fd::{AsFd, BorrowedFd};
@@ -39,12 +40,21 @@ crate::sendfile_cfg! {
         let out_fd: BorrowedFd<'_> = tcp.as_fd();
 
         let mut sent_total: usize = 0;
+        let mut deadline = idle.map(|window| tokio::time::Instant::now() + window);
 
         while sent_total < region.len {
             // Wait for the socket to be writable, then attempt one sendfile. If
             // the kernel reports it would block (with no forward progress),
             // `try_io` returns WouldBlock and we loop back to `writable()`.
-            tcp.writable().await.map_err(BrokerError::Io)?;
+            tokio::select! {
+                biased;
+                () = sleep_until_opt(deadline) => {
+                    return Err(BrokerError::Io(std::io::Error::new(
+                        ErrorKind::TimedOut, "sendfile made no progress within connections.max.idle.ms"
+                    )));
+                }
+                result = tcp.writable() => result.map_err(BrokerError::Io)?,
+            }
             let offset = region.offset + sent_total as u64;
             let remaining = region.len - sent_total;
             let res = tcp.try_io(tokio::io::Interest::WRITABLE, || {
@@ -64,6 +74,7 @@ crate::sendfile_cfg! {
                 }
                 Ok(n) => {
                     sent_total += n;
+                    deadline = idle.map(|window| tokio::time::Instant::now() + window);
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     // Not writable yet (true would-block: zero bytes moved); loop

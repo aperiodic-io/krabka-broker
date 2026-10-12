@@ -1,4 +1,4 @@
-(* #"/workspace/crates/verified/src/composition/transaction_fetch.rs" 63 0 70 30 *)
+(* #"/workspace/crates/verified/src/composition/transaction_fetch.rs" 66 0 73 30 *)
 
 let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
 let%span sord'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 22 8 22 20
@@ -8,14 +8,14 @@ let%span scmp'0 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cr
 let%span scmp'1 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/cmp.rs" 78 36 78 40
 let%span scmp'2 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/cmp.rs" 79 26 79 79
 let%span scmp'3 = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/std/cmp.rs" 80 26 80 77
-let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 169 10 169 63
-let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 170 10 171 97
-let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 83
-let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 175 58
-let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 176 74
-let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 177 10 181 1
-let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 182 10 182 36
-let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 183 10 183 59
+let%span sfetch = "/workspace/crates/verified/src/broker/fetch.rs" 172 10 172 93
+let%span sfetch'0 = "/workspace/crates/verified/src/broker/fetch.rs" 173 10 174 97
+let%span sfetch'1 = "/workspace/crates/verified/src/broker/fetch.rs" 175 10 175 83
+let%span sfetch'2 = "/workspace/crates/verified/src/broker/fetch.rs" 176 10 178 58
+let%span sfetch'3 = "/workspace/crates/verified/src/broker/fetch.rs" 179 10 179 74
+let%span sfetch'4 = "/workspace/crates/verified/src/broker/fetch.rs" 180 10 184 1
+let%span sfetch'5 = "/workspace/crates/verified/src/broker/fetch.rs" 185 10 185 36
+let%span sfetch'6 = "/workspace/crates/verified/src/broker/fetch.rs" 186 10 186 59
 let%span sfetch'7 = "/workspace/crates/verified/src/broker/fetch.rs" 120 16 120 42
 let%span sfetch'8 = "/workspace/crates/verified/src/broker/fetch.rs" 133 8 139 9
 let%span snext_producer_identity = "/workspace/crates/verified/src/transaction/next_producer_identity.rs" 42 10 42 88
@@ -24,28 +24,28 @@ let%span snext_producer_identity'1 = "/workspace/crates/verified/src/transaction
 let%span stransaction = "/workspace/crates/verified/src/transaction.rs" 273 16 273 99
 let%span stransaction'0 = "/workspace/crates/verified/src/transaction.rs" 9 8 14 86
 let%span sfuture_log_swap_admission = "/workspace/crates/verified/src/storage/future_log_swap_admission.rs" 9 10 22 1
-let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 71 28 71 76
-let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 72 16 72 24
-let%span stransaction_fetch'1 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 74 15 74 46
-let%span stransaction_fetch'2 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 77 17 77 89
-let%span stransaction_fetch'3 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 79 8 79 72
-let%span stransaction_fetch'4 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 83 24 83 64
-let%span stransaction_fetch'5 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 84 16 84 24
-let%span stransaction_fetch'6 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 87 14 87 33
-let%span stransaction_fetch'7 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 93 23 93 24
-let%span stransaction_fetch'8 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 90 8 90 13
-let%span stransaction_fetch'9 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 91 8 91 12
-let%span stransaction_fetch'10 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 99 8 99 9
-let%span stransaction_fetch'11 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 89 21 100 5
-let%span stransaction_fetch'12 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 44 11 44 72
-let%span stransaction_fetch'13 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 45 11 45 73
-let%span stransaction_fetch'14 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 46 11 46 83
-let%span stransaction_fetch'15 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 47 10 48 55
-let%span stransaction_fetch'16 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 49 10 50 38
-let%span stransaction_fetch'17 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 51 10 51 125
-let%span stransaction_fetch'18 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 52 10 58 1
-let%span stransaction_fetch'19 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 59 10 62 22
-let%span stransaction_fetch'20 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 113 16 115 35
+let%span stransaction_fetch = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 74 28 74 76
+let%span stransaction_fetch'0 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 75 16 75 24
+let%span stransaction_fetch'1 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 77 15 77 46
+let%span stransaction_fetch'2 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 80 17 80 89
+let%span stransaction_fetch'3 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 82 8 82 72
+let%span stransaction_fetch'4 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 86 24 86 64
+let%span stransaction_fetch'5 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 87 16 87 24
+let%span stransaction_fetch'6 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 90 14 90 33
+let%span stransaction_fetch'7 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 96 23 96 24
+let%span stransaction_fetch'8 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 93 8 93 13
+let%span stransaction_fetch'9 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 94 8 94 12
+let%span stransaction_fetch'10 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 102 8 102 9
+let%span stransaction_fetch'11 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 92 21 103 5
+let%span stransaction_fetch'12 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 47 11 47 72
+let%span stransaction_fetch'13 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 48 11 48 73
+let%span stransaction_fetch'14 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 49 11 49 83
+let%span stransaction_fetch'15 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 50 10 51 55
+let%span stransaction_fetch'16 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 52 10 53 38
+let%span stransaction_fetch'17 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 54 10 54 125
+let%span stransaction_fetch'18 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 55 10 61 1
+let%span stransaction_fetch'19 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 62 10 65 22
+let%span stransaction_fetch'20 = "/workspace/crates/verified/src/composition/transaction_fetch.rs" 116 16 118 35
 let%span smarker = "/workspace/crates/verified/src/transaction/marker.rs" 28 10 28 55
 let%span smarker'0 = "/workspace/crates/verified/src/transaction/marker.rs" 29 10 30 69
 let%span smarker'1 = "/workspace/crates/verified/src/transaction/marker.rs" 31 10 32 69
@@ -227,7 +227,8 @@ let fetch_visibility (is_follower: bool) (read_committed: bool) (w: t_FetchWater
   (return (x: t_FetchVisibility)) = any
   [ return (result: t_FetchVisibility) ->
   {[@stop_split] [@expl:fetch_visibility ensures] ([@stop_split] [@expl:fetch_visibility ensures #0] [%#sfetch] result.out_of_range
-      = (Int64.to_int fetch_offset < Int64.to_int w.log_start))
+      = (Int64.to_int fetch_offset < Int64.to_int w.log_start
+      \/ gt_log_Int (Int64.to_int fetch_offset) (Int64.to_int w.log_end)))
     /\ ([@stop_split] [@expl:fetch_visibility ensures #1] [%#sfetch'0] result.empty
       = (not result.out_of_range
       /\ ge_log_Int (Int64.to_int fetch_offset) (if is_follower then
@@ -258,7 +259,7 @@ predicate pending_starts_before_marker [#"/workspace/crates/verified/src/transac
   [%#stransaction] forall i: int. 0 <= i /\ i < Seq.length starts
     -> 0 <= Int64.to_int (Seq.get starts i) /\ Int64.to_int (Seq.get starts i) <= base
 
-predicate committed_producer_marker [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 106 0 112 9] (is_control: bool) (key: Seq.seq UInt8.t) (producer: tup3_i64_i64_i64) (high_watermark: int) (marker_last: int) =
+predicate committed_producer_marker [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 109 0 115 9] (is_control: bool) (key: Seq.seq UInt8.t) (producer: tup3_i64_i64_i64) (high_watermark: int) (marker_last: int) =
   [%#stransaction_fetch'20] is_control
   /\ ge_log_Int (Seq.length key) 4
   /\ UInt8.t'int (Seq.get key 2) = 0
@@ -269,7 +270,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let control_marker_bounds_committed_fetch [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 63 0 70 30]
+let control_marker_bounds_committed_fetch [#"/workspace/crates/verified/src/composition/transaction_fetch.rs" 66 0 73 30]
   (key: Slice64.slice UInt8.t) (is_control: bool) (producer: tup3_i64_i64_i64) (span: tup2_i64_i32)
   (other_starts: Slice64.slice Int64.t) (bounds: tup2_i64_i64) (return (x: tup2_i64_Option_tup2_i64_i64)) =
 {[@stop_split] [@expl:control_marker_bounds_committed_fetch requires] ([@stop_split] [@expl:control_marker_bounds_committed_fetch requires #0] [%#stransaction_fetch'12] 0

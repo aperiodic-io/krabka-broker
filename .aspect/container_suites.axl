@@ -571,6 +571,42 @@ def _check(condition, message):
 def _self_test():
     available = [_target(suite) for suite in _mapped_suites().keys()] + [_IMAGE_SUITE_TARGET]
 
+    _check(
+        _non_broker_packages([
+            "crates/verified/src/composition/tests/epoch_replay.rs",
+            "crates/verified/proptest-regressions/composition/tests/epoch_replay.txt",
+            "crates/verified/proptest-regressions/composition/tests/stable_fetch.txt",
+            "crates/raft/BUILD.bazel",
+            "crates/raft/examples/quorum_state.rs",
+            "crates/raft/README.md",
+            "crates/broker/src/handlers/fetch.rs",
+            "docs/KIP_MATRIX.md",
+        ]) == ["//crates/raft:all", "//crates/verified:all"],
+        "non-broker changes query each owning crate once, including undeclared regression inputs",
+    )
+    _check(
+        _non_broker_packages(["crates/verified/README.md", "crates/broker/Cargo.toml"]) == [],
+        "crate documentation and broker feature changes stay out of the non-broker rdeps query",
+    )
+    _check(
+        _requires_full_matrix(
+            ["crates/removed/BUILD.bazel", "crates/removed/README.md"],
+            ["crates/removed/BUILD.bazel", "crates/removed/README.md"],
+        ),
+        "a removed crate selects the full matrix before querying its nonexistent package",
+    )
+    _check(
+        _requires_full_matrix(["crates/removed/src/lib.rs"], ["crates/removed/src/lib.rs"]),
+        "deleted Rust sources retain the conservative full-matrix fallback",
+    )
+    _check(
+        not _requires_full_matrix(
+            ["crates/verified/proptest-regressions/stale.txt"],
+            ["crates/verified/proptest-regressions/stale.txt"],
+        ),
+        "deleting a regression input still queries its existing owning package",
+    )
+
     # The soak lane is scheduled-only. Neither its own sources, nor the crate
     # manifest that selects every other suite, nor the raw query answer the
     # full-matrix run uses may put it in the `docker` matrix -- a four-hour
@@ -938,6 +974,36 @@ def _is_deleted_source(path):
         path.endswith("/BUILD.bazel")
     )
 
+def _requires_full_matrix(changed, deleted):
+    for path in changed:
+        if _is_build_wide(path):
+            return True
+    for path in deleted:
+        if _is_deleted_source(path):
+            return True
+    return False
+
+def _non_broker_packages(paths):
+    """Owning crate target patterns for non-broker changes.
+
+    Rust targets are defined at crate granularity. Not every on-disk input is
+    also a declared Bazel source target: proptest regression files, for
+    example, need not be exported by BUILD.bazel. Querying their paths directly
+    aborts selection. The owning package's rules are stable query roots and
+    conservatively include every container suite affected by the crate.
+    """
+    packages = {}
+    for path in paths:
+        if (
+            path.startswith("crates/") and
+            not path.startswith("crates/broker/") and
+            not path.endswith(".md")
+        ):
+            parts = path.split("/")
+            if len(parts) >= 3:
+                packages["//crates/" + parts[1] + ":all"] = True
+    return sorted(packages.keys())
+
 def _affected_targets(ctx, base):
     all_targets = _without_own_lane(sorted(run(ctx, "bazel", ["query", "attr(tags, 'docker', " + _SUITE_SCOPE + ")"])))
     if not valid_base(ctx, base):
@@ -945,14 +1011,9 @@ def _affected_targets(ctx, base):
 
     comparison = base + "...HEAD"
     changed = run(ctx, "git", ["diff", "--name-only", comparison])
-    for path in changed:
-        if _is_build_wide(path):
-            return all_targets
-
     deleted = run(ctx, "git", ["diff", "--diff-filter=D", "--name-only", comparison])
-    for path in deleted:
-        if _is_deleted_source(path):
-            return all_targets
+    if _requires_full_matrix(changed, deleted):
+        return all_targets
 
     targets = {}
     for label in _select(changed, all_targets):
@@ -961,18 +1022,9 @@ def _affected_targets(ctx, base):
     # Non-broker crates go through rdeps. Six of them build a binary the image
     # carries, so the scope is what makes a change to `krabka-format` or
     # `krabka-restore` select the image suite as well as the JVM ones.
-    files = []
-    root = ctx.std.env.bazel_root_dir()
-    for path in changed:
-        if (
-            path.startswith("crates/") and
-            not path.startswith("crates/broker/") and
-            not path.endswith(".md") and
-            ctx.std.fs.exists(root + "/" + path)
-        ):
-            files.append(path)
-    if files:
-        expression = "attr(tags, 'docker', rdeps(" + _SUITE_SCOPE + ", set(" + " ".join(files) + ")))"
+    packages = _non_broker_packages(changed)
+    if packages:
+        expression = "attr(tags, 'docker', rdeps(" + _SUITE_SCOPE + ", set(" + " ".join(packages) + ")))"
         for label in _without_own_lane(run(ctx, "bazel", ["query", expression])):
             targets[label] = True
 

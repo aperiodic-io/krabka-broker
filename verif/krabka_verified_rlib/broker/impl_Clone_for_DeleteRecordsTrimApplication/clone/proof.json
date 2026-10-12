@@ -4,7 +4,7 @@
     "Coma": {
       "vc_clone_DeleteRecordsTrimApplication": {
         "prover": "alt-ergo",
-        "time": 0.009
+        "time": 0.026
       }
     }
   }

@@ -1,6 +1,5 @@
 # krabka-broker
 
-[![Crates.io](https://img.shields.io/crates/v/krabka-broker.svg)](https://crates.io/crates/krabka-broker)
 [API documentation](https://krabka-io.github.io/krabka-broker/krabka-broker/krabka_broker/index.html)
 [![CI](https://github.com/robot-head/crabka/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-head/crabka/actions/workflows/ci.yml)
 
@@ -11,10 +10,10 @@ This crate is part of [Krabka](https://github.com/robot-head/crabka), a Rust imp
 ## Install
 
 ```sh
-cargo add krabka-broker
+cargo add krabka-broker --path ../krabka-broker/crates/broker
 ```
 
-For workspace development, use the path dependency from this repository instead.
+This crate is not published by this repository. Adjust the path to your local checkout. Workspace development uses the path dependencies declared in this repository.
 
 ## Usage example
 

@@ -11,6 +11,7 @@
 use std::sync::{Arc, atomic::Ordering};
 
 use bytes::Bytes;
+use dashmap::DashMap;
 use krabka_ids::PartitionIndex;
 use krabka_log::Offset;
 use krabka_protocol::records::{Record, RecordBatch};
@@ -21,7 +22,7 @@ use super::{ShareCoordinator, ShareErrorCode, ShareStateError, Term, message};
 use crate::{
     codes,
     error::BrokerError,
-    partition::Partition,
+    partition::{Partition, ProduceBatchError},
     share_coordinator::{
         bootstrap,
         persistence::{ShareStateKey, encode_state_key},
@@ -33,9 +34,32 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// Cancellation after enqueue can abandon the reply while the writer keeps
+/// the append. Until its FIFO barrier and replay finish, no operation may
+/// validate against the shard's potentially stale live state.
+struct AppendUncertainty<'a> {
+    shards: &'a DashMap<PartitionIndex, ()>,
+    recovery_needed: &'a tokio::sync::Notify,
+    partition: PartitionIndex,
+    determinate: bool,
+}
+
+impl Drop for AppendUncertainty<'_> {
+    fn drop(&mut self) {
+        if !self.determinate {
+            self.shards.insert(self.partition, ());
+            self.recovery_needed.notify_one();
+        }
+    }
+}
+
 /// A write to `__share_group_state` that failed or did not commit.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum AppendError {
+    /// A previous append lost its acknowledgement. Even a background job
+    /// already holding the active guard must stop until barrier and replay.
+    #[error("__share_group_state-{0} needs writer barrier and replay")]
+    NeedsReplay(PartitionIndex),
     /// The partition log is not open on this broker.
     #[error("__share_group_state-{0} not local")]
     NotLocal(PartitionIndex),
@@ -63,6 +87,7 @@ impl AppendError {
     /// answers for a shard that it unloaded: `NOT_COORDINATOR`.
     pub(super) fn share_error(&self) -> ShareStateError {
         let append_code = match self {
+            Self::NeedsReplay(_) => codes::COORDINATOR_LOAD_IN_PROGRESS,
             Self::NotLocal(_) => codes::UNKNOWN_TOPIC_OR_PARTITION,
             Self::NotLeader(_) => codes::NOT_COORDINATOR,
             // A local append that fails on the log or the writer task is a
@@ -89,6 +114,7 @@ fn operation_error_code(append_code: ShareErrorCode) -> ShareErrorCode {
 /// The message of the append error, before the mapping.
 fn append_message(append_code: ShareErrorCode) -> &'static str {
     match append_code {
+        codes::COORDINATOR_LOAD_IN_PROGRESS => message::COORDINATOR_LOAD_IN_PROGRESS,
         codes::UNKNOWN_TOPIC_OR_PARTITION => message::UNKNOWN_TOPIC_OR_PARTITION,
         codes::KAFKA_STORAGE_ERROR => message::KAFKA_STORAGE_ERROR,
         codes::NOT_COORDINATOR => message::NOT_COORDINATOR,
@@ -106,18 +132,23 @@ impl ShareCoordinator {
     ///
     /// # Errors
     ///
-    /// Returns [`AppendError::NotLocal`] if the partition log is not open
+    /// Returns [`AppendError::NeedsReplay`] if a previous append was
+    /// indeterminate, [`AppendError::NotLocal`] if the partition log is not open
     /// locally, [`AppendError::NotLeader`] if the partition does not lead on
     /// this broker at the leader epoch of `term`, [`AppendError::Failed`] if
     /// the key does not encode or `produce_batch` fails, and
     /// [`AppendError::TimedOut`] if the append does not finish within the
-    /// configured write timeout.
+    /// configured write timeout. If a queued append loses its reply, including
+    /// caller cancellation, the shard stops serving until barrier and replay.
     pub(super) async fn persist_record(
         &self,
         term: Term,
         key: ShareStateKey,
         value: Option<Bytes>,
     ) -> Result<Offset, AppendError> {
+        if self.uncertain_appends.contains_key(&term.partition) {
+            return Err(AppendError::NeedsReplay(term.partition));
+        }
         let part = self
             .partitions
             .get(bootstrap::TOPIC, term.partition)
@@ -167,10 +198,26 @@ impl ShareCoordinator {
         // `UnifiedLog.appendAsLeader` stamps the leader epoch on the batch.
         // The partition writer does not stamp an owned batch.
         batch.partition_leader_epoch = term.leader_epoch;
-        let base_offset = part
-            .produce_batch(batch)
-            .await
-            .map_err(AppendError::Failed)?;
+        let mut uncertainty = AppendUncertainty {
+            shards: &self.uncertain_appends,
+            recovery_needed: &self.recovery_needed,
+            partition: term.partition,
+            determinate: false,
+        };
+        let appended = part.produce_batch_outcome(batch).await;
+        let base_offset = match appended {
+            Ok(offset) => {
+                uncertainty.determinate = true;
+                offset
+            }
+            Err(ProduceBatchError::Rejected(error)) => {
+                uncertainty.determinate = true;
+                return Err(AppendError::Failed(error));
+            }
+            Err(ProduceBatchError::Indeterminate(error)) => {
+                return Err(AppendError::Failed(BrokerError::Txn(error)));
+            }
+        };
         drop(leadership);
         Ok(base_offset)
     }

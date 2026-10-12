@@ -6,11 +6,11 @@
         "prover": "alt-ergo",
         "time": 0.105
       },
-      "vc_len_EpochEntry": { "prover": "alt-ergo", "time": 0.006 },
-      "vc_set_UNDEFINED_EPOCH": { "prover": "alt-ergo", "time": 0.01 },
+      "vc_len_EpochEntry": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_set_UNDEFINED_EPOCH": { "prover": "alt-ergo", "time": 0.02 },
       "vc_set_UNDEFINED_EPOCH_OFFSET": {
         "prover": "alt-ergo",
-        "time": 0.021
+        "time": 0.005
       }
     }
   }

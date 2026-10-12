@@ -1,7 +1,7 @@
-(* #"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 55 0 55 93 *)
+(* #"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 56 0 56 93 *)
 
-let%span sshould_capture_first_downgrade = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 56 4 56 35
-let%span sshould_capture_first_downgrade'0 = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 53 10 53 53
+let%span sshould_capture_first_downgrade = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 57 4 57 35
+let%span sshould_capture_first_downgrade'0 = "/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 54 10 54 53
 
 use creusot.prelude.Any
 
@@ -9,7 +9,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let should_capture_first_downgrade [#"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 55 0 55 93]
+let should_capture_first_downgrade [#"/workspace/crates/verified/src/recovery/should_capture_first_downgrade.rs" 56 0 56 93]
   (pending_exists: bool) (is_downgrade: bool) (return (x: bool)) = (! bb0
   [ bb0 = any [ br0 -> {pending_exists = false} (! bb1) | br1 -> {pending_exists} (! bb2) ]
   | bb2 = s0 [ s0 = [ &_ret <- [%#sshould_capture_first_downgrade] false ] s1 | s1 = return {_ret} ]

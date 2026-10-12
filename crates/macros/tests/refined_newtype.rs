@@ -35,6 +35,22 @@ struct MissLimit(u32);
 #[refined(rule(GreaterU32<0>), string_error, from_str)]
 struct Attempts(u32);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, RefinedNewtype)]
+#[refined(rule(MinMaxU32<0, MAX>), string_error, default = 0, from_str,
+          display, parse_fn = parse_bounded)]
+struct Bounded<const MAX: u32>(u32);
+
+#[test]
+fn generic_rules_apply_to_construction_traits_and_the_free_parser() {
+    assert!(Bounded::<7>::new(7) == Ok(Bounded(7)));
+    assert!(Bounded::<7>::new(8).is_err());
+    assert!(Bounded::<7>::default().into_value() == 0);
+    assert!("5".parse::<Bounded<7>>() == Ok(Bounded(5)));
+    assert!(Bounded::<7>(5).to_string() == "5");
+    assert!(parse_bounded::<7>("7") == Ok(Bounded(7)));
+    assert!(parse_bounded::<7>("8").is_err());
+}
+
 #[test]
 fn new_accepts_what_the_rule_accepts_and_returns_it_unchanged() {
     assert!(Percent::new(100).ok().map(Percent::into_value) == Some(100));

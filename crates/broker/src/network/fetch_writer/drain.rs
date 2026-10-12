@@ -135,7 +135,7 @@ crate::sendfile_cfg! {
             let tcp = stream
                 .tcp_for_sendfile()
                 .expect("checked Some on the line above");
-            sendfile_region(tcp, region).await?;
+            sendfile_region(tcp, region, stream.write_idle_window()).await?;
             Ok(FetchDrainPath::Sendfile)
         } else {
             // TLS fallback: pread the region into a buffer and write it.

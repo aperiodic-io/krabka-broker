@@ -27,6 +27,7 @@ use crate::{
             validate_dynamic_broker_configs,
         },
     },
+    cordoned_log_dirs::CORDONED_LOG_DIRS,
 };
 
 /// The default a `LIST` broker key starts from when the resource does not
@@ -177,6 +178,32 @@ fn broker_records(
         }));
     }
     Ok(records)
+}
+
+/// Broker-side checks whose inputs belong to the client-addressed node.
+/// The controller applies the operations and validates the complete config
+/// again against its authoritative image.
+pub(super) fn preprocess_broker_resource(
+    resource: &AlterConfigsResource,
+    context: BrokerConfigContext<'_>,
+) -> Result<(), (i16, String)> {
+    let node = context.resource_node(&resource.resource_name)?;
+    if node == krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID {
+        return Ok(());
+    }
+    // Check only newly introduced directories. Existing stored values may be
+    // stale here; their merge and wildcard exclusivity are controller checks.
+    for config in &resource.configs {
+        if config.name == CORDONED_LOG_DIRS && matches!(config.config_operation, OP_SET | OP_APPEND)
+        {
+            let props = BTreeMap::from([(
+                CORDONED_LOG_DIRS.to_owned(),
+                config.value.clone().unwrap_or_default(),
+            )]);
+            cordoned_log_dirs_error(&props, context.log_dirs)?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn handle_broker_scoped(

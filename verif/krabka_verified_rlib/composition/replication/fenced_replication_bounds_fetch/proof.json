@@ -10,7 +10,7 @@
       },
       "vc_fetch_visibility": { "prover": "alt-ergo", "time": 0.017 },
       "vc_local_append_coordinates": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_replica_fetch_mutation": { "prover": "alt-ergo", "time": 0.009 },
+      "vc_replica_fetch_mutation": { "prover": "alt-ergo", "time": 0.023 },
       "vc_truncation_frontier": { "prover": "alt-ergo", "time": 0.017 }
     }
   }

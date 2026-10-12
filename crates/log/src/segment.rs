@@ -43,7 +43,7 @@ use crate::{
 /// The `base_offset` identifies a segment. It is the absolute offset of the
 /// segment's first record, encoded into the segment's 20-digit zero-padded
 /// filename. [`Segment::create`] makes a new active segment.
-/// [`Segment::open`] opens a read-only sealed segment, and
+/// [`Segment::open`] validates and opens a sealed segment for reading, and
 /// [`Segment::open_active`] opens an active segment with tail recovery.
 #[derive(Debug)]
 pub struct Segment {
@@ -288,7 +288,7 @@ impl Segment {
     /// files. The compactor uses it to read the `.log` file directly and to
     /// avoid the `Segment::read` path. That path depends on the in-memory
     /// `last_offset`, which is stale for sealed segments loaded through
-    /// `Segment::open`.
+    /// the log's no-scan loader.
     #[must_use]
     pub fn dir(&self) -> &Path {
         &self.dir

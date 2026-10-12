@@ -40,7 +40,7 @@ mod test_support;
 mod tests;
 
 use self::reconcile::reconcile_with_snapshot;
-pub(crate) use self::reconcile::{load_snapshot, reconcile_authenticated_with_snapshot};
+pub(crate) use self::reconcile::{load_snapshot, reconcile_authenticated_snapshot};
 use crate::{args::RestoreArgs, backend::ArchiveStore, error::RestoreError};
 
 /// One artifact of one archived segment, as the scan found it.

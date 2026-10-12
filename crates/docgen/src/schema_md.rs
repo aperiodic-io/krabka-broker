@@ -160,23 +160,30 @@ fn resolve_ref<'a>(root: &'a Value, reference: &str) -> Option<&'a Value> {
 /// `Value`. That value is the field itself when no `$ref` and no wrapper
 /// applies.
 fn effective_schema<'a>(root: &'a Value, field: &'a Value) -> &'a Value {
-    if let Some(reference) = field.get("$ref").and_then(Value::as_str)
-        && let Some(target) = resolve_ref(root, reference)
-    {
-        return target;
-    }
-    for key in ["anyOf", "allOf", "oneOf"] {
-        if let Some(arr) = field.get(key).and_then(Value::as_array) {
-            // Pick the first non-"null" branch (schemars' Option<T> pattern).
-            for branch in arr {
-                let is_null = branch.get("type").and_then(Value::as_str) == Some("null");
-                if !is_null {
-                    return effective_schema(root, branch);
-                }
-            }
+    let mut current = field;
+    for _ in 0..MAX_DEPTH {
+        if let Some(reference) = current.get("$ref").and_then(Value::as_str)
+            && let Some(target) = resolve_ref(root, reference)
+        {
+            current = target;
+            continue;
         }
+        let next = ["anyOf", "allOf", "oneOf"].into_iter().find_map(|key| {
+            current
+                .get(key)
+                .and_then(Value::as_array)
+                .and_then(|branches| {
+                    branches
+                        .iter()
+                        .find(|branch| branch.get("type").and_then(Value::as_str) != Some("null"))
+                })
+        });
+        let Some(next) = next else {
+            return current;
+        };
+        current = next;
     }
-    field
+    current
 }
 
 /// Maximum nesting depth for `$ref` and object recursion.
@@ -230,13 +237,21 @@ fn primitive_type(field: &Value) -> Option<String> {
 }
 
 fn type_label(root: &Value, field: &Value) -> String {
+    type_label_at(root, field, 0)
+}
+
+fn type_label_at(root: &Value, field: &Value, depth: usize) -> String {
+    if depth >= MAX_DEPTH {
+        return "any".to_string();
+    }
     // Follow Option<T>/$ref wrappers before inspecting the type.
     let field = effective_schema(root, field);
     match primitive_type(field).as_deref() {
         Some("array") => {
-            let item = field
-                .get("items")
-                .map_or_else(|| "any".to_string(), |it| type_label(root, it));
+            let item = field.get("items").map_or_else(
+                || "any".to_string(),
+                |it| type_label_at(root, it, depth + 1),
+            );
             format!("array<{item}>")
         }
         Some(t) => t.to_string(),

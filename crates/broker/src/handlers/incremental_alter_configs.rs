@@ -26,17 +26,31 @@
 //! resource type has its own submodule that owns the key whitelist, the value
 //! validation, and the metadata record that it stages.
 
+use std::{sync::Arc, time::Duration};
+
+use bytes::Bytes;
 use krabka_metadata::{MetadataImage, MetadataRecord};
 use krabka_protocol::owned::{
-    incremental_alter_configs_request::{AlterConfigsResource, IncrementalAlterConfigsRequest},
+    incremental_alter_configs_request::{
+        self, AlterConfigsResource, IncrementalAlterConfigsRequest,
+    },
     incremental_alter_configs_response::{
         AlterConfigsResourceResponse, IncrementalAlterConfigsResponse,
     },
 };
+use krabka_raft::RaftError;
 
 use crate::{
-    config_keys::{MIN_INSYNC_REPLICAS, clear_elr_records, group::GroupBounds},
-    handlers::{RequestContext, audit_resource, response_encoding::ErrorRow as _},
+    config_keys::{
+        MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext, clear_elr_records,
+        group::GroupBounds,
+    },
+    error::BrokerError,
+    handlers::{
+        RequestContext, audit_resource, config_resource_refusal, decode_request, encode_response,
+        forward_to_controller::{controller_listener_dispatch, to_active_controller},
+        response_encoding::ErrorRow as _,
+    },
 };
 
 mod broker_logger_scope;
@@ -64,6 +78,135 @@ const OP_SET: i8 = 0;
 const OP_DELETE: i8 = 1;
 const OP_APPEND: i8 = 2;
 const OP_SUBTRACT: i8 = 3;
+
+/// Forward operations before merging them with authoritative metadata.
+/// Broker ids and local log directories are preprocessed on the addressed
+/// broker; logger resources continue to run there.
+pub(crate) async fn dispatch(
+    broker: &Broker,
+    version: i16,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> Result<Bytes, BrokerError> {
+    let mut req = decode_request::<IncrementalAlterConfigsRequest>(req_bytes, version)?;
+    controller_listener_dispatch!(
+        broker,
+        ctx,
+        req,
+        version,
+        self::handle,
+        self::request_refusal
+    );
+    let image = broker.controller.current_image();
+    let duplicates = super::alter_configs::duplicate_resource_flags(
+        req.resources
+            .iter()
+            .map(|resource| (resource.resource_type, resource.resource_name.as_str())),
+    );
+    let mut local = Vec::new();
+    let mut local_indices = Vec::new();
+    let mut indexed_responses = Vec::new();
+    let mut forwarded = Vec::new();
+    let mut forwarded_indices = Vec::new();
+    for (index, (resource, duplicate)) in std::mem::take(&mut req.resources)
+        .into_iter()
+        .zip(duplicates)
+        .enumerate()
+    {
+        if resource.resource_type == RESOURCE_TYPE_BROKER_LOGGER {
+            local_indices.push(index);
+            local.push(resource);
+            continue;
+        }
+        if resource.resource_type == RESOURCE_TYPE_BROKER {
+            let shape = validate_resource_shape(&resource, duplicate);
+            let preprocessed = shape.and_then(|()| {
+                broker_scope::preprocess_broker_resource(
+                    &resource,
+                    BrokerConfigContext {
+                        image: &image,
+                        serving: broker.config.node_id,
+                        log_dirs: &broker.config.broker_log_dirs(),
+                        unstable: broker.config.features.unstable_api_versions,
+                    },
+                )
+            });
+            if let Err((code, message)) = preprocessed {
+                let (code, message) = if validate_resource_shape(&resource, duplicate).is_err() {
+                    (code, message)
+                } else {
+                    config_resource_refusal(
+                        broker.config.authorizer.as_ref(),
+                        &image,
+                        ctx,
+                        (resource.resource_type, &resource.resource_name),
+                        true,
+                    )
+                    .unwrap_or((code, message))
+                };
+                indexed_responses.push((
+                    index,
+                    resource_refusal(&resource, code).with_error(code, message),
+                ));
+                continue;
+            }
+        }
+        forwarded_indices.push(index);
+        forwarded.push(resource);
+    }
+    req.resources = forwarded;
+    let mut response = if req.resources.is_empty() {
+        IncrementalAlterConfigsResponse::default()
+    } else {
+        let body = encode_response(&req, version)?;
+        match to_active_controller(
+            broker,
+            incremental_alter_configs_request::API_KEY,
+            &body,
+            version,
+            ctx,
+            |code, message| encode_response(&request_refusal(&req, code, message), version),
+        )
+        .await
+        {
+            Some(answer) => decode_request::<IncrementalAlterConfigsResponse>(&answer?, version)?,
+            None => handle(broker, req.clone(), version, ctx).await?,
+        }
+    };
+    indexed_responses.extend(forwarded_indices.into_iter().zip(response.responses));
+    if !local.is_empty() {
+        req.resources = local;
+        indexed_responses.extend(
+            local_indices
+                .into_iter()
+                .zip(handle(broker, req, version, ctx).await?.responses),
+        );
+    }
+    indexed_responses.sort_unstable_by_key(|(index, _)| *index);
+    response.responses = indexed_responses.into_iter().map(|(_, row)| row).collect();
+    encode_response(&response, version)
+}
+
+fn request_refusal(
+    req: &IncrementalAlterConfigsRequest,
+    code: i16,
+    message: Option<&str>,
+) -> IncrementalAlterConfigsResponse {
+    IncrementalAlterConfigsResponse {
+        responses: req
+            .resources
+            .iter()
+            .map(|resource| AlterConfigsResourceResponse {
+                resource_type: resource.resource_type,
+                resource_name: resource.resource_name.clone(),
+                error_code: code,
+                error_message: message.map(str::to_owned),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
 
 super::alter_configs::config_alter_handler!(
     IncrementalAlterConfigsRequest => IncrementalAlterConfigsResponse,
@@ -119,18 +262,99 @@ fn validate_resource_shape(
 
 async fn process_resource(
     broker: &Broker,
-    image: &MetadataImage,
+    _image: &MetadataImage,
     ctx: &RequestContext<'_>,
     resource: AlterConfigsResource,
     validate_only: bool,
     is_duplicate: bool,
 ) -> AlterConfigsResourceResponse {
-    super::alter_configs::config_resource_preamble!(
-        (out, broker, image, ctx, resource),
-        AlterConfigsResourceResponse,
+    // Read and admission are optimistic; the engine atomically checks that
+    // image when it appends. Rebuild every operation after a conflicting commit.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut images = broker.controller.watch_image();
+        let image = images.borrow_and_update().clone();
+        let planned = tokio::time::timeout_at(
+            deadline,
+            process_resource_once(
+                broker,
+                &image,
+                ctx,
+                resource.clone(),
+                validate_only,
+                is_duplicate,
+            ),
+        )
+        .await;
+        let Ok(planned) = planned else {
+            return resource_refusal(&resource, codes::REQUEST_TIMED_OUT);
+        };
+        match planned {
+            Ok(response) => return response,
+            Err(RaftError::StaleMetadataImage) if tokio::time::Instant::now() < deadline => {}
+            Err(RaftError::UncommittedTail) if tokio::time::Instant::now() < deadline => {
+                // Some committed control records advance the high watermark
+                // without publishing a different image. Recheck admission even
+                // when the image watch has no notification for that commit.
+                tokio::select! {
+                    changed = images.changed() => {
+                        if changed.is_err() {
+                            return resource_refusal(&resource, codes::NOT_CONTROLLER);
+                        }
+                    }
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+            }
+            Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown) => {
+                return resource_refusal(&resource, codes::NOT_CONTROLLER);
+            }
+            Err(RaftError::StaleMetadataImage | RaftError::UncommittedTail) => {
+                return resource_refusal(&resource, codes::REQUEST_TIMED_OUT);
+            }
+            Err(error) => {
+                tracing::error!(%error, "IncrementalAlterConfigs submit_change failed");
+                return resource_refusal(&resource, codes::UNKNOWN_SERVER_ERROR);
+            }
+        }
+    }
+}
+
+fn resource_refusal(resource: &AlterConfigsResource, code: i16) -> AlterConfigsResourceResponse {
+    AlterConfigsResourceResponse {
+        resource_type: resource.resource_type,
+        resource_name: resource.resource_name.clone(),
+        error_code: code,
+        error_message: None,
+        ..Default::default()
+    }
+}
+
+async fn process_resource_once(
+    broker: &Broker,
+    image: &Arc<MetadataImage>,
+    ctx: &RequestContext<'_>,
+    resource: AlterConfigsResource,
+    validate_only: bool,
+    is_duplicate: bool,
+) -> Result<AlterConfigsResourceResponse, RaftError> {
+    let mut out = AlterConfigsResourceResponse {
+        resource_type: resource.resource_type,
+        resource_name: resource.resource_name.clone(),
+        error_message: None,
+        ..Default::default()
+    };
+    if let Err((code, message)) = validate_resource_shape(&resource, is_duplicate) {
+        return Ok(out.with_error(code, message));
+    }
+    if let Some((code, message)) = config_resource_refusal(
+        broker.config.authorizer.as_ref(),
+        image,
+        ctx,
+        (resource.resource_type, &resource.resource_name),
         true,
-        validate_resource_shape(&resource, is_duplicate)
-    );
+    ) {
+        return Ok(out.with_error(code, message));
+    }
 
     // After ACL pass: dispatch by resource type.
     let mut to_submit: Vec<MetadataRecord> = Vec::new();
@@ -146,24 +370,34 @@ async fn process_resource(
             ) {
                 Ok(record) => to_submit.push(record),
                 Err((code, message)) => {
-                    return out.with_error(code, message);
+                    return Ok(out.with_error(code, message));
                 }
             }
         }
         RESOURCE_TYPE_BROKER => {
+            let serving = if ctx.forwarded && !resource.resource_name.is_empty() {
+                resource
+                    .resource_name
+                    .parse::<u64>()
+                    .map_or(broker.config.node_id, krabka_metadata::NodeId)
+            } else {
+                broker.config.node_id
+            };
+            let log_dirs = if ctx.forwarded {
+                Vec::new()
+            } else {
+                broker.config.broker_log_dirs()
+            };
             handle_broker_scoped(
                 &resource,
                 image,
-                krabka_metadata::NodeId(broker.config.node_id.0),
-                (
-                    &broker.config.broker_log_dirs(),
-                    broker.config.features.unstable_api_versions,
-                ),
+                serving,
+                (&log_dirs, broker.config.features.unstable_api_versions),
                 &mut out,
                 &mut to_submit,
             );
             if out.error_code != codes::NONE {
-                return out;
+                return Ok(out);
             }
         }
         RESOURCE_TYPE_BROKER_LOGGER => {
@@ -176,12 +410,12 @@ async fn process_resource(
                 validate_only,
                 &mut out,
             );
-            return out;
+            return Ok(out);
         }
         RESOURCE_TYPE_CLIENT_METRICS => {
             handle_client_metrics_scoped(&resource, image, &mut out, &mut to_submit);
             if out.error_code != codes::NONE {
-                return out;
+                return Ok(out);
             }
         }
         RESOURCE_TYPE_GROUP => {
@@ -194,14 +428,14 @@ async fn process_resource(
                 &mut to_submit,
             );
             if out.error_code != codes::NONE {
-                return out;
+                return Ok(out);
             }
         }
         other => unreachable!("resource type {other} passed the ACL dispatch"),
     }
 
     if let Some((code, message)) = super::alter_configs::config_value_size_error(&to_submit) {
-        return out.with_error(code, message);
+        return Ok(out.with_error(code, message));
     }
 
     if to_submit.iter().any(|record| {
@@ -222,21 +456,111 @@ async fn process_resource(
         // to submit; the response already carries the per-resource result
         // (NONE if all configs validated, INVALID_CONFIG with reason on any
         // rejection). This matches Apache Kafka's --dry-run behavior.
-        return out;
+        return Ok(out);
     }
-    out.error_code = super::alter_configs::submission_code(
-        broker.controller.submit_change(to_submit).await,
-        |e| tracing::error!(error = %e, "IncrementalAlterConfigs submit_change failed"),
-    );
-    out
+    broker
+        .controller
+        .submit_change_if_image(to_submit, image.clone())
+        .await?;
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use assert2::{assert, check};
     use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
 
     use super::*;
+    use crate::{
+        handlers::incremental_alter_configs::test_support::make_scoped_resource,
+        test_support::{context_helper, start_broker_with_authorizer as start_broker, test_ctx},
+    };
+
+    context_helper!(client_id = "admin-client");
+
+    /// The wire response interleaves logger results, local broker refusals and
+    /// controller results in the original order, keeping duplicate rows.
+    #[tokio::test]
+    async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
+        broker_fixture!((handle, _dir, broker), allow_all, context(ctx, "admin"));
+        let resource = |kind, name| make_scoped_resource(kind, name, vec![]);
+        let duplicate_topic = tagged_wire!(AlterConfigsResourceResponse {
+            resource_type: RESOURCE_TYPE_TOPIC,
+            resource_name: "duplicate".into(),
+            error_code: codes::INVALID_REQUEST,
+            error_message: Some("Each resource must appear at most once.".into())
+        });
+        let duplicate_logger = tagged_wire!(AlterConfigsResourceResponse {
+            resource_type: RESOURCE_TYPE_BROKER_LOGGER,
+            resource_name: "2".into(),
+            error_code: codes::INVALID_REQUEST,
+            error_message: Some("Each resource must appear at most once.".into())
+        });
+        let rows = [
+            (
+                resource(RESOURCE_TYPE_BROKER_LOGGER, "1"),
+                tagged_wire!(AlterConfigsResourceResponse {
+                    resource_type: RESOURCE_TYPE_BROKER_LOGGER,
+                    resource_name: "1".into(),
+                    error_code: codes::NONE,
+                    error_message: None
+                }),
+            ),
+            (
+                resource(RESOURCE_TYPE_BROKER, "2"),
+                tagged_wire!(AlterConfigsResourceResponse {
+                    resource_type: RESOURCE_TYPE_BROKER,
+                    resource_name: "2".into(),
+                    error_code: codes::INVALID_REQUEST,
+                    error_message: Some("Unexpected broker id, expected 1, but received 2".into())
+                }),
+            ),
+            (
+                resource(RESOURCE_TYPE_TOPIC, "duplicate"),
+                duplicate_topic.clone(),
+            ),
+            (
+                resource(RESOURCE_TYPE_BROKER, "1"),
+                tagged_wire!(AlterConfigsResourceResponse {
+                    resource_type: RESOURCE_TYPE_BROKER,
+                    resource_name: "1".into(),
+                    error_code: codes::NONE,
+                    error_message: None
+                }),
+            ),
+            (
+                resource(RESOURCE_TYPE_TOPIC, "missing"),
+                tagged_wire!(AlterConfigsResourceResponse {
+                    resource_type: RESOURCE_TYPE_TOPIC,
+                    resource_name: "missing".into(),
+                    error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                    error_message: Some("The topic 'missing' does not exist.".into())
+                }),
+            ),
+            (resource(RESOURCE_TYPE_TOPIC, "duplicate"), duplicate_topic),
+            (
+                resource(RESOURCE_TYPE_BROKER_LOGGER, "2"),
+                duplicate_logger.clone(),
+            ),
+            (resource(RESOURCE_TYPE_BROKER_LOGGER, "2"), duplicate_logger),
+        ];
+        for order in [[0, 1, 2, 3, 4, 5, 6, 7], [7, 6, 5, 4, 3, 2, 1, 0]] {
+            let request = IncrementalAlterConfigsRequest {
+                resources: order.iter().map(|&index| rows[index].0.clone()).collect(),
+                validate_only: true,
+                ..Default::default()
+            };
+            let bytes = encode_response(&request, 1).unwrap();
+            let bytes = Box::pin(dispatch(&broker, 1, &bytes, &ctx)).await.unwrap();
+            let response = decode_request::<IncrementalAlterConfigsResponse>(&bytes, 1).unwrap();
+            let expected = IncrementalAlterConfigsResponse {
+                responses: order.iter().map(|&index| rows[index].1.clone()).collect(),
+                ..Default::default()
+            };
+            assert!(response == expected);
+        }
+        handle.shutdown().await;
+    }
 
     fn config(name: &str, operation: i8, value: Option<&str>) -> AlterableConfig {
         AlterableConfig {
