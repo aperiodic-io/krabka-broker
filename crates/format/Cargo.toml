@@ -23,6 +23,7 @@ name = "krabka-format"
 path = "src/main.rs"
 
 [dependencies]
+bon = { workspace = true }
 krabka-metadata = { version = "0.6.0" }
 krabka-security = { workspace = true }
 # The singleton VotersRecord this writes is the one the consensus engine reads

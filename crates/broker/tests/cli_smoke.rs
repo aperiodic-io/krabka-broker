@@ -170,17 +170,19 @@ fn refuses_a_log_dir_formatted_for_another_node() {
     let log_dir = tmp.path().join("data");
     run_krabka_format(&log_dir, 1, "127.0.0.1:9093");
 
-    let mut child = Command::new(broker_bin())
-        .arg(format!("--log-dir={}", log_dir.display()))
-        .arg("--broker-id=2")
-        .arg("--listen-addr=127.0.0.1:0")
-        .arg("--controller-listen-addr=127.0.0.1:0")
-        .arg("--metrics-listen-addr=none")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn krabka-broker");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut cmd = Command::new(broker_bin());
+    cmd.args([
+        format!("--log-dir={}", log_dir.display()),
+        "--broker-id=2".into(),
+        "--listen-addr=127.0.0.1:0".into(),
+        "--controller-listen-addr=127.0.0.1:0".into(),
+        "--metrics-listen-addr=none".into(),
+    ]);
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn krabka-broker");
+    let timeout = std::time::Duration::from_secs(30);
+    let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll krabka-broker") {
             break Some(status);

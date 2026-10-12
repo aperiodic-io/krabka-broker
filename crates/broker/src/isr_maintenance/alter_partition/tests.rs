@@ -177,15 +177,17 @@ impl ScriptedListener {
                         max_version,
                     )
                 }));
+                let mut api_keys = Vec::new();
+                for (k, min_v, max_v) in advertised {
+                    api_keys.push(ApiVersion {
+                        api_key: k,
+                        min_version: min_v,
+                        max_version: max_v,
+                        ..Default::default()
+                    });
+                }
                 let api_versions = ApiVersionsResponse {
-                    api_keys: advertised
-                        .map(|(api_key, min_version, max_version)| ApiVersion {
-                            api_key,
-                            min_version,
-                            max_version,
-                            ..Default::default()
-                        })
-                        .collect(),
+                    api_keys,
                     ..Default::default()
                 };
                 // `ApiVersions` always answers with a v0 response header.
@@ -363,15 +365,12 @@ async fn send_alter_partition_rejects_bad_controller_leader() {
         let metadata = source_of(cluster_image(brokers.addr(), None), leader);
         let dialer = plaintext_dialer(Vec::new());
 
-        let sent = send_alter_partition(
-            &ControllerLink {
-                controller: &metadata,
-                broker_id: 1,
-                dialer: &dialer,
-            },
-            &change(),
-        )
-        .await;
+        let link = ControllerLink {
+            controller: &metadata,
+            broker_id: 1,
+            dialer: &dialer,
+        };
+        let sent = send_alter_partition(&link, &change()).await;
 
         assert!(sent == Err(want.to_owned()), "leader={leader:?}");
         assert!(

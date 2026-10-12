@@ -82,30 +82,21 @@ fn compact(log: &[Entry], clock: i64, ret_ms: i64) -> Vec<Entry> {
     let held = markers_behind_data(log);
     let mut next = Vec::with_capacity(log.len());
     for (idx, e) in log.iter().enumerate() {
-        let (rec, batch, is_newest, txn) = match &e.kind {
+        let (metadata, is_newest, txn) = match &e.kind {
             EntryKind::Data { value } => (
-                RecordMeta {
-                    has_key: e.key.is_some(),
-                    has_value: value.is_some(),
-                },
-                BatchMeta {
-                    is_control: false,
-                    producer_id: ProducerId(-1),
-                    existing_horizon: e.horizon,
-                },
+                data_retention_metadata()
+                    .has_key(e.key.is_some())
+                    .has_value(value.is_some())
+                    .maybe_existing_horizon(e.horizon)
+                    .call(),
                 e.key.is_some_and(|k| map.get(&k).copied() == Some(idx)),
                 TxnDataState::NotTransactional,
             ),
             EntryKind::Marker { producer_id, .. } => (
-                RecordMeta {
-                    has_key: true,
-                    has_value: false,
-                },
-                BatchMeta {
-                    is_control: true,
-                    producer_id: ProducerId(i64::from(*producer_id)),
-                    existing_horizon: e.horizon,
-                },
+                marker_retention_metadata()
+                    .producer_id(i64::from(*producer_id))
+                    .maybe_existing_horizon(e.horizon)
+                    .call(),
                 false,
                 if held.contains(&idx) {
                     TxnDataState::DataSurvives
@@ -114,7 +105,14 @@ fn compact(log: &[Entry], clock: i64, ret_ms: i64) -> Vec<Entry> {
                 },
             ),
         };
-        match retain_decision(rec, batch, is_newest, txn, clock, ret_ms) {
+        match retain_decision(
+            metadata.record,
+            metadata.batch,
+            is_newest,
+            txn,
+            clock,
+            ret_ms,
+        ) {
             RetainDecision::Keep => next.push(e.clone()),
             RetainDecision::SetHorizon(h) => {
                 // Single-horizon stamping: the core must only ever stamp an

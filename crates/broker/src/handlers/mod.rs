@@ -18,6 +18,8 @@
 //! beside the subsystems whose topic-name constants it is built from rather
 //! than under the handlers that happen to answer with it.
 
+use crate::error::BrokerError;
+
 #[macro_use]
 mod wire_types;
 #[cfg(test)]
@@ -76,6 +78,9 @@ pub(crate) use self::{
     submit_failure::submit_failure_code,
     wire_types::{ApiKeyCode, ApiVersion, CorrelationId},
 };
+
+/// Encoded response returned by a raw-body handler dispatch function.
+pub(crate) type DispatchResult = Result<bytes::Bytes, BrokerError>;
 
 pub(crate) mod context;
 pub(crate) use context::{RequestContext, TelemetryContext};

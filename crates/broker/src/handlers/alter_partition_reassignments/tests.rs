@@ -181,18 +181,12 @@ async fn handle_preserves_unknown_partition_response_shape() {
         context(ctx, "admin")
     );
 
-    let resp = handle(
-        &broker,
-        request(ReassignmentRequestSetup {
-            topic: "payments",
-            partition_index: krabka_ids::PartitionIndex(8),
-            ..Default::default()
-        }),
-        version,
-        &ctx,
-    )
-    .await
-    .expect("handle");
+    let req = request(ReassignmentRequestSetup {
+        topic: "payments",
+        partition_index: krabka_ids::PartitionIndex(8),
+        ..Default::default()
+    });
+    let resp = handle(&broker, req, version, &ctx).await.expect("handle");
 
     let expected = unthrottled_wire!(AlterPartitionReassignmentsResponse {
         allow_replication_factor_change: false,

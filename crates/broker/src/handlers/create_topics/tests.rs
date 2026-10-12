@@ -26,7 +26,7 @@ use crate::{
         describe_configs::effective_topic_configs,
         test_support::{
             AclSetup, TopicPartitionCount, TopicReplicationFactor, replica_availability,
-            seed_controller_quota as seed_controller_quota_helper,
+            replica_nodes_from_partitions, seed_controller_quota as seed_controller_quota_helper,
         },
     },
     test_support::{
@@ -1399,10 +1399,7 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
                     topic: "manual".into(),
                     partition: i32::try_from(index).expect("index"),
                     leader,
-                    replicas: replicas
-                        .iter()
-                        .map(|&id| n(u64::try_from(id).expect("broker id")))
-                        .collect(),
+                    replicas: replica_nodes_from_partitions(replicas),
                     isr,
                     leader_epoch: krabka_metadata::LeaderEpoch(INITIAL_LEADER_EPOCH),
                     adding_replicas: vec![],

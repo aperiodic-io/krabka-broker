@@ -143,6 +143,13 @@ struct FsModel {
     partitions: Vec<i32>,
 }
 
+fn one_partition_model(refs: Vec<Ref>) -> FsModel {
+    FsModel {
+        refs,
+        partitions: vec![0],
+    }
+}
+
 fn forgotten_topic(r: Ref, p: i32) -> ForgottenTopic {
     ForgottenTopic {
         topic: ref_name(r),
@@ -308,15 +315,12 @@ fn run(model: FsModel, label: &str, pinned_unique_states: usize) {
 fn fetch_session_basic() {
     // One partition; the core rename/half-identity churn alphabet.
     run(
-        FsModel {
-            refs: vec![
-                Ref::Both(NAME_A, 1),
-                Ref::NameOnly(NAME_A),
-                Ref::IdOnly(1),
-                Ref::Both(NAME_B, 1),
-            ],
-            partitions: vec![0],
-        },
+        one_partition_model(vec![
+            Ref::Both(NAME_A, 1),
+            Ref::NameOnly(NAME_A),
+            Ref::IdOnly(1),
+            Ref::Both(NAME_B, 1),
+        ]),
         "fetch_session_basic",
         PINNED_UNIQUE_STATES_BASIC,
     );
@@ -331,18 +335,15 @@ fn fetch_session_wide() {
     // the shadow logic; the `two_keys` witness still fires via two distinct-
     // identity topics coexisting on the one partition.
     run(
-        FsModel {
-            refs: vec![
-                Ref::Both(NAME_A, 1),
-                Ref::NameOnly(NAME_A),
-                Ref::IdOnly(1),
-                Ref::Both(NAME_B, 1),
-                Ref::NameOnly(NAME_B),
-                Ref::Both(NAME_A, 2),
-                Ref::IdOnly(2),
-            ],
-            partitions: vec![0],
-        },
+        one_partition_model(vec![
+            Ref::Both(NAME_A, 1),
+            Ref::NameOnly(NAME_A),
+            Ref::IdOnly(1),
+            Ref::Both(NAME_B, 1),
+            Ref::NameOnly(NAME_B),
+            Ref::Both(NAME_A, 2),
+            Ref::IdOnly(2),
+        ]),
         "fetch_session_wide",
         PINNED_UNIQUE_STATES_WIDE,
     );

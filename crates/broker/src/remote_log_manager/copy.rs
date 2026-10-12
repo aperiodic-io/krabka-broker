@@ -621,14 +621,11 @@ mod tests {
         let rsm: Arc<dyn RemoteStorageManager> = Arc::new(RefusingRsm);
         let rlmm = fixtures::in_memory_metadata();
         let metrics = BrokerMetrics::new();
-        let tier = fixtures::configured_tier(
-            &rsm,
-            &rlmm,
-            fixtures::TierSetup {
-                metrics: &metrics,
-                ..Default::default()
-            },
-        );
+        let tier_setup = fixtures::TierSetup {
+            metrics: &metrics,
+            ..Default::default()
+        };
+        let tier = fixtures::configured_tier(&rsm, &rlmm, tier_setup);
 
         let copied = copy_exports(
             &tier,

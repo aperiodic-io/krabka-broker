@@ -5,10 +5,7 @@ use krabka_client_admin::DeleteRecordsOp;
 use krabka_client_core::{ClientError, Connection, ConnectionOptions, fetch_partition};
 use krabka_protocol::primitives::uuid::Uuid as WireUuid;
 
-use crate::support::{
-    admin::{standalone_admin, topic_spec},
-    producer::{ProducerRecordSetup, default_producer, producer_record},
-};
+use crate::support::client_admin::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_records_truncates_wal_and_maps_outcome() {

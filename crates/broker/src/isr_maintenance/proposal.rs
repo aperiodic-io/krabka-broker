@@ -281,6 +281,8 @@ mod tests {
     #[test]
     fn a_scan_proposes_the_isr_kafkas_rules_select() {
         let now = Instant::now() + Duration::from_secs(60);
+        let follower_pair =
+            |candidate| vec![(2, follower(now, 100, Some(10), Some(10))), (3, candidate)];
         let cases: [ScanCase<'_>; 10] = [
             (
                 "every follower caught up recently",
@@ -320,30 +322,21 @@ mod tests {
                 "an out-of-sync follower at the high watermark joins",
                 &[1, 2],
                 &[1, 2, 3],
-                vec![
-                    (2, follower(now, 100, Some(10), Some(10))),
-                    (3, follower(now, 90, Some(30_000), Some(30_000))),
-                ],
+                follower_pair(follower(now, 90, Some(30_000), Some(30_000))),
                 Some(proposal(&[1, 2], &[1, 2, 3])),
             ),
             (
                 "an out-of-sync follower one short of the high watermark stays out",
                 &[1, 2],
                 &[1, 2, 3],
-                vec![
-                    (2, follower(now, 100, Some(10), Some(10))),
-                    (3, follower(now, 89, Some(10), Some(10))),
-                ],
+                follower_pair(follower(now, 89, Some(10), Some(10))),
                 None,
             ),
             (
                 "a follower past the high watermark that has not fetched from this leader stays out",
                 &[1, 2],
                 &[1, 2, 3],
-                vec![
-                    (2, follower(now, 100, Some(10), Some(10))),
-                    (3, follower(now, 100, None, Some(10))),
-                ],
+                follower_pair(follower(now, 100, None, Some(10))),
                 None,
             ),
             (

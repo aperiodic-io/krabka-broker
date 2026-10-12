@@ -399,8 +399,7 @@ mod tests {
     async fn start_move_to_current_dir_is_noop() {
         // Asking to move a partition to the directory it already
         // lives in returns success without touching `future_logs`.
-        let primary = tempdir().unwrap();
-        let extra = tempdir().unwrap();
+        let (primary, extra) = (tempdir().unwrap(), tempdir().unwrap());
         let (log_dirs, partitions, future_logs) = registered_move(primary.path(), extra.path());
 
         move_with_defaults!(

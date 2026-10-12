@@ -211,6 +211,7 @@ mod tests {
 
     use super::{TxnCoordinator, TxnState, TxnVersion};
     use crate::{
+        codes::{INVALID_PRODUCER_EPOCH, PRODUCER_FENCED},
         partition::Partition,
         test_support::{StandalonePartitionSetup, open_partition},
         txn::{
@@ -329,32 +330,21 @@ mod tests {
             entry.state = TxnState::Dead;
             entry
         };
-        coordinator
-            .state
-            .insert("tid-a".into(), Arc::new(Mutex::new(dead())));
-        check!(
-            register_fixture(
-                &coordinator,
-                (ProducerId(7), i16::MIN),
-                requested.clone(),
-                1
-            )
-            .await
-                == crate::codes::INVALID_PRODUCER_EPOCH
-        );
-        coordinator
-            .state
-            .insert("tid-a".into(), Arc::new(Mutex::new(dead())));
-        check!(
-            register_fixture(
-                &coordinator,
-                (ProducerId(7), i16::MIN),
-                requested.clone(),
-                3
-            )
-            .await
-                == crate::codes::PRODUCER_FENCED
-        );
+        for (ver, expected_code) in [(1, INVALID_PRODUCER_EPOCH), (3, PRODUCER_FENCED)] {
+            coordinator
+                .state
+                .insert("tid-a".into(), Arc::new(Mutex::new(dead())));
+            check!(
+                register_fixture(
+                    &coordinator,
+                    (ProducerId(7), i16::MIN),
+                    requested.clone(),
+                    ver
+                )
+                .await
+                    == expected_code
+            );
+        }
 
         check!(
             register_fixture(

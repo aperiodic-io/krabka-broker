@@ -131,17 +131,16 @@ async fn the_kfc9_gauges_and_counters_move_on_real_requests() {
         cluster.broker.metrics(),
         krabka_metadata::BreakGlassAction::DeleteTopic,
     );
-    let deleted = alice
-        .send(DeleteTopicsRequest {
-            topics: vec![DeleteTopicState {
-                name: Some("doomed".into()),
-                ..Default::default()
-            }],
-            timeout_ms: 5_000,
+    let req = DeleteTopicsRequest {
+        topics: vec![DeleteTopicState {
+            name: Some("doomed".into()),
             ..Default::default()
-        })
-        .await
-        .expect("DeleteTopics");
+        }],
+        topic_names: vec!["doomed".into()],
+        timeout_ms: 5_000,
+        ..Default::default()
+    };
+    let deleted = alice.send(req).await.expect("DeleteTopics");
     check!(deleted.responses[0].error_code == krabka_broker::codes::POLICY_VIOLATION);
     check!(
         refusals(

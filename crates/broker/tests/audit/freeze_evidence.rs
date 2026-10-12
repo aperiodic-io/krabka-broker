@@ -157,10 +157,11 @@ async fn the_proposal_id_joins_each_approval_to_the_transition_it_authorized() {
     );
 
     // And into the proposal, which names the person who asked for the thaw.
+    let target_prop_json = serde_json::json!(proposal);
     let proposed: Vec<&str> = privileged(&records, "thaw_topic_freeze.proposed")
-        .into_iter()
-        .filter(|j| j["privileged_action"]["proposal_id"] == serde_json::json!(proposal))
-        .filter_map(|j| j["actor"]["user"]["name"].as_str())
+        .iter()
+        .filter(|row| row["privileged_action"]["proposal_id"] == target_prop_json)
+        .filter_map(|row| row["actor"]["user"]["name"].as_str())
         .collect();
     check!(proposed == vec![ALICE]);
 

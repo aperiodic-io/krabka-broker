@@ -34,36 +34,21 @@ fn initial_election_deadline_matches_startup_role() {
     );
     assert2::assert!(initial_election_at(&single, None, base, NodeId(1), 0, TIMEOUT) == Some(base));
 
-    let known_leader = QuorumStateMachine::new(
-        NodeId(1),
+    let three_voter_state = || {
         QuorumState::bootstrap(
             uuid::Uuid::nil(),
             voter_set(&[NodeId(1), NodeId(2), NodeId(3)]),
-        ),
-        TIMEOUT,
-    );
+        )
+    };
+    let known_leader = QuorumStateMachine::new(NodeId(1), three_voter_state(), TIMEOUT);
     assert2::assert!(
         initial_election_at(&known_leader, Some(NodeId(2)), base, NodeId(1), 0, TIMEOUT).is_none()
     );
 
-    let non_voter = QuorumStateMachine::new(
-        NodeId(4),
-        QuorumState::bootstrap(
-            uuid::Uuid::nil(),
-            voter_set(&[NodeId(1), NodeId(2), NodeId(3)]),
-        ),
-        TIMEOUT,
-    );
+    let non_voter = QuorumStateMachine::new(NodeId(4), three_voter_state(), TIMEOUT);
     assert2::assert!(initial_election_at(&non_voter, None, base, NodeId(4), 0, TIMEOUT).is_none());
 
-    let multi = QuorumStateMachine::new(
-        NodeId(1),
-        QuorumState::bootstrap(
-            uuid::Uuid::nil(),
-            voter_set(&[NodeId(1), NodeId(2), NodeId(3)]),
-        ),
-        TIMEOUT,
-    );
+    let multi = QuorumStateMachine::new(NodeId(1), three_voter_state(), TIMEOUT);
     // The jitter is integer milliseconds and the deadline is the integer
     // sum, so the quantity must not shift the deadline by even a nanosecond.
     let jitter = election_jitter_ms(NodeId(1), 0, TIMEOUT_MS);

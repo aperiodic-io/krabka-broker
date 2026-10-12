@@ -72,6 +72,15 @@ async fn sweep_at(broker: &Broker, now_ms: i64) -> Vec<(String, super::ReapOutco
     .await
 }
 
+/// These memberless-group cases keep the committed offset after a sweep.
+async fn assert_offset_retained_after_sweep(
+    broker: &Broker,
+    swept: Vec<(String, super::ReapOutcome)>,
+) {
+    assert!(swept.is_empty());
+    check!(fetched_offset(broker).await == 42);
+}
+
 /// Independent expected result for a pass that deletes the group.
 fn deleted_group(reaped: Vec<(String, i32)>) -> Vec<(String, super::ReapOutcome)> {
     vec![(
@@ -317,8 +326,7 @@ async fn live_group_keeps_its_offsets_across_the_same_interval() {
     let now_ms = now_ms() + RETENTION_MS * 10;
     let swept = sweep_at(&broker, now_ms).await;
 
-    assert!(swept.is_empty());
-    check!(fetched_offset(&broker).await == 42);
+    assert_offset_retained_after_sweep(&broker, swept).await;
     check!(!has_tombstone(
         &offsets_log_records(&broker),
         &committed_offset_key()
@@ -394,8 +402,7 @@ async fn a_group_this_broker_does_not_own_is_not_swept() {
     )
     .await;
 
-    assert!(swept.is_empty());
-    check!(fetched_offset(&broker).await == 42);
+    assert_offset_retained_after_sweep(&broker, swept).await;
 }
 
 /// A streams group parks its committed offsets on a classic `groups` entry

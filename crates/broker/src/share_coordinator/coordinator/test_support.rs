@@ -12,6 +12,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
+use assert2::assert;
 use krabka_ids::PartitionIndex;
 use krabka_log::{Log, LogConfig, Offset};
 use qubit_clock::{ManualMonotonicClock, ManualWallClock};
@@ -33,6 +34,26 @@ use crate::{
         },
     },
 };
+
+#[bon::builder]
+pub(crate) async fn assert_recovered_epoch_is_fenced(
+    coordinator: &ShareCoordinator,
+    topic_image: &krabka_metadata::MetadataImage,
+    topic_id: uuid::Uuid,
+) {
+    assert!(coordinator.read_summary("g", topic_id, 0).await == Ok(Some((2, 0, Offset(10), 0))));
+    assert!(
+        coordinator
+            .initialize(topic_image, "g", topic_id, 0, 1, Offset(20))
+            .await
+            == Err(
+                crate::share_coordinator::coordinator::ShareStateError::Refused {
+                    code: crate::codes::FENCED_STATE_EPOCH,
+                    message: crate::share_coordinator::coordinator::message::FENCED_STATE_EPOCH,
+                }
+            )
+    );
+}
 
 /// The wall-clock time, in milliseconds, at which every test coordinator
 /// starts.

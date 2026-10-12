@@ -146,11 +146,10 @@ async fn next_gen_state_cleared_after_leave_then_restart() {
 /// restart reaches the member too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn replay_keeps_the_topics_a_regex_resolved_to_and_finds_new_ones() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let log_dir = dir.path().to_path_buf();
+    let test_dir = tempfile::tempdir().expect("test tempdir");
+    let log_dir = test_dir.path().to_path_buf();
 
-    let member_id;
-    let initial_epoch;
+    let (member_id, initial_epoch);
     {
         let (broker, client) = boot_topic(log_dir.clone(), "orders-eu").await;
         let resp = client

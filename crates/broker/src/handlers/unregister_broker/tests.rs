@@ -49,6 +49,16 @@ fn context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext
     request_context(principal, peer, "unregister-client")
 }
 
+fn follower_departure_partition() -> krabka_metadata::PartitionRecord {
+    replicated_partition(UnregisterPartitionSetup {
+        index: krabka_ids::PartitionIndex(0),
+        leader: NodeId(2),
+        isr: &[NodeId(2)],
+        leader_epoch: krabka_metadata::LeaderEpoch(6),
+        partition_epoch: PartitionEpoch(1),
+    })
+}
+
 #[test]
 fn response_preserves_error_fields_and_throttle() {
     let resp =
@@ -359,13 +369,7 @@ async fn handle_removes_the_broker_from_every_isr_in_the_unregistering_append() 
     // It only followed partition 1, so the leader stays and the epoch does not
     // move. It was in neither of partition 2's lists, so that one is untouched.
     let expected = [
-        replicated_partition(UnregisterPartitionSetup {
-            leader: NodeId(2),
-            isr: &[NodeId(2)],
-            leader_epoch: krabka_metadata::LeaderEpoch(6),
-            partition_epoch: PartitionEpoch(1),
-            ..Default::default()
-        }),
+        follower_departure_partition(),
         replicated_partition(UnregisterPartitionSetup {
             index: krabka_ids::PartitionIndex(1),
             leader: NodeId(2),
@@ -475,13 +479,7 @@ fn the_isr_departures_sit_between_the_consume_and_the_unregister_record() {
         node_id: DOOMED,
         broker_epoch: DOOMED_EPOCH,
     });
-    let leave = MetadataRecord::V1Partition(replicated_partition(UnregisterPartitionSetup {
-        leader: NodeId(2),
-        isr: &[NodeId(2)],
-        leader_epoch: krabka_metadata::LeaderEpoch(6),
-        partition_epoch: PartitionEpoch(1),
-        ..Default::default()
-    }));
+    let leave = MetadataRecord::V1Partition(follower_departure_partition());
 
     for (case, records, expected) in [
         (

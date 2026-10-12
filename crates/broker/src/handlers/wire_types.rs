@@ -75,3 +75,29 @@ macro_rules! wire_handler {
         ) -> Result<bytes::Bytes, crate::error::BrokerError> $body
     };
 }
+
+/// Define a raw dispatch entry point that first decodes its request body.
+macro_rules! raw_dispatch {
+    ($(#[$attr:meta])* mut $request:ty, ($broker:ident, $version:ident, $bytes:ident, $ctx:ident, $req:ident), $body:block) => {
+        raw_dispatch!(@define $(#[$attr])* [mut] $request,
+            ($broker, $version, $bytes, $ctx, $req), $body);
+    };
+    ($(#[$attr:meta])* $request:ty, ($broker:ident, $version:ident, $bytes:ident, $ctx:ident, $req:ident), $body:block) => {
+        raw_dispatch!(@define $(#[$attr])* [] $request,
+            ($broker, $version, $bytes, $ctx, $req), $body);
+    };
+    (@define $(#[$attr:meta])* [$($mutability:ident)?] $request:ty,
+        ($broker:ident, $version:ident, $bytes:ident, $ctx:ident, $req:ident), $body:block) => {
+        $(#[$attr])*
+        pub(crate) async fn dispatch(
+            $broker: &$crate::broker::Broker,
+            $version: $crate::handlers::ApiVersion,
+            $bytes: &[u8],
+            $ctx: &$crate::handlers::RequestContext<'_>,
+        ) -> $crate::handlers::DispatchResult {
+            let $($mutability)? $req =
+                $crate::handlers::decode_request::<$request>($bytes, $version)?;
+            $body
+        }
+    };
+}

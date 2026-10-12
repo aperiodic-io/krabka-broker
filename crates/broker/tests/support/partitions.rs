@@ -8,6 +8,17 @@ use std::{
 use assert2::assert;
 use krabka_broker::BrokerHandle;
 
+/// Wait until every listed broker has materialized the partition in its image.
+pub async fn wait_for_partition_on_all<'a>(
+    brokers: impl IntoIterator<Item = &'a BrokerHandle>,
+    topic: &str,
+    partition: i32,
+) {
+    for broker in brokers {
+        broker.wait_until_partition_present(topic, partition).await;
+    }
+}
+
 /// Waits for the supervisor to materialize the local writer actor.
 ///
 /// # Panics

@@ -5,6 +5,28 @@ use krabka_ids::PartitionIndex as ElectionPartitionIndex;
 
 use crate::support::standalone_broker;
 
+#[bon::builder]
+pub fn unregister_controller_answers(
+    controller_id: i32,
+) -> Vec<krabka_protocol::owned::unregister_controller_response::UnregisterControllerResponse> {
+    use krabka_broker::codes::CONTROLLER_ID_NOT_REGISTERED;
+    use krabka_protocol::owned::unregister_controller_response::UnregisterControllerResponse;
+
+    vec![
+        UnregisterControllerResponse {
+            error_message: Some(String::new()),
+            ..Default::default()
+        },
+        UnregisterControllerResponse {
+            error_code: CONTROLLER_ID_NOT_REGISTERED,
+            error_message: Some(format!(
+                "Controller ID {controller_id} is not currently registered."
+            )),
+            ..Default::default()
+        },
+    ]
+}
+
 pub fn topic_spec(name: impl Into<String>, partitions: i32, replicas: i32) -> CreateTopicSpec {
     CreateTopicSpec {
         name: name.into(),

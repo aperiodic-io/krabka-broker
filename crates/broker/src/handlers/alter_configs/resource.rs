@@ -25,8 +25,8 @@ use krabka_raft::RaftError;
 use super::{
     RESOURCE_TYPE_BROKER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
     broker_configs::broker_config_records, client_metrics_configs::client_metrics_config_record,
-    group_configs::group_config_record, topic_configs::topic_config_record,
-    validate_resource_shape,
+    empty_resource_response, group_configs::group_config_record,
+    topic_configs::topic_config_record, validate_resource_shape,
 };
 use crate::{
     broker::Broker,
@@ -34,7 +34,7 @@ use crate::{
     config_keys::{broker_dynamic::BrokerConfigContext, clear_elr_records, group::GroupBounds},
     handlers::{
         RequestContext, audit_admin_success, config_resource_refusal,
-        forward_to_controller::guarded_operation, response_encoding::ErrorRow as _,
+        forward_to_controller::guarded_operation_on_source, response_encoding::ErrorRow as _,
     },
 };
 
@@ -46,8 +46,8 @@ pub(super) async fn process_resource(
     validate_only: bool,
     is_duplicate: bool,
 ) -> AlterConfigsResourceResponse {
-    let result = guarded_operation(
-        broker,
+    let result = guarded_operation_on_source(
+        broker.controller.as_ref(),
         tokio::time::Instant::now() + Duration::from_secs(5),
         |image| {
             process_resource_once(
@@ -87,12 +87,7 @@ async fn process_resource_once(
     validate_only: bool,
     is_duplicate: bool,
 ) -> Result<AlterConfigsResourceResponse, RaftError> {
-    let out = AlterConfigsResourceResponse {
-        resource_type: resource.resource_type,
-        resource_name: resource.resource_name.clone(),
-        error_message: None,
-        ..Default::default()
-    };
+    let out: AlterConfigsResourceResponse = empty_resource_response(&resource);
     if let Err((code, message)) = validate_resource_shape(
         is_duplicate,
         resource
@@ -248,6 +243,18 @@ mod tests {
         .expect("guarded submission")
     }
 
+    #[bon::builder]
+    fn source_with_intervening_image(
+        initial: MetadataImage,
+        newer: MetadataImage,
+    ) -> FakeMetadataSource {
+        FakeMetadataSource::builder()
+            .image(initial)
+            .leader(Some(NodeId(1)))
+            .before_guarded_submit(move |source| source.set_image(newer))
+            .build()
+    }
+
     /// A full replacement must delete overrides committed after its first
     /// planning attempt as well as those the first image contained.
     #[tokio::test]
@@ -263,11 +270,10 @@ mod tests {
         initial.apply(&record(LEADER_THROTTLED_RATE_KEY, Some("1")));
         let mut newer = initial.clone();
         newer.apply(&record(FOLLOWER_THROTTLED_RATE_KEY, Some("2")));
-        let source = FakeMetadataSource::builder()
-            .image(initial)
-            .leader(Some(NodeId(1)))
-            .before_guarded_submit(move |source| source.set_image(newer))
-            .build();
+        let source = source_with_intervening_image()
+            .initial(initial)
+            .newer(newer)
+            .call();
         let resource = broker_resource("1", &[]);
         let result = submit_replacement(&source, &resource, |resource, image| {
             broker_config_records(
@@ -297,11 +303,10 @@ mod tests {
     async fn replacement_rechecks_remote_storage_disable_after_a_conflict() {
         let initial = image_with_topic_config("t", &[(REMOTE_STORAGE_ENABLE, "false")]);
         let newer = image_with_topic_config("t", &[(REMOTE_STORAGE_ENABLE, "true")]);
-        let source = FakeMetadataSource::builder()
-            .image(initial)
-            .leader(Some(NodeId(1)))
-            .before_guarded_submit(move |source| source.set_image(newer))
-            .build();
+        let source = source_with_intervening_image()
+            .initial(initial)
+            .newer(newer)
+            .call();
         let resource = topic_resource("t", &[(REMOTE_STORAGE_ENABLE, "false")]);
         let result = submit_replacement(&source, &resource, |resource, image| {
             topic_config_record(

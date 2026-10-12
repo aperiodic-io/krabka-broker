@@ -8,6 +8,11 @@
 use creusot_std::prelude::*;
 use krabka_ids::{LeaderEpoch, Offset};
 
+pub(super) use crate::broker::FetchVisibility;
+#[cfg(creusot)]
+pub(super) use crate::broker::{clamped_fetch_watermarks, committed_fetch_response};
+#[cfg(creusot)]
+pub(super) use crate::leader_epoch::kafka_end_offset_for;
 use crate::{
     audit::{AuditLosses, settle_loss_batch},
     authz::{
@@ -53,6 +58,7 @@ use crate::{
         restore_leader_epoch_entry_valid, restore_offset_index_entry_valid,
         restore_time_index_entry_valid, restore_txn_index_entry_valid,
     },
+    retention::RemoteRetentionSegment,
     storage::{local_append_coordinates, truncation_batch_retained, truncation_frontier},
     throttle::{AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume},
     timestamp::{earliest_max_timestamp_index, first_timestamp_index, timestamp_scan_next},
@@ -229,6 +235,35 @@ fn finished_ranges_valid(count: Int, ranges: creusot_std::logic::Mapping<Int, (i
     pearlite! { forall<i: Int> 0 <= i && i < count
     ==> offset_range_valid(ranges.get(i).0@, ranges.get(i).1@) }
 }
+}
+
+/// Project completed remote ranges into the facts consumed by retention policy.
+#[requires(finished_ranges_valid(finished@.len(), |i: Int| (finished@[i].0, finished@[i].1)))]
+#[ensures(result@.len() == finished@.len())]
+#[ensures(forall<i: Int> 0 <= i && i < finished@.len() ==> result@[i].blocked == false
+    && result@[i].log_start_breached == match deleted_below { None => false, Some(floor) => finished@[i].1@ < floor@ }
+    && result@[i].time_expired == finished@[i].3 && result@[i].size == finished@[i].2)]
+fn remote_retention_facts(
+    finished: &[(i64, i64, u64, bool)],
+    deleted_below: Option<i64>,
+) -> Vec<RemoteRetentionSegment> {
+    let mut facts: Vec<RemoteRetentionSegment> = Vec::new();
+    let mut i = 0usize;
+    #[invariant(i@ <= finished@.len() && facts@.len() == i@)]
+    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> facts@[j].blocked == false
+        && facts@[j].log_start_breached == match deleted_below { None => false, Some(floor) => finished@[j].1@ < floor@ }
+        && facts@[j].time_expired == finished@[j].3 && facts@[j].size == finished@[j].2)]
+    #[variant(finished@.len() - i@)]
+    while i < finished.len() {
+        facts.push(RemoteRetentionSegment {
+            blocked: false,
+            log_start_breached: matches!(deleted_below, Some(floor) if finished[i].1 < floor),
+            time_expired: finished[i].3,
+            size: finished[i].2,
+        });
+        i += 1;
+    }
+    facts
 }
 
 #[cfg(test)]

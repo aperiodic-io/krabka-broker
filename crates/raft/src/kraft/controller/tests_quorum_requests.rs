@@ -450,8 +450,8 @@ async fn begin_quorum_epoch_runs_kafka_request_checks() {
         (
             "two partitions",
             begin_request(|r| {
-                let second = r.topics[0].partitions[0].clone();
-                r.topics[0].partitions.push(second);
+                let dup_part = r.topics[0].partitions[0].clone();
+                r.topics[0].partitions.push(dup_part);
             }),
             top_level(42),
         ),

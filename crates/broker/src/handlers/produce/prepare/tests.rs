@@ -32,47 +32,29 @@ fn record_decompression_policy_limits_owned_and_verbatim_produce() {
         ..Default::default()
     };
     let wire = encode_batch(&v2);
-    let error = prepare_batch(
-        PartitionPayload::Slice(wire.clone()),
-        None,
-        TimestampPolicy::default(),
-        false,
-        DecodeEnv {
-            topic_name: &topic(),
-            metrics: &metrics,
-            policy,
-        },
-        13,
-    )
-    .unwrap_err();
-    assert!(error == crate::codes::INVALID_RECORD);
-
-    let error = prepare_batch(
-        PartitionPayload::Slice(wire.clone()),
-        Some(CompressionType::Zstd),
-        TimestampPolicy::default(),
-        false,
-        DecodeEnv {
-            topic_name: &topic(),
-            metrics: &metrics,
-            policy,
-        },
-        13,
-    )
-    .unwrap_err();
-    assert!(error == crate::codes::INVALID_RECORD);
-    assert!(
+    let run_prepare = |compression, pol| {
         prepare_batch(
-            PartitionPayload::Slice(wire),
-            Some(CompressionType::Zstd),
+            PartitionPayload::Slice(wire.clone()),
+            compression,
             TimestampPolicy::default(),
             false,
             DecodeEnv {
                 topic_name: &topic(),
                 metrics: &metrics,
-                policy: RecordDecompressionPolicy::default(),
+                policy: pol,
             },
             13,
+        )
+    };
+    assert!(run_prepare(None, policy).unwrap_err() == crate::codes::INVALID_RECORD);
+    assert!(
+        run_prepare(Some(CompressionType::Zstd), policy).unwrap_err()
+            == crate::codes::INVALID_RECORD
+    );
+    assert!(
+        run_prepare(
+            Some(CompressionType::Zstd),
+            RecordDecompressionPolicy::default()
         )
         .is_ok()
     );

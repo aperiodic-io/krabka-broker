@@ -58,16 +58,14 @@ async fn backlog_is_scraped_and_survives_scale_to_zero() {
         .expect("topic metadata");
     produce_five(&client, topic_id).await;
 
-    let joined = client
-        .send(ShareGroupHeartbeatRequest {
-            group_id: GROUP.into(),
-            member_id: "member-1".into(),
-            member_epoch: 0,
-            subscribed_topic_names: Some(vec![TOPIC.into()]),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    let join_req = ShareGroupHeartbeatRequest {
+        group_id: GROUP.into(),
+        member_id: "member-1".into(),
+        member_epoch: 0,
+        subscribed_topic_names: Some(vec![TOPIC.into()]),
+        ..Default::default()
+    };
+    let joined = client.send(join_req).await.unwrap();
     assert!(joined.error_code == 0, "{joined:?}");
     broker
         .wait_for_share_state_summary(GROUP, topic_id, 0)
@@ -109,22 +107,22 @@ async fn backlog_is_scraped_and_survives_scale_to_zero() {
     );
     assert!(scrape(metrics_addr).await.contains(&expected));
 
-    let altered = client
-        .send(AlterShareGroupOffsetsRequest {
-            group_id: GROUP.into(),
-            topics: vec![AlterShareGroupOffsetsRequestTopic {
-                topic_name: TOPIC.into(),
-                partitions: vec![AlterShareGroupOffsetsRequestPartition {
-                    partition_index: 0,
-                    start_offset: 5,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    let alter_part = AlterShareGroupOffsetsRequestPartition {
+        partition_index: 0,
+        start_offset: 5,
+        ..Default::default()
+    };
+    let alter_topic = AlterShareGroupOffsetsRequestTopic {
+        topic_name: TOPIC.into(),
+        partitions: vec![alter_part],
+        ..Default::default()
+    };
+    let alter_req = AlterShareGroupOffsetsRequest {
+        group_id: GROUP.into(),
+        topics: vec![alter_topic],
+        ..Default::default()
+    };
+    let altered = client.send(alter_req).await.unwrap();
     assert!(altered.error_code == 0, "{altered:?}");
     assert!(
         altered.responses[0].partitions[0].error_code == 0,

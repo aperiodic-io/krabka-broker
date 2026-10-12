@@ -479,16 +479,12 @@ async fn an_empty_version_0_request_asks_for_every_topic() {
     assert!(response.topics == vec![existing]);
 
     fixture.grants.set(&[]);
-    let response = fixture
-        .metadata(
-            0,
-            &MetadataRequest {
-                topics: Some(Vec::new()),
-                ..Default::default()
-            },
-        )
-        .await;
-    assert!(response.topics == Vec::<MetadataResponseTopic>::new());
+    let empty_req = MetadataRequest {
+        topics: Some(Vec::new()),
+        ..Default::default()
+    };
+    let response = fixture.metadata(0, &empty_req).await;
+    assert!(response.topics.is_empty());
     fixture.broker.shutdown().await;
 }
 

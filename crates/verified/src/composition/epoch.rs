@@ -1,14 +1,7 @@
+#[cfg(creusot)]
 use creusot_std::prelude::*;
 
-use super::{
-    EpochEntry, FetchWatermarks, LeaderEpoch, Offset, epoch_and_offset_for_entries,
-    fetch_visibility, restore_leader_epoch_entry_valid, truncation_frontier,
-};
-use crate::broker::FetchVisibility;
-#[cfg(creusot)]
-use crate::broker::{clamped_fetch_watermarks, committed_fetch_response};
-#[cfg(creusot)]
-use crate::leader_epoch::kafka_end_offset_for;
+use super::*;
 
 open_logic! {
 pub fn epoch_window_valid(base: Int, start: Int, end: Int) -> bool {

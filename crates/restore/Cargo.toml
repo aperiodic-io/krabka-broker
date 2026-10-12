@@ -24,6 +24,7 @@ name = "krabka-restore"
 path = "src/main.rs"
 
 [dependencies]
+bon = { workspace = true }
 maplit = { workspace = true }
 # The target cluster is formatted through the same code path `krabka format`
 # uses, with the recovered topic and partition records seeded into the

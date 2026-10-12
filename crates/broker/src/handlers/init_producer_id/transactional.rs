@@ -1363,15 +1363,16 @@ mod tests {
     async fn an_ongoing_transaction_fenced_at_the_exhausted_epoch_rotates_the_producer_id() {
         const TID: &str = "tid-abort-rotation";
 
-        let dir = tempfile::tempdir().expect("tempdir");
-        let (coordinator, _part) = coordinator_with_completed_transaction(dir.path(), TID).await;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (coordinator, _) = coordinator_with_completed_transaction(tmp.path(), TID).await;
 
         // An Ongoing transaction at the exhausted epoch boundary, with no
         // partitions, so the abort's marker fan-out succeeds at once and its
         // own `prepare_completion_identities` rotates to a fresh producer id.
-        let mut ongoing =
-            TxnEntry::new_empty(TID.to_string(), ProducerId(1000), i16::MAX - 1, 60_000, 0);
-        ongoing.state = TxnState::Ongoing;
+        let ongoing = TxnEntry {
+            state: TxnState::Ongoing,
+            ..TxnEntry::new_empty(TID.to_string(), ProducerId(1000), i16::MAX - 1, 60_000, 0)
+        };
         seed(&coordinator, ongoing).await;
 
         let fenced = init_near_exhaustion(&coordinator, TID).await;

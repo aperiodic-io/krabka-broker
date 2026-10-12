@@ -3,10 +3,10 @@
 //! topic and its overrides, and they build the request-side resource and
 //! per-key config structures that each scope handler consumes.
 
+pub(super) use assert2::{assert, check};
 use krabka_metadata::{MetadataImage, MetadataRecord, NodeId, TopicConfigRecord};
-use krabka_protocol::owned::incremental_alter_configs_request::{
-    AlterConfigsResource, AlterableConfig,
-};
+use krabka_protocol::owned::incremental_alter_configs_request::AlterConfigsResource;
+pub(super) use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
 
 use super::{OP_DELETE, OP_SET, RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC};
 use crate::test_support::{broker_registration, string_pairs};

@@ -20,7 +20,7 @@ use crate::{
         consumer_state::{GroupState, MemberState},
         member_records::{MemberValues, append_target_records},
         offsets_log::OffsetsLog,
-        persistence::{GroupMetadataValue, sorted_partitions},
+        persistence::{GroupMetadataValue, sorted_assigned_partitions, sorted_partitions},
         persistence_next_gen::{
             ClassicMemberMetadata, CurrentMemberAssignmentValue, CurrentTopicPartitions,
             GroupMetadataValue as NextGenGroupMetadataValue, MemberMetadataValue,
@@ -108,21 +108,9 @@ pub(super) fn current_assignment_value(member: &MemberState) -> CurrentMemberAss
 pub(super) fn target_assignment_value(
     target: &HashMap<Uuid, Vec<i32>>,
 ) -> TargetAssignmentMemberValue {
-    use crate::coordinator::unified::persistence_next_gen::AssignedTopicPartitions;
-    let mut topic_partitions: Vec<AssignedTopicPartitions> = target
-        .iter()
-        .filter(|(_, partitions)| !partitions.is_empty())
-        .map(|(topic_id, partitions)| {
-            let mut partitions = partitions.clone();
-            partitions.sort_unstable();
-            AssignedTopicPartitions {
-                topic_id: *topic_id,
-                partitions,
-            }
-        })
-        .collect();
-    topic_partitions.sort_by_key(|topic| topic.topic_id.0);
-    TargetAssignmentMemberValue { topic_partitions }
+    TargetAssignmentMemberValue {
+        topic_partitions: sorted_assigned_partitions(target),
+    }
 }
 
 /// The records of one consumer-group transition, as Kafka's

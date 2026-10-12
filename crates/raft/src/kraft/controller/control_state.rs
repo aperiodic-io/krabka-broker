@@ -264,14 +264,15 @@ mod tests {
     use super::*;
 
     fn versioned_voter() -> krabka_metadata::voters::Voter {
+        let ep = krabka_metadata::voters::VoterEndpoint {
+            name: "CONTROLLER".into(),
+            host: "127.0.0.1".into(),
+            port: 9092,
+        };
         krabka_metadata::voters::Voter {
             id: NodeId(1),
             directory_id: uuid::Uuid::nil(),
-            endpoints: vec![krabka_metadata::voters::VoterEndpoint {
-                name: "CONTROLLER".into(),
-                host: "127.0.0.1".into(),
-                port: 9092,
-            }],
+            endpoints: vec![ep],
             kraft_version: krabka_metadata::voters::KRaftVersionRange { min: 2, max: 4 },
         }
     }

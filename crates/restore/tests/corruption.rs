@@ -258,17 +258,25 @@ fn truncate_log_mid_batch(path: &StdPath) {
     file.set_len(full_len / 2).expect("truncate log file");
 }
 
-#[tokio::test]
-async fn a_flipped_crc_byte_fails_the_whole_restore_and_names_the_object() {
+fn single_segment_fixture(
+    topic_id: u128,
+    segment_id: u128,
+) -> (tempfile::TempDir, tempfile::TempDir) {
     let archive = tempfile::tempdir().expect("archive root");
     let target_parent = tempfile::tempdir().expect("target parent");
     archive_segment(
         archive.path(),
         "orders",
         0,
-        Uuid::from_u128(1),
-        Uuid::from_u128(0xC12C),
+        Uuid::from_u128(topic_id),
+        Uuid::from_u128(segment_id),
     );
+    (archive, target_parent)
+}
+
+#[tokio::test]
+async fn a_flipped_crc_byte_fails_the_whole_restore_and_names_the_object() {
+    let (archive, target_parent) = single_segment_fixture(1, 0xC12C);
 
     let log_path = find_one_file(archive.path(), |p| has_extension(p, "log"));
     let expected_key = relative_key(archive.path(), &log_path);
@@ -289,15 +297,7 @@ async fn a_flipped_crc_byte_fails_the_whole_restore_and_names_the_object() {
 
 #[tokio::test]
 async fn a_log_truncated_mid_batch_fails_the_whole_restore_and_names_the_object() {
-    let archive = tempfile::tempdir().expect("archive root");
-    let target_parent = tempfile::tempdir().expect("target parent");
-    archive_segment(
-        archive.path(),
-        "orders",
-        0,
-        Uuid::from_u128(2),
-        Uuid::from_u128(0x7ecc),
-    );
+    let (archive, target_parent) = single_segment_fixture(2, 0x7ecc);
 
     let log_path = find_one_file(archive.path(), |p| has_extension(p, "log"));
     let expected_key = relative_key(archive.path(), &log_path);
@@ -460,15 +460,7 @@ async fn continue_on_corrupt_does_not_rescue_a_format_target_failure() {
     // `--node-id` is the cheapest way to make `format_target` fail on a
     // command line that is otherwise completely valid, proving
     // `--continue-on-corrupt` does not paper over a target-side failure.
-    let archive = tempfile::tempdir().expect("archive root");
-    let target_parent = tempfile::tempdir().expect("target parent");
-    archive_segment(
-        archive.path(),
-        "orders",
-        0,
-        Uuid::from_u128(30),
-        Uuid::from_u128(0xF00D),
-    );
+    let (archive, target_parent) = single_segment_fixture(30, 0xF00D);
 
     let command_line = vec![
         "krabka-restore".to_owned(),

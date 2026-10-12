@@ -19,17 +19,19 @@ pub(super) struct Message {
     pub(super) event: Event,
 }
 
+krabka_kraft_core::impl_partition_message!(Message, NodeId);
+
 /// A node and everything the harness owns on its behalf.
 pub(super) struct Node<L: SimNodeLog> {
     pub(super) id: NodeId,
-    pub(super) machine: QuorumStateMachine,
     pub(super) log: L,
+    pub(super) machine: QuorumStateMachine,
+    /// Next election-timer deadline, if armed.
+    pub(super) election_deadline: Option<SimInstant>,
     /// Harness mirror of the leader's high watermark. The `Role::Leader`
     /// variant also carries it, but the harness tracks it here for non-leaders
     /// and observers.
     pub(super) high_watermark: i64,
-    /// Next election-timer deadline, if armed.
-    pub(super) election_deadline: Option<SimInstant>,
     /// Next fetch-timer deadline, if armed.
     pub(super) fetch_deadline: Option<SimInstant>,
     /// Next leader heartbeat deadline, if armed.
@@ -49,6 +51,24 @@ pub(super) struct Node<L: SimNodeLog> {
 }
 
 impl<L: SimNodeLog> Node<L> {
+    pub(super) fn new(
+        id: NodeId,
+        machine: QuorumStateMachine,
+        log: L,
+        election_timeout_ms: u64,
+    ) -> Self {
+        Self {
+            id,
+            machine,
+            log,
+            high_watermark: 0,
+            election_deadline: Some(SimInstant(election_timeout_ms)),
+            fetch_deadline: None,
+            heartbeat_deadline: None,
+            check_quorum_deadline: None,
+        }
+    }
+
     /// Append under the machine's current epoch without advancing its durability frontier.
     pub(super) fn append_in_current_epoch(&mut self, count: usize) {
         self.log

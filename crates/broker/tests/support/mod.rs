@@ -47,17 +47,20 @@ pub mod admin;
 mod audit;
 pub mod classic;
 pub mod client;
+pub mod client_admin;
 mod cluster;
 mod cluster_boot;
 pub mod configs;
 pub mod consumer_groups;
 mod containers;
+pub mod controller_listener;
 mod coordinator;
 pub mod discovery;
 pub mod diskless;
 pub mod durability;
 pub mod fetch;
 pub mod listeners;
+pub mod load_test;
 pub mod offsets;
 mod operator_keys;
 pub mod partitions;
@@ -67,6 +70,7 @@ pub mod produce;
 pub mod producer;
 pub mod quorum;
 pub mod records;
+pub mod retry;
 pub mod sasl;
 pub mod share;
 mod single_broker;
@@ -131,9 +135,10 @@ pub use self::{
     ports::{bind_and_drop_ports, bind_and_hold_ports},
     sasl::{sasl_plaintext_config, sasl_plaintext_with_users, start_broker},
     single_broker::{
-        InProcess, boot_single, standalone_broker, start, start_configured,
-        start_group_coordinator, start_legacy, start_ready_group, start_with_audit_key,
-        start_with_bound_listeners, start_with_deny_all_authz, start_with_dir,
+        GroupCoordinatorBoot, InProcess, boot_single, standalone_broker, start, start_configured,
+        start_group_coordinator, start_group_coordinator_with_config, start_legacy,
+        start_ready_group, start_with_audit_key, start_with_bound_listeners,
+        start_with_deny_all_authz, start_with_dir,
     },
 };
 

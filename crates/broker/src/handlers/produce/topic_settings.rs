@@ -538,11 +538,10 @@ mod tests {
         // Topic has *some* override (e.g. retention.ms) but no
         // min.insync.replicas — still defaults to 1.
         let mut img = image_with_topic("t", &[1, 2, 3]);
-        let mut o = BTreeMap::new();
-        o.insert("retention.ms".into(), "60000".into());
+        let overrides = BTreeMap::from([("retention.ms".into(), "60000".into())]);
         img.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
             topic: "t".into(),
-            overrides: o,
+            overrides,
         }));
         assert!(topic_min_insync_replicas(&img, NODE, "t", 1) == 1);
     }

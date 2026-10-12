@@ -9,7 +9,7 @@
 //! deleted and created again is asked again.
 
 use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig, file_config::FileConfig};
+use krabka_broker::{BrokerConfig, file_config::FileConfig};
 use krabka_client_core::Client;
 use krabka_protocol::owned::{
     common::{
@@ -27,7 +27,10 @@ use crate::{
     streams_harness::{
         connect, create_topic, finalize_streams_version, first_join, follow_up, topology,
     },
-    support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+    support::{
+        start_group_coordinator_with_config,
+        streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+    },
 };
 
 /// The `[server_properties]` that the system-test adapter passes through.
@@ -45,10 +48,14 @@ async fn boot_with_plugin() -> (krabka_broker::BrokerHandle, String, tempfile::T
     let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
     let file: FileConfig = toml::from_str(TRUNK_WITH_PLUGIN).expect("parse the properties");
     file.apply_to(&mut config).expect("apply the properties");
-    let broker = Broker::start(config).await.unwrap();
-    broker.wait_until_group_coordinator_ready().await;
-    let bootstrap = broker.listen_addr().to_string();
-    (broker, bootstrap, dir)
+    let started = Box::pin(
+        start_group_coordinator_with_config()
+            .config(config)
+            .directory(dir)
+            .call(),
+    )
+    .await;
+    (started.broker, started.bootstrap, started.directory)
 }
 
 /// The description a Streams client pushes for [`topology`]: one source node.
@@ -107,10 +114,11 @@ async fn describe_with_description(client: &Client) -> DescribedGroup {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_member_is_asked_and_its_push_is_described() {
-    let (_broker, bootstrap, _dir) = boot_with_plugin().await;
+    let (_broker, bootstrap, _dir) = Box::pin(boot_with_plugin()).await;
     let client = connect(&bootstrap).await;
     finalize_streams_version(&client).await;
-    create_topic(&client, SOURCE, 1).await;
+    let source_topic = SOURCE;
+    create_topic(&client, source_topic, 1).await;
 
     let first = client
         .send(first_join(GROUP, topology(SOURCE, vec![])))
@@ -178,7 +186,7 @@ async fn one_member_is_asked_and_its_push_is_described() {
 /// join creates is asked again and describes nothing stored.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_deleted_and_recreated_group_is_asked_again() {
-    let (_broker, bootstrap, _dir) = boot_with_plugin().await;
+    let (_broker, bootstrap, _dir) = Box::pin(boot_with_plugin()).await;
     let client = connect(&bootstrap).await;
     finalize_streams_version(&client).await;
     create_topic(&client, SOURCE, 1).await;

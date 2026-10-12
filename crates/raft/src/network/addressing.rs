@@ -37,12 +37,20 @@ mod tests {
     use super::*;
     use crate::kraft::transport::api_key;
 
-    #[test]
-    fn controller_addr_prefers_controller_endpoint_and_reports_unknown_voter() {
-        let voters = VoterSet::from_voters([krabka_metadata::Voter {
+    #[bon::builder]
+    fn voter_fixture(endpoints: Vec<krabka_metadata::VoterEndpoint>) -> krabka_metadata::Voter {
+        krabka_metadata::Voter {
             id: NodeId(7),
             directory_id: uuid::Uuid::nil(),
-            endpoints: vec![
+            endpoints,
+            kraft_version: krabka_metadata::KRaftVersionRange::default(),
+        }
+    }
+
+    #[test]
+    fn controller_addr_prefers_controller_endpoint_and_reports_unknown_voter() {
+        let voters = VoterSet::from_voters([voter_fixture()
+            .endpoints(vec![
                 krabka_metadata::VoterEndpoint {
                     name: "REPLICATION".into(),
                     host: "replication-host".into(),
@@ -53,9 +61,8 @@ mod tests {
                     host: "controller-host".into(),
                     port: 9093,
                 },
-            ],
-            kraft_version: krabka_metadata::KRaftVersionRange::default(),
-        }]);
+            ])
+            .call()]);
 
         assert2::assert!(
             controller_addr(&voters, NodeId(7)) == Some("controller-host:9093".to_string())
@@ -65,16 +72,13 @@ mod tests {
 
     #[test]
     fn controller_addr_falls_back_to_first_endpoint() {
-        let voters = VoterSet::from_voters([krabka_metadata::Voter {
-            id: NodeId(7),
-            directory_id: uuid::Uuid::nil(),
-            endpoints: vec![krabka_metadata::VoterEndpoint {
+        let voters = VoterSet::from_voters([voter_fixture()
+            .endpoints(vec![krabka_metadata::VoterEndpoint {
                 name: "PLAINTEXT".into(),
                 host: "only-host".into(),
                 port: 9094,
-            }],
-            kraft_version: krabka_metadata::KRaftVersionRange::default(),
-        }]);
+            }])
+            .call()]);
 
         assert2::assert!(controller_addr(&voters, NodeId(7)) == Some("only-host:9094".to_string()));
     }

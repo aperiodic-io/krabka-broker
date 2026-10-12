@@ -53,13 +53,12 @@ async fn writer_trim_to_offset_advances_log_start() {
 
     let (tx, writer) = spawn_default_writer(dir.path(), log.clone());
 
-    let (ack, ack_rx) = tokio::sync::oneshot::channel();
-    tx.send(WriterMessage::TrimToOffset {
+    let (trim_ack, ack_rx) = tokio::sync::oneshot::channel();
+    let msg = WriterMessage::TrimToOffset {
         new_start: Offset(3),
-        ack,
-    })
-    .await
-    .expect("send");
+        ack: trim_ack,
+    };
+    tx.send(msg).await.expect("send");
     let new_start = ack_rx.await.expect("ack").expect("trim ok");
     assert!(new_start >= 3);
     assert!(log.lock().expect("lock").log_start_offset() == new_start);

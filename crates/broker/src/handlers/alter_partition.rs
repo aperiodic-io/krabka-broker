@@ -35,7 +35,7 @@ use crate::{
     elr::ElrPublisher,
     handlers::{
         RequestContext, cluster_action_denied,
-        forward_to_controller::{guarded_operation, is_active_controller},
+        forward_to_controller::{guarded_operation_on_source, is_active_controller},
     },
     heartbeat::controller_state::replicated_registrations,
 };
@@ -44,8 +44,8 @@ context_handler! {
     AlterPartitionRequest => AlterPartitionResponse,
     (broker, req, _version, ctx),
     {
-        let result = guarded_operation(
-            broker,
+        let result = guarded_operation_on_source(
+            broker.controller.as_ref(),
             tokio::time::Instant::now() + Duration::from_secs(5),
             |image| alter_partition_once(broker, &req, ctx, image),
         ).await;

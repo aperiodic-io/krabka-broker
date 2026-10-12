@@ -171,6 +171,26 @@ fn docker_run(args: &[&str]) -> std::process::Output {
     support::jvm_docker_run(KAFKA_IMAGE, args)
 }
 
+fn run_share_consumer(
+    bootstrap: &str,
+    topic: &str,
+    group: &str,
+    max_messages: usize,
+) -> std::process::Output {
+    docker_run(&[
+        "bash",
+        "-c",
+        &format!(
+            "{SHARE_CONSUMER} \
+                --bootstrap-server {bootstrap} \
+                --topic {topic} \
+                --group {group} \
+                --timeout-ms 20000 \
+                --max-messages {max_messages}"
+        ),
+    ])
+}
+
 /// Sets `share.auto.offset.reset` for `group` through the real
 /// `kafka-configs.sh --alter --entity-type groups`, which drives
 /// `IncrementalAlterConfigs` (`api_key` 44) against Krabka.
@@ -227,19 +247,7 @@ async fn jvm_share_consumer_reads_krabka() {
     // produced records. `--timeout-ms` makes it exit after the idle window
     // once it has drained the partition.
     set_share_auto_offset_reset(bootstrap, group, "earliest");
-    let consumed = docker_run(&[
-        "bash",
-        "-c",
-        &format!(
-            "{SHARE_CONSUMER} \
-                --bootstrap-server {bootstrap} \
-                --topic {topic} \
-                --group {group} \
-                --timeout-ms 20000 \
-                --max-messages {}",
-            values.len()
-        ),
-    ]);
+    let consumed = run_share_consumer(bootstrap, topic, group, values.len());
     let stdout = String::from_utf8_lossy(&consumed.stdout);
     eprintln!("KRABKA[test] share-consumer stdout:\n{stdout}");
 
@@ -342,19 +350,7 @@ async fn jvm_share_consumer_by_duration_skips_records_outside_the_window() {
     produce_at(&client, topic, tid, &recent, now).await;
 
     set_share_auto_offset_reset(bootstrap, group, "by_duration:PT1H");
-    let consumed = docker_run(&[
-        "bash",
-        "-c",
-        &format!(
-            "{SHARE_CONSUMER} \
-                --bootstrap-server {bootstrap} \
-                --topic {topic} \
-                --group {group} \
-                --timeout-ms 20000 \
-                --max-messages {}",
-            recent.len()
-        ),
-    ]);
+    let consumed = run_share_consumer(bootstrap, topic, group, recent.len());
     let stdout = String::from_utf8_lossy(&consumed.stdout);
     eprintln!("KRABKA[test] by_duration share-consumer stdout:\n{stdout}");
 

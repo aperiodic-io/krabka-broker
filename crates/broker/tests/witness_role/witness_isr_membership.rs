@@ -15,8 +15,8 @@ use krabka_broker::codes;
 use krabka_protocol::owned::metadata_request::MetadataRequest;
 
 use crate::{
-    LEADER_ID, SITE_A, SITE_B, SITE_C, TOPIC, WITNESS_ID, cluster_lock, within,
-    witness_cluster::{client_at, shutdown, start_stretch_cluster},
+    LEADER_ID, SITE_A, SITE_B, SITE_C, TOPIC, WITNESS_ID, cluster_lock,
+    witness_cluster::{client_at, shutdown, start_stretch_cluster, wait_for_witness_isr},
     witness_wire::{PartitionView, consumer_fetch, create_topic, partition_view},
 };
 
@@ -30,18 +30,7 @@ async fn witness_is_a_visible_isr_member_that_serves_no_reads() {
 
     let client = client_at(&cluster[0].1.listen_addr.to_string()).await;
     let topic_id = create_topic(&client).await;
-    for (handle, _, _) in &cluster {
-        within(
-            "partition present on every node",
-            handle.wait_until_partition_present(TOPIC, 0),
-        )
-        .await;
-    }
-    within(
-        "the witness joins the ISR",
-        cluster[0].0.wait_until_isr_len(TOPIC, 0, 3),
-    )
-    .await;
+    wait_for_witness_isr(&cluster, TOPIC).await;
 
     // The witness must stay resolvable: `kafka-topics` and
     // `kafka-reassign-partitions` render replica ids through this list, and its

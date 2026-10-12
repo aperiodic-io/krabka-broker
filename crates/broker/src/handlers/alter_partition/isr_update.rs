@@ -666,16 +666,13 @@ mod tests {
     fn error_response_matches_kafkas_default_fields() {
         let image = non_default_partition_image();
         let mut changes = Vec::new();
-        let resp = handle_partition(
-            &image,
-            &mut changes,
-            PartitionRequestSetup {
-                partition: krabka_ids::PartitionIndex(7),
-                leader_epoch: LeaderEpoch(8),
-                new_isr: &[WireBrokerId(2), WireBrokerId(4)],
-                ..Default::default()
-            },
-        );
+        let req = PartitionRequestSetup {
+            partition: krabka_ids::PartitionIndex(7),
+            leader_epoch: LeaderEpoch(8),
+            new_isr: &[WireBrokerId(2), WireBrokerId(4)],
+            ..Default::default()
+        };
+        let resp = handle_partition(&image, &mut changes, req);
 
         let expected = RespPartitionData {
             partition_index: 7,

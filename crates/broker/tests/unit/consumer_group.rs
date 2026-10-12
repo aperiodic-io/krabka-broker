@@ -16,7 +16,7 @@ use crate::{
     support::{
         classic::{
             ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId,
-            classic_join_request, classic_sync_request, sync_assignment,
+            classic_join_request, classic_sync_request, required_member_id, sync_assignment,
         },
         offsets::{
             offset_commit_partition, offset_commit_topic, offset_fetch_group, offset_fetch_request,
@@ -94,9 +94,7 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
         .send(classic_join_request(join_setup()))
         .await
         .unwrap();
-    assert!(r1.error_code == 79);
-    let mid = r1.member_id.clone();
-    assert!(!mid.is_empty());
+    let mid = required_member_id(r1.error_code, r1.member_id.clone());
 
     // Step 2: re-join with assigned member_id → wait for rebalance, become leader.
     let r2 = p

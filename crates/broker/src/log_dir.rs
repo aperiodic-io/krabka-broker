@@ -362,10 +362,10 @@ mod tests {
 
     #[test]
     fn scan_all_first_dir_wins_on_duplicate() {
-        let a = partition_dirs(&["foo-0"]);
-        let b = partition_dirs(&["foo-0"]);
-        let dirs = vec![a.path().to_path_buf(), b.path().to_path_buf()];
-        let out = scan_all(&dirs).expect("scan_all ok");
-        assert!(out == vec![("foo".to_string(), 0, a.path().to_path_buf())]);
+        let first = partition_dirs(&["foo-0"]);
+        let second = partition_dirs(&["foo-0"]);
+        let search_dirs = [first.path().to_path_buf(), second.path().to_path_buf()];
+        let results = scan_all(&search_dirs).expect("scan_all ok");
+        assert!(results == vec![("foo".to_string(), 0, first.path().to_path_buf())]);
     }
 }

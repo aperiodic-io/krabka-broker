@@ -95,7 +95,7 @@ async fn a_group_reports_its_own_heartbeat_interval() {
             heartbeat(&handle, "m1", 0).await.heartbeat_interval_ms,
         ));
     }
-    assert!(reported == [("tuned", 7000), ("plain", 5000)]);
+    assert!(reported.as_slice() == [("tuned", 7000), ("plain", 5000)]);
 }
 
 /// A member of a group with a `consumer.session.timeout.ms` of 1 ms is

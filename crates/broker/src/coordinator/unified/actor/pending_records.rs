@@ -768,15 +768,10 @@ mod tests {
         };
         let k2 = encode_classic_key(&Key::GroupMetadata { group_id: group() }).unwrap();
         let metadata = MemberMetadataValue {
-            instance_id: None,
-            rack_id: None,
             client_id: "c".into(),
             client_host: "h".into(),
-            subscribed_topic_names: vec![],
-            subscribed_topic_regex: None,
-            server_assignor: None,
             rebalance_timeout_ms: 1,
-            classic: None,
+            ..MemberMetadataValue::default()
         };
         let current = CurrentMemberAssignmentValue {
             member_epoch: 2,

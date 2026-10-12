@@ -347,7 +347,8 @@ mod tests {
         part.install_leader_change(2, 0).await;
         partitions.insert("t".into(), PartitionIndex(0), part.clone());
         let mut entry = marker_entry();
-        entry.partitions.insert(tps().remove(0));
+        let target_tp = tps().remove(0);
+        entry.partitions.insert(target_tp);
 
         let context = marker_context(&image, &client);
         assert!(

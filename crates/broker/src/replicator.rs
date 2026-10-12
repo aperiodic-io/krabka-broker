@@ -92,6 +92,25 @@ pub(crate) struct ReplicationConnectionConfig {
     pub replication: ReplicationRuntimeConfig,
 }
 
+#[cfg(test)]
+#[bon::builder]
+pub(crate) fn replication_connection_for_test(
+    #[builder(default = Arc::new(InterBrokerClient::new(None, None)))] inter_broker_client: Arc<
+        InterBrokerClient,
+    >,
+    #[builder(default = ListenerProtocol::Plaintext)]
+    inter_broker_listener_protocol: ListenerProtocol,
+    #[builder(default = String::from("localhost"))] inter_broker_server_name: String,
+    #[builder(default = ReplicationRuntimeConfig::default())] replication: ReplicationRuntimeConfig,
+) -> ReplicationConnectionConfig {
+    ReplicationConnectionConfig {
+        inter_broker_client,
+        inter_broker_listener_protocol,
+        inter_broker_server_name,
+        replication,
+    }
+}
+
 /// Configuration handed to a single replicator task.
 pub(crate) struct Config {
     pub node_id: NodeId,

@@ -3192,6 +3192,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.23.1",
+ "bon",
  "bytes",
  "clap",
  "codspeed-criterion-compat",
@@ -3424,6 +3425,7 @@ version = "1.0.3"
 dependencies = [
  "assert2",
  "base64 0.23.1",
+ "bon",
  "clap",
  "derive_more",
  "krabka-broker",
@@ -3503,6 +3505,7 @@ name = "krabka-log"
 version = "1.0.3"
 dependencies = [
  "assert2",
+ "bon",
  "bytes",
  "codspeed-criterion-compat",
  "crc32c",
@@ -3653,6 +3656,7 @@ dependencies = [
  "assert2",
  "async-trait",
  "base64 0.23.1",
+ "bon",
  "bytes",
  "dashmap",
  "derive_more",
@@ -3776,6 +3780,7 @@ dependencies = [
  "assert2",
  "async-trait",
  "base64 0.23.1",
+ "bon",
  "bytes",
  "clap",
  "crc32c",
@@ -3989,6 +3994,7 @@ name = "krabka-verified"
 version = "1.0.3"
 dependencies = [
  "assert2",
+ "bon",
  "creusot-std",
  "derive_more",
  "krabka-ids",

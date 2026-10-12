@@ -103,11 +103,7 @@ impl ControllerMutationQuota {
         let Some(limit) = &self.limit else {
             return Ok(());
         };
-        let mut bucket = limit
-            .bucket
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        refresh_bucket(&mut bucket, limit);
+        let mut bucket = refilled_bucket(limit);
 
         let refill = |tokens: f64| Time::from_secs_f64((-tokens / limit.rate).max(0.0));
         if self.strict && bucket.tokens < 0.0 {
@@ -149,11 +145,7 @@ impl ControllerMutationQuota {
         let Some(limit) = &self.limit else {
             return Ok(());
         };
-        let mut bucket = limit
-            .bucket
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        refresh_bucket(&mut bucket, limit);
+        let mut bucket = refilled_bucket(limit);
         bucket.tokens = (bucket.tokens + super::u64_to_f64(previous - current))
             .min(limit.rate * limit.window_secs);
         if current > 0 && !self.strict && bucket.tokens < 0.0 {
@@ -179,6 +171,15 @@ impl ControllerMutationQuota {
         });
         super::QuotaDelay::new(self.delay, user, client_id)
     }
+}
+
+fn refilled_bucket(limit: &Limit) -> std::sync::MutexGuard<'_, ControllerMutationBucket> {
+    let mut bucket = limit
+        .bucket
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    refresh_bucket(&mut bucket, limit);
+    bucket
 }
 
 /// Refill at the previous rate before applying a new rate/capacity. Existing
@@ -457,14 +458,15 @@ mod tests {
     fn strict_rejection_reports_the_uncapped_refill_time() {
         let img = img_with_quota(vec![("user", Some("alice"))], 1.0);
         let buckets = QuotaBuckets::new();
-        let mut quota = ControllerMutationQuota::new(&QuotaRequest {
+        let quota_req = QuotaRequest {
             image: &img,
             buckets: &buckets,
             principal: "alice",
             client_id: Some(""),
             window: secs(1),
             strict: true,
-        });
+        };
+        let mut quota = ControllerMutationQuota::new(&quota_req);
 
         let outcomes = [61, 1].map(|charge| quota.record(charge));
 
@@ -525,16 +527,17 @@ mod tests {
     /// A principal with no `controller_mutation_rate` is never throttled.
     #[test]
     fn no_quota_never_refuses() {
-        let img = img_with_quota(vec![("user", Some("bob"))], 1.0);
+        let image = img_with_quota(vec![("user", Some("bob"))], 1.0);
         let buckets = QuotaBuckets::new();
-        let mut quota = ControllerMutationQuota::new(&QuotaRequest {
-            image: &img,
+        let req = QuotaRequest {
+            image: &image,
             buckets: &buckets,
             principal: "alice",
             client_id: Some(""),
             window: secs(11),
             strict: true,
-        });
+        };
+        let mut quota = ControllerMutationQuota::new(&req);
 
         let outcomes = [1_000, 1_000].map(|charge| quota.record(charge));
 

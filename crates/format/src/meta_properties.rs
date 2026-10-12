@@ -257,6 +257,16 @@ impl MetaProperties {
     }
 }
 
+#[bon::builder]
+pub(crate) fn node_id_mismatch_message(stored: i32, previous: i32, path: &Path) -> String {
+    format!(
+        "Stored node id {stored} doesn't match previous node id {previous} in {}. If you \
+         moved your data, make sure your configured node id matches. If you intend \
+         to create a new node, you should remove all data in your data directories.",
+        path.display(),
+    )
+}
+
 /// Kafka's `MetaPropertiesEnsemble.verify`, over the readable files of the
 /// directories of one node, sorted by path.
 ///
@@ -293,13 +303,11 @@ pub fn verify_ensemble<'a>(
         match node_id {
             None => node_id = Some(meta.node_id),
             Some(expected) if expected != meta.node_id => {
-                return Err(format!(
-                    "Stored node id {} doesn't match previous node id {expected} in {}. If you \
-                     moved your data, make sure your configured node id matches. If you intend \
-                     to create a new node, you should remove all data in your data directories.",
-                    meta.node_id,
-                    path.display(),
-                ));
+                return Err(node_id_mismatch_message()
+                    .stored(meta.node_id)
+                    .previous(expected)
+                    .path(&path)
+                    .call());
             }
             Some(_) => {}
         }
@@ -784,13 +792,11 @@ mod tests {
                 vec![("/a", file(c1, 2, 0x1000))],
                 None,
                 Some(1),
-                Err(
-                    "Stored node id 2 doesn't match previous node id 1 in /a/meta.properties. \
-                     If you moved your data, make sure your configured node id matches. If you \
-                     intend to create a new node, you should remove all data in your data \
-                     directories."
-                        .to_owned(),
-                ),
+                Err(node_id_mismatch_message()
+                    .stored(2)
+                    .previous(1)
+                    .path(Path::new("/a/meta.properties"))
+                    .call()),
             ),
             (
                 "two directories disagree on the node id",

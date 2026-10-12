@@ -15,6 +15,7 @@ use super::{
     test_support::{append_source, batch, distributed_store, open_log, source_log},
 };
 use crate::{
+    error::BrokerError,
     metrics::BrokerMetrics,
     wal::{WalStore, quorum::registry::ShardId},
 };
@@ -37,6 +38,21 @@ async fn wait_for_leader_vote(store: &QuorumWalStore, offset: Offset) {
     .expect("the leader records its own fsync as a vote");
 }
 
+async fn spawn_sync_while_leader_vote_is_pending(
+    store: &Arc<QuorumWalStore>,
+    offset: Offset,
+) -> tokio::task::JoinHandle<Result<Offset, BrokerError>> {
+    let syncing = Arc::clone(store);
+    let mut sync = tokio::spawn(async move { syncing.sync_durable(offset).await });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), &mut sync)
+            .await
+            .is_err()
+    );
+    wait_for_leader_vote(store, offset).await;
+    sync
+}
+
 #[tokio::test]
 async fn distributed_wal_waits_for_a_remote_fsync_ack() {
     let dir = tempfile::tempdir().unwrap();
@@ -54,15 +70,7 @@ async fn distributed_wal_waits_for_a_remote_fsync_ack() {
         .engine
         .configure_distributed(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)]);
     let (_results, leo) = append_source(&store, 1).await;
-    let syncing = Arc::clone(&store);
-    let mut sync = tokio::spawn(async move { syncing.sync_durable(leo).await });
-
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(20), &mut sync)
-            .await
-            .is_err()
-    );
-    wait_for_leader_vote(&store, leo).await;
+    let sync = spawn_sync_while_leader_vote_is_pending(&store, leo).await;
     assert!(!store.engine.record_follower_ack(NodeId(9), leo));
     assert!(!store.engine.record_follower_ack(NodeId(1), leo));
     assert!(
@@ -94,14 +102,7 @@ async fn distributed_wal_waits_for_a_remote_fsync_ack() {
     );
 
     let (_results, next) = append_source(&store, 1).await;
-    let syncing = Arc::clone(&store);
-    let mut sync = tokio::spawn(async move { syncing.sync_durable(next).await });
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(20), &mut sync)
-            .await
-            .is_err()
-    );
-    wait_for_leader_vote(&store, next).await;
+    let sync = spawn_sync_while_leader_vote_is_pending(&store, next).await;
     store.engine.configure_distributed(NodeId(1), &[]);
     let error = sync.await.unwrap().unwrap_err();
     assert!(error.to_string().contains("placement disappeared"));

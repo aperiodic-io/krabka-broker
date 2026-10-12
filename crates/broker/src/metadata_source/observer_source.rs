@@ -183,10 +183,10 @@ mod tests {
             client_id: "observer-source-test".into(),
             ..observer_config(cluster_id, dir.path().to_path_buf())
         });
-        let writer = Arc::new(RecordingWriter {
+        let rec_writer = Arc::new(RecordingWriter {
             calls: Mutex::new(Vec::new()),
         });
-        let source = ObserverSource::new(observer.clone(), writer.clone());
+        let source = ObserverSource::new(observer.clone(), rec_writer.clone());
 
         assert2::assert!((source.current_image().cluster_id()) == (cluster_id));
         assert2::assert!((source.current_metadata_offset()) == (-1));
@@ -201,7 +201,7 @@ mod tests {
             .await
             .expect("submit via writer");
         {
-            let calls = writer.calls.lock().unwrap();
+            let calls = rec_writer.calls.lock().unwrap();
             assert2::assert!((calls.len()) == (1));
             assert2::assert!(
                 matches!(&calls[0][0], MetadataRecord::V1Topic(t) if t.name == "forwarded-topic")

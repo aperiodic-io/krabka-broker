@@ -30,6 +30,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+use krabka_protocol::owned::share_fetch_request::{AcknowledgementBatch, FetchTopic};
 use krabka_protocol::owned::{
     share_fetch_request::{FetchPartition, ShareFetchRequest},
     share_fetch_response::{LeaderIdAndEpoch, ShareFetchResponse},
@@ -68,6 +70,43 @@ mod request_validation_tests;
 mod session_tests;
 #[cfg(test)]
 mod topic_resolution_tests;
+
+#[cfg(test)]
+#[bon::builder]
+fn test_fetch_request(
+    group_id: String,
+    member_id: String,
+    topic_id: [u8; 16],
+    #[builder(default)] share_session_epoch: i32,
+    #[builder(default = 1_048_576)] max_bytes: i32,
+    #[builder(default = 10)] max_records: i32,
+    #[builder(default = 1_048_576)] partition_max_bytes: i32,
+    #[builder(default)] acknowledgement_batches: Vec<AcknowledgementBatch>,
+    #[builder(default)] is_renew_ack: bool,
+) -> ShareFetchRequest {
+    ShareFetchRequest {
+        group_id: Some(group_id),
+        member_id: Some(member_id),
+        share_session_epoch,
+        max_wait_ms: 0,
+        min_bytes: 0,
+        max_bytes,
+        max_records,
+        batch_size: max_records,
+        is_renew_ack,
+        topics: vec![FetchTopic {
+            topic_id: krabka_protocol::primitives::uuid::Uuid(topic_id),
+            partitions: vec![FetchPartition {
+                partition_index: 0,
+                partition_max_bytes,
+                acknowledgement_batches,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
 
 pub(crate) use self::{
     acknowledge::{

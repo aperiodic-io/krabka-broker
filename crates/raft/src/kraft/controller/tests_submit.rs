@@ -6,6 +6,7 @@ use std::{sync::Arc, time::Duration as StdDuration};
 
 use assert2::{assert, check};
 use krabka_ids::Offset;
+use krabka_metadata::{DeleteTopicRecord, MetadataImage, MetadataRecord, TopicConfigRecord};
 use tokio::sync::oneshot;
 
 use super::{CommitWaiter, Engine};
@@ -36,6 +37,43 @@ fn waiter_offsets(engine: &super::Engine) -> Vec<Offset> {
         .collect()
 }
 
+struct TopicSubmitFixture {
+    engine: Engine,
+    _directory: tempfile::TempDir,
+    _images: tokio::sync::watch::Receiver<Arc<MetadataImage>>,
+    expected_image: Arc<MetadataImage>,
+}
+
+fn topic_submit_fixture(records: &[MetadataRecord]) -> TopicSubmitFixture {
+    let (mut engine, directory) = super::test_support::single_voter_leader_engine();
+    let images = engine.image_tx.subscribe();
+    let mut created = super::test_support::submit_on_engine(&mut engine, records);
+    assert!(matches!(created.try_recv(), Ok(Ok(_))));
+    let expected_image = engine.image_tx.borrow().clone();
+    TopicSubmitFixture {
+        engine,
+        _directory: directory,
+        _images: images,
+        expected_image,
+    }
+}
+
+#[bon::builder]
+fn assert_stale_submit(
+    engine: &mut Engine,
+    records: &[MetadataRecord],
+    expected_image: &Arc<MetadataImage>,
+) {
+    let end = engine.log.log_end_offset();
+    let (reply, mut result) = oneshot::channel();
+    engine.on_submit_change_if_image(records, Some(expected_image), reply);
+    assert!(matches!(
+        result.try_recv(),
+        Ok(Err(RaftError::StaleMetadataImage))
+    ));
+    assert!(engine.log.log_end_offset() == end);
+}
+
 fn check_future_waiter(
     engine: &super::Engine,
     receiver: &mut oneshot::Receiver<Result<SubmitChangeResult, RaftError>>,
@@ -64,6 +102,15 @@ fn park_waiter(
     receiver
 }
 
+async fn assert_rejected_change_and_shutdown(
+    ctrl: &KraftController,
+    change: krabka_metadata::MetadataRecord,
+) {
+    let retry = ctrl.submit_change(vec![change]).await;
+    assert2::assert!(matches!(retry, Err(RaftError::ChangeRejected(_))));
+    ctrl.shutdown().await;
+}
+
 #[test]
 fn direct_single_voter_submit_applies_image_and_resolves_waiter() {
     let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
@@ -80,14 +127,12 @@ fn direct_single_voter_submit_applies_image_and_resolves_waiter() {
 /// A deletion admitted for an old generation cannot delete its replacement.
 #[test]
 fn guarded_delete_rejects_a_recreated_topic() {
-    use krabka_metadata::{DeleteTopicRecord, MetadataRecord};
-
-    let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
-    let _images = engine.image_tx.subscribe();
-    let mut created =
-        super::test_support::submit_on_engine(&mut engine, &topic_record_named("orders", 1));
-    assert!(matches!(created.try_recv(), Ok(Ok(_))));
-    let expected = engine.image_tx.borrow().clone();
+    let TopicSubmitFixture {
+        mut engine,
+        _directory,
+        _images,
+        expected_image,
+    } = topic_submit_fixture(&topic_record_named("orders", 1));
     let delete = MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
         name: "orders".into(),
     });
@@ -96,14 +141,11 @@ fn guarded_delete_rejects_a_recreated_topic() {
         &[vec![delete.clone()], topic_record_named("orders", 2)].concat(),
     );
     assert!(matches!(replaced.try_recv(), Ok(Ok(_))));
-    let end = engine.log.log_end_offset();
-    let (reply, mut result) = oneshot::channel();
-    engine.on_submit_change_if_image(&[delete], Some(&expected), reply);
-    assert!(matches!(
-        result.try_recv(),
-        Ok(Err(RaftError::StaleMetadataImage))
-    ));
-    assert!(engine.log.log_end_offset() == end);
+    assert_stale_submit()
+        .engine(&mut engine)
+        .records(&[delete])
+        .expected_image(&expected_image)
+        .call();
     assert!(
         engine
             .image
@@ -118,13 +160,12 @@ fn guarded_delete_rejects_a_recreated_topic() {
 /// disjoint change. A fresh rebuild commits both settings.
 #[test]
 fn guarded_config_rejects_stale_maps_and_accepts_a_fresh_merge() {
-    use krabka_metadata::{MetadataRecord, TopicConfigRecord};
-
-    let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
-    let _images = engine.image_tx.subscribe();
-    let mut created = super::test_support::submit_on_engine(&mut engine, &topic_record("orders"));
-    assert!(matches!(created.try_recv(), Ok(Ok(_))));
-    let expected = engine.image_tx.borrow().clone();
+    let TopicSubmitFixture {
+        mut engine,
+        _directory,
+        _images,
+        expected_image,
+    } = topic_submit_fixture(&topic_record("orders"));
     let config = |entries: &[(&str, &str)]| {
         MetadataRecord::V1TopicConfig(TopicConfigRecord {
             topic: "orders".into(),
@@ -139,16 +180,11 @@ fn guarded_config_rejects_stale_maps_and_accepts_a_fresh_merge() {
         &[config(&[("cleanup.policy", "compact")])],
     );
     assert!(matches!(updated.try_recv(), Ok(Ok(_))));
-    let (reply, mut result) = oneshot::channel();
-    engine.on_submit_change_if_image(
-        &[config(&[("retention.ms", "30000")])],
-        Some(&expected),
-        reply,
-    );
-    assert!(matches!(
-        result.try_recv(),
-        Ok(Err(RaftError::StaleMetadataImage))
-    ));
+    assert_stale_submit()
+        .engine(&mut engine)
+        .records(&[config(&[("retention.ms", "30000")])])
+        .expected_image(&expected_image)
+        .call();
     let expected = engine.image_tx.borrow().clone();
     let merged = config(&[("cleanup.policy", "compact"), ("retention.ms", "30000")]);
     let (reply, mut result) = oneshot::channel();
@@ -197,14 +233,11 @@ async fn guarded_change_rejects_old_authority_after_a_term_cycle_without_metadat
         if !before_commit {
             engine.advance_and_apply(engine.log.log_end_offset());
         }
-        let end = engine.log.log_end_offset();
-        let (reply, mut result) = oneshot::channel();
-        engine.on_submit_change_if_image(&topic_record("stale"), Some(&original), reply);
-        assert!(matches!(
-            result.try_recv(),
-            Ok(Err(RaftError::StaleMetadataImage))
-        ));
-        assert!(engine.log.log_end_offset() == end);
+        assert_stale_submit()
+            .engine(&mut engine)
+            .records(&topic_record("stale"))
+            .expected_image(&original)
+            .call();
         assert!(engine.image.topic("stale").is_none());
     }
     let fresh = engine.image_tx.borrow().clone();
@@ -415,11 +448,8 @@ async fn break_glass_consume_is_exact_and_single_flight_until_commit() {
             .is_some_and(|stored| stored.consumed_at_ms == i64::MAX)
     );
 
-    let retry = ctrl
-        .submit_change(vec![MetadataRecord::V1BreakGlassProposal(consumed)])
+    assert_rejected_change_and_shutdown(&ctrl, MetadataRecord::V1BreakGlassProposal(consumed))
         .await;
-    assert2::assert!(matches!(retry, Err(RaftError::ChangeRejected(_))));
-    ctrl.shutdown().await;
 }
 
 /// A new leader refuses a break-glass consume with the retriable
@@ -508,12 +538,10 @@ async fn topic_freeze_replacement_is_newer_only_and_single_flight_until_commit()
     let (ctrl, _dir) = super::test_support::three_voter_leader().await;
     commit_pending(&ctrl, NodeId(2)).await;
 
-    let create = super::test_support::spawn_submit(
-        &ctrl,
-        vec![MetadataRecord::V1TopicFreeze(freeze("orders", 10, true))],
-    );
+    let record = MetadataRecord::V1TopicFreeze(freeze("orders", 10, true));
+    let create_task = super::test_support::spawn_submit(&ctrl, vec![record]);
     acknowledge_tip(&ctrl, NodeId(2)).await;
-    create.await.unwrap().unwrap();
+    create_task.await.unwrap().unwrap();
 
     let log_end = ctrl.quorum_state().await.unwrap().log_end_offset;
     for rejected in [
@@ -556,11 +584,7 @@ async fn topic_freeze_replacement_is_newer_only_and_single_flight_until_commit()
             .is_some_and(|stored| stored.set_at_ms == i64::MAX)
     );
 
-    let retry = ctrl
-        .submit_change(vec![MetadataRecord::V1TopicFreeze(replacement)])
-        .await;
-    assert2::assert!(matches!(retry, Err(RaftError::ChangeRejected(_))));
-    ctrl.shutdown().await;
+    assert_rejected_change_and_shutdown(&ctrl, MetadataRecord::V1TopicFreeze(replacement)).await;
 }
 
 #[tokio::test]

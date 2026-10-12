@@ -6,7 +6,7 @@
 //! unreachable-site half, where every broker stays up, is in
 //! `unreachable_site`.
 
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 use assert2::{assert, check};
 use krabka_broker::codes;
@@ -19,6 +19,17 @@ use crate::{
     view::{PartitionView, partition_view, wait_for_leader_and_isr, witness_never_leads},
 };
 
+#[bon::builder]
+fn preferred_partition_view(isr: BTreeSet<u64>) -> PartitionView {
+    PartitionView {
+        leader: 1,
+        replicas: vec![1, 2, WITNESS],
+        isr,
+        adding_replicas: vec![],
+        removing_replicas: vec![],
+    }
+}
+
 /// Placement pins the partition to the preferred site: `replicas[0]` is the
 /// `site-a` broker and it is the leader, with the other data site and the
 /// witness in the ISR behind it. `acks=all` commits with all three sites up.
@@ -29,13 +40,11 @@ async fn preferred_site_holds_replicas_zero_and_the_leader() {
 
     check!(
         partition_view(cluster.handle(NODE_A))
-            == Some(PartitionView {
-                leader: 1,
-                replicas: vec![1, 2, WITNESS],
-                isr: maplit::btreeset! {1, 2, WITNESS},
-                adding_replicas: vec![],
-                removing_replicas: vec![],
-            }),
+            == Some(
+                preferred_partition_view()
+                    .isr(maplit::btreeset! {1, 2, WITNESS})
+                    .call(),
+            ),
         "replicas[0] and the leader are both the preferred site's broker"
     );
 
@@ -70,13 +79,11 @@ async fn acks_all_survives_the_loss_of_the_non_preferred_data_site() {
     .await;
     check!(
         partition_view(cluster.handle(NODE_A))
-            == Some(PartitionView {
-                leader: 1,
-                replicas: vec![1, 2, WITNESS],
-                isr: maplit::btreeset! {1, WITNESS},
-                adding_replicas: vec![],
-                removing_replicas: vec![],
-            }),
+            == Some(
+                preferred_partition_view()
+                    .isr(maplit::btreeset! {1, WITNESS})
+                    .call(),
+            ),
         "the witness keeps the ISR at two members after a data site is lost"
     );
 

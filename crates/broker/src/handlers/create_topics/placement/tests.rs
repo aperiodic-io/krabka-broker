@@ -121,6 +121,18 @@ fn broker_views(
     )
 }
 
+fn views_with_fenced_brokers(
+    image: &krabka_metadata::MetadataImage,
+    fenced: &std::collections::HashSet<u64>,
+) -> Vec<super::SiteBrokerView> {
+    site_broker_views(
+        image,
+        Some(NodeId(1)),
+        &automatic_placement_exclusions(image, fenced),
+        fenced,
+    )
+}
+
 /// The automatic placement that `seed` gives, or the code and message of a
 /// refusal.
 fn assign(
@@ -272,12 +284,7 @@ fn site_broker_views_read_the_rack_and_the_witness_role() {
 fn a_fenced_broker_is_a_tagged_last_resort_candidate() {
     let mut image = stretch_image(&[(1, None), (2, None), (3, None)], &[], None);
     let fenced = std::collections::HashSet::from([2]);
-    let views = site_broker_views(
-        &image,
-        Some(NodeId(1)),
-        &automatic_placement_exclusions(&image, &fenced),
-        &fenced,
-    );
+    let views = views_with_fenced_brokers(&image, &fenced);
 
     assert!(
         views
@@ -301,12 +308,7 @@ fn a_fenced_broker_is_a_tagged_last_resort_candidate() {
     // A broker in controlled shutdown is not a candidate at all, so the same
     // replication factor now exceeds the broker count.
     enter_controlled_shutdown(&mut image, 3);
-    let views = site_broker_views(
-        &image,
-        Some(NodeId(1)),
-        &automatic_placement_exclusions(&image, &fenced),
-        &fenced,
-    );
+    let views = views_with_fenced_brokers(&image, &fenced);
     assert!(
         views.iter().map(|view| view.node_id).collect::<Vec<_>>() == vec![NodeId(1), NodeId(2)]
     );

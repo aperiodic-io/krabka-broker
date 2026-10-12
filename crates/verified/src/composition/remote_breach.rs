@@ -27,6 +27,7 @@ type RemoteBreachPlan = (
 #[requires(trim_store_frontiers_valid(facts, stores.0@, stores.1@))]
 #[requires(match previous { None => true, Some(floor) => 0 <= floor@ && floor@ <= stores.0@ && floor@ <= stores.1@ })]
 #[requires(super::finished_ranges_valid(finished@.len(), |i: Int| (finished@[i].0, finished@[i].1)))]
+#[requires(forall<i: Int> 0 <= i && i < finished@.len() ==> !finished@[i].3)]
 #[ensures(match result {
     Err(error) => trim_rejection(facts, error),
     Ok(plan) => {
@@ -64,7 +65,7 @@ pub(super) fn published_trim_bounds_remote_breach_cleanup(
     applied: &[bool],
     published: bool,
     deletes_allowed: bool,
-    finished: &[(i64, i64, u64)],
+    finished: &[(i64, i64, u64, bool)],
 ) -> Result<RemoteBreachPlan, DeleteRecordsTrimDecision> {
     let accepted = match delete_records_trim_decision(facts) {
         DeleteRecordsTrimDecision::Apply { frontier }
@@ -83,25 +84,9 @@ pub(super) fn published_trim_bounds_remote_breach_cleanup(
     } else {
         previous
     };
-    let mut rows: Vec<RemoteRetentionSegment> = Vec::new();
-    let mut i = 0usize;
-    #[invariant(i@ <= finished@.len() && rows@.len() == i@)]
-    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> !rows@[j].blocked && rows@[j].size == finished@[j].2
-        && !rows@[j].time_expired && rows@[j].log_start_breached == match checkpoint {
-            None => false, Some(floor) => finished@[j].1@ < floor@,
-        })]
-    #[variant(finished@.len() - i@)]
-    while i < finished.len() {
-        rows.push(RemoteRetentionSegment {
-            blocked: false,
-            log_start_breached: matches!(checkpoint, Some(floor) if finished[i].1 < floor),
-            time_expired: false,
-            size: finished[i].2,
-        });
-        i += 1;
-    }
-    let count = remote_retention_prefix(deletes_allowed, &rows, 0);
-    proof_assert!(forall<j: Int> 0 <= j && j < count@ ==> rows@[j].log_start_breached);
-    proof_assert!(deletes_allowed && count@ < finished@.len() ==> !rows@[count@].log_start_breached);
-    Ok((canonical, observed, checkpoint, rows, count))
+    let facts = super::remote_retention_facts(finished, checkpoint);
+    let count = remote_retention_prefix(deletes_allowed, &facts, 0);
+    proof_assert!(forall<j: Int> 0 <= j && j < count@ ==> facts@[j].log_start_breached);
+    proof_assert!(deletes_allowed && count@ < finished@.len() ==> !facts@[count@].log_start_breached);
+    Ok((canonical, observed, checkpoint, facts, count))
 }

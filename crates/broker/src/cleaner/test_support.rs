@@ -127,7 +127,7 @@ pub(super) async fn register_compactable(
         },
     )
     .await;
-    let before = record_count(&partition);
-    registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
-    (partition, before)
+    let initial_count = record_count(&partition);
+    registry.insert(topic.into(), PartitionIndex(0), partition.clone());
+    (partition, initial_count)
 }

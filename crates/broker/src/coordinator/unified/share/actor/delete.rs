@@ -184,7 +184,6 @@ mod tests {
     use std::collections::HashMap;
 
     use assert2::check;
-    use bytes::Bytes;
 
     use super::*;
     use crate::{
@@ -196,13 +195,13 @@ mod tests {
                     DeletingTopic, ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
                 },
             },
-            test_support::{fixed_source, make_coord_with_log, make_share_persister, share_member},
+            test_support::{
+                AppendedRecords as Appended, appended_offsets_records as appended_records,
+                fixed_source, make_coord_with_log, make_share_persister, share_member,
+            },
         },
         metrics::{BrokerMetrics, ShareGroupIdLabel},
     };
-
-    /// `(key, value)` of every record appended to `__consumer_offsets`.
-    type Appended = Vec<(Option<Bytes>, Option<Bytes>)>;
 
     /// `(share group seed, persister wired, expected result, group kept,
     /// expected appended records)`.
@@ -391,13 +390,7 @@ mod tests {
                     == kept,
                 "row {index}"
             );
-            let written: Appended = log
-                .batches()
-                .await
-                .into_iter()
-                .flat_map(|batch| batch.records)
-                .map(|record| (record.key, record.value))
-                .collect();
+            let written = appended_records(log.as_ref()).await;
             check!(written == appended, "row {index}");
         }
     }
@@ -424,13 +417,7 @@ mod tests {
 
         let result = coordinator.delete_group("sg").await;
 
-        let written: Appended = log
-            .batches()
-            .await
-            .into_iter()
-            .flat_map(|batch| batch.records)
-            .map(|record| (record.key, record.value))
-            .collect();
+        let written = appended_records(log.as_ref()).await;
         let tombstones: Appended = tombstone_batch("sg", 0)
             .unwrap()
             .records

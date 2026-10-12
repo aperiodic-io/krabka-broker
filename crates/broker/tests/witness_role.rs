@@ -79,10 +79,6 @@ const STRETCH_PREFERRED_LEADER_SITE: &str = "stretch.preferred.leader.site";
 const TOPIC: &str = "witness-topic";
 const N_RECORDS: i32 = 5;
 
-/// Generous enough that a loaded runner does not fail a healthy cluster, short
-/// enough that a broken one reports in seconds rather than at CI's kill.
-const STEP_TIMEOUT: Duration = Duration::from_secs(45);
-
 async fn within<F: Future>(what: &str, future: F) -> F::Output {
-    support::poll::within(what, STEP_TIMEOUT, future).await
+    support::poll::within(what, Duration::from_secs(45), future).await
 }

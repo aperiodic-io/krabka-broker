@@ -17,6 +17,16 @@ pub fn api_versions_request_for(
     }
 }
 
+/// Send the standard client-identifying `ApiVersions` request.
+pub async fn api_versions(
+    client: &krabka_client_core::Client,
+) -> krabka_protocol::owned::api_versions_response::ApiVersionsResponse {
+    client
+        .send(api_versions_request_for("krabka-test", "0.0.0"))
+        .await
+        .expect("ApiVersions")
+}
+
 pub fn coordinator_lookup_request(
     key: impl Into<String>,
     key_type: i8,

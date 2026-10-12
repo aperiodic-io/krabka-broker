@@ -360,7 +360,7 @@ async fn topic_ids_follow_kafka_version_rules() {
         // From version 12 on, the ids win and the names are ignored.
         Case {
             version: 12,
-            rows: vec![(Name::A, Id::B)],
+            rows: [(Name::A, Id::B)].to_vec(),
             expect: Rows(vec![Row::Described(Id::B)]),
         },
         Case {

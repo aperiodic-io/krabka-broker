@@ -11,13 +11,26 @@
 //! it elects again for such a partition when a broker unfences, which is what
 //! Kafka's `handleBrokerUnfenced` does over `partitionsWithNoLeader`.
 
+#[cfg(test)]
+use krabka_metadata::{
+    LeaderEpoch, LeaderRecoveryState, PartitionElrRecord, PartitionRecoveryRecord,
+    PartitionUpdateRecord,
+};
 use krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord};
 use krabka_raft::NodeId;
 use tracing::warn;
 
 use super::policy::{
-    FailoverDecision, FailoverPlan, elect_leaderless_one, failover_one, push_partition_change,
-    unclean_restart_one,
+    FailoverDecision, FailoverPlan, Ladder, elect_leaderless_one, failover_one,
+    push_partition_change, unclean_restart_one,
+};
+#[cfg(test)]
+use crate::{
+    config_keys::{ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS},
+    leader_election::test_support::{
+        ElectionSetup, ElrFinalization, ExpectedPartitionSetup, expected_partition,
+        img_with_partition,
+    },
 };
 use crate::{
     config_keys::{
@@ -70,15 +83,14 @@ impl ScanElr {
         let strategy = resolve_recovery_strategy(image, &pr.topic);
         let unclean_enabled = resolve_unclean_leader_election_enabled(image, &pr.topic);
         let elr_state = self.state(image, &pr.topic, pr.partition);
-        failover_one(
-            pr,
-            departed,
-            alive,
-            witnesses,
-            &elr_state,
-            strategy,
-            unclean_enabled,
-        )
+        let ladder = Ladder::builder()
+            .alive(alive)
+            .witnesses(witnesses)
+            .elr(&elr_state)
+            .strategy(strategy)
+            .unclean_enabled(unclean_enabled)
+            .build();
+        failover_one(pr, departed, &ladder)
     }
 }
 
@@ -127,6 +139,19 @@ fn checked_epochs(
         warn!(topic = %pr.topic, partition = pr.partition, "{exhausted_message}");
         None
     })
+}
+
+/// A failover whose metadata epochs cannot advance is reported as unavailable.
+fn checked_election_epochs(
+    unavailable: &mut Vec<(String, i32)>,
+    pr: &PartitionRecord,
+    exhausted_message: &str,
+) -> Option<(i32, krabka_metadata::LeaderEpoch)> {
+    let epochs = checked_epochs(pr, true, exhausted_message);
+    if epochs.is_none() {
+        unavailable.push((pr.topic.clone(), pr.partition));
+    }
+    epochs
 }
 
 /// Check the partition epoch before publishing a clean ISR shrink.
@@ -182,12 +207,11 @@ pub(crate) async fn compute_failover_changes(
                 isr,
                 unclean,
             } => {
-                let Some((partition_epoch, new_leader_epoch)) = checked_epochs(
+                let Some((partition_epoch, new_leader_epoch)) = checked_election_epochs(
+                    &mut unavailable,
                     pr,
-                    true,
                     "failover skipped because a metadata epoch is exhausted",
                 ) else {
-                    unavailable.push((pr.topic.clone(), pr.partition));
                     continue;
                 };
                 if unclean {
@@ -427,12 +451,11 @@ pub(crate) async fn compute_unclean_restart_changes(
                 isr,
                 unclean,
             } => {
-                let Some((partition_epoch, new_leader_epoch)) = checked_epochs(
+                let Some((partition_epoch, new_leader_epoch)) = checked_election_epochs(
+                    &mut unavailable,
                     pr,
-                    true,
                     "unclean-restart failover skipped because a metadata epoch is exhausted",
                 ) else {
-                    unavailable.push((pr.topic.clone(), pr.partition));
                     continue;
                 };
                 if unclean {
@@ -540,11 +563,13 @@ pub(crate) async fn compute_unfence_changes(
             unclean,
         } = elect_leaderless_one(
             pr,
-            &alive,
-            &witnesses,
-            &elr_state,
-            strategy,
-            unclean_enabled,
+            &Ladder::builder()
+                .alive(&alive)
+                .witnesses(&witnesses)
+                .elr(&elr_state)
+                .strategy(strategy)
+                .unclean_enabled(unclean_enabled)
+                .build(),
         )
         else {
             continue;

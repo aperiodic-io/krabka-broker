@@ -466,20 +466,20 @@ mod tests {
                 });
             }
             TxnEntry {
+                partitions,
                 transactional_id: "tid".into(),
+                state: TxnState::Ongoing,
                 producer_id: ProducerId(1),
                 producer_epoch: 0,
-                state: TxnState::Ongoing,
                 txn_timeout_ms: 60_000,
-                partitions,
+                client_transaction_version: 1,
+                start_ms: 1,
+                last_update_ms: 1,
                 prev_producer_id: ProducerId(-1),
                 next_producer_id: ProducerId(-1),
                 next_producer_epoch: -1,
                 last_producer_epoch: -1,
                 has_failed_epoch_fence: false,
-                last_update_ms: 1,
-                start_ms: 1,
-                client_transaction_version: 1,
             }
         };
 

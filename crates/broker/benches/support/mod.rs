@@ -1,5 +1,39 @@
 //! Batch shapes and measurement controls shared by the leader and follower benchmarks.
 
+pub(crate) struct BoundedResource<T> {
+    value: T,
+    written: usize,
+    budget: usize,
+    factory: fn() -> T,
+}
+
+#[bon::builder]
+pub(crate) fn bounded_resource<T>(budget: usize, factory: fn() -> T) -> BoundedResource<T> {
+    BoundedResource {
+        value: factory(),
+        written: 0,
+        budget,
+        factory,
+    }
+}
+
+impl<T> BoundedResource<T> {
+    /// Replace the resource when the next write would exceed its byte budget.
+    pub(crate) fn rotate_if_full(&mut self, incoming: usize) -> &mut T {
+        if self.written + incoming > self.budget {
+            self.value = (self.factory)();
+            self.written = 0;
+        }
+        self.written += incoming;
+        &mut self.value
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
 pub const SHAPES: [(&str, i32, usize); 3] = [
     ("1rec_100KiB", 1, 100 * 1024),
     ("100rec_1KiB", 100, 1024),

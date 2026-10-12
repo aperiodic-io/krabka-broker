@@ -44,9 +44,19 @@ fn check_plan(
         };
         (floor, observed, checkpoint, rows, count)
     });
+    let proof_rows: Vec<_> = finished
+        .iter()
+        .map(|&(start, end, size)| (start, end, size, false))
+        .collect();
     assert!(
         published_trim_bounds_remote_breach_cleanup(
-            facts, stores, previous, trace, published, allowed, finished
+            facts,
+            stores,
+            previous,
+            trace,
+            published,
+            allowed,
+            &proof_rows,
         ) == expected
     );
 }

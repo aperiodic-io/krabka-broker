@@ -168,7 +168,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::ids::DirectoryId;
+    use crate::{ids::DirectoryId, meta_properties::node_id_mismatch_message};
 
     fn meta(cluster: u128, node_id: i32, directory: u128) -> MetaProperties {
         MetaProperties {
@@ -228,13 +228,11 @@ mod tests {
                 "another node's directory",
                 formatted(&[("/a", meta(0xc1, 2, 0x1000))]),
                 Some(c1),
-                Err(
-                    "Stored node id 2 doesn't match previous node id 1 in /a/meta.properties. \
-                     If you moved your data, make sure your configured node id matches. If you \
-                     intend to create a new node, you should remove all data in your data \
-                     directories."
-                        .to_owned(),
-                ),
+                Err(node_id_mismatch_message()
+                    .stored(2)
+                    .previous(1)
+                    .path(Path::new("/a/meta.properties"))
+                    .call()),
             ),
         ];
         for (what, ensemble, expected, want) in cases {

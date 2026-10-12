@@ -218,11 +218,46 @@ mod tests {
 
     use super::*;
     use crate::{
+        broker::{Broker, BrokerHandle},
         codes,
         handlers::list_offsets::test_support::{list_one, remote_topic},
-        partition::test_support::test_partition,
+        partition::{Partition, test_support::test_partition},
         remote_reader::RemoteReader,
     };
+
+    struct BrokerPartition {
+        broker: std::sync::Arc<Broker>,
+        partition: std::sync::Arc<Partition>,
+    }
+
+    struct RemotePartitionTopic {
+        broker_handle: BrokerHandle,
+        client: krabka_client_core::Client,
+        _directories: [tempfile::TempDir; 2],
+        broker: std::sync::Arc<Broker>,
+        partition: std::sync::Arc<Partition>,
+    }
+
+    fn broker_partition(handle: &BrokerHandle, topic: &str) -> BrokerPartition {
+        let broker = handle.broker_arc_for_test();
+        let partition = broker
+            .partitions
+            .get(topic, krabka_ids::PartitionIndex(0))
+            .expect("topic partition");
+        BrokerPartition { broker, partition }
+    }
+
+    async fn remote_partition_topic(topic: &str) -> RemotePartitionTopic {
+        let (broker_handle, client, directories) = remote_topic(topic, vec![]).await;
+        let BrokerPartition { broker, partition } = broker_partition(&broker_handle, topic);
+        RemotePartitionTopic {
+            broker_handle,
+            client,
+            _directories: directories,
+            broker,
+            partition,
+        }
+    }
 
     /// The remote tier answers first, and what it answers decides the row: a
     /// hit competes with any earlier local match; a miss or a failure reads the local log,
@@ -386,12 +421,10 @@ mod tests {
         use crate::remote_log_manager::{ProducerSnapshotExport, export_segment_data};
 
         const TOPIC: &str = "timestamp-reopened-archive";
-        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
-        let broker_arc = broker.broker_arc_for_test();
-        let partition = broker_arc
-            .partitions
-            .get(TOPIC, krabka_ids::PartitionIndex(0))
-            .unwrap();
+        let topic = remote_partition_topic(TOPIC).await;
+        let client = &topic.client;
+        let broker_arc = &topic.broker;
+        let partition = &topic.partition;
         let source = tempfile::tempdir().unwrap();
         let config = LogConfig {
             segment_size: bytes(1),
@@ -447,7 +480,7 @@ mod tests {
         *partition.log.lock().unwrap() = reopened;
         partition.replica_state.lock().await.hw = Offset(6);
         assert!(
-            list_one(&client, TOPIC, 1_500).await
+            list_one(client, TOPIC, 1_500).await
                 == ListOffsetsPartitionResponse {
                     partition_index: 0,
                     error_code: codes::NONE,
@@ -469,7 +502,7 @@ mod tests {
         assert!(reopened.established_log_start() == Some(Offset(5)));
         *partition.log.lock().unwrap() = reopened;
         assert!(
-            list_one(&client, TOPIC, 1_000).await
+            list_one(client, TOPIC, 1_000).await
                 == ListOffsetsPartitionResponse {
                     partition_index: 0,
                     error_code: codes::NONE,
@@ -479,8 +512,8 @@ mod tests {
                     ..ListOffsetsPartitionResponse::default()
                 }
         );
-        drop(client);
-        broker.shutdown().await;
+        drop(topic.client);
+        topic.broker_handle.shutdown().await;
     }
 
     #[tokio::test]
@@ -490,13 +523,10 @@ mod tests {
 
         const TOPIC: &str = "list-offsets-remote-timestamp";
 
-        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
-
-        let broker_arc = broker.broker_arc_for_test();
-        let partition = broker_arc
-            .partitions
-            .get(TOPIC, krabka_ids::PartitionIndex(0))
-            .expect("partition");
+        let topic = remote_partition_topic(TOPIC).await;
+        let client = &topic.client;
+        let broker_arc = &topic.broker;
+        let partition = &topic.partition;
         let source_dir = tempfile::tempdir().expect("source tempdir");
         let batches = [
             (0, &[1_000, 1_100][..]),
@@ -588,7 +618,7 @@ mod tests {
         partition.replica_state.lock().await.hw = krabka_log::Offset(7);
 
         assert!(
-            list_one(&client, TOPIC, 1_500).await
+            list_one(client, TOPIC, 1_500).await
                 == ListOffsetsPartitionResponse {
                     partition_index: 0,
                     error_code: codes::NONE,
@@ -644,7 +674,7 @@ mod tests {
                 event: UnixMillis(2_500),
             },
         );
-        let response = list_one(&client, TOPIC, 1_500).await;
+        let response = list_one(client, TOPIC, 1_500).await;
         assert!(
             response.error_code == codes::NONE
                 && response.offset == 2
@@ -659,7 +689,7 @@ mod tests {
                 .expect("log mutex")
                 .set_log_start_offset(krabka_ids::Offset(floor))
                 .expect("logical trim");
-            let response = list_one(&client, TOPIC, 1_500).await;
+            let response = list_one(client, TOPIC, 1_500).await;
             assert!(
                 response.error_code == codes::NONE
                     && response.offset == floor
@@ -668,7 +698,7 @@ mod tests {
             );
         }
 
-        drop(client);
-        broker.shutdown().await;
+        drop(topic.client);
+        topic.broker_handle.shutdown().await;
     }
 }

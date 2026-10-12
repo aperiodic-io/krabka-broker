@@ -50,15 +50,16 @@ async fn to_offset_filters_records_past_a_bound_inside_one_batch() {
 
     let (_target, target_dir) = run_restore(archive.path(), &["--to-offset", "orders:0=2"]).await;
 
-    let log = reopen(&target_dir, "orders", 0);
-    let read = log
+    let restored_log = reopen(&target_dir, "orders", 0);
+    let batches = restored_log
         .read(Offset(0), LogConfig::default().segment_size)
-        .expect("read back");
+        .expect("read back")
+        .batches;
     let expected = vec![RecordBatch {
         records: fixture[0].records[..=2].to_vec(),
         ..fixture[0].clone()
     }];
-    check!(read.batches == expected);
+    check!(batches == expected);
 }
 
 // ---------------------------------------------------------------------

@@ -337,10 +337,11 @@ mod tests {
         frame: Vec<u8>,
         router: Option<&dyn ControllerAdminRouter>,
     ) -> DecodedFrame {
-        let (mut client, mut server) = tokio::io::duplex(128);
-        let writer = tokio::spawn(async move {
+        let (mut client, mut server) = tokio::io::duplex(256);
+        let write_fut = async move {
             client.write_all(&frame).await.unwrap();
-        });
+        };
+        let writer = tokio::spawn(write_fut);
         let request = super::read_one_request(&mut server, router, MAX_REQUEST_BYTES)
             .await
             .expect("decode");
@@ -376,13 +377,19 @@ mod tests {
     struct ClientIdLength(i16);
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
-    struct ControllerFrameSetup<'a> {
+    struct ControllerFrameHeader {
         #[default(ApiKey(52))]
         api_key: ApiKey,
         #[default(ApiVersion(2))]
         api_version: ApiVersion,
         #[default(FrameCorrelationId(123))]
         correlation_id: FrameCorrelationId,
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    struct ControllerFrameSetup<'a> {
+        #[default(ControllerFrameHeader::default())]
+        header: ControllerFrameHeader,
         #[default("raft-client")]
         client_id: &'a str,
         body: &'a [u8],
@@ -390,18 +397,14 @@ mod tests {
 
     fn request_frame(setup: ControllerFrameSetup<'_>) -> Vec<u8> {
         let ControllerFrameSetup {
-            api_key,
-            api_version,
-            correlation_id,
+            header,
             client_id,
             body,
         } = setup;
         let mut tagged_body = vec![0];
         tagged_body.extend_from_slice(body);
         raw_request_frame(RawControllerFrameSetup {
-            api_key,
-            api_version,
-            correlation_id,
+            header,
             client_id_len: ClientIdLength(i16::try_from(client_id.len()).unwrap()),
             client_id_bytes: client_id.as_bytes(),
             tagged_or_body: &tagged_body,
@@ -410,12 +413,8 @@ mod tests {
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
     struct RawControllerFrameSetup<'a> {
-        #[default(ApiKey(52))]
-        api_key: ApiKey,
-        #[default(ApiVersion(2))]
-        api_version: ApiVersion,
-        #[default(FrameCorrelationId(123))]
-        correlation_id: FrameCorrelationId,
+        #[default(ControllerFrameHeader::default())]
+        header: ControllerFrameHeader,
         #[default(ClientIdLength(-1))]
         client_id_len: ClientIdLength,
         client_id_bytes: &'a [u8],
@@ -425,17 +424,15 @@ mod tests {
 
     fn raw_request_frame(setup: RawControllerFrameSetup<'_>) -> Vec<u8> {
         let RawControllerFrameSetup {
-            api_key,
-            api_version,
-            correlation_id,
+            header,
             client_id_len,
             client_id_bytes,
             tagged_or_body,
         } = setup;
         let mut frame = bytes::BytesMut::new();
-        frame.put_i16(api_key.get());
-        frame.put_i16(api_version.get());
-        frame.put_i32(correlation_id.0);
+        frame.put_i16(header.api_key.get());
+        frame.put_i16(header.api_version.get());
+        frame.put_i32(header.correlation_id.0);
         frame.put_i16(client_id_len.0);
         frame.put_slice(client_id_bytes);
         frame.put_slice(tagged_or_body);
@@ -577,8 +574,11 @@ mod tests {
     async fn read_one_request_keeps_nonflexible_body_prefix() {
         let (mut client, mut server) = tokio::io::duplex(128);
         let frame = raw_request_frame(RawControllerFrameSetup {
-            api_key: ApiKey(53),
-            api_version: ApiVersion(0),
+            header: ControllerFrameHeader {
+                api_key: ApiKey(53),
+                api_version: ApiVersion(0),
+                ..Default::default()
+            },
             client_id_len: ClientIdLength(0),
             tagged_or_body: &[1, b'p', b'a', b'y'],
             ..Default::default()
@@ -640,9 +640,11 @@ mod tests {
                 key,
                 ApiVersion(flexible_min),
                 request_frame(ControllerFrameSetup {
-                    api_key: key,
-                    api_version: ApiVersion(flexible_min),
-                    correlation_id: FrameCorrelationId(7),
+                    header: ControllerFrameHeader {
+                        api_key: key,
+                        api_version: ApiVersion(flexible_min),
+                        correlation_id: FrameCorrelationId(7),
+                    },
                     client_id,
                     body: b"body",
                 }),
@@ -653,9 +655,11 @@ mod tests {
                 key,
                 ApiVersion(flexible_min - 1),
                 raw_request_frame(RawControllerFrameSetup {
-                    api_key: key,
-                    api_version: ApiVersion(flexible_min - 1),
-                    correlation_id: FrameCorrelationId(7),
+                    header: ControllerFrameHeader {
+                        api_key: key,
+                        api_version: ApiVersion(flexible_min - 1),
+                        correlation_id: FrameCorrelationId(7),
+                    },
                     client_id_len: ClientIdLength(id_len),
                     client_id_bytes: client_id.as_bytes(),
                     tagged_or_body: b"body",
@@ -667,9 +671,11 @@ mod tests {
                 ApiKey(vote_request::API_KEY),
                 ApiVersion(vote_request::FLEXIBLE_MIN),
                 request_frame(ControllerFrameSetup {
-                    api_key: ApiKey(vote_request::API_KEY),
-                    api_version: ApiVersion(vote_request::FLEXIBLE_MIN),
-                    correlation_id: FrameCorrelationId(7),
+                    header: ControllerFrameHeader {
+                        api_key: ApiKey(vote_request::API_KEY),
+                        api_version: ApiVersion(vote_request::FLEXIBLE_MIN),
+                        correlation_id: FrameCorrelationId(7),
+                    },
                     client_id,
                     body: b"body",
                 }),
@@ -680,9 +686,11 @@ mod tests {
                 unclaimed,
                 ApiVersion(flexible_min),
                 raw_request_frame(RawControllerFrameSetup {
-                    api_key: unclaimed,
-                    api_version: ApiVersion(flexible_min),
-                    correlation_id: FrameCorrelationId(7),
+                    header: ControllerFrameHeader {
+                        api_key: unclaimed,
+                        api_version: ApiVersion(flexible_min),
+                        correlation_id: FrameCorrelationId(7),
+                    },
                     client_id_len: ClientIdLength(id_len),
                     client_id_bytes: client_id.as_bytes(),
                     tagged_or_body: b"body",

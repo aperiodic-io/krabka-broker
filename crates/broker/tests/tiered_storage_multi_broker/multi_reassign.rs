@@ -40,7 +40,11 @@ use crate::{
     multi_client::topic_id_for,
     multi_cluster::{ready_admin, start_three_tiered_brokers_with_segment_sizes},
     multi_workload::local_segment_bases,
-    support::{client::connect_owned, storage::topic_remote_log_files, topics::AssignedTopicSetup},
+    support::{
+        client::connect_owned,
+        storage::{local_log_segment_metadata, topic_remote_log_files},
+        topics::AssignedTopicSetup,
+    },
     topic_fixture::{
         AssignedTieredTopicSetup, TieredRecordCount, TieredRecordsSetup, create_assigned_topic,
         produce_records as produce_tiered_records,
@@ -70,13 +74,8 @@ fn archive_bytes(root: &Path) -> u64 {
 
 /// The total size of the `*.log` files in one replica's partition directory.
 fn local_log_bytes(partition_dir: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(partition_dir) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .filter(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("log"))
-        .filter_map(|entry| entry.metadata().ok())
+    local_log_segment_metadata(partition_dir)
+        .into_iter()
         .map(|meta| meta.len())
         .sum()
 }

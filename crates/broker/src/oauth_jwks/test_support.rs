@@ -43,13 +43,11 @@ pub fn dormant_timer() -> Arc<dyn Timer> {
 pub(crate) use crate::test_support::await_until;
 use crate::test_support::serve_loopback_tls;
 
-/// Serves a fixed body at `/jwks` on an ephemeral port. It returns the
-/// bound address and a shutdown token for the server task.
-pub async fn serve_jwks(body: &'static str) -> (SocketAddr, CancellationToken) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let shutdown = CancellationToken::new();
-    let app = axum::Router::new().route("/jwks", axum::routing::get(move || async move { body }));
+fn spawn_axum_server(
+    listener: tokio::net::TcpListener,
+    app: axum::Router,
+    shutdown: &CancellationToken,
+) {
     let srv_shutdown = shutdown.clone();
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -57,6 +55,16 @@ pub async fn serve_jwks(body: &'static str) -> (SocketAddr, CancellationToken) {
             .await
             .unwrap();
     });
+}
+
+/// Serves a fixed body at `/jwks` on an ephemeral port. It returns the
+/// bound address and a shutdown token for the server task.
+pub async fn serve_jwks(body: &'static str) -> (SocketAddr, CancellationToken) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shutdown = CancellationToken::new();
+    let app = axum::Router::new().route("/jwks", axum::routing::get(move || async move { body }));
+    spawn_axum_server(listener, app, &shutdown);
     (addr, shutdown)
 }
 
@@ -158,13 +166,7 @@ pub async fn serve_jwks_counting(
             }
         }),
     );
-    let srv_shutdown = shutdown.clone();
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move { srv_shutdown.cancelled().await })
-            .await
-            .unwrap();
-    });
+    spawn_axum_server(listener, app, &shutdown);
     (addr, shutdown, counter)
 }
 

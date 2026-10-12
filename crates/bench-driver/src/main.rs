@@ -450,13 +450,7 @@ mod tests {
         let cli = Cli::try_parse_from(required_args("krabka")).expect("retry defaults");
         let policy = resolve_consumer_build_retry_policy(&cli).expect("valid defaults");
 
-        check!(
-            (
-                policy.attempts(),
-                policy.initial_backoff(),
-                policy.max_backoff()
-            ) == (6, millis(100), secs(2))
-        );
+        check!(policy == ConsumerBuildRetryPolicy::default());
     }
 
     #[test]

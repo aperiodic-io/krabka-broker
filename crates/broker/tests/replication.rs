@@ -182,10 +182,10 @@ async fn out_of_range_truncates_and_recovers() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_follower_that_catches_up_across_segments_copies_every_batch() {
     const BATCHES: i64 = 12;
-    let _g = cluster_lock().lock().await;
+    let _lock_guard = cluster_lock().lock().await;
     let cluster = support::start_n_node_with_retry(3).await;
-    for (h, _, _) in &cluster {
-        h.wait_until_brokers_registered(3).await;
+    for (handle, _, _) in &cluster {
+        handle.wait_until_brokers_registered(3).await;
     }
 
     let (leader_addr, topic_id) = create_replicated_partition(

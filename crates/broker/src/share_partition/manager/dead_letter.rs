@@ -326,7 +326,8 @@ mod tests {
             state.take_pending_dlq()
         };
 
-        let states = dispatch_and_wait(&mgr, &key, &cell, ranges, |states| states.len() == 1).await;
+        let is_single = |st: &[_]| st.len() == 1;
+        let states = dispatch_and_wait(&mgr, &key, &cell, ranges, is_single).await;
 
         assert!(
             (states, dlq.requests(), cell.lock().await.start_offset)

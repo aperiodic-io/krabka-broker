@@ -301,6 +301,14 @@ mod tests {
     /// `handleShareGroupHeartbeat`. A principal denied `Read` on the group
     /// still gets `UNSUPPORTED_VERSION`, not `GROUP_AUTHORIZATION_FAILED`,
     /// when the protocol itself is unavailable.
+    async fn handle_denied_group_heartbeat(broker: &Broker) -> ShareGroupHeartbeatResponse {
+        test_ctx!(ctx, "ANONYMOUS");
+        let req = request("denied-group", vec!["t1"]);
+        handle(broker, req, VERSION, &ctx)
+            .await
+            .expect("ShareGroupHeartbeat handler")
+    }
+
     #[tokio::test]
     async fn handle_protocol_gate_precedes_group_acl() {
         broker_fixture!(
@@ -308,12 +316,7 @@ mod tests {
             start_broker(Arc::new(acl_authorizer()))
         );
         finalize_share_version(&broker, 0).await;
-        test_ctx!(ctx, "ANONYMOUS");
-        let req = request("denied-group", vec!["t1"]);
-
-        let resp = handle(&broker, req, VERSION, &ctx)
-            .await
-            .expect("ShareGroupHeartbeat handler");
+        let resp = handle_denied_group_heartbeat(&broker).await;
 
         assert!(resp.error_code == codes::UNSUPPORTED_VERSION, "{resp:?}");
 
@@ -326,12 +329,7 @@ mod tests {
             (broker_handle, _dir, broker),
             start_broker(Arc::new(acl_authorizer()))
         );
-        test_ctx!(ctx, "ANONYMOUS");
-        let req = request("denied-group", vec!["t1"]);
-
-        let resp = handle(&broker, req, VERSION, &ctx)
-            .await
-            .expect("ShareGroupHeartbeat handler");
+        let resp = handle_denied_group_heartbeat(&broker).await;
 
         assert!(
             resp.error_code == codes::GROUP_AUTHORIZATION_FAILED,
@@ -583,7 +581,7 @@ mod tests {
         broker_handle.wait_until_group_coordinator_ready().await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((principal, peer, ctx), principal("ANONYMOUS"), test_context);
-        let req = ShareGroupHeartbeatRequest {
+        let heartbeat_req = ShareGroupHeartbeatRequest {
             group_id: "identity-group".into(),
             member_id: "member-1".into(),
             member_epoch: 0,
@@ -591,7 +589,7 @@ mod tests {
             ..Default::default()
         };
 
-        let resp = handle(&broker, req, version, &ctx)
+        let resp = handle(&broker, heartbeat_req, version, &ctx)
             .await
             .expect("ShareGroupHeartbeat handler");
         assert!(resp.error_code == 0);

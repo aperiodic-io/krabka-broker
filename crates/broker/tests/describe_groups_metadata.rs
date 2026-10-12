@@ -219,11 +219,12 @@ async fn describe_groups_reports_member_metadata_and_protocol_name() {
     );
 
     // ── DescribeGroups: the populated fields are the contract. ──
+    let req = DescribeGroupsRequest {
+        groups: vec![group_id.to_string()],
+        ..Default::default()
+    };
     let resp = client
-        .send(DescribeGroupsRequest {
-            groups: vec![group_id.to_string()],
-            ..Default::default()
-        })
+        .send(req)
         .await
         .expect("DescribeGroups must round-trip");
     handle.shutdown().await;

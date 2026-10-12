@@ -595,16 +595,10 @@ mod tests {
             ..request("invalid-join")
         };
 
-        let resp = handle(&broker, req.clone(), version, &ctx)
-            .await
-            .expect("handle");
+        let resp = handle(&broker, req, version, &ctx).await.expect("handle");
 
-        assert!(
-            resp == crate::coordinator::unified::streams::actor::response::error_resp(
-                codes::INVALID_REQUEST,
-                Some("MemberId can't be empty.".into()),
-            )
-        );
+        assert!(resp.error_code == codes::INVALID_REQUEST);
+        assert!(resp.error_message == Some("MemberId can't be empty.".into()));
         assert!(
             broker
                 .group_coordinator

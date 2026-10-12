@@ -408,14 +408,17 @@ async fn a_peer_stays_reachable_after_it_leaves_the_voter_set() {
 
     // A node that no voter set and no bootstrap server ever named has no
     // address.
-    let sender = RealPeerSender::new(
-        VoterSet::default(),
-        &[],
-        "raft-client".into(),
-        Arc::new(PlaintextDialer),
-        krabka_client_core::ConnectionDispatchQueueCapacity::default(),
-        krabka_client_core::ClientFrameMax::default(),
-    );
+    let empty_sender = || {
+        RealPeerSender::new(
+            VoterSet::default(),
+            &[],
+            "raft-client".into(),
+            Arc::new(PlaintextDialer),
+            krabka_client_core::ConnectionDispatchQueueCapacity::default(),
+            krabka_client_core::ClientFrameMax::default(),
+        )
+    };
+    let sender = empty_sender();
     let response = sender
         .send(NodeId(9), api_key::FETCH, Bytes::from_static(b"fetch-body"))
         .await;
@@ -425,14 +428,7 @@ async fn a_peer_stays_reachable_after_it_leaves_the_voter_set() {
     let (addr, server) = fetch_server().await;
     let host = addr.ip().to_string();
     let new_voter = voter_with_controller(NodeId(5), &host, addr.port());
-    let sender = RealPeerSender::new(
-        VoterSet::default(),
-        &[],
-        "raft-client".into(),
-        Arc::new(PlaintextDialer),
-        krabka_client_core::ConnectionDispatchQueueCapacity::default(),
-        krabka_client_core::ClientFrameMax::default(),
-    );
+    let sender = empty_sender();
     sender.update_voters(&VoterSet::from_voters([new_voter]));
     let response = sender
         .send(NodeId(5), api_key::FETCH, Bytes::from_static(b"fetch-body"))

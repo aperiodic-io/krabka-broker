@@ -19,7 +19,7 @@ use krabka_broker::codes;
 
 use crate::{
     N_RECORDS, SITE_C, TOPIC, cluster_lock, within,
-    witness_cluster::{client_at, shutdown, start_stretch_cluster},
+    witness_cluster::{client_at, shutdown, start_stretch_cluster, wait_for_witness_isr},
     witness_wire::{consumer_fetch, create_topic, produce_error, produce_response},
 };
 
@@ -38,18 +38,7 @@ async fn witness_refuses_client_traffic_while_replication_advances() {
 
     let leader = client_at(&cluster[0].1.listen_addr.to_string()).await;
     let topic_id = create_topic(&leader).await;
-    for (handle, _, _) in &cluster {
-        within(
-            "partition present on every node",
-            handle.wait_until_partition_present(TOPIC, 0),
-        )
-        .await;
-    }
-    within(
-        "the witness joins the ISR",
-        cluster[0].0.wait_until_isr_len(TOPIC, 0, 3),
-    )
-    .await;
+    wait_for_witness_isr(&cluster, TOPIC).await;
 
     check!(
         produce_error(&leader, topic_id, N_RECORDS).await == codes::NONE,
@@ -89,15 +78,15 @@ async fn witness_refuses_client_traffic_while_replication_advances() {
         produced.responses[0].partition_responses[0].error_code == codes::NOT_LEADER_OR_FOLLOWER,
         "a client Produce to the witness is refused"
     );
+    let expected_endpoint = krabka_protocol::owned::produce_response::NodeEndpoint {
+        node_id: leader_id,
+        port: i32::from(advertised.port),
+        host: advertised.host.clone(),
+        rack: registration.rack.clone(),
+        ..Default::default()
+    };
     check!(
-        produced.node_endpoints
-            == vec![krabka_protocol::owned::produce_response::NodeEndpoint {
-                node_id: leader_id,
-                host: advertised.host.clone(),
-                port: i32::from(advertised.port),
-                rack: registration.rack.clone(),
-                ..Default::default()
-            }],
+        produced.node_endpoints == [expected_endpoint],
         "the refused Produce carries the leader's endpoint (KIP-951): {:?}",
         produced.node_endpoints
     );

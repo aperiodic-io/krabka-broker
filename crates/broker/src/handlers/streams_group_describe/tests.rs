@@ -173,9 +173,10 @@ async fn protocol_gate_runs_before_the_group_acl_check() {
 /// in the response even though it was requested second.
 #[tokio::test]
 async fn denied_group_rows_sort_first_regardless_of_request_order() {
+    let empty_acls = HashSet::new();
     broker_fixture!(
         (broker_handle, _dir, broker),
-        start_broker_with_authorizer(Arc::new(SimpleAclAuthorizer::new(HashSet::new())))
+        start_broker_with_authorizer(Arc::new(SimpleAclAuthorizer::new(empty_acls)))
     );
     finalize_streams_version(&broker).await;
     grant(

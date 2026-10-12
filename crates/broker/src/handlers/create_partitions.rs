@@ -24,7 +24,6 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
 use krabka_metadata::{AclOperation, MetadataImage, TopicRecord};
 use krabka_protocol::owned::{
     create_partitions_request::{self, CreatePartitionsRequest, CreatePartitionsTopic},
@@ -52,16 +51,16 @@ use crate::{
     broker::Broker,
     codes,
     config_keys::{resolve_diskless, resolve_preferred_leader_site, witness_node_ids},
-    controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
-    error::BrokerError,
     handlers::{
         RequestContext,
         create_topics::{
             InitialLeadership, automatic_leaderships, automatic_placement_exclusions,
             diskless_wal_placement_error, inactive_brokers, manual_leaderships, site_broker_views,
         },
-        decode_request, denied_topics, encode_response,
-        forward_to_controller::{guarded_operation, is_active_controller, to_active_controller},
+        denied_topics, encode_response,
+        forward_to_controller::{
+            forward_if_not_controller, guarded_operation_on_source, is_active_controller,
+        },
         offline_replicas::unavailable_brokers,
         partition_materialization::PartitionMaterialization,
     },
@@ -69,31 +68,22 @@ use crate::{
     site_placement::PlacementRng,
 };
 
-/// Forward the operation before deriving partition indices from metadata.
-pub(crate) async fn dispatch(
-    broker: &Broker,
-    version: i16,
-    req_bytes: &[u8],
-    ctx: &RequestContext<'_>,
-) -> Result<Bytes, BrokerError> {
-    let req = decode_request::<CreatePartitionsRequest>(req_bytes, version)?;
-    if ctx.connection_id != CONTROLLER_ADMIN_CONNECTION_ID
-        && let Some(answer) = to_active_controller(
-            broker,
-            create_partitions_request::API_KEY,
-            req_bytes,
-            version,
-            ctx,
-            |code, message| encode_response(&request_refusal(&req, code, message), version),
-        )
-        .await
-    {
-        return answer;
-    }
+raw_dispatch! {
+    /// Apply explicit assignments and placement rules after the request reaches the controller.
+    CreatePartitionsRequest, (broker, version, req_bytes, ctx, req), {
+    forward_if_not_controller!(
+        broker,
+        ctx,
+        create_partitions_request::API_KEY,
+        req_bytes,
+        version,
+        |code, message| encode_response(&request_refusal(&req, code, message), version)
+    );
     if !is_active_controller(broker) {
         return encode_response(&request_refusal(&req, codes::NOT_CONTROLLER, None), version);
     }
     encode_response(&handle(broker, req, version, ctx).await?, version)
+    }
 }
 
 fn request_refusal(
@@ -179,7 +169,10 @@ context_handler! {
             }
             let prior_delay = quota.lock().await.delay();
             let growth = GrowthContext { broker, ctx, quota: &quota, charged: AtomicU64::new(0), prior_delay, validate_only };
-            let attempt = guarded_operation(broker, deadline, |image| grow_topic(&growth, &t, image)).await;
+            let attempt = guarded_operation_on_source(broker.controller.as_ref(), deadline, |image| {
+                grow_topic(&growth, &t, image)
+            })
+            .await;
             let out = match attempt {
                 Ok(Ok(row)) => row,
                 failure => {

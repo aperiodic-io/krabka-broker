@@ -113,15 +113,20 @@ async fn offline_dir_elects_alive_isr_member_when_leader_dir_failed() {
     assert!(*pr == expected);
 }
 
+async fn assert_offline_dir_no_changes(setup: OfflinePartitionSetup<'_>) {
+    let (img, bad, _good) = offline_image(setup);
+    let plan = scan_offline_dir(&img, 1, bad, &[1, 2, 3]).await;
+    assert!(plan.changes.is_empty());
+}
+
 #[tokio::test]
 async fn offline_dir_leaves_healthy_dir_partition_untouched() {
-    let (img, bad, _good) = offline_image(OfflinePartitionSetup {
+    assert_offline_dir_no_changes(OfflinePartitionSetup {
         isr: &[NodeId(1), NodeId(2), NodeId(3)],
         failed_replica: None,
         ..Default::default()
-    });
-    let plan = scan_offline_dir(&img, 1, bad, &[1, 2, 3]).await;
-    assert!(plan.changes.is_empty());
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -149,13 +154,12 @@ async fn offline_dir_shrinks_isr_for_non_leader_replica() {
 async fn offline_dir_idempotent_after_failover() {
     // After failover: broker 1's dir is bad but broker 1 is no longer
     // leader (broker 2 is), and broker 1 is not in ISR {2,3} either.
-    let (img, bad, _good) = offline_image(OfflinePartitionSetup {
+    assert_offline_dir_no_changes(OfflinePartitionSetup {
         leader: NodeId(2),
         isr: &[NodeId(2), NodeId(3)],
         ..Default::default()
-    });
-    let plan = scan_offline_dir(&img, 1, bad, &[1, 2, 3]).await;
-    assert!(plan.changes.is_empty());
+    })
+    .await;
 }
 
 #[tokio::test]

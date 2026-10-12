@@ -340,16 +340,20 @@ fn encoded_fetch_request_carries_replica_state_epoch_sentinel() {
     );
 }
 
-#[test]
-fn fetch_snapshot_request_round_trips() {
-    let req = PeerRequest::FetchSnapshot {
+fn sample_fetch_snapshot_request() -> PeerRequest {
+    PeerRequest::FetchSnapshot {
         cluster_id: Some(uuid::Uuid::from_u128(9)),
         from: NodeId(2),
         current_leader_epoch: 7,
         snapshot_id: (42, 3),
         position: 128,
         max_bytes: 4096,
-    };
+    }
+}
+
+#[test]
+fn fetch_snapshot_request_round_trips() {
+    let req = sample_fetch_snapshot_request();
     assert2::assert!(decode_fetch_snapshot(&req.encode()) == Some(req));
 }
 
@@ -357,14 +361,7 @@ fn fetch_snapshot_request_round_trips() {
 fn encoded_fetch_snapshot_request_carries_cluster_id_and_current_leader_epoch() {
     use krabka_protocol::Decode;
 
-    let req = PeerRequest::FetchSnapshot {
-        cluster_id: Some(uuid::Uuid::from_u128(9)),
-        from: NodeId(2),
-        current_leader_epoch: 7,
-        snapshot_id: (42, 3),
-        position: 128,
-        max_bytes: 4096,
-    };
+    let req = sample_fetch_snapshot_request();
     let mut cur = &req.encode()[..];
     let raw = FetchSnapshotRequest::decode(&mut cur, FETCH_SNAPSHOT_VERSION)
         .expect("decode fetch snapshot request");

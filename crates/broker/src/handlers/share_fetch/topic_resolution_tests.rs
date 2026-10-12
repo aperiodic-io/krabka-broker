@@ -14,9 +14,7 @@ use assert2::assert;
 use bytes::Bytes;
 use krabka_protocol::{
     owned::{
-        share_fetch_request::{
-            AcknowledgementBatch, FetchPartition, FetchTopic, ShareFetchRequest,
-        },
+        share_fetch_request::{AcknowledgementBatch, ShareFetchRequest},
         share_fetch_response::{PartitionData, ShareFetchResponse, ShareFetchableTopicResponse},
     },
     primitives::uuid::Uuid as WireUuid,
@@ -99,39 +97,22 @@ fn request(setup: TopicResolutionSetup<'_>) -> ShareFetchRequest {
         topic_id,
         acknowledgements,
     } = setup;
-    ShareFetchRequest {
-        group_id: Some("resolution-group".into()),
-        member_id: Some(member.into()),
-        share_session_epoch: epoch.0,
-        max_wait_ms: 0,
-        min_bytes: 0,
-        max_bytes: 1_048_576,
-        max_records: 10,
-        batch_size: 10,
-        topics: vec![FetchTopic {
-            topic_id,
-            partitions: vec![FetchPartition {
-                partition_index: 0,
-                partition_max_bytes: 1_048_576,
-                acknowledgement_batches: if matches!(
-                    acknowledgements,
-                    AcknowledgementPresence::AcceptFirstRecord
-                ) {
-                    vec![AcknowledgementBatch {
-                        first_offset: 0,
-                        last_offset: 0,
-                        acknowledge_types: vec![1],
-                        ..Default::default()
-                    }]
-                } else {
-                    Vec::new()
-                },
-                ..Default::default()
-            }],
+    let acknowledgement_batches = match acknowledgements {
+        AcknowledgementPresence::None => Vec::new(),
+        AcknowledgementPresence::AcceptFirstRecord => vec![AcknowledgementBatch {
+            first_offset: 0,
+            last_offset: 0,
+            acknowledge_types: vec![1],
             ..Default::default()
         }],
-        ..Default::default()
-    }
+    };
+    super::test_fetch_request()
+        .group_id("resolution-group".into())
+        .member_id(member.into())
+        .topic_id(topic_id.0)
+        .share_session_epoch(epoch.0)
+        .acknowledgement_batches(acknowledgement_batches)
+        .call()
 }
 
 async fn share_fetch(

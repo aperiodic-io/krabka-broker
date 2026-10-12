@@ -192,12 +192,13 @@ fn unsupported_token_mutations(component: &str) -> RaftError {
 pub trait MetadataWriter: Send + Sync {
     async fn submit_change(
         &self,
-        records: Vec<MetadataRecord>,
+        batch: Vec<MetadataRecord>,
     ) -> Result<SubmitChangeResult, RaftError>;
     async fn submit_delegation_token_mutations(
         &self,
-        _mutations: Vec<DelegationTokenMutation>,
+        mutations: Vec<DelegationTokenMutation>,
     ) -> Result<SubmitChangeResult, RaftError> {
+        let _ = mutations;
         Err(unsupported_token_mutations("writer"))
     }
     /// Forward a raw request to the controller quorum.

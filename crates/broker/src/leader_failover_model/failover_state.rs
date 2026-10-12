@@ -109,13 +109,14 @@ impl FailoverModel {
 /// `failover_one`. This function fills the fields `failover_one` ignores with
 /// dummy values.
 pub(super) fn pr_of(s: &FailoverState) -> PartitionRecord {
+    let epoch = krabka_metadata::LeaderEpoch(s.leader_epoch);
     PartitionRecord {
         topic: elr::TOPIC.to_string(),
         partition: 0,
         leader: s.leader,
         replicas: s.replicas.clone(),
         isr: s.isr.clone(),
-        leader_epoch: krabka_metadata::LeaderEpoch(s.leader_epoch),
+        leader_epoch: epoch,
         adding_replicas: vec![],
         removing_replicas: vec![],
         directories: vec![],

@@ -10,18 +10,14 @@ use krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest;
 
 use crate::support::{
     self,
-    discovery::{api_versions_request_for, topic_metadata_request},
+    discovery::{api_versions, topic_metadata_request},
     topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
 };
 
 #[tokio::test]
 async fn api_versions_round_trip() {
     let p = support::start().await;
-    let resp = p
-        .client
-        .send(api_versions_request_for("krabka-test", "0.0.0"))
-        .await
-        .expect("ApiVersions");
+    let resp = api_versions(&p.client).await;
     assert!(resp.error_code == 0);
     // Must include ApiVersions itself.
     assert!(resp.api_keys.iter().any(|k| k.api_key == 18));
@@ -52,10 +48,12 @@ async fn metadata_returns_this_broker_and_listed_topics() {
         .find(|t| t.name.as_deref() == Some("beta"))
         .unwrap();
     assert!(topic.partitions.len() == 3);
-    for (i, part) in topic.partitions.iter().enumerate() {
-        check!(part.error_code == 0);
-        check!(part.partition_index == i32::try_from(i).unwrap());
-        check!(part.leader_id == 1);
+    for idx in 0..3 {
+        let part = &topic.partitions[idx];
+        let expected_index = i32::try_from(idx).expect("partition index fits in i32");
+        check!(
+            part.error_code == 0 && part.partition_index == expected_index && part.leader_id == 1
+        );
     }
     p.broker.shutdown().await;
 }

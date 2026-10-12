@@ -57,7 +57,7 @@ struct IsrModel {
 }
 
 impl IsrModel {
-    fn safety(max_offset: i64) -> Self {
+    fn new(max_offset: i64, test_overshoot: bool) -> Self {
         Self {
             t0: Instant::now(),
             replicas: vec![
@@ -66,21 +66,16 @@ impl IsrModel {
                 krabka_audit::NodeId(3),
             ],
             max_offset,
-            test_overshoot: false,
+            test_overshoot,
         }
     }
 
+    fn safety(max_offset: i64) -> Self {
+        Self::new(max_offset, false)
+    }
+
     fn overshoot(max_offset: i64) -> Self {
-        Self {
-            t0: Instant::now(),
-            replicas: vec![
-                krabka_audit::NodeId(1),
-                krabka_audit::NodeId(2),
-                krabka_audit::NodeId(3),
-            ],
-            max_offset,
-            test_overshoot: true,
-        }
+        Self::new(max_offset, true)
     }
 
     fn leader(&self) -> NodeId {

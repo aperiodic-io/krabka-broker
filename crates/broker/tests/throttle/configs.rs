@@ -8,21 +8,10 @@
 
 use std::net::SocketAddr;
 
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{Decode, Encode};
-use tokio::net::TcpStream;
-
-use crate::{
-    CLIENT_ID,
-    kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
-    support::{
-        configs::{
-            ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
-            incremental_request, incremental_resource,
-        },
-        wire::HeaderEncoding as RequestHeaderEncoding,
-    },
+use super::test_support::*;
+use crate::support::configs::{
+    ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
+    incremental_request, incremental_resource,
 };
 
 pub type ConfigOperations = Vec<(String, Option<String>, i8)>;

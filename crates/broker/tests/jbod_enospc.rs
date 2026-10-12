@@ -179,9 +179,16 @@ struct BrokerProcess {
 
 impl BrokerProcess {
     fn user(&self) -> String {
-        use std::os::unix::fs::MetadataExt as _;
-        let metadata = std::fs::metadata(self.root.path()).expect("stat broker root");
-        format!("{}:{}", metadata.uid(), metadata.gid())
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            let metadata = std::fs::metadata(self.root.path()).expect("stat broker root");
+            format!("{}:{}", metadata.uid(), metadata.gid())
+        }
+        #[cfg(not(unix))]
+        {
+            "0:0".to_string()
+        }
     }
 
     fn bootstrap(&self) -> String {

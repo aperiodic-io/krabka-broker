@@ -34,7 +34,6 @@
 
 use std::time::Duration;
 
-use bytes::Bytes;
 use krabka_protocol::owned::{
     delete_topics_request::{self, DeleteTopicsRequest},
     delete_topics_response::DeleteTopicsResponse,
@@ -42,13 +41,12 @@ use krabka_protocol::owned::{
 use krabka_raft::RaftError;
 
 use crate::{
-    broker::Broker,
     codes,
-    controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
-    error::BrokerError,
     handlers::{
-        RequestContext, decode_request, encode_response,
-        forward_to_controller::{guarded_operation, is_active_controller, to_active_controller},
+        encode_response,
+        forward_to_controller::{
+            forward_if_not_controller, guarded_operation_on_source, is_active_controller,
+        },
     },
 };
 
@@ -76,32 +74,22 @@ use self::{
     },
 };
 
-/// Forward the original request before resolving its topic ids or authorizing it.
-pub(crate) async fn dispatch(
-    broker: &Broker,
-    version: i16,
-    req_bytes: &[u8],
-    ctx: &RequestContext<'_>,
-) -> Result<Bytes, BrokerError> {
-    let req = decode_request::<DeleteTopicsRequest>(req_bytes, version)?;
-    if ctx.connection_id != CONTROLLER_ADMIN_CONNECTION_ID
-        && let Some(answer) = to_active_controller(
-            broker,
-            delete_topics_request::API_KEY,
-            req_bytes,
-            version,
-            ctx,
-            |code, _| {
-                encode_response(
-                    &delete_topics_response(request_error_results(&req, code), 0),
-                    version,
-                )
-            },
-        )
-        .await
-    {
-        return answer;
-    }
+raw_dispatch! {
+    /// Resolve topic identifiers and per-topic authorization on the active controller.
+    DeleteTopicsRequest, (broker, version, req_bytes, ctx, req), {
+    forward_if_not_controller!(
+        broker,
+        ctx,
+        delete_topics_request::API_KEY,
+        req_bytes,
+        version,
+        |code, _| {
+            encode_response(
+                &delete_topics_response(request_error_results(&req, code), 0),
+                version,
+            )
+        }
+    );
     if !is_active_controller(broker) {
         return encode_response(
             &delete_topics_response(request_error_results(&req, codes::NOT_CONTROLLER), 0),
@@ -109,6 +97,7 @@ pub(crate) async fn dispatch(
         );
     }
     encode_response(&handle(broker, req, version, ctx).await?, version)
+    }
 }
 
 context_handler! {
@@ -190,7 +179,7 @@ context_handler! {
                 results.push(delete_topic_result(Some(name), wire_topic_id, codes::THROTTLING_QUOTA_EXCEEDED));
                 continue;
             }
-            let attempt = guarded_operation(broker, deadline, |image|
+            let attempt = guarded_operation_on_source(broker.controller.as_ref(), deadline, |image|
                 delete_topic_once(broker, ctx, &name, wire_topic_id, requested_by_id, image)).await;
             let row = match attempt {
                 Ok(Ok(row)) => row,

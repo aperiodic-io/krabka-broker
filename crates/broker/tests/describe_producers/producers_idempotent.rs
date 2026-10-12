@@ -90,9 +90,12 @@ async fn after_idempotent_produce_describe_returns_the_producer() {
         .await
         .expect("DescribeProducers");
 
-    assert!(resp.topics.len() == 1);
-    assert!(resp.topics[0].partitions.len() == 1);
-    let part = &resp.topics[0].partitions[0];
+    let [topic] = &resp.topics[..] else {
+        panic!("expected 1 topic")
+    };
+    let [part] = &topic.partitions[..] else {
+        panic!("expected 1 partition")
+    };
     assert!(part.error_code == 0, "{part:?}");
     assert!(
         part.active_producers.len() == 1,

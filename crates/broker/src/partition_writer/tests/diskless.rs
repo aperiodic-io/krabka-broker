@@ -118,9 +118,8 @@ async fn a_reservation_refused_during_a_controller_election_answers_not_leader()
 async fn diskless_writer_acks_all_gates_on_durable_hw() {
     let dir = tempdir().expect("tempdir");
     let log = open_default_log(dir.path());
-    let (sync_started_tx, sync_started_rx) = oneshot::channel();
-    let (release_sync_tx, release_sync_rx) = oneshot::channel();
-    let wal: Option<SharedWal> = Some(Arc::new(GatedWal::new(sync_started_tx, release_sync_rx)));
+    let (wal, sync_started_rx, release_sync_tx) = GatedWal::gated_channel();
+    let wal: Option<SharedWal> = Some(wal);
     let (tx, rx) = mpsc::channel(1);
     let observed = observed_single_replica_writer(dir.path(), log.clone(), rx, |options| {
         options.wal = wal;
@@ -327,15 +326,15 @@ async fn diskless_writer_invalidates_hot_tail_after_log_rewrite() {
         },
     );
 
-    let (ack, ack_rx) = oneshot::channel();
+    let (trunc_tx, trunc_rx) = oneshot::channel();
     tx.send(WriterMessage::Truncate {
         offset: Offset(0),
-        ack,
+        ack: trunc_tx,
     })
     .await
     .expect("send truncate");
 
-    ack_rx
+    trunc_rx
         .await
         .expect("truncate ack")
         .expect("truncate succeeds");

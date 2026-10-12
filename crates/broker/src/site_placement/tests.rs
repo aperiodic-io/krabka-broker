@@ -94,6 +94,12 @@ fn sites_of(brokers: &[SiteBrokerView], replicas: &[NodeId]) -> Vec<String> {
     sites
 }
 
+fn six_partitions(brokers: &[SiteBrokerView], seed: u64) -> Vec<Vec<NodeId>> {
+    let placement = place(brokers, 6, 3, None, seed);
+    assert!(placement.len() == 6);
+    placement
+}
+
 fn distinct(replicas: &[NodeId]) -> Vec<NodeId> {
     let mut ids = replicas.to_vec();
     ids.sort_unstable();
@@ -353,9 +359,8 @@ fn the_witness_replicates_but_never_leads() {
     let brokers = vec![replica(1, "a"), replica(2, "b"), witness(3, "w")];
 
     for seed in SEEDS {
-        let placement = place(&brokers, 6, 3, None, seed);
+        let placement = six_partitions(&brokers, seed);
 
-        assert!(placement.len() == 6);
         for replicas in &placement {
             assert!(replicas.contains(&NodeId(3)));
             assert!(replicas[0] != NodeId(3));
@@ -454,9 +459,8 @@ fn a_site_of_fenced_brokers_still_holds_a_replica() {
     let brokers = vec![fenced(replica(1, "a")), replica(2, "b"), replica(3, "c")];
 
     for seed in SEEDS {
-        let placement = place(&brokers, 6, 3, None, seed);
+        let placement = six_partitions(&brokers, seed);
 
-        assert!(placement.len() == 6);
         for replicas in &placement {
             assert!(sites_of(&brokers, replicas) == vec!["a", "b", "c"]);
             assert!(replicas[0] != NodeId(1), "seed {seed}");

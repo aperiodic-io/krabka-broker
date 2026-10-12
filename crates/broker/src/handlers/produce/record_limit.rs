@@ -110,15 +110,15 @@ mod tests {
             PreparedSource::Owned(batch.clone())
         };
         PreparedBatch {
+            source,
             attributes: batch.attributes,
-            last_offset_delta: 0,
-            max_timestamp: 0,
             producer_id: -1,
             producer_epoch: -1,
             base_sequence: -1,
+            last_offset_delta: 0,
+            max_timestamp: 0,
             keyless_records: Vec::new(),
             invalid_timestamp_records: Vec::new(),
-            source,
         }
     }
 

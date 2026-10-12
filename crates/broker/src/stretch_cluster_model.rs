@@ -16,7 +16,7 @@
 //! - [`stretch_replicas`](crate::site_placement::stretch_replicas) builds the
 //!   replica list, so the model inherits the real site spread and the real
 //!   leadership pinning.
-//! - [`failover_one`] takes every controller failover decision.
+//! - [`crate::leader_election::failover_one`] takes every controller failover decision.
 //! - [`select_new_leader_for_partition`](crate::leader_election::select_new_leader_for_partition)
 //!   takes every KIP-460 preferred election.
 //! - The durability arithmetic comes from the Creusot-proved kernels in
@@ -134,9 +134,9 @@ mod topology;
 
 use self::{
     config::StretchModel,
+    election::production_elect,
     runner::{PINNED_UNIQUE_STATES_THREE_SITES, run},
 };
-use crate::leader_election::failover_one;
 
 /// Run `future` to completion on a per-thread current-thread tokio runtime.
 ///
@@ -156,7 +156,7 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 fn stretch_three_sites() {
     // The supported shape: one broker per site, RF=3, min.insync.replicas=2.
     run(
-        StretchModel::three_sites(2, failover_one),
+        StretchModel::three_sites(2, production_elect),
         "stretch_three_sites",
         PINNED_UNIQUE_STATES_THREE_SITES,
     );

@@ -28,7 +28,6 @@
 
 use assert2::assert;
 
-use crate::support::discovery::api_versions_request_for;
 mod support;
 
 use krabka_format::LATEST_PRODUCTION_METADATA_VERSION;
@@ -37,11 +36,7 @@ use krabka_format::LATEST_PRODUCTION_METADATA_VERSION;
 async fn v3_response_advertises_supported_and_bootstrapped_finalized_features() {
     let p = support::start().await;
 
-    let resp = p
-        .client
-        .send(api_versions_request_for("krabka-test", "0.0.0"))
-        .await
-        .expect("ApiVersions");
+    let resp = support::discovery::api_versions(&p.client).await;
 
     assert!(resp.error_code == 0, "{resp:?}");
 

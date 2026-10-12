@@ -314,14 +314,18 @@ async fn offline_log_dir_is_reported_as_an_offline_replica() {
     let expected_described: Vec<DescribeTopicPartitionsResponsePartition> = (0..PARTITIONS)
         .map(|partition| {
             let doomed = expected_offline.contains(&partition);
+            let active_nodes = if doomed { vec![] } else { vec![BROKER_ID] };
+            let leader = if doomed { NO_LEADER_ID } else { BROKER_ID };
+            let epoch = leader_epoch(&handle, partition);
+            let elr_nodes = if doomed { vec![BROKER_ID] } else { vec![] };
             DescribeTopicPartitionsResponsePartition {
                 error_code: 0,
                 partition_index: partition,
-                leader_id: if doomed { NO_LEADER_ID } else { BROKER_ID },
-                leader_epoch: leader_epoch(&handle, partition),
+                leader_id: leader,
+                leader_epoch: epoch,
                 replica_nodes: vec![BROKER_ID],
-                isr_nodes: if doomed { vec![] } else { vec![BROKER_ID] },
-                eligible_leader_replicas: Some(if doomed { vec![BROKER_ID] } else { vec![] }),
+                isr_nodes: active_nodes,
+                eligible_leader_replicas: Some(elr_nodes.clone()),
                 last_known_elr: Some(if doomed { vec![BROKER_ID] } else { vec![] }),
                 offline_replicas: if doomed { vec![BROKER_ID] } else { vec![] },
                 ..Default::default()

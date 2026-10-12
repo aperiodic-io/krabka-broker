@@ -50,6 +50,11 @@ fn check_expired(buckets: &QuotaBuckets, metrics: &BrokerMetrics) {
     check!(throttle_series(metrics).is_empty());
 }
 
+fn sweep_and_check_expired(buckets: &QuotaBuckets, metrics: &BrokerMetrics) {
+    sweep(buckets, metrics, millis(0));
+    check_expired(buckets, metrics);
+}
+
 #[test]
 fn an_inactive_bucket_and_its_metric_series_are_both_dropped() {
     let (buckets, metrics) = alice_fixture();
@@ -57,9 +62,7 @@ fn an_inactive_bucket_and_its_metric_series_are_both_dropped() {
 
     // Nothing has touched the bucket since it was made, so any positive age
     // below "just now" expires it.
-    sweep(&buckets, &metrics, millis(0));
-
-    check_expired(&buckets, &metrics);
+    sweep_and_check_expired(&buckets, &metrics);
 }
 
 #[test]
@@ -93,9 +96,7 @@ fn a_user_bucket_releases_the_series_of_its_own_key() {
     );
     check!(throttle_series(&metrics).len() == 1);
 
-    sweep(&buckets, &metrics, millis(0));
-
-    check_expired(&buckets, &metrics);
+    sweep_and_check_expired(&buckets, &metrics);
 }
 
 /// Kafka charges every quota under its own config key, and the series is

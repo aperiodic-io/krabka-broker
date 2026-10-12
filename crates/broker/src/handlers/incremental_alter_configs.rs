@@ -28,7 +28,6 @@
 
 use std::{sync::Arc, time::Duration};
 
-use bytes::Bytes;
 use krabka_metadata::{MetadataImage, MetadataRecord};
 use krabka_protocol::owned::{
     incremental_alter_configs_request::{
@@ -45,7 +44,6 @@ use crate::{
         MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext, clear_elr_records,
         group::GroupBounds,
     },
-    error::BrokerError,
     handlers::{
         RequestContext, audit_resource, config_resource_refusal, decode_request, encode_response,
         forward_to_controller::{controller_listener_dispatch, to_active_controller},
@@ -79,16 +77,10 @@ const OP_DELETE: i8 = 1;
 const OP_APPEND: i8 = 2;
 const OP_SUBTRACT: i8 = 3;
 
-/// Forward operations before merging them with authoritative metadata.
-/// Broker ids and local log directories are preprocessed on the addressed
-/// broker; logger resources continue to run there.
-pub(crate) async fn dispatch(
-    broker: &Broker,
-    version: i16,
-    req_bytes: &[u8],
-    ctx: &RequestContext<'_>,
-) -> Result<Bytes, BrokerError> {
-    let mut req = decode_request::<IncrementalAlterConfigsRequest>(req_bytes, version)?;
+raw_dispatch! {
+    /// Keep logger changes on this node and validate broker keys against local settings.
+    /// Topic, group, and other resource operations use the controller's image.
+    mut IncrementalAlterConfigsRequest, (broker, version, req_bytes, ctx, req), {
     controller_listener_dispatch!(
         broker,
         ctx,
@@ -182,9 +174,9 @@ pub(crate) async fn dispatch(
                 .zip(handle(broker, req, version, ctx).await?.responses),
         );
     }
-    indexed_responses.sort_unstable_by_key(|(index, _)| *index);
-    response.responses = indexed_responses.into_iter().map(|(_, row)| row).collect();
+    response.responses = super::alter_configs::ordered_resource_responses(indexed_responses);
     encode_response(&response, version)
+    }
 }
 
 fn request_refusal(
@@ -193,17 +185,7 @@ fn request_refusal(
     message: Option<&str>,
 ) -> IncrementalAlterConfigsResponse {
     IncrementalAlterConfigsResponse {
-        responses: req
-            .resources
-            .iter()
-            .map(|resource| AlterConfigsResourceResponse {
-                resource_type: resource.resource_type,
-                resource_name: resource.resource_name.clone(),
-                error_code: code,
-                error_message: message.map(str::to_owned),
-                ..Default::default()
-            })
-            .collect(),
+        responses: super::alter_configs::resource_error_rows(req.resources.iter(), code, message),
         ..Default::default()
     }
 }
@@ -337,12 +319,8 @@ async fn process_resource_once(
     validate_only: bool,
     is_duplicate: bool,
 ) -> Result<AlterConfigsResourceResponse, RaftError> {
-    let mut out = AlterConfigsResourceResponse {
-        resource_type: resource.resource_type,
-        resource_name: resource.resource_name.clone(),
-        error_message: None,
-        ..Default::default()
-    };
+    let mut out: AlterConfigsResourceResponse =
+        super::alter_configs::empty_resource_response(&resource);
     if let Err((code, message)) = validate_resource_shape(&resource, is_duplicate) {
         return Ok(out.with_error(code, message));
     }
@@ -467,12 +445,14 @@ async fn process_resource_once(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
-
     use super::*;
     use crate::{
-        handlers::incremental_alter_configs::test_support::make_scoped_resource,
+        handlers::{
+            incremental_alter_configs::test_support::{
+                AlterableConfig, check, make_scoped_resource,
+            },
+            test_support::{assert_dispatch_response, ordered_rows},
+        },
         test_support::{context_helper, start_broker_with_authorizer as start_broker, test_ctx},
     };
 
@@ -545,19 +525,22 @@ mod tests {
             (resource(RESOURCE_TYPE_BROKER_LOGGER, "2"), duplicate_logger),
         ];
         for order in [[0, 1, 2, 3, 4, 5, 6, 7], [7, 6, 5, 4, 3, 2, 1, 0]] {
+            let ordered = ordered_rows(&rows, &order);
             let request = IncrementalAlterConfigsRequest {
-                resources: order.iter().map(|&index| rows[index].0.clone()).collect(),
+                resources: ordered.requests,
                 validate_only: true,
                 ..Default::default()
             };
-            let bytes = encode_response(&request, 1).unwrap();
-            let bytes = Box::pin(dispatch(&broker, 1, &bytes, &ctx)).await.unwrap();
-            let response = decode_request::<IncrementalAlterConfigsResponse>(&bytes, 1).unwrap();
             let expected = IncrementalAlterConfigsResponse {
-                responses: order.iter().map(|&index| rows[index].1.clone()).collect(),
+                responses: ordered.responses,
                 ..Default::default()
             };
-            assert!(response == expected);
+            let broker_ref = broker.as_ref();
+            let context_ref = &ctx;
+            assert_dispatch_response(&request, &expected, 1, |body| async move {
+                dispatch(broker_ref, 1, &body, context_ref).await
+            })
+            .await;
         }
         handle.shutdown().await;
     }

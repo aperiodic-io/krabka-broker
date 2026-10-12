@@ -41,13 +41,7 @@ pub(super) fn spawn_replicator_supervisor(
     runtime: (&CancellationToken, &Arc<ThrottleState>, &BrokerMetrics),
     storage: ReplicatorStorage<'_>,
 ) -> JoinHandle<()> {
-    let protocol = config
-        .effective_listeners()
-        .iter()
-        .find(|listener| listener.name == config.inter_broker_listener_name)
-        .map_or(krabka_security::ListenerProtocol::Plaintext, |listener| {
-            listener.protocol
-        });
+    let protocol = config.inter_broker_listener_protocol();
     ReplicatorSupervisor::new(ReplicatorSupervisorConfig {
         node_id: config.node_id,
         broker_id: config.broker_id,

@@ -187,8 +187,8 @@ mod tests {
             actor::{
                 GroupActorMessage, GroupKindTag, PendingRecords, RegexResolution,
                 test_support::{
-                    ConsumerMemberSetup, completing_classic_group, empty_metadata,
-                    last_classic_metadata, make_coordinator, parked_follower, rpc,
+                    ConsumerMemberSetup, actor_services_with, completing_classic_group,
+                    empty_metadata, last_classic_metadata, make_coordinator, parked_follower, rpc,
                     subscribed_member,
                 },
             },
@@ -261,12 +261,12 @@ mod tests {
             GroupKind::Consumer(state),
             std::collections::HashMap::new(),
         );
-        let services = ActorServices {
-            config: &config,
-            metadata: &*metadata,
-            offsets_log: log.as_ref(),
-            coordinator: &coord,
-        };
+        let services = actor_services_with()
+            .config(&config)
+            .metadata(metadata.as_ref())
+            .offsets_log(log.as_ref())
+            .coordinator(&coord)
+            .call();
 
         handle_session_tick(&mut group, services)
             .await
@@ -414,12 +414,7 @@ mod tests {
                 GroupKind::Consumer(state),
                 std::collections::HashMap::new(),
             );
-            let services = ActorServices {
-                config: &config,
-                metadata: &metadata,
-                offsets_log: log.as_ref(),
-                coordinator: &coord,
-            };
+            let services = super::super::test_support::actor_services(&coord, log.as_ref());
             handle_session_tick(&mut group, services)
                 .await
                 .expect("tick");

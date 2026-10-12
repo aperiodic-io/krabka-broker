@@ -39,7 +39,7 @@ macro_rules! refusal_token_fixture {
     };
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, derive_more::Display, derive_more::From, derive_more::Into)]
 pub(super) struct TokenMutationIndex(pub usize);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -119,7 +119,7 @@ impl SecretProvision {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, derive_more::Display, derive_more::From, derive_more::Into)]
 pub(super) struct TokenPeriodMillis(pub i64);
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -158,6 +158,40 @@ pub(super) fn ownership_refusal(
         error: KafkaErrorCode(DELEGATION_TOKEN_OWNER_MISMATCH),
         ..Default::default()
     }
+}
+
+#[derive(Clone, Copy)]
+struct OwnershipRefusalIdentity {
+    name: &'static str,
+    caller: &'static str,
+}
+
+const ORDINARY_OWNERSHIP_REFUSALS: [OwnershipRefusalIdentity; 3] = [
+    OwnershipRefusalIdentity {
+        name: "foreign caller",
+        caller: "eve",
+    },
+    OwnershipRefusalIdentity {
+        name: "super user",
+        caller: "admin",
+    },
+    OwnershipRefusalIdentity {
+        name: "requester of a token created for another owner",
+        caller: "minter",
+    },
+];
+
+pub(super) fn ordinary_ownership_refusals(hmac: &[u8]) -> [TokenMutationRefusalSetup; 3] {
+    ORDINARY_OWNERSHIP_REFUSALS.map(|identity| {
+        ownership_refusal(
+            hmac,
+            OwnershipRefusalSetup {
+                name: identity.name,
+                caller: identity.caller,
+                ..Default::default()
+            },
+        )
+    })
 }
 
 /// Compare the complete API-specific wire response with independent refusal data.

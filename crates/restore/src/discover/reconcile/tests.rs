@@ -275,18 +275,16 @@ async fn a_live_partition_missing_from_the_scan_entirely_is_a_disagreement() {
     let archive = tempfile::tempdir().expect("temp dir");
     let payments_id = Uuid::from_u128(2);
     let payments_seg = Uuid::from_u128(20);
-    write_full_segment(
-        archive.path(),
-        SegmentSetup {
-            partition: PartitionKey {
-                topic: "payments",
-                topic_id: payments_id,
-                ..Default::default()
-            },
-            segment_id: payments_seg,
+    let payments_setup = SegmentSetup {
+        partition: PartitionKey {
+            topic: "payments",
+            topic_id: payments_id,
             ..Default::default()
         },
-    );
+        segment_id: payments_seg,
+        ..Default::default()
+    };
+    write_full_segment(archive.path(), payments_setup);
 
     let orders_id = Uuid::from_u128(1);
     let (_snap_dir, snap_path) = snapshot_directory();

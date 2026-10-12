@@ -442,6 +442,18 @@ mod tests {
             .collect()
     }
 
+    fn expected_with_fixed_first_two_members(third_member: &[(Uuid, &[i32])]) -> Assignment {
+        let mut assignment = expected(&[("A", &[(T1, &[0])]), ("B", &[(T2, &[0])])]);
+        assignment.insert(
+            "C".to_owned(),
+            third_member
+                .iter()
+                .map(|(topic, partitions)| (*topic, partitions.to_vec()))
+                .collect(),
+        );
+        assignment
+    }
+
     fn overshared_first_partition(c_subscriptions: &[Uuid]) -> Vec<MemberSubscription> {
         vec![
             member("A", &[T1], &[(T1, &[0])]),
@@ -498,11 +510,7 @@ mod tests {
                 ),
                 topics(&[(T1, 1), (T2, 1), (T3, 1)]),
                 None,
-                expected(&[
-                    ("A", &[(T1, &[0])]),
-                    ("B", &[(T2, &[0])]),
-                    ("C", &[(T3, &[0])]),
-                ]),
+                expected_with_fixed_first_two_members(&[(T3, &[0])]),
             ),
             (
                 "more members than partitions share",
@@ -593,11 +601,7 @@ mod tests {
                 ),
                 topics(&[(T1, 2), (T2, 2)]),
                 None,
-                expected(&[
-                    ("A", &[(T1, &[0])]),
-                    ("B", &[(T2, &[0])]),
-                    ("C", &[(T1, &[1]), (T2, &[1])]),
-                ]),
+                expected_with_fixed_first_two_members(&[(T1, &[1]), (T2, &[1])]),
             ),
             // Kafka's assignRemainingPartitions does not add a member it just
             // assigned to the partition's holders. After the overshare on

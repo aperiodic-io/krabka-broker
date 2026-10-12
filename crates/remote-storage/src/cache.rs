@@ -251,7 +251,7 @@ impl RemoteLogMetadataCache {
     }
 }
 
-fn sort_by_start_offset(segments: &mut [RemoteLogSegmentMetadata]) {
+pub(crate) fn sort_by_start_offset(segments: &mut [RemoteLogSegmentMetadata]) {
     segments.sort_by(|a, b| {
         a.start_offset().cmp(&b.start_offset()).then_with(|| {
             a.remote_log_segment_id()

@@ -9,23 +9,14 @@
 use std::net::SocketAddr;
 
 use assert2::assert;
-use bytes::{Buf, BytesMut};
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{Decode, Encode};
-use tokio::net::TcpStream;
+use bytes::Buf;
 
-use crate::{
-    CLIENT_ID,
-    kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
-    support::{
-        fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
-        produce::{SinglePartitionProduceSetup, single_partition_produce},
-        records::{batch_from_records, value_record},
-        wire::{
-            HeaderEncoding as RequestHeaderEncoding, WireFrameSetup, read_frame,
-            request_body_capacity, request_frame, write_frame,
-        },
-    },
+use super::test_support::*;
+use crate::support::{
+    fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
+    produce::{SinglePartitionProduceSetup, single_partition_produce},
+    records::{batch_from_records, value_record},
+    wire::{WireFrameSetup, read_frame, request_body_capacity, request_frame, write_frame},
 };
 
 /// Produce `count` records of `record_bytes` bytes each to `(topic, 0)` over

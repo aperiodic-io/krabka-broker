@@ -121,16 +121,11 @@ pub fn append_one_batch(
 /// `crate::partition_writer::append` applies to an owned batch.
 fn append_produce_data(data: ProduceData, log: &mut Log) -> Result<ProducePath, i16> {
     let target = log.config_snapshot().compression_type;
+    let mut data = data;
+    data.apply_target_compression(target);
     let result = match data {
         ProduceData::Verbatim(batch) => log.append_verbatim(&batch).map(|_| ProducePath::Verbatim),
-        ProduceData::Owned(mut batch) => {
-            if let Some(target) = target
-                && batch.attributes.compression() != target
-            {
-                batch.attributes = batch.attributes.with_compression(target);
-            }
-            log.append(&mut batch).map(|_| ProducePath::Owned)
-        }
+        ProduceData::Owned(mut batch) => log.append(&mut batch).map(|_| ProducePath::Owned),
         // `build_produce_data` builds only the two client-produce shapes. The
         // control and commit-marker shapes come from the coordinator paths,
         // which never reach this seam.

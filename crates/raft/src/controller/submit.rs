@@ -53,20 +53,17 @@ impl ControllerHandle {
         &self,
         records: Vec<MetadataRecord>,
     ) -> Result<SubmitChangeResult, RaftError> {
-        match self.engine.submit_change(records.clone()).await {
-            Ok(result) => Ok(result),
+        let submission = self.engine.submit_change(records.clone()).await;
+        match submission {
             Err(RaftError::NotLeader {
                 current_leader: Some(leader),
-            }) => {
-                if let Some(addr) = self.voter_addr(leader) {
-                    self.forward_submit_to(leader, &addr, &records).await
-                } else {
-                    Err(RaftError::NotLeader {
-                        current_leader: Some(leader),
-                    })
-                }
-            }
-            Err(e) => Err(e),
+            }) => match self.voter_addr(leader) {
+                Some(addr) => self.forward_submit_to(leader, &addr, &records).await,
+                None => Err(RaftError::NotLeader {
+                    current_leader: Some(leader),
+                }),
+            },
+            other => other,
         }
     }
 

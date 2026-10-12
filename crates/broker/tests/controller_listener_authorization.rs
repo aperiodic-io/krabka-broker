@@ -14,29 +14,22 @@
 mod support;
 
 use assert2::{assert, check};
-use bytes::{BufMut as _, Bytes, BytesMut};
-use krabka_broker::{
-    BrokerConfig, BrokerHandle, authorizer::SimpleAclAuthorizer, config::InterBrokerCredentials,
-};
-use krabka_metadata::{AclOperation, MetadataRecord, TopicRecord};
-use krabka_protocol::{
-    Decode, Encode, UnknownTaggedFields,
-    owned::{
-        broker_heartbeat_request::{self, BrokerHeartbeatRequest},
-        broker_heartbeat_response::BrokerHeartbeatResponse,
-        create_topics_request::{self},
-        create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
-        describe_cluster_request::{self, DescribeClusterRequest},
-        describe_cluster_response::DescribeClusterResponse,
-        describe_quorum_request::{self},
-        describe_quorum_response::DescribeQuorumResponse,
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_authenticate_response::SaslAuthenticateResponse,
-        sasl_handshake_request::SaslHandshakeRequest,
-        sasl_handshake_response::SaslHandshakeResponse,
-        vote_request::{self, VoteRequest},
-        vote_response::VoteResponse,
-    },
+use krabka_metadata::{MetadataRecord, TopicRecord};
+use krabka_protocol::owned::{
+    broker_heartbeat_request::{self, BrokerHeartbeatRequest},
+    broker_heartbeat_response::BrokerHeartbeatResponse,
+    create_topics_request::{self},
+    create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
+    describe_cluster_request::{self, DescribeClusterRequest},
+    describe_cluster_response::DescribeClusterResponse,
+    describe_quorum_request::{self},
+    describe_quorum_response::DescribeQuorumResponse,
+    sasl_authenticate_request::SaslAuthenticateRequest,
+    sasl_authenticate_response::SaslAuthenticateResponse,
+    sasl_handshake_request::SaslHandshakeRequest,
+    sasl_handshake_response::SaslHandshakeResponse,
+    vote_request::{self, VoteRequest},
+    vote_response::VoteResponse,
 };
 use krabka_raft::{
     API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE, KrabkaMetadataFetchRequest,
@@ -54,6 +47,7 @@ use tokio_rustls::rustls::{
 
 use crate::support::{
     acl::{ClusterAclSetup, cluster_acl_record},
+    controller_listener::*,
     quorum::describe_quorum_request as support_describe_quorum_request,
     start_with_bound_listeners,
     tls::{PinnedCertVerifier, fixture_signature_schemes},

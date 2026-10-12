@@ -63,14 +63,14 @@ mod tests {
             owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
         };
         let req = PeerRequest::Fetch {
-            cluster_id: None,
-            max_wait_ms: 0,
-            high_watermark: -1,
             from: NodeId(2),
             current_leader_epoch: 1,
             fetch_epoch: 1,
             fetch_offset: 5,
             replica_directory_id: uuid::Uuid::nil(),
+            cluster_id: None,
+            max_wait_ms: 0,
+            high_watermark: -1,
         };
         let mut c = &req.encode()[..];
         let dreq = FetchRequest::decode(&mut c, FETCH_VERSION).unwrap();

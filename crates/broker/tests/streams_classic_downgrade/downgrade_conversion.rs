@@ -3,7 +3,7 @@
 //! and across a restart that replays the group from the log.
 
 use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig};
+use krabka_broker::{Broker, BrokerConfig, coordinator::unified::GroupType};
 
 use crate::{
     CONVERGE_TRIES, ERR_NONE,
@@ -24,11 +24,10 @@ use crate::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn drained_streams_group_downgrades_and_preserves_offsets() {
     let (broker, bootstrap, _dir) = boot().await;
-    let streams_client = connect(&bootstrap).await;
-    let classic_client = connect(&bootstrap).await;
+    let (streams_client, classic_client) = (connect(&bootstrap).await, connect(&bootstrap).await);
 
-    finalize_streams_version(&streams_client).await;
     create_topic(&streams_client, "in", 1).await;
+    finalize_streams_version(&streams_client).await;
     let topic_id = topic_id_for(&streams_client, "in").await;
 
     // ── Phase 1: form a streams group, commit offset 42, then leave. ──
@@ -78,14 +77,10 @@ async fn drained_streams_group_downgrades_and_preserves_offsets() {
 
     // ── Phase 2: classic JoinGroup for the same id → downgrade to classic. ──
     let (_cm, _gen) = classic_join_sync(&classic_client, "g").await;
-    broker
-        .wait_until_group_type("g", krabka_broker::coordinator::unified::GroupType::Classic)
-        .await;
+    broker.wait_until_group_type("g", GroupType::Classic).await;
     assert!(
-        broker.group_type_for_test("g")
-            == Some(krabka_broker::coordinator::unified::GroupType::Classic),
-        "group_type must be Classic after downgrade, got {:?}",
-        broker.group_type_for_test("g")
+        broker.group_type_for_test("g") == Some(GroupType::Classic),
+        "group_type must be Classic after downgrade"
     );
 
     // ── Phase 3: committed offset survives the flip. ──

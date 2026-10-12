@@ -118,9 +118,9 @@ async fn a_parked_long_poll_wakes_when_the_record_comes_due() {
 
     for case in cases {
         let topic = format!("deliver-at-time-longpoll-{}", case.mode.value);
-        let topic_id = ready_topic(&p.broker, &p.client, &topic, case.mode).await;
-
-        let deliver_at_ms = produce_due_soon(&p.client, &topic, topic_id).await;
+        let id = ready_topic(&p.broker, &p.client, &topic, case.mode).await;
+        let deliver_at_ms = produce_due_soon(&p.client, &topic, id).await;
+        let topic_id = id;
 
         // The record is already in the log, so nothing appends and no watermark
         // this consumer reads moves while it waits. On a scheduled topic the

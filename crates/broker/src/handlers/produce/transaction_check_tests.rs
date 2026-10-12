@@ -8,19 +8,13 @@
 //! `__transaction_state` record.
 
 use assert2::assert;
-use bytes::Bytes;
 use krabka_ids::PartitionIndex;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{self},
-        init_producer_id_request::InitProducerIdRequest,
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::{PartitionProduceResponse, ProduceResponse},
-    },
-    records::{Attributes, Record, RecordBatch, RecordsPayload},
+use krabka_protocol::owned::{
+    create_topics_request::{self},
+    init_producer_id_request::InitProducerIdRequest,
 };
 
-use super::handle;
+use super::{test_support::one_transactional_batch, *};
 use crate::{
     codes,
     handlers::{
@@ -114,17 +108,12 @@ async fn a_produce_that_starts_a_transaction_on_many_partitions_makes_one_coordi
             partition_data: (0..PARTITIONS)
                 .map(|index| PartitionProduceData {
                     index,
-                    records: Some(RecordsPayload::V2(vec![RecordBatch {
-                        attributes: Attributes::default().with_transactional(true),
-                        producer_id: init.producer_id,
-                        producer_epoch: init.producer_epoch,
-                        base_sequence: 0,
-                        records: vec![Record {
-                            value: Some(Bytes::from_static(b"v")),
-                            ..Default::default()
-                        }],
-                        ..Default::default()
-                    }])),
+                    records: Some(
+                        one_transactional_batch()
+                            .producer_id(init.producer_id)
+                            .producer_epoch(init.producer_epoch)
+                            .call(),
+                    ),
                     ..Default::default()
                 })
                 .collect(),

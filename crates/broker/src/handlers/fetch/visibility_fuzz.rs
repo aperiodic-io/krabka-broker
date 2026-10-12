@@ -28,18 +28,14 @@ proptest! {
         // the log still holds, so the kernel sees `log_start <= d <= hw`.
         let deliverable = deliverable_raw.clamp(log_start, hw);
         let read_committed = rc_raw && !is_follower; // read_committed ⟹ !follower
-        let w = compute_visibility_window(
-            is_follower,
-            read_committed,
-            FetchWatermarks {
-                log_start: Offset(log_start),
-                hw: Offset(hw),
-                lso: Offset(lso),
-                log_end: Offset(log_end),
-                deliverable: Offset(deliverable),
-            },
-            Offset(fo),
-        );
+        let watermarks = FetchWatermarks {
+            log_start: Offset(log_start),
+            hw: Offset(hw),
+            lso: Offset(lso),
+            log_end: Offset(log_end),
+            deliverable: Offset(deliverable),
+        };
+        let w = compute_visibility_window(is_follower, read_committed, watermarks, Offset(fo));
         // Unwrap the `Offset` window fields into this proptest's `i64` world.
         let (limit_offset, response_hw, response_lso, effective_lso) = (
             w.limit_offset.0,

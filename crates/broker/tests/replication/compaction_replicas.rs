@@ -167,8 +167,13 @@ async fn every_replica_keeps_the_last_batch_of_an_active_producer() {
     .collect();
     let topic_id =
         support::client::create_topic_spec(&admin, topic, CreateTopicRequestSetup::default()).await;
+    support::partitions::wait_for_partition_on_all(
+        cluster.iter().map(|(handle, _, _)| handle),
+        TOPIC,
+        0,
+    )
+    .await;
     for (handle, _, _) in &cluster {
-        handle.wait_until_partition_present(TOPIC, 0).await;
         wait_for_the_topic_config(handle).await;
     }
     cluster[0]

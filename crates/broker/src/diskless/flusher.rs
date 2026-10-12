@@ -900,16 +900,13 @@ mod tests {
     #[tokio::test]
     async fn an_unlimited_retention_expires_nothing() {
         let dir = tempdir().unwrap();
-        let topic_id = Uuid::from_u128(11);
-        let (context, store, handle, image) = seeded_retention_flusher(
-            dir.path(),
-            topic_id,
-            &[
-                ("diskless-wal/7/first.ckwl", 0, 2, 1_000),
-                ("diskless-wal/7/second.ckwl", 3, 5, 5_000),
-            ],
-        )
-        .await;
+        let tid = Uuid::from_u128(11);
+        let entries = [
+            ("diskless-wal/7/first.ckwl", 0, 2, 1_000),
+            ("diskless-wal/7/second.ckwl", 3, 5, 5_000),
+        ];
+        let (context, store, handle, image) =
+            seeded_retention_flusher(dir.path(), tid, &entries).await;
         // Kafka's unlimited sentinel for both windows, which is what a topic
         // with `retention.ms=-1` and `retention.bytes=-1` reaches the flusher
         // as. The clock is then irrelevant, so this uses the largest one.
@@ -917,11 +914,11 @@ mod tests {
         config.retention = None;
         config.retention_size = None;
         handle.log.lock().unwrap().set_config(config);
-        let partitions = [flush_partition(topic_id, &handle)];
+        let partitions = [flush_partition(tid, &handle)];
 
         expire_and_reclaim(&context, &image, &partitions, i64::MAX).await;
 
-        assert_cached_range!(context, topic_id, 0, 0; is_some);
+        assert_cached_range!(context, tid, 0, 0; is_some);
         assert!(
             store
                 .head(&Path::from("diskless-wal/7/first.ckwl"))

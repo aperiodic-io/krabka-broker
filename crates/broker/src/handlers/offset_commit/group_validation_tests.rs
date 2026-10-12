@@ -131,15 +131,7 @@ async fn drive(broker: &BrokerHandle, row: usize, case: Case) -> (OffsetCommitRe
         group_id: group_id.clone(),
         generation_id_or_member_epoch: case.generation,
         member_id: case.member_id.to_string(),
-        topics: vec![OffsetCommitRequestTopic {
-            name: TOPIC.to_string(),
-            partitions: vec![OffsetCommitRequestPartition {
-                partition_index: 0,
-                committed_offset: 42,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }],
+        topics: vec![super::test_topic_row().name(TOPIC.to_string()).call()],
         ..Default::default()
     };
     request_identity!(
@@ -228,6 +220,11 @@ async fn commit_is_fenced_by_kafka_group_rule() {
     for (row, case) in cases.into_iter().enumerate() {
         let (response, exists) = drive(&broker, row, case).await;
         actual.push((case.group, case.version, case.member_id, response, exists));
+        let resp_parts = vec![OffsetCommitResponsePartition {
+            partition_index: 0,
+            error_code: case.error_code,
+            ..Default::default()
+        }];
         expected.push((
             case.group,
             case.version,
@@ -235,11 +232,7 @@ async fn commit_is_fenced_by_kafka_group_rule() {
             OffsetCommitResponse {
                 topics: vec![OffsetCommitResponseTopic {
                     name: TOPIC.to_string(),
-                    partitions: vec![OffsetCommitResponsePartition {
-                        partition_index: 0,
-                        error_code: case.error_code,
-                        ..Default::default()
-                    }],
+                    partitions: resp_parts,
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -363,16 +356,17 @@ async fn oversized_metadata_is_refused_through_the_handler() {
     create_topic(&shared).await;
     broker.wait_until_partition_present(TOPIC, 0).await;
     let max = usize::try_from(shared.config.offset_metadata_max_bytes).unwrap();
+    let partition = OffsetCommitRequestPartition {
+        partition_index: 0,
+        committed_offset: 42,
+        committed_metadata: Some("m".repeat(max + 1)),
+        ..Default::default()
+    };
     let request = OffsetCommitRequest {
         group_id: GROUP_ID.to_string(),
         topics: vec![OffsetCommitRequestTopic {
             name: TOPIC.to_string(),
-            partitions: vec![OffsetCommitRequestPartition {
-                partition_index: 0,
-                committed_offset: 42,
-                committed_metadata: Some("m".repeat(max + 1)),
-                ..Default::default()
-            }],
+            partitions: vec![partition],
             ..Default::default()
         }],
         ..Default::default()

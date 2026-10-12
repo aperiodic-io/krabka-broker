@@ -21,6 +21,17 @@ use crate::{
     txn::{bootstrap, state::TxnEntry},
 };
 
+#[allow(unused_imports)]
+pub(crate) mod test_prelude {
+    pub(crate) use std::{collections::HashSet, sync::Arc};
+
+    pub(crate) use assert2::{assert, check};
+    pub(crate) use krabka_ids::PartitionIndex;
+    pub(crate) use krabka_log::{Log, LogConfig, Offset, ProducerId, ReadOutput};
+    pub(crate) use krabka_metadata::{MetadataImage, NodeId};
+    pub(crate) use tempfile::TempDir;
+}
+
 /// The topic of the data partition [`live_coordinator`] hosts.
 pub(super) const DATA_TOPIC: &str = "orders";
 

@@ -69,6 +69,10 @@ fn row(name: Option<&str>, topic_id: WireUuid, error_code: i16) -> DeletableTopi
     wire::delete_topic_result(name.map(str::to_string), topic_id, error_code)
 }
 
+fn response(rows: Vec<DeletableTopicResult>) -> DeleteTopicsResponse {
+    unthrottled_wire!(DeleteTopicsResponse { responses: rows })
+}
+
 #[tokio::test]
 async fn handle_denied_topic_returns_authorization_failure() {
     broker_fixture!((broker_handle, _dir, broker), deny_all);
@@ -77,14 +81,11 @@ async fn handle_denied_topic_returns_authorization_failure() {
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    let expected = unthrottled_wire!(DeleteTopicsResponse {
-        responses: vec![tagged_wire!(DeletableTopicResult {
-            name: Some("secret".into()),
-            topic_id: WireUuid::ZERO,
-            error_code: codes::TOPIC_AUTHORIZATION_FAILED,
-            error_message: Some("Topic authorization failed.".into()),
-        })],
-    });
+    let expected = response(vec![row(
+        Some("secret"),
+        WireUuid::ZERO,
+        codes::TOPIC_AUTHORIZATION_FAILED,
+    )]);
     assert!(resp == expected);
     broker_handle.shutdown().await;
 }
@@ -98,22 +99,14 @@ async fn handle_unknown_name_and_id_preserve_error_rows() {
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    let expected = unthrottled_wire!(DeleteTopicsResponse {
-        responses: vec![
-            tagged_wire!(DeletableTopicResult {
-                name: None,
-                topic_id: bogus_id,
-                error_code: codes::UNKNOWN_TOPIC_ID,
-                error_message: Some("This server does not host this topic ID.".into()),
-            }),
-            tagged_wire!(DeletableTopicResult {
-                name: Some("missing".into()),
-                topic_id: WireUuid::ZERO,
-                error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
-                error_message: Some("This server does not host this topic-partition.".into()),
-            }),
-        ],
-    });
+    let expected = response(vec![
+        row(None, bogus_id, codes::UNKNOWN_TOPIC_ID),
+        row(
+            Some("missing"),
+            WireUuid::ZERO,
+            codes::UNKNOWN_TOPIC_OR_PARTITION,
+        ),
+    ]);
     assert!(resp == expected);
     broker_handle.shutdown().await;
 }

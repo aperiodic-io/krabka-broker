@@ -28,6 +28,13 @@ use crate::{
     },
 };
 
+macro_rules! assert_single_response_error {
+    ($response:expr, $error_code:expr) => {{
+        assert!($response.responses.len() == 1);
+        assert!($response.responses[0].error_code == $error_code);
+    }};
+}
+
 async fn stopped_observer() -> (BrokerHandle, BrokerHandle, TempDir, TempDir) {
     let (controller, controller_dir) = start_broker_no_audit().await;
     controller.wait_until_controller_leader().await;
@@ -109,8 +116,7 @@ async fn a_stale_observer_cannot_delete_a_recreated_topic_by_old_id() {
         &ctx,
     )
     .await;
-    assert!(response.responses.len() == 1);
-    assert!(response.responses[0].error_code == codes::UNKNOWN_TOPIC_ID);
+    assert_single_response_error!(response, codes::UNKNOWN_TOPIC_ID);
     assert!(
         authority
             .controller
@@ -168,11 +174,7 @@ async fn an_incremental_update_through_a_stale_observer_keeps_unrelated_config()
         &ctx,
     )
     .await;
-    assert!(response.responses.len() == 1);
-    assert!(
-        response.responses[0].error_code == codes::NONE,
-        "{response:?}"
-    );
+    assert_single_response_error!(response, codes::NONE);
     assert!(
         authority.controller.current_image().topic_config("orders")
             == Some(&string_pairs(&[

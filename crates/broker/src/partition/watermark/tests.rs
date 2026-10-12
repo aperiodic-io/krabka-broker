@@ -173,10 +173,10 @@ async fn set_follower_hw_same_high_watermark_does_not_notify() {
     let (p, _td) = test_partition(hw_advance_notify.clone());
     assert!(p.high_watermark().await == 0);
 
-    let waiter = hw_advance_notify.notified();
-    tokio::pin!(waiter);
+    let notif_waiter = hw_advance_notify.notified();
+    tokio::pin!(notif_waiter);
     assert!(
-        futures_util::poll!(&mut waiter).is_pending(),
+        futures_util::poll!(&mut notif_waiter).is_pending(),
         "waiter registers on first poll"
     );
 
@@ -184,7 +184,7 @@ async fn set_follower_hw_same_high_watermark_does_not_notify() {
 
     assert!(p.high_watermark().await == 0);
     assert!(
-        futures_util::poll!(&mut waiter).is_pending(),
+        futures_util::poll!(&mut notif_waiter).is_pending(),
         "unchanged HW must not wake waiters"
     );
 }

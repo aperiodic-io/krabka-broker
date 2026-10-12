@@ -14,9 +14,6 @@
 //! The algorithm treats a tombstone like any other value and keeps it as the
 //! most-recent entry for its key. `delete.retention.ms` ages tombstones out.
 
-#[cfg(test)]
-use krabka_ids::ProducerId;
-
 mod batch_reader;
 mod decision;
 mod offset_map;
@@ -30,6 +27,8 @@ mod test_support;
 pub(crate) use self::decision::{
     BatchMeta, RecordMeta, RetainDecision, TxnDataState, retain_decision, should_index_key,
 };
+#[cfg(test)]
+pub(crate) use self::decision::{data_retention_metadata, marker_retention_metadata};
 pub use self::{
     offset_map::build_offset_map,
     rewrite::{

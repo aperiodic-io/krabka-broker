@@ -13,13 +13,13 @@ const COMPLETE_ABORT: i8 = 5;
 
 use krabka_ids::ProducerId;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, derive_more::Display, derive_more::From, derive_more::Into)]
 struct ProducerEpoch(i16);
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, derive_more::Display, derive_more::From, derive_more::Into)]
 struct CoordinatorEpoch(i32);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, derive_more::Display, derive_more::From, derive_more::Into)]
 struct TransactionStateCode(i8);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -43,13 +43,18 @@ enum PendingTransaction {
     Absent,
 }
 
-#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+#[derive(Clone, Copy, krabka_macros::FieldDefaults, bon::Builder)]
 struct MarkerSetup {
+    #[builder(default = ProducerId(1))]
     #[default(ProducerId(1))]
     producer_id: ProducerId,
+    #[builder(default = ProducerEpoch(0), into)]
     producer_epoch: ProducerEpoch,
+    #[builder(default = CoordinatorEpoch(0), into)]
     coordinator_epoch: CoordinatorEpoch,
+    #[builder(default)]
     outcome: TransactionOutcome,
+    #[builder(default)]
     target: MarkerTarget,
 }
 
@@ -78,6 +83,15 @@ fn marker(setup: MarkerSetup) -> TransactionMarkerRequest {
         is_commit: setup.outcome == TransactionOutcome::Commit,
         is_offsets_partition: setup.target == MarkerTarget::Offsets,
     }
+}
+
+fn committed_marker() -> TransactionMarkerRequest {
+    marker(
+        MarkerSetup::builder()
+            .producer_epoch(3)
+            .coordinator_epoch(8)
+            .build(),
+    )
 }
 
 fn partition(setup: MarkerPartitionSetup) -> TransactionMarkerPartitionState {

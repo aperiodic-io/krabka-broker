@@ -18,7 +18,9 @@ use krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes};
 
 use super::{
     Log,
-    test_support::{NO_LIMIT, append_samples, configured_test_log, sample_batch},
+    test_support::{
+        NO_LIMIT, append_samples, assert_log_end_offset, configured_test_log, sample_batch,
+    },
 };
 use crate::{
     config::{LogConfig, SegmentAllocation},
@@ -249,7 +251,7 @@ fn a_reopened_segment_gives_back_a_crashed_runs_reservation() {
     .unwrap();
 
     let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
-    assert2::assert!(log.log_end_offset() == Offset(3));
+    assert_log_end_offset(&log, Offset(3));
     assert2::assert!(allocated(dir.path(), 0) >= SEGMENT.bytes_u64());
 
     assert2::assert!(log.roll().unwrap());

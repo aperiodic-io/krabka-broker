@@ -376,12 +376,9 @@ async fn audit_only_elects_and_records_the_bypass() {
     let (audit_log, mut events) = AuditLog::new(8);
     let source = source_with(Some(NODE), image_with_partition(1, &[1, 2]));
     let image = source.current_image();
-    let mgr = manager_with(
-        Arc::clone(&source),
-        liveness_with_alive(&[2]).await,
-        &gated(BackgroundUncleanRecovery::AuditOnly),
-        audit_log,
-    );
+    let liveness = liveness_with_alive(&[2]).await;
+    let gate_cfg = gated(BackgroundUncleanRecovery::AuditOnly);
+    let mgr = manager_with(Arc::clone(&source), liveness, &gate_cfg, audit_log);
     let pr = image
         .partition("t", 0)
         .expect("the partition is in the image");

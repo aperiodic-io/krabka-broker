@@ -13,18 +13,18 @@ struct OrdersResolver;
 impl TopicRegexResolver for OrdersResolver {
     fn resolve(&self, regexes: &BTreeSet<String>) -> HashMap<String, ResolvedRegularExpression> {
         regexes
-            .iter()
+            .first()
             .map(|pattern| {
-                (
+                HashMap::from([(
                     pattern.clone(),
                     ResolvedRegularExpression {
                         topics: BTreeSet::from(["orders".to_owned()]),
                         version: 42,
                         timestamp_ms: 1_000,
                     },
-                )
+                )])
             })
-            .collect()
+            .unwrap_or_default()
     }
 }
 

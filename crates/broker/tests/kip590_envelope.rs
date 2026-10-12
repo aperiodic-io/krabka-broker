@@ -15,34 +15,27 @@
 //! "alice"))` is the byte string [`JVM_USER_ALICE`] holds.
 
 use assert2::{assert, check};
-use bytes::{BufMut as _, Bytes, BytesMut};
-use krabka_broker::{
-    BrokerConfig, BrokerHandle, authorizer::SimpleAclAuthorizer, config::InterBrokerCredentials,
-};
-use krabka_metadata::AclOperation;
-use krabka_protocol::{
-    Decode as _, Encode, UnknownTaggedFields,
-    owned::{
-        allocate_producer_ids_request::{self, AllocateProducerIdsRequest},
-        allocate_producer_ids_response::AllocateProducerIdsResponse,
-        api_versions_response::ApiVersionsResponse,
-        create_delegation_token_request::{self, CreateDelegationTokenRequest},
-        create_delegation_token_response::CreateDelegationTokenResponse,
-        create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
-        envelope_request::{self, EnvelopeRequest},
-        envelope_response::EnvelopeResponse,
-        produce_request::ProduceRequest,
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_authenticate_response::SaslAuthenticateResponse,
-        sasl_handshake_request::SaslHandshakeRequest,
-        sasl_handshake_response::SaslHandshakeResponse,
-    },
+use krabka_protocol::owned::{
+    allocate_producer_ids_request::{self, AllocateProducerIdsRequest},
+    allocate_producer_ids_response::AllocateProducerIdsResponse,
+    api_versions_response::ApiVersionsResponse,
+    create_delegation_token_request::{self, CreateDelegationTokenRequest},
+    create_delegation_token_response::CreateDelegationTokenResponse,
+    create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
+    envelope_request::{self, EnvelopeRequest},
+    envelope_response::EnvelopeResponse,
+    produce_request::ProduceRequest,
+    sasl_authenticate_request::SaslAuthenticateRequest,
+    sasl_authenticate_response::SaslAuthenticateResponse,
+    sasl_handshake_request::SaslHandshakeRequest,
+    sasl_handshake_response::SaslHandshakeResponse,
 };
 use krabka_security::{ListenerProtocol, SaslMechanism, SecretBytes};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::support::{
     acl::{ClusterAclSetup, cluster_acl_record},
+    controller_listener::*,
     start_with_bound_listeners,
     topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
 };
@@ -207,14 +200,15 @@ fn embedded_create_topics(topic: &str) -> Bytes {
     );
     // The length prefix belongs to the outer connection, not to `request_data`
     // — KIP-590 wraps the header and body only.
-    let framed = request_frame(RequestFrameSetup {
+    let setup = RequestFrameSetup {
+        body: &body,
+        client_id: Some("adminclient-1".as_bytes()),
         api_key: krabka_ids::ApiKey(krabka_protocol::owned::create_topics_request::API_KEY),
         api_version: krabka_ids::ApiVersion(version),
         correlation_id: FrameCorrelationId(EMBEDDED_CORRELATION_ID),
-        client_id: Some("adminclient-1".as_bytes()),
         tagged: Some(&[0]),
-        body: &body,
-    });
+    };
+    let framed = request_frame(setup);
     framed.slice(4..)
 }
 

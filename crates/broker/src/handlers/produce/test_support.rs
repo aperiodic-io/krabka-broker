@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-use krabka_protocol::records::RecordBatch;
+use krabka_protocol::records::{Attributes, Record, RecordBatch, RecordsPayload};
 
 use crate::{
     api_catalog::UnstableApiVersions,
@@ -181,6 +181,21 @@ pub(crate) fn image_with_topic(topic: &str, isr: &[u64]) -> MetadataImage {
             ..Default::default()
         })
     })
+}
+
+#[bon::builder]
+pub(super) fn one_transactional_batch(producer_id: i64, producer_epoch: i16) -> RecordsPayload {
+    RecordsPayload::V2(vec![RecordBatch {
+        attributes: Attributes::default().with_transactional(true),
+        producer_id,
+        producer_epoch,
+        base_sequence: 0,
+        records: vec![Record {
+            value: Some(Bytes::from_static(b"v")),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }])
 }
 
 pub(super) fn set_min_isr(img: &mut MetadataImage, topic: &str, n: i32) {

@@ -21,10 +21,7 @@ use crate::{
         create_topic, create_topic_with_partitions, fetch_legacy_raw, fetch_legacy_raw_partitions,
         legacy_bytes, produce_batch, produce_batch_to,
     },
-    support::{
-        self,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
-    },
+    support,
 };
 
 #[tokio::test]
@@ -32,21 +29,7 @@ async fn fetch_v3_downconverts_v2_batch_to_v0_messageset() {
     let p = support::start_legacy().await;
 
     // 1. Create topic.
-    let cr = p
-        .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("legacy_fetch_basic").into(),
-                ..Default::default()
-            },
-        )))
-        .await
-        .expect("CreateTopics");
-    assert!(
-        cr.topics[0].error_code == 0,
-        "CreateTopics error: {}",
-        cr.topics[0].error_code
-    );
+    create_topic(&p.client, "legacy_fetch_basic").await;
 
     // 2. Produce 2 records via modern path (ProduceRequest v9).
     let batch = RecordBatch {
@@ -74,9 +57,8 @@ async fn fetch_v3_downconverts_v2_batch_to_v0_messageset() {
     let resp_body = fetch_legacy_raw(addr, "legacy_fetch_basic", 3).await;
 
     // 4. Decode as LegacyFetchResponse (Fetch v3 is non-flexible).
-    let mut cur: &[u8] = &resp_body;
-    let fetch_resp =
-        LegacyFetchResponse::decode(&mut cur, 3).expect("decode LegacyFetchResponse v3");
+    let fetch_resp = LegacyFetchResponse::decode(&mut resp_body.as_slice(), 3)
+        .expect("decode LegacyFetchResponse v3");
 
     assert!(
         fetch_resp.responses.len() == 1,

@@ -199,15 +199,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn txn_overlaps_boundaries() {
-        let e = AbortedTxnIndexEntry {
+    fn sample_aborted_txn_entry(start: i64, last: i64, lso: i64) -> AbortedTxnIndexEntry {
+        AbortedTxnIndexEntry {
             version: I16::new(0),
             producer_id: I64::new(1),
-            start_offset: I64::new(10),
-            last_offset: I64::new(14),
-            last_stable_offset: I64::new(15),
-        };
+            start_offset: I64::new(start),
+            last_offset: I64::new(last),
+            last_stable_offset: I64::new(lso),
+        }
+    }
+
+    #[test]
+    fn txn_overlaps_boundaries() {
+        let e = sample_aborted_txn_entry(10, 14, 15);
         let cases = [
             // Range fully before the entry → excluded.
             (0, 9, false),
@@ -232,20 +236,8 @@ mod tests {
 
     #[test]
     fn txn_overlaps_rejects_inverted_query_and_parser_rejects_inverted_entry() {
-        let valid = AbortedTxnIndexEntry {
-            version: I16::new(0),
-            producer_id: I64::new(1),
-            start_offset: I64::new(10),
-            last_offset: I64::new(14),
-            last_stable_offset: I64::new(15),
-        };
-        let inverted = AbortedTxnIndexEntry {
-            version: I16::new(0),
-            producer_id: I64::new(1),
-            start_offset: I64::new(14),
-            last_offset: I64::new(10),
-            last_stable_offset: I64::new(11),
-        };
+        let valid = sample_aborted_txn_entry(10, 14, 15);
+        let inverted = sample_aborted_txn_entry(14, 10, 11);
 
         assert!(!txn_overlaps(&valid, 14, 10));
         assert!(!txn_overlaps(&inverted, 0, 100));

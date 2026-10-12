@@ -122,9 +122,9 @@ mod tests {
     use crate::{
         codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH},
         handlers::delegation_token_test_support::{
-            DAY_MS, MutationSeedSetup, OwnershipRefusalSetup, TokenExpiryRule, TokenExpirySetup,
-            TokenMutationIndex, TokenMutationRefusalSetup, TokenPeriodMillis, TokenPersistence,
-            authed, in_mutation_window, mutation_credential_refusals, ownership_refusal,
+            DAY_MS, MutationSeedSetup, TokenExpiryRule, TokenExpirySetup, TokenMutationIndex,
+            TokenMutationRefusalSetup, TokenPeriodMillis, TokenPersistence, authed,
+            in_mutation_window, mutation_credential_refusals, ordinary_ownership_refusals,
             stored_expiry, test_controller,
         },
         test_support::{KafkaErrorCode, UnixMillis},
@@ -155,51 +155,34 @@ mod tests {
     async fn refusals_follow_kafka_order() {
         refusal_token_fixture!((_dir, controller, secret, live, expired));
 
-        let cases = mutation_credential_refusals(&live.0).into_iter().chain([
-            ownership_refusal(&live.0, OwnershipRefusalSetup::default()),
-            ownership_refusal(
-                &live.0,
-                OwnershipRefusalSetup {
-                    name: "super user",
-                    caller: "admin",
+        let cases = mutation_credential_refusals(&live.0)
+            .into_iter()
+            .chain(ordinary_ownership_refusals(&live.0))
+            .chain([
+                TokenMutationRefusalSetup {
+                    name: "foreign caller, expired token",
+                    authentication: authed("eve"),
+                    hmac: expired.0.clone(),
                     period: TokenPeriodMillis(0),
+                    error: KafkaErrorCode(DELEGATION_TOKEN_OWNER_MISMATCH),
+                    ..Default::default()
                 },
-            ),
-            // `allowedToRenew` is the owner or a renewer. Unlike `filterToken`'s
-            // `ownerOrRenewer`, it leaves out the requester that created the
-            // token for another owner.
-            ownership_refusal(
-                &live.0,
-                OwnershipRefusalSetup {
-                    name: "requester of a token created for another owner",
-                    caller: "minter",
+                TokenMutationRefusalSetup {
+                    name: "owner, expired token",
+                    hmac: expired.0.clone(),
                     period: TokenPeriodMillis(0),
+                    error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
+                    ..Default::default()
                 },
-            ),
-            TokenMutationRefusalSetup {
-                name: "foreign caller, expired token",
-                authentication: authed("eve"),
-                hmac: expired.0.clone(),
-                period: TokenPeriodMillis(0),
-                error: KafkaErrorCode(DELEGATION_TOKEN_OWNER_MISMATCH),
-                ..Default::default()
-            },
-            TokenMutationRefusalSetup {
-                name: "owner, expired token",
-                hmac: expired.0.clone(),
-                period: TokenPeriodMillis(0),
-                error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
-                ..Default::default()
-            },
-            TokenMutationRefusalSetup {
-                name: "renewer, expired token",
-                authentication: authed("bob"),
-                hmac: expired.0.clone(),
-                period: TokenPeriodMillis(1_000),
-                error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
-                ..Default::default()
-            },
-        ]);
+                TokenMutationRefusalSetup {
+                    name: "renewer, expired token",
+                    authentication: authed("bob"),
+                    hmac: expired.0.clone(),
+                    period: TokenPeriodMillis(1_000),
+                    error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
+                    ..Default::default()
+                },
+            ]);
         for case in cases {
             let resp = handle(
                 &ExpireDelegationTokenRequest {

@@ -38,12 +38,19 @@ const PINNED_UNIQUE_STATES_RF_DECREASE: usize = 21;
 const PINNED_UNIQUE_STATES_RF_DECREASE_LEADER_REMOVED: usize = 120;
 
 /// Bounded config for the reassignment model. It lives here, not in the state.
+#[derive(bon::Builder)]
 struct ReassignModel {
+    #[builder(default = vec![krabka_audit::NodeId(1), krabka_audit::NodeId(2), krabka_audit::NodeId(3)])]
     replicas: Vec<NodeId>,
+    #[builder(default = vec![krabka_audit::NodeId(3)])]
     adding: Vec<NodeId>,
+    #[builder(default = vec![krabka_audit::NodeId(2)])]
     removing: Vec<NodeId>,
+    #[builder(default = vec![krabka_audit::NodeId(1), krabka_audit::NodeId(2)])]
     initial_isr: Vec<NodeId>,
+    #[builder(default = krabka_audit::NodeId(1))]
     leader: NodeId,
+    #[builder(default = 10)]
     max_epoch: i32,
 }
 
@@ -68,61 +75,39 @@ enum ReassignAction {
 
 impl ReassignModel {
     fn basic() -> Self {
-        Self {
-            replicas: vec![
-                krabka_audit::NodeId(1),
-                krabka_audit::NodeId(2),
-                krabka_audit::NodeId(3),
-            ],
-            adding: vec![krabka_audit::NodeId(3)],
-            removing: vec![krabka_audit::NodeId(2)],
-            initial_isr: vec![krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-            leader: krabka_audit::NodeId(1), // not removed → no handoff
-            max_epoch: 10,
-        }
+        Self::builder().build()
     }
 
     fn leader_handoff() -> Self {
-        Self {
-            leader: krabka_audit::NodeId(2), // in `removing` → handoff required before completion
-            ..Self::basic()
-        }
+        Self::builder().leader(krabka_audit::NodeId(2)).build()
     }
 
     /// A replication factor decrease with nothing to add: broker 2, a target
     /// replica, is not in the ISR, and completing early would shrink the ISR.
     fn rf_decrease() -> Self {
-        Self {
-            replicas: vec![
-                krabka_audit::NodeId(1),
-                krabka_audit::NodeId(2),
-                krabka_audit::NodeId(3),
-            ],
-            adding: vec![],
-            removing: vec![krabka_audit::NodeId(3)],
-            initial_isr: vec![krabka_audit::NodeId(1), krabka_audit::NodeId(3)],
-            leader: krabka_audit::NodeId(1),
-            max_epoch: 10,
-        }
+        Self::builder()
+            .adding(Vec::new())
+            .removing(vec![krabka_audit::NodeId(3)])
+            .initial_isr(vec![krabka_audit::NodeId(1), krabka_audit::NodeId(3)])
+            .build()
     }
 
     /// `[1,2,3,4] -> [3,4]` with broker 4 added and the leader removed. Kafka
     /// hands off and completes only once broker 3 has caught up too, even
     /// though broker 4 alone would already satisfy the additions.
     fn rf_decrease_leader_removed() -> Self {
-        Self {
-            replicas: vec![
+        Self::builder()
+            .replicas(vec![
                 krabka_audit::NodeId(1),
                 krabka_audit::NodeId(2),
                 krabka_audit::NodeId(3),
                 krabka_audit::NodeId(4),
-            ],
-            adding: vec![krabka_audit::NodeId(4)],
-            removing: vec![krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-            initial_isr: vec![krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-            leader: krabka_audit::NodeId(1),
-            max_epoch: 10,
-        }
+            ])
+            .adding(vec![krabka_audit::NodeId(4)])
+            .removing(vec![krabka_audit::NodeId(1), krabka_audit::NodeId(2)])
+            .initial_isr(vec![krabka_audit::NodeId(1), krabka_audit::NodeId(2)])
+            .leader(krabka_audit::NodeId(1))
+            .build()
     }
 
     fn wide() -> Self {

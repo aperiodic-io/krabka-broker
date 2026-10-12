@@ -106,14 +106,12 @@ fn uuid_hashcode(id: Uuid) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use assert2::{assert, check};
     use krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord};
     use uuid::Uuid;
 
     use super::*;
-    use crate::client_metrics::manager::test_support::{attrs, img_with};
+    use crate::client_metrics::manager::test_support::{apply_config, attrs, img_with};
 
     /// The subscription of a broker that keeps Kafka's default interval.
     fn compute_subscription(
@@ -199,17 +197,11 @@ mod tests {
     #[test]
     fn min_interval_and_metric_union_across_subs() {
         let mut img = img_with("s1", &[("metrics", "a."), ("interval.ms", "60000")]);
-        img.apply(&MetadataRecord::V1ClientMetricsConfig(
-            ClientMetricsConfigRecord {
-                name: "s2".into(),
-                configs: {
-                    let mut c = BTreeMap::new();
-                    c.insert("metrics".into(), "b.".into());
-                    c.insert("interval.ms".into(), "30000".into());
-                    c
-                },
-            },
-        ));
+        apply_config(
+            &mut img,
+            "s2",
+            &[("metrics", "b."), ("interval.ms", "30000")],
+        );
         let m = compute_subscription(&img, &attrs());
         let mut got = m.metrics.clone();
         got.sort();
@@ -236,16 +228,7 @@ mod tests {
     #[test]
     fn star_collapses_union() {
         let mut img = img_with("s1", &[("metrics", "a.")]);
-        img.apply(&MetadataRecord::V1ClientMetricsConfig(
-            ClientMetricsConfigRecord {
-                name: "s2".into(),
-                configs: {
-                    let mut c = BTreeMap::new();
-                    c.insert("metrics".into(), "*".into());
-                    c
-                },
-            },
-        ));
+        apply_config(&mut img, "s2", &[("metrics", "*")]);
         let m = compute_subscription(&img, &attrs());
         check!(m.metrics == vec!["*".to_string()]);
     }

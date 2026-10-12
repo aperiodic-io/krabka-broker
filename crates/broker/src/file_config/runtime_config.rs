@@ -199,30 +199,6 @@ pub struct RuntimeFileConfig {
     /// `min.insync.replicas` of the `__share_group_state` internal topic,
     /// Kafka's `share.coordinator.state.topic.min.isr`.
     pub share_state_min_isr: Option<i32>,
-    /// Updates of one share key between two snapshots of it, Kafka's
-    /// `share.coordinator.snapshot.update.records.per.snapshot`. At most 500.
-    pub share_snapshot_update_records_per_snapshot: Option<u32>,
-    /// How long an append to `__share_group_state` may take before the share
-    /// coordinator answers `COORDINATOR_NOT_AVAILABLE`, Kafka's
-    /// `share.coordinator.write.timeout.ms`.
-    pub share_coordinator_write_timeout: Option<Time>,
-    /// How often the share coordinator trims the redundant prefix of each
-    /// `__share_group_state` partition it leads, Kafka's
-    /// `share.coordinator.state.topic.prune.interval.ms`.
-    pub share_state_prune_interval: Option<Time>,
-    /// How old the latest snapshot of a share key may get before the share
-    /// coordinator writes a new one, Kafka's
-    /// `share.coordinator.cold.partition.snapshot.interval.ms`.
-    pub share_cold_partition_snapshot_interval: Option<Time>,
-    /// Codec of the batches the share coordinator appends to
-    /// `__share_group_state`, Kafka's
-    /// `share.coordinator.state.topic.compression.codec`, as Kafka's codec
-    /// id: 0 none (the default), 1 gzip, 2 snappy, 3 lz4 or 4 zstd.
-    pub share_state_compression_codec: Option<i32>,
-    /// Kafka's `share.coordinator.threads`, at least 1. Accepted and has no
-    /// effect: the share coordinator runs as tasks on the broker's shared
-    /// async runtime rather than on a thread pool of its own.
-    pub share_coordinator_threads: Option<i32>,
     /// Kafka's `share.coordinator.append.linger.ms`, a whole number of
     /// milliseconds, or -1 (the default) for an adaptive linger. Accepted and
     /// has no effect: each share-state write is its own append, and the

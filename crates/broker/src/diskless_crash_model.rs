@@ -297,13 +297,7 @@ fn fsync_quorum(s: &mut CrashState) {
 }
 
 fn quorum_frontier(s: &CrashState) -> i64 {
-    let live: Vec<i64> = s
-        .wal_nodes
-        .iter()
-        .copied()
-        .zip(s.wal_lost.iter().copied())
-        .filter_map(|(offset, lost)| (!lost).then_some(offset))
-        .collect();
+    let live: Vec<i64> = live_wal_offsets(s).collect();
     if live.len() < WAL_MAJORITY {
         return s.trimmed;
     }
@@ -331,14 +325,18 @@ fn reserve_via_controller(s: &CrashState) -> (i64, i64) {
 }
 
 fn surviving_wal_frontier(s: &CrashState) -> i64 {
+    live_wal_offsets(s)
+        .max()
+        .unwrap_or(s.index_frontier)
+        .max(s.index_frontier)
+}
+
+fn live_wal_offsets(s: &CrashState) -> impl Iterator<Item = i64> + '_ {
     s.wal_nodes
         .iter()
         .copied()
         .zip(s.wal_lost.iter().copied())
         .filter_map(|(offset, lost)| (!lost).then_some(offset))
-        .max()
-        .unwrap_or(s.index_frontier)
-        .max(s.index_frontier)
 }
 
 fn run() {

@@ -19,7 +19,7 @@ use crate::{
         },
     },
     partition::Partition,
-    test_support::{BrokenTimer, TimerFailure},
+    test_support::{BrokenTimer, TimerFailure, UnixMillis},
 };
 
 const THIS_BROKER: u64 = 7;
@@ -167,14 +167,15 @@ impl Harness {
     }
 }
 
+fn active_and_delayed_activations() -> Vec<UnixMillis> {
+    vec![UnixMillis(NOW_MS - 60_000), UnixMillis(NOW_MS + 10_000)]
+}
+
 #[tokio::test]
 async fn a_batch_that_is_not_due_holds_the_watermark_and_then_releases_it() {
     // One batch that is already active, then one that comes due in 10s.
     let (_dir, harness, partition) = Harness::with_partition(ScheduleSetup {
-        activations: vec![
-            crate::test_support::UnixMillis(NOW_MS - 60_000),
-            crate::test_support::UnixMillis(NOW_MS + 10_000),
-        ],
+        activations: active_and_delayed_activations(),
         ..Default::default()
     });
 
@@ -304,10 +305,7 @@ fn reported_sweep(
 async fn the_sweep_reports_the_watermark_and_the_pending_count() {
     let (_dir, harness, _partition) = Harness::with_partition(ScheduleSetup {
         topic: "reported",
-        activations: vec![
-            crate::test_support::UnixMillis(NOW_MS - 60_000),
-            crate::test_support::UnixMillis(NOW_MS + 10_000),
-        ],
+        activations: active_and_delayed_activations(),
         ..Default::default()
     });
 

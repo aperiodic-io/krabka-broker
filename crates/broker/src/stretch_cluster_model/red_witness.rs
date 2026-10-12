@@ -11,12 +11,11 @@ use krabka_raft::NodeId;
 
 use super::{
     config::StretchModel,
+    election::production_elect,
     runner::{PINNED_UNIQUE_STATES_RED_LEGACY_ELECT, PINNED_UNIQUE_STATES_RED_MIN_INSYNC_ONE, run},
 };
 use crate::{
-    config_keys::RecoveryStrategy,
-    elr::state::PartitionElr,
-    leader_election::{FailoverDecision, failover_one},
+    config_keys::RecoveryStrategy, elr::state::PartitionElr, leader_election::FailoverDecision,
 };
 
 /// The pre-witness controller decision. It is the same shape as
@@ -76,7 +75,7 @@ fn red_min_insync_one_commits_in_a_minority() {
     // majority. This proves that `minority_never_commits` is a real gate and
     // not a tautology of the model.
     run(
-        StretchModel::three_sites(1, failover_one),
+        StretchModel::three_sites(1, production_elect),
         "red_min_insync_one",
         PINNED_UNIQUE_STATES_RED_MIN_INSYNC_ONE,
     );

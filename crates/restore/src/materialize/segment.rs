@@ -14,7 +14,7 @@ use krabka_remote_storage::TopicIdPartition;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::prepare::{BatchTally, PreparedBatch, prepare_batch};
+use super::prepare::{BatchTally, PrepareBatchSetup, PreparedBatch, prepare_batch};
 use crate::{
     args::{PartitionRef, RestoreArgs},
     bound::Predicates,
@@ -129,11 +129,13 @@ pub(crate) async fn write_segment_after_skip(
         let records_in_batch = nonneg_u64(header.records_count.get());
 
         let (mut prepared, tally) = prepare_batch(
-            &partition_ref,
-            predicates,
-            &batch,
-            batch_bytes,
-            records_in_batch,
+            PrepareBatchSetup::builder()
+                .partition_ref(&partition_ref)
+                .predicates(predicates)
+                .batch(&batch)
+                .batch_bytes(batch_bytes)
+                .records_in_batch(records_in_batch)
+                .build(),
         )?;
 
         let last_offset_delta = prepared.last_offset_delta();

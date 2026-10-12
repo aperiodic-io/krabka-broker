@@ -669,11 +669,8 @@ mod tests {
     #[tokio::test]
     async fn handle_response_matches_fetch_topic_by_topic_id() {
         let (cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
-        let resp = fetch_response(
-            "",
-            WIRE_TOPIC_ID,
-            partition_response(PARTITION, codes::NOT_LEADER_OR_FOLLOWER),
-        );
+        let part_resp = partition_response(PARTITION, codes::NOT_LEADER_OR_FOLLOWER);
+        let resp = fetch_response("", WIRE_TOPIC_ID, part_resp);
 
         assert!(handle_response(resp, &cfg, cfg.leader_epoch.0).await == RowAction::Drop);
     }

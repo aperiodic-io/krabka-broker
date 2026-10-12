@@ -165,7 +165,8 @@ async fn the_proposer_cannot_approve_their_own_proposal() {
         "{refused:?}"
     );
     check!(refused.approvals_held == 0);
-    check!(stored(&alice, id).await.approvals.is_empty());
+    let post_stored = stored(&alice, id).await;
+    check!(post_stored.approvals.is_empty());
 
     cluster.broker.shutdown().await;
 }

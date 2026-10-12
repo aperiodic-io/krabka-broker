@@ -26,7 +26,7 @@ use crate::{
         client::{BatchProduceSetup, produce_batch},
         produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
         records::batch_from_records,
-        storage::remote_log_files,
+        storage::{local_log_segment_metadata, remote_log_files},
         topics::AssignedTopicSetup,
     },
     topic_fixture::{AssignedTieredTopicSetup, await_tiered_replicas, create_assigned_topic},
@@ -43,13 +43,7 @@ fn count_remote_log_files(root: &std::path::Path) -> usize {
 /// A tiered partition that has evicted everything it copied is down to its
 /// active segment, so this reaching 1 is the eviction having happened.
 fn count_local_segment_files(partition_dir: &std::path::Path) -> usize {
-    let Ok(entries) = std::fs::read_dir(partition_dir) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("log"))
-        .count()
+    local_log_segment_metadata(partition_dir).len()
 }
 
 /// Polls `partition_dir` until its `*.log` count satisfies `done`, or fails

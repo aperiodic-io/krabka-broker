@@ -32,8 +32,7 @@ pub(super) fn preprocess_broker_resource(
     resource: &AlterConfigsResource,
     context: BrokerConfigContext<'_>,
 ) -> Result<(), (i16, String)> {
-    let node = context.resource_node(&resource.resource_name)?;
-    if node != krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID {
+    if !context.is_cluster_default_resource(&resource.resource_name)? {
         let values = resource
             .configs
             .iter()

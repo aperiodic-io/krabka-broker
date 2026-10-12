@@ -340,8 +340,9 @@ fn size_retention_on_an_unscheduled_topic_is_untouched_by_the_guard() {
     };
     let (_dir, mut log) = log_of(config, &[PAST_MS, PAST_MS, PAST_MS]);
 
-    let now = SystemTime::UNIX_EPOCH + Duration::from_millis(u64::try_from(NOW_MS).unwrap());
-    log.tick(now, Offset(i64::MAX)).unwrap();
+    let epoch_offset = Duration::from_millis(NOW_MS as u64);
+    log.tick(SystemTime::UNIX_EPOCH + epoch_offset, Offset(i64::MAX))
+        .unwrap();
 
     // Kafka's `deleteSegments`: with every byte over budget and the whole log
     // replicated, every segment goes, the active one after a roll, and the

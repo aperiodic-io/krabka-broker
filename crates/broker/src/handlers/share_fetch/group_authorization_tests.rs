@@ -24,7 +24,6 @@ use krabka_protocol::{
         share_acknowledge_response::{
             self, ShareAcknowledgeResponse, ShareAcknowledgeTopicResponse,
         },
-        share_fetch_request::{FetchPartition, FetchTopic, ShareFetchRequest},
         share_fetch_response::{
             self, PartitionData, ShareFetchResponse, ShareFetchableTopicResponse,
         },
@@ -180,26 +179,11 @@ async fn share_fetch_checks_group_read_before_topic_read() {
         for grants in Grants::ALL {
             let user = principal(&grants.principal_name());
             let ctx = request_context(&user, &address, "share-client");
-            let request = ShareFetchRequest {
-                group_id: Some(GROUP.into()),
-                member_id: Some(format!("member-{version}-{}", grants.principal_name())),
-                share_session_epoch: 0,
-                max_wait_ms: 0,
-                min_bytes: 0,
-                max_bytes: 1_048_576,
-                max_records: 10,
-                batch_size: 10,
-                topics: vec![FetchTopic {
-                    topic_id,
-                    partitions: vec![FetchPartition {
-                        partition_index: 0,
-                        partition_max_bytes: 1_048_576,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            };
+            let request = super::test_fetch_request()
+                .group_id(GROUP.into())
+                .member_id(format!("member-{version}-{}", grants.principal_name()))
+                .topic_id(topic_id.0)
+                .call();
             let response = try_dispatch_context(
                 &shared,
                 krabka_protocol::owned::share_fetch_request::API_KEY,

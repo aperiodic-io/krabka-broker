@@ -179,18 +179,19 @@ wire_handler! {
                 return crate::handlers::encode_response(&resp, version);
             }
         };
-        let proposal_id = records.first().and_then(consumed_proposal_id);
+        let consumed_id = records.first().and_then(consumed_proposal_id);
+        let transition = GatedTransition {
+            action: BreakGlassAction::UnregisterBroker,
+            target: &target,
+            phase: PrivilegedPhase::Applied,
+            proposal_id: consumed_id,
+            reason: "broker unregistration admitted",
+        };
         if let Err(error) = require_transition(
             &broker.audit_log,
             &broker.config.break_glass,
             ctx,
-            &GatedTransition {
-                action: BreakGlassAction::UnregisterBroker,
-                target: &target,
-                phase: PrivilegedPhase::Applied,
-                proposal_id,
-                reason: "broker unregistration admitted",
-            },
+            &transition,
         )
         .await
         {
@@ -225,7 +226,7 @@ wire_handler! {
                 action: BreakGlassAction::UnregisterBroker,
                 target: &target,
                 phase: PrivilegedPhase::Applied,
-                proposal_id,
+                proposal_id: consumed_id,
                 reason: "broker registration removed",
             },
         );

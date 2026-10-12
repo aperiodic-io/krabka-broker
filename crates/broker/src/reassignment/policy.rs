@@ -225,6 +225,15 @@ mod tests {
         },
     };
 
+    fn leader_handoff_setup() -> ReassignmentSetup<'static> {
+        ReassignmentSetup {
+            adding: vec![krabka_ids::NodeId(3)],
+            removing: vec![krabka_ids::NodeId(2)],
+            leader: krabka_ids::NodeId(2),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn remap_directories_preserves_slot_alignment_on_replica_removal() {
         let da = uuid::Uuid::from_u128(0xA);
@@ -645,16 +654,11 @@ mod tests {
     #[tokio::test]
     async fn leader_handoff_when_leader_in_removing() {
         // leader=2, removing=[2]; new leader must come from target ∩ isr = {1,3} ∩ {1,2,3} = {1,3}.
-        let img = img(ReassignmentSetup {
-            adding: vec![krabka_ids::NodeId(3)],
-            removing: vec![krabka_ids::NodeId(2)],
-            leader: krabka_ids::NodeId(2),
-            ..Default::default()
-        });
-        let l = liveness(&[1, 2, 3]).await;
-        let updates = compute_reassignment_progress(&img, &l).await;
-        assert!(updates.len() == 1);
-        let pr = first_partition(&updates[0]);
+        let img = img(leader_handoff_setup());
+        let live = liveness(&[1, 2, 3]).await;
+        let progress = compute_reassignment_progress(&img, &live).await;
+        assert!(progress.len() == 1);
+        let pr = first_partition(&progress[0]);
         assert!(
             pr.leader == 1 || pr.leader == 3,
             "leader was {}",
@@ -670,12 +674,8 @@ mod tests {
 
     #[test]
     fn exhausted_epochs_block_reassignment_transitions() {
-        let image = img(ReassignmentSetup {
-            adding: vec![krabka_ids::NodeId(3)],
-            removing: vec![krabka_ids::NodeId(2)],
-            leader: krabka_ids::NodeId(2),
-            ..Default::default()
-        });
+        let setup = leader_handoff_setup();
+        let image = img(setup);
         let mut record = image.partition("foo", 0).expect("seeded partition").clone();
         let alive = std::collections::HashSet::from([NodeId(1), NodeId(2), NodeId(3)]);
 
@@ -802,7 +802,7 @@ mod tests {
         });
         let l = liveness(&[1, 2, 3, 4]).await;
         let updates = compute_reassignment_progress(&img, &l).await;
-        assert!(updates.len() == 1);
+        check!(updates.len() == 1);
         let pr = first_partition(&updates[0]);
         assert!(pr.isr == vec![NodeId(1), NodeId(3), NodeId(4)]);
     }

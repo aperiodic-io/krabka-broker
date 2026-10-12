@@ -558,12 +558,10 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_with_empty_voters_and_auto_join_falls_back_to_join() {
         let dir = TempDir::new().unwrap();
-        let cfg = ControllerConfig {
-            bootstrap_mode: BootstrapMode::Bootstrap,
-            initial_voters: krabka_metadata::VoterSet::from_voters(std::iter::empty()),
-            auto_join: true,
-            ..ControllerConfig::for_tests(NodeId(1), dir.path().to_path_buf())
-        };
+        let mut cfg = ControllerConfig::for_tests(NodeId(1), dir.path().to_path_buf());
+        cfg.bootstrap_mode = BootstrapMode::Bootstrap;
+        cfg.initial_voters = krabka_metadata::VoterSet::from_voters(std::iter::empty());
+        cfg.auto_join = true;
         let ctrl = Controller::start(cfg)
             .await
             .expect("Bootstrap with empty voters and auto_join should fall back to Join");

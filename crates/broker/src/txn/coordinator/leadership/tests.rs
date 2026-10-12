@@ -126,6 +126,11 @@ fn run(steps: Vec<Step>) {
 
 #[test]
 fn an_election_loads_and_a_resignation_unloads() {
+    let loaded_epoch_0 = Some(leadership(
+        Uuid::from_u128(1),
+        LeaderEpoch(0),
+        Some((LoadGeneration(1), LoadStatus::Loaded)),
+    ));
     run(vec![
         Step {
             name: "an image before the topic exists",
@@ -146,20 +151,12 @@ fn an_election_loads_and_a_resignation_unloads() {
         Step {
             name: "the same image again changes nothing",
             image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(0)),
-            after: Some(leadership(
-                Uuid::from_u128(1),
-                LeaderEpoch(0),
-                Some((LoadGeneration(1), LoadStatus::Loaded)),
-            )),
+            after: loaded_epoch_0,
             ..Default::default()
         },
         Step {
             name: "a stale image from before the topic existed (#975)",
-            after: Some(leadership(
-                Uuid::from_u128(1),
-                LeaderEpoch(0),
-                Some((LoadGeneration(1), LoadStatus::Loaded)),
-            )),
+            after: loaded_epoch_0,
             ..Default::default()
         },
         Step {

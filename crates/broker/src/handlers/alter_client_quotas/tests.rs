@@ -17,8 +17,9 @@ use super::{
     *,
 };
 use crate::{
-    broker::BrokerHandle,
+    broker::{Broker, BrokerHandle},
     codes::INVALID_REQUEST,
+    handlers::RequestContext,
     test_support::{
         DenyAll, grant_cluster_operation, peer, principal,
         start_broker_with_authorizer as start_broker, test_ctx,
@@ -44,6 +45,20 @@ fn expected_entry(
 
 fn expected_response(entries: Vec<RespEntry>) -> AlterClientQuotasResponse {
     unthrottled_wire!(AlterClientQuotasResponse { entries })
+}
+
+#[bon::builder]
+async fn assert_handled_response(
+    broker: &Broker,
+    request: AlterClientQuotasRequest,
+    version: i16,
+    context: &RequestContext<'_>,
+    expected: AlterClientQuotasResponse,
+) {
+    let actual = handle(broker, request, version, context)
+        .await
+        .expect("handle");
+    assert!(actual == expected);
 }
 
 fn quota_value(handle: &BrokerHandle, user: &str, quota_key: &str) -> Option<f64> {
@@ -98,14 +113,18 @@ async fn handle_denies_cluster_alter_for_each_entry() {
         false,
     );
 
-    let resp = handle(&broker, req, version, &ctx).await.expect("handle");
-
-    let expected = expected_response(vec![expected_entry(
-        ("user", Some("alice")),
-        CLUSTER_AUTHORIZATION_FAILED,
-        Some("Cluster authorization failed.".into()),
-    )]);
-    assert!(resp == expected);
+    assert_handled_response()
+        .broker(&broker)
+        .request(req)
+        .version(version)
+        .context(&ctx)
+        .expected(expected_response(vec![expected_entry(
+            ("user", Some("alice")),
+            CLUSTER_AUTHORIZATION_FAILED,
+            Some("Cluster authorization failed.".into()),
+        )]))
+        .call()
+        .await;
     assert!(quota_value(&broker_handle, "alice", "producer_byte_rate") == None);
     broker_handle.shutdown().await;
 }
@@ -116,10 +135,11 @@ async fn handle_denies_cluster_alter_for_each_entry() {
 #[tokio::test]
 async fn cluster_alter_configs_gates_the_quota_write() {
     let version = 1;
+    let empty_super_users = std::collections::HashSet::new();
     broker_fixture!(
         (broker_handle, _dir, broker),
         start_broker(Arc::new(crate::authorizer::SimpleAclAuthorizer::new(
-            std::collections::HashSet::new()
+            empty_super_users,
         ),))
     );
     let peer = peer();
@@ -148,8 +168,6 @@ async fn cluster_alter_configs_gates_the_quota_write() {
             false,
         );
 
-        let resp = handle(&broker, req, version, &ctx).await.expect("handle");
-
         let (error_code, error_message) = if allowed {
             (0, None)
         } else {
@@ -158,12 +176,18 @@ async fn cluster_alter_configs_gates_the_quota_write() {
                 Some("Cluster authorization failed.".to_string()),
             )
         };
-        let expected = expected_response(vec![expected_entry(
-            ("user", Some(user)),
-            error_code,
-            error_message,
-        )]);
-        assert2::check!(resp == expected, "user {user} with grant {grant:?}");
+        assert_handled_response()
+            .broker(&broker)
+            .request(req)
+            .version(version)
+            .context(&ctx)
+            .expected(expected_response(vec![expected_entry(
+                ("user", Some(user)),
+                error_code,
+                error_message,
+            )]))
+            .call()
+            .await;
         let stored = allowed.then_some(1024.0);
         assert2::check!(
             quota_value(&broker_handle, user, "producer_byte_rate") == stored,

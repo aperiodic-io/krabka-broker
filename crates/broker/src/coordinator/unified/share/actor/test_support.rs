@@ -16,15 +16,9 @@ use tokio::sync::oneshot;
 
 use super::{ShareGroupActorHandle, ShareGroupActorMessage};
 use crate::{
-    coordinator::unified::{
-        GroupCoordinator,
-        actor::MetadataProvider,
-        config::NextGenConfig,
-        offsets_log::fake::InMemoryOffsetsLog,
-        reconciler::ReconcileInput,
-        share::config::ShareGroupConfig,
-        streams::config::StreamsGroupConfig,
-        test_support::{MemberEpoch, fixed_source, make_share_persister},
+    coordinator::unified::test_support::{
+        GroupCoordinator, InMemoryOffsetsLog, MemberEpoch, MetadataProvider, NextGenConfig,
+        ReconcileInput, ShareGroupConfig, StreamsGroupConfig, fixed_source, make_share_persister,
     },
     test_support::PartitionCount,
 };

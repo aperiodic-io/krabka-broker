@@ -2,6 +2,18 @@
 
 krabka_macros::single_partition_produce_fixture!(single_partition_produce);
 
+#[bon::builder]
+pub fn replicated_topic_produce_setup(
+    topic: String,
+    topic_id: [u8; 16],
+) -> SinglePartitionProduceSetup {
+    SinglePartitionProduceSetup {
+        topic,
+        topic_id: krabka_protocol::primitives::uuid::Uuid(topic_id),
+        ..SinglePartitionProduceSetup::replicated()
+    }
+}
+
 /// Verify the response cardinality before a scenario checks its partition row.
 ///
 /// # Panics
@@ -66,31 +78,28 @@ impl BatchSender for krabka_client_core::Client {
 impl BatchSender for krabka_client_core::Connection {
     async fn send_produce_request(
         &self,
-        request: krabka_protocol::owned::produce_request::ProduceRequest,
+        req: krabka_protocol::owned::produce_request::ProduceRequest,
     ) -> krabka_protocol::owned::produce_response::ProduceResponse {
-        self.send(request).await.expect("Produce")
+        let resp = self.send(req).await;
+        resp.expect("Connection Produce")
     }
 }
 
-impl<T: BatchSender + Send> BatchSender for std::sync::Arc<T> {
-    fn send_produce_request(
-        &self,
-        request: krabka_protocol::owned::produce_request::ProduceRequest,
-    ) -> impl std::future::Future<Output = krabka_protocol::owned::produce_response::ProduceResponse>
-    + Send {
-        self.as_ref().send_produce_request(request)
-    }
+macro_rules! impl_batch_sender_for_reference {
+    ($transport:ty, $diagnostic:literal) => {
+        impl BatchSender for &$transport {
+            async fn send_produce_request(
+                &self,
+                request: krabka_protocol::owned::produce_request::ProduceRequest,
+            ) -> krabka_protocol::owned::produce_response::ProduceResponse {
+                (**self).send(request).await.expect($diagnostic)
+            }
+        }
+    };
 }
 
-impl<T: BatchSender + ?Sized> BatchSender for &T {
-    fn send_produce_request(
-        &self,
-        request: krabka_protocol::owned::produce_request::ProduceRequest,
-    ) -> impl std::future::Future<Output = krabka_protocol::owned::produce_response::ProduceResponse>
-    + Send {
-        (*self).send_produce_request(request)
-    }
-}
+impl_batch_sender_for_reference!(krabka_client_core::Client, "Produce");
+impl_batch_sender_for_reference!(krabka_client_core::Connection, "Connection Produce");
 
 /// Send one batch with the default Produce diagnostic; callers keep their response oracles.
 pub async fn send_batch(

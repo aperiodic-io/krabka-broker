@@ -30,7 +30,8 @@ use crate::{
     coordinator::unified::{
         classic_state::OffsetEntry,
         persistence_next_gen::{
-            NextGenKey, encode_key as encode_next_gen_key, parse_key as parse_next_gen_key,
+            AssignedTopicPartitions, NextGenKey, encode_key as encode_next_gen_key,
+            parse_key as parse_next_gen_key,
         },
         share::persistence::{ShareGroupKey, encode_share_key, parse_share_key},
         streams::persistence::{StreamsGroupKey, encode_streams_key, parse_streams_key},
@@ -670,6 +671,18 @@ pub(super) fn sorted_partitions(
         .collect();
     topics.sort_by_key(|(topic_id, _)| topic_id.0);
     topics
+}
+
+pub(super) fn sorted_assigned_partitions(
+    partitions: &std::collections::HashMap<krabka_protocol::primitives::uuid::Uuid, Vec<i32>>,
+) -> Vec<AssignedTopicPartitions> {
+    sorted_partitions(partitions)
+        .into_iter()
+        .map(|(topic_id, partitions)| AssignedTopicPartitions {
+            topic_id,
+            partitions,
+        })
+        .collect()
 }
 
 #[cfg(test)]

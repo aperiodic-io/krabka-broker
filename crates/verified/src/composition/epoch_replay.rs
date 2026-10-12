@@ -1,16 +1,9 @@
+#[cfg(creusot)]
 use creusot_std::prelude::*;
 
 #[cfg(creusot)]
 use super::epoch::{epoch_archive_valid, epoch_window_valid};
-use super::{
-    EpochEntry, FetchWatermarks, ProducerReloadRange, truncated_snapshot_selection_bounds_replay,
-    validated_epochs_bound_truncated_fetch,
-};
-use crate::broker::FetchVisibility;
-#[cfg(creusot)]
-use crate::broker::{clamped_fetch_watermarks, committed_fetch_response};
-#[cfg(creusot)]
-use crate::leader_epoch::kafka_end_offset_for;
+use super::*;
 
 type EpochSnapshotReplay = (i32, FetchWatermarks, FetchVisibility, Option<usize>, i64);
 

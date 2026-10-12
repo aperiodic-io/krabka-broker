@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use krabka_compression::CompressionType;
 use krabka_log::{Log, Offset, VerbatimBatch};
 use krabka_protocol::records::RecordBatch;
 use tokio::sync::oneshot;
@@ -48,6 +49,19 @@ pub enum ProduceData {
 }
 
 impl ProduceData {
+    /// Apply the partition's configured compression to an owned client batch.
+    /// Control batches and verbatim producer bytes keep their original shape.
+    pub(crate) fn apply_target_compression(&mut self, target: Option<CompressionType>) {
+        let Self::Owned(batch) = self else {
+            return;
+        };
+        if let Some(target) = target
+            && batch.attributes.compression() != target
+        {
+            batch.attributes = batch.attributes.with_compression(target);
+        }
+    }
+
     /// The producer ID of an internally built control batch, or `None` for a
     /// data batch.
     ///

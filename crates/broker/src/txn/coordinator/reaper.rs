@@ -174,6 +174,15 @@ async fn sweep_with_backend<B: ReaperBackend + ?Sized>(
 }
 
 impl TxnCoordinator {
+    async fn current_entry_guard(
+        &self,
+        tid: &str,
+    ) -> Option<tokio::sync::OwnedMutexGuard<TxnEntry>> {
+        let handle = self.get(tid)?;
+        let entry = Arc::clone(&handle).lock_owned().await;
+        handle_is_current(self, tid, &handle).then_some(entry)
+    }
+
     /// KIP-939 idle-transaction reaper: aborts every locally-coordinated,
     /// non-2PC, `Ongoing` transaction whose timeout has elapsed at `now_ms`.
     ///
@@ -224,12 +233,8 @@ impl ReaperBackend for TxnCoordinator {
     // cargo-mutants: I/O over live entry locks + raft persistence
     #[cfg_attr(test, mutants::skip)]
     async fn prepare_abort(&self, tid: &str, now_ms: i64, txnv: TxnVersion) -> Option<TxnEntry> {
-        let _state_partition_write = self.lock_state_partition_for(tid).await;
-        let handle = self.get(tid)?;
-        let entry = handle.lock().await;
-        if !handle_is_current(self, tid, &handle) {
-            return None;
-        }
+        let _partition_lock = self.lock_state_partition_for(tid).await;
+        let entry = self.current_entry_guard(tid).await?;
         if entry.state == TxnState::PrepareAbort {
             // A prepared 2PC transaction remains under its external
             // coordinator's control, including after recovery.
@@ -295,11 +300,7 @@ impl ReaperBackend for TxnCoordinator {
     ) -> Option<TxnEntry> {
         let tid = prepared.transactional_id.as_str();
         let _state_partition_write = self.lock_state_partition_for(tid).await;
-        let handle = self.get(tid)?;
-        let entry = handle.lock().await;
-        if !handle_is_current(self, tid, &handle) {
-            return None;
-        }
+        let entry = self.current_entry_guard(tid).await?;
         match complete_abort_decision(&entry, prepared) {
             CompletionDecision::AlreadyComplete => return Some(entry.clone()),
             CompletionDecision::Proceed => {}

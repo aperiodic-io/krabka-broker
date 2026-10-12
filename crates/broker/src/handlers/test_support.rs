@@ -1,6 +1,6 @@
 //! Shared live-broker and local-partition fixtures for handler tests.
 
-use std::{path::Path, sync::Arc};
+use std::{future::Future, path::Path, sync::Arc};
 
 use assert2::assert;
 use bytes::Bytes;
@@ -22,20 +22,90 @@ use crate::{
     codes,
     config::BrokerConfig,
     config_keys::broker_dynamic::BrokerConfigContext,
+    error::BrokerError,
     features::{METADATA_VERSION, STREAMS_VERSION, require_feature},
-    handlers::{acl_wire::CLUSTER_RESOURCE_NAME, produce::handle},
+    handlers::{acl_wire::CLUSTER_RESOURCE_NAME, decode_request, encode_response, produce::handle},
     log_dir::partition_dir,
     log_dir_status::LogDirRegistry,
     partition::Partition,
     producer_state::ProducerState,
     share_partition::state::RecordState,
     test_support::{
-        StandalonePartitionSetup, StorageMode, decode_response, encode_request,
-        initialize_share_state, peer, principal, request_context, sasl_principal,
+        StandalonePartitionSetup, StorageMode, broker_registration, decode_response,
+        encode_request, initialize_share_state, peer, principal, request_context, sasl_principal,
         start_broker_no_audit_with, start_broker_with as start_test_broker_with,
         try_dispatch_context,
     },
 };
+
+pub(crate) mod transaction_admin_tests {
+    pub(crate) use std::sync::Arc;
+
+    #[allow(unused_imports)]
+    pub(crate) use assert2::assert;
+
+    pub(crate) use crate::{
+        test_support::{
+            lead_transaction_state_partitions,
+            start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+        },
+        txn::version::TxnVersion,
+    };
+}
+
+#[bon::builder]
+pub(crate) fn registered_broker_image(
+    #[builder(default = krabka_raft::NodeId(7))] node_id: krabka_raft::NodeId,
+    #[builder(default = 42)] broker_epoch: i64,
+) -> krabka_metadata::MetadataImage {
+    let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
+    image.apply(&krabka_metadata::MetadataRecord::V1BrokerRegistration(
+        krabka_metadata::BrokerRegistrationRecord {
+            broker_epoch,
+            host: "localhost".into(),
+            ..broker_registration(node_id)
+        },
+    ));
+    image
+}
+
+pub(crate) struct OrderedRows<Request, Response> {
+    pub(crate) requests: Vec<Request>,
+    pub(crate) responses: Vec<Response>,
+}
+
+pub(crate) fn ordered_rows<Request: Clone, Response: Clone>(
+    rows: &[(Request, Response)],
+    order: &[usize],
+) -> OrderedRows<Request, Response> {
+    let mut ordered = OrderedRows {
+        requests: Vec::with_capacity(order.len()),
+        responses: Vec::with_capacity(order.len()),
+    };
+    for &index in order {
+        let (request, response) = &rows[index];
+        ordered.requests.push(request.clone());
+        ordered.responses.push(response.clone());
+    }
+    ordered
+}
+
+pub(crate) async fn assert_dispatch_response<Request, Response, Handler, HandlerFuture>(
+    request: &Request,
+    expected: &Response,
+    version: i16,
+    handler: Handler,
+) where
+    Request: Encode,
+    Response: for<'body> Decode<'body> + PartialEq + std::fmt::Debug,
+    Handler: FnOnce(Bytes) -> HandlerFuture,
+    HandlerFuture: Future<Output = Result<Bytes, BrokerError>>,
+{
+    let body = encode_response(request, version).expect("encode request");
+    let body = handler(body).await.expect("dispatch request");
+    let actual: Response = decode_request(&body, version).expect("decode response");
+    assert!(&actual == expected);
+}
 
 /// Retains a broker's handle, directory, and shared runtime in their original order.
 /// The calling test supplies its own start expression, including authorizer and config.
@@ -356,10 +426,10 @@ pub(crate) struct ReplicatedPartitionSetup<'a> {
     #[default("orders")]
     pub topic: &'a str,
     pub partition: krabka_ids::PartitionIndex,
-    #[default(krabka_metadata::NodeId(1))]
-    pub leader: krabka_metadata::NodeId,
     #[default(&[krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)])]
     pub replicas: &'a [krabka_metadata::NodeId],
+    #[default(krabka_metadata::NodeId(1))]
+    pub leader: krabka_metadata::NodeId,
 }
 
 pub(crate) fn replicated_partition(
@@ -376,6 +446,13 @@ pub(crate) fn replicated_partition(
         isr: replicas.to_vec(),
         ..single_replica_partition(topic, partition, leader)
     }
+}
+
+pub(crate) fn replica_nodes_from_partitions(replicas: &[i32]) -> Vec<krabka_metadata::NodeId> {
+    replicas
+        .iter()
+        .map(|&id| krabka_metadata::NodeId(u64::try_from(id).expect("broker id")))
+        .collect()
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -568,8 +645,8 @@ pub(crate) async fn seed_partition_replicas(
             directories: vec![uuid::Uuid::nil(); replicas.len()],
             ..replicated_partition(ReplicatedPartitionSetup {
                 topic,
-                leader,
                 replicas,
+                leader,
                 ..Default::default()
             })
         }))

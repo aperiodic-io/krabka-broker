@@ -416,14 +416,14 @@ fn delete_local_segments_through_rejects_negative_target() {
 #[test]
 fn a_local_eviction_leaves_a_reopened_log_with_no_floor_to_refuse_against() {
     let dir = tempdir().unwrap();
-    let config = LogConfig::default();
-    let mut log = rolled_log(dir.path(), &config);
+    let cfg = LogConfig::default();
+    let mut log = rolled_log(dir.path(), &cfg);
     let exports = log.tierable_segments();
     let evicted_through = exports[1].last_offset + 1;
     log.delete_local_segments_through(evicted_through).unwrap();
     drop(log);
 
-    let mut reopened = Log::open(dir.path(), config).unwrap();
+    let mut reopened = Log::open(dir.path(), cfg).unwrap();
     check!(
         reopened.log_start_offset() == evicted_through,
         "the derivation is still the first surviving segment"

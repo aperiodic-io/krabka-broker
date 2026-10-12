@@ -287,11 +287,10 @@ impl StampIndex {
     /// # Errors
     /// Returns an error when rewriting or syncing the sidecar fails.
     pub fn truncate_from(&mut self, offset: Offset) -> Result<(), LogError> {
-        if let Some(entries) = rewrite_retained_entries(
-            &self.entries,
-            |entry| entry.last_offset < offset,
-            |entries| self.rewrite(entries),
-        )? {
+        let keep = |entry: &StampEntry| entry.last_offset < offset;
+        if let Some(entries) =
+            rewrite_retained_entries(&self.entries, keep, |entries| self.rewrite(entries))?
+        {
             self.entries = entries;
         }
         Ok(())

@@ -76,7 +76,6 @@ use krabka_protocol::{
         sasl_handshake_request::SaslHandshakeRequest,
         sasl_handshake_response::SaslHandshakeResponse,
         unregister_controller_request::UnregisterControllerRequest,
-        unregister_controller_response::UnregisterControllerResponse,
         update_features_request::UpdateFeaturesRequest,
     },
     primitives::uuid::Uuid as WireUuid,
@@ -408,22 +407,20 @@ async fn controller_listener_serves_the_topic_lifecycle() {
         .expect("DeleteTopics over the controller listener");
     connection.close();
 
-    check!(
-        deleted
-            == DeleteTopicsResponse {
-                throttle_time_ms: 0,
-                responses: vec![DeletableTopicResult {
-                    name: Some("controller-lifecycle".into()),
-                    // A deleted topic's row carries its topic id, as Kafka's
-                    // `ControllerApis.deleteTopics` answers it (#634).
-                    topic_id: created_topic.topic_id,
-                    error_code: 0,
-                    error_message: None,
-                    unknown_tagged_fields: UnknownTaggedFields::default(),
-                }],
-                unknown_tagged_fields: UnknownTaggedFields::default(),
-            }
-    );
+    let expected_delete = DeleteTopicsResponse {
+        throttle_time_ms: 0,
+        responses: vec![DeletableTopicResult {
+            name: Some("controller-lifecycle".into()),
+            // A deleted topic's row carries its topic id, as Kafka's
+            // `ControllerApis.deleteTopics` answers it (#634).
+            topic_id: created_topic.topic_id,
+            error_code: 0,
+            error_message: None,
+            unknown_tagged_fields: UnknownTaggedFields::default(),
+        }],
+        unknown_tagged_fields: UnknownTaggedFields::default(),
+    };
+    check!(deleted == expected_delete);
     broker.shutdown().await;
 }
 
@@ -593,24 +590,25 @@ async fn controller_listener_serves_assign_replicas_to_dirs() {
     assert!(let [created_topic] = &created.topics[..]);
     let topic_id = created_topic.topic_id;
 
-    let assigned = connection
-        .send(AssignReplicasToDirsRequest {
-            broker_id: 1,
-            broker_epoch,
-            directories: vec![DirectoryData {
-                id: LOG_DIR_ID,
-                topics: vec![TopicData {
-                    topic_id,
-                    partitions: vec![PartitionData {
-                        partition_index: 0,
-                        ..Default::default()
-                    }],
+    let req = AssignReplicasToDirsRequest {
+        broker_id: 1,
+        broker_epoch,
+        directories: vec![DirectoryData {
+            id: LOG_DIR_ID,
+            topics: vec![TopicData {
+                topic_id,
+                partitions: vec![PartitionData {
+                    partition_index: 0,
                     ..Default::default()
                 }],
                 ..Default::default()
             }],
             ..Default::default()
-        })
+        }],
+        ..Default::default()
+    };
+    let assigned = connection
+        .send(req)
         .await
         .expect("AssignReplicasToDirs over the controller listener");
     connection.close();
@@ -647,8 +645,6 @@ async fn controller_listener_serves_assign_replicas_to_dirs() {
 /// `unstable.*.enable` settings on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_serves_unregister_controller() {
-    const CONTROLLER_ID_NOT_REGISTERED: i16 = 136;
-
     let (broker, _dir) = start_trunk_broker().await;
     broker
         .submit_metadata_record_for_test(controller_registration(NodeId(7)))
@@ -684,17 +680,9 @@ async fn controller_listener_serves_unregister_controller() {
 
     check!(
         answers
-            == vec![
-                UnregisterControllerResponse {
-                    error_message: Some(String::new()),
-                    ..Default::default()
-                },
-                UnregisterControllerResponse {
-                    error_code: CONTROLLER_ID_NOT_REGISTERED,
-                    error_message: Some("Controller ID 9 is not currently registered.".into()),
-                    ..Default::default()
-                },
-            ]
+            == crate::support::admin::unregister_controller_answers()
+                .controller_id(9)
+                .call()
     );
     check!(
         broker

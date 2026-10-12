@@ -94,7 +94,7 @@ impl ClassicMemberMetadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemberMetadataValue {
     pub instance_id: Option<String>,
     pub rack_id: Option<String>,
@@ -245,18 +245,14 @@ mod tests {
     #[test]
     fn classic_sub_state_bytes_match_kafka_schema() {
         let v = MemberMetadataValue {
-            instance_id: None,
-            rack_id: None,
-            client_id: "c".into(),
-            client_host: "h".into(),
-            subscribed_topic_names: vec![],
-            subscribed_topic_regex: None,
-            server_assignor: None,
-            rebalance_timeout_ms: 1,
             classic: Some(ClassicMemberMetadata {
                 session_timeout_ms: 2,
                 supported_protocols: vec![("range".into(), Bytes::from_static(b"m"))],
             }),
+            client_id: "c".into(),
+            client_host: "h".into(),
+            rebalance_timeout_ms: 1,
+            ..Default::default()
         };
         let want = wire_bytes(&[
             "0000",         // version

@@ -246,6 +246,21 @@ mod tests {
         }
     }
 
+    #[bon::builder]
+    async fn assert_snapshot_fetch_was_not_applied(
+        cluster_id: Uuid,
+        address: std::net::SocketAddr,
+    ) {
+        let mut fixture = SnapshotFixture::new(cluster_id, address);
+        assert!(fixture.fetch().await.is_none());
+        assert!(fixture.image.borrow().topics().next().is_none());
+        assert!(
+            ObserverStore::open(fixture.directory.path(), 0)
+                .resume(cluster_id)
+                .is_none()
+        );
+    }
+
     async fn snapshot_broker(
         snapshot_id: (i64, i32),
         mut response: impl FnMut(&[u8]) -> Option<PeerResponse> + Send + 'static,
@@ -463,17 +478,11 @@ mod tests {
         })
         .await;
 
-        let mut fixture = SnapshotFixture::new(cluster_id, mock.addr);
-
-        let outcome = fixture.fetch().await;
-
-        assert!(outcome.is_none());
-        assert!(fixture.image.borrow().topics().next().is_none());
-        assert!(
-            ObserverStore::open(fixture.directory.path(), 0)
-                .resume(cluster_id)
-                .is_none()
-        );
+        assert_snapshot_fetch_was_not_applied()
+            .cluster_id(cluster_id)
+            .address(mock.addr)
+            .call()
+            .await;
 
         mock.stop();
     }
@@ -499,16 +508,11 @@ mod tests {
         })
         .await;
 
-        let mut fixture = SnapshotFixture::new(cluster_id, mock.addr);
-
-        let outcome = fixture.fetch().await;
-
-        assert!(outcome.is_none());
-        assert!(
-            ObserverStore::open(fixture.directory.path(), 0)
-                .resume(cluster_id)
-                .is_none()
-        );
+        assert_snapshot_fetch_was_not_applied()
+            .cluster_id(cluster_id)
+            .address(mock.addr)
+            .call()
+            .await;
 
         mock.stop();
     }

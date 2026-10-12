@@ -16,62 +16,22 @@
 use std::{net::SocketAddr, time::Duration};
 
 use assert2::assert;
-use bytes::BytesMut;
 use krabka_broker::BrokerHandle;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_metadata::NodeId as MetadataNodeId;
-use krabka_protocol::{Decode, Encode, owned::create_topics_response::CreateTopicsResponse};
-use tokio::net::TcpStream;
 
-use crate::{
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
-    support::{
-        registered_cluster, shutdown_cluster,
-        topics::{
-            CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor, configured_topic_request,
-        },
-        wire::HeaderEncoding as RequestHeaderEncoding,
-    },
+use crate::support::{
+    registered_cluster, shutdown_cluster,
+    topics::{CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor},
 };
 
 mod kafka_wire;
 mod support;
 
-const CREATE_TOPICS_API_KEY: i16 = 19;
-const CREATE_TOPICS_VERSION: i16 = 7;
-
 /// The client id every request header in this suite carries.
 const CLIENT_ID: &str = "krabka-controlled-shutdown-test";
 
 async fn create_topic(addr: SocketAddr, setup: CreateTopicSetup<'_>) {
-    let name = setup.topic;
-    let req = configured_topic_request(setup);
-    let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let mut body = BytesMut::new();
-    req.encode(&mut body, CREATE_TOPICS_VERSION)
-        .expect("encode CreateTopics");
-    let resp_bytes = kafka_wire::round_trip(
-        &mut stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(CREATE_TOPICS_API_KEY),
-            version: WireApiVersion(CREATE_TOPICS_VERSION),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("CreateTopics round-trip");
-    let mut cur: &[u8] = &resp_bytes;
-    let resp = CreateTopicsResponse::decode(&mut cur, CREATE_TOPICS_VERSION)
-        .expect("decode CreateTopicsResponse");
-    assert!(resp.topics.len() == 1);
-    assert!(
-        resp.topics[0].error_code == 0,
-        "CreateTopics({name}) must succeed: {:?}",
-        resp.topics[0].error_message
-    );
+    kafka_wire::create_topic_from_setup(addr, CLIENT_ID, setup).await;
 }
 
 /// Waits until `(topic, partition)` appears in the metadata image of

@@ -239,9 +239,9 @@ async fn list_in_flight_returns_pending_rows() {
 /// with empty `adding_replicas` and `removing_replicas`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancel_via_null_replicas_reverts() {
-    let _g = case_lock!();
-
-    let (h1, h2, h3, _d1, _d2, _d3, _addr) = foo_cluster().await;
+    let _lock = case_lock!();
+    let cluster = foo_cluster().await;
+    let (h1, h2, h3) = (cluster.0, cluster.1, cluster.2);
 
     let pr = h1.partition_record_for_test("foo", 0).expect("partition");
     let original_replicas = pr.replicas.clone();

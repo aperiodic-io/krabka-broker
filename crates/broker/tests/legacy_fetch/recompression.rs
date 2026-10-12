@@ -29,14 +29,13 @@ async fn fetch_v3_recompresses_zstd_as_snappy() {
     let p = support::start_legacy().await;
 
     // 1. Create topic.
+    let spec = creatable_topic(ConfiguredTopicSetup {
+        name: "legacy_fetch_zstd".into(),
+        ..ConfiguredTopicSetup::default()
+    });
     let cr = p
         .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("legacy_fetch_zstd").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(spec))
         .await
         .expect("CreateTopics");
     assert!(

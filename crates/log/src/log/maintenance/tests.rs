@@ -97,15 +97,20 @@ fn segment_jitter_is_stable_bounded_and_changes_the_roll_boundary() {
     check!(log.jittered_roll_interval(millis(100)) == interval);
 }
 
-#[test]
-fn retention_removes_visibility_before_reclaiming_files_and_reopen_cleans_tombstones() {
+fn trimmed_two_segment_log(file_delete_delay: Time) -> (tempfile::TempDir, Log) {
     let (dir, mut log) = configured_test_log(LogConfig {
-        file_delete_delay: millis(1000),
+        file_delete_delay,
         ..tiny_segments()
     });
     log.append(&mut sample_batch(1)).unwrap();
     log.append(&mut sample_batch(1)).unwrap();
     log.trim_to_offset(Offset(1)).unwrap();
+    (dir, log)
+}
+
+#[test]
+fn retention_removes_visibility_before_reclaiming_files_and_reopen_cleans_tombstones() {
+    let (dir, mut log) = trimmed_two_segment_log(millis(1000));
     check!(!name::log_path(dir.path(), 0).exists());
     check!(log.log_start_offset() == Offset(1));
     assert!(log.pending_deletes.len() == 1);
@@ -125,13 +130,7 @@ fn retention_removes_visibility_before_reclaiming_files_and_reopen_cleans_tombst
 
 #[test]
 fn zero_delete_delay_unlinks_immediately() {
-    let (dir, mut log) = configured_test_log(LogConfig {
-        file_delete_delay: Time::ZERO,
-        ..tiny_segments()
-    });
-    log.append(&mut sample_batch(1)).unwrap();
-    log.append(&mut sample_batch(1)).unwrap();
-    log.trim_to_offset(Offset(1)).unwrap();
+    let (dir, log) = trimmed_two_segment_log(Time::ZERO);
     check!(log.pending_deletes.is_empty());
     check!(!name::log_path(dir.path(), 0).exists());
 }

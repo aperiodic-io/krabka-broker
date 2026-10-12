@@ -411,6 +411,14 @@ mod tests {
         }
     }
 
+    fn reverted_leader_record() -> PartitionRecord {
+        record(PlanRecordSetup {
+            isr: &[NodeId(1)],
+            leader_epoch: LeaderEpoch(6),
+            ..Default::default()
+        })
+    }
+
     const FOUR_REPLICAS: &[NodeId] = &[NodeId(1), NodeId(2), NodeId(3), NodeId(4)];
 
     /// Independent completed-removal expectation shared by start and cancel rows.
@@ -680,11 +688,7 @@ mod tests {
                 "a leader in the adding set moves to the reverted ISR",
                 added_leader_assignment(),
                 UncleanElection::Forbidden,
-                Ok(Some(record(PlanRecordSetup {
-                    isr: &[NodeId(1)],
-                    leader_epoch: LeaderEpoch(6),
-                    ..Default::default()
-                }))),
+                Ok(Some(reverted_leader_record())),
             ),
             (
                 "a leader outside the reverted ISR is replaced",
@@ -694,11 +698,7 @@ mod tests {
                     ..added_leader_assignment()
                 },
                 UncleanElection::Forbidden,
-                Ok(Some(record(PlanRecordSetup {
-                    isr: &[NodeId(1)],
-                    leader_epoch: LeaderEpoch(6),
-                    ..Default::default()
-                }))),
+                Ok(Some(reverted_leader_record())),
             ),
             (
                 "only removing replicas keeps the leader epoch",

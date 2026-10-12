@@ -9,22 +9,10 @@ use std::time::{Duration, Instant};
 
 use krabka_metadata::{LeaderEpoch, MetadataRecord};
 
-use crate::{
-    docker::{produce_lines_via_jvm, set_container_paused},
-    dump_log::{dump_log_in_container, max_offset_in_dump},
-    mixed_cluster::{
-        DivergenceDirection, PartitionEpochDelta, SingleLeaderSetup, prepare_divergence,
-        single_leader_record,
-    },
-    topic_admin::{LEADER_WAIT, wait_for_described_leader},
-};
+use crate::test_support::truncation::*;
 
-/// Step 2 of Task 11, reverse direction. A Krabka follower replicates from a
-/// JVM leader. The test parks replication behind a phantom leader, appends a
-/// suffix only to the Krabka replica at a new epoch, and then promotes the JVM
-/// replica. It asserts that the Krabka follower observes the JVM leader's
-/// `diverging_epoch`, truncates to their shared prefix, and subsequently copies
-/// a fresh JVM-authored suffix.
+/// Parks the Krabka replica behind a phantom leader, then verifies that it
+/// adopts the promoted JVM leader's divergent epoch and resumes replication.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires Docker + a published controller/data port; Linux-bound"]
 async fn kip320_krabka_follower_truncates_from_jvm_leader() {

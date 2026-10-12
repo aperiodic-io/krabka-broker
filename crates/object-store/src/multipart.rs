@@ -227,7 +227,9 @@ mod tests {
     use tokio::io::AsyncWriteExt as _;
 
     use super::*;
-    use crate::test_support::{http_listener, read_request, respond, s3_config, serve_http_pages};
+    use crate::test_support::{
+        accept_http_request, http_listener, read_request, respond, s3_config, serve_http_pages,
+    };
 
     async fn with_listing<T>(
         pages: Vec<(&'static str, &'static str, &'static str)>,
@@ -420,8 +422,7 @@ mod tests {
     async fn a_truncated_permission_error_preserves_status_and_does_not_retry() {
         let (listener, endpoint) = http_listener().await;
         let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            read_request(&mut socket).await;
+            let mut socket = accept_http_request(listener).await;
             socket
                 .write_all(
                     b"HTTP/1.1 403 Forbidden\r\ncontent-length: 100\r\nconnection: close\r\n\r\n",

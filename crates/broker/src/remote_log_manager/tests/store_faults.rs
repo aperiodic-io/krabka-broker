@@ -34,7 +34,7 @@ use super::*;
 use crate::{
     api_catalog::UnstableApiVersions,
     metadata_source::MetadataSource,
-    metrics::TopicLabel,
+    metrics::{BrokerMetrics, TopicLabel},
     remote_log_manager::test_support::{
         self as fixtures, TEST_COPY_TIMEOUT, copy_exports, partition_snapshot,
         rolled_tiered_partition_with_config,
@@ -48,6 +48,48 @@ const STALL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The copy deadline the stall cases run under.
 const SHORT_COPY_DEADLINE: Time = millis(150);
+
+struct CopyExportContext {
+    rsm: Arc<dyn RemoteStorageManager>,
+    rlmm: Arc<dyn krabka_remote_storage::RemoteLogMetadataManager>,
+    metrics: BrokerMetrics,
+    index_cache: Arc<krabka_remote_storage::RemoteIndexCache>,
+}
+
+#[derive(bon::Builder)]
+struct CopyExportRequest {
+    exports: Vec<krabka_log::SegmentExport>,
+    #[builder(default = TEST_COPY_TIMEOUT)]
+    copy_timeout: Time,
+}
+
+impl CopyExportContext {
+    fn new(rsm: Arc<dyn RemoteStorageManager>) -> Self {
+        Self {
+            rsm,
+            rlmm: Arc::new(krabka_remote_storage::InmemoryRemoteLogMetadataManager::new()),
+            metrics: BrokerMetrics::new(),
+            index_cache: Arc::new(krabka_remote_storage::RemoteIndexCache::disabled()),
+        }
+    }
+
+    async fn copy(&self, request: CopyExportRequest) -> usize {
+        copy_exports(
+            &fixtures::configured_tier(
+                &self.rsm,
+                &self.rlmm,
+                fixtures::TierSetup {
+                    metrics: &self.metrics,
+                    index_cache: &self.index_cache,
+                    copy_timeout: request.copy_timeout,
+                    ..Default::default()
+                },
+            ),
+            request.exports,
+        )
+        .await
+    }
+}
 
 /// The production S3 backend over `store`, so a fault drill exercises the
 /// same `put_from_path` / multipart / key-layout code a real copy does.
@@ -115,32 +157,26 @@ macro_rules! faulty_copy_fixture {
 async fn a_healthy_store_finishes_every_copy() {
     let log_dir = tempfile::tempdir().unwrap();
     let (_partition, exports, _config) = tiered_partition(log_dir.path());
-    let rsm = backend(faulty_store(FaultPolicy::none()));
-    fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
+    let copy_context = CopyExportContext::new(backend(faulty_store(FaultPolicy::none())));
 
-    let copied = copy_exports(
-        &fixtures::configured_tier(
-            &rsm,
-            &rlmm,
-            fixtures::TierSetup {
-                metrics: &metrics,
-                index_cache: &index_cache,
-                ..Default::default()
-            },
-        ),
-        exports.clone(),
-    )
-    .await;
+    let copied = copy_context
+        .copy(
+            CopyExportRequest::builder()
+                .exports(exports.clone())
+                .build(),
+        )
+        .await;
 
     check!(copied == exports.len());
-    let listed = rlmm.list_remote_log_segments(&tp()).unwrap();
+    let listed = copy_context.rlmm.list_remote_log_segments(&tp()).unwrap();
     check!(
         listed
             .iter()
             .all(|md| md.state() == RemoteLogSegmentState::CopySegmentFinished)
     );
     check!(
-        metrics
+        copy_context
+            .metrics
             .remote_copy_errors_total
             .get_or_create(&orders_label())
             .get()
@@ -336,23 +372,16 @@ async fn local_retention_keeps_segments_whose_copy_never_finished() {
     for (case, store, copy_timeout) in cases {
         let log_dir = tempfile::tempdir().unwrap();
         let (partition, exports, config) = tiered_partition(log_dir.path());
-        let rsm = backend(store());
-        fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
+        let copy_context = CopyExportContext::new(backend(store()));
 
-        let copied = copy_exports(
-            &fixtures::configured_tier(
-                &rsm,
-                &rlmm,
-                fixtures::TierSetup {
-                    metrics: &metrics,
-                    index_cache: &index_cache,
-                    copy_timeout,
-                    ..Default::default()
-                },
-            ),
-            exports.clone(),
-        )
-        .await;
+        let copied = copy_context
+            .copy(
+                CopyExportRequest::builder()
+                    .exports(exports.clone())
+                    .copy_timeout(copy_timeout)
+                    .build(),
+            )
+            .await;
         check!(copied == 0, "{case}");
 
         // Far past every segment's `local.retention.ms`, so nothing but the
@@ -361,7 +390,7 @@ async fn local_retention_keeps_segments_whose_copy_never_finished() {
             &partition,
             &exports,
             &config,
-            &rlmm,
+            &copy_context.rlmm,
             (UnstableApiVersions::Disabled, now_ms() + 1_000_000),
         )
         .await;

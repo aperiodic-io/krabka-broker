@@ -46,11 +46,12 @@ fn create_request(name: &str, replication_factor: i16) -> CreateTopicsRequest {
 /// `--dry-run` too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_topics_below_the_replication_floor_is_a_policy_violation() {
+    let policy = TopicPolicy {
+        min_replication_factor: Some(3),
+        ..Default::default()
+    };
     let cluster = start_n_node_with(1, |_, cfg| {
-        cfg.topic_policy = TopicPolicy {
-            min_replication_factor: Some(3),
-            ..TopicPolicy::default()
-        };
+        cfg.topic_policy = policy.clone();
     })
     .await
     .expect("start_n_node_with");

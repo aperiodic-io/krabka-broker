@@ -75,12 +75,12 @@ impl Oracle {
         let properties = format!(
             "process.roles=broker,controller\n\
              node.id=1\n\
+             inter.broker.listener.name=PLAINTEXT\n\
              controller.quorum.voters=1@localhost:{controller_port}\n\
              controller.listener.names=CONTROLLER\n\
+             listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT\n\
              listeners=PLAINTEXT://0.0.0.0:{port},CONTROLLER://0.0.0.0:{controller_port}\n\
              advertised.listeners=PLAINTEXT://127.0.0.1:{port}\n\
-             listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT\n\
-             inter.broker.listener.name=PLAINTEXT\n\
              offsets.topic.replication.factor=1\n\
              transaction.state.log.replication.factor=1\n\
              transaction.state.log.min.isr=1\n\

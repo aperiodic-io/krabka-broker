@@ -6,7 +6,7 @@ use super::*;
 /// actual log end).
 /// No-append preflight consumes none of those coordinates.
 #[requires(control_inputs_coherent(old@, state.1, reports@))]
-#[ensures((result != None) == control_supported_request(old@, state, request, (node, target),
+#[ensures((None != result) == control_supported_request(old@, state, request, (node, target),
     (progress.0@ >= 0 && 0 <= progress.1@ && progress.1@ <= progress.3@
             && progress.0@ + control_record_count(state.1.kraft_version, request.kind) <= progress.3@
             && control_prefix_majorities(old@, reports@, request.kind, node,

@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   cpd:
-    name: jscpd · zero repeats at 60 tokens
+    name: jscpd · zero repeats at 48 tokens
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30

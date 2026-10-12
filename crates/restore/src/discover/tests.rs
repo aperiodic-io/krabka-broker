@@ -338,10 +338,7 @@ fn unrecognized_keys_keep_a_bounded_sample_and_count_the_rest() {
 #[tokio::test]
 async fn a_torn_copy_still_appears_with_the_missing_artifact_as_none() {
     let archive = torn_archive(None);
-
-    let args = args_from(archive.path(), &[]);
-    let store = open_archive(&args).expect("store");
-    let result = inventory(&store, &args).await.expect("inventory");
+    let result = scan_archive(archive.path()).await;
 
     check!(result.partitions.len() == 1);
     let segment = &result.partitions[0].segments[0];

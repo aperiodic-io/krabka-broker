@@ -75,16 +75,17 @@ fn batch(keys: &[Option<&'static [u8]>]) -> RecordsPayload {
 }
 
 async fn produce(broker: &BrokerHandle, topic: &str, records: RecordsPayload) -> ProduceResponse {
+    let part_data = PartitionProduceData {
+        index: 0,
+        records: Some(records),
+        ..Default::default()
+    };
     let request = ProduceRequest {
         acks: 1,
         timeout_ms: 5_000,
         topic_data: vec![TopicProduceData {
             name: topic.to_string(),
-            partition_data: vec![PartitionProduceData {
-                index: 0,
-                records: Some(records),
-                ..Default::default()
-            }],
+            partition_data: vec![part_data],
             ..Default::default()
         }],
         ..Default::default()

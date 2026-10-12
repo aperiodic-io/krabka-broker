@@ -161,6 +161,12 @@ mod tests {
         )]]
     }
 
+    async fn assign_topic_zero(source: Arc<dyn MetadataSource>) -> Result<Offset, BrokerError> {
+        ControllerSequencer::new(source)
+            .assign("topic", PartitionIndex(0), 3)
+            .await
+    }
+
     /// A controller in term 7 that answers every `submit_change` with
     /// `result`.
     fn source_answering(result: SubmitChangeResult) -> Arc<FakeMetadataSource> {
@@ -177,10 +183,7 @@ mod tests {
         let source = source_answering(SubmitChangeResult {
             offset_reservations: vec![reservation("topic", 0, 11, 3, 7)],
         });
-        let sequencer = ControllerSequencer::new(Arc::clone(&source) as Arc<dyn MetadataSource>);
-
-        let base = sequencer
-            .assign("topic", PartitionIndex(0), 3)
+        let base = assign_topic_zero(Arc::clone(&source) as Arc<dyn MetadataSource>)
             .await
             .unwrap();
 
@@ -221,11 +224,8 @@ mod tests {
 
         for result in cases {
             let source = source_answering(result);
-            let sequencer =
-                ControllerSequencer::new(Arc::clone(&source) as Arc<dyn MetadataSource>);
             assert2::assert!(
-                sequencer
-                    .assign("topic", PartitionIndex(0), 3)
+                assign_topic_zero(Arc::clone(&source) as Arc<dyn MetadataSource>)
                     .await
                     .is_err()
             );
@@ -239,10 +239,8 @@ mod tests {
                 .on_submit(|_| Err(RaftError::Shutdown))
                 .build(),
         );
-        let sequencer = ControllerSequencer::new(Arc::clone(&failing) as Arc<dyn MetadataSource>);
         assert2::assert!(
-            sequencer
-                .assign("topic", PartitionIndex(0), 3)
+            assign_topic_zero(Arc::clone(&failing) as Arc<dyn MetadataSource>)
                 .await
                 .is_err()
         );
@@ -330,11 +328,8 @@ mod tests {
                 })
                 .build(),
         );
-        let sequencer = ControllerSequencer::new(Arc::clone(&source) as Arc<dyn MetadataSource>);
-
         assert2::assert!(
-            sequencer
-                .assign("topic", PartitionIndex(0), 3)
+            assign_topic_zero(Arc::clone(&source) as Arc<dyn MetadataSource>)
                 .await
                 .unwrap()
                 == Offset(11)

@@ -187,9 +187,9 @@ fn snapshot_recovery_preserves_open_and_completed_transaction_fields() {
 #[test]
 fn recovery_recreates_missing_producer_snapshot_at_segment_boundary() {
     let dir = tempdir().unwrap();
-    let config = tiny_segments();
+    let reopen_cfg = tiny_segments();
     {
-        let mut log = Log::open(dir.path(), config.clone()).unwrap();
+        let mut log = Log::open(dir.path(), reopen_cfg.clone()).unwrap();
         for (base_sequence, timestamp) in [(0, 10), (2, 20), (4, 30)] {
             let mut batch = sample_batch(2);
             batch.producer_id = 42;
@@ -204,7 +204,7 @@ fn recovery_recreates_missing_producer_snapshot_at_segment_boundary() {
     check!(missing.exists());
     std::fs::remove_file(&missing).unwrap();
 
-    let reopened = Log::open(dir.path(), config).unwrap();
+    let reopened = Log::open(dir.path(), reopen_cfg).unwrap();
     check!(missing.exists());
     let range = krabka_verified::ProducerReloadRange {
         log_start: 0,

@@ -189,13 +189,14 @@ async fn inter_broker_only_apis_close_the_connection_on_a_client_listener() {
         let server = tokio::spawn(serve);
 
         let mut framed = test_support::connect_framed(addr, "connect").await;
-        let frame = request_frame(RequestFrameSetup {
+        let req_setup = RequestFrameSetup {
             api_key: krabka_ids::ApiKey(api_key),
             api_version: krabka_ids::ApiVersion(version),
             correlation_id: FrameCorrelationId(7),
             tagged: entry.body_flexible(version).then_some(&[0][..]),
             ..Default::default()
-        });
+        };
+        let frame = request_frame(req_setup);
         framed.send(frame.freeze()).await.expect("send request");
         check!(
             framed.next().await.is_none(),

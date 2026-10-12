@@ -13,15 +13,8 @@ use crate::harness::{KNOWN_ID, VALIDATED, check_value_append, framed, mock_topic
 async fn a_record_framed_with_a_bound_schema_id_is_accepted() {
     let (_registry, broker, client, _dir, id) = mock_topic_fixture("validated", VALIDATED).await;
 
-    check_value_append(
-        &broker,
-        &client,
-        "validated",
-        id,
-        Some(framed(KNOWN_ID, b"anything")),
-        (0, Some(1)),
-    )
-    .await;
+    let payload = Some(framed(KNOWN_ID, b"anything"));
+    check_value_append(&broker, &client, "validated", id, payload, (0, Some(1))).await;
 
     broker.shutdown().await;
 }

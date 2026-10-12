@@ -101,11 +101,10 @@ async fn streams_group_with_live_member_rejects_classic_join() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn converted_group_admin_views_respect_type_lock() {
     let (broker, bootstrap, _dir) = boot().await;
-    let classic_client = connect(&bootstrap).await;
-    let streams_client = connect(&bootstrap).await;
+    let (classic_client, streams_client) = (connect(&bootstrap).await, connect(&bootstrap).await);
 
-    finalize_streams_version(&classic_client).await;
     create_topic(&classic_client, "in3", 1).await;
+    finalize_streams_version(&classic_client).await;
 
     // Drain a classic group, then upgrade it to streams via a heartbeat.
     let (cm, _gen) = classic_join_sync(&classic_client, "g3").await;

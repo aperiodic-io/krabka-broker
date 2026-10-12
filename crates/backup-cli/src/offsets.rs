@@ -198,17 +198,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use assert2::check;
-    use krabka_protocol::{
-        owned::{
-            offset_commit_request::{
-                OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
-            },
-            offset_commit_response::{
-                OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
-            },
-        },
-        primitives::uuid::Uuid as WireUuid,
-    };
+    use krabka_protocol::{owned as wire, primitives::uuid::Uuid as WireUuid};
 
     use super::{
         CommittedOffset, GROUP_OFFSETS_VERSION, GroupOffsets, GroupOffsetsFile,
@@ -257,60 +247,61 @@ mod tests {
 
         let request = commit_request(&captured(), &topic_ids);
 
-        let partition = |index: i32, offset: i64| OffsetCommitRequestPartition {
-            partition_index: index,
-            committed_offset: offset,
-            committed_leader_epoch: UNKNOWN_LEADER_EPOCH,
-            ..OffsetCommitRequestPartition::default()
-        };
+        let partition =
+            |index: i32, offset: i64| wire::offset_commit_request::OffsetCommitRequestPartition {
+                partition_index: index,
+                committed_offset: offset,
+                committed_leader_epoch: UNKNOWN_LEADER_EPOCH,
+                ..wire::offset_commit_request::OffsetCommitRequestPartition::default()
+            };
         check!(
             request
-                == OffsetCommitRequest {
+                == wire::offset_commit_request::OffsetCommitRequest {
                     group_id: "orders-consumers".to_owned(),
                     generation_id_or_member_epoch: SIMPLE_CONSUMER_GENERATION,
                     member_id: String::new(),
                     topics: vec![
-                        OffsetCommitRequestTopic {
+                        wire::offset_commit_request::OffsetCommitRequestTopic {
                             name: "orders".to_owned(),
                             topic_id: orders,
                             partitions: vec![partition(0, 12), partition(1, 7)],
-                            ..OffsetCommitRequestTopic::default()
+                            ..wire::offset_commit_request::OffsetCommitRequestTopic::default()
                         },
-                        OffsetCommitRequestTopic {
+                        wire::offset_commit_request::OffsetCommitRequestTopic {
                             name: "payments".to_owned(),
                             // The cluster did not name an id for this topic, so
                             // the zero uuid goes on the wire and only the name
                             // resolves it.
                             topic_id: WireUuid::default(),
                             partitions: vec![partition(0, 3)],
-                            ..OffsetCommitRequestTopic::default()
+                            ..wire::offset_commit_request::OffsetCommitRequestTopic::default()
                         },
                     ],
-                    ..OffsetCommitRequest::default()
+                    ..wire::offset_commit_request::OffsetCommitRequest::default()
                 }
         );
     }
 
     #[test]
     fn only_the_refused_partitions_are_reported() {
-        let response = OffsetCommitResponse {
-            topics: vec![OffsetCommitResponseTopic {
+        let response = wire::offset_commit_response::OffsetCommitResponse {
+            topics: vec![wire::offset_commit_response::OffsetCommitResponseTopic {
                 name: "orders".to_owned(),
                 partitions: vec![
-                    OffsetCommitResponsePartition {
+                    wire::offset_commit_response::OffsetCommitResponsePartition {
                         partition_index: 0,
                         error_code: 0,
-                        ..OffsetCommitResponsePartition::default()
+                        ..wire::offset_commit_response::OffsetCommitResponsePartition::default()
                     },
-                    OffsetCommitResponsePartition {
+                    wire::offset_commit_response::OffsetCommitResponsePartition {
                         partition_index: 1,
                         error_code: 25,
-                        ..OffsetCommitResponsePartition::default()
+                        ..wire::offset_commit_response::OffsetCommitResponsePartition::default()
                     },
                 ],
-                ..OffsetCommitResponseTopic::default()
+                ..wire::offset_commit_response::OffsetCommitResponseTopic::default()
             }],
-            ..OffsetCommitResponse::default()
+            ..wire::offset_commit_response::OffsetCommitResponse::default()
         };
         check!(commit_refusals(&response) == vec!["orders-1: error code 25".to_owned()]);
     }

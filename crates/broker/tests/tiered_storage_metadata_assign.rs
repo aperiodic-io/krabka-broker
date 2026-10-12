@@ -34,13 +34,13 @@ async fn start_bare_broker() -> (BrokerHandle, TempDir) {
 
     // Pin a loopback port so the metadata-log bootstrap address is
     // knowable before the listener binds.
-    let (client_addrs, controller_addrs, client_listeners, controller_listeners) =
+    let (clients, controllers, client_listeners, controller_listeners) =
         support::bind_and_hold_ports(1).await;
-    let listen = client_addrs[0];
+    let (listen, ctrl) = (clients[0], controllers[0]);
 
     let log_dir = TempDir::new().expect("log tempdir");
 
-    let cfg = bare_config(log_dir.path(), listen, controller_addrs[0]);
+    let cfg = bare_config(log_dir.path(), listen, ctrl);
 
     let broker =
         support::start_first_held(cfg, client_listeners, controller_listeners, "broker start")
@@ -71,12 +71,12 @@ async fn subscribe_subset_from_nonzero_offset_yields_exact_records() {
     log.publish(2, Bytes::from_static(b"z")).await.unwrap();
 
     // Subscribe to partitions {0 from offset 1, 1 from offset 0}; not 2.
-    let (mut stream, _handle) =
-        log.subscribe(vec![PartitionStart::new(0, 1), PartitionStart::new(1, 0)]);
+    let starts = [PartitionStart::new(0, 1), PartitionStart::new(1, 0)];
+    let (mut stream, _handle) = log.subscribe(starts.to_vec());
 
     // Expect exactly: (0,1,b), (0,2,c), (1,0,x), (1,1,y). Collect with a
     // deadline; assert no partition-2 record ever arrives.
-    let mut got: Vec<(i32, i64, Vec<u8>)> = Vec::new();
+    let mut got: Vec<(i32, i64, Vec<u8>)> = Vec::with_capacity(4);
     let deadline = Instant::now() + Duration::from_secs(15);
     while got.len() < 4 {
         let next = tokio::time::timeout(Duration::from_millis(500), stream.next()).await;
@@ -93,15 +93,14 @@ async fn subscribe_subset_from_nonzero_offset_yields_exact_records() {
             "did not receive 4 records in 15s: {got:?}"
         );
     }
-    got.sort();
-    assert!(
-        got == vec![
-            (0, 1, b"b".to_vec()),
-            (0, 2, b"c".to_vec()),
-            (1, 0, b"x".to_vec()),
-            (1, 1, b"y".to_vec()),
-        ]
-    );
+    got.sort_unstable();
+    let expected = [
+        (0, 1, b"b".to_vec()),
+        (0, 2, b"c".to_vec()),
+        (1, 0, b"x".to_vec()),
+        (1, 1, b"y".to_vec()),
+    ];
+    assert!(got == expected);
 
     // Brief grace: ensure no stray partition-2 record sneaks in.
     if let Ok(Some(extra)) = tokio::time::timeout(Duration::from_millis(500), stream.next()).await {

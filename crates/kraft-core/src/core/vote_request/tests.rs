@@ -613,8 +613,8 @@ fn vote_from_voter_addressed_to_us_still_granted() {
     // C-2 must not break the legitimate path: a voter candidate addressing
     // us is still granted.
     let mut m = three_voter_machine();
-    let actions = receive_vote(&mut m, vote_event(NodeId(2), 1, false, 1, 5));
-    assert_binding_vote(&m, &actions, NodeId(2));
+    let actions = receive_vote(&mut m, vote_event(NodeId(3), 1, false, 1, 5));
+    assert_binding_vote(&m, &actions, NodeId(3));
 }
 
 #[test]

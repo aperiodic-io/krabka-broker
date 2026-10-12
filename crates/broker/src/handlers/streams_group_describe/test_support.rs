@@ -212,13 +212,13 @@ pub(super) fn topology_value() -> StreamsGroupTopologyValue {
 
 pub(super) fn describe_member() -> StreamsDescribeMember {
     StreamsDescribeMember {
+        client_host: "/127.0.0.1".into(),
+        client_id: "client-a".into(),
+        process_id: "process-a".into(),
         member_id: "member-1".into(),
         member_epoch: 7,
         instance_id: Some("instance-a".into()),
         rack_id: Some("rack-a".into()),
-        client_id: "client-a".into(),
-        client_host: "/127.0.0.1".into(),
-        process_id: "process-a".into(),
         topology_epoch: 9,
         user_endpoint: Some(("host-a".into(), 8080)),
         client_tags: vec![("zone".into(), "z1".into())],

@@ -27,6 +27,21 @@ struct SweepFixture {
     state: LivenessTickState,
 }
 
+struct FailoverTestContext {
+    controller: Arc<dyn MetadataSource>,
+    liveness: Arc<ControllerLivenessState>,
+    recovery: UncleanRecoveryHandle,
+}
+
+#[bon::builder]
+async fn failover_test_context(source: Arc<dyn MetadataSource>) -> FailoverTestContext {
+    FailoverTestContext {
+        controller: source,
+        liveness: liveness_with_alive(&[2, 3]).await,
+        recovery: recovery_handle_for_tests(),
+    }
+}
+
 impl SweepFixture {
     async fn new(dead: &[u64], alive: &[u64]) -> Self {
         Self {
@@ -56,17 +71,15 @@ async fn on_broker_dead_submits_failover_when_this_controller_is_leader() {
         ..Default::default()
     });
     let source = fake_source(img, Some(NodeId(7)));
-    let controller: Arc<dyn MetadataSource> = source.clone();
-    let liveness = liveness_with_alive(&[2, 3]).await;
-    let recovery = recovery_handle_for_tests();
+    let context = failover_test_context().source(source.clone()).call().await;
 
     on_broker_dead(
-        &controller,
+        &context.controller,
         NodeId(7),
         NodeId(1),
-        &liveness,
+        &context.liveness,
         &BrokerMetrics::new(),
-        &recovery,
+        &context.recovery,
     )
     .await
     .expect("broker dead handling should submit");
@@ -143,19 +156,17 @@ async fn on_broker_dead_bounds_a_stalled_commit() {
         ..Default::default()
     });
     let source = stalled_fake_source(img, Some(NodeId(7)));
-    let controller: Arc<dyn MetadataSource> = source.clone();
-    let liveness = liveness_with_alive(&[2, 3]).await;
-    let recovery = recovery_handle_for_tests();
+    let context = failover_test_context().source(source.clone()).call().await;
 
     // Paused time: the runtime auto-advances past the bound as soon as
     // the only pending future is the timeout itself.
     let result = on_broker_dead(
-        &controller,
+        &context.controller,
         NodeId(7),
         NodeId(1),
-        &liveness,
+        &context.liveness,
         &BrokerMetrics::new(),
-        &recovery,
+        &context.recovery,
     )
     .await;
 
@@ -258,16 +269,17 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
         leader_epoch: LeaderEpoch(5),
         ..Default::default()
     });
+    let isr_123 = &[
+        krabka_raft::NodeId(1),
+        krabka_raft::NodeId(2),
+        krabka_raft::NodeId(3),
+    ];
     let cases = [
         Case {
             name: "dead leader still leads: elect an alive ISR member",
             controller_leader: Some(NodeId(7)),
             leader: NodeId(1),
-            isr: &[
-                krabka_raft::NodeId(1),
-                krabka_raft::NodeId(2),
-                krabka_raft::NodeId(3),
-            ],
+            isr: isr_123,
             dead: &[1],
             alive: &[2, 3],
             expected: Some(PartitionRecord {
@@ -281,11 +293,7 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
             name: "dead ISR member: shrink the ISR without an epoch bump",
             controller_leader: Some(NodeId(7)),
             leader: NodeId(1),
-            isr: &[
-                krabka_raft::NodeId(1),
-                krabka_raft::NodeId(2),
-                krabka_raft::NodeId(3),
-            ],
+            isr: isr_123,
             dead: &[2],
             alive: &[1, 3],
             expected: Some(PartitionRecord {
@@ -306,11 +314,7 @@ async fn sweep_re_drives_only_dead_leaders_and_isr_members() {
             name: "not the controller leader: no re-drive",
             controller_leader: Some(NodeId(8)),
             leader: NodeId(1),
-            isr: &[
-                krabka_raft::NodeId(1),
-                krabka_raft::NodeId(2),
-                krabka_raft::NodeId(3),
-            ],
+            isr: isr_123,
             dead: &[1],
             alive: &[2, 3],
             expected: None,

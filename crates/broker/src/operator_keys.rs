@@ -23,6 +23,38 @@ pub use self::{
     trust_set::{OperatorKey, OperatorKeys},
 };
 
+/// The signed fields of one topic-freeze record, shared by the broker and the
+/// operator CLI. Each side still encodes these fields independently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreezeSigningInput<'a> {
+    pub cluster_id: &'a str,
+    pub pattern_type: i8,
+    pub scope: &'a str,
+    pub frozen: bool,
+    pub reason: &'a str,
+    pub set_by: &'a str,
+    pub set_at_ms: i64,
+    pub proposal_id: [u8; 16],
+}
+
+#[bon::builder]
+pub fn freeze_signing_input<'a>(
+    cluster_id: &'a str,
+    entry: &'a krabka_protocol::krabka::freeze::DescribedTopicFreeze,
+    frozen: bool,
+) -> FreezeSigningInput<'a> {
+    FreezeSigningInput {
+        cluster_id,
+        pattern_type: entry.pattern_type,
+        scope: &entry.scope,
+        frozen,
+        reason: &entry.reason,
+        set_by: &entry.set_by,
+        set_at_ms: entry.set_at_ms,
+        proposal_id: entry.proposal_id.0,
+    }
+}
+
 mod error;
 mod fingerprint;
 mod key_file;

@@ -737,13 +737,13 @@ mod tests {
                             partitions: vec![WritableTxnMarkerPartitionResult {
                                 partition_index: offsets_partition,
                                 error_code: codes::NONE,
-                                unknown_tagged_fields: UnknownTaggedFields::default(),
+                                ..Default::default()
                             }],
-                            unknown_tagged_fields: UnknownTaggedFields::default(),
+                            ..Default::default()
                         }],
-                        unknown_tagged_fields: UnknownTaggedFields::default(),
+                        ..Default::default()
                     }],
-                    unknown_tagged_fields: UnknownTaggedFields::default(),
+                    ..Default::default()
                 }
         );
         broker_handle.shutdown().await;

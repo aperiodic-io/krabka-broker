@@ -602,6 +602,15 @@ mod tests {
             }
         }
 
+        let settles_owned_partitions = |name, before| Row {
+            state_change: StateChange::Changed,
+            name,
+            before,
+            owned: Some(&[PartitionIndex(0), PartitionIndex(1)]),
+            after: settled_expected(),
+            ..Default::default()
+        };
+
         let rows = [
             // A member that must revoke stays where it is until it reports an
             // owned set without the pending partitions.
@@ -618,14 +627,10 @@ mod tests {
                 after: revoking_expected(),
                 ..Default::default()
             },
-            Row {
-                state_change: StateChange::Changed,
-                name: "an owned set without the pending partition moves the member on",
-                before: revoking_input(),
-                owned: Some(&[PartitionIndex(0), PartitionIndex(1)]),
-                after: settled_expected(),
-                ..Default::default()
-            },
+            settles_owned_partitions(
+                "an owned set without the pending partition moves the member on",
+                revoking_input(),
+            ),
             // A stable member behind the target epoch learns what to revoke.
             Row {
                 state_change: StateChange::Changed,
@@ -634,14 +639,10 @@ mod tests {
                 after: revoking_expected(),
                 ..Default::default()
             },
-            Row {
-                state_change: StateChange::Changed,
-                name: "a member that already dropped the partition moves on",
-                before: expanded_input(),
-                owned: Some(&[PartitionIndex(0), PartitionIndex(1)]),
-                after: settled_expected(),
-                ..Default::default()
-            },
+            settles_owned_partitions(
+                "a member that already dropped the partition moves on",
+                expanded_input(),
+            ),
             Row {
                 state_change: StateChange::Changed,
                 name: "a free target partition is granted at the target epoch",

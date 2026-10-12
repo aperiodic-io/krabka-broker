@@ -406,17 +406,16 @@ impl Log {
         }
         let mut next = self.local_log_start_offset();
         let end = self.log_end_offset();
-        let mut first_read = true;
+        let mut is_first_read = true;
         while next < end {
-            let read = self.read(next, krabka_units::mebibytes(1))?;
-            if read.batches.is_empty() {
-                return Err(LogError::Corrupt(format!(
-                    "transaction-stamp recovery made no progress at offset {next}"
-                )));
+            let slice = self.read(next, krabka_units::mebibytes(1))?;
+            if slice.batches.is_empty() {
+                let msg = format!("transaction-stamp recovery made no progress at offset {next}");
+                return Err(LogError::Corrupt(msg));
             }
-            for (index, batch) in read.batches.iter().enumerate() {
+            for (index, batch) in slice.batches.iter().enumerate() {
                 let producer_id = ProducerId(batch.producer_id);
-                let cursor = Self::replay_cursor(first_read && index == 0, next, batch);
+                let cursor = Self::replay_cursor(is_first_read && index == 0, next, batch);
                 let (last, advanced_to) = Self::recovered_batch_offsets(cursor, end, batch)?;
                 match control_batch_kind(batch) {
                     // A barrier marker closes no transaction, so it clears no
@@ -436,7 +435,7 @@ impl Log {
                 }
                 next = advanced_to;
             }
-            first_read = false;
+            is_first_read = false;
         }
         Ok(())
     }

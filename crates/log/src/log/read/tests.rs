@@ -392,11 +392,9 @@ fn read_at_log_end_returns_empty() {
 
 #[test]
 fn read_raw_after_reopen_does_not_skip_first_sealed_segment() {
-    use tempfile::TempDir;
-    let dir = TempDir::new().unwrap();
-    let cfg = tiny_segments();
+    let dir = tempfile::tempdir().unwrap();
     {
-        let mut log = Log::open(dir.path(), cfg.clone()).unwrap();
+        let mut log = Log::open(dir.path(), tiny_segments()).unwrap();
         log.append(&mut sample_batch(1)).unwrap(); // offset 0 → sealed seg base 0
         log.append(&mut sample_batch(1)).unwrap(); // offset 1 → sealed seg base 1
         log.append(&mut sample_batch(1)).unwrap(); // offset 2 → active seg base 2
@@ -409,7 +407,7 @@ fn read_raw_after_reopen_does_not_skip_first_sealed_segment() {
     // first sealed segment (its stale last_offset < fetch_offset) and serves
     // a later segment's base — the on-cluster phantom-follower gap that
     // pinned the high-watermark and stalled acks=all.
-    let reopened = Log::open(dir.path(), cfg).unwrap();
+    let reopened = Log::open(dir.path(), tiny_segments()).unwrap();
     let r = reopened
         .read_raw(Offset(0), reopened.log_end_offset(), mebibytes(1))
         .unwrap();

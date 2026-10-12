@@ -193,11 +193,12 @@ mod tests {
             (Some(2), true, true),
         ] {
             let mut image = MetadataImage::new(uuid::Uuid::nil());
-            if let Some(level) = finalized {
-                image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
+            if let Some(lvl) = finalized {
+                let rec = MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
                     name: SHARE_VERSION.into(),
-                    level,
-                }));
+                    level: lvl,
+                });
+                image.apply(&rec);
             }
             assert!(share_groups_enabled(&image) == groups, "{finalized:?}");
             assert!(share_dlq_supported(&image) == dlq, "{finalized:?}");

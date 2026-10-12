@@ -19,7 +19,7 @@ type ScheduledStablePrefix = (i64, i64, FetchVisibility, FetchVisibility);
 /// inputs, then expose the greatest consumer prefix allowed by both gates.
 /// Replication remains ungated. Cached input LSO/delivery fields are ignored;
 /// decoded bytes, cached-cursor invalidation and input completeness are external.
-#[requires(scheduled_inputs_coherent(batches@, activations@, w.log_start@, w.log_end@))]
+#[requires(true && scheduled_inputs_coherent(batches@, activations@, w.log_start@, w.log_end@))]
 #[ensures(match result {
     None => !scheduled_batches_valid(batches@, w.log_start@, w.log_end@)
         || exists<i: Int> 0 <= i && i < starts@.len() && starts@[i]@ > w.log_end@,

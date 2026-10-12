@@ -421,12 +421,9 @@ fn strict_orphans_grades_an_orphan_as_a_failure() {
 #[test]
 fn an_empty_archive_verifies() {
     let root = TempDir::new().unwrap();
+    let local_dir = root.path().to_str().unwrap().to_owned();
 
-    let result = run(&[
-        "verify".to_string(),
-        "--local-dir".to_string(),
-        root.path().display().to_string(),
-    ]);
+    let result = run(&["verify".to_string(), "--local-dir".to_string(), local_dir]);
 
     check!(result.code == Some(0), "stderr: {}", result.stderr);
     check!(result.stdout.contains("OK: empty archive"));

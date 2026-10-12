@@ -445,10 +445,8 @@ fn probed_high_watermarks(
 /// `true` when `node_id` leads the `__consumer_offsets` partition that hosts
 /// `group_id`, which is what makes it that group's coordinator.
 fn coordinates_group(image: &MetadataImage, node_id: NodeId, group_id: &str) -> bool {
-    let partition = partitioner::partition_for_group(image, group_id);
-    image
-        .partition(OFFSETS_TOPIC, partition)
-        .is_some_and(|record| record.leader == node_id)
+    let p = partitioner::partition_for_group(image, group_id);
+    matches!(image.partition(OFFSETS_TOPIC, p), Some(rec) if rec.leader == node_id)
 }
 
 /// Every committed offset the group's actor holds.

@@ -19,7 +19,7 @@ use crate::{
     ArchiveInventory, ArchiveStore, PartitionInventory, RestoreArgs, RestoreError,
     args::PartitionRef,
     bound::Predicates,
-    materialize::prepare::{BatchTally, PreparedBatch, prepare_batch},
+    materialize::prepare::{BatchTally, PrepareBatchSetup, PreparedBatch, prepare_batch},
     report::{DisklessPartitionReport, DisklessRestoreReport},
     verify::{MAX_LOG_BYTES, fetch_capped},
 };
@@ -254,11 +254,13 @@ pub(super) async fn materialize(
                     let records_in_batch =
                         u64::try_from(header.records_count.get().max(0)).unwrap_or(0);
                     let (mut prepared, tally) = prepare_batch(
-                        &partition_ref,
-                        predicates,
-                        &batch,
-                        object.slice(cursor..batch_end),
-                        records_in_batch,
+                        PrepareBatchSetup::builder()
+                            .partition_ref(&partition_ref)
+                            .predicates(predicates)
+                            .batch(&batch)
+                            .batch_bytes(object.slice(cursor..batch_end))
+                            .records_in_batch(records_in_batch)
+                            .build(),
                     )?;
                     materialized_end = base
                         .0

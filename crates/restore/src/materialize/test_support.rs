@@ -86,14 +86,15 @@ pub(super) fn batch(
     base_offset: i64,
     records: Vec<krabka_protocol::records::Record>,
 ) -> RecordBatch {
-    let last_offset_delta = records.iter().map(|r| r.offset_delta).max().unwrap_or(0);
+    let delta = records.iter().map(|r| r.offset_delta).max().unwrap_or(0);
+    let ts = 1_700_000_000_000;
     RecordBatch {
         base_offset,
         partition_leader_epoch: 7,
         attributes: Attributes::default(),
-        last_offset_delta,
-        base_timestamp: 1_700_000_000_000,
-        max_timestamp: 1_700_000_000_000 + i64::from(last_offset_delta),
+        last_offset_delta: delta,
+        base_timestamp: ts,
+        max_timestamp: ts + i64::from(delta),
         producer_id: -1,
         producer_epoch: -1,
         base_sequence: -1,

@@ -87,22 +87,17 @@ async fn a_batch_scheduled_far_out_holds_back_a_later_batch_that_is_already_due(
     ];
 
     for case in cases {
-        let topic = format!("deliver-at-time-head-of-line-{}", case.mode.value);
+        let mode_val = case.mode.value;
+        let topic = format!("deliver-at-time-head-of-line-{mode_val}");
         let topic_id = ready_topic(&p.broker, &p.client, &topic, case.mode).await;
 
-        let now = now_ms();
+        let pending_batch = batch_at(now_ms() + PENDING_HORIZON_MS, &["pending"]);
+        produce(&p.client, &topic, topic_id, pending_batch).await;
         produce(
             &p.client,
             &topic,
             topic_id,
-            batch_at(now + PENDING_HORIZON_MS, &["pending"]),
-        )
-        .await;
-        produce(
-            &p.client,
-            &topic,
-            topic_id,
-            batch_at(now - ALREADY_DUE_MS, &["already-due"]),
+            batch_at(now_ms() - ALREADY_DUE_MS, &["already-due"]),
         )
         .await;
 

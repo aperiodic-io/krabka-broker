@@ -68,21 +68,15 @@ use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
     process::Command,
-    time::{Duration, Instant},
 };
 
 use assert2::{assert, check};
-use krabka_client_consumer::{AutoOffsetReset, Consumer};
-use krabka_client_core::Client;
-use krabka_client_producer::{Acks, Producer, ProducerRecord};
-use krabka_protocol::{
-    owned::create_topics_request::{CreatableTopic, CreateTopicsRequest},
-    records::{CRC_COVERAGE_START, HEADER_LEN, RecordBatchHeader},
-};
+use krabka_protocol::records::{CRC_COVERAGE_START, HEADER_LEN, RecordBatchHeader};
 use support::{docker, free_port};
 use zerocopy::FromBytes;
 
 use crate::support::{
+    load_test::*,
     producer::{ProducerRecordSetup, no_retry_acks_all_producer, producer_record},
     remove_container_with_volumes,
     storage::host_directory_user,

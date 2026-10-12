@@ -10,13 +10,13 @@ use std::sync::Arc;
 use assert2::check;
 use bytes::Bytes;
 use krabka_metadata::{MetadataImage, MetadataRecord, PatternType, TopicRecord};
-use krabka_protocol::{
-    owned::produce_response::PartitionProduceResponse,
-    records::{Record, RecordBatch},
-};
+use krabka_protocol::owned::produce_response::PartitionProduceResponse;
 use uuid::Uuid;
 
-use super::super::{PartitionInput, process_partition};
+use super::{
+    super::{PartitionInput, process_partition},
+    seed_batch,
+};
 use crate::{
     broker::spawn_partition,
     codes::{NONE, POLICY_VIOLATION},
@@ -257,15 +257,4 @@ async fn a_frozen_topic_is_refused_and_its_log_end_offset_does_not_move() {
         "the gate counts once per refused partition row"
     );
     check!(rejections("control") == 0);
-}
-
-// One record, enough to seed a partition or to be refused.
-fn seed_batch() -> RecordBatch {
-    RecordBatch {
-        records: vec![Record {
-            value: Some(Bytes::from_static(b"v")),
-            ..Default::default()
-        }],
-        ..Default::default()
-    }
 }

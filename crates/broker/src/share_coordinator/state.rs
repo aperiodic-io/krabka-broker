@@ -455,8 +455,8 @@ mod tests {
                     ..Default::default()
                 })],
                 vec![batch(StateBatchSetup {
-                    bounds: Offset(5)..=Offset(9),
                     delivery: FixtureDeliveryState::Acknowledged,
+                    bounds: Offset(5)..=Offset(9),
                     ..Default::default()
                 })],
                 Offset(0),

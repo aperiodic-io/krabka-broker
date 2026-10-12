@@ -67,14 +67,13 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
     let p = support::start_legacy().await;
 
     // 1. Create topic "legacy_v0" with 1 partition using the typed client.
+    let topic_setup = ConfiguredTopicSetup {
+        name: "legacy_v0".into(),
+        ..Default::default()
+    };
     let cr = p
         .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("legacy_v0").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(creatable_topic(topic_setup)))
         .await
         .expect("CreateTopics");
     assert!(

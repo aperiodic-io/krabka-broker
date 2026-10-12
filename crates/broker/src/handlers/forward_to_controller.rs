@@ -42,26 +42,10 @@ use crate::{
 const UNKNOWN_SERVER_ERROR_MESSAGE: &str =
     "The server experienced an unexpected error when processing the request.";
 
-/// Rebuild a controller mutation after conflicting metadata or a pending tail.
+/// Retry a controller mutation after conflicting metadata or a pending tail.
 ///
 /// `operation` must submit with `submit_change_if_image`; each attempt gets a
 /// fresh authoritative image. The deadline covers admission and commit waits.
-///
-/// # Errors
-/// Returns the deadline error outside the operation's own result.
-pub(crate) async fn guarded_operation<T, F, Fut>(
-    broker: &Broker,
-    deadline: tokio::time::Instant,
-    operation: F,
-) -> Result<Result<T, RaftError>, tokio::time::error::Elapsed>
-where
-    F: FnMut(Arc<MetadataImage>) -> Fut,
-    Fut: Future<Output = Result<T, RaftError>> + Send,
-{
-    guarded_operation_on_source(broker.controller.as_ref(), deadline, operation).await
-}
-
-/// Metadata-source seam shared by the broker wrapper and race regressions.
 ///
 /// # Errors
 /// Returns the deadline error outside the operation's own result.
@@ -115,6 +99,21 @@ macro_rules! controller_listener_dispatch {
     };
 }
 pub(super) use controller_listener_dispatch;
+
+/// Forward a broker-listener mutation before running its controller handler.
+macro_rules! forward_if_not_controller {
+    ($broker:ident, $ctx:ident, $api_key:expr, $req_bytes:ident, $version:ident, $refusal:expr) => {
+        if $ctx.connection_id != $crate::controller_admin::CONTROLLER_ADMIN_CONNECTION_ID
+            && let Some(answer) = $crate::handlers::forward_to_controller::to_active_controller(
+                $broker, $api_key, $req_bytes, $version, $ctx, $refusal,
+            )
+            .await
+        {
+            return answer;
+        }
+    };
+}
+pub(super) use forward_if_not_controller;
 
 /// `ControllerExceptions.newWrongControllerException`'s message, the one a
 /// request that only the active controller may run carries when it reaches

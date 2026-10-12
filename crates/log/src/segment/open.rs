@@ -90,12 +90,10 @@ impl Segment {
     /// # Errors
     /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
     pub fn create(dir: &Path, base_offset: Offset) -> Result<Self, LogError> {
-        let log_path = name::log_path(dir, base_offset.0);
-        let log_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&log_path)?;
+        let path = name::log_path(dir, base_offset.0);
+        let mut opts = OpenOptions::new();
+        opts.read(true).write(true).create_new(true);
+        let log_file = opts.open(&path)?;
         Self::from_log_file(dir, base_offset, log_file, 0)
     }
 

@@ -40,9 +40,8 @@ use crate::support::quorum::metadata_quorum_request as describe_quorum_request;
 async fn a_follower_whose_leader_just_died_answers_not_leader_instead_of_closing() {
     let mut cluster = start_n_node_with_retry(2).await;
 
-    let (_, first_cfg, _dir0) = &cluster[0];
-    let first_client = build_client(first_cfg.listen_addr).await;
-    let first_resp = first_client
+    let node0_client = build_client(cluster[0].1.listen_addr).await;
+    let first_resp = node0_client
         .send(describe_quorum_request())
         .await
         .expect("describe_quorum from node 0");
@@ -52,7 +51,7 @@ async fn a_follower_whose_leader_just_died_answers_not_leader_instead_of_closing
         leader_id == 1 || leader_id == 2,
         "a 2-node cluster has an elected leader; got {leader_id}"
     );
-    first_client.close();
+    node0_client.close();
 
     let leader_index = cluster
         .iter()

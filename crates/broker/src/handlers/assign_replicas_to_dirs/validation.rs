@@ -41,27 +41,16 @@ pub(super) fn check_broker_epoch(
 #[cfg(test)]
 mod tests {
     use assert2::assert;
-    use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord};
-    use uuid::Uuid;
 
     use super::*;
-    use crate::test_support::broker_registration;
-
-    fn image_with_broker(node_id: u64, broker_epoch: i64) -> MetadataImage {
-        let mut image = MetadataImage::new(Uuid::nil());
-        image.apply(&MetadataRecord::V1BrokerRegistration(
-            BrokerRegistrationRecord {
-                broker_epoch,
-                host: "localhost".into(),
-                ..broker_registration(krabka_raft::NodeId(node_id))
-            },
-        ));
-        image
-    }
+    use crate::handlers::test_support::registered_broker_image;
 
     #[test]
     fn check_broker_epoch_rejects_unregistered_and_stale_brokers() {
-        let image = image_with_broker(7, 42);
+        let image = registered_broker_image()
+            .node_id(krabka_raft::NodeId(7))
+            .broker_epoch(42)
+            .call();
 
         let cases = [
             ("current epoch of a registered broker", 7, 42, Ok(7)),

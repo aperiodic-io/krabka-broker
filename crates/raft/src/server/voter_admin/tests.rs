@@ -327,38 +327,28 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
         check!(response.error_message.is_some(), "{what}: says why");
     }
 
-    // Foreign cluster_id is refused with INCONSISTENT_CLUSTER_ID (104)
-    let request = AddRaftVoterRequest {
-        cluster_id: Some("00000000-0000-0000-0000-0000000000ff".to_owned()),
+    let build_candidate_request = |cluster_id: Option<String>| AddRaftVoterRequest {
+        cluster_id,
         voter_id: 2,
         voter_directory_id: directory,
         listeners: vec![good_listener()],
         ..Default::default()
     };
+
+    // Foreign cluster_id is refused with INCONSISTENT_CLUSTER_ID (104)
+    let request = build_candidate_request(Some("00000000-0000-0000-0000-0000000000ff".to_owned()));
     let response = add_response(request, &engine, response_setup).await;
     check!(response.error_code == 104);
 
     // Matching cluster_id is accepted (does not return INVALID_REQUEST)
-    let request = AddRaftVoterRequest {
-        cluster_id: Some(engine.current_image().cluster_id().to_string()),
-        voter_id: 2,
-        voter_directory_id: directory,
-        listeners: vec![good_listener()],
-        ..Default::default()
-    };
+    let request = build_candidate_request(Some(engine.current_image().cluster_id().to_string()));
     let response = add_response(request, &engine, response_setup).await;
     check!(response.error_code != INVALID_REQUEST);
 
     // At kraft.version >= 1, AddRaftVoter probes the candidate listeners.
     // Unreachable candidate fails probe with code 7.
     activate_dynamic_membership(&engine).await;
-    let request = AddRaftVoterRequest {
-        cluster_id: None,
-        voter_id: 2,
-        voter_directory_id: directory,
-        listeners: vec![good_listener()],
-        ..Default::default()
-    };
+    let request = build_candidate_request(None);
     let response = add_response(request, &engine, response_setup).await;
     check!(
         response.error_code == 7,

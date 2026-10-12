@@ -286,6 +286,14 @@ fn kafka_reads_krabka_local_tiered_segment_and_producer_snapshot() {
 
     let topic_id = Uuid::from_u128(1);
     let segment_id = Uuid::from_u128(0xfe);
+    let seg_size = i32::try_from(export.log_path.metadata().unwrap().len()).unwrap();
+    let details = RemoteLogSegmentDetails::new(
+        seg_size,
+        RemoteLogSegmentState::CopySegmentStarted,
+        [(LeaderEpoch(0), export.base_offset.0)]
+            .into_iter()
+            .collect(),
+    );
     let metadata = RemoteLogSegmentMetadata::new(
         RemoteLogSegmentId::new(TopicIdPartition::new(topic_id, "orders", 0), segment_id),
         export.base_offset.0,
@@ -293,12 +301,7 @@ fn kafka_reads_krabka_local_tiered_segment_and_producer_snapshot() {
         export.max_timestamp,
         1,
         0,
-        RemoteLogSegmentDetails::new(
-            i32::try_from(std::fs::metadata(&export.log_path).unwrap().len())
-                .expect("test segment fits i32"),
-            RemoteLogSegmentState::CopySegmentStarted,
-            maplit::btreemap! {LeaderEpoch(0) => export.base_offset.0},
-        ),
+        details,
     )
     .expect("valid remote metadata");
 

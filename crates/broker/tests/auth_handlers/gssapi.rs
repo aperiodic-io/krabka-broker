@@ -8,7 +8,6 @@
 
 use assert2::assert;
 use bytes::BytesMut;
-use krabka_broker::Broker;
 use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
     Decode, Encode,
@@ -19,11 +18,10 @@ use krabka_protocol::{
     },
 };
 use krabka_security::SaslMechanism;
-use tokio::net::TcpStream;
 
 use crate::{
-    harness::round_trip,
-    inter_broker::drive_inter_broker_client_then_apiversions,
+    harness::{round_trip, start_broker_stream},
+    inter_broker::run_inter_broker_auth_test,
     support::{
         manifest_dir,
         sasl::sasl_temp_config,
@@ -53,10 +51,9 @@ async fn gssapi_handshake_advertised_when_enabled() {
         max_time_skew: krabka_security::gssapi::DEFAULT_GSSAPI_MAX_TIME_SKEW,
     });
 
-    let handle = Broker::start(cfg).await.expect("broker must start");
-    let addr = handle.listen_addr();
-
-    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let broker_stream = start_broker_stream(cfg).await;
+    let handle = broker_stream.broker;
+    let mut stream = broker_stream.stream;
     let mut corr = 0;
 
     // ApiVersions (pre-auth) so the connection is in a clean state.
@@ -147,20 +144,15 @@ async fn gssapi_inter_broker_client_authenticates_from_keytab() {
         max_time_skew: krabka_security::gssapi::DEFAULT_GSSAPI_MAX_TIME_SKEW,
     });
 
-    let handle = Broker::start(cfg).await.expect("broker must start");
-    let addr = handle.listen_addr();
-
-    let client = krabka_broker::network::client::InterBrokerClient::new(
-        None,
-        Some(krabka_broker::config::InterBrokerCredentials::Gssapi {
+    let result = run_inter_broker_auth_test(
+        cfg,
+        krabka_broker::config::InterBrokerCredentials::Gssapi {
             keytab_path: fixtures.join("alice.keytab"),
             client_principal: "alice@CRABKA.TEST".to_string(),
             service_name: "kafka".to_string(),
             kdc_url,
-        }),
-    );
-
-    let result = drive_inter_broker_client_then_apiversions(&client, addr).await;
-    handle.shutdown().await;
+        },
+    )
+    .await;
     result.expect("InterBrokerClient GSSAPI auth + ApiVersions round-trip must succeed");
 }

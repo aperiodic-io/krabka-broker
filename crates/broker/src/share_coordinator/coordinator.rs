@@ -407,17 +407,16 @@ impl ShareCoordinator {
                 self.drop_partition_state(*partition);
             }
         }
-        ScheduledLoads(
-            to_load
-                .into_iter()
-                .map(|(partition, generation)| {
-                    let coordinator = Arc::clone(self);
-                    tokio::spawn(async move {
-                        coordinator.load_partition(partition, generation).await;
-                    })
+        let handles = to_load
+            .into_iter()
+            .map(|(partition, generation)| {
+                let coord = Arc::clone(self);
+                tokio::spawn(async move {
+                    coord.load_partition(partition, generation).await;
                 })
-                .collect(),
-        )
+            })
+            .collect();
+        ScheduledLoads(handles)
     }
 
     /// Whether `desired` (led partition to leader epoch) differs from the led

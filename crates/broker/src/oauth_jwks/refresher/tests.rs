@@ -29,6 +29,15 @@ async fn check_first_fetch_and_stop(
     server_shutdown.cancel();
 }
 
+async fn send_signal_until(
+    signal_tx: &tokio::sync::mpsc::Sender<()>,
+    description: &str,
+    condition: impl Fn() -> bool,
+) {
+    signal_tx.send(()).await.unwrap();
+    await_until(description, condition).await;
+}
+
 #[tokio::test]
 async fn refresher_populates_handle_then_stops_on_shutdown() {
     let (addr, srv_shutdown) = serve_jwks(JWKS_BODY).await;
@@ -160,10 +169,10 @@ async fn refresher_signal_triggers_on_demand_refresh_when_pause_elapsed() {
     let task = tokio::spawn(refresher.run());
 
     // Drive at least one signal refresh.
-    signal_tx.send(()).await.unwrap();
     // Poll until the on-demand timestamp moves and the handle has been
     // populated by the on-demand fetch.
-    await_until(
+    send_signal_until(
+        &signal_tx,
         "on-demand fetch advances timestamp and populates handle",
         || last_on_demand.load(Ordering::Relaxed) > 0 && !handle.load().is_empty(),
     )
@@ -314,10 +323,10 @@ async fn refresher_failed_refresh_does_not_advance_last_successful_fetch() {
     ) = make_signal_refresher(endpoint, <Time as TimeExt>::ZERO);
     let task = tokio::spawn(refresher.run());
 
-    signal_tx.send(()).await.unwrap();
     // Wait for the failed refresh attempt to complete & log; the on-demand
     // rate-limit timestamp advances even when the fetch itself fails.
-    await_until(
+    send_signal_until(
+        &signal_tx,
         "failed on-demand fetch still advances rate-limit timestamp",
         || last_on_demand.load(Ordering::Relaxed) > 0,
     )

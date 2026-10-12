@@ -47,18 +47,7 @@ impl<L: SimNodeLog> Sim<L> {
             );
             nodes.insert(
                 id,
-                Node {
-                    id,
-                    machine,
-                    log: make_log(id),
-                    high_watermark: 0,
-                    // Arm the initial election timer: an idle voter must time out
-                    // and begin an election to bootstrap the cluster.
-                    election_deadline: Some(SimInstant(election_timeout_ms)),
-                    fetch_deadline: None,
-                    heartbeat_deadline: None,
-                    check_quorum_deadline: None,
-                },
+                Node::new(id, machine, make_log(id), election_timeout_ms),
             );
         }
         Self {
@@ -132,9 +121,11 @@ impl<L: SimNodeLog> Sim<L> {
     /// its timers no longer affect its peers. The node keeps ticking
     /// internally, but no peer can hear it.
     pub fn partition(&mut self, node: NodeId) {
-        self.partitioned.insert(node);
-        // Drop any in-flight messages touching the partitioned node.
-        self.queue.retain(|m| m.src != node && m.dst != node);
+        krabka_kraft_core::simulation_support::partition_node(
+            &mut self.partitioned,
+            &mut self.queue,
+            node,
+        );
     }
 
     /// Heals a partition. The node can send and receive again.

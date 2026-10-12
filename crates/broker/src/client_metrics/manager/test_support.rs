@@ -12,6 +12,11 @@ use super::{ClientAttributes, SubscriptionAssignment, SubscriptionDecision};
 
 pub(super) fn img_with(name: &str, kvs: &[(&str, &str)]) -> MetadataImage {
     let mut img = MetadataImage::new(Uuid::nil());
+    apply_config(&mut img, name, kvs);
+    img
+}
+
+pub(super) fn apply_config(img: &mut MetadataImage, name: &str, kvs: &[(&str, &str)]) {
     let mut cfgs = BTreeMap::new();
     for (k, v) in kvs {
         cfgs.insert((*k).to_string(), (*v).to_string());
@@ -22,7 +27,6 @@ pub(super) fn img_with(name: &str, kvs: &[(&str, &str)]) -> MetadataImage {
             configs: cfgs,
         },
     ));
-    img
 }
 
 pub(super) fn attrs() -> ClientAttributes {

@@ -471,13 +471,8 @@ fn replay_recovers_fencing_and_controlled_shutdown() {
     }
 
     let mut recovered = MetadataImage::new(uuid::Uuid::nil());
-    replay_committed(
-        &engine.log,
-        &mut recovered,
-        Offset(0),
-        MetadataRaftFetchMax::default(),
-    )
-    .expect("replay");
+    let fetch_cap = MetadataRaftFetchMax::default();
+    replay_committed(&engine.log, &mut recovered, Offset(0), fetch_cap).expect("replay");
 
     let registrations = |image: &MetadataImage| {
         let mut brokers: Vec<BrokerRegistrationRecord> = image.brokers().cloned().collect();

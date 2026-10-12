@@ -66,6 +66,22 @@ pub struct UserQuotaSetup<'a> {
     pub value: QuotaValue,
 }
 
+impl UserQuotaSetup<'_> {
+    fn alteration_entries(&self) -> QuotaEntries {
+        vec![(
+            vec![("user".into(), Some(self.user.into()))],
+            vec![(self.key.into(), self.value.0, false)],
+        )]
+    }
+
+    fn alteration_options(&self) -> QuotaAlterSetup<'_> {
+        QuotaAlterSetup {
+            authentication: self.authentication.clone(),
+            ..Default::default()
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire drivers for AlterClientQuotas and DescribeClientQuotas
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,14 +252,8 @@ pub async fn set_user_quota(
     let entity: krabka_metadata::EntityKey = vec![("user".into(), Some(setup.user.into()))];
     let response = drive_alter_client_quotas_sasl(
         addr,
-        vec![(
-            entity.clone(),
-            vec![(setup.key.into(), setup.value.0, false)],
-        )],
-        &QuotaAlterSetup {
-            authentication: setup.authentication,
-            ..Default::default()
-        },
+        setup.alteration_entries(),
+        &setup.alteration_options(),
     )
     .await;
     assert!(response[0].1 == 0, "alter quota must succeed");
@@ -268,14 +278,8 @@ pub async fn alter_user_quota(
 ) -> Vec<(QuotaEntity, i16)> {
     drive_alter_client_quotas_sasl(
         addr,
-        vec![(
-            vec![("user".into(), Some(setup.user.into()))],
-            vec![(setup.key.into(), setup.value.0, false)],
-        )],
-        &QuotaAlterSetup {
-            authentication: setup.authentication,
-            ..Default::default()
-        },
+        setup.alteration_entries(),
+        &setup.alteration_options(),
     )
     .await
 }

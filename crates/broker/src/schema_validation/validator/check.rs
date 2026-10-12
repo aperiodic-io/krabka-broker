@@ -326,7 +326,7 @@ mod tests {
         // One call, for the same reason as above: the id is cached, and only
         // the subject the role derives differs between the two checks.
         let (_server, v, field) = bound_subject_validator().await;
-        let got = v
+        let err = v
             .check(
                 "orders",
                 Role::Key,
@@ -334,9 +334,9 @@ mod tests {
                 &field,
                 &no_metrics(),
             )
-            .await;
-        assert!(let Err(reason) = got);
-        check!(reason.label() == "wrong_subject", "{reason}");
+            .await
+            .unwrap_err();
+        check!(err.label() == "wrong_subject", "{err}");
     }
 
     #[tokio::test]

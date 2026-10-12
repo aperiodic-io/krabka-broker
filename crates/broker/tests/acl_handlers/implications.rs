@@ -26,7 +26,9 @@ async fn metadata_implication(operation: krabka_metadata::AclOperation) {
     handle.shutdown().await;
 
     assert!(resp.topics.len() == 1, "one topic row in response");
-    let row = &resp.topics[0];
+    let [row] = &resp.topics[..] else {
+        unreachable!()
+    };
     assert!(row.name.as_deref() == Some("foo"));
     assert!(
         row.error_code == 0,

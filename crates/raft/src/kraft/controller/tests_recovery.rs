@@ -23,6 +23,10 @@ use crate::{
     },
 };
 
+fn quorum_state_json(directory: &std::path::Path) -> String {
+    std::fs::read_to_string(directory.join(QUORUM_STATE_FILE)).unwrap()
+}
+
 fn recovery_voters() -> (VoterSet, VoterSet, VoterSet) {
     (
         voter_set(&[NodeId(1)]),
@@ -305,7 +309,7 @@ async fn quorum_state_file_round_trips() {
     // The JVM tools read this file, so the schema-v0 field set and its
     // Kafka field order are part of the contract, not an implementation
     // detail of whatever serializer writes it.
-    let json = std::fs::read_to_string(dir.path().join(QUORUM_STATE_FILE)).unwrap();
+    let json = quorum_state_json(dir.path());
     check!(
         json == format!(
             "{{\"clusterId\":\"{cid}\",\"leaderId\":2,\"leaderEpoch\":5,\"votedId\":3,\
@@ -332,7 +336,7 @@ async fn quorum_state_file_round_trips() {
             loaded.cluster_id,
         ) == (5, None, Some(NodeId(3)), cid)
     );
-    let json = std::fs::read_to_string(dir.path().join(QUORUM_STATE_FILE)).unwrap();
+    let json = quorum_state_json(dir.path());
     assert2::assert!(json.contains("\"currentVoters\""));
     assert2::assert!(json.contains("\"data_version\":0"));
     assert2::assert!(!json.contains("votedDirectoryId"));

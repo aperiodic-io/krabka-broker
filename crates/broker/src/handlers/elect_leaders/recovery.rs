@@ -60,13 +60,11 @@ pub(super) async fn run_offset_aware_recovery(
             &broker.audit_log,
             &broker.config.break_glass,
             env.ctx,
-            &GatedTransition {
-                action: BreakGlassAction::UncleanElectLeaders,
-                target: &target,
-                phase: PrivilegedPhase::Consumed,
-                proposal_id: Some(proposal_id),
-                reason: "offset-aware unclean recovery admitted",
-            },
+            &consumed_transition()
+                .target(&target)
+                .proposal_id(proposal_id)
+                .reason("offset-aware unclean recovery admitted")
+                .call(),
         )
         .await
     {
@@ -93,13 +91,11 @@ pub(super) async fn run_offset_aware_recovery(
             &broker.audit_log,
             &broker.config.break_glass,
             env.ctx,
-            &GatedTransition {
-                action: BreakGlassAction::UncleanElectLeaders,
-                target: &target,
-                phase: PrivilegedPhase::Consumed,
-                proposal_id: Some(proposal_id),
-                reason: "approval spent on an offset-aware unclean recovery",
-            },
+            &consumed_transition()
+                .target(&target)
+                .proposal_id(proposal_id)
+                .reason("approval spent on an offset-aware unclean recovery")
+                .call(),
         );
     }
     let (tx, rx) = oneshot::channel();
@@ -142,6 +138,21 @@ pub(super) async fn run_offset_aware_recovery(
         error_code,
         error_message,
         ..Default::default()
+    }
+}
+
+#[bon::builder]
+fn consumed_transition<'a>(
+    target: &'a str,
+    proposal_id: Uuid,
+    reason: &'a str,
+) -> GatedTransition<'a> {
+    GatedTransition {
+        action: BreakGlassAction::UncleanElectLeaders,
+        target,
+        phase: PrivilegedPhase::Consumed,
+        proposal_id: Some(proposal_id),
+        reason,
     }
 }
 

@@ -45,7 +45,7 @@ use crate::{
     kafka_wire::{PlainAuthenticationSetup, quotas::QuotaAlterSetup},
     tuple_quota_cluster::{
         create_topic_as_admin, seed_alice_write_acl, seed_compat_shim_disable_acl,
-        start_single_broker_sasl_plaintext_with_users, wait_partition_exists,
+        start_single_broker_sasl_plaintext_with_users,
     },
     tuple_quota_drivers::{await_authorized_produce, drive_alter_client_quotas_sasl},
 };
@@ -97,7 +97,9 @@ async fn tuple_quota_throttles_only_matching_client_id() {
         },
     )
     .await;
-    wait_partition_exists(&handle, "tuple-quota-topic", 0).await;
+    handle
+        .wait_until_partition_present("tuple-quota-topic", 0)
+        .await;
     seed_alice_write_acl(&handle, "tuple-quota-topic").await;
 
     // Set tuple quota: (user=alice, client-id=app-x) producer_byte_rate=1024.

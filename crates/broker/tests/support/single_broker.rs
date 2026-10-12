@@ -172,10 +172,36 @@ pub async fn boot_single() -> (BrokerHandle, String, TempDir) {
 pub async fn start_group_coordinator() -> (BrokerHandle, String, TempDir) {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let config = BrokerConfig::for_tests(tempdir.path().to_path_buf());
-    let handle = Broker::start(config).await.expect("broker must start");
-    handle.wait_until_group_coordinator_ready().await;
-    let bootstrap = handle.listen_addr().to_string();
-    (handle, bootstrap, tempdir)
+    let started = Box::pin(
+        start_group_coordinator_with_config()
+            .config(config)
+            .directory(tempdir)
+            .call(),
+    )
+    .await;
+    (started.broker, started.bootstrap, started.directory)
+}
+
+pub struct GroupCoordinatorBoot {
+    pub broker: BrokerHandle,
+    pub bootstrap: String,
+    pub directory: TempDir,
+}
+
+/// Start a configured broker and wait until its group coordinator is ready.
+#[bon::builder]
+pub async fn start_group_coordinator_with_config(
+    config: BrokerConfig,
+    directory: TempDir,
+) -> GroupCoordinatorBoot {
+    let broker = Broker::start(config).await.expect("broker must start");
+    broker.wait_until_group_coordinator_ready().await;
+    let bootstrap = broker.listen_addr().to_string();
+    GroupCoordinatorBoot {
+        broker,
+        bootstrap,
+        directory,
+    }
 }
 
 /// Keep the standard client fixture and wait for its group coordinator after startup.

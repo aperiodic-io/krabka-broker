@@ -339,12 +339,9 @@ async fn a_transaction_that_begins_while_the_sweep_waits_is_not_expired() {
     let mut entry = handle.lock().await;
 
     let sweep = {
-        let coordinator = Arc::clone(&coordinator);
-        tokio::spawn(async move {
-            coordinator
-                .expire_transactional_ids(EXPIRY_MS + 1, EXPIRY_MS)
-                .await
-        })
+        let coord = Arc::clone(&coordinator);
+        let cutoff = EXPIRY_MS + 1;
+        tokio::spawn(async move { coord.expire_transactional_ids(cutoff, EXPIRY_MS).await })
     };
     // The producer begins a transaction while the sweep waits on the lock.
     entry.state = TxnState::Ongoing;

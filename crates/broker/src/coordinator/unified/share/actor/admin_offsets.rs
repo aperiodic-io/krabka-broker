@@ -345,13 +345,11 @@ mod tests {
     use std::collections::HashSet;
 
     use assert2::check;
-    use bytes::Bytes;
 
     use super::{DeleteTopicOutcome, ResetPartition, delete_offsets, reset_offsets};
     use crate::{
         codes,
         coordinator::unified::{
-            offsets_log::fake::InMemoryOffsetsLog,
             share::{
                 actor::{
                     records::PendingShareRecords,
@@ -365,22 +363,13 @@ mod tests {
                 },
                 state::{ShareGroupState, ShareMemberState},
             },
-            test_support::{fixed_source, make_share_persister},
+            test_support::{
+                AppendedRecords as Appended, appended_offsets_records as appended, fixed_source,
+                make_share_persister,
+            },
         },
         test_support::PartitionCount,
     };
-
-    /// `(key, value)` of every record appended to `__consumer_offsets`.
-    type Appended = Vec<(Option<Bytes>, Option<Bytes>)>;
-
-    async fn appended(log: &InMemoryOffsetsLog) -> Appended {
-        log.batches()
-            .await
-            .into_iter()
-            .flat_map(|batch| batch.records)
-            .map(|record| (record.key, record.value))
-            .collect()
-    }
 
     /// The records of one `ShareGroupStatePartitionMetadata` write of `g`.
     fn metadata_record(value: ShareGroupStatePartitionMetadataValue) -> Appended {

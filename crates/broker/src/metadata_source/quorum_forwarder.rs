@@ -174,12 +174,12 @@ impl MetadataWriter for QuorumForwarder {
         version: i16,
         body: bytes::Bytes,
     ) -> Result<bytes::Bytes, RaftError> {
-        let hint = *self.leader.borrow();
-        let order = build_forward_order(&self.targets(), hint);
+        let leader_hint = *self.leader.borrow();
+        let forward_order = build_forward_order(&self.targets(), leader_hint);
         let mut last_err = RaftError::NotLeader {
-            current_leader: hint,
+            current_leader: leader_hint,
         };
-        for (target, addr) in &order {
+        for (target, addr) in &forward_order {
             let opts = krabka_client_core::ConnectionOptions {
                 client_id: self.client_id.clone(),
                 dispatch_queue_capacity: self.client_dispatch_queue_capacity,

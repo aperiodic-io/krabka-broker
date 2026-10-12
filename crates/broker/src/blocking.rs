@@ -58,6 +58,12 @@ enum Placement {
     Inline,
 }
 
+#[derive(Clone, Copy)]
+enum InPlacePanicHandling {
+    Propagate,
+    ReturnError,
+}
+
 impl Placement {
     /// The placement of [`run_blocking`] on the current runtime.
     fn for_current_runtime() -> Self {
@@ -87,13 +93,7 @@ pub(crate) async fn run_blocking<R>(
 where
     R: Send + 'static,
 {
-    match Placement::for_current_runtime() {
-        Placement::InPlace => Ok(tokio::task::block_in_place(work)),
-        Placement::Pool => tokio::task::spawn_blocking(work)
-            .await
-            .map_err(BlockingError::Join),
-        Placement::Inline => run_inline(work),
-    }
+    run_blocking_placed(work, InPlacePanicHandling::Propagate).await
 }
 
 /// [`run_blocking`], with a panic in place returned as an error rather than
@@ -111,9 +111,24 @@ pub(crate) async fn run_blocking_catching<R>(
 where
     R: Send + 'static,
 {
+    run_blocking_placed(work, InPlacePanicHandling::ReturnError).await
+}
+
+async fn run_blocking_placed<R>(
+    work: impl FnOnce() -> R + Send + 'static,
+    in_place_panic: InPlacePanicHandling,
+) -> Result<R, BlockingError>
+where
+    R: Send + 'static,
+{
     match Placement::for_current_runtime() {
-        Placement::InPlace => catch_unwind(AssertUnwindSafe(|| tokio::task::block_in_place(work)))
-            .map_err(|_| BlockingError::PanickedInPlace),
+        Placement::InPlace => match in_place_panic {
+            InPlacePanicHandling::Propagate => Ok(tokio::task::block_in_place(work)),
+            InPlacePanicHandling::ReturnError => {
+                catch_unwind(AssertUnwindSafe(|| tokio::task::block_in_place(work)))
+                    .map_err(|_| BlockingError::PanickedInPlace)
+            }
+        },
         Placement::Pool => tokio::task::spawn_blocking(work)
             .await
             .map_err(BlockingError::Join),

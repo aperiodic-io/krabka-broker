@@ -4,7 +4,7 @@
 
 use krabka_ids::Offset;
 use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_protocol::records::metadata::control::ControlRecord;
+use krabka_protocol::records::{RecordBatch, metadata::control::ControlRecord};
 use krabka_verified::recovery::{
     ReplayCursorDecision, ReplayRecordDecision, replay_cursor_decision, replay_record_decision,
     should_capture_first_downgrade,
@@ -20,6 +20,29 @@ use crate::{
     error::{MetadataReplayError, RaftError},
     kraft::{log::KraftLog, types::QuorumState},
 };
+
+fn visit_decoded_batches(
+    log: &KraftLog,
+    from: Offset,
+    target: Offset,
+    max: MetadataRaftFetchMax,
+    mut visit: impl FnMut(&[RecordBatch], Offset, Offset) -> Result<(), RaftError>,
+) -> Result<(), RaftError> {
+    let mut cursor = from;
+    while cursor < target {
+        let batches = log.read_decoded(cursor, max.size())?;
+        let next = next_batch_offset(&batches);
+        if batches.is_empty() {
+            break;
+        }
+        visit(&batches, from, target)?;
+        match replay_cursor_decision(cursor.0, next.map(|offset| offset.0)) {
+            ReplayCursorDecision::Advance(next) => cursor = Offset(next),
+            ReplayCursorDecision::Stop => break,
+        }
+    }
+    Ok(())
+}
 
 /// Replay committed log batches starting at `from` into `image` (idempotent:
 /// records that fail `validate` are skipped). Used by restart recovery.
@@ -44,17 +67,11 @@ pub fn replay_committed_with_timestamp(
     from: Offset,
     max: MetadataRaftFetchMax,
 ) -> Result<(Option<PendingDowngradeSnapshot>, Option<i64>), RaftError> {
-    let mut cursor = from;
     let target = log.hwm();
     let mut pending = None;
     let mut last_applied_timestamp_ms = None;
-    while cursor < target {
-        let batches = log.read_decoded(cursor, max.size())?;
-        let next = next_batch_offset(&batches);
-        if batches.is_empty() {
-            break;
-        }
-        for batch in &batches {
+    visit_decoded_batches(log, from, target, max, |batches, from, target| {
+        for batch in batches {
             if batch.base_offset >= from.0 && batch.base_offset < target.0 {
                 last_applied_timestamp_ms = Some(batch.max_timestamp);
             }
@@ -102,11 +119,8 @@ pub fn replay_committed_with_timestamp(
                 }
             }
         }
-        match replay_cursor_decision(cursor.0, next.map(|offset| offset.0)) {
-            ReplayCursorDecision::Advance(next) => cursor = Offset(next),
-            ReplayCursorDecision::Stop => break,
-        }
-    }
+        Ok(())
+    })?;
     Ok((pending, last_applied_timestamp_ms))
 }
 
@@ -135,14 +149,8 @@ fn replay_control_records_until(
     max: MetadataRaftFetchMax,
 ) -> Result<(), RaftError> {
     let from = log.log_start_offset();
-    let mut cursor = from;
-    while cursor < target {
-        let batches = log.read_decoded(cursor, max.size())?;
-        let next = next_batch_offset(&batches);
-        if batches.is_empty() {
-            break;
-        }
-        for batch in &batches {
+    visit_decoded_batches(log, from, target, max, |batches, from, target| {
+        for batch in batches {
             for record in &batch.records {
                 if !matches!(
                     replay_record_decision(
@@ -163,11 +171,8 @@ fn replay_control_records_until(
                 apply_control_record(state, record, offset)?;
             }
         }
-        match replay_cursor_decision(cursor.0, next.map(|offset| offset.0)) {
-            ReplayCursorDecision::Advance(next) => cursor = Offset(next),
-            ReplayCursorDecision::Stop => break,
-        }
-    }
+        Ok(())
+    })?;
     Ok(())
 }
 

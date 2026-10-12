@@ -111,6 +111,15 @@ impl BrokerConfig {
         }]
     }
 
+    /// The protocol selected by the listener used for broker-to-broker traffic.
+    #[must_use]
+    pub fn inter_broker_listener_protocol(&self) -> ListenerProtocol {
+        self.effective_listeners()
+            .into_iter()
+            .find(|listener| listener.name == self.inter_broker_listener_name)
+            .map_or(ListenerProtocol::Plaintext, |listener| listener.protocol)
+    }
+
     /// The broker-wide idle window in force: what the operator configured, or
     /// Kafka's `connections.max.idle.ms` default when they configured
     /// nothing. Every path that only wants the window reads it here, so that

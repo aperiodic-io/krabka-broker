@@ -6,6 +6,9 @@
 //! model state, so they share one file with the convergence test that the
 //! availability property depends on.
 
+use std::collections::HashSet;
+
+use krabka_metadata::PartitionRecord;
 use krabka_raft::NodeId;
 
 use super::{
@@ -16,8 +19,30 @@ use super::{
 use crate::{
     config_keys::RecoveryStrategy,
     elr::state::PartitionElr,
-    leader_election::{ElectionType, FailoverDecision, select_new_leader_for_partition},
+    leader_election::{
+        ElectionType, FailoverDecision, Ladder, failover_one, select_new_leader_for_partition,
+    },
 };
+
+/// Adapt the production ladder-based decision to the model's callback shape.
+pub(super) fn production_elect(
+    record: &PartitionRecord,
+    dead: NodeId,
+    alive: &HashSet<NodeId>,
+    witnesses: &HashSet<NodeId>,
+    elr: &PartitionElr,
+    strategy: RecoveryStrategy,
+    unclean_enabled: bool,
+) -> FailoverDecision {
+    let ladder = Ladder::builder()
+        .alive(alive)
+        .witnesses(witnesses)
+        .elr(elr)
+        .strategy(strategy)
+        .unclean_enabled(unclean_enabled)
+        .build();
+    failover_one(record, dead, &ladder)
+}
 
 impl StretchModel {
     /// `true` when the controller has no failover work left. Every broker it

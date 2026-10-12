@@ -53,9 +53,10 @@ pub(super) struct ParkedFetch {
 
 impl Engine {
     #[tracing::instrument(
+        name = "kraft_on_inbound",
         level = "debug",
         skip_all,
-        fields(node = self.me.0, epoch = self.core.quorum_state().leader_epoch, role = self.core.role().name())
+        fields(role = self.core.role().name(), epoch = self.core.quorum_state().leader_epoch, node = self.me.0)
     )]
     pub fn on_inbound(&mut self, inbound: Inbound) {
         // Decode the request body, run it through the core, and encode the

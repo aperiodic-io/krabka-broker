@@ -252,29 +252,43 @@ mod tests {
         )
     }
 
+    fn cached_partitions(
+        partitions: std::ops::RangeInclusive<i32>,
+    ) -> Vec<(FetchSessionKey, CachedPartitionState)> {
+        partitions
+            .map(krabka_ids::PartitionIndex)
+            .map(cached_partition)
+            .collect()
+    }
+
+    #[bon::builder]
+    fn two_partition_session(principal: &str, partition_ids: [i32; 2]) -> SessionAllocationSetup {
+        SessionAllocationSetup {
+            principal: principal.into(),
+            partitions: partition_ids
+                .into_iter()
+                .map(krabka_ids::PartitionIndex)
+                .map(cached_partition)
+                .collect(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn total_partitions_cached_sums_across_sessions() {
         let cache = FetchSessionCache::new(10);
         allocate_session(
             &cache,
-            SessionAllocationSetup {
-                principal: "a".into(),
-                partitions: vec![
-                    cached_partition(krabka_ids::PartitionIndex(0)),
-                    cached_partition(krabka_ids::PartitionIndex(1)),
-                ],
-                ..Default::default()
-            },
+            two_partition_session()
+                .principal("a")
+                .partition_ids([0, 1])
+                .call(),
         );
         allocate_session(
             &cache,
             SessionAllocationSetup {
                 principal: "b".into(),
-                partitions: vec![
-                    cached_partition(krabka_ids::PartitionIndex(2)),
-                    cached_partition(krabka_ids::PartitionIndex(3)),
-                    cached_partition(krabka_ids::PartitionIndex(4)),
-                ],
+                partitions: cached_partitions(2..=4),
                 ..Default::default()
             },
         );
@@ -282,14 +296,12 @@ mod tests {
     }
 
     fn two_partition_cache() -> (FetchSessionCache, FetchSessionId) {
-        allocated_cache(SessionAllocationSetup {
-            principal: "a".into(),
-            partitions: vec![
-                cached_partition(krabka_ids::PartitionIndex(0)),
-                cached_partition(krabka_ids::PartitionIndex(1)),
-            ],
-            ..Default::default()
-        })
+        allocated_cache(
+            two_partition_session()
+                .principal("a")
+                .partition_ids([0, 1])
+                .call(),
+        )
     }
 
     #[test]
@@ -351,13 +363,7 @@ mod tests {
             &cache,
             SessionAllocationSetup {
                 principal: "a".into(),
-                partitions: vec![
-                    cached_partition(krabka_ids::PartitionIndex(0)),
-                    cached_partition(krabka_ids::PartitionIndex(1)),
-                    cached_partition(krabka_ids::PartitionIndex(2)),
-                    cached_partition(krabka_ids::PartitionIndex(3)),
-                    cached_partition(krabka_ids::PartitionIndex(4)),
-                ],
+                partitions: cached_partitions(0..=4),
                 ..Default::default()
             },
         );

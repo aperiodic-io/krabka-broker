@@ -104,16 +104,14 @@ pub(crate) async fn drive_delete_topics_sasl(
         ..Default::default()
     };
 
-    let mut stream = kafka_wire::sasl_plain_authenticate(
-        addr,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            user,
-            password: (pass.as_bytes()).to_vec(),
-        },
-    )
-    .await
-    .expect("SASL authenticate for DeleteTopics");
+    let auth_setup = PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        user,
+        password: pass.as_bytes().to_vec(),
+    };
+    let mut stream = kafka_wire::sasl_plain_authenticate(addr, &auth_setup)
+        .await
+        .expect("SASL authenticate for DeleteTopics");
     let mut body = BytesMut::new();
     req.encode(&mut body, VERSION).expect("encode DeleteTopics");
     let resp_bytes = kafka_wire::round_trip(

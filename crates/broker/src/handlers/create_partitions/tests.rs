@@ -19,7 +19,7 @@ use crate::{
             expected_response, expected_result, request, seed_controller_quota, seed_topic,
             topic_req,
         },
-        test_support::{TopicPartitionCount, replica_availability},
+        test_support::{TopicPartitionCount, replica_availability, replica_nodes_from_partitions},
     },
     test_support::{
         DenyAll, begin_controlled_shutdown, fence_remote_broker, make_witness, peer, principal,
@@ -551,10 +551,7 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
                     topic: "grow".into(),
                     partition,
                     leader,
-                    replicas: replicas
-                        .iter()
-                        .map(|&id| n(u64::try_from(id).expect("broker id")))
-                        .collect(),
+                    replicas: replica_nodes_from_partitions(replicas),
                     isr,
                     leader_epoch: krabka_metadata::LeaderEpoch(0),
                     adding_replicas: vec![],
@@ -627,10 +624,10 @@ async fn automatic_growth_takes_fenced_brokers_last_and_words_refusals_like_the_
         )
         .await;
 
-        let image = broker_handle.controller_image_for_test();
-        let added = (1..)
-            .map_while(|index| image.partition("grow", index).cloned())
-            .collect::<Vec<_>>();
+        let ctrl_image = broker_handle.controller_image_for_test();
+        let added: Vec<_> = (1..)
+            .map_while(|idx| ctrl_image.partition("grow", idx).cloned())
+            .collect();
         let label = format!("fenced {fenced:?}, shutting down {shutting_down:?}");
         let (error_code, error_message) = match outcome {
             Ok(_) => (codes::NONE, None),

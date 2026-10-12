@@ -17,9 +17,10 @@
 //! cannot do it in this test, because the nodes wait ten minutes before they
 //! call a follower slow.
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::{
     collections::BTreeMap,
-    os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -96,13 +97,11 @@ async fn start_cluster() -> Cluster {
     let topology = endpoints.topology();
 
     let controller_dir = TempDir::new().unwrap();
-    let ctrl_cfg = topology.config(
-        controller_dir.path(),
-        RoleNodeSetup {
-            role: NodeRole::Controller,
-            ..Default::default()
-        },
-    );
+    let setup = RoleNodeSetup {
+        role: NodeRole::Controller,
+        ..Default::default()
+    };
+    let ctrl_cfg = topology.config(controller_dir.path(), setup);
     let controller = support::start_held_node(
         ctrl_cfg,
         &mut ctrl_listeners,
@@ -182,10 +181,12 @@ fn directory_id(dir: &Path) -> uuid::Uuid {
 
 /// `chmod a-w -R` over a directory tree, undone when dropped so the temporary
 /// directory can be removed.
+#[cfg(unix)]
 struct ReadOnlyTree {
     paths: Vec<(PathBuf, u32)>,
 }
 
+#[cfg(unix)]
 impl ReadOnlyTree {
     fn new(root: &Path) -> Self {
         let mut paths = Vec::new();
@@ -219,11 +220,26 @@ impl ReadOnlyTree {
     }
 }
 
+#[cfg(unix)]
 impl Drop for ReadOnlyTree {
     fn drop(&mut self) {
         for (path, mode) in &self.paths {
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(*mode));
         }
+    }
+}
+
+#[cfg(not(unix))]
+struct ReadOnlyTree;
+
+#[cfg(not(unix))]
+impl ReadOnlyTree {
+    fn new(_root: &Path) -> Self {
+        Self
+    }
+
+    fn refuses_writes(&self) -> bool {
+        false
     }
 }
 

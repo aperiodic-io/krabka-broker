@@ -19,6 +19,12 @@ pub(crate) async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
     String::from_utf8(request).unwrap()
 }
 
+pub(crate) async fn accept_http_request(listener: TcpListener) -> TcpStream {
+    let (mut socket, _) = listener.accept().await.expect("accept HTTP request");
+    read_request(&mut socket).await;
+    socket
+}
+
 /// Bind a local HTTP test endpoint without starting its response task.
 pub(crate) async fn http_listener() -> (TcpListener, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

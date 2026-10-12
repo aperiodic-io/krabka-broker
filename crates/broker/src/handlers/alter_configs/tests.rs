@@ -30,7 +30,7 @@ use crate::{
             image_with_client_metrics_config, image_with_group_config, image_with_topic_config,
             topic_resource,
         },
-        decode_request, encode_response,
+        test_support::{assert_dispatch_response, ordered_rows},
     },
     test_support::{
         DenyAll, context_helper, start_broker_with_authorizer as start_broker, test_ctx,
@@ -45,6 +45,12 @@ context_helper!(client_id = "admin-client");
 #[tokio::test]
 async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
     broker_fixture!((handle, _dir, broker), allow_all, context(ctx, "admin"));
+    let duplicate_topic = tagged_wire!(AlterConfigsResourceResponse {
+        resource_type: RESOURCE_TYPE_TOPIC,
+        resource_name: "duplicate".into(),
+        error_code: codes::INVALID_REQUEST,
+        error_message: Some("Each resource must appear at most once.".into())
+    });
     let rows = [
         (
             broker_resource("2", &[]),
@@ -64,15 +70,7 @@ async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
                 error_message: None
             }),
         ),
-        (
-            topic_resource("duplicate", &[]),
-            tagged_wire!(AlterConfigsResourceResponse {
-                resource_type: RESOURCE_TYPE_TOPIC,
-                resource_name: "duplicate".into(),
-                error_code: codes::INVALID_REQUEST,
-                error_message: Some("Each resource must appear at most once.".into())
-            }),
-        ),
+        (topic_resource("duplicate", &[]), duplicate_topic.clone()),
         (
             resource(77, "unsupported"),
             tagged_wire!(AlterConfigsResourceResponse {
@@ -91,30 +89,25 @@ async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
                 error_message: Some("The topic 'missing' does not exist.".into())
             }),
         ),
-        (
-            topic_resource("duplicate", &[]),
-            tagged_wire!(AlterConfigsResourceResponse {
-                resource_type: RESOURCE_TYPE_TOPIC,
-                resource_name: "duplicate".into(),
-                error_code: codes::INVALID_REQUEST,
-                error_message: Some("Each resource must appear at most once.".into())
-            }),
-        ),
+        (topic_resource("duplicate", &[]), duplicate_topic),
     ];
     for order in [[0, 1, 2, 3, 4, 5], [5, 4, 3, 2, 1, 0]] {
+        let ordered = ordered_rows(&rows, &order);
         let request = AlterConfigsRequest {
-            resources: order.iter().map(|&index| rows[index].0.clone()).collect(),
+            resources: ordered.requests,
             validate_only: true,
             ..Default::default()
         };
-        let bytes = encode_response(&request, 2).unwrap();
-        let bytes = Box::pin(dispatch(&broker, 2, &bytes, &ctx)).await.unwrap();
-        let response = decode_request::<AlterConfigsResponse>(&bytes, 2).unwrap();
         let expected = AlterConfigsResponse {
-            responses: order.iter().map(|&index| rows[index].1.clone()).collect(),
+            responses: ordered.responses,
             ..Default::default()
         };
-        assert!(response == expected);
+        let broker_ref = broker.as_ref();
+        let context_ref = &ctx;
+        assert_dispatch_response(&request, &expected, 2, |body| async move {
+            dispatch(broker_ref, 2, &body, context_ref).await
+        })
+        .await;
     }
     handle.shutdown().await;
 }

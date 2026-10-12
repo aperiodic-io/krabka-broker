@@ -527,9 +527,9 @@ async fn acquire_pass(
                     // records does not park for the full long-poll timeout.
                     outcome = grow_and_acquire(&mut st, &mut fresh, grow_and_acquire_args()).await;
                     if outcome.as_ref().is_err_and(log_start_moved_past_spso) {
-                        // A concurrent floor move is retried on the next pass.
-                        // The local-only WAL trim frontier cannot establish
-                        // the logical deletion floor.
+                        // A concurrent floor move is retried on the next
+                        // pass. The local-only WAL trim frontier cannot
+                        // establish the logical deletion floor.
                         fresh = PartitionData::default();
                         outcome = Ok(0);
                     }

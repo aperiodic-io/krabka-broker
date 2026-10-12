@@ -55,53 +55,52 @@ pub(crate) enum BatchTally {
     Emptied,
 }
 
-/// Decide one archived batch's fate under `predicates`, and prepare what gets appended to the target log without touching the log itself, so `--dry-run` can share this exact path with a real run.
-pub(crate) fn prepare_batch(
-    partition_ref: &PartitionRef,
-    predicates: &Predicates,
-    batch: &RecordBatchBorrowed<'_>,
+#[derive(bon::Builder)]
+pub(crate) struct PrepareBatchSetup<'record, 'bytes> {
+    partition_ref: &'record PartitionRef,
+    predicates: &'record Predicates,
+    batch: &'record RecordBatchBorrowed<'bytes>,
     batch_bytes: Bytes,
     records_in_batch: u64,
+}
+
+/// Decide one archived batch's fate under `predicates`, and prepare what gets appended to the target log without touching the log itself, so `--dry-run` can share this exact path with a real run.
+pub(crate) fn prepare_batch(
+    setup: PrepareBatchSetup<'_, '_>,
 ) -> Result<(PreparedBatch, BatchTally), RestoreError> {
-    let header = batch.header();
-    match predicates.decide_batch(partition_ref, batch)? {
-        BatchDecision::Keep if batch.attributes().is_control_batch() => {
-            Ok((prepare_owned_batch(batch.to_owned()?)?, BatchTally::Kept))
-        }
+    let header = setup.batch.header();
+    match setup
+        .predicates
+        .decide_batch(setup.partition_ref, setup.batch)?
+    {
+        BatchDecision::Keep if setup.batch.attributes().is_control_batch() => Ok((
+            prepare_owned_batch(setup.batch.to_owned()?)?,
+            BatchTally::Kept,
+        )),
         BatchDecision::Keep => {
-            let verbatim = VerbatimBatch::from_header(header, batch_bytes);
+            let verbatim = VerbatimBatch::from_header(header, setup.batch_bytes);
             Ok((PreparedBatch::Verbatim(verbatim), BatchTally::Kept))
         }
         BatchDecision::Empty => Ok((
             prepare_owned_batch(bare_header_batch(header))?,
             BatchTally::Emptied,
         )),
-        BatchDecision::Filter => prepare_filtered_batch(
-            partition_ref,
-            predicates,
-            batch,
-            batch_bytes,
-            records_in_batch,
-        ),
+        BatchDecision::Filter => prepare_filtered_batch(setup),
     }
 }
 
 /// The [`BatchDecision::Filter`] arm of [`prepare_batch`], split out because it is the one path that has to decide record by record before it can decide the whole batch.
 fn prepare_filtered_batch(
-    partition_ref: &PartitionRef,
-    predicates: &Predicates,
-    batch: &RecordBatchBorrowed<'_>,
-    batch_bytes: Bytes,
-    records_in_batch: u64,
+    setup: PrepareBatchSetup<'_, '_>,
 ) -> Result<(PreparedBatch, BatchTally), RestoreError> {
-    let header = batch.header();
-    let mut keep_flags = Vec::with_capacity(usize::try_from(records_in_batch).unwrap_or(0));
-    for record in batch {
+    let header = setup.batch.header();
+    let mut keep_flags = Vec::with_capacity(usize::try_from(setup.records_in_batch).unwrap_or(0));
+    for record in setup.batch {
         let record = record?;
         let (record_offset, timestamp_ms) = record_coordinates(header, &record)?;
         let producer_id = ProducerId(header.producer_id.get());
-        let decision = predicates.decide_record(
-            partition_ref,
+        let decision = setup.predicates.decide_record(
+            setup.partition_ref,
             record_offset,
             timestamp_ms,
             producer_id,
@@ -110,7 +109,7 @@ fn prepare_filtered_batch(
         keep_flags.push(decision == RecordDecision::Keep);
     }
 
-    let owned = batch.to_owned()?;
+    let owned = setup.batch.to_owned()?;
     let mut flags = keep_flags.into_iter();
     let filtered = filter_batch(&owned, |_record| {
         flags.next().expect(
@@ -121,12 +120,12 @@ fn prepare_filtered_batch(
 
     Ok(match filtered {
         FilteredBatch::Unchanged => {
-            let verbatim = VerbatimBatch::from_header(header, batch_bytes);
+            let verbatim = VerbatimBatch::from_header(header, setup.batch_bytes);
             (PreparedBatch::Verbatim(verbatim), BatchTally::Kept)
         }
         FilteredBatch::Filtered(rewritten) => {
             let kept = u64::try_from(rewritten.records.len()).unwrap_or(0);
-            let dropped = records_in_batch.saturating_sub(kept);
+            let dropped = setup.records_in_batch.saturating_sub(kept);
             // The generic record filter shrinks the span to its survivors.
             // Restore preserves the archived span instead, as Kafka's
             // MemoryRecords.buildRetainedRecordsInto does with overrideLastOffset:
@@ -251,8 +250,9 @@ mod tests {
     use krabka_protocol::records::{Attributes, Record, TimestampType};
 
     use super::{
-        BatchTally, Bytes, BytesMut, PartitionRef, Predicates, PreparedBatch, RecordBatch,
-        RecordBatchBorrowed, prepare_batch, prepare_owned_batch, validate_one_v2_batch,
+        BatchTally, Bytes, BytesMut, PartitionRef, Predicates, PrepareBatchSetup, PreparedBatch,
+        RecordBatch, RecordBatchBorrowed, prepare_batch, prepare_owned_batch,
+        validate_one_v2_batch,
     };
     use crate::materialize::test_support::args_from;
 
@@ -414,11 +414,13 @@ mod tests {
         let borrowed = RecordBatchBorrowed::decode_borrow_with_policy(&mut cursor, <_>::default())
             .expect("borrow marker");
         let (mut prepared, tally) = prepare_batch(
-            &partition_ref,
-            &predicates,
-            &borrowed,
-            marker_bytes.clone(),
-            1,
+            PrepareBatchSetup::builder()
+                .partition_ref(&partition_ref)
+                .predicates(&predicates)
+                .batch(&borrowed)
+                .batch_bytes(marker_bytes.clone())
+                .records_in_batch(1)
+                .build(),
         )
         .expect("prepare marker");
         check!(matches!(tally, BatchTally::Kept));

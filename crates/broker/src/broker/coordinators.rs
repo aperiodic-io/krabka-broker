@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use super::inter_broker_listener_protocol;
 use crate::{
     api_catalog::UnstableApiVersions,
     auto_topic_creation::AutoTopicCreation,
@@ -59,13 +60,7 @@ pub(super) async fn start_coordinators(
         auto_topic_creation,
         metrics,
     } = inputs;
-    let listener_protocol = config
-        .effective_listeners()
-        .iter()
-        .find(|listener| listener.name == config.inter_broker_listener_name)
-        .map_or(krabka_security::ListenerProtocol::Plaintext, |listener| {
-            listener.protocol
-        });
+    let listener_protocol = inter_broker_listener_protocol(config);
     let mut txn_coordinator = TxnCoordinator::new(
         config.node_id,
         Arc::clone(partitions),

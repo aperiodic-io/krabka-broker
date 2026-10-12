@@ -9,13 +9,12 @@
 use std::{path::PathBuf, sync::Arc};
 
 use assert2::check;
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::produce_response::PartitionProduceResponse,
-    records::{Record, RecordBatch},
-};
+use krabka_protocol::owned::produce_response::PartitionProduceResponse;
 
-use super::super::{PartitionInput, process_partition};
+use super::{
+    super::{PartitionInput, process_partition},
+    seed_batch,
+};
 use crate::{
     codes::{INVALID_TOPIC_EXCEPTION, NONE},
     config::BrokerConfig,
@@ -187,15 +186,4 @@ async fn a_denied_internal_topic_is_refused_and_its_log_end_offset_does_not_move
         "the seed batch plus the admin client's one append; the ordinary \
          application's refused batch must not have landed"
     );
-}
-
-// One record, enough to seed a partition or to be refused.
-fn seed_batch() -> RecordBatch {
-    RecordBatch {
-        records: vec![Record {
-            value: Some(Bytes::from_static(b"v")),
-            ..Default::default()
-        }],
-        ..Default::default()
-    }
 }

@@ -70,8 +70,8 @@ async fn a_produce_to_a_scheduled_topic_refreshes_the_mirror_and_rearms_the_sche
             u64::try_from(200 + BOUND_MS).expect("positive"),
         ))
         .expect("manual time moves forward");
-    let ack_rx = queue_batch(&tx, batch_at(NOW_MS - 60_000)).await;
-    ack_rx.await.expect("ack").expect("append ok");
+    let rx = queue_batch(&tx, batch_at(NOW_MS - 60_000)).await;
+    rx.await.expect("produce ack").expect("append ok");
     check!(wait_until(|| delivery.watermark() == Offset(6)).await);
 
     drop(tx);

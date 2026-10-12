@@ -34,10 +34,10 @@ crate::test_support::codec_helpers!(
 const GZIP: i8 = 1;
 const NONE: i8 = 0;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 struct SubscriptionId(i32);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TelemetryCompressionCode(i8);
 
 #[derive(Clone, Copy, Default)]
@@ -279,16 +279,17 @@ async fn push_without_a_get_builds_the_instance() {
         (broker_handle, _dir, broker),
         crate::test_support::start_broker_with(|_cfg| {})
     );
-    let peer = peer();
+    let peer_addr = peer();
+    let client_ctx = TelemetryContext {
+        connection_id: "connection-a",
+        client_id: "client-a",
+        peer: &peer_addr,
+        software_name: "test-client",
+        software_version: "1.0.0",
+    };
     let client = Client {
         broker: &broker,
-        ctx: TelemetryContext {
-            connection_id: "connection-a",
-            client_id: "client-a",
-            peer: &peer,
-            software_name: "test-client",
-            software_version: "1.0.0",
-        },
+        ctx: client_ctx,
     };
     let known = Uuid::from_u128(0x1234);
     let other = Uuid::from_u128(0x5678);

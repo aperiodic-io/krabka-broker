@@ -255,8 +255,7 @@ mod tests {
     #[test]
     fn abort_marker_writes_txnindex_entry() {
         let (dir, mut log) = test_log();
-        let mut t = transactional_batch(1000, 0, &["a", "b", "c"]);
-        log.append(&mut t).unwrap();
+        append_transaction(&mut log, (1000, 0), &["a", "b", "c"]);
 
         let mut a = abort_marker(1000, 0);
         log.append(&mut a).unwrap();
@@ -330,8 +329,7 @@ mod tests {
     #[test]
     fn abort_marker_last_offset_uses_base_plus_delta() {
         let (dir, mut log) = test_log();
-        let mut t = transactional_batch(1000, 0, &["a", "b", "c"]);
-        log.append(&mut t).unwrap(); // offsets 0..=2
+        append_transaction(&mut log, (1000, 0), &["a", "b", "c"]); // offsets 0..=2
 
         // Abort marker spanning two offsets (delta 1): base 3, last 4.
         let mut a = abort_marker(1000, 0);

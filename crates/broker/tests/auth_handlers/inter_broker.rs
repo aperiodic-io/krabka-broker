@@ -38,20 +38,27 @@ async fn inter_broker_client_authenticates_via_plain() {
     cfg.plain_credentials
         .insert("broker".to_string(), admin_plain_password());
 
-    let handle = Broker::start(cfg).await.expect("broker must start");
-    let addr = handle.listen_addr();
-
-    let client = krabka_broker::network::client::InterBrokerClient::new(
-        None,
-        Some(krabka_broker::config::InterBrokerCredentials::Plain {
+    run_inter_broker_auth_test(
+        cfg,
+        krabka_broker::config::InterBrokerCredentials::Plain {
             username: "broker".to_string(),
             password: admin_plain_password(),
-        }),
-    );
+        },
+    )
+    .await
+    .expect("InterBrokerClient PLAIN auth + ApiVersions round-trip must succeed");
+}
 
+pub async fn run_inter_broker_auth_test(
+    cfg: krabka_broker::BrokerConfig,
+    credentials: krabka_broker::config::InterBrokerCredentials,
+) -> Result<(), io::Error> {
+    let handle = Broker::start(cfg).await.expect("broker must start");
+    let addr = handle.listen_addr();
+    let client = krabka_broker::network::client::InterBrokerClient::new(None, Some(credentials));
     let result = drive_inter_broker_client_then_apiversions(&client, addr).await;
     handle.shutdown().await;
-    result.expect("InterBrokerClient PLAIN auth + ApiVersions round-trip must succeed");
+    result
 }
 
 /// Drive `InterBrokerClient::connect` and run one `ApiVersions` round-trip

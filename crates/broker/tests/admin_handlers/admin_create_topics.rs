@@ -23,10 +23,28 @@ use crate::{
 /// carried reports.
 const DYNAMIC_TOPIC_CONFIG: i8 = 1;
 
-/// One entry as both responses state it: the fields `CreatableTopicConfigs`
-/// and `DescribeConfigsResourceResult` have in common, which is everything
-/// KIP-525 puts on the create response.
-type ConfigEntry = (String, Option<String>, i8, bool, bool);
+/// The fields both responses share, which is everything KIP-525 puts on the
+/// create response.
+#[derive(Debug, PartialEq, Eq)]
+struct ConfigEntry {
+    name: String,
+    value: Option<String>,
+    source: i8,
+    is_sensitive: bool,
+    read_only: bool,
+}
+
+macro_rules! config_entry {
+    ($entry:ident) => {
+        ConfigEntry {
+            name: $entry.name.clone(),
+            value: $entry.value.clone(),
+            source: $entry.config_source,
+            is_sensitive: $entry.is_sensitive,
+            read_only: $entry.read_only,
+        }
+    };
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_topics_returns_the_configs_describe_configs_reports() {
@@ -63,28 +81,20 @@ async fn create_topics_returns_the_configs_describe_configs_reports() {
         .as_ref()
         .expect("KIP-525 configs list")
         .iter()
-        .map(|entry| {
-            (
-                entry.name.clone(),
-                entry.value.clone(),
-                entry.config_source,
-                entry.is_sensitive,
-                entry.read_only,
-            )
-        })
+        .map(|entry| config_entry!(entry))
         .collect();
     check!(
         !from_create.is_empty(),
         "the list carries the topic's values"
     );
     check!(
-        from_create.contains(&(
-            "retention.ms".to_string(),
-            Some("60000".to_string()),
-            DYNAMIC_TOPIC_CONFIG,
-            false,
-            false,
-        )),
+        from_create.contains(&ConfigEntry {
+            name: "retention.ms".to_string(),
+            value: Some("60000".to_string()),
+            source: DYNAMIC_TOPIC_CONFIG,
+            is_sensitive: false,
+            read_only: false,
+        }),
         "the request's own override, at DYNAMIC_TOPIC_CONFIG"
     );
 
@@ -105,15 +115,7 @@ async fn create_topics_returns_the_configs_describe_configs_reports() {
     let from_describe: Vec<ConfigEntry> = result
         .configs
         .iter()
-        .map(|entry| {
-            (
-                entry.name.clone(),
-                entry.value.clone(),
-                entry.config_source,
-                entry.is_sensitive,
-                entry.read_only,
-            )
-        })
+        .map(|entry| config_entry!(entry))
         .collect();
 
     assert!(from_create == from_describe);

@@ -64,17 +64,17 @@ async fn broker_death_elects_new_leader() {
     .await;
 
     // Kill broker 1 (the partition leader by round-robin).
-    let (dead, dead_cfg, _dead_dir) = cluster.remove(0);
-    let victim = dead_cfg.node_id;
-    dead.shutdown().await;
+    let (killed_broker, killed_cfg, _dead_dir) = cluster.remove(0);
+    let killed_id = killed_cfg.node_id;
+    killed_broker.shutdown().await;
 
     // Wait for election: first a controller leader among the survivors, then
     // the partition failover it drives. cluster[0] is now broker 2 (broker 1
     // was removed above).
-    wait_for_controller_leader_other_than(&cluster, victim).await;
+    wait_for_controller_leader_other_than(&cluster, killed_id).await;
     cluster[0]
         .0
-        .wait_until_partition_leader_changed("elect", 0, victim)
+        .wait_until_partition_leader_changed("elect", 0, killed_id)
         .await;
     let client = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
     let resp = client

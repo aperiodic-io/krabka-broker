@@ -424,6 +424,24 @@ mod tests {
 
     const VERSION: i16 = krabka_protocol::owned::describe_topic_partitions_response::MAX_VERSION;
 
+    #[bon::builder]
+    fn expected_topic_row(
+        name: String,
+        topic_id: [u8; 16],
+        partitions: Vec<DescribeTopicPartitionsResponsePartition>,
+        topic_authorized_operations: i32,
+    ) -> DescribeTopicPartitionsResponseTopic {
+        DescribeTopicPartitionsResponseTopic {
+            error_code: codes::NONE,
+            name: Some(name),
+            topic_id: WireUuid(topic_id),
+            is_internal: false,
+            partitions,
+            topic_authorized_operations,
+            ..Default::default()
+        }
+    }
+
     crate::test_support::context_helper!(client_id = "admin-client");
 
     use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
@@ -625,21 +643,18 @@ mod tests {
             resp == DescribeTopicPartitionsResponse {
                 throttle_time_ms: 0,
                 topics: vec![
-                    DescribeTopicPartitionsResponseTopic {
-                        error_code: codes::NONE,
-                        name: Some("a".into()),
-                        topic_id: WireUuid(uuid::Uuid::from_u128(1).into_bytes()),
-                        is_internal: false,
-                        partitions: vec![partition_row(PartitionIndex(0))],
-                        topic_authorized_operations: authorized_operations_bits(
+                    expected_topic_row()
+                        .name("a".into())
+                        .topic_id(uuid::Uuid::from_u128(1).into_bytes())
+                        .partitions(vec![partition_row(PartitionIndex(0))])
+                        .topic_authorized_operations(authorized_operations_bits(
                             broker.config.authorizer.as_ref(),
                             &broker.controller.current_image(),
                             &ctx,
                             ResourceType::Topic,
                             "a",
-                        ),
-                        ..Default::default()
-                    },
+                        ))
+                        .call(),
                     error_topic("c", codes::TOPIC_AUTHORIZATION_FAILED),
                 ],
                 next_cursor: Some(ResponseCursor {
@@ -699,25 +714,22 @@ mod tests {
             resp == DescribeTopicPartitionsResponse {
                 throttle_time_ms: 0,
                 topics: vec![
-                    DescribeTopicPartitionsResponseTopic {
-                        error_code: codes::NONE,
-                        name: Some("b".into()),
-                        topic_id: WireUuid(uuid::Uuid::from_u128(2).into_bytes()),
-                        is_internal: false,
-                        partitions: vec![
+                    expected_topic_row()
+                        .name("b".into())
+                        .topic_id(uuid::Uuid::from_u128(2).into_bytes())
+                        .partitions(vec![
                             partition_row(PartitionIndex(0)),
                             partition_row(PartitionIndex(1)),
                             partition_row(PartitionIndex(2)),
-                        ],
-                        topic_authorized_operations: authorized_operations_bits(
+                        ])
+                        .topic_authorized_operations(authorized_operations_bits(
                             broker.config.authorizer.as_ref(),
                             &broker.controller.current_image(),
                             &ctx,
                             ResourceType::Topic,
                             "b",
-                        ),
-                        ..Default::default()
-                    },
+                        ))
+                        .call(),
                     error_topic("a", codes::TOPIC_AUTHORIZATION_FAILED),
                 ],
                 next_cursor: None,

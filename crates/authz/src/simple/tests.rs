@@ -16,6 +16,24 @@ use crate::{
     },
 };
 
+fn prefixed_topic_write_allowed_when(denial: AclSetup) {
+    let image = acl_image([
+        topic_acl(AclSetup {
+            op: AclOperation::Write,
+            pattern: PatternType::Prefixed,
+            name: "ord",
+            ..Default::default()
+        }),
+        topic_acl(denial),
+    ]);
+    check_resource_type_access(
+        &image,
+        ResourceType::Topic,
+        AclOperation::Write,
+        AuthorizationResult::Allow,
+    );
+}
+
 #[test]
 fn empty_image_with_no_super_users_defaults_to_deny() {
     // There is no compat shim that returns Allow in this case —
@@ -270,26 +288,12 @@ mod authorize_by_resource_type {
     /// prefix string itself, taken as a literal resource name, is denied.
     #[test]
     fn literal_deny_on_the_bare_prefix_string_does_not_shadow_the_prefixed_allow() {
-        let img = acl_image([
-            topic_acl(AclSetup {
-                op: AclOperation::Write,
-                pattern: PatternType::Prefixed,
-                name: "ord",
-                ..Default::default()
-            }),
-            topic_acl(AclSetup {
-                permission: PermissionType::Deny,
-                op: AclOperation::Write,
-                name: "ord",
-                ..Default::default()
-            }),
-        ]);
-        check_resource_type_access(
-            &img,
-            ResourceType::Topic,
-            AclOperation::Write,
-            AuthorizationResult::Allow,
-        );
+        prefixed_topic_write_allowed_when(AclSetup {
+            permission: PermissionType::Deny,
+            op: AclOperation::Write,
+            name: "ord",
+            ..Default::default()
+        });
     }
 
     #[test]
@@ -482,25 +486,11 @@ mod authorize_by_resource_type {
                 ..Default::default()
             },
         ] {
-            let image = acl_image([
-                topic_acl(AclSetup {
-                    op: AclOperation::Write,
-                    pattern: PatternType::Prefixed,
-                    name: "ord",
-                    ..Default::default()
-                }),
-                topic_acl(AclSetup {
-                    permission: PermissionType::Deny,
-                    name: "*",
-                    ..excluded
-                }),
-            ]);
-            check_resource_type_access(
-                &image,
-                ResourceType::Topic,
-                AclOperation::Write,
-                AuthorizationResult::Allow,
-            );
+            prefixed_topic_write_allowed_when(AclSetup {
+                permission: PermissionType::Deny,
+                name: "*",
+                ..excluded
+            });
         }
     }
 

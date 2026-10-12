@@ -149,9 +149,8 @@ impl Engine {
         reply: oneshot::Sender<Result<SubmitChangeResult, RaftError>>,
     ) {
         if !self.core.role().is_leader() {
-            let _ = reply.send(Err(RaftError::NotLeader {
-                current_leader: self.core.quorum_state().leader_id,
-            }));
+            let current_leader = self.core.quorum_state().leader_id;
+            let _ = reply.send(Err(RaftError::NotLeader { current_leader }));
             return;
         }
 
@@ -427,6 +426,17 @@ impl Engine {
     ///
     /// A change names the broker epoch of the registration it was built from,
     /// and applies only while the broker is still registered at that epoch,
+    fn leader_epoch_ready(&self) -> bool {
+        match self.core.role() {
+            Role::Leader {
+                epoch_start_offset, ..
+            } => {
+                krabka_verified::wal_reservation_epoch_ready(self.log.hwm().0, *epoch_start_offset)
+            }
+            _ => false,
+        }
+    }
+
     /// as Kafka's `ClusterControlManager.replayRegistrationChange` refuses a
     /// `BrokerRegistrationChangeRecord` for any other epoch. The leader
     /// decides that against its committed image. A registration of the same
@@ -436,14 +446,7 @@ impl Engine {
     /// the change names. The refusal clears when the tail commits, and the
     /// caller builds the change again from the image that holds it.
     fn registration_change_must_wait(&self, node_id: krabka_metadata::NodeId) -> bool {
-        let epoch_ready = match self.core.role() {
-            Role::Leader {
-                epoch_start_offset, ..
-            } => {
-                krabka_verified::wal_reservation_epoch_ready(self.log.hwm().0, *epoch_start_offset)
-            }
-            _ => false,
-        };
+        let epoch_ready = self.leader_epoch_ready();
         let leader_epoch = self.core.quorum_state().leader_epoch;
         !epoch_ready
             || self
@@ -487,14 +490,7 @@ impl Engine {
             return;
         }
         let leader_epoch = self.core.quorum_state().leader_epoch;
-        let epoch_ready = match self.core.role() {
-            Role::Leader {
-                epoch_start_offset, ..
-            } => {
-                krabka_verified::wal_reservation_epoch_ready(self.log.hwm().0, *epoch_start_offset)
-            }
-            _ => false,
-        };
+        let epoch_ready = self.leader_epoch_ready();
         // A new leader reserves no offsets until its own epoch commits. The
         // refusal is transient, as the refusal of a compare-and-set behind
         // an uncommitted tail is, so it is the same error. A broker then

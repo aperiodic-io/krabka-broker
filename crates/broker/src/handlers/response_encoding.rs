@@ -110,6 +110,11 @@ pub(crate) trait ErrorRow {
     }
 }
 
+/// A generated per-resource error row from either config-alter API.
+pub(crate) trait ResourceErrorRow: ErrorRow + Default {
+    fn for_resource(resource_type: i8, resource_name: String) -> Self;
+}
+
 /// Stamps `error_code` and `error_message` on every row still at `NONE`, and
 /// leaves a row an earlier check already refused as it is: the rewrite a
 /// handler applies when the metadata submit behind its accepted rows fails.
@@ -148,6 +153,26 @@ impl_error_row!(
     krabka_protocol::owned::alter_user_scram_credentials_response::AlterUserScramCredentialsResult,
     krabka_protocol::owned::delete_acls_response::DeleteAclsFilterResult,
     krabka_protocol::owned::elect_leaders_response::PartitionResult,
+);
+
+macro_rules! impl_resource_error_row {
+    ($($ty:path),* $(,)?) => {
+        $(impl ResourceErrorRow for $ty {
+            fn for_resource(resource_type: i8, resource_name: String) -> Self {
+                Self {
+                    resource_type,
+                    resource_name,
+                    error_message: None,
+                    ..Self::default()
+                }
+            }
+        })*
+    };
+}
+
+impl_resource_error_row!(
+    krabka_protocol::owned::alter_configs_response::AlterConfigsResourceResponse,
+    krabka_protocol::owned::incremental_alter_configs_response::AlterConfigsResourceResponse,
 );
 
 #[cfg(test)]

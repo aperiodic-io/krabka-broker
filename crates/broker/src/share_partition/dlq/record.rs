@@ -168,6 +168,14 @@ pub(super) fn build_round(
 }
 
 #[cfg(test)]
+pub(super) fn projected_cases_match<T: PartialEq>(
+    actual: impl IntoIterator<Item = T>,
+    expected: impl IntoIterator<Item = T>,
+) -> bool {
+    actual.into_iter().eq(expected)
+}
+
+#[cfg(test)]
 mod tests {
     use assert2::assert;
 
@@ -494,12 +502,11 @@ mod tests {
             ((5, 1), 0),
         ];
 
-        assert!(
+        assert!(projected_cases_match(
             cases
                 .iter()
-                .map(|((source, count), _)| destination_partition(*source, *count))
-                .collect::<Vec<_>>()
-                == cases.iter().map(|(_, want)| *want).collect::<Vec<_>>()
-        );
+                .map(|((source, count), _)| destination_partition(*source, *count)),
+            cases.iter().map(|(_, want)| *want),
+        ));
     }
 }

@@ -73,7 +73,7 @@ const BODY_SIZES: [(&str, usize); 3] =
     [("1KiB", 1024), ("64KiB", 64 * 1024), ("1MiB", 1024 * 1024)];
 
 mod support;
-use support::{LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP};
+use support::{BoundedResource, LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP, bounded_resource};
 
 // ---------------------------------------------------------------------------
 // Deferral 1: response framing.
@@ -269,32 +269,20 @@ krabka_macros::record_batch_fixture!(make_batch, LEADER_EPOCH);
 
 /// A follower partition that starts over once its log has taken
 /// [`LOG_BUDGET`] bytes.
-struct BoundedReplica {
+struct ReplicaLog {
     _dir: tempfile::TempDir,
     seam: ReplicaSeam,
-    written: usize,
 }
 
-impl BoundedReplica {
+impl ReplicaLog {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let seam = ReplicaSeam::spawn(dir.path()).expect("open follower log");
-        Self {
-            _dir: dir,
-            seam,
-            written: 0,
-        }
-    }
-
-    /// Replace the partition when its log is full. Call this outside the timed
-    /// region.
-    fn rotate_if_full(&mut self, incoming: usize) {
-        if self.written + incoming > LOG_BUDGET {
-            *self = Self::new();
-        }
-        self.written += incoming;
+        Self { _dir: dir, seam }
     }
 }
+
+type BoundedReplica = BoundedResource<ReplicaLog>;
 
 /// Hand one leader-assigned batch to the follower's writer, returning only the
 /// time `replicate_batch` took.
@@ -303,7 +291,7 @@ impl BoundedReplica {
 /// batches arrive owned out of the Fetch response and already carry the
 /// leader's offsets.
 async fn replicate_once(replica: &mut BoundedReplica, template: &RecordBatch) -> Duration {
-    replica.rotate_if_full(template.encoded_len());
+    let replica = replica.rotate_if_full(template.encoded_len());
     let mut batch = template.clone();
     batch.base_offset = replica.seam.next_offset().0;
     let start = Instant::now();
@@ -319,7 +307,10 @@ async fn replicate_once(replica: &mut BoundedReplica, template: &RecordBatch) ->
 /// took.
 fn timed_replicates(runtime: &Runtime, template: &RecordBatch, iters: u64) -> Duration {
     runtime.block_on(async {
-        let mut replica = BoundedReplica::new();
+        let mut replica = bounded_resource()
+            .budget(LOG_BUDGET)
+            .factory(ReplicaLog::new)
+            .call();
         for _ in 0..WARMUP {
             replicate_once(&mut replica, template).await;
         }

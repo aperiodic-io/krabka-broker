@@ -190,6 +190,26 @@ mod tests {
             .expect("submit partition record");
     }
 
+    #[bon::builder]
+    async fn register_and_lead_partition(
+        broker: &Broker,
+        handle: &BrokerHandle,
+        partition: &Arc<Partition>,
+        topic: &str,
+    ) {
+        register(&broker.partitions, partition);
+        install_partition_leader_record(handle, topic, broker.config.node_id.get()).await;
+        partition
+            .install_leader_change(broker.config.node_id.get(), 0)
+            .await;
+    }
+
+    fn synced_tierable_segments(partition: &Partition) -> Vec<krabka_log::SegmentExport> {
+        let mut log = partition.log.lock().unwrap();
+        log.sync().unwrap();
+        log.tierable_segments()
+    }
+
     async fn list_partition(
         broker: &Broker,
         topic: &str,
@@ -355,10 +375,12 @@ mod tests {
         );
         config.local_retention_size = Some(bytes(0));
         partition.log.lock().unwrap().set_config(config.clone());
-        register(&broker.partitions, &partition);
-        install_partition_leader_record(&broker_handle, TOPIC, broker.config.node_id.get()).await;
-        partition
-            .install_leader_change(broker.config.node_id.get(), 0)
+        register_and_lead_partition()
+            .broker(&broker)
+            .handle(&broker_handle)
+            .partition(&partition)
+            .topic(TOPIC)
+            .call()
             .await;
         let topic_id = broker
             .controller
@@ -368,11 +390,7 @@ mod tests {
             .topic_id;
         let tp = TopicIdPartition::new(topic_id, TOPIC, 0);
         let (rsm, rlmm) = local_backends(remote.path());
-        let exports = {
-            let mut log = partition.log.lock().unwrap();
-            log.sync().unwrap();
-            log.tierable_segments()
-        };
+        let exports = synced_tierable_segments(&partition);
         assert!(
             copy_eligible(
                 &tier(ArchiveMode::Mutable, &rsm, &rlmm),
@@ -551,10 +569,12 @@ mod tests {
                 ..Default::default()
             },
         );
-        register(&broker.partitions, &partition);
-        install_partition_leader_record(&broker_handle, TOPIC, broker.config.node_id.get()).await;
-        partition
-            .install_leader_change(broker.config.node_id.get(), 0)
+        register_and_lead_partition()
+            .broker(&broker)
+            .handle(&broker_handle)
+            .partition(&partition)
+            .topic(TOPIC)
+            .call()
             .await;
         test_ctx!(ctx, "admin");
 

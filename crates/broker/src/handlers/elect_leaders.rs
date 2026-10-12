@@ -51,7 +51,7 @@ use crate::{
         RequestContext, audit_admin_success, audit_resource, cluster_alter_denied, decode_request,
         encode_response,
         forward_to_controller::{
-            controller_listener_dispatch, guarded_operation, is_active_controller,
+            controller_listener_dispatch, guarded_operation_on_source, is_active_controller,
             to_active_controller,
         },
         offline_replicas::live_brokers,
@@ -130,8 +130,8 @@ context_handler! {
     (broker, req, _version, ctx),
     {
         let budget = Duration::from_millis(req.timeout_ms.max(0).unsigned_abs().into());
-        let result = guarded_operation(
-            broker,
+        let result = guarded_operation_on_source(
+            broker.controller.as_ref(),
             tokio::time::Instant::now() + budget,
             |image| elect_leaders_once(broker, &req, ctx, image),
         ).await;

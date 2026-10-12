@@ -11,10 +11,10 @@ use crate::wal::WalStore;
 
 #[tokio::test]
 async fn wal_fetch_serves_the_uncommitted_tail_with_separate_frontiers() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = super::test_support::fresh_partition_store(dir.path());
-
-    let (first, second) = super::test_support::append_two(&store).await;
+    let test_dir = tempfile::tempdir().expect("fetch tempdir");
+    let store = super::test_support::fresh_partition_store(test_dir.path());
+    let appended = super::test_support::append_two(&store).await;
+    let (first, second) = (appended.0, appended.1);
     store.sync_durable(first).await.unwrap();
 
     let fetch = store

@@ -239,6 +239,16 @@ fn failed_stream<T: Send + 'static>(
 }
 
 impl FaultInjectingStore {
+    /// A fault-free in-memory store for consistency tests that inject one
+    /// targeted GET replacement.
+    #[must_use]
+    pub fn memory() -> Self {
+        Self::new(
+            Arc::new(object_store::memory::InMemory::new()),
+            FaultPolicy::none(),
+        )
+    }
+
     /// Wrap `inner` with `policy`.
     #[must_use]
     pub fn new(inner: Arc<dyn ObjectStore>, policy: FaultPolicy) -> Self {

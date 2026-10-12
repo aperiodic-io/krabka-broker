@@ -274,17 +274,17 @@ async fn losing_leadership_releases_the_partitions_replica_lag_series() {
     let (_dir, partitions, partition) = replica_fixture();
     install_isr(&partition).await;
     append_and_register(&partitions, &partition, 12);
-    let metrics = BrokerMetrics::new();
-    sample_replica_lag(&partitions, &metrics).await;
-    assert!(published_replica_lag(&metrics, 0) == Some(12));
+    let broker_metrics = BrokerMetrics::new();
+    sample_replica_lag(&partitions, &broker_metrics).await;
+    assert!(published_replica_lag(&broker_metrics, 0) == Some(12));
 
     partition
         .current_leader
         .store(OTHER_BROKER.0, Ordering::Release);
-    sample_replica_lag(&partitions, &metrics).await;
+    sample_replica_lag(&partitions, &broker_metrics).await;
 
-    check!(published_replica_lag(&metrics, 0) == None);
-    check!(metrics.replica_lag_max.get() == 0);
+    check!(published_replica_lag(&broker_metrics, 0) == None);
+    check!(broker_metrics.replica_lag_max.get() == 0);
 }
 
 /// A replica the assignment names but that has never fetched has no entry in

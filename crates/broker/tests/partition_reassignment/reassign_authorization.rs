@@ -4,13 +4,10 @@
 //! refused with `CLUSTER_AUTHORIZATION_FAILED` (31) on every partition, because
 //! the request needs cluster `Alter` permission.
 
-use std::time::{Duration, Instant};
-
 use assert2::assert;
 
 use crate::{
     kafka_wire::AutomaticTopicSetup,
-    plaintext_cluster::wait_partition_exists,
     plaintext_wire::CLIENT_ID,
     sasl_wire::{
         create_topic_as_admin, drive_alter_reassignments_sasl_plain,
@@ -18,6 +15,7 @@ use crate::{
     },
     support::{
         acl::{TopicAclSetup, topic_acl_record},
+        retry::retry_until,
         topics::ConfiguredTopicSetup,
     },
 };
@@ -61,40 +59,35 @@ async fn non_super_user_denied() {
         AutomaticTopicSetup {
             client_id: CLIENT_ID,
             topic: ConfiguredTopicSetup {
-                name: ("foo").into(),
+                name: "foo".to_string(),
+                configs: vec![],
                 ..Default::default()
             },
         },
     )
     .await;
-    wait_partition_exists(&handle, "foo", 0).await;
+    handle.wait_until_partition_present("foo", 0).await;
 
     // Retry up to 5s to absorb raft apply latency on slow runners.
     // intentional: bounded RPC-response poll on the alter response error code
     // (CLUSTER_AUTHORIZATION_FAILED=31) — an end-to-end authorizer verdict, not
     // a metadata-image or metric signal, so there is no awaiter to wait on.
-    let deadline_auth = Instant::now() + Duration::from_secs(5);
-    let resp = loop {
-        let r = drive_alter_reassignments_sasl_plain(
-            addr,
-            "alice",
-            "alice-secret",
-            vec![("foo", 0, Some(vec![1]))],
-        )
+    let resp = retry_until()
+        .attempt(|| async {
+            drive_alter_reassignments_sasl_plain(
+                addr,
+                "alice",
+                "alice-secret",
+                vec![("foo", 0, Some(vec![1]))],
+            )
+            .await
+        })
+        .is_complete(|rows| {
+            rows.iter()
+                .all(|(_, partitions)| partitions.iter().all(|(_, error_code)| *error_code == 31))
+        })
+        .call()
         .await;
-        // If we see 31, the shim is off and we're done.
-        if r.iter()
-            .all(|(_, parts)| parts.iter().all(|(_, ec)| *ec == 31))
-        {
-            break r;
-        }
-        assert!(
-            Instant::now() <= deadline_auth,
-            "ACL shim still active or wrong error after 5s; got {r:?}"
-        );
-        // real-time wait (not a progress poll): retry/backoff cadence between attempts — each attempt opens a fresh TCP connection + full SASL handshake, so the 100ms backoff bounds connection churn while the raft ACL apply propagates.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
 
     handle.shutdown().await;
 

@@ -13,6 +13,12 @@ use krabka_verified::{
 use super::{GroupEntry, PendingInjection};
 use crate::barrier::persistence::{CutValue, GroupValue, InjectionStartValue};
 
+fn pending_epoch(state: &BTreeMap<String, GroupEntry>, group: &str) -> Option<i64> {
+    state
+        .get(group)
+        .and_then(|entry| entry.pending.as_ref().map(|pending| pending.epoch))
+}
+
 /// One decoded `__barrier_state` record. A `None` value is a tombstone.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum StateRecord {
@@ -67,9 +73,7 @@ pub(crate) fn apply_record(state: &mut BTreeMap<String, GroupEntry>, record: Sta
             epoch,
             value,
         } => {
-            let pending_epoch = state
-                .get(&group)
-                .and_then(|entry| entry.pending.as_ref().map(|pending| pending.epoch));
+            let pending_epoch = pending_epoch(state, &group);
             let epoch_already_consumed = state.get(&group).is_some_and(|entry| {
                 entry.cuts.contains_key(&epoch) || epoch <= entry.definition.last_epoch
             });
@@ -101,9 +105,7 @@ pub(crate) fn apply_record(state: &mut BTreeMap<String, GroupEntry>, record: Sta
             epoch,
             value,
         } => {
-            let pending_epoch = state
-                .get(&group)
-                .and_then(|entry| entry.pending.as_ref().map(|pending| pending.epoch));
+            let pending_epoch = pending_epoch(state, &group);
             let action = barrier_recovery_fold_action(
                 BarrierRecoveryRecordKind::Cut,
                 value.is_some(),
@@ -148,16 +150,21 @@ mod tests {
         },
     };
 
-    #[test]
-    fn a_group_record_defines_the_entry() {
+    fn state_with_group(epoch: i64) -> BTreeMap<String, super::GroupEntry> {
         let mut state = BTreeMap::new();
         apply_record(
             &mut state,
             StateRecord::Group {
                 group: "orders-cut".to_owned(),
-                value: Some(group_value(7)),
+                value: Some(group_value(epoch)),
             },
         );
+        state
+    }
+
+    #[test]
+    fn a_group_record_defines_the_entry() {
+        let state = state_with_group(7);
         let entry = state.get("orders-cut").expect("the group is there");
         assert!(entry.definition == group_value(7));
         assert!(entry.is_defined());
@@ -166,14 +173,7 @@ mod tests {
 
     #[test]
     fn a_group_tombstone_removes_the_whole_entry() {
-        let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: Some(group_value(7)),
-            },
-        );
+        let mut state = state_with_group(7);
         apply_record(
             &mut state,
             StateRecord::Cut {
@@ -194,14 +194,7 @@ mod tests {
 
     #[test]
     fn a_cut_record_retires_the_injection_start_of_its_epoch() {
-        let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: Some(group_value(0)),
-            },
-        );
+        let mut state = state_with_group(0);
         apply_record(
             &mut state,
             StateRecord::InjectionStart {
@@ -352,14 +345,7 @@ mod tests {
 
     #[test]
     fn a_tombstone_drops_only_the_epoch_it_names() {
-        let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: Some(group_value(0)),
-            },
-        );
+        let mut state = state_with_group(0);
         for epoch in [1, 2, 3] {
             apply_record(
                 &mut state,

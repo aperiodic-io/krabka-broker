@@ -88,6 +88,14 @@ struct LongPollState {
     response_max_bytes: usize,
 }
 
+#[derive(Clone, Copy)]
+struct ReadAccounting {
+    local_bytes: usize,
+    cold_bytes: usize,
+    budget: i32,
+    allow_first_batch_overrun: bool,
+}
+
 impl LongPollState {
     fn total(&self) -> usize {
         self.bytes.iter().sum()
@@ -106,6 +114,19 @@ impl LongPollState {
     /// back up.
     fn charge(&mut self, served: usize) {
         self.remaining_response_bytes = self.remaining_response_bytes.saturating_sub(served);
+    }
+
+    fn record_read(&mut self, index: usize, read: &mut PendingRead, result: ReadAccounting) {
+        self.cold_served[index] = result.cold_bytes > 0;
+        self.bytes[index] = result.local_bytes + result.cold_bytes;
+        if !result.allow_first_batch_overrun
+            && self.bytes[index] > usize::try_from(result.budget.max(0)).unwrap_or(0)
+        {
+            discard_to_metadata_only(read);
+            self.bytes[index] = 0;
+            self.cold_served[index] = false;
+        }
+        self.charge(self.bytes[index]);
     }
 }
 
@@ -282,7 +303,7 @@ pub(super) async fn execute_pending_reads(
         let follower_update = read
             .follower_position
             .map(|position| (position, partition.log_end_offset()));
-        state.bytes[index] = do_read(
+        let local_bytes = do_read(
             &partition,
             planned_read_request(broker, read, budget, sendfile_capable),
             &broker.log_dir_status,
@@ -306,17 +327,16 @@ pub(super) async fn execute_pending_reads(
         read.max_bytes = budget;
         let cold = serve_from_cold_tier(broker, read, &partition, phases).await;
         read.max_bytes = requested_max_bytes;
-        state.cold_served[index] = cold > 0;
-        state.bytes[index] += cold;
-        if !min_one_batch && state.bytes[index] > usize::try_from(budget.max(0)).unwrap_or(0) {
-            // Every source guarantees a whole first batch. Kafka grants that
-            // exception only while the response holds no records, regardless
-            // of whether a previous partition needed to exceed its budget.
-            discard_to_metadata_only(read);
-            state.bytes[index] = 0;
-            state.cold_served[index] = false;
-        }
-        state.charge(state.bytes[index]);
+        state.record_read(
+            index,
+            read,
+            ReadAccounting {
+                local_bytes,
+                cold_bytes: cold,
+                budget,
+                allow_first_batch_overrun: min_one_batch,
+            },
+        );
         // Kafka's `Partition.fetchRecords` records the follower's position
         // only after its read succeeded, so the row this read just filled
         // reports the high watermark from before that position counted.
@@ -542,14 +562,16 @@ async fn reread_woken(
     read.max_bytes = read_budget;
     let cold = serve_from_cold_tier(broker, read, &part, phases).await;
     read.max_bytes = requested_max_bytes;
-    state.cold_served[index] = cold > 0;
-    state.bytes[index] = bytes + cold;
-    if !min_one_batch && state.bytes[index] > usize::try_from(read_budget.max(0)).unwrap_or(0) {
-        discard_to_metadata_only(read);
-        state.bytes[index] = 0;
-        state.cold_served[index] = false;
-    }
-    state.charge(state.bytes[index]);
+    state.record_read(
+        index,
+        read,
+        ReadAccounting {
+            local_bytes: bytes,
+            cold_bytes: cold,
+            budget: read_budget,
+            allow_first_batch_overrun: min_one_batch,
+        },
+    );
 }
 
 /// Serve `read`'s offset out of the cold tier when the local log no longer
@@ -627,6 +649,17 @@ mod tests {
         producer_state::ProducerState,
         test_support::{StandalonePartitionSetup, StorageMode},
     };
+
+    fn wide_partition_fetch_request() -> super::EffectivePartition {
+        super::EffectivePartition {
+            partition: 0,
+            current_leader_epoch: 0,
+            last_fetched_epoch: -1,
+            fetch_offset: 0,
+            log_start_offset: -1,
+            partition_max_bytes: 1 << 20,
+        }
+    }
 
     /// Table over a run of per-partition reads (each partition's own
     /// `partition_max_bytes` and the bytes its read actually served) against
@@ -844,14 +877,7 @@ mod tests {
         )
         .await;
 
-        let request = super::EffectivePartition {
-            partition: 0,
-            current_leader_epoch: 0,
-            last_fetched_epoch: -1,
-            fetch_offset: 0,
-            log_start_offset: -1,
-            partition_max_bytes: 1 << 20,
-        };
+        let request = wide_partition_fetch_request();
         let pending = vec![
             planned_follower(TOPIC_A, &part_a, &request, crate::codes::NONE),
             planned_follower(TOPIC_B, &part_b, &request, crate::codes::NONE),
@@ -900,14 +926,7 @@ mod tests {
             },
         )
         .await;
-        let request = super::EffectivePartition {
-            partition: 0,
-            current_leader_epoch: 0,
-            last_fetched_epoch: -1,
-            fetch_offset: 0,
-            log_start_offset: -1,
-            partition_max_bytes: 1 << 20,
-        };
+        let request = wide_partition_fetch_request();
         let pending = || {
             vec![
                 planned_follower("budget-fitting-first", &first, &request, NONE),
@@ -1507,14 +1526,12 @@ mod tests {
     /// the (here empty) list its read found.
     #[tokio::test]
     async fn a_reread_carries_aborted_transactions_only_for_read_committed() {
-        let cases = aborted_isolation_cases!();
-
         broker_fixture!(
             (broker_handle, _dir, broker),
             crate::handlers::test_support::start_broker()
         );
 
-        for (name, read_committed, want_aborted) in cases {
+        for (name, read_committed, want_aborted) in aborted_isolation_cases!() {
             let (part, _part_dir) = consumer_partition(Vec::new()).await;
             let mut pending = [consumer_read("reread", &part, read_committed)];
             let phases = RequestPhases::default();

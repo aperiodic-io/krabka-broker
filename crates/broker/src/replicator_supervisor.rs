@@ -33,6 +33,8 @@ use tokio_util::sync::CancellationToken;
 
 #[cfg(test)]
 use crate::replicator_supervisor::test_support::{SupervisorPartitionSetup, SupervisorTopicSetup};
+#[cfg(test)]
+use crate::share_coordinator::coordinator::test_support::assert_recovered_epoch_is_fenced;
 
 mod desired_sets;
 mod dir_assignments;
@@ -483,18 +485,12 @@ mod tests {
                 })
         );
         await_share_status(&coordinator, LoadStatus::Active).await;
-        assert!(
-            coordinator.read_summary("g", topic_id, 0).await == Ok(Some((2, 0, Offset(10), 0)))
-        );
-        assert!(
-            coordinator
-                .initialize(&topic_image, "g", topic_id, 0, 1, Offset(20))
-                .await
-                == Err(ShareStateError::Refused {
-                    code: codes::FENCED_STATE_EPOCH,
-                    message: message::FENCED_STATE_EPOCH,
-                })
-        );
+        assert_recovered_epoch_is_fenced()
+            .coordinator(&coordinator)
+            .topic_image(&topic_image)
+            .topic_id(topic_id)
+            .call()
+            .await;
         assert!(!metadata.has_changed().unwrap());
         shutdown.cancel();
         task.await.unwrap();

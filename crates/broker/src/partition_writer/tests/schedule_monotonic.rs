@@ -53,6 +53,21 @@ async fn queued_descending_batches(tx: &mpsc::Sender<WriterMessage>) -> (Produce
     (later, earlier)
 }
 
+async fn queued_scenario_writer(
+    dir: &std::path::Path,
+    log: &Arc<Mutex<Log>>,
+) -> (
+    mpsc::Sender<WriterMessage>,
+    ProduceAck,
+    ProduceAck,
+    tokio::task::JoinHandle<()>,
+) {
+    let (tx, rx) = mpsc::channel(2);
+    let (later, earlier) = queued_descending_batches(&tx).await;
+    let writer = spawn_writer(dir, log, rx);
+    (tx, later, earlier, writer)
+}
+
 /// Two produces whose delivery times descend, queued before the writer runs so
 /// that its group drain takes both into one append call.
 ///
@@ -66,12 +81,7 @@ async fn a_backwards_delivery_time_in_one_writer_group_is_refused() {
         Log::open(dir.path(), monotonic_config()).expect("open the scheduled log"),
     ));
 
-    // Both jobs are on the queue before the writer starts, so its first
-    // `recv` and the `try_recv` behind it drain them into one group.
-    let (tx, rx) = mpsc::channel(2);
-    let (later, earlier) = queued_descending_batches(&tx).await;
-
-    let writer = spawn_writer(dir.path(), &log, rx);
+    let (tx, later, earlier, writer) = queued_scenario_writer(dir.path(), &log).await;
 
     let later = later.await.expect("ack the later batch");
     check!(later.expect("the later batch is admitted").base_offset == Offset(0));
@@ -112,10 +122,7 @@ async fn a_backwards_delivery_time_is_admitted_without_the_setting() {
         .expect("open the scheduled log"),
     ));
 
-    let (tx, rx) = mpsc::channel(2);
-    let (later, earlier) = queued_descending_batches(&tx).await;
-
-    let writer = spawn_writer(dir.path(), &log, rx);
+    let (tx, later, earlier, writer) = queued_scenario_writer(dir.path(), &log).await;
 
     check!(
         later

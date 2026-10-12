@@ -144,10 +144,7 @@ mod tests {
 
     use assert2::check;
     use bytes::Bytes;
-    use krabka_object_store::{
-        ObjectStoreClient, ObjectStoreError,
-        fault::{FaultInjectingStore, FaultPolicy},
-    };
+    use krabka_object_store::{ObjectStoreClient, ObjectStoreError, fault::FaultInjectingStore};
     use object_store::{ObjectStoreExt as _, PutPayload, path::Path};
 
     use super::{Archive, ArchiveArgs, BTreeSet};
@@ -267,11 +264,7 @@ mod tests {
 
     async fn archive_that_grows_during_get(key: &str, prefix: Option<&str>) -> Archive {
         let store = Arc::new(
-            FaultInjectingStore::new(
-                Arc::new(object_store::memory::InMemory::new()),
-                FaultPolicy::none(),
-            )
-            .with_get_overwrite(Bytes::from_static(b"123456")),
+            FaultInjectingStore::memory().with_get_overwrite(Bytes::from_static(b"123456")),
         );
         store
             .put(&Path::from(key), PutPayload::from_static(b"123"))

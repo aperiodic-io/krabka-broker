@@ -13,11 +13,9 @@ use super::{
 };
 use crate::{
     codes::NONE,
-    coordinator::unified::{
-        GroupCoordinator, actor::MetadataProvider, config::NextGenConfig,
-        offsets_log::fake::InMemoryOffsetsLog, reconciler::ReconcileInput,
-        share::config::ShareGroupConfig, streams::config::StreamsGroupConfig,
-        test_support::MemberEpoch,
+    coordinator::unified::test_support::{
+        GroupCoordinator, InMemoryOffsetsLog, MemberEpoch, MetadataProvider, NextGenConfig,
+        ReconcileInput, ShareGroupConfig, StreamsGroupConfig,
     },
     task_util::ask,
 };

@@ -11,7 +11,6 @@ use krabka_metadata::{
 };
 use krabka_protocol::owned::{
     unregister_controller_request::UnregisterControllerRequest,
-    unregister_controller_response::UnregisterControllerResponse,
     update_features_request::UpdateFeaturesRequest,
 };
 
@@ -20,9 +19,6 @@ use crate::support::{
     configs::{controller_registration, feature_update},
     shutdown_cluster, start_n_node_with,
 };
-
-/// Kafka trunk's `CONTROLLER_ID_NOT_REGISTERED`.
-const CONTROLLER_ID_NOT_REGISTERED: i16 = 136;
 
 /// The cluster is first moved to trunk's 4.4-IV2 (33), the level the RPC
 /// needs, through `UpdateFeatures` on the follower, which forwards it too.
@@ -89,17 +85,9 @@ async fn a_follower_forwards_unregister_controller_to_the_active_controller() {
 
     check!(
         answers
-            == vec![
-                UnregisterControllerResponse {
-                    error_message: Some(String::new()),
-                    ..Default::default()
-                },
-                UnregisterControllerResponse {
-                    error_code: CONTROLLER_ID_NOT_REGISTERED,
-                    error_message: Some("Controller ID 7 is not currently registered.".into()),
-                    ..Default::default()
-                },
-            ]
+            == crate::support::admin::unregister_controller_answers()
+                .controller_id(7)
+                .call()
     );
     check!(
         leader_handle

@@ -61,9 +61,8 @@ async fn fetch_v3_drops_control_batch() {
 
     // Offset 0 is the data batch; offset 1 is the internally generated marker.
     let resp_body = fetch_legacy_raw_at(addr, "legacy_fetch_ctrl", 3, 1).await;
-    let mut cur: &[u8] = &resp_body;
     let fetch_resp =
-        LegacyFetchResponse::decode(&mut cur, 3).expect("decode LegacyFetchResponse v3");
+        LegacyFetchResponse::decode(&mut &resp_body[..], 3).expect("decode LegacyFetchResponse v3");
 
     let part = &fetch_resp.responses[0].partitions[0];
     assert!(

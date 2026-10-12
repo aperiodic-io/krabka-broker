@@ -53,24 +53,19 @@ fn append_owned(
 /// Dispatch one accepted job without changing control-batch compression or stamps.
 fn append_data(
     log: &mut Log,
-    data: ProduceData,
+    mut data: ProduceData,
     target: Option<CompressionType>,
     base: Option<Offset>,
 ) -> Result<AppendedBatch, BrokerError> {
+    data.apply_target_compression(target);
     let result = match data {
         ProduceData::Verbatim(batch) => match base {
             Some(base) => log.append_verbatim_at(&batch, base).map(at_offset),
             None => log.append_verbatim(&batch).map(appended),
         },
-        ProduceData::Owned(mut batch) => {
-            if let Some(target) = target
-                && batch.attributes.compression() != target
-            {
-                batch.attributes = batch.attributes.with_compression(target);
-            }
+        ProduceData::Owned(mut batch) | ProduceData::OwnedControl(mut batch) => {
             append_owned(log, &mut batch, base)
         }
-        ProduceData::OwnedControl(mut batch) => append_owned(log, &mut batch, base),
         ProduceData::OwnedCommitMarker {
             mut batch,
             commit_stamp,

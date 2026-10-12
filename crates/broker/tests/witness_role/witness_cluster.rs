@@ -23,9 +23,9 @@ use crate::{
 
 fn stretch_profile() -> StretchProfile {
     StretchProfile {
-        sites: SITES.iter().map(|site| (*site).to_string()).collect(),
-        witness_site: SITE_C.to_string(),
-        preferred_leader_site: SITE_A.to_string(),
+        sites: SITES.iter().copied().map(String::from).collect(),
+        witness_site: String::from(SITE_C),
+        preferred_leader_site: String::from(SITE_A),
     }
 }
 
@@ -75,6 +75,24 @@ pub(crate) async fn start_stretch_cluster() -> Vec<(BrokerHandle, BrokerConfig, 
 
 pub(crate) async fn client_at(addr: &str) -> Client {
     connect_owned(addr.to_string(), "witness-role-test", "client build").await
+}
+
+pub(crate) async fn wait_for_witness_isr(
+    cluster: &[(BrokerHandle, BrokerConfig, TempDir)],
+    topic: &str,
+) {
+    for (handle, _, _) in cluster {
+        within(
+            "partition present on every node",
+            handle.wait_until_partition_present(topic, 0),
+        )
+        .await;
+    }
+    within(
+        "the witness joins the ISR",
+        cluster[0].0.wait_until_isr_len(topic, 0, 3),
+    )
+    .await;
 }
 
 pub(crate) async fn shutdown(cluster: Vec<(BrokerHandle, BrokerConfig, TempDir)>) {

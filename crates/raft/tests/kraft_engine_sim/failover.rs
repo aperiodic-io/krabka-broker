@@ -5,8 +5,8 @@
 
 use crate::{
     harness::{
-        self as fixture, STAGGERED_TIMEOUTS, SimClusterSetup, await_single_leader, await_until,
-        metadata_log, start_cluster, start_engines, three_voter_network, topic_record, voter_set,
+        self as fixture, SimClusterSetup, await_single_leader, await_until, reopen_controller,
+        start_cluster, start_engines, three_voter_network, topic_record,
     },
     sim_net::SimNet,
 };
@@ -140,26 +140,8 @@ async fn repeated_leader_restart_reelects() {
         net.get(leader).unwrap().shutdown().await;
         net.remove(leader);
         tokio::time::sleep(fixture::Duration::from_millis(50)).await;
-        let reopened = fixture::KraftController::open(
-            dirs[&leader].path().to_path_buf(),
-            leader,
-            cid,
-            uuid::Uuid::nil(),
-            voter_set(&ids),
-            STAGGERED_TIMEOUTS[usize::try_from(leader.0 - 1).unwrap()],
-            None,
-            fixture::ControllerFetchMissLimit::default(),
-            fixture::MetadataRaftCommandQueueCapacity::default(),
-            fixture::MetadataRaftFetchMax::default(),
-            fixture::Arc::new(net.as_peer(leader)),
-            0,
-            krabka_units::prelude::bytes(0),
-            krabka_units::prelude::millis(0),
-            fixture::MetadataSnapshotFetchMax::default(),
-            metadata_log(),
-            krabka_raft::kraft::Activation::default(),
-        )
-        .expect("reopen leader");
+        let reopened =
+            reopen_controller(&net, dirs[&leader].path().to_path_buf(), leader, cid, &ids);
         net.register(leader, reopened);
     }
 

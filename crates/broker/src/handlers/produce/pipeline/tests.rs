@@ -153,3 +153,14 @@ fn non_leader_row() -> PartitionProduceResponse {
         }),
     })
 }
+
+// One record, enough to seed a partition or to be refused.
+pub(super) fn seed_batch() -> RecordBatch {
+    RecordBatch {
+        records: vec![Record {
+            value: Some(Bytes::from_static(b"v")),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}

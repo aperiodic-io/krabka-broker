@@ -399,6 +399,7 @@ mod tests {
         let log_dirs = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
         let (metrics, config) = gauge_fixture();
         let shutdown = CancellationToken::new();
+        let cancel_token = shutdown.child_token();
         spawn_broker_gauge_updater(
             (Arc::new(PartitionRegistry::new()), log_dirs.clone()),
             Arc::new(fake_source(
@@ -409,7 +410,7 @@ mod tests {
             krabka_metadata::NodeId(1),
             (metrics.clone(), None),
             &config,
-            shutdown.child_token(),
+            cancel_token,
         );
 
         // A healthy dir publishes the series at zero, so an operator can tell

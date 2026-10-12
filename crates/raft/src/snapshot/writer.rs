@@ -288,10 +288,8 @@ mod tests {
             footer.base_offset == 3 + i64::try_from(data.records.len()).expect("record count fits")
         );
         check!((footer.attributes.is_control_batch(), footer.records.len()) == (true, 1));
-        assert2::assert!(
-            decode_single_control(&footer)
-                == ControlRecord::SnapshotFooter(SnapshotFooterRecord::default())
-        );
+        let ctrl = decode_single_control(&footer);
+        assert2::assert!(ctrl == ControlRecord::SnapshotFooter(SnapshotFooterRecord::default()));
         check!(cur.is_empty());
     }
 

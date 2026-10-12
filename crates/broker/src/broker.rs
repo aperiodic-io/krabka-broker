@@ -14,6 +14,7 @@ use std::{
 use dashmap::DashMap;
 use krabka_ids::PartitionIndex;
 use krabka_raft::ConnectionLimiter;
+use krabka_security::ListenerProtocol;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -77,6 +78,14 @@ pub(crate) use self::partition_spawn::{
     PartitionSpawnConfig, spawn_partition, spawn_partition_with_replication_target,
     try_spawn_partition_with_replication_target, try_spawn_partition_with_sequencer,
 };
+
+fn inter_broker_listener_protocol(config: &BrokerConfig) -> ListenerProtocol {
+    config
+        .effective_listeners()
+        .iter()
+        .find(|listener| listener.name == config.inter_broker_listener_name)
+        .map_or(ListenerProtocol::Plaintext, |listener| listener.protocol)
+}
 
 /// Timeout shared by the test-helper `wait_*` awaiters. If a condition
 /// does not hold within this window, the test fails.

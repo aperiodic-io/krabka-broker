@@ -1,10 +1,40 @@
 //! Shared deterministic mechanics for the browser and storage simulation harnesses.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
 use crate::{
     Action, Epoch, Event, LogEnd, NodeId, QuorumStateMachine, Role, SimInstant, SuccessorRank,
 };
+
+/// The endpoints of one queued message, used to clear messages crossing a
+/// simulator partition.
+pub trait PartitionMessage<Node> {
+    fn touches(&self, node: Node) -> bool;
+}
+
+#[macro_export]
+macro_rules! impl_partition_message {
+    ($message:ty, $node:ty) => {
+        impl $crate::simulation_support::PartitionMessage<$node> for $message {
+            fn touches(&self, node: $node) -> bool {
+                self.src == node || self.dst == node
+            }
+        }
+    };
+}
+
+/// Isolate one node and remove messages already in flight to or from it.
+pub fn partition_node<Node, Message>(
+    partitioned: &mut BTreeSet<Node>,
+    queue: &mut VecDeque<Message>,
+    node: Node,
+) where
+    Node: Copy + Ord,
+    Message: PartitionMessage<Node>,
+{
+    partitioned.insert(node);
+    queue.retain(|message| !message.touches(node));
+}
 
 /// Stop after two timer rounds leave the cluster fingerprint unchanged.
 pub struct StableFingerprint<F> {

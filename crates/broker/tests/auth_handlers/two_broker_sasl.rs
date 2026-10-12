@@ -21,7 +21,7 @@ use crate::{
         ClusterNodeSetup, NodeIndex, broker_config,
         client::connect_client,
         controller_voters, init_tracing_with,
-        produce::{SinglePartitionProduceSetup, batch_request},
+        produce::{batch_request, replicated_topic_produce_setup},
         records::{batch_from_records, value_record},
         shutdown_cluster,
     },
@@ -45,10 +45,10 @@ async fn reserve_listeners(n: usize) -> (Vec<SocketAddr>, Vec<tokio::net::TcpLis
 /// `listen_addr`. The test clients use it, because they do not speak SASL
 /// yet. The second listener is a `SASL_PLAINTEXT` inter-broker listener.
 /// The replicator and the heartbeat use it against the peer broker.
-const DEFAULT_SASL_ENDPOINTS: [SocketAddr; 1] = [SocketAddr::V4(std::net::SocketAddrV4::new(
-    std::net::Ipv4Addr::LOCALHOST,
+const DEFAULT_SASL_ENDPOINTS: [SocketAddr; 1] = [SocketAddr::new(
+    std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
     0,
-))];
+)];
 
 #[derive(krabka_macros::FieldDefaults)]
 struct SaslNodeSetup<'a> {
@@ -194,11 +194,10 @@ async fn two_broker_sasl_plaintext_replication() {
     let prod = producer
         .send(batch_request(
             batch,
-            SinglePartitionProduceSetup {
-                topic: ("sasl-repl").into(),
-                topic_id,
-                ..SinglePartitionProduceSetup::replicated()
-            },
+            replicated_topic_produce_setup()
+                .topic("sasl-repl".into())
+                .topic_id(topic_id.0)
+                .call(),
         ))
         .await
         .unwrap();

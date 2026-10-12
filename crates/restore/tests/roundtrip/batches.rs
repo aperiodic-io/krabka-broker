@@ -30,12 +30,13 @@ pub(crate) fn tiny_segment_config() -> LogConfig {
 /// One record with a distinguishable value, at `offset_delta` within its
 /// batch.
 fn record(offset_delta: i32, value: &str) -> Record {
+    let payload = Bytes::copy_from_slice(value.as_bytes());
     Record {
-        attributes: 0,
-        timestamp_delta: i64::from(offset_delta),
+        value: Some(payload),
         offset_delta,
+        timestamp_delta: i64::from(offset_delta),
+        attributes: 0,
         key: None,
-        value: Some(Bytes::copy_from_slice(value.as_bytes())),
         headers: Vec::new(),
     }
 }

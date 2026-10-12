@@ -328,6 +328,28 @@ mod tests {
         .await;
     }
 
+    fn allowed_user_quota_response(name: Option<&str>, value: f64) -> DescribeClientQuotasResponse {
+        DescribeClientQuotasResponse {
+            throttle_time_ms: 0,
+            error_code: NONE,
+            error_message: Some(String::new()),
+            entries: Some(vec![EntryData {
+                entity: vec![EntityData {
+                    entity_type: "user".into(),
+                    entity_name: name.map(Into::into),
+                    ..Default::default()
+                }],
+                values: vec![ValueData {
+                    key: "producer_byte_rate".into(),
+                    value,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }]),
+            unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
+        }
+    }
+
     #[test]
     fn strict_exact_match_filters_correctly() {
         let stored = key(vec![("user", Some("alice"))]);
@@ -437,25 +459,7 @@ mod tests {
         .await;
         seed_alice_quota(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
-        let allowed = DescribeClientQuotasResponse {
-            throttle_time_ms: 0,
-            error_code: NONE,
-            error_message: Some(String::new()),
-            entries: Some(vec![EntryData {
-                entity: vec![EntityData {
-                    entity_type: "user".into(),
-                    entity_name: Some("alice".into()),
-                    ..Default::default()
-                }],
-                values: vec![ValueData {
-                    key: "producer_byte_rate".into(),
-                    value: 1024.0,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }]),
-            unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
-        };
+        let allowed = allowed_user_quota_response(Some("alice"), 1024.0);
         let denied = unthrottled_wire!(DescribeClientQuotasResponse {
             error_code: CLUSTER_AUTHORIZATION_FAILED,
             error_message: None,
@@ -571,26 +575,6 @@ mod tests {
                 entries: None,
             })
         };
-        let found = |name: Option<&str>, value: f64| DescribeClientQuotasResponse {
-            throttle_time_ms: 0,
-            error_code: NONE,
-            error_message: Some(String::new()),
-            entries: Some(vec![EntryData {
-                entity: vec![EntityData {
-                    entity_type: "user".into(),
-                    entity_name: name.map(Into::into),
-                    ..Default::default()
-                }],
-                values: vec![ValueData {
-                    key: "producer_byte_rate".into(),
-                    value,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }]),
-            unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
-        };
-
         let rows: Vec<(&str, Vec<ComponentData>, DescribeClientQuotasResponse)> = vec![
             (
                 "empty entity type",
@@ -703,7 +687,7 @@ mod tests {
             (
                 "valid exact",
                 exact_user_filter("alice"),
-                found(Some("alice"), 1024.0),
+                allowed_user_quota_response(Some("alice"), 1024.0),
             ),
             (
                 "valid default",
@@ -711,7 +695,7 @@ mod tests {
                     matching: QuotaNameMatch::DefaultEntity,
                     ..Default::default()
                 })],
-                found(None, 2048.0),
+                allowed_user_quota_response(None, 2048.0),
             ),
         ];
         for (name, components, expected) in rows {

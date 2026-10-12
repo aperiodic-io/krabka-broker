@@ -33,6 +33,13 @@ const TIMESTAMP: i64 = 1_700_000_000_000;
 /// Store the three-record batch of `producer_id` at `base_sequence` at the log
 /// end, as a follower stores a batch it replicates.
 fn replicate(partition: &Partition, producer_id: i64, base_sequence: i32) {
+    let records = (0..3)
+        .map(|delta| Record {
+            offset_delta: delta,
+            value: Some(Bytes::from_static(b"v")),
+            ..Record::default()
+        })
+        .collect();
     let mut batch = RecordBatch {
         last_offset_delta: 2,
         base_timestamp: TIMESTAMP,
@@ -40,13 +47,7 @@ fn replicate(partition: &Partition, producer_id: i64, base_sequence: i32) {
         producer_id,
         producer_epoch: 0,
         base_sequence,
-        records: (0..3)
-            .map(|offset_delta| Record {
-                offset_delta,
-                value: Some(Bytes::from_static(b"v")),
-                ..Record::default()
-            })
-            .collect(),
+        records,
         ..RecordBatch::default()
     };
     let mut log = partition.log.lock().expect("log mutex");

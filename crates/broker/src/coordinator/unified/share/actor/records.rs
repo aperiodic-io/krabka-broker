@@ -142,8 +142,9 @@ impl PendingShareRecords {
                 Some(v.encode()),
             );
         }
-        for (member_id, v) in self.current_per_member {
-            if v.is_none() && removed.contains(&member_id) {
+        for (member_id, assignment) in self.current_per_member {
+            let was_removed = removed.contains(&member_id);
+            if assignment.is_none() && was_removed {
                 continue;
             }
             batch.push(
@@ -151,7 +152,7 @@ impl PendingShareRecords {
                     group_id: group(),
                     member_id,
                 })?,
-                v.map(|x| x.encode()),
+                assignment.map(|x| x.encode()),
             );
         }
         if let Some(v) = self.state_partition_metadata {

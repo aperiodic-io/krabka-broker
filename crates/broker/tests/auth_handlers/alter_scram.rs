@@ -10,7 +10,7 @@ use std::{io, net::SocketAddr};
 
 use assert2::{assert, check};
 use krabka_broker::Broker;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
+use krabka_ids::ApiKey as WireApiKey;
 use krabka_protocol::owned::{
     alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
     alter_user_scram_credentials_response::AlterUserScramCredentialsResponse,
@@ -22,7 +22,8 @@ use tokio::net::TcpStream;
 
 use crate::{
     harness::{
-        admin_plain_password, alice_password, round_trip, scram_admin_fixture, wrong_scram_password,
+        admin_plain_password, alice_password, round_trip, sasl_authenticate_round_trip,
+        scram_admin_fixture, wrong_scram_password,
     },
     kafka_wire::{
         SaslHandshakeSetup, decode_named, encode_named, plain_payload, sasl_handshake_on,
@@ -60,13 +61,7 @@ async fn alter_scram_creds_super_user_can_provision() {
 
     let req = alice_sha512_request();
     let resp = provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion").await;
-    assert!(resp.results.len() == 1, "one result row per upsertion");
-    check!(
-        resp.results[0].error_code == 0,
-        "expected error_code=0, got {:?}",
-        resp.results[0]
-    );
-    check!(resp.results[0].user == "alice");
+    check_single_successful_user(&resp, "alice");
 
     // Round-trip: now log in as `alice` over SCRAM, proving the upserted
     // credential actually reached the metadata image. Wait for the raft
@@ -74,6 +69,16 @@ async fn alter_scram_creds_super_user_can_provision() {
     let result = post_upsertion_auth(&handle, addr, SaslMechanism::ScramSha512).await;
     handle.shutdown().await;
     result.expect("post-upsertion SCRAM auth must succeed");
+}
+
+fn check_single_successful_user(resp: &AlterUserScramCredentialsResponse, expected_user: &str) {
+    assert!(resp.results.len() == 1);
+    check!(
+        resp.results[0].error_code == 0,
+        "expected error_code=0, got {:?}",
+        resp.results[0]
+    );
+    check!(resp.results[0].user == expected_user);
 }
 
 /// Wire-mapping proof: `AlterUserScramCredentials` accepts `mechanism=1`,
@@ -88,23 +93,18 @@ async fn alter_scram_creds_super_user_can_provision_sha256() {
         scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha256]).await;
 
     let (salt, salted) = pbkdf2_salt_and_salted_sha256(alice_password().as_bytes(), 4096);
+    let upsert = scram_upsertion(ScramUpsertionSetup {
+        mechanism: ScramAlgorithm::Sha256,
+        salt: bytes::Bytes::from(salt),
+        salted_password: bytes::Bytes::from(salted.to_vec()),
+        ..Default::default()
+    });
     let req = AlterUserScramCredentialsRequest {
-        upsertions: vec![scram_upsertion(ScramUpsertionSetup {
-            mechanism: ScramAlgorithm::Sha256,
-            salt: bytes::Bytes::from(salt),
-            salted_password: bytes::Bytes::from(salted.to_vec()),
-            ..Default::default()
-        })],
+        upsertions: vec![upsert],
         ..Default::default()
     };
     let resp = provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion (SHA-256)").await;
-    assert!(resp.results.len() == 1);
-    check!(
-        resp.results[0].error_code == 0,
-        "expected error_code=0, got {:?}",
-        resp.results[0]
-    );
-    check!(resp.results[0].user == "alice");
+    check_single_successful_user(&resp, "alice");
 
     // Wait for the upserted credential to reach the committed metadata
     // image, then authenticate as `alice` over SHA-256 SCRAM.
@@ -187,17 +187,7 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
         2,
         "SaslAuthenticate",
     )?;
-    let auth_resp_bytes = round_trip(
-        &mut stream,
-        SocketExchangeSetup {
-            api_key: WireApiKey(36),
-            version: WireApiVersion(2),
-            correlation: WireCorrelationId(3),
-            header: RequestHeaderEncoding::Flexible,
-        },
-        &auth_body,
-    )
-    .await?;
+    let auth_resp_bytes = sasl_authenticate_round_trip(&mut stream, &auth_body).await?;
     let auth_resp =
         decode_named::<SaslAuthenticateResponse>(&auth_resp_bytes, 2, "SaslAuthenticate")?;
     if auth_resp.error_code != 0 {

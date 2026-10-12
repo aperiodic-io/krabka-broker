@@ -45,7 +45,7 @@ use super::{
 use crate::{
     config_keys::RecoveryStrategy,
     elr::state::PartitionElr,
-    leader_election::{FailoverDecision, failover_one},
+    leader_election::{FailoverDecision, Ladder, failover_one},
     unclean_recovery::{ReplicaLogInfo, select_leader},
 };
 
@@ -153,21 +153,18 @@ pub(super) fn do_failover(image: Option<&MetadataImage>, s: &mut DpState, dead: 
     };
     // This model has no witness broker: every replica can lead.
     let witnesses: HashSet<krabka_audit::NodeId> = HashSet::new();
-    let changed = match failover_one(
-        &pr,
-        krabka_audit::NodeId(node(dead)),
-        &alive,
-        &witnesses,
-        // The published eligible-leader set, as the production scan reads it
-        // out of the image for this partition. The model carries no last-known
-        // ELR, so no partition in it lacks a leader.
-        &PartitionElr {
-            eligible_leader_replicas: ids(s.elr),
-            last_known_elr: Vec::new(),
-        },
-        strategy,
-        unclean,
-    ) {
+    let elr = PartitionElr {
+        eligible_leader_replicas: ids(s.elr),
+        last_known_elr: Vec::new(),
+    };
+    let ladder = Ladder::builder()
+        .alive(&alive)
+        .witnesses(&witnesses)
+        .elr(&elr)
+        .strategy(strategy)
+        .unclean_enabled(unclean)
+        .build();
+    let changed = match failover_one(&pr, krabka_audit::NodeId(node(dead)), &ladder) {
         FailoverDecision::Elect {
             leader,
             isr,

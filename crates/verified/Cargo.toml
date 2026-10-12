@@ -29,5 +29,6 @@ krabka-ids = { version = "0.6.0" }
 krabka-macros = { version = "1.0.3", path = "../macros" }
 
 [dev-dependencies]
+bon = { workspace = true }
 proptest = { workspace = true }
 mutants = { workspace = true }

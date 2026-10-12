@@ -296,11 +296,12 @@ impl KrabkaCluster {
             tokio::time::sleep(POLL_GAP).await;
         }
 
-        let ids = krabka_broker::log_dir_id::LogDirIds::resolve(&[
-            primary.path().to_path_buf(),
-            extra.path().to_path_buf(),
-        ]);
-        let extra_id = ids.id_for(extra.path()).expect("extra dir id");
+        let extra_id = krabka_broker::log_dir_id::LogDirIds::resolve(&[
+            primary.path().into(),
+            extra.path().into(),
+        ])
+        .id_for(extra.path())
+        .expect("extra dir id");
         let doomed: BTreeSet<i32> = handle
             .controller_image_for_test()
             .partitions_of(TOPIC)

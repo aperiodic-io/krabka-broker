@@ -75,10 +75,10 @@ fn truncate_to_drops_later_records() {
     let mut b2 = sample_batch(2);
     log.append(&mut b1).unwrap();
     log.append(&mut b2).unwrap();
-    assert2::assert!(log.log_end_offset() == 5);
+    check!(log.log_end_offset() == Offset(5));
     log.truncate_to(Offset(3)).unwrap();
     // First batch (offsets 0..=2) survives; last_offset == 2, end == 3.
-    assert2::assert!(log.log_end_offset() == 3);
+    check!(log.log_end_offset() == Offset(3));
 }
 
 #[test]

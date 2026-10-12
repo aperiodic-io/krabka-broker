@@ -174,17 +174,13 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use assert2::assert;
 
     use super::*;
     use crate::{
-        test_support::{
-            grant_topic_operation, lead_transaction_state_partitions, peer, principal,
-            start_broker_with_authorizer_no_audit as start_broker, test_ctx,
-        },
-        txn::{state::TopicPartition, version::TxnVersion},
+        handlers::test_support::transaction_admin_tests::*,
+        test_support::{grant_topic_operation, peer, principal},
+        txn::state::TopicPartition,
     };
 
     fn entry() -> TxnEntry {

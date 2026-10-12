@@ -163,45 +163,42 @@ fn batch_size(broker: &BrokerHandle, topic: &str) -> i32 {
     i32::try_from(read.total).expect("small batch")
 }
 
+#[derive(Clone, Copy)]
+struct FetchAcknowledgement {
+    first_offset: i64,
+    last_offset: i64,
+    ack_type: i8,
+}
+
+#[bon::builder]
 async fn share_fetch(
     broker: &BrokerHandle,
     group: &str,
     member: &str,
-    epoch: i32,
-    topic_id: WireUuid,
-    (max_records, max_bytes): (i32, i32),
-    acknowledgements: &[(i64, i64, i8)],
+    topic_id: [u8; 16],
+    #[builder(default)] epoch: i32,
+    #[builder(default = 500)] max_records: i32,
+    #[builder(default = 1 << 20)] max_bytes: i32,
+    #[builder(default)] acknowledgements: Vec<FetchAcknowledgement>,
 ) -> ShareFetchResponse {
-    let request = ShareFetchRequest {
-        group_id: Some(group.into()),
-        member_id: Some(member.into()),
-        share_session_epoch: epoch,
-        max_wait_ms: 0,
-        min_bytes: 0,
-        max_bytes,
-        max_records,
-        batch_size: max_records,
-        topics: vec![FetchTopic {
-            topic_id,
-            partitions: vec![FetchPartition {
-                partition_index: 0,
-                acknowledgement_batches: acknowledgements
-                    .iter()
-                    .map(
-                        |&(first_offset, last_offset, ack_type)| AcknowledgementBatch {
-                            first_offset,
-                            last_offset,
-                            acknowledge_types: vec![ack_type],
-                            ..Default::default()
-                        },
-                    )
-                    .collect(),
-                ..Default::default()
-            }],
+    let acknowledgement_batches = acknowledgements
+        .into_iter()
+        .map(|ack| AcknowledgementBatch {
+            first_offset: ack.first_offset,
+            last_offset: ack.last_offset,
+            acknowledge_types: vec![ack.ack_type],
             ..Default::default()
-        }],
-        ..Default::default()
-    };
+        })
+        .collect();
+    let request = super::test_fetch_request()
+        .group_id(group.into())
+        .member_id(member.into())
+        .topic_id(topic_id)
+        .share_session_epoch(epoch)
+        .max_records(max_records)
+        .max_bytes(max_bytes)
+        .acknowledgement_batches(acknowledgement_batches)
+        .call();
     send_share_fetch(broker, &request).await
 }
 
@@ -277,6 +274,14 @@ struct Case {
     expected: Outcome,
 }
 
+fn one_batch_outcome() -> Outcome {
+    Outcome {
+        acquired: vec![(0, 1)],
+        records: vec![0, 1],
+        remainder: vec![(2, 7)],
+    }
+}
+
 fn cases() -> Vec<Case> {
     vec![
         Case {
@@ -293,21 +298,13 @@ fn cases() -> Vec<Case> {
             name: "one-batch-fits",
             max_records: 500,
             max_bytes_in_batches: (1, 1),
-            expected: Outcome {
-                acquired: vec![(0, 1)],
-                records: vec![0, 1],
-                remainder: vec![(2, 7)],
-            },
+            expected: one_batch_outcome(),
         },
         Case {
             name: "less-than-one-batch",
             max_records: 500,
             max_bytes_in_batches: (1, 2),
-            expected: Outcome {
-                acquired: vec![(0, 1)],
-                records: vec![0, 1],
-                remainder: vec![(2, 7)],
-            },
+            expected: one_batch_outcome(),
         },
         Case {
             // `batch_optimized`: MaxRecords is a soft limit that rounds up to
@@ -338,34 +335,37 @@ async fn every_acquired_offset_has_its_record_in_the_response() {
         // Open both sessions on the empty log, so the share partition starts
         // at offset 0 under the default `latest` reset.
         for member in ["limited", "unlimited"] {
-            let opened =
-                share_fetch(&broker, &group, member, 0, topic_id, (500, 1 << 20), &[]).await;
+            let opened = share_fetch()
+                .broker(&broker)
+                .group(&group)
+                .member(member)
+                .topic_id(topic_id.0)
+                .call()
+                .await;
             assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");
         }
         produce_batches(&broker, &topic).await;
         let size = batch_size(&broker, &topic);
         let (numerator, denominator) = case.max_bytes_in_batches;
 
-        let limited = share_fetch(
-            &broker,
-            &group,
-            "limited",
-            1,
-            topic_id,
-            (case.max_records, size * numerator / denominator),
-            &[],
-        )
-        .await;
-        let rest = share_fetch(
-            &broker,
-            &group,
-            "unlimited",
-            1,
-            topic_id,
-            (500, 1 << 20),
-            &[],
-        )
-        .await;
+        let limited = share_fetch()
+            .broker(&broker)
+            .group(&group)
+            .member("limited")
+            .topic_id(topic_id.0)
+            .epoch(1)
+            .max_records(case.max_records)
+            .max_bytes(size * numerator / denominator)
+            .call()
+            .await;
+        let rest = share_fetch()
+            .broker(&broker)
+            .group(&group)
+            .member("unlimited")
+            .topic_id(topic_id.0)
+            .epoch(1)
+            .call()
+            .await;
 
         actual.push((
             case.name,
@@ -391,11 +391,24 @@ async fn broker_fetch_cap_limits_share_fetch_and_keeps_first_batch_progress() {
     let group = "broker-fetch-cap-group";
     let topic_id = create_topic(&broker, topic).await;
     initialize_share_state(&broker, group, uuid::Uuid::from_bytes(topic_id.0), 0).await;
-    let opened = share_fetch(&broker, group, "member", 0, topic_id, (500, 1 << 20), &[]).await;
+    let opened = share_fetch()
+        .broker(&broker)
+        .group(group)
+        .member("member")
+        .topic_id(topic_id.0)
+        .call()
+        .await;
     assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");
     produce_batches(&broker, topic).await;
 
-    let response = share_fetch(&broker, group, "member", 1, topic_id, (500, 1 << 20), &[]).await;
+    let response = share_fetch()
+        .broker(&broker)
+        .group(group)
+        .member("member")
+        .topic_id(topic_id.0)
+        .epoch(1)
+        .call()
+        .await;
     let row = partition(&response);
     assert!(acquired(&row) == vec![(0, 1)]);
     assert!(record_offsets(&row) == vec![0, 1]);
@@ -414,23 +427,39 @@ async fn a_record_at_the_delivery_limit_does_not_stall_the_partition() {
     let (broker, _dir) = start_with_delivery_attempts(1).await;
     let topic_id = create_topic(&broker, "delivery-limit").await;
     initialize_share_state(&broker, "g", uuid::Uuid::from_bytes(topic_id.0), 0).await;
-    let opened = share_fetch(&broker, "g", "m", 0, topic_id, (500, 1 << 20), &[]).await;
+    let opened = share_fetch()
+        .broker(&broker)
+        .group("g")
+        .member("m")
+        .topic_id(topic_id.0)
+        .call()
+        .await;
     assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");
     produce_batches(&broker, "delivery-limit").await;
-    let first = share_fetch(&broker, "g", "m", 1, topic_id, (500, 1 << 20), &[]).await;
+    let first = share_fetch()
+        .broker(&broker)
+        .group("g")
+        .member("m")
+        .topic_id(topic_id.0)
+        .epoch(1)
+        .call()
+        .await;
     produce_batches(&broker, "delivery-limit").await;
 
     // Release every record at its only delivery attempt, and fetch.
-    let after_release = share_fetch(
-        &broker,
-        "g",
-        "m",
-        2,
-        topic_id,
-        (500, 1 << 20),
-        &[(0, 7, RELEASE)],
-    )
-    .await;
+    let after_release = share_fetch()
+        .broker(&broker)
+        .group("g")
+        .member("m")
+        .topic_id(topic_id.0)
+        .epoch(2)
+        .acknowledgements(vec![FetchAcknowledgement {
+            first_offset: 0,
+            last_offset: 7,
+            ack_type: RELEASE,
+        }])
+        .call()
+        .await;
 
     assert!(
         (
@@ -650,12 +679,25 @@ async fn a_batch_acquired_over_two_passes_is_carried_once() {
     let topic_id = create_topic(&broker, "two-passes").await;
     initialize_share_state(&broker, "g", uuid::Uuid::from_bytes(topic_id.0), 0).await;
     for member in ["waiting", "other"] {
-        let opened = share_fetch(&broker, "g", member, 0, topic_id, (500, 1 << 20), &[]).await;
+        let opened = share_fetch()
+            .broker(&broker)
+            .group("g")
+            .member(member)
+            .topic_id(topic_id.0)
+            .call()
+            .await;
         assert!(partition(&opened).error_code == codes::NONE, "{opened:?}");
     }
     // One batch at offsets 0-1. `other` holds it, then releases offset 0.
     produce_batch(&broker, "two-passes", 0).await;
-    let held = share_fetch(&broker, "g", "other", 1, topic_id, (500, 1 << 20), &[]).await;
+    let held = share_fetch()
+        .broker(&broker)
+        .group("g")
+        .member("other")
+        .topic_id(topic_id.0)
+        .epoch(1)
+        .call()
+        .await;
     assert!(acquired(&partition(&held)) == vec![(0, 1)]);
     release(&broker, "g", "other", 2, topic_id, (0, 0)).await;
 

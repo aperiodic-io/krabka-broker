@@ -225,15 +225,13 @@ mod tests {
         assert2::assert!(client_ids.lock().unwrap().as_slice() == ["metadata-fetch-client"]);
         {
             let opts = recorded_options.lock().unwrap();
+            let first_opt = &opts[0];
             assert2::assert!(opts.len() == 1);
-            assert2::assert!(
-                opts[0].dispatch_queue_capacity
-                    == krabka_client_core::ConnectionDispatchQueueCapacity::new(7).unwrap()
-            );
-            assert2::assert!(
-                opts[0].frame_max
-                    == krabka_client_core::ClientFrameMax::try_from(mebibytes(8)).unwrap()
-            );
+            let expected_cap = krabka_client_core::ConnectionDispatchQueueCapacity::new(7).unwrap();
+            assert2::assert!(first_opt.dispatch_queue_capacity == expected_cap);
+            let expected_frame =
+                krabka_client_core::ClientFrameMax::try_from(mebibytes(8)).unwrap();
+            assert2::assert!(first_opt.frame_max == expected_frame);
         }
         ctrl.shutdown().await;
     }

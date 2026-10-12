@@ -32,13 +32,14 @@ context_handler! {
         // `Read` on `Group(group_id)`. On Deny → whole-response
         // `error_code = GROUP_AUTHORIZATION_FAILED (30)`.
         {
-            let image = broker.controller.current_image();
-            if crate::handlers::group_read_denied(
+            let img = broker.controller.current_image();
+            let denied = crate::handlers::group_read_denied(
                 broker.config.authorizer.as_ref(),
-                &image,
+                &img,
                 ctx,
                 req.group_id.as_str(),
-            ) {
+            );
+            if denied {
                 return Ok(respond(
                     version,
                     JoinGroupResponse {

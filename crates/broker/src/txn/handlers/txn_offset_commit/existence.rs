@@ -118,7 +118,8 @@ mod tests {
     #[test]
     fn partition_with_no_leader_is_not_unknown() {
         let image = image_with_topic("a", 1, NodeId(0));
-        let unknown = unknown_partitions(&[topic("a", &[0])], &HashSet::new(), &image);
+        let topics = [topic("a", &[0])];
+        let unknown = unknown_partitions(&topics, &HashSet::new(), &image);
         check!(unknown.is_empty());
     }
 

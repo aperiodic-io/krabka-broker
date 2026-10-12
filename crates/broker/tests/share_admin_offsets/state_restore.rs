@@ -20,6 +20,18 @@ use crate::{
     },
 };
 
+async fn assert_share_summary(
+    broker: &krabka_broker::BrokerHandle,
+    tid: uuid::Uuid,
+    expected_dcc: i32,
+) {
+    let summary = broker
+        .share_state_summary_for_test("g1", tid, 0)
+        .await
+        .map(|(_, _, start, dcc)| (start, dcc));
+    assert!(summary == Some((0, expected_dcc)));
+}
+
 /// Lag restore: `delivery_complete_count` survives a broker restart.
 ///
 /// Produce N. Acquire all of them and Accept `1..N-1`, so offset 0 still holds
@@ -60,11 +72,7 @@ async fn delivery_complete_count_restored_across_restart() {
         broker
             .wait_until_share_delivery_complete("g1", tid, 0, COMPLETE)
             .await;
-        let summary = broker
-            .share_state_summary_for_test("g1", tid, 0)
-            .await
-            .map(|(_, _, start, dcc)| (start, dcc));
-        assert!(summary == Some((0, COMPLETE)));
+        assert_share_summary(&broker, tid, COMPLETE).await;
 
         // The awaiter above confirms the count is durable; shut down immediately.
         broker.shutdown().await;
@@ -76,10 +84,6 @@ async fn delivery_complete_count_restored_across_restart() {
         // The summary load is driven by the share coordinator reading the
         // persisted record; await until the recovered state is present.
         broker.wait_for_share_state_summary("g1", tid, 0).await;
-        let summary = broker
-            .share_state_summary_for_test("g1", tid, 0)
-            .await
-            .map(|(_, _, start, dcc)| (start, dcc));
-        assert!(summary == Some((0, COMPLETE)));
+        assert_share_summary(&broker, tid, COMPLETE).await;
     }
 }

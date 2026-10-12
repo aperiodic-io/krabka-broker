@@ -68,6 +68,16 @@ pub(super) struct GatedWal {
 }
 
 impl GatedWal {
+    pub(super) fn gated_channel() -> (Arc<Self>, oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (sync_started_tx, sync_started_rx) = oneshot::channel();
+        let (release_sync_tx, release_sync_rx) = oneshot::channel();
+        (
+            Arc::new(Self::new(sync_started_tx, release_sync_rx)),
+            sync_started_rx,
+            release_sync_tx,
+        )
+    }
+
     pub(super) fn new(
         sync_started: oneshot::Sender<()>,
         release_sync: oneshot::Receiver<()>,

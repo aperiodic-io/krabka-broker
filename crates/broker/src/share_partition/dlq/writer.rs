@@ -796,13 +796,12 @@ mod tests {
             (ProduceResponse::default(), "fatal"),
         ];
 
-        assert!(
+        assert!(super::super::record::projected_cases_match(
             cases
                 .iter()
-                .map(|(response, _)| outcome(&classify_produce(response, &target)))
-                .collect::<Vec<_>>()
-                == cases.iter().map(|(_, want)| *want).collect::<Vec<_>>()
-        );
+                .map(|(response, _)| outcome(&classify_produce(response, &target))),
+            cases.iter().map(|(_, want)| *want),
+        ));
     }
 
     /// The answer to a coalesced request has a row for each partition of each

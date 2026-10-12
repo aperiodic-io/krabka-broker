@@ -101,9 +101,11 @@ pub(super) fn manager_over(
 pub(super) fn manager_with_unlimited_fallback(
     fallback: SessionCapacity,
 ) -> Arc<SharePartitionLeaderManager> {
+    let source = fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil())));
+    let reg = Arc::new(PartitionRegistry::new());
     build(
-        fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil()))),
-        Arc::new(PartitionRegistry::new()),
+        source,
+        reg,
         ManagerSetup {
             capacity: fallback,
             ..Default::default()

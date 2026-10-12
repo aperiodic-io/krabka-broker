@@ -32,6 +32,13 @@ pub fn join_request(group_id: &str, member_id: &str) -> JoinGroupRequest {
     }
 }
 
+/// Validate the first `JoinGroup` response and retain the broker-generated ID.
+pub fn required_member_id(error_code: i16, member_id: String) -> String {
+    assert!(error_code == ERR_MEMBER_ID_REQUIRED);
+    assert!(!member_id.is_empty());
+    member_id
+}
+
 /// Drive the `JoinGroup` two-step (`MEMBER_ID_REQUIRED` + re-join) then `SyncGroup`.
 /// Returns `(member_id, generation_id)`. The caller is the sole member so it
 /// is also the leader and supplies a trivial self-assignment in `SyncGroup`.

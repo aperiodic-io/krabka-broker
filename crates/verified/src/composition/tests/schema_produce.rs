@@ -7,10 +7,10 @@ fn check_frontier(
     fields: &[SchemaWalkField],
     enabled: (bool, bool),
     policy: (bool, bool),
-    base: i64,
-    delta: i32,
+    base_offset: i64,
+    last_delta: i32,
     flags: (bool, bool),
-    producer: (i64, i32),
+    producer_id_epoch: (i64, i32),
 ) {
     let count = fields.len() / 2;
     let coherent = fields.len().is_multiple_of(2)
@@ -23,18 +23,18 @@ fn check_frontier(
                     SchemaFieldRole::Value
                 }
         });
-    let header = (0..i32::MAX).contains(&delta)
-        && i128::try_from(count).unwrap() == i128::from(delta) + 1
+    let header = (0..i32::MAX).contains(&last_delta)
+        && i128::try_from(count).unwrap() == i128::from(last_delta) + 1
         && count > 0
         && !flags.0
         && flags.1
-        && (producer.0 < 0 || producer.1 >= 0);
+        && (producer_id_epoch.0 < 0 || producer_id_epoch.1 >= 0);
     let (rows, decision) = schema_walk::oracle(fields, enabled, policy.0, policy.1);
-    let target = i128::from(base) + i128::try_from(count).unwrap();
+    let target = i128::from(base_offset) + i128::try_from(count).unwrap();
     let expected = if coherent
         && header
         && decision == SchemaBatchAdmission::Admit
-        && base >= 0
+        && base_offset >= 0
         && target <= i128::from(i64::MAX)
     {
         Some((rows, i64::try_from(target).unwrap()))
@@ -42,8 +42,15 @@ fn check_frontier(
         None
     };
     assert!(
-        schema_checked_produce_frontier(fields, enabled, policy, base, delta, flags, producer)
-            == expected
+        schema_checked_produce_frontier(
+            fields,
+            enabled,
+            policy,
+            base_offset,
+            last_delta,
+            flags,
+            producer_id_epoch
+        ) == expected
     );
 }
 

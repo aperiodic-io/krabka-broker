@@ -36,10 +36,10 @@
 
 use std::path::{Path, PathBuf};
 
-use krabka_broker::operator_keys::{OperatorKeyEntry, OperatorKeys};
+use krabka_broker::operator_keys::{OperatorKeyEntry, OperatorKeys, freeze_signing_input};
 use krabka_protocol::krabka::freeze::DescribedTopicFreeze;
 
-use crate::signing::{FreezeSigningInput, freeze_signing_bytes};
+use crate::signing::freeze_signing_bytes;
 
 /// Why one registry entry is not proved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,16 +160,13 @@ fn check_entry(
     if keys.get(&freeze.key_id).is_none() {
         return Some(Unproved::UnknownKeyId);
     }
-    let message = freeze_signing_bytes(&FreezeSigningInput {
-        cluster_id,
-        pattern_type: freeze.pattern_type,
-        scope: &freeze.scope,
-        frozen: true,
-        reason: &freeze.reason,
-        set_by: &freeze.set_by,
-        set_at_ms: freeze.set_at_ms,
-        proposal_id: freeze.proposal_id.0,
-    });
+    let message = freeze_signing_bytes(
+        &freeze_signing_input()
+            .cluster_id(cluster_id)
+            .entry(freeze)
+            .frozen(true)
+            .call(),
+    );
     // `verify` also checks that the key is bound to the principal the entry
     // names, so a signature from Alice's key over a record that claims Bob
     // wrote it does not pass.
@@ -282,16 +279,13 @@ mod tests {
             key_id: key_id.to_owned(),
             ..DescribedTopicFreeze::default()
         };
-        entry.signature = signer.sign(&freeze_signing_bytes(&FreezeSigningInput {
-            cluster_id: CLUSTER,
-            pattern_type: entry.pattern_type,
-            scope: &entry.scope,
-            frozen: true,
-            reason: &entry.reason,
-            set_by: &entry.set_by,
-            set_at_ms: entry.set_at_ms,
-            proposal_id: entry.proposal_id.0,
-        }));
+        entry.signature = signer.sign(&freeze_signing_bytes(
+            &freeze_signing_input()
+                .cluster_id(CLUSTER)
+                .entry(&entry)
+                .frozen(true)
+                .call(),
+        ));
         entry
     }
 

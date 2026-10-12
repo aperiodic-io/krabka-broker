@@ -92,13 +92,13 @@ async fn produce_and_fetch(client: &krabka_client_core::Client) -> usize {
         .expect("Fetch");
     let partition = &fetched.responses[0].partitions[0];
     assert!(partition.error_code == 0);
-    partition
-        .records
-        .as_ref()
-        .and_then(|records| records.as_v2())
-        .map_or(0, |batches| {
-            batches.iter().map(|batch| batch.records.len()).sum()
-        })
+    let mut total_records = 0;
+    if let Some(v2_batches) = partition.records.as_ref().and_then(|r| r.as_v2()) {
+        for b in v2_batches {
+            total_records += b.records.len();
+        }
+    }
+    total_records
 }
 
 /// Boot a node on a current-thread runtime of its own thread, run

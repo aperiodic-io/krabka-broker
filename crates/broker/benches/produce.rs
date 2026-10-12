@@ -63,7 +63,7 @@ use krabka_records_legacy::Magic;
 use tempfile::TempDir;
 
 mod support;
-use support::{LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP};
+use support::{BoundedResource, LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP, bounded_resource};
 
 fn settings(metrics: &BrokerMetrics) -> HotPathSettings<'_> {
     HotPathSettings {
@@ -123,31 +123,20 @@ fn legacy_v1_records(records: i32, payload: usize) -> Bytes {
 /// Every reset opens a fresh temp dir, so a long criterion run never grows the
 /// log past the budget and never measures a log whose segment count keeps
 /// climbing.
-struct BoundedLog {
+struct ProduceLog {
     _dir: TempDir,
     log: Log,
-    written: usize,
 }
 
-impl BoundedLog {
+impl ProduceLog {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let log = Log::open(dir.path(), LogConfig::default()).expect("open log");
-        Self {
-            _dir: dir,
-            log,
-            written: 0,
-        }
-    }
-
-    /// Replace the log when it is full. Call this outside the timed region.
-    fn rotate_if_full(&mut self, incoming: usize) {
-        if self.written + incoming > LOG_BUDGET {
-            *self = Self::new();
-        }
-        self.written += incoming;
+        Self { _dir: dir, log }
     }
 }
+
+type BoundedLog = BoundedResource<ProduceLog>;
 
 /// The measured region: one records field through prepare, writer-data build
 /// and append.
@@ -165,7 +154,7 @@ fn append(
     expected: ProducePath,
     settings: &HotPathSettings<'_>,
 ) {
-    let path = append_one_batch(payload, choice, settings, &mut store.log)
+    let path = append_one_batch(payload, choice, settings, &mut store.get_mut().log)
         .expect("the bench shapes are all valid produce payloads");
     assert!(path == expected, "{choice:?} took the {path:?} path");
 }
@@ -201,7 +190,10 @@ fn timed_appends(
 ) -> Duration {
     let metrics = BrokerMetrics::new();
     let settings = settings(&metrics);
-    let mut store = BoundedLog::new();
+    let mut store = bounded_resource()
+        .budget(LOG_BUDGET)
+        .factory(ProduceLog::new)
+        .call();
     for _ in 0..WARMUP {
         append_once(&mut store, records, choice, expected, &settings);
     }
@@ -254,7 +246,12 @@ fn bench_produce_hot_path(c: &mut Criterion) {
                 let settings = settings(&metrics);
                 // Both closures reach the log: the setup rotates it, the
                 // routine appends into it.
-                let store = RefCell::new(BoundedLog::new());
+                let store = RefCell::new(
+                    bounded_resource()
+                        .budget(LOG_BUDGET)
+                        .factory(ProduceLog::new)
+                        .call(),
+                );
                 b.iter_batched(
                     || {
                         store.borrow_mut().rotate_if_full(wire.len());

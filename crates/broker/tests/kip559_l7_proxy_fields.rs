@@ -55,16 +55,15 @@ async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
         .await
         .expect("JoinGroup (bootstrap)");
     assert!(r1.error_code == 79, "expected MEMBER_ID_REQUIRED");
-    let mid = r1.member_id.clone();
-    assert!(!mid.is_empty());
+    let member_id = r1.member_id;
+    assert!(!member_id.is_empty());
 
     // Step 2: re-join with the assigned member_id, falls out as leader.
+    let mut rejoin = join_setup();
+    rejoin.member_id = member_id.clone();
     let r2 = p
         .client
-        .send(classic_join_request(ClassicJoinSetup {
-            member_id: mid.clone(),
-            ..join_setup()
-        }))
+        .send(classic_join_request(rejoin))
         .await
         .expect("JoinGroup");
     check!(r2.error_code == 0, "JoinGroup must succeed: {r2:?}");
@@ -80,7 +79,7 @@ async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
         "JoinGroup must echo protocol_name: {r2:?}"
     );
 
-    (mid, r2.generation_id)
+    (member_id, r2.generation_id)
 }
 
 #[tokio::test]

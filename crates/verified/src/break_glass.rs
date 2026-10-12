@@ -115,17 +115,17 @@ pub fn is_min_by(keys: Seq<(i64, u64, u64)>, best: Int, len: Int) -> bool {
 #[must_use]
 pub fn select_break_glass_candidate(candidates: &[(i64, u64, u64)]) -> Option<usize> {
     let mut best: Option<usize> = None;
-    let mut i = 0usize;
-    #[invariant(i@ <= candidates@.len())]
+    let mut cursor = 0usize;
+    #[invariant(cursor@ <= candidates@.len())]
     #[invariant(match best {
-        None => i@ == 0,
-        Some(b) => is_min_by(candidates@, b@, i@),
+        None => cursor@ == 0,
+        Some(b) => is_min_by(candidates@, b@, cursor@),
     })]
-    #[variant(candidates@.len() - i@)]
-    while i < candidates.len() {
-        let candidate = candidates[i];
+    #[variant(candidates@.len() - cursor@)]
+    while cursor < candidates.len() {
+        let candidate = candidates[cursor];
         best = match best {
-            None => Some(i),
+            None => Some(cursor),
             Some(b) => {
                 let current = candidates[b];
                 if candidate.0 < current.0
@@ -134,13 +134,13 @@ pub fn select_break_glass_candidate(candidates: &[(i64, u64, u64)]) -> Option<us
                         && candidate.1 == current.1
                         && candidate.2 < current.2)
                 {
-                    Some(i)
+                    Some(cursor)
                 } else {
                     Some(b)
                 }
             }
         };
-        i += 1;
+        cursor += 1;
     }
     best
 }

@@ -203,12 +203,14 @@ mod tests {
         test_support::{peek_version, wire_bytes},
     };
 
+    fn active_tasks(partitions: &[i32]) -> BTreeMap<String, Vec<i32>> {
+        BTreeMap::from([("0".to_string(), partitions.to_vec())])
+    }
+
     #[test]
     fn target_assignment_member_bytes_match_kafka_schema() {
-        let mut active = BTreeMap::new();
-        active.insert("0".to_string(), vec![1]);
         let v = StreamsGroupTargetAssignmentMemberValue {
-            active,
+            active: active_tasks(&[1]),
             standby: BTreeMap::new(),
             warmup: BTreeMap::new(),
         };
@@ -237,8 +239,7 @@ mod tests {
                 }
         );
 
-        let mut active = BTreeMap::new();
-        active.insert("0".to_string(), vec![0, 1, 2]);
+        let mut active = active_tasks(&[0, 1, 2]);
         active.insert("1".to_string(), vec![]);
         let mut standby = BTreeMap::new();
         standby.insert("0".to_string(), vec![3]);
@@ -282,8 +283,7 @@ mod tests {
                 }
         );
 
-        let mut active = BTreeMap::new();
-        active.insert("0".to_string(), vec![0, 1]);
+        let active = active_tasks(&[0, 1]);
         let mut pending = BTreeMap::new();
         pending.insert("0".to_string(), vec![2]);
         let v = StreamsGroupCurrentMemberAssignmentValue {

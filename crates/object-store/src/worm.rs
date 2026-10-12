@@ -210,7 +210,7 @@ mod tests {
     use assert2::check;
 
     use super::*;
-    use crate::test_support::{http_listener, read_request, s3_config, serve_http_pages};
+    use crate::test_support::{accept_http_request, http_listener, s3_config, serve_http_pages};
 
     const GCS_TEST_KEY: &str = r#"{
         "private_key":"unused",
@@ -391,8 +391,7 @@ mod tests {
         for (gcs, retry_deadline) in [(false, false), (true, false), (false, true), (true, true)] {
             let (listener, endpoint) = http_listener().await;
             let server = tokio::spawn(async move {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                read_request(&mut socket).await;
+                let _socket = accept_http_request(listener).await;
                 std::future::pending::<()>().await;
             });
             let request_timeout = if retry_deadline {

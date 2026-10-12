@@ -49,10 +49,10 @@ pub(crate) async fn start_configured_topic_rlmm(
     let remote_dir = TempDir::new().expect("remote tempdir");
 
     let mut cfg = bare_config(log_dir.path(), listen, controller_addrs[0]);
-    cfg.remote_storage_backend = Some(RemoteStorageBackend::Local {
-        dir: remote_dir.path().to_path_buf(),
-    });
     cfg.remote_log_manager_interval = krabka_units::secs(1);
+    cfg.remote_storage_backend = Some(RemoteStorageBackend::Local {
+        dir: remote_dir.path().into(),
+    });
     cfg.remote_log_metadata = RlmmKind::TopicBacked(KafkaRlmmConfig {
         bootstrap: format!("127.0.0.1:{}", listen.port()),
         num_partitions: 1,

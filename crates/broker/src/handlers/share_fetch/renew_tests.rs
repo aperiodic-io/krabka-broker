@@ -16,10 +16,7 @@ use krabka_metadata::{GroupConfigRecord, MetadataRecord};
 use krabka_protocol::{
     owned::{
         share_acknowledge_response::ShareAcknowledgeResponse,
-        share_fetch_request::{
-            AcknowledgementBatch as FetchAcknowledgeBatch, FetchPartition, FetchTopic,
-            ShareFetchRequest,
-        },
+        share_fetch_request::{AcknowledgementBatch as FetchAcknowledgeBatch, ShareFetchRequest},
         share_fetch_response::ShareFetchResponse,
     },
     primitives::uuid::Uuid as WireUuid,
@@ -408,10 +405,10 @@ const NO_TOPIC_READ: &str = "no-topic-read";
 struct DenyTopicReadToOne;
 
 test_authorizer!(DenyTopicReadToOne, (self, _source, request), {
-    if request.principal.name == NO_TOPIC_READ
+    let denied = request.principal.name == NO_TOPIC_READ
         && request.resource_type == krabka_metadata::ResourceType::Topic
-        && request.operation == krabka_metadata::AclOperation::Read
-    {
+        && request.operation == krabka_metadata::AclOperation::Read;
+    if denied {
         crate::authorizer::AuthorizationResult::Deny
     } else {
         crate::authorizer::AuthorizationResult::Allow
@@ -478,33 +475,23 @@ fn fetch_request(setup: RenewFetchSetup<'_>) -> ShareFetchRequest {
         limits,
         batches,
     } = setup;
-    ShareFetchRequest {
-        group_id: Some(group.into()),
-        member_id: Some("member".into()),
-        share_session_epoch: epoch.0,
-        max_wait_ms: 0,
-        min_bytes: 0,
-        max_bytes: limits.max_bytes.0,
-        max_records: limits.max_records.0,
-        batch_size: limits.max_records.0,
-        is_renew_ack: matches!(mode, AcknowledgementMode::Renew),
-        topics: vec![FetchTopic {
-            topic_id,
-            partitions: vec![FetchPartition {
-                partition_index: 0,
-                acknowledgement_batches: batches
-                    .into_iter()
-                    .map(|batch| FetchAcknowledgeBatch {
-                        first_offset: batch.first_offset.0,
-                        last_offset: batch.last_offset.0,
-                        acknowledge_types: batch.types.into_iter().map(|code| code.0).collect(),
-                        ..Default::default()
-                    })
-                    .collect(),
-                ..Default::default()
-            }],
+    let acknowledgement_batches = batches
+        .into_iter()
+        .map(|batch| FetchAcknowledgeBatch {
+            first_offset: batch.first_offset.0,
+            last_offset: batch.last_offset.0,
+            acknowledge_types: batch.types.into_iter().map(|code| code.0).collect(),
             ..Default::default()
-        }],
-        ..Default::default()
-    }
+        })
+        .collect();
+    super::test_fetch_request()
+        .group_id(group.into())
+        .member_id("member".into())
+        .topic_id(topic_id.0)
+        .share_session_epoch(epoch.0)
+        .max_bytes(limits.max_bytes.0)
+        .max_records(limits.max_records.0)
+        .acknowledgement_batches(acknowledgement_batches)
+        .is_renew_ack(matches!(mode, AcknowledgementMode::Renew))
+        .call()
 }

@@ -459,10 +459,8 @@ mod tests {
                 ..broker_registration(krabka_raft::NodeId(2))
             },
         ));
-        let err = send_test_markers(&image, NodeId(2), "INTERNAL")
-            .await
-            .failure
-            .expect("unreachable endpoint must error");
+        let outcome = send_test_markers(&image, NodeId(2), "INTERNAL").await;
+        let err = outcome.failure.expect("unreachable endpoint must error");
         assert!(
             matches!(&err, BrokerError::Txn(m) if m.contains("connect to 127.0.0.1:9")),
             "unexpected error: {err:?}"

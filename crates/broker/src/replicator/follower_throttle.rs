@@ -281,21 +281,26 @@ mod tests {
         }
     }
 
+    fn throttled_caught_up_follower() -> (Config, tempfile::TempDir) {
+        let (cfg, log_dir) = test_config(image_with_follower_throttle("*"));
+        cfg.throttle_state
+            .follower_in
+            .set_byte_rate_with_burst(bytes_per_sec(1000), bytes(1000));
+        cfg.lag.note_appended(1);
+        cfg.lag.update(10, 10);
+        (cfg, log_dir)
+    }
+
     /// What a caught-up follower fetches still counts against the follower
     /// quota, so that total replication stays within it (#1211): the bytes are
     /// recorded as they arrive, and the debt leaves the follower that is not
     /// in sync with nothing to draw.
     #[test]
     fn a_caught_up_follower_still_charges_the_quota() {
-        let (cfg, _log_dir) = test_config(image_with_follower_throttle("*"));
-        cfg.throttle_state
-            .follower_in
-            .set_byte_rate_with_burst(bytes_per_sec(1000), bytes(1000));
+        let (cfg, _log_dir) = throttled_caught_up_follower();
 
         // Caught up: the round is not throttled, and the batch that arrives
         // is recorded in full, past the 1000 bytes the bucket holds.
-        cfg.lag.note_appended(1);
-        cfg.lag.update(10, 10);
         let fetching = follower_partition_fetch_cap(&cfg);
         record_replicated(&cfg, 4_000);
         // Behind again: the bucket is in debt, so there is no budget.
@@ -319,12 +324,7 @@ mod tests {
     /// would sit out all of it; bounded, it sits out 11 s at most.
     #[test]
     fn a_caught_up_follower_keeps_one_window_of_debt_at_most() {
-        let (cfg, _log_dir) = test_config(image_with_follower_throttle("*"));
-        cfg.throttle_state
-            .follower_in
-            .set_byte_rate_with_burst(bytes_per_sec(1000), bytes(1000));
-        cfg.lag.note_appended(1);
-        cfg.lag.update(10, 10);
+        let (cfg, _log_dir) = throttled_caught_up_follower();
 
         record_replicated(&cfg, 100_000);
 

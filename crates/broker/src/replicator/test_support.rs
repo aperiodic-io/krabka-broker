@@ -14,14 +14,11 @@ use krabka_protocol::{
     primitives::uuid::Uuid as WireUuid,
 };
 use krabka_raft::NodeId;
-use krabka_security::ListenerProtocol;
 
 use super::Config;
 use crate::{
-    config::ReplicationRuntimeConfig,
     log_dir_status::LogDirRegistry,
     metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
     partition_registry::PartitionRegistry,
     producer_state::ProducerState,
     test_support::FakeMetadataSource,
@@ -98,12 +95,7 @@ pub(super) fn test_config(image: MetadataImage) -> (Config, tempfile::TempDir) {
         log_dirs: vec![log_dir.path().to_path_buf()],
         log_settings: LogConfig::default(),
         client_id: "replica-test".into(),
-        connection: super::ReplicationConnectionConfig {
-            inter_broker_client: Arc::new(InterBrokerClient::new(None, None)),
-            inter_broker_listener_protocol: ListenerProtocol::Plaintext,
-            inter_broker_server_name: "localhost".into(),
-            replication: ReplicationRuntimeConfig::default(),
-        },
+        connection: super::replication_connection_for_test().call(),
         throttle_state: Arc::new(ThrottleState::new()),
         controller: Arc::new(static_source(image)),
         log_dir_status: LogDirRegistry::default(),

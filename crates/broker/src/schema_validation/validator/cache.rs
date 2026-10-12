@@ -332,10 +332,11 @@ mod tests {
 
         let v = validator(server.uri());
         let field = framed(99, b"anything");
-        for _ in 0..2 {
-            let got = value_check(&v, ValidationMode::Id, &field).await;
-            assert!(let Err(reason) = got);
-            check!(reason.label() == "unknown_id", "{reason}");
+        for run in [1, 2] {
+            let err = value_check(&v, ValidationMode::Id, &field)
+                .await
+                .unwrap_err();
+            check!(err.label() == "unknown_id", "run {run}: {err}");
         }
     }
 

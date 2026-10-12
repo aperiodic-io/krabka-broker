@@ -12,21 +12,14 @@
 //! exactly the resource-type/operation pairs it holds.
 
 use assert2::assert;
-use bytes::Bytes;
 use krabka_ids::PartitionIndex;
 use krabka_log::{Offset, ProducerId};
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{self},
-        init_producer_id_request::InitProducerIdRequest,
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::{PartitionProduceResponse, ProduceResponse, TopicProduceResponse},
-    },
-    primitives::uuid::Uuid as WireUuid,
-    records::{Attributes, Record, RecordBatch, RecordsPayload},
+use krabka_protocol::owned::{
+    create_topics_request::{self},
+    init_producer_id_request::InitProducerIdRequest,
 };
 
-use super::{FIRST_TOPIC_ID_VERSION, handle};
+use super::{test_support::one_transactional_batch, *};
 use crate::{
     broker::{Broker, BrokerHandle},
     codes,
@@ -146,22 +139,6 @@ fn plain_batch() -> RecordsPayload {
     RecordsPayload::V2(vec![
         repeated_records_batch(RepeatedRecordsSetup::default()),
     ])
-}
-
-/// One v2 batch with one record, marked transactional (KIP-98) under
-/// `producer_id`/`producer_epoch`.
-fn transactional_batch(setup: TransactionalBatchSetup) -> RecordsPayload {
-    RecordsPayload::V2(vec![RecordBatch {
-        attributes: Attributes::default().with_transactional(true),
-        producer_id: setup.producer_id.0,
-        producer_epoch: setup.producer_epoch.0,
-        base_sequence: 0,
-        records: vec![Record {
-            value: Some(Bytes::from_static(b"v")),
-            ..Default::default()
-        }],
-        ..Default::default()
-    }])
 }
 
 /// One request naming `TOPIC` by name (`version < FIRST_TOPIC_ID_VERSION`) or
@@ -315,7 +292,10 @@ async fn transactional_id_write_gates_exactly_on_the_batch_not_the_request_field
     let mut next_offset = Offset(0);
     for case in cases {
         let records = if matches!(case.batch, BatchKind::Transactional) {
-            transactional_batch(transaction)
+            one_transactional_batch()
+                .producer_id(transaction.producer_id.0)
+                .producer_epoch(transaction.producer_epoch.0)
+                .call()
         } else {
             plain_batch()
         };
@@ -376,10 +356,10 @@ async fn transactional_denial_precedes_topic_resolution_at_v13() {
             version,
             topic_id: unknown_id,
             transactional_id: Some(TXN_ID),
-            records: transactional_batch(TransactionalBatchSetup {
-                producer_id: ProducerId(999),
-                ..Default::default()
-            }),
+            records: one_transactional_batch()
+                .producer_id(ProducerId(999).0)
+                .producer_epoch(0)
+                .call(),
         },
     )
     .await;

@@ -55,6 +55,26 @@ mod group_validation_tests;
 #[cfg(test)]
 mod topic_resolution_tests;
 
+#[cfg(test)]
+#[bon::builder]
+pub(super) fn test_topic_row(
+    #[builder(default)] name: String,
+    #[builder(default)] topic_id: [u8; 16],
+) -> OffsetCommitRequestTopic {
+    OffsetCommitRequestTopic {
+        name,
+        topic_id: WireUuid(topic_id),
+        partitions: vec![
+            krabka_protocol::owned::offset_commit_request::OffsetCommitRequestPartition {
+                partition_index: 0,
+                committed_offset: 42,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
 /// The first `OffsetCommit` version that names each topic by `topic_id` only
 /// (KIP-848). The request schema carries `name` at versions 0-9 and
 /// `topic_id` from this version on.

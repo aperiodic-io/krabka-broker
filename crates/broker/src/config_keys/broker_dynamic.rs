@@ -47,6 +47,10 @@ impl BrokerConfigContext<'_> {
     pub fn resource_node(&self, name: &str) -> Result<NodeId, (i16, String)> {
         broker_resource_node(name, self.serving)
     }
+
+    pub fn is_cluster_default_resource(&self, name: &str) -> Result<bool, (i16, String)> {
+        Ok(self.resource_node(name)? == krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID)
+    }
 }
 
 /// Kafka's `ServerTopicConfigSynonyms.TOPIC_CONFIG_SYNONYMS`: the broker key

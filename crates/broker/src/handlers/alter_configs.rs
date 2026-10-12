@@ -20,7 +20,6 @@
 //! per-resource work lives in `resource`, and the record builders it
 //! dispatches to live in `topic_configs` and `broker_configs`.
 
-use bytes::Bytes;
 use krabka_protocol::owned::{
     alter_configs_request::{self, AlterConfigsRequest, AlterConfigsResource},
     alter_configs_response::{AlterConfigsResourceResponse, AlterConfigsResponse},
@@ -45,7 +44,6 @@ use crate::{
         MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext,
         is_controller_managed_topic_config,
     },
-    error::BrokerError,
     handlers::{
         RequestContext, audit_resource, config_resource_refusal, decode_request,
         describe_configs::{
@@ -54,18 +52,51 @@ use crate::{
         },
         encode_response,
         forward_to_controller::{controller_listener_dispatch, to_active_controller},
-        response_encoding::ErrorRow as _,
+        response_encoding::{ErrorRow as _, ResourceErrorRow},
     },
 };
 
-/// Preprocess node-local broker inputs before forwarding full replacements.
-pub(crate) async fn dispatch(
-    broker: &Broker,
-    version: i16,
-    req_bytes: &[u8],
-    ctx: &RequestContext<'_>,
-) -> Result<Bytes, BrokerError> {
-    let mut req = decode_request::<AlterConfigsRequest>(req_bytes, version)?;
+pub(super) trait ResourceErrorRequestResource {
+    fn resource_type(&self) -> i8;
+    fn resource_name(&self) -> &str;
+}
+
+impl ResourceErrorRequestResource for AlterConfigsResource {
+    fn resource_type(&self) -> i8 {
+        self.resource_type
+    }
+
+    fn resource_name(&self) -> &str {
+        &self.resource_name
+    }
+}
+
+impl ResourceErrorRequestResource
+    for krabka_protocol::owned::incremental_alter_configs_request::AlterConfigsResource
+{
+    fn resource_type(&self) -> i8 {
+        self.resource_type
+    }
+
+    fn resource_name(&self) -> &str {
+        &self.resource_name
+    }
+}
+
+pub(super) fn empty_resource_response<Resource, Row>(resource: &Resource) -> Row
+where
+    Resource: ResourceErrorRequestResource,
+    Row: ResourceErrorRow,
+{
+    Row::for_resource(
+        resource.resource_type(),
+        resource.resource_name().to_owned(),
+    )
+}
+
+raw_dispatch! {
+    /// Validate broker-local values before sending replacement resources to the controller.
+    mut AlterConfigsRequest, (broker, version, req_bytes, ctx, req), {
     controller_listener_dispatch!(
         broker,
         ctx,
@@ -114,9 +145,32 @@ pub(crate) async fn dispatch(
         }
     };
     indexed_responses.extend(forwarded_indices.into_iter().zip(response.responses));
-    indexed_responses.sort_unstable_by_key(|(index, _)| *index);
-    response.responses = indexed_responses.into_iter().map(|(_, row)| row).collect();
+    response.responses = ordered_resource_responses(indexed_responses);
     encode_response(&response, version)
+    }
+}
+
+pub(super) fn ordered_resource_responses<Row>(mut indexed: Vec<(usize, Row)>) -> Vec<Row> {
+    indexed.sort_unstable_by_key(|(index, _)| *index);
+    indexed.into_iter().map(|(_, row)| row).collect()
+}
+
+pub(super) fn resource_error_rows<'a, Resource, Row>(
+    resources: impl Iterator<Item = &'a Resource>,
+    code: i16,
+    message: Option<&str>,
+) -> Vec<Row>
+where
+    Resource: ResourceErrorRequestResource + 'a,
+    Row: ResourceErrorRow,
+{
+    resources
+        .map(|resource| {
+            let mut row: Row = empty_resource_response(resource);
+            row.set_error(code, message.map(str::to_owned));
+            row
+        })
+        .collect()
 }
 
 fn request_refusal(
@@ -125,17 +179,7 @@ fn request_refusal(
     message: Option<&str>,
 ) -> AlterConfigsResponse {
     AlterConfigsResponse {
-        responses: req
-            .resources
-            .iter()
-            .map(|r| AlterConfigsResourceResponse {
-                resource_type: r.resource_type,
-                resource_name: r.resource_name.clone(),
-                error_code: code,
-                error_message: message.map(str::to_owned),
-                ..Default::default()
-            })
-            .collect(),
+        responses: resource_error_rows(req.resources.iter(), code, message),
         ..Default::default()
     }
 }

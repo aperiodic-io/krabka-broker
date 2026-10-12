@@ -14,7 +14,7 @@ use krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType};
 use krabka_protocol::{
     ProtocolError,
     owned::{
-        delete_acls_request::DeleteAclsFilter,
+        delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest},
         delete_acls_response::{DeleteAclsFilterResult, DeleteAclsResponse},
     },
 };
@@ -37,6 +37,10 @@ use crate::{
     },
 };
 
+fn orders_and_payments_request() -> DeleteAclsRequest {
+    named_filters(&[("orders", "User:alice"), ("payments", "User:bob")])
+}
+
 #[tokio::test]
 async fn handle_denies_cluster_alter_for_each_filter() {
     seeded_acl_fixture!(
@@ -45,7 +49,7 @@ async fn handle_denies_cluster_alter_for_each_filter() {
         vec![crate::handlers::acl_test_support::alice_orders_acl()],
         "alice"
     );
-    let req = named_filters(&[("orders", "User:alice"), ("payments", "User:bob")]);
+    let req = orders_and_payments_request();
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
@@ -103,7 +107,7 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
 #[tokio::test]
 async fn handle_answers_security_disabled_for_each_filter_when_no_authorizer_is_configured() {
     security_disabled_acl_fixture!((broker_handle, _dir, broker, ctx));
-    let req = named_filters(&[("orders", "User:alice"), ("payments", "User:bob")]);
+    let req = orders_and_payments_request();
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 

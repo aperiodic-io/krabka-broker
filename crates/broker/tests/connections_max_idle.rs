@@ -172,19 +172,23 @@ async fn is_closed(stream: &mut TcpStream) -> bool {
     read == 0
 }
 
+async fn assert_connection_closed(stream: &mut TcpStream) {
+    assert!(is_closed(stream).await);
+}
+
 /// Scenario 1: a connection that sends nothing is closed once the window
 /// passes, and the close lands on the idle reason of the close counter.
 #[tokio::test(flavor = "current_thread")]
 async fn silent_plaintext_connection_is_closed_past_the_idle_window() {
-    let (cfg, log_dir) = config_with_idle_window(krabka_units::secs(60));
-    let fixture = Fixture::start(cfg, log_dir, "PLAINTEXT").await;
+    let (idle_cfg, log_dir) = config_with_idle_window(krabka_units::secs(60));
+    let fixture = Fixture::start(idle_cfg, log_dir, "PLAINTEXT").await;
 
     let mut stream = fixture.connect().await;
     assert!(fixture.idle_closes() == 0);
 
     advance(Duration::from_secs(61)).await;
 
-    assert!(is_closed(&mut stream).await);
+    assert_connection_closed(&mut stream).await;
     assert!(fixture.idle_closes() == 1);
 
     fixture.handle.shutdown().await;
@@ -227,7 +231,7 @@ async fn a_per_listener_override_expires_its_listener_before_the_broker_wide_win
     let mut stream = fixture.connect().await;
     advance(Duration::from_secs(21)).await;
 
-    assert!(is_closed(&mut stream).await);
+    assert_connection_closed(&mut stream).await;
     assert!(fixture.idle_closes() == 1);
 
     fixture.handle.shutdown().await;
@@ -268,7 +272,7 @@ async fn a_tls_listener_closes_a_socket_that_never_starts_its_handshake() {
         .expect("connect");
 
     // No `ClientHello`, ever. `is_closed` waits five seconds, twenty windows.
-    assert!(is_closed(&mut stream).await);
+    assert_connection_closed(&mut stream).await;
     assert!(
         handle
             .metrics()

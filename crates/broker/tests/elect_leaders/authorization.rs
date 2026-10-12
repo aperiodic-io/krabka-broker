@@ -6,7 +6,7 @@
 //! seeds one throw-away ACL so the compatibility shim, which allows everything
 //! while `image.acls` is empty, is out of the way.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use assert2::assert;
 use krabka_broker::Broker;
@@ -18,6 +18,7 @@ use crate::{
     support::{
         acl::{TopicAclSetup, topic_acl_record, use_simple_acl_authorizer},
         admin::ElectionSetup,
+        retry::{all_cluster_authorization_failed, retry_until},
         sasl::sasl_temp_config,
         topics::ConfiguredTopicSetup,
     },
@@ -98,41 +99,27 @@ async fn non_super_user_without_acl_denied() {
     //
     // If the shim were still active we'd see error_code=0 (allowed).
     // Retry up to 5s to absorb raft apply latency on slow runners.
-    let deadline_auth = Instant::now() + Duration::from_secs(5);
-    let resp = loop {
-        let r = drive_elect_leaders_sasl_plain(
-            addr,
-            ElectionSetup {
-                topic: ("foo-auth-test").to_string(),
-                ..Default::default()
-            },
-            &PlainAuthenticationSetup {
-                client_id: CLIENT_ID,
-                password: (b"alice-secret").to_vec(),
-                ..Default::default()
-            },
-        )
+    let resp = retry_until()
+        .attempt(|| async {
+            drive_elect_leaders_sasl_plain(
+                addr,
+                ElectionSetup {
+                    topic: ("foo-auth-test").to_string(),
+                    ..Default::default()
+                },
+                &PlainAuthenticationSetup::with_password(CLIENT_ID, b"alice-secret"),
+            )
+            .await
+        })
+        .is_complete(all_cluster_authorization_failed)
+        .call()
         .await;
-        // If we see 31, the shim is off and we're done.
-        if r.iter().all(|(_, ec)| *ec == 31) {
-            break r;
-        }
-        assert!(
-            Instant::now() <= deadline_auth,
-            "ACL shim still active or wrong error after 5s; got {r:?}"
-        );
-        // intentional: backoff between bounded RPC-response retries that
-        // re-drive the SASL ElectLeaders wire path to observe the authorizer's
-        // decision; the awaited state is on the request path, not in the
-        // metadata image, and has no metric.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
 
     handle.shutdown().await;
 
     // Per-row error code must be 31 (CLUSTER_AUTHORIZATION_FAILED).
     assert!(
-        resp == vec![(0, 31)],
+        resp == [(0, 31)],
         "expected CLUSTER_AUTHORIZATION_FAILED (31) for alice; got {resp:?}"
     );
 }

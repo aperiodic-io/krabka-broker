@@ -818,6 +818,18 @@ mod tests {
     /// A static member that leaves for a while keeps its partitions at epoch 0.
     #[test]
     fn assignment_epochs_follow_kafka_current_assignment_builder() {
+        struct ReconciliationStep {
+            epoch: i32,
+            target: Vec<i32>,
+            owned: Vec<i32>,
+        }
+
+        fn reconcile_step(g: &mut GroupState, topics: &Topics, step: ReconciliationStep) {
+            g.group_epoch = step.epoch;
+            g.install_target([("m1".to_string(), [(T, step.target)].into())].into());
+            g.reconcile_member("m1", Some(&[(T, step.owned)].into()), false, topics);
+        }
+
         let mut g = GroupState::new("g");
         let topics = Topics(vec![("t", T)]);
         g.add_or_update_member(subscribed_member("m1", &["t"]));
@@ -832,9 +844,15 @@ mod tests {
 
         // Epoch 2: partition 1 goes. The member still owns it, so it is
         // pending revocation with the epoch it was assigned at.
-        g.group_epoch = 2;
-        g.install_target([("m1".to_string(), [(T, vec![0])].into())].into());
-        g.reconcile_member("m1", Some(&[(T, vec![0, 1])].into()), false, &topics);
+        reconcile_step(
+            &mut g,
+            &topics,
+            ReconciliationStep {
+                epoch: 2,
+                target: vec![0],
+                owned: vec![0, 1],
+            },
+        );
         steps.push(epochs(&g));
 
         // The member revokes it and moves to epoch 2.
@@ -842,9 +860,15 @@ mod tests {
         steps.push(epochs(&g));
 
         // Epoch 3: partition 2 comes, at epoch 3; partition 0 keeps epoch 1.
-        g.group_epoch = 3;
-        g.install_target([("m1".to_string(), [(T, vec![0, 2])].into())].into());
-        g.reconcile_member("m1", Some(&[(T, vec![0])].into()), false, &topics);
+        reconcile_step(
+            &mut g,
+            &topics,
+            ReconciliationStep {
+                epoch: 3,
+                target: vec![0, 2],
+                owned: vec![0],
+            },
+        );
         steps.push(epochs(&g));
 
         // A static leave keeps the assignment at epoch 0.

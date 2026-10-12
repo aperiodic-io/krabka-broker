@@ -381,6 +381,12 @@ mod tests {
         format!("krabka_protocol::owned::{snake}_request::{request}::decode(&mut cur, version,)?")
     }
 
+    fn async_typed_handler_response(handler: &str) -> String {
+        format!(
+            "let resp = {handler}(broker, req, version, ctx).await?;\n                                    crate::handlers::encode_response(&resp, version)"
+        )
+    }
+
     /// Synchronous typed adapters share a decode/encode envelope in the golden expansion.
     fn sync_adapter(snake: &str, api: &str, request: &str, fallible: bool) -> String {
         let error_event = ".inspect_err(|error| ::tracing::error!(error = %error))";
@@ -459,9 +465,7 @@ mod tests {
                                         use krabka_protocol::Decode as _;
                                         {decode}
                                     }};
-                                    let resp = crate::handlers::list_groups::handle(
-                                        broker, req, version, ctx).await?;
-                                    crate::handlers::encode_response(&resp, version)
+                                    {response}
                                 }}).await{error_event}
                             }},
                             ::tracing::info_span!(\"handle_list_groups\", api = \"ListGroups\",
@@ -471,6 +475,8 @@ mod tests {
                     {registration}",
                     signature = context_signature("list_groups"),
                     decode = decode("list_groups", "ListGroupsRequest"),
+                    response =
+                        async_typed_handler_response("crate::handlers::list_groups::handle",),
                     registration = registration("context", "ListGroups", "list_groups"),
                 ),
             ),
@@ -506,9 +512,7 @@ mod tests {
                                     let req = crate::handlers::decode_group_request::<
                                         krabka_protocol::owned::heartbeat_request::HeartbeatRequest,
                                     >(&mut cur, version)?;
-                                    let resp = crate::handlers::heartbeat::handle(
-                                        broker, req, version, ctx).await?;
-                                    crate::handlers::encode_response(&resp, version)
+                                    {response}
                                 }}).await{error_event}
                             }},
                             ::tracing::info_span!(\"handle_heartbeat\", api = \"Heartbeat\",
@@ -517,6 +521,7 @@ mod tests {
                     }}
                     {registration}",
                     signature = context_signature("heartbeat"),
+                    response = async_typed_handler_response("crate::handlers::heartbeat::handle"),
                     registration = registration("context", "Heartbeat", "heartbeat"),
                 ),
             ),

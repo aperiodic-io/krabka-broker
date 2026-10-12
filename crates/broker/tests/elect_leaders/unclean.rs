@@ -96,13 +96,13 @@ async fn unclean_election_via_wire_picks_alive_replica() {
         topic: "foo-unclean".to_string(),
         partition: 0,
         leader: krabka_broker::NodeId(99),
-        replicas: pr_before.replicas.clone(),
         isr: vec![krabka_broker::NodeId(99)],
         leader_epoch: pr_before.leader_epoch.next(),
-        adding_replicas: vec![],
-        removing_replicas: vec![],
-        directories: vec![],
+        replicas: pr_before.replicas.clone(),
         partition_epoch: 0,
+        adding_replicas: Vec::new(),
+        removing_replicas: Vec::new(),
+        directories: Vec::new(),
     });
     h0.submit_metadata_record_for_test(forged)
         .await
@@ -115,20 +115,21 @@ async fn unclean_election_via_wire_picks_alive_replica() {
     // Drive ElectLeaders Unclean (election_type=1).
     // The algorithm finds: ISR=[99] — all dead → unclean eligible.
     // First alive in replicas=[1,2] → broker 1 → new leader=1, isr=[1].
+    let election_setup = ElectionSetup {
+        topic: "foo-unclean".to_string(),
+        kind: ElectionKind::Unclean,
+        ..Default::default()
+    };
     let result = drive_elect_leaders(
         addr,
         ElectionExchangeSetup {
             client_id: CLIENT_ID,
-            election: ElectionSetup {
-                topic: ("foo-unclean").to_string(),
-                kind: ElectionKind::Unclean,
-                ..Default::default()
-            },
+            election: election_setup,
         },
     )
     .await;
     assert!(
-        result == vec![(0, 0)],
+        result == [(0, 0)],
         "expected error_code=0 for UNCLEAN election; got {result:?}"
     );
 

@@ -26,6 +26,8 @@ pub(super) struct Message {
     pub(super) event: Event,
 }
 
+crate::impl_partition_message!(Message, NodeId);
+
 /// A node and everything the harness owns on its behalf.
 pub(super) struct Node {
     pub(super) id: NodeId,
@@ -35,8 +37,7 @@ pub(super) struct Node {
     pub(super) election_deadline: Option<SimInstant>,
     pub(super) fetch_deadline: Option<SimInstant>,
     pub(super) heartbeat_deadline: Option<SimInstant>,
-    /// Leader-side check-quorum deadline. Armed by the core's `ResetTimer`, and
-    /// cleared for every role that is not the leadership.
+    /// Leader check-quorum expiry.
     pub(super) check_quorum_deadline: Option<SimInstant>,
 }
 

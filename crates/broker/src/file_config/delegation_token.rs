@@ -174,9 +174,13 @@ secret_key = "toml-loses"
             // No secret key anywhere; lifetime knobs stay at their defaults
             // when no section is present.
             check!(cfg.delegation_token_secret_key.is_none());
-            check!(cfg.delegation_token_max_lifetime == days(7));
-            check!(cfg.delegation_token_expiry_check_interval == hours(1));
-            check!(cfg.delegation_token_default_renew_period == hours(24));
+            check!(
+                (
+                    cfg.delegation_token_max_lifetime,
+                    cfg.delegation_token_expiry_check_interval,
+                    cfg.delegation_token_default_renew_period,
+                ) == (days(7), hours(1), hours(24))
+            );
         });
     }
 }

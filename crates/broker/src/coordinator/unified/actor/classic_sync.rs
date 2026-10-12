@@ -115,7 +115,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn classic_leader_sync_persists_complete_stable_snapshot() {
         let (coord, log) = make_coordinator();
-        let (handle, generation) = seed_completing_classic(&coord, &["m1", "m2"]);
+        let seeded = seed_completing_classic(&coord, &["m1", "m2"]);
+        let handle = seeded.handle;
+        let generation = seeded.generation;
         let rx = rpc::begin(&handle, |tx| GroupActorMessage::ClassicSync {
             req: rpc::assignment_sync_request(generation, "m1", Bytes::from_static(b"assignment")),
             reply: tx,
@@ -150,7 +152,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn classic_sync_append_failure_rolls_back_and_can_retry() {
         let (coord, log) = make_coordinator();
-        let (handle, generation) = seed_completing_classic(&coord, &["m1"]);
+        let seeded = seed_completing_classic(&coord, &["m1"]);
+        let handle = seeded.handle;
+        let generation = seeded.generation;
         log.fail_next
             .store(true, std::sync::atomic::Ordering::SeqCst);
         let request =

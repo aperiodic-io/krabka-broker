@@ -670,6 +670,15 @@ mod tests {
         (dir, log)
     }
 
+    fn locked_raw_log(log: Log) -> (Mutex<Log>, Bytes, Offset) {
+        let limit = log.log_end_offset();
+        let raw = log
+            .read_raw(Offset(0), limit, UNBOUNDED)
+            .expect("the test log holds the range it is asked for")
+            .bytes;
+        (Mutex::new(log), raw, limit)
+    }
+
     /// One batch of two records in a fresh log directory. The directory is
     /// returned because dropping it deletes the segments underneath the log.
     fn two_record_log() -> (tempfile::TempDir, Log) {
@@ -762,12 +771,7 @@ mod tests {
     #[test]
     fn a_sendfile_capable_read_describes_the_run_only_above_the_threshold() {
         let (_dir, log) = two_record_log();
-        let limit = log.log_end_offset();
-        let raw = log
-            .read_raw(Offset(0), limit, UNBOUNDED)
-            .expect("the test log holds the range it is asked for")
-            .bytes;
-        let log = Mutex::new(log);
+        let (log, raw, limit) = locked_raw_log(log);
 
         let described = super::read_records(
             &log,
@@ -801,12 +805,7 @@ mod tests {
     #[test]
     fn read_committed_reports_the_aborted_ranges_beside_the_same_bytes() {
         let (_dir, log) = aborted_transaction_log();
-        let limit = log.log_end_offset();
-        let raw = log
-            .read_raw(Offset(0), limit, UNBOUNDED)
-            .expect("the test log holds the range it is asked for")
-            .bytes;
-        let log = Mutex::new(log);
+        let (log, raw, limit) = locked_raw_log(log);
 
         let read_committed = super::read_records(
             &log,

@@ -98,16 +98,12 @@ mod tests {
             producer_id: 22,
             producer_epoch: 3,
             base_sequence: 11,
-            records: vec![
-                Record {
-                    value: Some(Bytes::from_static(b"a")),
+            records: [b"a", b"b"]
+                .map(|v| Record {
+                    value: Some(Bytes::from_static(v)),
                     ..Default::default()
-                },
-                Record {
-                    value: Some(Bytes::from_static(b"b")),
-                    ..Default::default()
-                },
-            ],
+                })
+                .to_vec(),
             ..Default::default()
         };
         let decoded = decode_owned_batch(

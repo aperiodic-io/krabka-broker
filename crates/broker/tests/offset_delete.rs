@@ -9,7 +9,9 @@
 use assert2::{assert, check};
 
 use crate::support::{
-    classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol},
+    classic::{
+        ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol, required_member_id,
+    },
     client::create_topic as create_support_topic,
     offsets::{
         offset_commit_partition, offset_commit_topic, offset_delete_partition,
@@ -262,9 +264,7 @@ async fn delete_offsets_for_subscribed_topic_returns_group_subscribed() {
         .await
         .expect("JoinGroup1");
     // First JoinGroup with empty member_id returns MEMBER_ID_REQUIRED (79).
-    assert!(r1.error_code == 79);
-    let mid = r1.member_id.clone();
-    assert!(!mid.is_empty());
+    let mid = required_member_id(r1.error_code, r1.member_id.clone());
 
     // Re-join with the assigned member_id → become an actual member.
     let r2 = p

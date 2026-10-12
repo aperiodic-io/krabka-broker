@@ -104,14 +104,8 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
 };
 
-use assert2::{assert, check};
-use krabka_client_consumer::{AutoOffsetReset, Consumer};
-use krabka_client_core::Client;
-use krabka_client_producer::{Acks, Producer, ProducerRecord};
-use krabka_protocol::owned::create_topics_request::{CreatableTopic, CreateTopicsRequest};
 use tokio::sync::Mutex;
 
 // Cargo compiles this file as its own test binary, so the crate root's module
@@ -127,10 +121,13 @@ mod drift;
 #[path = "soak/probe.rs"]
 mod probe;
 
+use assert2::{assert, check};
+
 use crate::{
     cluster::SoakCluster,
     drift::{Bound, Series},
     support::{
+        load_test::*,
         producer::{ProducerRecordSetup, producer_record},
         topics::topic_configs,
     },

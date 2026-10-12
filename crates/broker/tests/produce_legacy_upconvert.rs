@@ -58,6 +58,22 @@ fn build_v1_message_set(values: &[&[u8]]) -> Bytes {
     buf.freeze()
 }
 
+async fn produce_legacy(
+    p: &support::InProcess,
+    topic: &str,
+    topic_id: Uuid,
+    records: Bytes,
+) -> i16 {
+    let req = single_partition_produce(SinglePartitionProduceSetup {
+        topic: topic.into(),
+        topic_id,
+        records: Some(RecordsPayload::Legacy(records)),
+        ..Default::default()
+    });
+    let resp = p.client.send(req).await.expect("Produce");
+    resp.responses[0].partition_responses[0].error_code
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn produce_v1_message_set_is_upconverted_and_round_trips() {
     let p = support::start().await;
@@ -66,18 +82,8 @@ async fn produce_v1_message_set_is_upconverted_and_round_trips() {
 
     let legacy_bytes = build_v1_message_set(&[b"alpha", b"beta", b"gamma"]);
 
-    let req = single_partition_produce(SinglePartitionProduceSetup {
-        topic: ("legacy").into(),
-        topic_id,
-        records: Some(RecordsPayload::Legacy(legacy_bytes)),
-        ..Default::default()
-    });
-    let resp = p.client.send(req).await.expect("Produce");
-    let pr = &resp.responses[0].partition_responses[0];
-    assert!(
-        pr.error_code == 0,
-        "Produce up-conversion must succeed: {pr:?}"
-    );
+    let err = produce_legacy(&p, "legacy", topic_id, legacy_bytes).await;
+    assert!(err == 0, "Produce up-conversion must succeed: {err}");
 
     // Fetch the stored records back and verify they survived the
     // up-conversion. The wire response is v2, so the fetched batch
@@ -136,18 +142,10 @@ async fn produce_malformed_legacy_bytes_returns_invalid_record() {
     // Kafka's 14-byte minimum is `CORRUPT_MESSAGE` before anything is parsed.
     let mut garbage = vec![0u8; 100];
     garbage[8..12].copy_from_slice(&88_i32.to_be_bytes());
-    garbage[16] = 0; // explicit: not v2
-    let req = single_partition_produce(SinglePartitionProduceSetup {
-        topic: ("bad").into(),
-        topic_id,
-        records: Some(RecordsPayload::Legacy(Bytes::from(garbage))),
-        ..Default::default()
-    });
-    let resp = p.client.send(req).await.expect("Produce");
-    let pr = &resp.responses[0].partition_responses[0];
+    let err = produce_legacy(&p, "bad", topic_id, Bytes::from(garbage)).await;
     assert!(
-        pr.error_code == 87,
-        "malformed legacy bytes must surface INVALID_RECORD (87): {pr:?}"
+        err == 87,
+        "malformed legacy bytes must surface INVALID_RECORD (87): {err}"
     );
 
     p.broker.shutdown().await;

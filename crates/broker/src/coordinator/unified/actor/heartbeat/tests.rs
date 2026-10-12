@@ -13,10 +13,11 @@ use crate::{
         actor::{
             member_state::build_member,
             test_support::{
-                ClassicMemberSetup, StaticMetadata, coordinator_with_log, empty_metadata,
-                make_coordinator, make_coordinator_with_topic, make_coordinator_with_topic_policy,
+                ClassicMemberSetup, StaticMetadata, classic_member_for_topic, coordinator_with_log,
+                empty_metadata, make_coordinator, make_coordinator_with_topic,
+                make_coordinator_with_topic_policy,
                 rpc::{self, consumer_request},
-                seed_classic_member, subscription_blob,
+                seed_classic_member,
             },
         },
         offsets_log::fake::InMemoryOffsetsLog,
@@ -1064,7 +1065,7 @@ fn step_heartbeat_first_join_targets_all_partitions() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_heartbeat_replaces_or_upgrades_a_classic_group_as_kafka_does() {
     use crate::coordinator::unified::{
-        classic_state::{ClassicGroup as ClassicState, Member},
+        classic_state::ClassicGroup as ClassicState,
         config::ConsumerGroupMigrationPolicy as Policy,
         group::{CoordinatorGroup, GroupKind},
     };
@@ -1122,14 +1123,7 @@ async fn a_heartbeat_replaces_or_upgrades_a_classic_group_as_kafka_does() {
         let mut classic = ClassicState::new("g");
         classic.protocol_type = protocol_type.map(String::from);
         for index in 0..members {
-            classic.add_member(Member::new(
-                format!("classic-{index}"),
-                "client",
-                "127.0.0.1",
-                std::time::Duration::from_secs(30),
-                std::time::Duration::from_mins(1),
-                vec![("range".into(), subscription_blob(&["t"]))],
-            ));
+            classic.add_member(classic_member_for_topic(format!("classic-{index}"), "t"));
         }
         classic.generation_id = 1;
         coord.seed_classic(

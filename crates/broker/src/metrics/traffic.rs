@@ -110,12 +110,20 @@ impl BrokerMetrics {
 #[cfg(test)]
 mod tests {
     use assert2::assert;
+    use prometheus_client::metrics::{counter::Counter, family::Family};
 
     use super::*;
 
     /// The topic name every case below records under.
     fn topic(name: &str) -> Arc<str> {
         Arc::from(name)
+    }
+
+    fn assert_topic_counters(cases: &[(&str, &Family<TopicLabel, Counter>, &TopicLabel, u64)]) {
+        for (family_name, family, label, want) in cases {
+            let got = family.get_or_create(label).get();
+            assert!(got == *want, "{family_name} for {:?}", label.topic);
+        }
     }
 
     #[test]
@@ -238,12 +246,7 @@ mod tests {
             ("failed_fetch", &m.topic_failed_fetch_requests, &good, 1),
             ("failed_fetch", &m.topic_failed_fetch_requests, &bad, 0),
         ];
-        for (family_name, family, label, want) in cases {
-            // One `get_or_create` guard per statement (first
-            // materialization takes the family write lock).
-            let got = family.get_or_create(label).get();
-            assert!(got == want, "{family_name} for {:?}", label.topic);
-        }
+        assert_topic_counters(&cases);
     }
 
     #[test]
@@ -317,11 +320,6 @@ mod tests {
                 2,
             ),
         ];
-        for (family_name, family, label, want) in cases {
-            // One `get_or_create` guard per statement (first
-            // materialization takes the family write lock).
-            let got = family.get_or_create(label).get();
-            assert!(got == want, "{family_name} for {:?}", label.topic);
-        }
+        assert_topic_counters(&cases);
     }
 }

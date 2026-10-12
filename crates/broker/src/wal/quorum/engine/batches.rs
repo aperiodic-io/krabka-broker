@@ -43,7 +43,8 @@ pub(in crate::wal::quorum) fn read_log_batches_exact(
     start: Offset,
     target: Offset,
 ) -> Result<Vec<BatchBytes>, BrokerError> {
-    let raw = source.read_raw(start, target, ByteSize::from_bytes(u64::MAX))?;
+    let unlimited = ByteSize::from_bytes(u64::MAX);
+    let raw = source.read_raw(start, target, unlimited)?;
     exact_batches(split_batches(&raw.bytes)?, start, target)
 }
 

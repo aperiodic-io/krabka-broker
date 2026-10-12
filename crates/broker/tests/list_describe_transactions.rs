@@ -227,20 +227,15 @@ async fn list_transactions_returns_ongoing_txn() {
         .find(|r| r.transactional_id == "my-tid")
         .expect("my-tid not present");
     check!(row.producer_id >= 0);
-    assert!(
-        resp == ListTransactionsResponse {
-            transaction_states: vec![ListedTransactionState {
-                transactional_id: "my-tid".into(),
-                producer_id: row.producer_id,
-                transaction_state: "Ongoing".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    );
+    let expected_state = ListedTransactionState {
+        transactional_id: "my-tid".into(),
+        producer_id: row.producer_id,
+        transaction_state: "Ongoing".into(),
+        ..Default::default()
+    };
+    assert!(resp.transaction_states == [expected_state]);
 
-    abort_and_close(transaction, producer).await;
-    broker.shutdown().await;
+    teardown_test_txn(transaction, producer, broker).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -264,8 +259,7 @@ async fn list_transactions_state_filter_excludes_non_matching() {
         "Ongoing txn must not match an Empty state filter: {r:?}",
     );
 
-    abort_and_close(transaction, producer).await;
-    broker.shutdown().await;
+    teardown_test_txn(transaction, producer, broker).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -325,8 +319,7 @@ async fn describe_transactions_returns_full_state_for_known_tid() {
         }
     );
 
-    abort_and_close(transaction, producer).await;
-    broker.shutdown().await;
+    teardown_test_txn(transaction, producer, broker).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -354,4 +347,13 @@ async fn abort_and_close(transaction: OwnedTransaction, producer: Arc<Producer>)
         .close()
         .await
         .unwrap();
+}
+
+async fn teardown_test_txn(
+    transaction: OwnedTransaction,
+    producer: Arc<Producer>,
+    broker: BrokerHandle,
+) {
+    abort_and_close(transaction, producer).await;
+    broker.shutdown().await;
 }

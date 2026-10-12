@@ -208,11 +208,7 @@ pub(crate) enum FailoverDecision {
 pub(crate) fn failover_one(
     pr: &PartitionRecord,
     dead: NodeId,
-    alive: &std::collections::HashSet<NodeId>,
-    witnesses: &std::collections::HashSet<NodeId>,
-    elr: &PartitionElr,
-    strategy: RecoveryStrategy,
-    unclean_enabled: bool,
+    ladder: &Ladder<'_>,
 ) -> FailoverDecision {
     // `partitionsWithBrokerInIsr(brokerId)`: the leader is an ISR member, so
     // this keeps every partition `dead` leads.
@@ -225,17 +221,7 @@ pub(crate) fn failover_one(
         // `dead` joins the target ELR: it is in the ISR the change leaves.
         joins_elr: pr.isr.contains(&dead),
     };
-    decide(
-        pr,
-        &departure,
-        &Ladder {
-            alive,
-            witnesses,
-            elr,
-            strategy,
-            unclean_enabled,
-        },
-    )
+    decide(pr, &departure, ladder)
 }
 
 /// Decide what to do with a partition that has no leader, read out of the
@@ -251,15 +237,8 @@ pub(crate) fn failover_one(
 /// and it can lead once `alive` names it: from the ELR when the fence put it
 /// there, and as the last known leader when an unclean restart kept it out.
 /// A partition that is not marked leaderless is [`FailoverDecision::NoChange`].
-pub(crate) fn elect_leaderless_one(
-    pr: &PartitionRecord,
-    alive: &std::collections::HashSet<NodeId>,
-    witnesses: &std::collections::HashSet<NodeId>,
-    elr: &PartitionElr,
-    strategy: RecoveryStrategy,
-    unclean_enabled: bool,
-) -> FailoverDecision {
-    if !elr.is_leaderless(pr.leader) {
+pub(crate) fn elect_leaderless_one(pr: &PartitionRecord, ladder: &Ladder<'_>) -> FailoverDecision {
+    if !ladder.elr.is_leaderless(pr.leader) {
         return FailoverDecision::NoChange;
     }
     let departure = Departure {
@@ -269,26 +248,17 @@ pub(crate) fn elect_leaderless_one(
         // It is in the published ELR when it belongs there.
         joins_elr: false,
     };
-    decide(
-        pr,
-        &departure,
-        &Ladder {
-            alive,
-            witnesses,
-            elr,
-            strategy,
-            unclean_enabled,
-        },
-    )
+    decide(pr, &departure, ladder)
 }
 
 /// What the ladder reads about the cluster and the partition's topic.
-struct Ladder<'a> {
-    alive: &'a std::collections::HashSet<NodeId>,
-    witnesses: &'a std::collections::HashSet<NodeId>,
-    elr: &'a PartitionElr,
-    strategy: RecoveryStrategy,
-    unclean_enabled: bool,
+#[derive(bon::Builder)]
+pub(crate) struct Ladder<'a> {
+    pub(crate) alive: &'a std::collections::HashSet<NodeId>,
+    pub(crate) witnesses: &'a std::collections::HashSet<NodeId>,
+    pub(crate) elr: &'a PartitionElr,
+    pub(crate) strategy: RecoveryStrategy,
+    pub(crate) unclean_enabled: bool,
 }
 
 /// The replica whose removal from the ISR the ladder answers.
@@ -476,11 +446,13 @@ fn decide(pr: &PartitionRecord, gone: &Departure, ctx: &Ladder<'_>) -> FailoverD
 /// not elect anyway, so the two orders agree. Kafka's `uncleanShutdownReplicas`
 /// keeps `returning` out of the target ELR, so it is not what keeps that set
 /// from being empty, as a fenced broker is.
+type NodeSet = std::collections::HashSet<NodeId>;
+
 pub(crate) fn unclean_restart_one(
     pr: &PartitionRecord,
     returning: NodeId,
-    alive: &std::collections::HashSet<NodeId>,
-    witnesses: &std::collections::HashSet<NodeId>,
+    alive: &NodeSet,
+    witnesses: &NodeSet,
     elr: &PartitionElr,
     strategy: RecoveryStrategy,
     unclean_enabled: bool,
@@ -530,16 +502,18 @@ mod tests {
         strategy: RecoveryStrategy,
         unclean_enabled: bool,
     ) -> super::FailoverDecision {
-        let alive: std::collections::HashSet<NodeId> = alive.iter().copied().map(NodeId).collect();
-        failover_one(
-            pr,
-            NodeId(dead),
-            &alive,
-            &witnesses(witness_ids),
-            &elr(eligible, &[]),
-            strategy,
-            unclean_enabled,
-        )
+        let alive_set: std::collections::HashSet<NodeId> =
+            alive.iter().map(|&id| NodeId(id)).collect();
+        let witness_set = witnesses(witness_ids);
+        let elr = elr(eligible, &[]);
+        let ladder = Ladder::builder()
+            .alive(&alive_set)
+            .witnesses(&witness_set)
+            .elr(&elr)
+            .strategy(strategy)
+            .unclean_enabled(unclean_enabled)
+            .build();
+        failover_one(pr, NodeId(dead), &ladder)
     }
 
     /// The published ELR state of a partition: the eligible and the last-known
@@ -566,6 +540,14 @@ mod tests {
             isr: &replica_nodes(isr),
             ..Default::default()
         })
+    }
+
+    fn expected_unclean_election(leader: NodeId) -> super::FailoverDecision {
+        super::FailoverDecision::Elect {
+            leader,
+            isr: vec![leader],
+            unclean: true,
+        }
     }
 
     #[test]
@@ -636,14 +618,7 @@ mod tests {
             RecoveryStrategy::None,
             true,
         );
-        assert!(
-            decision
-                == super::FailoverDecision::Elect {
-                    leader: NodeId(3),
-                    isr: vec![NodeId(3)],
-                    unclean: true,
-                }
-        );
+        assert!(decision == expected_unclean_election(NodeId(3)));
     }
 
     #[test]
@@ -803,15 +778,7 @@ mod tests {
                 RecoveryStrategy::None,
                 true,
             );
-            assert!(
-                decision
-                    == super::FailoverDecision::Elect {
-                        leader: NodeId(3),
-                        isr: vec![NodeId(3)],
-                        unclean: true,
-                    },
-                "{label}"
-            );
+            assert!(decision == expected_unclean_election(NodeId(3)), "{label}");
         }
     }
 
@@ -1145,14 +1112,15 @@ mod tests {
         let pr = partition_record(1, case.replicas, case.isr);
         let alive: std::collections::HashSet<NodeId> =
             case.alive.iter().copied().map(NodeId).collect();
-        elect_leaderless_one(
-            &pr,
-            &alive,
-            &witnesses(case.witness_ids),
-            &case.elr,
-            case.strategy,
-            case.unclean_enabled,
-        )
+        let witness_set = witnesses(case.witness_ids);
+        let ladder = Ladder::builder()
+            .alive(&alive)
+            .witnesses(&witness_set)
+            .elr(&case.elr)
+            .strategy(case.strategy)
+            .unclean_enabled(case.unclean_enabled)
+            .build();
+        elect_leaderless_one(&pr, &ladder)
     }
 
     /// `PartitionChangeBuilderTest` at 4.3.1: `testEligibleLeaderReplicas_ElectLastKnownLeader`,
@@ -1379,15 +1347,15 @@ mod tests {
         let state = elr(&[], &[2]);
         let alive: std::collections::HashSet<NodeId> = [NodeId(2), NodeId(3)].into();
 
-        let fenced = failover_one(
-            &pr,
-            NodeId(1),
-            &alive,
-            &witnesses(&[]),
-            &state,
-            RecoveryStrategy::None,
-            false,
-        );
+        let witness_set = witnesses(&[]);
+        let ladder = Ladder::builder()
+            .alive(&alive)
+            .witnesses(&witness_set)
+            .elr(&state)
+            .strategy(RecoveryStrategy::None)
+            .unclean_enabled(false)
+            .build();
+        let fenced = failover_one(&pr, NodeId(1), &ladder);
         let restarted = unclean_restart_one(
             &pr,
             NodeId(1),

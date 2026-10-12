@@ -162,31 +162,54 @@ pub(super) fn completing_classic_group(member_ids: &[&str]) -> CoordinatorGroup 
 }
 
 /// Borrow the services exactly as a live actor turn does.
-pub(super) fn actor_services<'a>(
-    coordinator: &'a Arc<GroupCoordinator>,
+#[bon::builder]
+pub(super) fn actor_services_with<'a>(
+    config: &'a NextGenConfig,
+    metadata: &'a dyn MetadataProvider,
     offsets_log: &'a InMemoryOffsetsLog,
+    coordinator: &'a GroupCoordinator,
 ) -> super::ActorServices<'a> {
     super::ActorServices {
-        config: &coordinator.config,
-        metadata: coordinator.metadata.as_ref(),
+        config,
+        metadata,
         offsets_log,
         coordinator,
     }
 }
 
+pub(super) fn actor_services<'a>(
+    coordinator: &'a Arc<GroupCoordinator>,
+    offsets_log: &'a InMemoryOffsetsLog,
+) -> super::ActorServices<'a> {
+    actor_services_with()
+        .config(&coordinator.config)
+        .metadata(coordinator.metadata.as_ref())
+        .offsets_log(offsets_log)
+        .coordinator(coordinator)
+        .call()
+}
+
+pub(super) struct SeededClassicGroup {
+    pub(super) handle: Arc<GroupActorHandle>,
+    pub(super) generation: i32,
+}
+
 pub(super) fn seed_classic_group(
     coordinator: &Arc<GroupCoordinator>,
     group: CoordinatorGroup,
-) -> (Arc<GroupActorHandle>, i32) {
+) -> SeededClassicGroup {
     let generation = group.as_classic().unwrap().generation_id;
     coordinator.seed_classic("g", Box::new(group));
-    (coordinator.find("g").unwrap(), generation)
+    SeededClassicGroup {
+        handle: coordinator.find("g").unwrap(),
+        generation,
+    }
 }
 
 pub(super) fn seed_completing_classic(
     coordinator: &Arc<GroupCoordinator>,
     members: &[&str],
-) -> (Arc<GroupActorHandle>, i32) {
+) -> SeededClassicGroup {
     seed_classic_group(coordinator, completing_classic_group(members))
 }
 
@@ -431,7 +454,7 @@ pub(super) fn seed_classic_member(
     setup: ClassicMemberSetup<'_>,
 ) -> Arc<GroupActorHandle> {
     use super::super::{
-        classic_state::{ClassicGroup as ClassicState, Member},
+        classic_state::ClassicGroup as ClassicState,
         group::{CoordinatorGroup, GroupKind},
     };
     let ClassicMemberSetup {
@@ -444,15 +467,8 @@ pub(super) fn seed_classic_member(
     cs.protocol_type = Some("consumer".into());
     cs.generation_id = 1;
     cs.add_member(
-        Member::new(
-            member_id,
-            "client",
-            "127.0.0.1",
-            std::time::Duration::from_secs(30),
-            std::time::Duration::from_mins(1),
-            vec![("range".into(), subscription_blob(&[topic]))],
-        )
-        .with_instance_id(instance_id.map(str::to_string)),
+        classic_member_for_topic(member_id, topic)
+            .with_instance_id(instance_id.map(str::to_string)),
     );
     let group = Box::new(CoordinatorGroup::seeded(
         "g",
@@ -463,11 +479,22 @@ pub(super) fn seed_classic_member(
     coord.find("g").expect("seeded classic actor")
 }
 
+pub(super) fn classic_member_for_topic(member_id: impl Into<String>, topic: &str) -> Member {
+    Member::new(
+        member_id,
+        "client",
+        "127.0.0.1",
+        Duration::from_secs(30),
+        Duration::from_mins(1),
+        vec![("range".into(), subscription_blob(&[topic]))],
+    )
+}
+
 /// Seed a stable classic group and report the generation before a leave.
 pub(super) fn seed_stable_classic(
     coordinator: &Arc<GroupCoordinator>,
     members: &[&str],
-) -> (Arc<GroupActorHandle>, i32) {
+) -> SeededClassicGroup {
     let mut group = completing_classic_group(members);
     group.as_classic_mut().unwrap().state = super::super::classic_state::GroupState::Stable;
     seed_classic_group(coordinator, group)

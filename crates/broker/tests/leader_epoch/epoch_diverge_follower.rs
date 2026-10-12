@@ -14,7 +14,7 @@ use crate::{
     support::{
         self,
         client::connect_client,
-        produce::{SinglePartitionProduceSetup, batch_request},
+        produce::{batch_request, replicated_topic_produce_setup},
         registered_cluster, shutdown_cluster,
         topics::AssignedTopicSetup,
     },
@@ -67,11 +67,10 @@ async fn follower_truncates_in_band_on_diverging_epoch() {
         let prod = producer
             .send(batch_request(
                 record(&format!("v{i}")),
-                SinglePartitionProduceSetup {
-                    topic: ("divtrunc").into(),
-                    topic_id,
-                    ..SinglePartitionProduceSetup::replicated()
-                },
+                replicated_topic_produce_setup()
+                    .topic("divtrunc".into())
+                    .topic_id(topic_id.0)
+                    .call(),
             ))
             .await
             .unwrap();

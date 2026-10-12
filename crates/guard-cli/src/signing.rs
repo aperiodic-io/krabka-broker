@@ -52,6 +52,7 @@
 use std::path::Path;
 
 use krabka_audit::FileEd25519Signer;
+pub use krabka_broker::operator_keys::FreezeSigningInput;
 
 /// Domain separator for a freeze record signature (KFC-9).
 ///
@@ -61,35 +62,6 @@ pub const FREEZE_DOMAIN: &[u8] = b"krabka-topic-freeze-v1\0";
 
 /// Domain separator for a break-glass approval signature (KFC-9).
 pub const BREAK_GLASS_DOMAIN: &[u8] = b"krabka-break-glass-v1\0";
-
-/// The freeze record fields that a signature covers.
-///
-/// Three of them answer a named attack. `frozen` is signed, so a signature
-/// captured from a freeze cannot be replayed as the thaw. `cluster_id` is
-/// signed, so a signed freeze cannot be replayed into a second cluster.
-/// `set_at_ms` is signed, so the broker can refuse a timestamp outside its skew
-/// window and one that is not newer than the entry it replaces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FreezeSigningInput<'a> {
-    /// The cluster the record acts on, in the string form `DescribeCluster`
-    /// gives.
-    pub cluster_id: &'a str,
-    /// `3` literal, `4` prefixed. Kafka's ACL pattern-type discriminant.
-    pub pattern_type: i8,
-    /// A literal topic name, or a topic-name prefix.
-    pub scope: &'a str,
-    /// `true` sets the freeze, `false` lifts it.
-    pub frozen: bool,
-    /// Free text the operator supplied.
-    pub reason: &'a str,
-    /// The principal the broker authenticates on the connection, which is the
-    /// author the record carries.
-    pub set_by: &'a str,
-    /// Milliseconds since the Unix epoch, at the moment of signing.
-    pub set_at_ms: i64,
-    /// The break-glass proposal that authorized a thaw. All zero on a freeze.
-    pub proposal_id: [u8; 16],
-}
 
 /// The break-glass proposal fields that an approval signature covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

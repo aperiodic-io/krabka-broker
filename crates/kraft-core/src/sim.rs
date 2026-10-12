@@ -32,6 +32,7 @@ use self::{
 use crate::{
     core::QuorumStateMachine,
     role::Role,
+    simulation_support::partition_node,
     types::{Epoch, NodeId, QuorumState, SimInstant},
 };
 
@@ -166,8 +167,7 @@ impl Sim {
     // ---- public scenario surface ---------------------------------------------
 
     pub fn partition(&mut self, node: NodeId) {
-        self.partitioned.insert(node);
-        self.queue.retain(|m| m.src != node && m.dst != node);
+        partition_node(&mut self.partitioned, &mut self.queue, node);
         self.record(
             TraceAction::Partition { node: node.0 },
             format!("N{node} is isolated from the cluster"),
@@ -205,8 +205,7 @@ impl Sim {
     pub fn leaders(&self) -> Vec<NodeId> {
         self.nodes
             .values()
-            .filter(|n| n.machine.role().is_leader())
-            .map(|n| n.id)
+            .filter_map(|node| node.machine.role().is_leader().then_some(node.id))
             .collect()
     }
 }

@@ -223,8 +223,8 @@ mod tests {
     fn per_topic_with_refusals_preserves_rows_and_overrides_refused_topics() {
         let topics = vec![
             topic("alpha", &[1, 2]),
-            topic("denied", &[3]),
-            topic("frozen", &[4]),
+            topic("denied", &[5]),
+            topic("frozen", &[6]),
         ];
         let denied = maplit::hashset! {"denied".to_string()};
         let frozen = maplit::hashset! {"frozen".to_string()};
@@ -236,8 +236,8 @@ mod tests {
                 "alpha",
                 &[(1, codes::NOT_COORDINATOR), (2, codes::NOT_COORDINATOR)],
             ),
-            topic_result("denied", &[(3, codes::TOPIC_AUTHORIZATION_FAILED)]),
-            topic_result("frozen", &[(4, codes::POLICY_VIOLATION)]),
+            topic_result("denied", &[(5, codes::TOPIC_AUTHORIZATION_FAILED)]),
+            topic_result("frozen", &[(6, codes::POLICY_VIOLATION)]),
         ];
         assert!(rows == expected);
     }

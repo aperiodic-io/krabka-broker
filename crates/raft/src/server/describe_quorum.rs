@@ -42,6 +42,25 @@ fn node_to_wire(id: NodeId) -> i32 {
     i32::try_from(id.0).unwrap_or(-1)
 }
 
+fn not_leader_or_follower_response() -> DescribeQuorumResponse {
+    DescribeQuorumResponse {
+        topics: vec![TopicData {
+            topic_name: METADATA_TOPIC.into(),
+            partitions: vec![PartitionData {
+                partition_index: 0,
+                error_code: NOT_LEADER_OR_FOLLOWER,
+                error_message: Some(NOT_LEADER_OR_FOLLOWER_MESSAGE.into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        // Kafka's `DescribeQuorumResponse.singletonErrorResponse` leaves
+        // the top-level message at its empty default.
+        error_message: Some(String::new()),
+        ..Default::default()
+    }
+}
+
 /// Kafka's `hasValidTopicPartition` for `DescribeQuorum`.
 fn names_only_the_metadata_partition(request: &DescribeQuorumRequest) -> bool {
     matches!(
@@ -98,25 +117,26 @@ pub fn describe_quorum(
     quorum: &QuorumStateSnapshot,
 ) -> DescribeQuorumResponse {
     if !names_only_the_metadata_partition(request) {
+        let topics: Vec<TopicData> = request
+            .topics
+            .iter()
+            .map(|topic| TopicData {
+                topic_name: topic.topic_name.clone(),
+                partitions: topic
+                    .partitions
+                    .iter()
+                    .map(|partition| PartitionData {
+                        partition_index: partition.partition_index,
+                        error_code: UNKNOWN_TOPIC_OR_PARTITION,
+                        error_message: Some(UNKNOWN_TOPIC_OR_PARTITION_MESSAGE.into()),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .collect();
         return DescribeQuorumResponse {
-            topics: request
-                .topics
-                .iter()
-                .map(|topic| TopicData {
-                    topic_name: topic.topic_name.clone(),
-                    partitions: topic
-                        .partitions
-                        .iter()
-                        .map(|partition| PartitionData {
-                            partition_index: partition.partition_index,
-                            error_code: UNKNOWN_TOPIC_OR_PARTITION,
-                            error_message: Some(UNKNOWN_TOPIC_OR_PARTITION_MESSAGE.into()),
-                            ..Default::default()
-                        })
-                        .collect(),
-                    ..Default::default()
-                })
-                .collect(),
+            topics,
             // Kafka's `getPartitionLevelErrorResponse` leaves the top-level
             // message at its empty default.
             error_message: Some(String::new()),
@@ -124,22 +144,7 @@ pub fn describe_quorum(
         };
     }
     let Some(leader) = quorum.leader_id.filter(|_| quorum.is_leader) else {
-        return DescribeQuorumResponse {
-            topics: vec![TopicData {
-                topic_name: METADATA_TOPIC.into(),
-                partitions: vec![PartitionData {
-                    partition_index: 0,
-                    error_code: NOT_LEADER_OR_FOLLOWER,
-                    error_message: Some(NOT_LEADER_OR_FOLLOWER_MESSAGE.into()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            // Kafka's `DescribeQuorumResponse.singletonErrorResponse` leaves
-            // the top-level message at its empty default.
-            error_message: Some(String::new()),
-            ..Default::default()
-        };
+        return not_leader_or_follower_response();
     };
     DescribeQuorumResponse {
         topics: vec![TopicData {
@@ -356,20 +361,7 @@ mod tests {
 
         check!(
             describe_quorum(&request(&[(METADATA_TOPIC, &[0])]), &follower)
-                == DescribeQuorumResponse {
-                    topics: vec![TopicData {
-                        topic_name: METADATA_TOPIC.into(),
-                        partitions: vec![PartitionData {
-                            partition_index: 0,
-                            error_code: 6,
-                            error_message: Some(NOT_LEADER_OR_FOLLOWER_MESSAGE.into()),
-                            ..Default::default()
-                        }],
-                        ..Default::default()
-                    }],
-                    error_message: Some(String::new()),
-                    ..Default::default()
-                }
+                == not_leader_or_follower_response()
         );
     }
 

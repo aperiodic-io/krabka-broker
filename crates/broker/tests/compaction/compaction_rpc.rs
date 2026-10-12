@@ -9,14 +9,10 @@
 use std::net::SocketAddr;
 
 use assert2::assert;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
 use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        create_topics_response::CreateTopicsResponse, metadata_response::MetadataResponse,
-        produce_response::ProduceResponse,
-    },
+    owned::{metadata_response::MetadataResponse, produce_response::ProduceResponse},
     primitives::uuid::Uuid,
     records::{Record, RecordBatch},
 };
@@ -29,42 +25,14 @@ use crate::{
         discovery::named_topic_metadata,
         produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
-        topics::{CreateTopicSetup, configured_topic_request},
+        topics::CreateTopicSetup,
         wire::HeaderEncoding as RequestHeaderEncoding,
     },
 };
 
 /// Create a topic with config overrides, on PLAINTEXT and with no SASL.
 pub(crate) async fn create_topic_with_configs(addr: SocketAddr, setup: CreateTopicSetup<'_>) {
-    let topic = setup.topic;
-    let req = configured_topic_request(setup);
-
-    let version: i16 = 7; // flexible
-    let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let mut body = BytesMut::new();
-    req.encode(&mut body, version).expect("encode CreateTopics");
-    let resp_bytes = kafka_wire::round_trip(
-        &mut stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(19),
-            version: WireApiVersion(version),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("CreateTopics round-trip");
-    let mut cur: &[u8] = &resp_bytes;
-    let resp =
-        CreateTopicsResponse::decode(&mut cur, version).expect("decode CreateTopicsResponse");
-    assert!(resp.topics.len() == 1);
-    assert!(
-        resp.topics[0].error_code == 0,
-        "CreateTopics({topic}) must succeed: {:?}",
-        resp.topics[0].error_message
-    );
+    kafka_wire::create_topic_from_setup(addr, CLIENT_ID, setup).await;
 }
 
 /// Get `topic_id` with Metadata. Produce and Fetch v9+ need it.

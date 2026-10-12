@@ -14,6 +14,15 @@ use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use krabka_protocol::owned::produce_response::{PartitionProduceResponse, TopicProduceResponse};
+#[cfg(test)]
+use krabka_protocol::{
+    owned::{
+        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+        produce_response::ProduceResponse,
+    },
+    primitives::uuid::Uuid as WireUuid,
+    records::RecordsPayload,
+};
 use krabka_verified::FreezeMutationKind;
 
 use self::{

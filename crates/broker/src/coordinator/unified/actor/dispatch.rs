@@ -325,7 +325,9 @@ mod tests {
 
         // A follower that waits in `SyncGroup` for the leader.
         let (coord, _log) = make_coordinator();
-        let (handle, generation) = seed_completing_classic(&coord, &["m1", "m2"]);
+        let seeded = seed_completing_classic(&coord, &["m1", "m2"]);
+        let handle = seeded.handle;
+        let generation = seeded.generation;
         let sync_rx = rpc::begin_classic_sync(
             &handle,
             SyncGroupRequest {

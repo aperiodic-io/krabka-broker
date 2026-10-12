@@ -165,23 +165,7 @@ mod tests {
         event::Event,
     };
 
-    /// A follower attached to voter 2 at epoch 4 before it resigns.
-    fn following_second_voter() -> (QuorumStateMachine, FakeLog) {
-        let mut m = three_voter_machine();
-        let log = FakeLog::new(5, 1);
-        m.on_event(
-            Event::ReceiveBeginQuorumEpoch {
-                leader_id: NodeId(2),
-                leader_epoch: 4,
-            },
-            &log,
-            SimInstant(10),
-        );
-        (m, log)
-    }
-
-    #[test]
-    fn begin_quorum_epoch_makes_us_follower() {
+    fn following_second_voter_with_actions() -> (QuorumStateMachine, FakeLog, Vec<Action>) {
         let mut m = three_voter_machine();
         let log = FakeLog::new(5, 1);
         let actions = m.on_event(
@@ -192,6 +176,18 @@ mod tests {
             &log,
             SimInstant(10),
         );
+        (m, log, actions)
+    }
+
+    /// A follower attached to voter 2 at epoch 4 before it resigns.
+    fn following_second_voter() -> (QuorumStateMachine, FakeLog) {
+        let (m, log, _) = following_second_voter_with_actions();
+        (m, log)
+    }
+
+    #[test]
+    fn begin_quorum_epoch_makes_us_follower() {
+        let (m, _log, actions) = following_second_voter_with_actions();
         check!(
             (
                 matches!(
@@ -281,16 +277,7 @@ mod tests {
     #[test]
     fn begin_quorum_epoch_from_voter_leader_still_accepted() {
         // C-2 must not break the legitimate path: a voter leader is adopted.
-        let mut m = three_voter_machine();
-        let log = FakeLog::new(5, 1);
-        let actions = m.on_event(
-            Event::ReceiveBeginQuorumEpoch {
-                leader_id: NodeId(2), // a real voter
-                leader_epoch: 4,
-            },
-            &log,
-            SimInstant(10),
-        );
+        let (m, _log, actions) = following_second_voter_with_actions();
         assert2::assert!(matches!(
             m.role(),
             Role::Follower {

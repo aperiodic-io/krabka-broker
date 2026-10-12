@@ -55,14 +55,15 @@ pub(crate) fn api_versions_response_v0() -> Vec<u8> {
         },
     };
 
+    let key = ApiVersion {
+        api_key: api_versions_request::API_KEY,
+        min_version: 0,
+        max_version: 3,
+        ..Default::default()
+    };
     let resp = ApiVersionsResponse {
         error_code: 0,
-        api_keys: vec![ApiVersion {
-            api_key: api_versions_request::API_KEY,
-            min_version: 0,
-            max_version: 3,
-            ..Default::default()
-        }],
+        api_keys: vec![key],
         ..Default::default()
     };
     let mut buf = bytes::BytesMut::new();

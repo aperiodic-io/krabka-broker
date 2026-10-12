@@ -8,7 +8,9 @@ use super::{
     DELETE_RETENTION_MS,
     state::{Cleaner, Entry, EntryKind},
 };
-use crate::compact::{BatchMeta, ProducerId, RecordMeta, RetainDecision, TxnDataState};
+use crate::compact::{
+    RetainDecision, TxnDataState, data_retention_metadata, marker_retention_metadata,
+};
 
 /// Run one compaction pass of `cleaner` over `log` at `clock` and return the
 /// next log. This mirrors the production rewrite path: build the dedup map
@@ -21,37 +23,28 @@ pub(super) fn compact_pass(log: &[Entry], clock: i64, cleaner: Cleaner) -> Vec<E
     let mut next: Vec<Entry> = Vec::with_capacity(log.len());
     for (idx, entry) in log.iter().enumerate() {
         let is_newest = Cleaner::is_newest(log, &offset_map, idx);
-        let (rec_meta, batch_meta, txn) = match entry.kind {
+        let (metadata, txn) = match entry.kind {
             EntryKind::Data { value } => (
-                RecordMeta {
-                    has_key: entry.key.is_some(),
-                    has_value: value.is_some(),
-                },
-                BatchMeta {
-                    is_control: false,
-                    producer_id: ProducerId(-1),
-                    existing_horizon: entry.horizon,
-                },
+                data_retention_metadata()
+                    .has_key(entry.key.is_some())
+                    .has_value(value.is_some())
+                    .maybe_existing_horizon(entry.horizon)
+                    .call(),
                 TxnDataState::NotTransactional,
             ),
             // A control record carries the control-type key and no value.
             EntryKind::Marker { producer_id, .. } => (
-                RecordMeta {
-                    has_key: true,
-                    has_value: false,
-                },
-                BatchMeta {
-                    is_control: true,
-                    producer_id: ProducerId(i64::from(producer_id)),
-                    existing_horizon: entry.horizon,
-                },
+                marker_retention_metadata()
+                    .producer_id(i64::from(producer_id))
+                    .maybe_existing_horizon(entry.horizon)
+                    .call(),
                 marker_states[&idx],
             ),
         };
 
         match (cleaner.retain)(
-            rec_meta,
-            batch_meta,
+            metadata.record,
+            metadata.batch,
             is_newest,
             txn,
             clock,

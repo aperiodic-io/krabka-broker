@@ -178,6 +178,35 @@ pub(crate) fn build_engine(
     (ctrl, dir)
 }
 
+pub(crate) fn reopen_controller(
+    net: &SimNet,
+    dir: std::path::PathBuf,
+    node: NodeId,
+    cid: uuid::Uuid,
+    ids: &[NodeId],
+) -> KraftController {
+    KraftController::open(
+        dir,
+        node,
+        cid,
+        uuid::Uuid::nil(),
+        voter_set(ids),
+        STAGGERED_TIMEOUTS[usize::try_from(node.0 - 1).unwrap()],
+        None,
+        ControllerFetchMissLimit::default(),
+        MetadataRaftCommandQueueCapacity::default(),
+        MetadataRaftFetchMax::default(),
+        Arc::new(net.as_peer(node)),
+        0,
+        krabka_units::prelude::bytes(0),
+        krabka_units::prelude::millis(0),
+        MetadataSnapshotFetchMax::default(),
+        metadata_log(),
+        krabka_raft::kraft::Activation::default(),
+    )
+    .expect("reopen")
+}
+
 /// Polls `f` until it returns `Some`, bounded by `timeout`. The helper yields
 /// between polls, so the engine loops make progress. It returns the value, or
 /// panics on a timeout.

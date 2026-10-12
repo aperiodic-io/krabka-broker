@@ -155,16 +155,13 @@ fn remove_marked_partitions_from(entry: &mut TxnEntry, written: &[TopicPartition
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
-
     use assert2::{assert, check};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{Log, LogConfig, ProducerId};
 
     use super::*;
     use crate::{
-        broker::spawn_partition, log_dir::partition_dir,
-        txn::coordinator::test_support::test_coordinator,
+        broker::spawn_partition,
+        log_dir::partition_dir,
+        txn::coordinator::test_support::{test_coordinator, test_prelude::*},
     };
 
     #[test]

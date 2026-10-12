@@ -115,6 +115,24 @@ async fn delete_records(
     response.topics[0].partitions[0].error_code
 }
 
+#[derive(bon::Builder)]
+struct ShareFetchOutcomeCheck<'a> {
+    broker: &'a BrokerHandle,
+    group: &'a str,
+    topic_id: [u8; 16],
+}
+
+impl ShareFetchOutcomeCheck<'_> {
+    async fn expect(&self, expected: Vec<PartitionOutcome>) {
+        let rows = share_fetch_rows(
+            self.broker,
+            ShareFetchRowsSetup::incremental_pair(self.group, WireUuid(self.topic_id)),
+        )
+        .await;
+        assert!(sorted_partition_outcomes(&rows) == expected);
+    }
+}
+
 /// Sends a `ShareFetch` naming every partition index of `topic_id` with
 /// `max_records`, and returns each row's `PartitionData` in request order.
 use krabka_ids::PartitionIndex;
@@ -398,20 +416,16 @@ async fn an_unreadable_partition_fails_alone() {
     bytes[8..12].copy_from_slice(&0_i32.to_be_bytes());
     std::fs::write(&segment, bytes).expect("corrupt the segment");
 
-    let rows = share_fetch_rows(
-        &broker,
-        ShareFetchRowsSetup::incremental_pair(group, topic_id),
-    )
-    .await;
-    let by_partition = sorted_partition_outcomes(&rows);
-
-    assert!(
-        by_partition
-            == vec![
-                (0, codes::CORRUPT_MESSAGE, vec![]),
-                (1, codes::NONE, vec![(0, 4)]),
-            ]
-    );
+    ShareFetchOutcomeCheck::builder()
+        .broker(&broker)
+        .group(group)
+        .topic_id(topic_id.0)
+        .build()
+        .expect(vec![
+            (0, codes::CORRUPT_MESSAGE, vec![]),
+            (1, codes::NONE, vec![(0, 4)]),
+        ])
+        .await;
     broker.shutdown().await;
 }
 
@@ -429,22 +443,17 @@ async fn a_healthy_partition_in_the_same_request_is_unaffected() {
     let delete_error = delete_records(&broker, topic, 0, 3).await;
     assert!(delete_error == codes::NONE, "{delete_error}");
 
-    let rows = share_fetch_rows(
-        &broker,
-        ShareFetchRowsSetup::incremental_pair(group, topic_id),
-    )
-    .await;
-    // The partitions rotate by session epoch, so the rows come in either
-    // order.
-    let by_partition = sorted_partition_outcomes(&rows);
-
-    assert!(
-        by_partition
-            == vec![
-                (0, codes::NONE, vec![(3, 4)]),
-                (1, codes::NONE, vec![(0, 4)]),
-            ]
-    );
+    // The partitions rotate by session epoch, so the helper sorts their rows.
+    ShareFetchOutcomeCheck::builder()
+        .broker(&broker)
+        .group(group)
+        .topic_id(topic_id.0)
+        .build()
+        .expect(vec![
+            (0, codes::NONE, vec![(3, 4)]),
+            (1, codes::NONE, vec![(0, 4)]),
+        ])
+        .await;
     broker.shutdown().await;
 }
 

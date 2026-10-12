@@ -192,6 +192,10 @@ async fn seed_pending_txn_offsets(broker: &Broker, setup: PendingTxnOffsetsSetup
     rx.await.expect("AddPendingTxnOffsets ack");
 }
 
+async fn seed_default_pending_txn_offsets(broker: &Broker) {
+    seed_pending_txn_offsets(broker, PendingTxnOffsetsSetup::default()).await;
+}
+
 // Resolve the transaction the way its marker does: publish the offsets a
 // commit carries (an abort carries none) and drop the producer's pending
 // marks, stamped with the marker's own position in the offsets log.
@@ -382,14 +386,7 @@ async fn a_mark_for_records_below_an_applied_marker_does_not_strand_the_partitio
         },
     )
     .await;
-    seed_pending_txn_offsets(
-        &broker,
-        PendingTxnOffsetsSetup {
-            producer: krabka_ids::ProducerId(PRODUCER_ID),
-            ..Default::default()
-        },
-    )
-    .await;
+    seed_default_pending_txn_offsets(&broker).await;
 
     let after_late_mark = fetch(&broker, VERSION, &request).await;
     assert!(
@@ -1136,14 +1133,7 @@ async fn require_stable<R>(
         },
     )
     .await;
-    seed_pending_txn_offsets(
-        &broker,
-        PendingTxnOffsetsSetup {
-            producer: krabka_ids::ProducerId(PRODUCER_ID),
-            ..Default::default()
-        },
-    )
-    .await;
+    seed_default_pending_txn_offsets(&broker).await;
     let stable_row = |partition_index, offset| row(partition_index, offset, 5, codes::NONE);
     let relaxed = fetch(&broker, version, &request(false)).await;
     assert!(relaxed == expect(vec![stable_row(0, 42), stable_row(1, 11)]));

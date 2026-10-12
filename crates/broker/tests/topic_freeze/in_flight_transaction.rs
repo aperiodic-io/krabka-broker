@@ -136,7 +136,8 @@ async fn a_transaction_that_enlisted_before_the_freeze_still_commits() {
     // record yet.
     check!(stable_offset(&p.client, "orders").await == 0);
 
-    freeze_scope(&p.client, PATTERN_TYPE_LITERAL, "orders", "cutover").await;
+    let (pat, reason) = (PATTERN_TYPE_LITERAL, "cutover");
+    freeze_scope(&p.client, pat, "orders", reason).await;
 
     // The freeze is live while the transaction is open: a new plain write is
     // refused, and it does not move the log.

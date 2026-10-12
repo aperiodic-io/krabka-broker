@@ -165,8 +165,9 @@ async fn first_tick_of_a_new_term_seeds_before_it_sweeps() {
     // The seeded window is a real one: a broker that stays silent for a
     // full window afterwards still expires and fails over.
     fixture.clock.advance(std::time::Duration::from_millis(11));
-    fixture.liveness.record_heartbeat(2).await;
-    fixture.liveness.record_heartbeat(3).await;
+    for broker in [2, 3] {
+        fixture.liveness.record_heartbeat(broker).await;
+    }
     fixture.tick().await;
     assert!(fixture.liveness.dead_snapshot().await == [1].into_iter().collect());
     let batches = fixture.source.submitted();

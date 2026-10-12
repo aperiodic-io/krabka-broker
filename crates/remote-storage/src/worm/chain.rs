@@ -394,6 +394,11 @@ mod tests {
 
     #[test]
     fn next_chain_stamp_ignores_deleted_segments() {
+        let expected_stamp = Some(ChainStamp {
+            epoch_id: epoch(),
+            seq: ManifestSeq(2),
+            prev_head: head(0xbb),
+        });
         for (name, deleted_state) in [
             (
                 "delete started",
@@ -412,15 +417,8 @@ mod tests {
                 ),
                 sample_metadata(300, deleted_state, Some(receipt(5, 0xee, 0xff))),
             ];
-            check!(
-                next_chain_stamp(&segments, EpochId(Uuid::from_u128(0xfeed)))
-                    == Some(ChainStamp {
-                        epoch_id: epoch(),
-                        seq: ManifestSeq(2),
-                        prev_head: head(0xbb),
-                    }),
-                "case {name}"
-            );
+            let actual = next_chain_stamp(&segments, EpochId(Uuid::from_u128(0xfeed)));
+            check!(actual == expected_stamp, "case {name}");
         }
     }
 

@@ -30,10 +30,10 @@ async fn produce_unresolved_topic_id_returns_unknown_topic_id() {
         .await
         .expect("create topic");
 
-    let cases = support::topics::unresolved_topic_ids(0x0bad_f00d);
-    let mut actual = Vec::with_capacity(cases.len());
-    let mut expected = Vec::with_capacity(cases.len());
-    for (label, topic_id) in cases {
+    let id_cases = support::topics::unresolved_topic_ids(0x0bad_f00d);
+    let mut actual = Vec::new();
+    let mut expected = Vec::new();
+    for (label, topic_id) in id_cases {
         let resp = p
             .client
             .send(ProduceRequest {

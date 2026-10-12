@@ -343,13 +343,13 @@ mod tests {
 
     #[tokio::test]
     async fn diskless_index_bootstrap_retries_until_cancelled() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let bootstrap = listener.local_addr().unwrap().to_string();
-        drop(listener);
+        let dummy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bootstrap_addr = dummy.local_addr().unwrap().to_string();
+        drop(dummy);
 
         let snapshot_dir = tempdir().unwrap();
         let kickoff = kickoff_with_config(KafkaRlmmConfig {
-            bootstrap,
+            bootstrap: bootstrap_addr,
             num_partitions: 1,
             replication: 1,
             snapshot_dir: snapshot_dir.path().to_path_buf(),

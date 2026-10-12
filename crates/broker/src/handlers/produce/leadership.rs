@@ -196,7 +196,7 @@ pub(super) fn current_leader_hint(record: &krabka_metadata::PartitionRecord) -> 
 #[cfg(test)]
 mod tests {
     use assert2::assert;
-    use krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord};
+    use krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord, PartitionRecord};
     use uuid::Uuid;
 
     use super::*;
@@ -214,6 +214,26 @@ mod tests {
         replica_state::ReplicaState,
         test_support::{StandalonePartitionSetup, StorageMode, spawn_standalone_partition},
     };
+
+    #[bon::builder]
+    fn test_partition_record(
+        isr: Vec<krabka_audit::NodeId>,
+        leader_epoch: i32,
+        partition_epoch: i32,
+    ) -> PartitionRecord {
+        PartitionRecord {
+            topic: "orders".into(),
+            partition: 0,
+            leader: krabka_audit::NodeId(1),
+            replicas: [1, 2, 3].map(krabka_audit::NodeId).to_vec(),
+            isr,
+            leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+            adding_replicas: vec![],
+            removing_replicas: vec![],
+            directories: vec![],
+            partition_epoch,
+        }
+    }
 
     #[test]
     fn replication_target_must_match_the_complete_image_identity() {
@@ -252,7 +272,7 @@ mod tests {
     /// Epoch changes of the same partition keep it.
     #[test]
     fn the_completion_minimum_belongs_to_the_admitted_partition() {
-        use krabka_metadata::{DeleteTopicRecord, PartitionRecord, TopicRecord};
+        use krabka_metadata::{DeleteTopicRecord, TopicRecord};
         let admitted = Uuid::from_u128(1);
         let image_of = |topic_id: Option<Uuid>, leader_epoch: i32, partition_epoch: i32| {
             let mut image = image_with_topic("orders", &[1, 2, 3]);
@@ -266,18 +286,13 @@ mod tests {
                     partitions: 1,
                     replication_factor: 3,
                 }));
-                image.apply(&MetadataRecord::V1Partition(PartitionRecord {
-                    topic: "orders".into(),
-                    partition: 0,
-                    leader: krabka_audit::NodeId(1),
-                    replicas: [1, 2, 3].map(krabka_audit::NodeId).to_vec(),
-                    isr: [1, 2].map(krabka_audit::NodeId).to_vec(),
-                    leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
-                    adding_replicas: vec![],
-                    removing_replicas: vec![],
-                    directories: vec![],
-                    partition_epoch,
-                }));
+                image.apply(&MetadataRecord::V1Partition(
+                    test_partition_record()
+                        .isr([1, 2].map(krabka_audit::NodeId).to_vec())
+                        .leader_epoch(leader_epoch)
+                        .partition_epoch(partition_epoch)
+                        .call(),
+                ));
             }
             image
         };
@@ -509,18 +524,11 @@ mod tests {
         ] {
             let mut image = image_with_topic("orders", &[1, 2, 3]);
             image.apply(&MetadataRecord::V1Partition(
-                krabka_metadata::PartitionRecord {
-                    topic: "orders".into(),
-                    partition: 0,
-                    leader: krabka_audit::NodeId(1),
-                    replicas: [1, 2, 3].map(krabka_audit::NodeId).to_vec(),
-                    isr: vec![krabka_audit::NodeId(1)],
-                    leader_epoch: krabka_metadata::LeaderEpoch(0),
-                    adding_replicas: vec![],
-                    removing_replicas: vec![],
-                    directories: vec![],
-                    partition_epoch: 1,
-                },
+                test_partition_record()
+                    .isr(vec![krabka_audit::NodeId(1)])
+                    .leader_epoch(0)
+                    .partition_epoch(1)
+                    .call(),
             ));
             for (node, value) in [
                 (

@@ -156,14 +156,12 @@ pub(super) fn topic_config_record(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
-
     use super::*;
     use crate::{
         handlers::{
             incremental_alter_configs::test_support::{
-                image_with_topic_config, make_del_cfg, make_set_cfg, make_topic_resource,
+                AlterableConfig, assert, check, image_with_topic_config, make_del_cfg,
+                make_set_cfg, make_topic_resource,
             },
             test_support::check_config_result,
         },

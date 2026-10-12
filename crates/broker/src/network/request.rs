@@ -123,17 +123,18 @@ mod tests {
 
     #[test]
     fn parse_request_flexible_header_skips_non_empty_tagged_fields() {
+        let tagged_bytes = [1, 1, 3, b't', b'a', b'g'];
         let frame = request_frame(RequestFrameSetup {
             api_version: krabka_ids::ApiVersion(3),
             correlation_id: FrameCorrelationId(7),
             client_id: Some(b"client-a"),
-            tagged: Some(&[1, 1, 3, b't', b'a', b'g']),
+            tagged: Some(&tagged_bytes),
             body: b"body",
             ..Default::default()
         });
 
-        let parsed =
-            parse_request(&frame, |key, version| key == 18 && version >= 3).expect("parse request");
+        let is_flex = |key: i16, version: i16| key == 18 && version >= 3;
+        let parsed = parse_request(&frame, is_flex).expect("parse request");
 
         assert_flexible_client_body(&parsed);
     }

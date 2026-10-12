@@ -173,15 +173,11 @@ async fn follower_forwards_create_topic() {
     let follower_idx = follower_idx.expect("at least one follower");
 
     let c = connect_client(cluster[follower_idx].1.listen_addr.to_string(), None).await;
-    let resp = c
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("via-follower").into(),
-                ..Default::default()
-            },
-        )))
-        .await
-        .unwrap();
+    let req = create_topic_request(creatable_topic(ConfiguredTopicSetup {
+        name: ("via-follower").into(),
+        ..Default::default()
+    }));
+    let resp = c.send(req).await.unwrap();
     assert!(resp.topics[0].error_code == 0);
 
     shutdown_cluster(cluster).await;

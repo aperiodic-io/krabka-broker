@@ -126,7 +126,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        authorizer::opa::OpaAuthorizer,
+        authorizer::{AuthorizationRequest, opa::OpaAuthorizer},
         config::BrokerConfig,
         file_config::test_support::configured_unwrap_parse,
         test_support::{peer, sasl_principal},
@@ -180,11 +180,25 @@ super_users = ["operator", "admin"]
     fn test_principal(name: &str) -> krabka_security::Principal {
         sasl_principal(name)
     }
+
+    fn topic_read_request<'a>(
+        principal: &'a krabka_security::Principal,
+        host: &'a std::net::SocketAddr,
+    ) -> AuthorizationRequest<'a> {
+        AuthorizationRequest {
+            principal,
+            host,
+            resource_type: krabka_metadata::ResourceType::Topic,
+            resource_name: "t",
+            operation: krabka_metadata::AclOperation::Read,
+        }
+    }
+
     #[test]
     fn authorization_section_simple_builds_simple_acl_authorizer() {
-        use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
+        use krabka_metadata::MetadataImage;
 
-        use crate::authorizer::{AuthorizationRequest, AuthorizationResult};
+        use crate::authorizer::AuthorizationResult;
 
         let toml = r#"
 [authorization]
@@ -205,25 +219,13 @@ super_users = ["admin"]
         let img = MetadataImage::new(uuid::Uuid::nil());
         let admin = test_principal("admin");
         let host = peer();
-        let req = AuthorizationRequest {
-            principal: &admin,
-            host: &host,
-            resource_type: ResourceType::Topic,
-            resource_name: "t",
-            operation: AclOperation::Read,
-        };
+        let req = topic_read_request(&admin, &host);
         assert!(cfg.authorizer.authorize(&img, &req) == AuthorizationResult::Allow);
 
         // Non-super-user with no matching ACL → Deny (proves we got
         // SimpleAcl, not AllowAll).
         let alice = test_principal("alice");
-        let req_alice = AuthorizationRequest {
-            principal: &alice,
-            host: &host,
-            resource_type: ResourceType::Topic,
-            resource_name: "t",
-            operation: AclOperation::Read,
-        };
+        let req_alice = topic_read_request(&alice, &host);
         assert!(
             cfg.authorizer.authorize(&img, &req_alice) == AuthorizationResult::Deny,
             "type=simple must default-deny non-super-users with no matching ACL"
@@ -237,20 +239,14 @@ super_users = ["admin"]
     /// ACL for the resource.
     #[test]
     fn allow_everyone_if_no_acl_found_toml_flows_to_simple_acl_authorizer() {
-        use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
+        use krabka_metadata::MetadataImage;
 
-        use crate::authorizer::{AuthorizationRequest, AuthorizationResult};
+        use crate::authorizer::AuthorizationResult;
 
         let img = MetadataImage::new(uuid::Uuid::nil());
         let alice = test_principal("alice");
         let host = peer();
-        let req = AuthorizationRequest {
-            principal: &alice,
-            host: &host,
-            resource_type: ResourceType::Topic,
-            resource_name: "t",
-            operation: AclOperation::Read,
-        };
+        let req = topic_read_request(&alice, &host);
 
         let cases = [
             (
@@ -287,9 +283,9 @@ allow_everyone_if_no_acl_found = true
     }
     #[test]
     fn authorization_section_opa_builds_opa_authorizer() {
-        use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
+        use krabka_metadata::MetadataImage;
 
-        use crate::authorizer::{AuthorizationRequest, AuthorizationResult};
+        use crate::authorizer::AuthorizationResult;
 
         // `OpaAuthorizer::new` captures `Handle::try_current()` — needs
         // an active tokio runtime. `Runtime::new()` defaults to
@@ -318,13 +314,7 @@ expire_after_ms = 60000
             let img = MetadataImage::new(uuid::Uuid::nil());
             let operator = test_principal("operator");
             let host = peer();
-            let req = AuthorizationRequest {
-                principal: &operator,
-                host: &host,
-                resource_type: ResourceType::Topic,
-                resource_name: "t",
-                operation: AclOperation::Read,
-            };
+            let req = topic_read_request(&operator, &host);
             assert!(
                 cfg.authorizer.authorize(&img, &req) == AuthorizationResult::Allow,
                 "OPA super-user bypass must short-circuit before any HTTP call"
@@ -346,9 +336,9 @@ expire_after_ms = 60000
         // And the built authorizer must Deny on OPA error (fail-closed).
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
+            use krabka_metadata::MetadataImage;
 
-            use crate::authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer};
+            use crate::authorizer::{AuthorizationResult, Authorizer};
 
             let auth = OpaAuthorizer::new(
                 std::collections::HashSet::new(),
@@ -363,13 +353,7 @@ expire_after_ms = 60000
             let img = MetadataImage::new(uuid::Uuid::nil());
             let p = test_principal("alice");
             let host = peer();
-            let req = AuthorizationRequest {
-                principal: &p,
-                host: &host,
-                resource_type: ResourceType::Topic,
-                resource_name: "t",
-                operation: AclOperation::Read,
-            };
+            let req = topic_read_request(&p, &host);
             assert!(
                 auth.authorize(&img, &req) == AuthorizationResult::Deny,
                 "OPA outage with default allow_on_error must fail closed (Deny)"
@@ -388,24 +372,19 @@ url = "http://opa.invalid:8181/v1/data/k/a"
     }
     #[test]
     fn authorization_section_absent_defaults_to_allow_all() {
-        use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
+        use krabka_metadata::MetadataImage;
 
-        use crate::authorizer::{AuthorizationRequest, AuthorizationResult};
+        use crate::authorizer::AuthorizationResult;
 
         let cfg = configured_unwrap_parse("").unwrap();
 
         // Default authorizer is AllowAll — anyone gets Allow, including
         // a principal who isn't in any super-user set.
         let img = MetadataImage::new(uuid::Uuid::nil());
+        let peer_host = peer();
         let anyone = test_principal("anyone");
-        let host = peer();
-        let req = AuthorizationRequest {
-            principal: &anyone,
-            host: &host,
-            resource_type: ResourceType::Topic,
-            resource_name: "t",
-            operation: AclOperation::Read,
-        };
-        assert!(cfg.authorizer.authorize(&img, &req) == AuthorizationResult::Allow);
+        let check_req = topic_read_request(&anyone, &peer_host);
+        let auth_res = cfg.authorizer.authorize(&img, &check_req);
+        assert!(auth_res == AuthorizationResult::Allow);
     }
 }

@@ -378,17 +378,7 @@ async fn reconfiguration_refuses_when_epoch_not_committed_and_admits_when_commit
     assert2::assert!(leader.core.role().is_leader());
 
     // Update committed version to 1 and ensure all existing voters support version 1
-    leader.controls.version_history.insert(-1, 1);
-    leader.controls.committed_version = 1;
-    leader.core.set_kraft_version(1);
-    let mut v = leader.controls.committed_voters.clone();
-    for id in [NodeId(1), NodeId(2), NodeId(3)] {
-        let mut voter = v.get(id).unwrap().clone();
-        voter.kraft_version = krabka_metadata::KRaftVersionRange { min: 0, max: 1 };
-        v = v.with_voter(voter);
-    }
-    leader.controls.committed_voters = v.clone();
-    leader.controls.voter_history.insert(-1, v);
+    upgrade_leader_to_kraft_v1(&mut leader);
 
     // Epoch not committed (hwm == 0, epoch_start_offset == 0)
     let (reply, mut rx) = oneshot::channel();
@@ -446,16 +436,7 @@ async fn reconfiguration_refuses_when_epoch_not_committed_and_admits_when_commit
 
     // Update with nil directory
     let update_matching = VoterChange::Update(UpdateVoter {
-        voter: krabka_metadata::Voter {
-            id: NodeId(1),
-            directory_id: uuid::Uuid::from_u128(99),
-            endpoints: vec![krabka_metadata::voters::VoterEndpoint {
-                name: "CONTROLLER".into(),
-                host: "127.0.0.1".into(),
-                port: 9_093,
-            }],
-            kraft_version: krabka_metadata::KRaftVersionRange { min: 0, max: 1 },
-        },
+        voter: test_voter(NodeId(1), uuid::Uuid::from_u128(99)),
     });
     let (reply, mut rx) = oneshot::channel();
     leader.on_reconfigure(update_matching, reply);
@@ -524,6 +505,20 @@ fn apply_and_restore_control_records_updates_core_voters() {
     check!(engine.controls.committed_voters.contains(NodeId(2)));
 }
 
+fn upgrade_leader_to_kraft_v1(leader: &mut Engine) {
+    leader.controls.version_history.insert(-1, 1);
+    leader.controls.committed_version = 1;
+    leader.core.set_kraft_version(1);
+    let mut v = leader.controls.committed_voters.clone();
+    for id in [NodeId(1), NodeId(2), NodeId(3)] {
+        let mut voter = v.get(id).unwrap().clone();
+        voter.kraft_version = krabka_metadata::KRaftVersionRange { min: 0, max: 1 };
+        v = v.with_voter(voter);
+    }
+    leader.controls.committed_voters = v.clone();
+    leader.controls.voter_history.insert(-1, v);
+}
+
 /// A leader of voters 1, 2 and 3 at `kraft.version` 1 that has committed its
 /// epoch, ready to answer `AddRaftVoter`, with a clock that has been running for
 /// 50 ms so a fetch is stamped with a nonzero time.
@@ -538,17 +533,7 @@ fn kraft_version_one_leader() -> (Engine, tempfile::TempDir) {
         });
     }
     assert2::assert!(leader.core.role().is_leader());
-    leader.controls.version_history.insert(-1, 1);
-    leader.controls.committed_version = 1;
-    leader.core.set_kraft_version(1);
-    let mut voters = leader.controls.committed_voters.clone();
-    for id in [NodeId(1), NodeId(2), NodeId(3)] {
-        let mut voter = voters.get(id).unwrap().clone();
-        voter.kraft_version = krabka_metadata::KRaftVersionRange { min: 0, max: 1 };
-        voters = voters.with_voter(voter);
-    }
-    leader.controls.committed_voters = voters.clone();
-    leader.controls.voter_history.insert(-1, voters);
+    upgrade_leader_to_kraft_v1(&mut leader);
     leader.log.advance_hwm(leader.log.log_end_offset() + 10);
     leader.clock_base = Instant::now() - Duration::from_millis(50);
     (leader, dir)
@@ -567,18 +552,22 @@ fn commit_add_voter(
     rx.try_recv().expect("the add was answered")
 }
 
+fn test_voter(id: NodeId, directory_id: uuid::Uuid) -> krabka_metadata::Voter {
+    krabka_metadata::Voter {
+        id,
+        directory_id,
+        endpoints: vec![krabka_metadata::voters::VoterEndpoint {
+            name: "CONTROLLER".into(),
+            host: "127.0.0.1".into(),
+            port: 9_093,
+        }],
+        kraft_version: krabka_metadata::KRaftVersionRange { min: 0, max: 1 },
+    }
+}
+
 fn add_request(id: u64, directory: u128) -> AddVoter {
     AddVoter {
-        voter: krabka_metadata::Voter {
-            id: NodeId(id),
-            directory_id: uuid::Uuid::from_u128(directory),
-            endpoints: vec![krabka_metadata::voters::VoterEndpoint {
-                name: "CONTROLLER".into(),
-                host: "127.0.0.1".into(),
-                port: 9_093,
-            }],
-            kraft_version: krabka_metadata::KRaftVersionRange { min: 0, max: 1 },
-        },
+        voter: test_voter(NodeId(id), uuid::Uuid::from_u128(directory)),
         ack_when_committed: true,
     }
 }

@@ -37,12 +37,12 @@ use tempfile::TempDir;
 use crate::{
     cluster_lock,
     support::{
-        self,
         client::connect_with_context,
         produce::{SinglePartitionProduceSetup, batch_request},
         shutdown_cluster,
         topics::CreateTopicRequestSetup,
         transactions::{ProducerIdentity, TransactionOutcome},
+        {self},
     },
 };
 
@@ -264,9 +264,12 @@ async fn every_replica_describes_the_producers_of_its_log() {
         CreateTopicRequestSetup::default(),
     )
     .await;
-    for (handle, _, _) in &cluster {
-        handle.wait_until_partition_present(TOPIC, 0).await;
-    }
+    support::partitions::wait_for_partition_on_all(
+        cluster.iter().map(|(handle, _, _)| handle),
+        TOPIC,
+        0,
+    )
+    .await;
     cluster[0]
         .0
         .wait_until_local_partition_leader(TOPIC, 0, cluster[0].1.node_id)

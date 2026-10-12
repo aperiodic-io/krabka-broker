@@ -151,14 +151,15 @@ fn a_committed_swap_is_completed_whatever_originals_remain() {
 /// A committed swap's own `.txnindex` replaces the stale one at its base.
 #[test]
 fn a_committed_swap_promotes_its_transaction_index() {
+    let txn_bytes = b"survivor txn".to_vec();
     let mut files = originals_with_swaps();
-    files.insert(file(0, "txnindex.swap"), b"survivor txn".to_vec());
+    files.insert(file(0, "txnindex.swap"), txn_bytes.clone());
     let dir = populated_directory(&files);
 
     swap_orphan_recover(dir.path()).unwrap();
 
     let mut expected = compacted();
-    expected.insert(file(0, "txnindex"), b"survivor txn".to_vec());
+    expected.insert(file(0, "txnindex"), txn_bytes);
     check!(directory_files(dir.path()) == expected);
 }
 

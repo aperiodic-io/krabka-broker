@@ -65,14 +65,15 @@ fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
 fn remote_timestamp_composition_handles_padding_and_conservative_rows() {
     let offsets = [0, 3, 6];
     let timestamps = [100, 300, 200];
+    let padded = [(100, 0), (300, 3), (300, 6), (0, 0), (0, 0)];
+    let conservative = [(500, 0), (100, 3), (300, 6)];
+    let min_padded = [(i64::MIN, 0), (0, 0)];
     for entries in [
         &[][..],
-        &[(100, 0), (300, 3), (300, 6)],
-        &[(100, 0), (300, 3), (300, 6), (0, 0), (0, 0)],
-        // Conservative bounds may decrease without skipping a match;
-        // this is accepted by remote scanning but fails row validation.
-        &[(500, 0), (100, 3), (300, 6)],
-        &[(i64::MIN, 0), (0, 0)],
+        &[(100, 0), (300, 3), (300, 6)][..],
+        &padded[..],
+        &conservative[..],
+        &min_padded[..],
     ] {
         for target in [i64::MIN, 100, 200, 300, 301, 500, i64::MAX] {
             let (count, floor) = validated_time_scan::prefix_oracle(entries, target);

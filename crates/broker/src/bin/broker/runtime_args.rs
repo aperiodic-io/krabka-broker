@@ -122,13 +122,6 @@ pub struct RuntimeArgs {
     pub share_state_segment_bytes: Option<ByteSize>,
     #[overlay(refined)]
     pub share_state_min_isr: Option<PositiveI32>,
-    #[arg(long, env = "KRABKA_SHARE_SNAPSHOT_UPDATE_RECORDS_PER_SNAPSHOT", value_parser = clap::value_parser!(u32).range(0..=500))]
-    pub share_snapshot_update_records_per_snapshot: Option<u32>,
-    pub share_coordinator_write_timeout: Option<Time>,
-    pub share_state_prune_interval: Option<Time>,
-    pub share_cold_partition_snapshot_interval: Option<Time>,
-    pub share_state_compression_codec: Option<i32>,
-    pub share_coordinator_threads: Option<i32>,
     #[arg(
         long,
         env = "KRABKA_SHARE_COORDINATOR_APPEND_LINGER_MS",

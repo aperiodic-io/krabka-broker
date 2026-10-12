@@ -2,8 +2,6 @@
 //! becomes visible in the metadata image and in `DescribeClientQuotas`, and a
 //! principal that is neither a super-user nor ACL-authorized is refused.
 
-use std::time::{Duration, Instant};
-
 use assert2::assert;
 
 use super::{
@@ -17,6 +15,7 @@ use crate::{
         PlainAuthenticationSetup,
         quotas::{QuotaAlterSetup, QuotaDescribeSetup, UserQuotaSetup, alter_user_quota},
     },
+    support::retry::{all_cluster_authorization_failed, retry_until},
 };
 
 /// Test 1: `AlterClientQuotas` sets `(user=alice) producer_byte_rate=1024`.
@@ -92,46 +91,36 @@ async fn alter_then_describe_round_trip() {
 /// which allows every operation while the image holds no ACLs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn non_super_user_denied() {
-    let (handle, _dir, addr) = start_single_broker_sasl_plaintext_with_users(
-        "admin",
-        &[("admin", "admin-secret"), ("alice", "alice-secret")],
-    )
-    .await;
+    let credentials = [("admin", "admin-secret"), ("alice", "alice-secret")];
+    let (handle, _dir, addr) =
+        start_single_broker_sasl_plaintext_with_users("admin", &credentials).await;
 
     // Seed dummy ACL to disable compat shim.
     seed_compat_shim_disable_acl(&handle).await;
 
     // Retry until the shim is provably off: alice should receive 31 on every
     // AlterClientQuotas entry, not 0 (which would mean the shim allowed it).
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let resp = loop {
-        let r = drive_alter_client_quotas_sasl(
-            addr,
-            vec![(
-                vec![("user".into(), Some("alice".into()))],
-                vec![("producer_byte_rate".into(), 999.0, false)],
-            )],
-            &QuotaAlterSetup {
-                authentication: PlainAuthenticationSetup {
-                    client_id: CLIENT_ID,
-                    password: ("alice-secret").as_bytes().to_vec(),
+    let resp = retry_until()
+        .attempt(|| async {
+            drive_alter_client_quotas_sasl(
+                addr,
+                vec![(
+                    vec![("user".into(), Some("alice".into()))],
+                    vec![("producer_byte_rate".into(), 999.0, false)],
+                )],
+                &QuotaAlterSetup {
+                    authentication: PlainAuthenticationSetup::with_password(
+                        CLIENT_ID,
+                        b"alice-secret",
+                    ),
                     ..Default::default()
                 },
-                ..Default::default()
-            },
-        )
+            )
+            .await
+        })
+        .is_complete(all_cluster_authorization_failed)
+        .call()
         .await;
-        // CLUSTER_AUTHORIZATION_FAILED = 31.
-        if r.iter().all(|(_, ec)| *ec == 31) {
-            break r;
-        }
-        assert!(
-            Instant::now() <= deadline,
-            "compat shim still active after 5s; got {r:?}"
-        );
-        // real-time wait (not a progress poll): retry cadence between network AlterClientQuotas attempts (shim disable), deadline-guarded
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
 
     handle.shutdown().await;
 

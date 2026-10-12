@@ -86,7 +86,7 @@ async fn deleting_a_topic_tombstones_its_offsets_in_the_group() {
             expected_reply: vec![],
             expected_records: vec![],
             expected_committed: all_committed.clone(),
-            expected_pending: HashSet::from([key("orders", 2), key("payments", 1)]),
+            expected_pending: [key("orders", 2), key("payments", 1)].into_iter().collect(),
         },
         Row {
             name: "the append fails",

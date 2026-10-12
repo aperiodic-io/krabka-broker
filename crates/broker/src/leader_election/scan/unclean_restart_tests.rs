@@ -7,17 +7,8 @@
 //! implemented.
 
 use assert2::assert;
-use krabka_metadata::{LeaderEpoch, PartitionElrRecord};
 
 use super::*;
-use crate::{
-    config_keys::{ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS},
-    leader_election::test_support::{
-        ElectionSetup, ElrFinalization, ExpectedPartitionSetup, expected_partition,
-        img_with_partition,
-    },
-    metrics::BrokerMetrics,
-};
 
 /// Liveness where each of `alive` heartbeated inside the current window.
 async fn alive(alive: &[u64]) -> ControllerLivenessState {
@@ -37,6 +28,11 @@ async fn restart_batch(image: &MetadataImage, alive_nodes: &[u64]) -> FailoverPl
         &BrokerMetrics::new(),
     )
     .await
+}
+
+fn assert_restart_outcome(plan: &FailoverPlan, expected_unavailable: &[(String, i32)]) {
+    assert!(plan.recoveries.is_empty());
+    assert!(plan.unavailable.as_slice() == expected_unavailable);
 }
 
 /// The whole batch for the case the withdrawal alone could not close.
@@ -60,8 +56,7 @@ async fn a_returning_broker_leaves_the_isr_and_does_not_re_enter_the_elr() {
 
     let plan = restart_batch(&image, &[1, 2]).await;
 
-    assert!(plan.recoveries.is_empty());
-    assert!(plan.unavailable.is_empty());
+    assert_restart_outcome(&plan, &[]);
     assert!(
         plan.changes
             == vec![MetadataRecord::V1Partition(expected_partition(
@@ -117,8 +112,7 @@ async fn the_only_isr_member_restarting_uncleanly_leaves_the_partition_leaderles
 
     let plan = restart_batch(&image, &[1, 2]).await;
 
-    assert!(plan.recoveries.is_empty());
-    assert!(plan.unavailable == vec![("t".to_string(), 0)]);
+    assert_restart_outcome(&plan, &[("t".to_string(), 0)]);
     assert!(
         plan.changes
             == vec![MetadataRecord::V1PartitionElr(PartitionElrRecord {
@@ -143,16 +137,14 @@ async fn a_partition_the_returning_broker_leads_is_re_elected() {
 
     let plan = restart_batch(&image, &[1, 2]).await;
 
-    assert!(
-        plan.changes
-            == vec![MetadataRecord::V1Partition(expected_partition(
-                ExpectedPartitionSetup {
-                    leader: krabka_raft::NodeId(1),
-                    isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
-                    ..Default::default()
-                }
-            ))]
-    );
+    let expected = vec![MetadataRecord::V1Partition(expected_partition(
+        ExpectedPartitionSetup {
+            leader: krabka_raft::NodeId(1),
+            isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
+            ..Default::default()
+        },
+    ))];
+    assert!(plan.changes == expected);
 }
 
 /// A partition the returning broker is neither leading nor in the ISR of, and

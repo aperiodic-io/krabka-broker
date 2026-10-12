@@ -10,6 +10,7 @@ use krabka_units::{Time, convert::TimeExt};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::inter_broker_listener_protocol;
 use crate::{
     break_glass::{
         metrics::record_proposal_states,
@@ -246,13 +247,7 @@ pub(super) async fn start_broker_runtime(
         storage.0.cordoned_log_dirs().clone(),
         supervisor_shutdown.child_token(),
     );
-    let inter_listener_protocol = config
-        .effective_listeners()
-        .iter()
-        .find(|listener| listener.name == config.inter_broker_listener_name)
-        .map_or(krabka_security::ListenerProtocol::Plaintext, |listener| {
-            listener.protocol
-        });
+    let inter_listener_protocol = inter_broker_listener_protocol(config);
     let (audit_led_partition, audit_log, audit_writer_handle) = start_audit_pipeline(
         config,
         &**controller,

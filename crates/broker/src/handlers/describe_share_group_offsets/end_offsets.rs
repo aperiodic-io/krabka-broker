@@ -105,13 +105,7 @@ impl NetworkLatestOffsets<'_> {
         let (host, port) =
             registered_listener_endpoint(registration, &config.inter_broker_listener_name);
         let host = host.to_owned();
-        let protocol = config
-            .effective_listeners()
-            .iter()
-            .find(|listener| listener.name == config.inter_broker_listener_name)
-            .map_or(krabka_security::ListenerProtocol::Plaintext, |listener| {
-                listener.protocol
-            });
+        let protocol = config.inter_broker_listener_protocol();
         let options = krabka_client_core::ConnectionOptions {
             client_id: format!("krabka-broker-share-lag-{}", config.node_id),
             ..krabka_client_core::ConnectionOptions::default()

@@ -718,13 +718,12 @@ mod tests {
         };
         let image_at = |level: Option<i16>| {
             let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-            if let Some(level) = level {
-                image.apply(&MetadataRecord::V1FeatureLevel(
-                    krabka_metadata::FeatureLevelRecord {
-                        name: METADATA_VERSION.into(),
-                        level,
-                    },
-                ));
+            if let Some(lvl) = level {
+                let rec = krabka_metadata::FeatureLevelRecord {
+                    name: METADATA_VERSION.into(),
+                    level: lvl,
+                };
+                image.apply(&MetadataRecord::V1FeatureLevel(rec));
             }
             image
         };

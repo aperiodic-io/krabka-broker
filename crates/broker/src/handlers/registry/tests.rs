@@ -125,13 +125,13 @@ fn registry_registers_decoded_context_handlers() {
         ApiKey::AlterUserScramCredentials as i16,
         ApiKey::UpdateFeatures as i16,
     ] {
-        let key = api_key;
+        let target_key = api_key;
         let entry = registry
-            .get(key)
-            .unwrap_or_else(|| panic!("registered api_key {key}"));
+            .get(target_key)
+            .unwrap_or_else(|| panic!("registered api_key {target_key}"));
         assert!(
             matches!(entry.kind(), DispatchKind::Context(_)),
-            "api_key {key}"
+            "api_key {target_key}"
         );
     }
 }

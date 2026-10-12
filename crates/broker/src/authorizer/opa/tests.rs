@@ -20,6 +20,23 @@ use wiremock::{
 };
 
 use super::*;
+
+fn opa_decision_response(allow: bool) -> wiremock::ResponseTemplate {
+    wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({ "result": allow }))
+}
+
+#[bon::builder]
+async fn mount_decision(mock: &MockServer, allow: bool, body: Option<serde_json::Value>) {
+    let mut request = Mock::given(method("POST"));
+    if let Some(body) = body {
+        request = request.and(body_json(body));
+    }
+    request
+        .respond_with(opa_decision_response(allow))
+        .expect(1)
+        .mount(mock)
+        .await;
+}
 use crate::test_support::sasl_principal;
 
 fn test_principal(name: &str) -> Principal {
@@ -103,13 +120,7 @@ async fn cache_miss_calls_opa_and_caches_result() {
 
 async fn check_cached_decision(topic: &str, allow: bool, expected: AuthorizationResult) {
     let mock = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({"result": allow})),
-        )
-        .expect(1)
-        .mount(&mock)
-        .await;
+    mount_decision().mock(&mock).allow(allow).call().await;
     let auth = authorizer(HashSet::new(), opa_url(&mock), false);
     request_fixture!(image, principal, host, "alice");
     // The second call must preserve the decision and use the cache: expect(1)
@@ -269,11 +280,11 @@ async fn published_kafka_plugin_policy_receives_action_and_context() {
         "requestContext": { "principal": { "principalType": "User", "name": "alice" },
             "clientAddress": "/1.2.3.4" }
     }});
-    Mock::given(method("POST"))
-        .and(body_json(expected))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"result": true})))
-        .expect(1)
-        .mount(&mock)
+    mount_decision()
+        .mock(&mock)
+        .allow(true)
+        .body(expected)
+        .call()
         .await;
     let auth = authorizer(HashSet::new(), opa_url(&mock), false);
     request_fixture!(image, principal, host, "alice");

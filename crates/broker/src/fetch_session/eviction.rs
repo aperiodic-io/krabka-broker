@@ -541,14 +541,12 @@ mod tests {
         clock
             .advance(PAST_MIN_EVICTION)
             .expect("manual time moves forward");
-        let newcomer = allocate_session(
-            &cache,
-            SessionAllocationSetup {
-                principal: "newcomer".into(),
-                partitions: partitions(1),
-                ..Default::default()
-            },
-        );
+        let newcomer_setup = SessionAllocationSetup {
+            principal: "newcomer".into(),
+            partitions: partitions(1),
+            ..Default::default()
+        };
+        let newcomer = allocate_session(&cache, newcomer_setup);
 
         // The cache refilled to {oldest_live, refill}; both are stale by now,
         // and `newcomer` displaced `oldest_live`, the one unused the longest.

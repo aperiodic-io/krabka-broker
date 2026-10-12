@@ -102,9 +102,8 @@ async fn writer_groups_queued_produces_up_to_configured_cap() {
 async fn durable_sync_ack_waits_for_diskless_wal() {
     let dir = tempdir().expect("tempdir");
     let log = open_default_log(dir.path());
-    let (sync_started_tx, sync_started_rx) = oneshot::channel();
-    let (release_sync_tx, release_sync_rx) = oneshot::channel();
-    let wal: SharedWal = Arc::new(GatedWal::new(sync_started_tx, release_sync_rx));
+    let (wal, sync_started_rx, release_sync_tx) = GatedWal::gated_channel();
+    let wal: SharedWal = wal;
     let (tx, rx) = mpsc::channel(2);
     let writer = spawn_writer(
         dir.path(),

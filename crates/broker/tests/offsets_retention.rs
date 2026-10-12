@@ -135,22 +135,16 @@ async fn describe_configs_reports_a_named_knob_as_static() {
     let broker = Broker::start(config).await.unwrap();
     let client = client_for(&broker).await;
 
-    let described = client
-        .send(DescribeConfigsRequest {
-            resources: vec![describe_resource(
-                RESOURCE_TYPE_BROKER,
-                "1".to_string(),
-                Some(vec![
-                    OFFSETS_RETENTION_MINUTES.to_string(),
-                    OFFSETS_RETENTION_CHECK_INTERVAL_MS.to_string(),
-                ]),
-            )],
-            include_synonyms: false,
-            include_documentation: false,
-            ..Default::default()
-        })
-        .await
-        .expect("DescribeConfigs");
+    let target_keys = vec![
+        OFFSETS_RETENTION_MINUTES.to_string(),
+        OFFSETS_RETENTION_CHECK_INTERVAL_MS.to_string(),
+    ];
+    let res = describe_resource(RESOURCE_TYPE_BROKER, "1".to_string(), Some(target_keys));
+    let req = DescribeConfigsRequest {
+        resources: vec![res],
+        ..Default::default()
+    };
+    let described = client.send(req).await.expect("DescribeConfigs");
 
     let result = &described.results[0];
     check!(result.error_code == codes::NONE);

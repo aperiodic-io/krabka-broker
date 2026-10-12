@@ -27,14 +27,24 @@ use crate::support::{
     topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
 };
 
-async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
-    let dir = tempfile::TempDir::new().unwrap();
-    let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
-    config.heartbeat_timeout = krabka_units::secs(30);
-    let broker = Broker::start(config).await.unwrap();
-    broker.wait_until_group_coordinator_ready().await;
-    let bootstrap = broker.listen_addr().to_string();
-    (broker, bootstrap, dir)
+fn boot() -> std::pin::Pin<
+    Box<
+        impl std::future::Future<Output = (krabka_broker::BrokerHandle, String, tempfile::TempDir)>,
+    >,
+> {
+    Box::pin(async {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
+        config.heartbeat_timeout = krabka_units::secs(30);
+        let started = Box::pin(
+            support::start_group_coordinator_with_config()
+                .config(config)
+                .directory(dir)
+                .call(),
+        )
+        .await;
+        (started.broker, started.bootstrap, started.directory)
+    })
 }
 
 async fn create_topic(client: &Client, topic: &str, partitions: i32) {
@@ -367,10 +377,10 @@ async fn list_groups_includes_next_gen_consumer_group() {
         })
         .await
         .expect("ListGroups[share]");
+    let ids: Vec<_> = resp.groups.iter().map(|g| g.group_id.as_str()).collect();
     assert!(
-        !resp.groups.iter().any(|g| g.group_id == "glist"),
-        "consumer group glist must be excluded under types_filter=[share], got {:?}",
-        resp.groups.iter().map(|g| &g.group_id).collect::<Vec<_>>()
+        !ids.contains(&"glist"),
+        "consumer group glist must be excluded under types_filter=[share], got {ids:?}",
     );
 
     // No filter → glist appears exactly once, tagged "consumer".
@@ -545,13 +555,21 @@ async fn a_group_config_overrides_the_heartbeat_interval_of_its_group() {
     check!(intervals == [("g-tuned", 7_000), ("g-plain", 5_000)]);
 }
 
-async fn consumer_case(
+fn consumer_case(
     topic: &str,
     partitions: i32,
     client_id: &str,
-) -> (krabka_broker::BrokerHandle, tempfile::TempDir, Arc<Client>) {
-    let (broker, bootstrap, dir) = boot().await;
-    let client = Arc::new(connect_client(bootstrap.as_str(), Some(client_id)).await);
-    create_topic(&client, topic, partitions).await;
-    (broker, dir, client)
+) -> std::pin::Pin<
+    Box<
+        impl std::future::Future<Output = (krabka_broker::BrokerHandle, tempfile::TempDir, Arc<Client>)>,
+    >,
+> {
+    let topic = topic.to_owned();
+    let client_id = client_id.to_owned();
+    Box::pin(async move {
+        let (broker, bootstrap, dir) = boot().await;
+        let client = Arc::new(connect_client(bootstrap.as_str(), Some(&client_id)).await);
+        create_topic(&client, &topic, partitions).await;
+        (broker, dir, client)
+    })
 }

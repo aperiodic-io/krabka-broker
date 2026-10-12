@@ -93,11 +93,14 @@ fn the_snapshot_image_keeps_the_quorum_controls() {
 }
 
 async fn wait_for_leader(controller: &krabka_raft::ControllerHandle) {
-    let mut rx = controller.watch_leader();
-    tokio::time::timeout(Duration::from_secs(30), rx.wait_for(Option::is_some))
-        .await
-        .expect("no leader elected within 30s")
-        .expect("leader watch channel closed");
+    let mut leader_watch = controller.watch_leader();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while leader_watch.borrow().is_none() {
+            leader_watch.changed().await.expect("leader watch closed");
+        }
+    })
+    .await
+    .expect("no leader elected within 30s");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

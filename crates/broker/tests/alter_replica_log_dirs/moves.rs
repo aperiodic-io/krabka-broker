@@ -19,6 +19,17 @@ use crate::{
     wire::{CLIENT_ID, alter_replica_log_dirs},
 };
 
+fn target_dir_opposite_to_partition_0<'a>(
+    primary: &'a tempfile::TempDir,
+    extra: &'a tempfile::TempDir,
+) -> &'a std::path::Path {
+    if primary.path().join("t-0").exists() {
+        extra.path()
+    } else {
+        primary.path()
+    }
+}
+
 #[tokio::test]
 async fn alter_replica_log_dirs_moves_partitions_to_target_dir() {
     let n: i32 = 2;
@@ -33,12 +44,7 @@ async fn alter_replica_log_dirs_moves_partitions_to_target_dir() {
     // least-loaded; with n=2 each dir gets one). Pick the source dir
     // that DOES hold partition 0 and move both partitions to the
     // OTHER directory.
-    let primary_has_0 = primary.path().join("t-0").exists();
-    let target_dir = if primary_has_0 {
-        extra.path()
-    } else {
-        primary.path()
-    };
+    let target_dir = target_dir_opposite_to_partition_0(&primary, &extra);
 
     let resp = alter_replica_log_dirs(addr, target_dir, "t", vec![0, 1]).await;
     let topic_results: Vec<_> = resp
@@ -62,10 +68,10 @@ async fn alter_replica_log_dirs_moves_partitions_to_target_dir() {
     wait_for_move_complete(addr, target_dir, "t", &[0, 1]).await;
 
     // Both partitions now live in the target dir; the source is empty.
-    let source_dir = if primary_has_0 {
-        primary.path()
-    } else {
+    let source_dir = if target_dir == primary.path() {
         extra.path()
+    } else {
+        primary.path()
     };
     assert!(count_topic_dirs(target_dir, "t") == 2);
     assert!(count_topic_dirs(source_dir, "t") == 0);
@@ -121,13 +127,7 @@ async fn alter_replica_log_dirs_preserves_records_across_move() {
     .await;
     producer.flush().await.expect("flush");
 
-    // Pick the OTHER dir as the move target.
-    let primary_has_0 = primary.path().join("t-0").exists();
-    let target_dir = if primary_has_0 {
-        extra.path()
-    } else {
-        primary.path()
-    };
+    let target_dir = target_dir_opposite_to_partition_0(&primary, &extra);
 
     let resp = alter_replica_log_dirs(addr, target_dir, "t", vec![0]).await;
     let topic = resp

@@ -10,22 +10,13 @@ use std::time::{Duration, Instant};
 use krabka_metadata::{LeaderEpoch, MetadataRecord};
 
 use crate::{
-    docker::{
-        KAFKA_IMAGE, docker_run_kafka_tool_with_image, produce_lines_via_jvm, set_container_paused,
-    },
-    dump_log::{dump_log_in_container, grep_base_offsets, max_offset_in_dump},
-    mixed_cluster::{
-        DivergenceDirection, PartitionEpochDelta, SingleLeaderSetup, prepare_divergence,
-        single_leader_record,
-    },
-    topic_admin::{LEADER_WAIT, wait_for_described_leader},
+    docker::{KAFKA_IMAGE, docker_run_kafka_tool_with_image},
+    dump_log::grep_base_offsets,
+    test_support::truncation::*,
 };
 
-/// Steps 2-3 of Task 11. Force a real divergent suffix in a mixed cluster and
-/// assert:
-///  (a) the JVM follower truncates to converge on the Krabka leader, and
-///  (b) a kafka-console-consumer recovers. It continues without a fatal
-///      truncation/deserialization error after the suffix is rewritten.
+/// Recreates a shorter Krabka-led suffix, then verifies the JVM follower
+/// truncates it and resumes consumption from the leader's rewritten log.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires Docker + a published controller/data port; Linux-bound"]
 async fn kip320_jvm_follower_truncates_from_krabka_leader() {

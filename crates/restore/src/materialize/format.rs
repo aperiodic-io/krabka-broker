@@ -12,6 +12,8 @@ use std::{
 };
 
 use krabka_ids::LeaderEpoch;
+#[cfg(test)]
+use krabka_metadata::FeatureLevelRecord;
 use krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord};
 use krabka_remote_storage::{
     ArchiveVerifyReport, ChainHead, ChainStamp, RemoteLogSegmentState, WormChainRecord,
@@ -33,6 +35,19 @@ pub struct FormatTargetOutcome {
     pub cluster_id: Uuid,
     /// Metadata recovered from the optional controller snapshot.
     pub metadata: MetadataRestoreReport,
+}
+
+#[cfg(test)]
+fn feature_level_records<'a>(excluded: &'a [&str]) -> impl Iterator<Item = MetadataRecord> + 'a {
+    krabka_metadata::feature_registry()
+        .iter()
+        .filter(|registered| !excluded.contains(&registered.name()))
+        .map(|registered| {
+            MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
+                name: registered.name().to_owned(),
+                level: 0,
+            })
+        })
 }
 
 /// Format the target log directory, seed it with the recovered topics, and
@@ -438,6 +453,16 @@ mod tests {
         materialize::test_support::{args_from, partition_inventory},
     };
 
+    fn delete_marked_dump() -> RlmmCacheDump {
+        RlmmCacheDump {
+            partitions: vec![PartitionDump {
+                topic_id_partition: TopicIdPartition::new(uuid::Uuid::from_u128(7), "orders", 0),
+                segments: Vec::new(),
+                delete_state: Some(RemotePartitionDeleteState::DeletePartitionMarked),
+            }],
+        }
+    }
+
     #[test]
     fn seed_metadata_records_emits_every_topic_before_any_partition() {
         let orders_id = Uuid::new_v4();
@@ -497,13 +522,7 @@ mod tests {
         let source = tempfile::tempdir().expect("source tempdir");
         let target = tempfile::tempdir().expect("target tempdir");
         let source_path = source.path().join("snapshot");
-        let dump = RlmmCacheDump {
-            partitions: vec![PartitionDump {
-                topic_id_partition: TopicIdPartition::new(Uuid::from_u128(7), "orders", 0),
-                segments: Vec::new(),
-                delete_state: Some(RemotePartitionDeleteState::DeletePartitionMarked),
-            }],
-        };
+        let dump = delete_marked_dump();
         Snapshot {
             committed_offsets: vec![19],
             dump: dump.clone(),
@@ -544,13 +563,7 @@ mod tests {
             krabka_raft::serialize_metadata_snapshot(&image, 42).expect("metadata");
         let snapshot = Snapshot {
             committed_offsets: vec![19],
-            dump: RlmmCacheDump {
-                partitions: vec![PartitionDump {
-                    topic_id_partition: TopicIdPartition::new(Uuid::from_u128(7), "orders", 0),
-                    segments: Vec::new(),
-                    delete_state: Some(RemotePartitionDeleteState::DeletePartitionMarked),
-                }],
-            },
+            dump: delete_marked_dump(),
         };
         let rlmm_bytes = snapshot.encode();
         std::fs::write(&metadata_path, &metadata_bytes).unwrap();
@@ -693,23 +706,10 @@ mod tests {
         .expect("seed metadata");
 
         let mut expected = vec![feature];
-        expected.extend(
-            krabka_metadata::feature_registry()
-                .iter()
-                .filter(|registered| {
-                    !matches!(
-                        registered.name(),
-                        "metadata.version"
-                            | krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE
-                    )
-                })
-                .map(|registered| {
-                    MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-                        name: registered.name().to_owned(),
-                        level: 0,
-                    })
-                }),
-        );
+        expected.extend(feature_level_records(&[
+            "metadata.version",
+            krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE,
+        ]));
         expected.extend([
             epoch,
             MetadataRecord::V1Topic(TopicRecord {
@@ -773,24 +773,11 @@ mod tests {
         .expect("seed metadata");
 
         let mut expected = vec![group_version];
-        expected.extend(
-            krabka_metadata::feature_registry()
-                .iter()
-                .filter(|registered| {
-                    !matches!(
-                        registered.name(),
-                        "metadata.version"
-                            | "group.version"
-                            | krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE
-                    )
-                })
-                .map(|registered| {
-                    MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-                        name: registered.name().to_owned(),
-                        level: 0,
-                    })
-                }),
-        );
+        expected.extend(feature_level_records(&[
+            "metadata.version",
+            "group.version",
+            krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE,
+        ]));
         check!(records == expected);
     }
 

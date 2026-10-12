@@ -2486,13 +2486,13 @@ mod tests {
 
         fn authorize_by_resource_type(
             &self,
-            _source: &dyn AclSource,
-            _principal: &krabka_security::Principal,
-            _host: &std::net::SocketAddr,
-            _resource_type: krabka_metadata::ResourceType,
-            _operation: krabka_metadata::AclOperation,
+            src: &dyn AclSource,
+            p: &krabka_security::Principal,
+            h: &std::net::SocketAddr,
+            r: krabka_metadata::ResourceType,
+            o: krabka_metadata::AclOperation,
         ) -> AuthorizationResult {
-            AuthorizationResult::Allow
+            AllowAllAuthorizer.authorize_by_resource_type(src, p, h, r, o)
         }
     }
 
@@ -2703,10 +2703,8 @@ impl krabka_raft::OutboundDialer for RecordingDialer {
         addr: &str,
         options: krabka_client_core::ConnectionOptions,
     ) -> Result<krabka_client_core::Connection, krabka_client_core::ClientError> {
-        self.client_ids
-            .lock()
-            .unwrap()
-            .push(options.client_id.clone());
+        let recorded_id = options.client_id.clone();
+        self.client_ids.lock().unwrap().push(recorded_id);
         krabka_raft::PlaintextDialer
             .dial(target, addr, options)
             .await

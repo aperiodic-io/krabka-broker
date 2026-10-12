@@ -225,8 +225,7 @@ impl WalDeleteFloorRecord {
     pub fn to_bytes(&self) -> Result<Bytes, String> {
         let body = <serde_wincode::SerdeCompat<Self> as wincode::Serialize>::serialize(self)
             .map_err(|error| error.to_string())?;
-        let mut out = Vec::with_capacity(2 + body.len());
-        out.extend_from_slice(&Self::VERSION.to_be_bytes());
+        let mut out = Self::VERSION.to_be_bytes().to_vec();
         out.extend_from_slice(&body);
         Ok(out.into())
     }

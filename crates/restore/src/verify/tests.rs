@@ -11,7 +11,7 @@ use assert2::check;
 use bytes::{BufMut, BytesMut};
 use clap::Parser as _;
 use crc32c::crc32c;
-use krabka_object_store::fault::{FaultInjectingStore, FaultPolicy};
+use krabka_object_store::fault::FaultInjectingStore;
 use krabka_protocol::records::{Record, RecordBatch};
 use object_store::{ObjectStoreExt as _, PutPayload};
 use tempfile::TempDir;
@@ -85,13 +85,8 @@ async fn authenticated_size_mismatch_is_rejected_from_head_metadata() {
 
 #[tokio::test]
 async fn restore_read_rejects_an_object_that_grows_after_head() {
-    let backend = Arc::new(
-        FaultInjectingStore::new(
-            Arc::new(object_store::memory::InMemory::new()),
-            FaultPolicy::none(),
-        )
-        .with_get_overwrite(Bytes::from_static(b"123456")),
-    );
+    let backend =
+        Arc::new(FaultInjectingStore::memory().with_get_overwrite(Bytes::from_static(b"123456")));
     let key = Path::from("changing");
     backend
         .put(&key, PutPayload::from_static(b"123"))
@@ -529,11 +524,11 @@ async fn a_batch_whose_exclusive_end_overflows_is_rejected() {
         ..Default::default()
     });
 
-    let segment = write_segment(dir.path(), &fixture, &[]);
-    let error = verify_segment(&store, &partition, &segment)
+    let target_segment = write_segment(dir.path(), &fixture, &[]);
+    let err = verify_segment(&store, &partition, &target_segment)
         .await
-        .expect_err("exclusive offset overflow");
-    check!(matches!(error, RestoreError::TruncatedSegment { .. }));
+        .unwrap_err();
+    check!(matches!(err, RestoreError::TruncatedSegment { .. }));
 }
 
 #[tokio::test]
@@ -722,12 +717,12 @@ async fn malformed_leader_epoch_checkpoints_are_rejected() {
 
 #[tokio::test]
 async fn every_batch_reporting_unknown_timestamp_keeps_the_sentinel() {
-    let (dir, store, partition) = verification_context();
-    let fixture = segment_bytes(-1, -1);
+    let (ctx_dir, store, partition) = verification_context();
+    let bytes_fixture = segment_bytes(-1, -1);
 
-    let segment = write_segment(dir.path(), &fixture, &[]);
-    let verified = verify_segment(&store, &partition, &segment)
+    let target_segment = write_segment(ctx_dir.path(), &bytes_fixture, &[]);
+    let res = verify_segment(&store, &partition, &target_segment)
         .await
         .expect("verify");
-    check!(verified.facts.max_timestamp_ms == -1);
+    check!(res.facts.max_timestamp_ms == -1);
 }

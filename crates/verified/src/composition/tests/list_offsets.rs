@@ -4,25 +4,30 @@ use super::*;
 use crate::list_offsets::ListOffsetsSelectionDecision;
 
 fn visible_oracle(
-    offsets: &[u32],
-    timestamps: &[i64],
-    starts: &[i64],
+    record_offsets: &[u32],
+    record_timestamps: &[i64],
+    pending_starts: &[i64],
     frontiers: (i64, i64, i64),
     request: (i32, i8, i64),
     candidate_epoch: i32,
 ) -> ListOffsetsSelectionDecision {
     let boundary = if request.0 == -1 {
         if request.1 == 1 {
-            starts.iter().copied().chain([frontiers.2]).min().unwrap()
+            pending_starts
+                .iter()
+                .copied()
+                .chain([frontiers.2])
+                .min()
+                .unwrap()
         } else {
             frontiers.2
         }
     } else {
         frontiers.1
     };
-    offsets
+    record_offsets
         .iter()
-        .zip(timestamps)
+        .zip(record_timestamps)
         .find_map(|(&offset, &timestamp)| {
             let offset = frontiers.0 + i64::from(offset);
             (offset < boundary && timestamp >= request.2).then_some(

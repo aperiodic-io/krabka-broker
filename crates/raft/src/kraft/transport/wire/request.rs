@@ -29,6 +29,15 @@ use super::codec::{
 };
 use crate::kraft::types::{Epoch, NodeId};
 
+macro_rules! singleton_metadata_topic {
+    ($topic:ty, $partition:expr) => {{
+        let mut topic: $topic = Default::default();
+        topic.topic_name = METADATA_TOPIC.to_string();
+        topic.partitions = vec![$partition];
+        topic
+    }};
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -186,17 +195,16 @@ impl PeerRequest {
                             ..Default::default()
                         })
                         .collect(),
-                    topics: vec![bqe_req::TopicData {
-                        topic_name: METADATA_TOPIC.to_string(),
-                        partitions: vec![bqe_req::PartitionData {
+                    topics: vec![singleton_metadata_topic!(
+                        bqe_req::TopicData,
+                        bqe_req::PartitionData {
                             partition_index: METADATA_PARTITION,
                             voter_directory_id: uuid_to_wire(voter_directory_id),
                             leader_id: node_to_wire(leader_id),
                             leader_epoch: epoch_to_wire(leader_epoch),
                             ..Default::default()
-                        }],
-                        ..Default::default()
-                    }],
+                        }
+                    )],
                     ..Default::default()
                 };
                 Some(encode_body(&req, QUORUM_EPOCH_VERSION))
@@ -212,9 +220,9 @@ impl PeerRequest {
                 // v0, `PreferredCandidates` from v1.
                 let req = EndQuorumEpochRequest {
                     cluster_id: cluster_id_to_wire(cluster_id),
-                    topics: vec![eqe_req::TopicData {
-                        topic_name: METADATA_TOPIC.to_string(),
-                        partitions: vec![eqe_req::PartitionData {
+                    topics: vec![singleton_metadata_topic!(
+                        eqe_req::TopicData,
+                        eqe_req::PartitionData {
                             partition_index: METADATA_PARTITION,
                             leader_id: node_to_wire(leader_id),
                             leader_epoch: epoch_to_wire(leader_epoch),
@@ -231,9 +239,8 @@ impl PeerRequest {
                                 })
                                 .collect(),
                             ..Default::default()
-                        }],
-                        ..Default::default()
-                    }],
+                        }
+                    )],
                     ..Default::default()
                 };
                 Some(encode_body(&req, QUORUM_EPOCH_VERSION))

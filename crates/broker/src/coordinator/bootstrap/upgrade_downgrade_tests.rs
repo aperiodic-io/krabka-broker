@@ -13,7 +13,7 @@ use super::{
     replay::finalize,
     test_support::{
         bare_coordinator, classic_group_record, consumer_group_records, replay_classic_residue,
-        replay_stream,
+        replay_values,
     },
 };
 use crate::coordinator::{
@@ -167,10 +167,7 @@ async fn upgraded_group_without_tombstone_replays_as_consumer() {
 
     let coord = bare_coordinator();
     let stream = consumer_group_records(1, None);
-    let acc = replay_stream(
-        &coord,
-        stream.into_iter().map(|(key, value)| (key, Some(value))),
-    );
+    let acc = replay_values(&coord, stream);
     finalize(&coord, acc).await;
 
     assert!(coord.group_type("g") != Some(GroupType::Classic));
@@ -196,10 +193,7 @@ async fn member_with_classic_block_replays_facade() {
             supported_protocols: vec![("range".into(), bytes::Bytes::from_static(b"meta"))],
         }),
     );
-    let acc = replay_stream(
-        &coord,
-        stream.into_iter().map(|(key, value)| (key, Some(value))),
-    );
+    let acc = replay_values(&coord, stream);
     finalize(&coord, acc).await;
 
     let handle = coord.find("g").expect("consumer actor present");

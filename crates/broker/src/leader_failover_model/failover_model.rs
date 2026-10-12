@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     elr::state::PartitionElr,
-    leader_election::{FailoverDecision, failover_one},
+    leader_election::{FailoverDecision, Ladder, failover_one},
 };
 
 impl FailoverModel {
@@ -140,21 +140,18 @@ impl Model for FailoverModel {
                     }
                     let pr = pr_of(&state);
                     let alive: HashSet<NodeId> = state.alive.iter().copied().collect();
-                    let decision = failover_one(
-                        &pr,
-                        dead,
-                        &alive,
-                        &self.witnesses,
-                        // The published eligible-leader set, as the production
-                        // scan reads it out of the image. The model carries no
-                        // last-known ELR, so no partition in it lacks a leader.
-                        &PartitionElr {
-                            eligible_leader_replicas: state.elr.clone(),
-                            last_known_elr: Vec::new(),
-                        },
-                        self.strategy,
-                        self.unclean_enabled,
-                    );
+                    let elr = PartitionElr {
+                        eligible_leader_replicas: state.elr.clone(),
+                        last_known_elr: Vec::new(),
+                    };
+                    let ladder = Ladder::builder()
+                        .alive(&alive)
+                        .witnesses(&self.witnesses)
+                        .elr(&elr)
+                        .strategy(self.strategy)
+                        .unclean_enabled(self.unclean_enabled)
+                        .build();
+                    let decision = failover_one(&pr, dead, &ladder);
                     assert_decision(self, &state, dead, &decision);
                     match decision {
                         FailoverDecision::Elect {

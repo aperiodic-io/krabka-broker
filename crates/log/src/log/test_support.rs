@@ -28,6 +28,10 @@ use crate::{
 /// budget never clips the result.
 pub const NO_LIMIT: ByteSize = gibibytes(4);
 
+pub fn assert_log_end_offset(log: &Log, expected: Offset) {
+    assert2::assert!(log.log_end_offset() == expected);
+}
+
 pub fn sample_batch(n: i32) -> RecordBatch {
     let mut b = RecordBatch {
         base_offset: 0, // overwritten by Log::append

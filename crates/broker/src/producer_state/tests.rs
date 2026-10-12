@@ -104,16 +104,13 @@ async fn a_late_commit_at_an_older_epoch_does_not_undo_a_marker() {
 #[tokio::test]
 async fn only_an_exact_retry_of_the_last_batch_is_duplicate() {
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            sequence: ProducerSequence(3),
-            delta: SequenceDelta(1),
-            offset: krabka_log::Offset(10),
-            ..Default::default()
-        },
-    )
-    .await;
+    let setup = ProducerCommitSetup {
+        sequence: ProducerSequence(3),
+        delta: SequenceDelta(1),
+        offset: krabka_log::Offset(10),
+        ..Default::default()
+    };
+    commit_fixture(&s, setup).await;
 
     check!(
         s.check("t", PartitionIndex(0), 1000, 0, 3, 1).await
@@ -233,14 +230,11 @@ async fn truncate_drops_dedup_entry_at_exact_offset_boundary() {
     // Truncating at an entry's last_offset removes that entry: the last
     // accepted record is no longer below the log end being retained.
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            offset: krabka_log::Offset(100),
-            ..Default::default()
-        },
-    )
-    .await; // last_offset 104
+    let setup = ProducerCommitSetup {
+        offset: krabka_log::Offset(100),
+        ..Default::default()
+    };
+    commit_fixture(&s, setup).await; // last_offset 104
     s.truncate("t", PartitionIndex(0), 104).await;
     assert!(s.check("t", PartitionIndex(0), 1000, 0, 0, 4).await == Decision::Append);
 }
@@ -281,6 +275,18 @@ async fn out_of_order_when_gap() {
     assert!(d == Decision::OutOfOrder);
 }
 
+async fn commit_epoch_five_prefix(state: &ProducerState) {
+    commit_fixture(
+        state,
+        ProducerCommitSetup {
+            epoch: ProducerEpoch(5),
+            delta: SequenceDelta(2),
+            ..Default::default()
+        },
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn lower_epoch_is_fenced() {
     let s = ProducerState::new();
@@ -310,15 +316,7 @@ async fn lower_epoch_is_fenced() {
 async fn higher_epoch_at_seq_zero_appends() {
     let s = ProducerState::new();
     // Epoch 5 committed sequences 0..=2 (last_sequence = 2).
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            epoch: ProducerEpoch(5),
-            delta: SequenceDelta(2),
-            ..Default::default()
-        },
-    )
-    .await;
+    commit_epoch_five_prefix(&s).await;
     // Same pid, epoch 6, base_sequence 0 — a fresh write, NOT a duplicate.
     let d = s.check("t", PartitionIndex(0), 1000, 6, 0, 0).await;
     assert!(d == Decision::Append);
@@ -334,15 +332,7 @@ async fn higher_epoch_at_seq_zero_appends() {
 #[tokio::test]
 async fn higher_epoch_continuing_sequence_is_out_of_order() {
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            epoch: ProducerEpoch(5),
-            delta: SequenceDelta(2),
-            ..Default::default()
-        },
-    )
-    .await;
+    commit_epoch_five_prefix(&s).await;
     check!(s.check("t", PartitionIndex(0), 1000, 6, 3, 0).await == Decision::OutOfOrder);
     check!(s.check("t", PartitionIndex(0), 1000, 6, 0, 0).await == Decision::Append);
     commit_fixture(

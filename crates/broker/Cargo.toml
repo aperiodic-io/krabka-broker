@@ -35,6 +35,7 @@ path = "src/bin/broker.rs"
 
 [dependencies]
 assert2 = { workspace = true }
+bon = { workspace = true }
 maplit = { workspace = true }
 krabka-audit = { workspace = true }
 krabka-protocol = { version = "0.6.0", default-features = false }

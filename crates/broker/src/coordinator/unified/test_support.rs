@@ -7,17 +7,16 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use super::{
-    actor::MetadataProvider,
-    config::NextGenConfig,
-    group_coordinator::GroupCoordinator,
-    persistence_next_gen, reconciler,
-    share::{self, config::ShareGroupConfig},
-    streams::{self, config::StreamsGroupConfig},
+use bytes::Bytes;
+
+pub(crate) use super::{
+    actor::MetadataProvider, config::NextGenConfig, group_coordinator::GroupCoordinator,
+    offsets_log::fake::InMemoryOffsetsLog, reconciler::ReconcileInput,
+    share::config::ShareGroupConfig, streams::config::StreamsGroupConfig,
 };
+use super::{persistence_next_gen, reconciler, share, streams};
 use crate::{
     codes::{COORDINATOR_LOAD_IN_PROGRESS, COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR},
-    coordinator::unified::offsets_log::fake::InMemoryOffsetsLog,
     error::BrokerError,
     metadata_source::MetadataSource,
     network::client::InterBrokerClient,
@@ -28,6 +27,17 @@ use crate::{
     },
     test_support::{FakeMetadataSource, KafkaErrorCode, UnixMillis, string_pairs},
 };
+
+pub(crate) type AppendedRecords = Vec<(Option<Bytes>, Option<Bytes>)>;
+
+pub(crate) async fn appended_offsets_records(log: &InMemoryOffsetsLog) -> AppendedRecords {
+    log.batches()
+        .await
+        .into_iter()
+        .flat_map(|batch| batch.records)
+        .map(|record| (record.key, record.value))
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MemberEpoch(pub i32);

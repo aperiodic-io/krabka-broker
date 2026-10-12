@@ -2,8 +2,8 @@
 //! own data dir rebuilds its metadata image from the checkpoint plus the log.
 
 use crate::harness::{
-    self as fixture, STAGGERED_TIMEOUTS, await_single_leader, await_until, metadata_log,
-    shutdown_nodes, start_cluster, three_voter_network, topic_record, voter_set,
+    self as fixture, await_single_leader, await_until, reopen_controller, shutdown_nodes,
+    start_cluster, three_voter_network, topic_record,
 };
 
 /// 4. Restart recovery: commit, snapshot, drop one engine, reopen it over its
@@ -52,26 +52,7 @@ async fn restart_recovers_image() {
     tokio::time::sleep(fixture::Duration::from_millis(50)).await;
 
     let victim_dir = dirs.get(&victim).unwrap().path().to_path_buf();
-    let reopened = fixture::KraftController::open(
-        victim_dir,
-        victim,
-        cid,
-        uuid::Uuid::nil(),
-        voter_set(&ids),
-        STAGGERED_TIMEOUTS[usize::try_from(victim.0 - 1).unwrap()],
-        None,
-        fixture::ControllerFetchMissLimit::default(),
-        fixture::MetadataRaftCommandQueueCapacity::default(),
-        fixture::MetadataRaftFetchMax::default(),
-        fixture::Arc::new(net.as_peer(victim)),
-        0,
-        krabka_units::prelude::bytes(0),
-        krabka_units::prelude::millis(0),
-        fixture::MetadataSnapshotFetchMax::default(),
-        metadata_log(),
-        krabka_raft::kraft::Activation::default(),
-    )
-    .expect("reopen");
+    let reopened = reopen_controller(&net, victim_dir, victim, cid, &ids);
     // The recovered image must contain the committed topic.
     assert2::assert!(reopened.current_image().topic("persistent").is_some());
     net.register(victim, reopened);

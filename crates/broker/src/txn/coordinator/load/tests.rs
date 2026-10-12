@@ -1,13 +1,9 @@
 //! A leadership change moves `__transaction_state-0` between two coordinators
 //! that share one partition log, as replication would.
 
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_metadata::{MetadataImage, NodeId};
-use tempfile::TempDir;
 
 use super::*;
 use crate::{
@@ -16,7 +12,7 @@ use crate::{
     producer_id_manager::ProducerIdManager,
     test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
     txn::{
-        coordinator::test_support::StateImageSetup,
+        coordinator::test_support::{StateImageSetup, test_prelude::*},
         log_record::{encode_key, encode_value},
         partitioner::partition_for_tid,
         state::{TopicPartition, TxnEntry, TxnState},

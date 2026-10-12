@@ -744,7 +744,12 @@ mod tests {
 
     /// A `Stable` group whose one member, `m1`, is the static member
     /// `instance-1`, and a `JoinGroup` v4 from a restarted `instance-1`.
-    fn stable_static_group_and_rejoin() -> (CoordinatorGroup, JoinGroupRequest) {
+    struct StaticGroupRejoin {
+        group: CoordinatorGroup,
+        request: JoinGroupRequest,
+    }
+
+    fn stable_static_group_and_rejoin() -> StaticGroupRejoin {
         use krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol;
 
         let mut group = completing_classic_group(&["m1"]);
@@ -770,7 +775,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        (group, request)
+        StaticGroupRejoin { group, request }
     }
 
     async fn send_join(handle: &GroupActorHandle, req: JoinGroupRequest) -> JoinResult {
@@ -800,17 +805,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn classic_stable_static_rejoin_persists_replaced_member() {
         let (coord, log) = make_coordinator();
-        let (group, request) = stable_static_group_and_rejoin();
-        let (handle, generation) = super::super::test_support::seed_classic_group(&coord, group);
+        let rejoin = stable_static_group_and_rejoin();
+        let seeded = super::super::test_support::seed_classic_group(&coord, rejoin.group);
 
-        let response = send_join(&handle, request).await;
+        let response = send_join(&seeded.handle, rejoin.request).await;
 
         check!(response.member_id.starts_with("instance-1-"));
         check!(
             response
                 == JoinResult {
                     error_code: codes::NONE,
-                    generation_id: generation,
+                    generation_id: seeded.generation,
                     protocol_type: Some("consumer".into()),
                     protocol_name: Some("range".into()),
                     leader: "m1".into(),
@@ -820,7 +825,7 @@ mod tests {
                 }
         );
         let persisted = last_classic_metadata(&log).await;
-        check!(persisted.generation == generation);
+        check!(persisted.generation == seeded.generation);
         check!(persisted.members.len() == 1);
         check!(persisted.members[0].member_id == response.member_id);
         check!(persisted.members[0].client_id == "client");
@@ -834,25 +839,25 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn classic_static_rejoin_append_failure_rolls_back_and_reports_error() {
         let (coord, log) = make_coordinator();
-        let (group, request) = stable_static_group_and_rejoin();
-        let (handle, generation) = super::super::test_support::seed_classic_group(&coord, group);
+        let rejoin = stable_static_group_and_rejoin();
+        let seeded = super::super::test_support::seed_classic_group(&coord, rejoin.group);
         log.fail_next
             .store(true, std::sync::atomic::Ordering::SeqCst);
 
-        let response = send_join(&handle, request).await;
+        let response = send_join(&seeded.handle, rejoin.request).await;
 
         check!(
             response
                 == JoinResult {
                     error_code: codes::NOT_COORDINATOR,
-                    generation_id: generation,
+                    generation_id: seeded.generation,
                     protocol_type: Some("consumer".into()),
                     protocol_name: Some("range".into()),
                     leader: "m1".into(),
                     ..JoinResult::default()
                 }
         );
-        let view = rpc::classic_inspect(&handle).await;
+        let view = rpc::classic_inspect(&seeded.handle).await;
         rpc::check_stable_classic_member(&view, "m1");
         check!(view.members[0].protocol_metadata == Bytes::from_static(b"subscription"));
         check!(view.members[0].assignment.as_deref() == Some(&b"assignment"[..]));

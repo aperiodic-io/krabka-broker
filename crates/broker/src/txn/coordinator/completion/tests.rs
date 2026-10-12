@@ -2,18 +2,15 @@
 //! decision helpers, and one completion attempt against a coordinator whose
 //! `__transaction_state-0` partition and data partition are real logs.
 
-use std::sync::Arc;
-
 use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_metadata::{MetadataImage, NodeId};
-use tempfile::TempDir;
 
 use super::*;
 use crate::{
     test_support::PartitionCount,
-    txn::{coordinator::test_support::StateImageSetup, state::TopicPartition},
+    txn::{
+        coordinator::test_support::{StateImageSetup, test_prelude::*},
+        state::TopicPartition,
+    },
 };
 
 const TID: &str = "tid-completion";

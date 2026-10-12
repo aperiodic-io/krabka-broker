@@ -9,19 +9,8 @@
 //! it out (`0::1`).
 
 use assert2::assert;
-use krabka_metadata::{
-    LeaderEpoch, LeaderRecoveryState, PartitionRecoveryRecord, PartitionUpdateRecord,
-};
 
 use super::*;
-use crate::{
-    config_keys::{ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS},
-    leader_election::test_support::{
-        ElectionSetup, ElrFinalization, ExpectedPartitionSetup, expected_partition,
-        img_with_partition,
-    },
-    metrics::BrokerMetrics,
-};
 
 /// The image of a partition `t-0` with replicas `[1, 2, 3]`, led by broker 1
 /// alone in its record, and with `published` as its ELR state.
@@ -35,6 +24,14 @@ fn leaderless_image(published: &str) -> MetadataImage {
         ],
         ..Default::default()
     })
+}
+
+async fn setup_liveness(alive: &[u64]) -> ControllerLivenessState {
+    let l = ControllerLivenessState::new(krabka_units::secs(10));
+    for &n in alive {
+        l.record_heartbeat(n).await;
+    }
+    l
 }
 
 /// The records an unfence election writes: broker `leader` takes the
@@ -161,12 +158,10 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
             unclean_elections: 0,
         },
     ];
+
     for case in cases {
         let img = leaderless_image(case.published);
-        let l = ControllerLivenessState::new(krabka_units::secs(10));
-        for &n in case.alive {
-            l.record_heartbeat(n).await;
-        }
+        let l = setup_liveness(case.alive).await;
         let metrics = BrokerMetrics::new();
 
         let changes = compute_unfence_changes(&img, NodeId(case.unfenced), &l, &metrics).await;
@@ -220,10 +215,7 @@ async fn an_unfence_leaves_alone_what_it_cannot_elect() {
     ];
     for case in cases {
         let img = leaderless_image(case.published);
-        let l = ControllerLivenessState::new(krabka_units::secs(10));
-        for &n in case.alive {
-            l.record_heartbeat(n).await;
-        }
+        let l = setup_liveness(case.alive).await;
 
         let changes =
             compute_unfence_changes(&img, NodeId(case.unfenced), &l, &BrokerMetrics::new()).await;

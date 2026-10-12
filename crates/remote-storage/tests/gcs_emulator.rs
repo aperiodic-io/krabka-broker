@@ -422,21 +422,21 @@ async fn a_deleted_segment_is_gone_from_the_bucket() {
 }
 
 /// `with_worm` gates archive startup on `Buckets.get`, and a bucket with
+async fn assert_worm_startup_error(versioned: bool, expected_msg: &str) {
+    let server = FakeGcs::start().await;
+    let config = gcs_config(&server, server.create_bucket(versioned).await);
+
+    let storage = S3RemoteStorage::from_gcs_config(&config).expect("open the emulator bucket");
+    assert!(let Err(error) = storage.with_worm(&WormConfig::default()));
+    check!(error.to_string().contains(expected_msg));
+}
+
 /// neither versioning nor a retention policy fails that gate against a real
 /// server rather than only against a stubbed response body.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn worm_startup_refuses_an_unversioned_emulator_bucket() {
-    let server = FakeGcs::start().await;
-    let config = gcs_config(&server, server.create_bucket(false).await);
-
-    let storage = S3RemoteStorage::from_gcs_config(&config).expect("open the emulator bucket");
-    assert!(let Err(error) = storage.with_worm(&WormConfig::default()));
-    check!(
-        error
-            .to_string()
-            .contains("requires GCS versioning enabled")
-    );
+    assert_worm_startup_error(false, "requires GCS versioning enabled").await;
 }
 
 /// The next rung of the same gate: versioning alone is not a WORM bucket. GCS
@@ -445,10 +445,5 @@ async fn worm_startup_refuses_an_unversioned_emulator_bucket() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn worm_startup_refuses_a_versioned_bucket_with_no_retention_policy() {
-    let server = FakeGcs::start().await;
-    let config = gcs_config(&server, server.create_bucket(true).await);
-
-    let storage = S3RemoteStorage::from_gcs_config(&config).expect("open the emulator bucket");
-    assert!(let Err(error) = storage.with_worm(&WormConfig::default()));
-    check!(error.to_string().contains("no GCS retention policy"));
+    assert_worm_startup_error(true, "no GCS retention policy").await;
 }
