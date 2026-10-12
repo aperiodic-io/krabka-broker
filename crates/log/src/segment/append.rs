@@ -17,7 +17,7 @@ use super::{
     io::{write_all, write_all_vectored},
     lifecycle::WriteSnapshot,
 };
-use crate::error::LogError;
+use crate::{VerbatimBatch, error::LogError};
 
 /// One batch's encoded bytes, as an append path has them.
 #[derive(Clone, Copy)]
@@ -184,7 +184,7 @@ impl Segment {
     /// `writev` without a copy. Through `O_DIRECT`, the writer copies the
     /// batch behind the partial last block and writes whole blocks, and the
     /// batch joins the bytes kept in memory for reads.
-    fn write_bytes(&mut self, batch: BatchBytes<'_>) -> std::io::Result<()> {
+    fn write_bytes(&mut self, batch: BatchBytes<'_>, chunk_ends: &[usize]) -> std::io::Result<()> {
         let Some(mode) = self.direct.as_mut() else {
             return match batch {
                 BatchBytes::Whole(bytes) => write_all(&*self.io, &self.log_file, bytes),
@@ -205,7 +205,11 @@ impl Segment {
         mode.writer.append(parts, |file, buf, offset| {
             io.write_direct(file, buf, offset)
         })?;
-        mode.cache.push(cached);
+        if chunk_ends.is_empty() {
+            mode.cache.push(cached);
+        } else {
+            mode.cache.push_group(&cached, chunk_ends);
+        }
         Ok(())
     }
 
@@ -228,12 +232,55 @@ impl Segment {
         let position = self.log_size;
         let previous = self.write_snapshot();
         let index_entry = self.index_entry_for(position, last_offset, index_interval)?;
-        if let Err(error) = self.write_bytes(batch) {
+        if let Err(error) = self.write_bytes(batch, &[]) {
             self.rollback_failed_write(position, previous)?;
             return Err(error.into());
         }
         self.log_size = new_log_size;
         self.finish_append(position, previous, index_entry, last_offset, max_timestamp)
+    }
+
+    /// Write a validated group once, then build each batch's sparse indexes.
+    /// Any failure restores the segment to the start of the group.
+    pub(crate) fn append_verbatim_group(
+        &mut self,
+        batches: &[(&VerbatimBatch, Offset)],
+        index_interval: ByteSize,
+    ) -> Result<(), LogError> {
+        self.ensure_writable()?;
+        let size = batches.iter().map(|(batch, _)| batch.bytes.len()).sum();
+        let mut bytes = bytes::BytesMut::with_capacity(size);
+        let mut chunk_ends = Vec::with_capacity(batches.len());
+        for &(batch, base) in batches {
+            let mut header = [0; HEADER_LEN];
+            header.copy_from_slice(&batch.bytes[..HEADER_LEN]);
+            patch_base_offset_and_leader_epoch(&mut header, base.0, batch.leader_epoch.0);
+            bytes.extend_from_slice(&header);
+            bytes.extend_from_slice(&batch.bytes[HEADER_LEN..]);
+            chunk_ends.push(bytes.len());
+        }
+        let bytes = bytes.freeze();
+        let start = self.log_size;
+        let snapshot = self.write_snapshot();
+        let result = (|| {
+            self.write_bytes(BatchBytes::Whole(&bytes), &chunk_ends)?;
+            for &(batch, base) in batches {
+                let position = self.log_size;
+                let (last, size) =
+                    self.append_coordinates(base.0, batch.last_offset_delta, batch.bytes.len())?;
+                let entry = self.index_entry_for(position, last, index_interval)?;
+                self.log_size = size;
+                self.record_batch(last, batch.max_timestamp);
+                if let Some(entry) = entry {
+                    self.append_index_entries(entry)?;
+                }
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            self.rollback_failed_write(start, snapshot)?;
+        }
+        result
     }
 
     /// Publish the completed write and roll back its bytes if an index write fails.

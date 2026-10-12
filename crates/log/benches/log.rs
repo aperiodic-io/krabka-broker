@@ -18,7 +18,7 @@ use std::{
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use krabka_ids::{LeaderEpoch, Offset, ProducerId};
-use krabka_log::{Log, LogConfig, VerbatimBatch};
+use krabka_log::{Log, LogConfig, SegmentAllocation, VerbatimBatch};
 use krabka_protocol::records::RecordBatch;
 use krabka_units::prelude::{ByteSize, gibibytes, kibibytes, mebibytes};
 use tempfile::tempdir;
@@ -146,6 +146,47 @@ fn bench_append_large_message_paths(c: &mut Criterion) {
         });
     }
 
+    group.finish();
+}
+
+fn bench_append_direct_groups(c: &mut Criterion) {
+    let Some(path) = std::env::var_os("KRABKA_DIRECT_BENCH_DIR") else {
+        return;
+    };
+    let batch = make_verbatim_batch(1, 64);
+    let mut group = c.benchmark_group("log/direct_groups");
+    for count in [8, 32, 64] {
+        group.throughput(criterion::Throughput::Elements(count));
+        let batches = vec![&batch; usize::try_from(count).unwrap()];
+        for coalesce in [false, true] {
+            let dir = tempfile::tempdir_in(&path).unwrap();
+            let mut log = Log::open(
+                dir.path(),
+                LogConfig {
+                    segment_allocation: SegmentAllocation::Preallocate,
+                    ..LogConfig::default()
+                },
+            )
+            .unwrap();
+            log.append_verbatim(&batch).unwrap();
+            assert2::assert!(
+                log.try_append_verbatim_group(&batches).is_some(),
+                "benchmark directory must support Direct I/O"
+            );
+            let mode = if coalesce { "coalesced" } else { "individual" };
+            group.bench_function(format!("{mode}_{count}"), |b| {
+                b.iter(|| {
+                    if coalesce && let Some(result) = log.try_append_verbatim_group(&batches) {
+                        result.unwrap();
+                    } else {
+                        for &batch in &batches {
+                            log.append_verbatim(batch).unwrap();
+                        }
+                    }
+                });
+            });
+        }
+    }
     group.finish();
 }
 
@@ -449,6 +490,7 @@ criterion_group!(
     benches,
     bench_append_record_sizes,
     bench_append_large_message_paths,
+    bench_append_direct_groups,
     bench_append_handoff,
     bench_file_write_shapes,
     bench_read,

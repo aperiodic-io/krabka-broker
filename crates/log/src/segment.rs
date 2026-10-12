@@ -239,10 +239,16 @@ impl Segment {
     /// index is full one entry early.
     #[must_use]
     pub(crate) fn indexes_full(&self, segment_index_size: ByteSize) -> bool {
+        self.indexes_full_after(segment_index_size, 0)
+    }
+
+    /// Check capacity with at most one new entry in each index per batch.
+    pub(crate) fn indexes_full_after(&self, segment_index_size: ByteSize, batches: usize) -> bool {
         let max_entries = |entry_size: usize| {
             segment_index_size.bytes_u64() / u64::try_from(entry_size).unwrap_or(u64::MAX)
         };
-        let entries = |count: usize| u64::try_from(count).unwrap_or(u64::MAX);
+        let entries =
+            |count: usize| u64::try_from(count.saturating_add(batches)).unwrap_or(u64::MAX);
         entries(self.offset_index.entry_count()) >= max_entries(OFFSET_ENTRY_SIZE)
             || entries(self.time_index.entry_count()).saturating_add(1)
                 >= max_entries(TIME_ENTRY_SIZE)

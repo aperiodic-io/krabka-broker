@@ -25,6 +25,9 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ### Fixed
 
+- Queued ordinary Produce batches under `preallocate=true` share one aligned
+  Direct I/O write when they fit in the active segment and total at most 1 MiB.
+  This reduces synchronous writes and repeated block padding under load.
 - Sendfile fetches read only batch headers when scanning large batches, avoiding
   synchronous reads of cold payload pages during backlog consumption. Small
   batches retain buffered header scans.

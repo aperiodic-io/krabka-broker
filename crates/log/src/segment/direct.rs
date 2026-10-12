@@ -351,6 +351,41 @@ impl TailCache {
         }
     }
 
+    /// Record the batches of one coalesced write, `group[..ends[0]]`,
+    /// `group[ends[0]..ends[1]]` and so on, appended at [`Self::end`].
+    ///
+    /// A slice of `group` keeps the whole group allocation alive, so a batch
+    /// that stays in the window gets storage of its own: otherwise one small
+    /// cached batch would hold up to the group's full size and the window
+    /// would no longer be bounded by `cap`. A batch that this same push
+    /// evicts is pushed as a slice and dropped at once, so only the
+    /// survivors are copied.
+    pub(crate) fn push_group(&mut self, group: &Bytes, ends: &[usize]) {
+        // Walking back from the newest batch, the survivors are those whose
+        // bytes still fit in `cap`; the newest survives regardless.
+        let mut kept = 0usize;
+        let mut first_kept = ends.len();
+        for i in (0..ends.len()).rev() {
+            let start = if i == 0 { 0 } else { ends[i - 1] };
+            let len = ends[i] - start;
+            if first_kept != ends.len() && kept + len > self.cap {
+                break;
+            }
+            kept += len;
+            first_kept = i;
+        }
+        let mut start = 0;
+        for (i, &end) in ends.iter().enumerate() {
+            let batch = if i >= first_kept {
+                Bytes::copy_from_slice(&group[start..end])
+            } else {
+                group.slice(start..end)
+            };
+            self.push(batch);
+            start = end;
+        }
+    }
+
     /// Copy `[pos, pos + out.len())` into `out` and return true when the whole
     /// range is in the window. Return false and leave `out` as it is when it
     /// is not.
@@ -826,6 +861,36 @@ mod tests {
                     == Some(all[usize::try_from(start - 1000).unwrap()..].to_vec())
             );
             check!(read(&cache, start - 1, 1).is_none());
+        }
+    }
+
+    /// A coalesced write leaves the same window as pushing its batches one
+    /// by one, and no batch left in the window shares the group's allocation,
+    /// so the window still holds at most `cap` bytes (or the newest batch).
+    #[test]
+    fn tail_cache_group_push_matches_single_pushes_and_detaches_survivors() {
+        for cap in [1000, 60, 59, 50, 30, 29, 0] {
+            let (single, all) = three_chunks(cap);
+            let group = Bytes::from(all.clone());
+            let mut grouped = TailCache::new(cap, 1000);
+            grouped.push_group(&group, &[10, 30, 60]);
+            check!(
+                (grouped.start(), grouped.end()) == (single.start(), single.end()),
+                "cap {cap}"
+            );
+            let start = single.start();
+            let len = 1060 - usize::try_from(start).unwrap();
+            check!(
+                read(&grouped, start, len) == read(&single, start, len),
+                "cap {cap}"
+            );
+            let group_range = group.as_ptr().addr()..group.as_ptr().addr() + group.len();
+            for chunk in &grouped.chunks {
+                check!(
+                    !group_range.contains(&chunk.as_ptr().addr()),
+                    "cap {cap}: a retained batch still points into the group"
+                );
+            }
         }
     }
 

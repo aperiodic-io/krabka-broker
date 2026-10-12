@@ -52,6 +52,7 @@ mod timestamp;
 mod transaction;
 mod truncate;
 mod verbatim;
+mod verbatim_group;
 mod verification;
 
 pub use self::{

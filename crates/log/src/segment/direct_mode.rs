@@ -52,6 +52,10 @@ impl Drop for DirectMode {
 }
 
 impl Segment {
+    pub(crate) fn writes_direct(&self) -> bool {
+        self.direct.is_some()
+    }
+
     /// Write this segment's appends through `O_DIRECT` from here on, keeping
     /// up to `tail_cache` of the newest bytes in memory for reads.
     ///
