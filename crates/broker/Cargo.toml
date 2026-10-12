@@ -38,31 +38,31 @@ assert2 = { workspace = true }
 maplit = { workspace = true }
 krabka-audit = { workspace = true }
 krabka-protocol = { version = "0.6.0", default-features = false }
-krabka-telemetry = { version = "1.0.2", path = "../telemetry" }
-krabka-records-legacy = { version = "1.0.2", path = "../records-legacy" }
-krabka-log = { version = "1.0.2", path = "../log" }
+krabka-telemetry = { version = "1.0.3", path = "../telemetry" }
+krabka-records-legacy = { version = "1.0.3", path = "../records-legacy" }
+krabka-log = { version = "1.0.3", path = "../log" }
 krabka-ids = { version = "0.6.0" }
 krabka-compression = { version = "0.6.0", default-features = false }
-krabka-raft = { version = "1.0.2", path = "../raft" }
-krabka-kraft-core = { version = "1.0.2", path = "../kraft-core" }
-krabka-verified = { version = "1.0.2", path = "../verified" }
+krabka-raft = { version = "1.0.3", path = "../raft" }
+krabka-kraft-core = { version = "1.0.3", path = "../kraft-core" }
+krabka-verified = { version = "1.0.3", path = "../verified" }
 # `#[derive(RegisterMetrics)]`: `BrokerMetrics` names, helps and constructs each
 # metric once, on its field.
-krabka-macros = { version = "1.0.2", path = "../macros" }
+krabka-macros = { version = "1.0.3", path = "../macros" }
 # Kafka's `meta.properties` is read and written with the formatter's own
 # `MetaProperties`, so the file has one parser and one writer. Tests such as `bootstrap_consumption`,
 # `cli_smoke` and `format_features` also call `krabka_format::run_from_args` to
 # format a log directory before they boot a broker: a subprocess would need a
 # Cargo working tree, which a Bazel test sandbox does not have.
-krabka-format = { version = "1.0.2", path = "../format" }
+krabka-format = { version = "1.0.3", path = "../format" }
 krabka-voters = { version = "0.6.0" }
 krabka-metadata = { version = "0.6.0" }
-krabka-authz = { version = "1.0.2", path = "../authz" }
-krabka-remote-storage = { version = "1.0.2", path = "../remote-storage" }
-krabka-remote-storage-topic = { version = "1.0.2", path = "../remote-storage-topic" }
-krabka-object-store = { version = "1.0.2", path = "../object-store" }
+krabka-authz = { version = "1.0.3", path = "../authz" }
+krabka-remote-storage = { version = "1.0.3", path = "../remote-storage" }
+krabka-remote-storage-topic = { version = "1.0.3", path = "../remote-storage-topic" }
+krabka-object-store = { version = "1.0.3", path = "../object-store" }
 krabka-client-core = { version = "0.6.0" }
-krabka-throttle = { version = "1.0.2", path = "../throttle" }
+krabka-throttle = { version = "1.0.3", path = "../throttle" }
 krabka-units = { workspace = true }
 krabka-security.workspace = true
 qubit-clock = { workspace = true }
@@ -191,7 +191,7 @@ krabka-broker = { path = ".", features = ["test-helpers"] }
 # `krabka-docgen` renders (see docs/docgen-contract.md). No production path
 # enables the feature, so it is turned on here to keep the trace shape under
 # test. Bazel reads the feature off the same table.
-krabka-raft = { version = "1.0.2", path = "../raft", features = ["scenarios"] }
+krabka-raft = { version = "1.0.3", path = "../raft", features = ["scenarios"] }
 # `jvm_acceptance_tiered`'s restore case rebuilds a log directory from the
 # MinIO bucket this crate's own tiered-storage path filled, then boots a broker
 # on it and points the JVM console consumer at that. Called in process for the
@@ -199,7 +199,7 @@ krabka-raft = { version = "1.0.2", path = "../raft", features = ["scenarios"] }
 # `krabka-restore` boots a broker to read its output back -- which Cargo and
 # `//bazel:defs.bzl` both allow, because a library and its test binaries are
 # separate compilations and neither library depends on the other.
-krabka-restore = { version = "1.0.2", path = "../restore" }
+krabka-restore = { version = "1.0.3", path = "../restore" }
 # Drives the relocated `client_admin_*` suites, which boot an in-process
 # broker to exercise the admin client end to end.
 krabka-client-admin = { version = "0.6.0" }
@@ -209,7 +209,7 @@ krabka-client-producer = { version = "0.6.0" }
 # real-Kafka Docker capture (`describe_groups_jvm.rs`).
 krabka-client-core = { version = "0.6.0", features = ["mock"] }
 krabka-ids = { version = "0.6.0" }
-krabka-records-legacy = { version = "1.0.2", path = "../records-legacy" }
+krabka-records-legacy = { version = "1.0.3", path = "../records-legacy" }
 krabka-protocol = { version = "0.6.0", default-features = false }
 # Serialize the captured real-Kafka DescribeGroups fixture as JSON.
 serde_json = { workspace = true }

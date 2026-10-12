@@ -24,8 +24,8 @@ heap-profiling = ["dep:jemalloc_pprof"]
 
 [dependencies]
 assert2 = { workspace = true }
-krabka-logfmt = { version = "1.0.2", path = "../logfmt" }
-krabka-macros = { version = "1.0.2", path = "../macros" }
+krabka-logfmt = { version = "1.0.3", path = "../logfmt" }
+krabka-macros = { version = "1.0.3", path = "../macros" }
 krabka-trace-context = { version = "0.6.0" }
 krabka-units = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }

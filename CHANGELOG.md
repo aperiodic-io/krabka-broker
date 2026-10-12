@@ -23,8 +23,21 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-12
+
+1.0.3 changes no on-disk format and adds no setting, so it upgrades from 1.0.2
+or 1.0.1 in place and rolls back to 1.0.2 the same way. A rollback to 1.0.1
+follows the 1.0.2 notes below.
+
 ### Fixed
 
+- A consumer catching up on data that is no longer in the page cache no longer
+  reads record payloads to find batch boundaries. In 1.0.2, a plaintext
+  (`sendfile`) fetch found the batch boundaries of a run of large batches by
+  reading 16 KiB at each one, with the partition's log mutex held. On a cold
+  backlog each of those reads went to disk, which slowed the drain and held up
+  appends to the same partition. A fetch now reads only the 61-byte header at
+  a large batch, and keeps buffered scans for runs of small batches (#1359).
 - Controller-side admission prevents stale topic UUID deletes and incremental
   config updates from affecting recreated topics or overwriting newer settings.
 - Request byte limits reserve capacity before allocating and reading a frame
@@ -86,9 +99,6 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 - Queued ordinary Produce batches under `preallocate=true` share one aligned
   Direct I/O write when they fit in the active segment and total at most 1 MiB.
   This reduces synchronous writes and repeated block padding under load.
-- Sendfile fetches read only batch headers when scanning large batches, avoiding
-  synchronous reads of cold payload pages during backlog consumption. Small
-  batches retain buffered header scans.
 
 ### Changed
 
@@ -1486,7 +1496,8 @@ robot-head/crabka.
 - An audit stamp carries the value that its freeze signature covers.
 - The release publishes the image digest that cosign signed.
 
-[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.3
 [1.0.2]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.2
 [1.0.1]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.1
 [1.0.0]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.0
