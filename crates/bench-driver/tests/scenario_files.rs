@@ -3,7 +3,7 @@
 //! `bench/scenarios/*.yaml` is an operator-written corpus that lives outside
 //! this crate, so nothing linked it to the `Scenario` type. When the dimensioned
 //! fields grew units, all twelve files stopped parsing and no test noticed.
-//! This harness closes that gap. It runs each file through the same `serde_yaml`
+//! This harness closes that gap. It runs each file through the same `serde_saphyr`
 //! path that `main.rs` uses, with one nextest process per scenario, so a broken
 //! file names itself.
 //!
@@ -99,7 +99,7 @@ fn scenario_paths() -> Vec<PathBuf> {
 /// Loads one scenario file and checks it describes a runnable benchmark.
 fn scenario_file(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let yaml = std::fs::read_to_string(path)?;
-    let scenario: Scenario = serde_yaml::from_str(&yaml)
+    let scenario: Scenario = serde_saphyr::from_str(&yaml)
         .map_err(|error| format!("{} does not load: {error}", path.display()))?;
 
     check!(!scenario.name.is_empty());
@@ -122,8 +122,8 @@ fn scenario_file(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     // The quantities survive a round trip through the operator-facing encoding,
     // so a scenario echoed into a report reads back as the same benchmark.
-    let reencoded = serde_yaml::to_string(&scenario)?;
-    let reparsed: Scenario = serde_yaml::from_str(&reencoded)?;
+    let reencoded = serde_saphyr::to_string(&scenario)?;
+    let reparsed: Scenario = serde_saphyr::from_str(&reencoded)?;
     assert!(reparsed == scenario);
 
     Ok(())

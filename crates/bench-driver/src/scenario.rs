@@ -684,7 +684,7 @@ batch_size: 16KiB
 duration: 60s
 warmup: 10s
 ";
-        let s: Scenario = serde_yaml::from_str(y).expect("parse");
+        let s: Scenario = serde_saphyr::from_str(y).expect("parse");
         check!(s.name.as_str() == "small-msg-saturate");
         check!(s.partitions == 6);
         check!(s.msg_size == bytes(100));
@@ -707,7 +707,7 @@ name: bare
 mode:
   kind: saturate
 ";
-        let s: Scenario = serde_yaml::from_str(y).expect("parse");
+        let s: Scenario = serde_saphyr::from_str(y).expect("parse");
         check!(s.msg_size == kibibytes(1));
         check_default_batch_timing(&s);
         check!(s.failover == None);
@@ -721,14 +721,14 @@ msg_size: 100
 mode:
   kind: saturate
 ";
-        let error = serde_yaml::from_str::<Scenario>(y).expect_err("a bare number is not a size");
+        let error = serde_saphyr::from_str::<Scenario>(y).expect_err("a bare number is not a size");
         check!(error.to_string().contains("missing unit"));
     }
 
     /// A minimal `saturate` scenario with `extra` appended, so one field's bound
     /// can be exercised against an otherwise-runnable file.
-    fn parse_saturate_with(extra: &str) -> Result<Scenario, serde_yaml::Error> {
-        serde_yaml::from_str(&format!("name: bounds\nmode:\n  kind: saturate\n{extra}\n"))
+    fn parse_saturate_with(extra: &str) -> Result<Scenario, serde_saphyr::Error> {
+        serde_saphyr::from_str(&format!("name: bounds\nmode:\n  kind: saturate\n{extra}\n"))
     }
 
     #[test]
@@ -760,7 +760,7 @@ mode:
         // integer rather than the scalar text the human form reads.
         for rate in [r#""-1/s""#, r#""0""#] {
             let yaml = format!("name: bounds\nmode:\n  kind: fixed_rate\n  rate: {rate}\n");
-            let error = serde_yaml::from_str::<Scenario>(&yaml)
+            let error = serde_saphyr::from_str::<Scenario>(&yaml)
                 .expect_err("a paced producer needs a positive rate");
             check!(error.to_string().contains("a positive rate"), "{rate}");
         }
@@ -785,7 +785,7 @@ mode:
   kind: fixed_rate
   rate: 20000/s
 ";
-        let s: Scenario = serde_yaml::from_str(y).unwrap();
+        let s: Scenario = serde_saphyr::from_str(y).unwrap();
         check!(
             s.mode
                 == LoadMode::FixedRate {
@@ -803,7 +803,7 @@ mode:
 failover:
   kill_after: 4s
 ";
-        let s: Scenario = serde_yaml::from_str(y).unwrap();
+        let s: Scenario = serde_saphyr::from_str(y).unwrap();
         check!(
             s.failover
                 == Some(FailoverSpec {
@@ -815,12 +815,12 @@ failover:
 
     #[test]
     fn scenario_yaml_round_trips_through_the_human_form() {
-        let yaml = serde_yaml::to_string(&scenario()).expect("encode");
+        let yaml = serde_saphyr::to_string(&scenario()).expect("encode");
         // Operator-facing fields carry their unit rather than a bare float.
         for needle in ["msg_size: 4KiB", "linger: 5ms", "rate: 20000/s"] {
             check!(yaml.contains(needle));
         }
-        let back: Scenario = serde_yaml::from_str(&yaml).expect("decode");
+        let back: Scenario = serde_saphyr::from_str(&yaml).expect("decode");
         check!(back == scenario());
     }
 
