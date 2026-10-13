@@ -8,6 +8,8 @@ use {
 };
 
 #[cfg(test)]
+mod bounds_tests;
+#[cfg(test)]
 mod tests;
 
 // Entries the cursor visits for each new identity. Eight per new identity
@@ -41,6 +43,104 @@ const CAPACITY_EVICT_DIVISOR: usize = 4;
 const CAPACITY_EVICT_BUCKETS: usize = 512;
 // `CAPACITY_EVICT_BUCKETS - 1` as a timestamp divisor.
 const LAST_BUCKET: i64 = 511;
+
+// The index is `1 << SEGMENT_BITS` hash tables. When a table grows or shrinks,
+// it moves its own entries and no others, so more tables make the largest
+// single move smaller. 64 makes it 1/64 of the index, and the set of tables
+// that hold entries fits in one `u64`, which lets the cursor skip empty tables
+// in constant time.
+const SEGMENT_BITS: u32 = 6;
+
+// A segment holds at most this multiple of its even share of the entry limit.
+// With well-spread digests a segment is near its share: at 10^5 entries per
+// segment the spread is a few hundred. Identities chosen to share a segment are
+// the case this limit is for. Without it, they would put the whole index in one
+// table, and that table would move every entry when it doubled.
+const SEGMENT_LIMIT_FACTOR: usize = 2;
+
+// The lowest per-segment entry limit. It keeps a small entry limit from making
+// segments that fill on an ordinary spread of identities. A move of this many
+// entries takes well under a millisecond.
+const SEGMENT_LIMIT_FLOOR: usize = 4096;
+
+// A segment shrinks when its entries fall to this fraction of its capacity. It
+// shrinks to `SHRINK_TARGET_FACTOR` times its length, which is half of the
+// capacity, and it grows only when it is full. The gap between a quarter and
+// full keeps a segment that changes size near one boundary from moving its
+// entries on each change.
+const SHRINK_DIVISOR: usize = 4;
+const SHRINK_TARGET_FACTOR: usize = 2;
+
+// A segment at or below this capacity does not shrink. Moving so few entries
+// costs little, but a burst of small allocations gives no memory back that
+// matters: 64 segments at this capacity hold about 0.8 MiB.
+const SHRINK_FLOOR: usize = 256;
+
+// The bytes of one entry in a segment's dense array: the stored hash, the
+// digest and the timestamp. `indexmap` keeps the hash beside each entry.
+const ENTRY_BYTES: usize = size_of::<usize>() + size_of::<IdentityDigest>() + size_of::<i64>();
+
+// The bytes of one bucket in a segment's hash table: the index into the dense
+// array and one control byte.
+const INDEX_BUCKET_BYTES: usize = size_of::<usize>() + 1;
+
+// The control bytes that hashbrown adds after the buckets: one SIMD group.
+const CONTROL_TAIL_BYTES: usize = 16;
+
+type Table = IndexMap<IdentityDigest, i64, DigestBuildHasher>;
+
+// One hash table of the index, and the capacity it was last sized to.
+#[derive(Default)]
+struct Segment {
+    table: Table,
+    // `IndexMap::capacity` counts the slots an insert can still use, and a
+    // removal can leave a tombstone that is not one of them. That number then
+    // falls with no change to the allocation. This one changes only when the
+    // segment grows or shrinks, so it describes the allocation.
+    capacity: usize,
+}
+
+impl Segment {
+    // Inserts an identity the segment does not hold. Returns the number of
+    // entries the insert moved or rehashed.
+    fn insert_new(&mut self, identity: IdentityDigest, timestamp: i64) -> usize {
+        let length = self.table.len();
+        // With a usable slot, the insert does not grow or rehash anything. So
+        // every grow and rehash happens here, and is counted.
+        let moved = if length < self.table.capacity() {
+            0
+        } else {
+            // A full segment doubles, which is also what hashbrown does by
+            // default. Doing it here makes the step a rule of this filter.
+            // When tombstones, not entries, use up the slots, the segment
+            // asks for one slot: hashbrown then rehashes it in place, or
+            // doubles it past half load.
+            let additional = if length < self.capacity {
+                1
+            } else {
+                length.max(1)
+            };
+            self.table.reserve(additional);
+            self.capacity = self.table.capacity();
+            length
+        };
+        self.table.insert(identity, timestamp);
+        moved
+    }
+
+    // Shrinks the segment to twice its length when it is a quarter full and
+    // above `floor`. Returns the number of entries that moved. Shrinking keeps
+    // the order of the entries, so a cursor in the segment stays valid.
+    fn shrink_if_sparse(&mut self, floor: usize) -> usize {
+        let length = self.table.len();
+        if self.capacity <= floor || length > self.capacity / SHRINK_DIVISOR {
+            return 0;
+        }
+        self.table.shrink_to(length * SHRINK_TARGET_FACTOR);
+        self.capacity = self.table.capacity();
+        length
+    }
+}
 
 /// One record as the filter sees it: its digested identity, if it has one, and its timestamp.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +232,10 @@ pub struct DedupCounters {
 ///
 /// No operation does work proportional to the index. This is a requirement: sweeps happen at the same log position on every replica, so a whole-index pass stalls the leader and then the followers together.
 ///
+/// For the same reason, the index is [`SEGMENTS`](Self::SEGMENTS) hash tables and not one. The top bits of an identity's digest choose its segment. A segment that is full doubles its capacity, and a segment that falls to a quarter of its capacity, above a floor of 256 entries, shrinks to twice its length. Either step moves the entries of that one segment, and each segment holds at most `max(2 * ceil(max_entries / SEGMENTS), 4096)` entries, so no call moves more than that many. One table for the partition would move every entry at once: tens to hundreds of milliseconds at millions of entries. [`largest_relocation`](Self::largest_relocation) reports the largest move so far. Shrinking keeps the heap within a small factor of the live entries, plus the floor of each segment, after a burst expires. [`heap_bytes`](Self::heap_bytes) estimates it.
+///
+/// The per-segment limit binds only when identities crowd one segment. Well-spread digests stay far below it, but xxh3 does not resist chosen input, so a producer can choose identities that share a segment. A new identity for a full segment is then admitted unindexed and counted, as at the entry limit.
+///
 /// The highest timestamp seen is a client-supplied `CreateTime` with no order guarantee, so each record timestamp is clamped to the broker's time before it reaches the index. Without the clamp, one future-dated record would move the expiry cutoff past the whole index and disable dedup for the partition. The clamp does not bound reordering within the window, so eviction at the window edge stays approximate.
 pub struct DedupWindowFilter {
     window_ms: i64,
@@ -139,20 +243,33 @@ pub struct DedupWindowFilter {
     budget: Option<Arc<DedupBudget>>,
     // This filter's contribution to the budget's entry count.
     budget_accounted: usize,
-    // A dense array of entries in insertion order with a hash index over it.
-    // A removal moves the last entry into the freed slot, which the cursor
-    // relies on.
-    map: IndexMap<IdentityDigest, i64, DigestBuildHasher>,
+    // `SEGMENTS` tables. Each is a dense array of entries in insertion order
+    // with a hash index over it. A removal moves the last entry of its segment
+    // into the freed slot, which the cursor relies on.
+    segments: Box<[Segment]>,
+    // The sum of the segment lengths.
+    len: usize,
+    // Bit `i` is set when segment `i` holds an entry.
+    occupied: u64,
+    // The most entries one segment may hold. See `SEGMENT_LIMIT_FACTOR`.
+    segment_limit: usize,
+    // The capacity at or below which a segment does not shrink. A field, and
+    // not the constant, so that tests can make small segments shrink.
+    shrink_floor: usize,
+    // The most entries that one grow or shrink of a segment moved.
+    largest_relocation: usize,
     // The highest record timestamp seen: the reference "now" for expiry.
     max_ts: i64,
-    // A position in the map's dense array. Replicas agree on it because they
-    // insert the same identities in the same order and so lay out the array
-    // the same way. `revert` is the exception: it removes entries a follower
-    // never inserted, which permutes the leader's array. The two then sweep
-    // equal sets in different orders and can drop different live entries for
-    // capacity. That needs the index above 90% of its limit, and which live
-    // entry goes is already best-effort, but it is inherent to bounded work:
-    // a cursor is a position in a layout.
+    // A position in the segments' dense arrays: a segment, and an index in
+    // it. Replicas agree on it because they insert the same identities in
+    // the same order and so lay out the arrays the same way. `revert` is the
+    // exception: it removes entries a follower never inserted, which permutes
+    // the leader's arrays. The two then sweep equal sets in different orders
+    // and can drop different live entries for capacity. That needs the index
+    // above 90% of its limit, and which live entry goes is already
+    // best-effort, but it is inherent to bounded work: a cursor is a position
+    // in a layout.
+    sweep_segment: usize,
     sweep_pos: usize,
     // The histogram of the entries the current pass visited, measured against
     // a frame frozen at the start of the pass. `max_ts` moves while the cursor
@@ -177,10 +294,14 @@ impl DedupWindowFilter {
     pub const DEFAULT_MAX_ENTRIES: usize = 1_000_000;
     /// The highest per-partition entry limit that configuration accepts.
     pub const MAX_MAX_ENTRIES: usize = 10_000_000;
+    /// The number of hash tables the index is split into.
+    pub const SEGMENTS: usize = 1 << SEGMENT_BITS;
 
     /// Makes an empty filter.
     ///
     /// `max_entries` is the per-partition entry limit. A filter with a `budget` also keeps the sum over every filter on that budget under the budget's limit. A negative `window_ms` makes no record a duplicate.
+    ///
+    /// The filter allocates no entry space until it indexes an identity, so an idle partition costs a few KiB.
     #[must_use]
     pub fn new(window_ms: i64, max_entries: usize, budget: Option<Arc<DedupBudget>>) -> Self {
         let mut filter = Self {
@@ -188,8 +309,14 @@ impl DedupWindowFilter {
             max_entries,
             budget,
             budget_accounted: 0,
-            map: IndexMap::default(),
+            segments: empty_segments(),
+            len: 0,
+            occupied: 0,
+            segment_limit: segment_limit_of(max_entries),
+            shrink_floor: SHRINK_FLOOR,
+            largest_relocation: 0,
             max_ts: i64::MIN,
+            sweep_segment: 0,
             sweep_pos: 0,
             pass_counts: Box::new([0; CAPACITY_EVICT_BUCKETS]),
             pass_visited: 0,
@@ -241,20 +368,20 @@ impl DedupWindowFilter {
         // unwind correctly: the last entry restores what the one before it
         // wrote, and the first restores the state before the request.
         for entry in undo.entries.iter().rev() {
-            let Some(timestamp) = self.map.get_mut(&entry.identity) else {
+            let segment = segment_of(entry.identity);
+            let Some(timestamp) = self.segments[segment].table.get_mut(&entry.identity) else {
                 continue;
             };
             if *timestamp != entry.applied_timestamp {
                 continue;
             }
-            match entry.previous_timestamp {
-                Some(previous) => *timestamp = previous,
-                None => {
-                    self.map.swap_remove(&entry.identity);
-                }
+            if let Some(previous) = entry.previous_timestamp {
+                *timestamp = previous;
+            } else {
+                self.segments[segment].table.swap_remove(&entry.identity);
+                self.after_removal(segment);
             }
         }
-        self.sync_budget();
     }
 
     /// Records an identity that the log admitted.
@@ -263,24 +390,24 @@ impl DedupWindowFilter {
     pub fn populate(&mut self, identity: IdentityDigest, timestamp_ms: i64, now_ms: i64) {
         let timestamp = self.clamp_to_now(timestamp_ms, now_ms);
         self.max_ts = self.max_ts.max(timestamp);
+        let segment = segment_of(identity);
         // Followers apply the leader's capacity rule at the same point as
         // `is_duplicate` does: look up, sweep, then insert. Expiry timing never
         // changes a decision, because an expired entry cannot match. Capacity
         // trimming drops entries that could still match, so the position of
         // the sweep relative to the insert decides what the index holds.
-        if let Some(stored) = self.map.get_mut(&identity) {
+        if let Some(stored) = self.segments[segment].table.get_mut(&identity) {
             if timestamp > *stored {
                 *stored = timestamp;
             }
             return;
         }
         self.sweep_step(SWEEP_BUDGET);
-        if self.at_capacity() && !self.make_room_for_one() {
+        if self.at_capacity(segment) && !self.make_room_for_one(segment) {
             self.counters.unindexed_records += 1;
             return;
         }
-        self.map.insert(identity, timestamp);
-        self.sync_budget();
+        self.insert_new(segment, identity, timestamp);
     }
 
     /// Changes the window, for example on a topic configuration change.
@@ -294,13 +421,17 @@ impl DedupWindowFilter {
 
     /// Removes every entry and gives the memory back.
     ///
-    /// The cursor, its histogram, and the highest timestamp seen reset as well. The counters stay.
+    /// The cursor, its histogram, and the highest timestamp seen reset as well. The counters, [`sweep_visits`](Self::sweep_visits) and [`largest_relocation`](Self::largest_relocation) stay.
     pub fn clear(&mut self) {
-        // A new map, not `IndexMap::clear`, which keeps the capacity it grew
-        // to: tens of MiB at the default limit. Every caller wants it back.
-        self.map = IndexMap::default();
+        // New segments, not `IndexMap::clear`, which keeps the capacity each
+        // grew to: tens of MiB at the default limit. Every caller wants it
+        // back.
+        self.segments = empty_segments();
+        self.len = 0;
+        self.occupied = 0;
         self.sync_budget();
         self.max_ts = i64::MIN;
+        self.sweep_segment = 0;
         self.sweep_pos = 0;
         self.capacity_cutoff = i64::MIN;
         self.begin_pass();
@@ -308,11 +439,11 @@ impl DedupWindowFilter {
 
     /// The number of indexed identities.
     #[must_use]
-    pub fn len(&self) -> usize { self.map.len() }
+    pub fn len(&self) -> usize { self.len }
 
     /// Whether no identity is indexed.
     #[must_use]
-    pub fn is_empty(&self) -> bool { self.map.is_empty() }
+    pub fn is_empty(&self) -> bool { self.len == 0 }
 
     /// The per-partition entry limit.
     #[must_use]
@@ -325,13 +456,17 @@ impl DedupWindowFilter {
     /// The stored timestamp of `identity`, or `None` when it is not indexed.
     #[must_use]
     pub fn timestamp_of(&self, identity: IdentityDigest) -> Option<i64> {
-        self.map.get(&identity).copied()
+        self.segments[segment_of(identity)]
+            .table
+            .get(&identity)
+            .copied()
     }
 
-    /// The indexed identities and their timestamps, in the dense order the sweep cursor walks.
+    /// The indexed identities and their timestamps, in the order the sweep cursor walks: segment by segment, and in each segment in its dense order.
     pub fn iter(&self) -> impl Iterator<Item = (IdentityDigest, i64)> + '_ {
-        self.map
+        self.segments
             .iter()
+            .flat_map(|segment| segment.table.iter())
             .map(|(identity, timestamp)| (*identity, *timestamp))
     }
 
@@ -345,12 +480,30 @@ impl DedupWindowFilter {
     #[must_use]
     pub fn sweep_visits(&self) -> u64 { self.sweep_visits }
 
+    /// The most entries of one segment that a single grow, shrink, or rehash moved, over the filter's lifetime.
+    ///
+    /// Such a step copies the entries of one segment or rebuilds its hash table, so this measures the longest pause that a change of capacity caused. It is at most `max(2 * ceil(max_entries / SEGMENTS), 4096)`.
+    #[must_use]
+    pub fn largest_relocation(&self) -> usize { self.largest_relocation }
+
+    /// An estimate of the heap bytes that the index holds.
+    ///
+    /// It is computed from the capacity each segment was last sized to, with the entry and hash-table layouts of `indexmap` and `hashbrown`, plus the fixed segment table and cursor histogram. It is an estimate: it does not see allocator overhead, and it assumes that a segment's hash table is no larger than its entry array needs.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        let tables: usize = self
+            .segments
+            .iter()
+            .map(|segment| segment_heap_bytes(segment.capacity))
+            .sum();
+        tables
+            + size_of::<Segment>() * Self::SEGMENTS
+            + size_of::<[usize; CAPACITY_EVICT_BUCKETS]>()
+    }
+
     /// The broker-wide budget this filter reports into, if it has one.
     #[must_use]
     pub fn budget(&self) -> Option<&DedupBudget> { self.budget.as_deref() }
-
-    #[cfg(test)]
-    fn map_capacity(&self) -> usize { self.map.capacity() }
 
     // Client `CreateTime` is untrusted. The broker admits records ahead of its
     // own clock, and `max_ts` is a running maximum, so one future-dated record
@@ -372,7 +525,8 @@ impl DedupWindowFilter {
     }
 
     fn is_duplicate(&mut self, identity: IdentityDigest, timestamp: i64, undo: &mut Undo) -> bool {
-        if let Some(stored) = self.map.get_mut(&identity) {
+        let segment = segment_of(identity);
+        if let Some(stored) = self.segments[segment].table.get_mut(&identity) {
             let previous = *stored;
             // Exact in i128, so that extreme client timestamps cannot wrap.
             let distance = (i128::from(timestamp) - i128::from(previous)).abs();
@@ -400,14 +554,13 @@ impl DedupWindowFilter {
         // and capacity trimming changes decisions, so the two orders must
         // match or replicas drift apart.
         self.sweep_step(SWEEP_BUDGET);
-        if self.at_capacity() && !self.make_room_for_one() {
+        if self.at_capacity(segment) && !self.make_room_for_one(segment) {
             // The bounded step freed nothing. The record is admitted, and its
             // identity is not remembered.
             self.counters.unindexed_records += 1;
             return false;
         }
-        self.map.insert(identity, timestamp);
-        self.sync_budget();
+        self.insert_new(segment, identity, timestamp);
         undo.entries.push(UndoEntry {
             identity,
             applied_timestamp: timestamp,
@@ -416,43 +569,52 @@ impl DedupWindowFilter {
         false
     }
 
+    // Inserts an identity that no segment holds.
+    fn insert_new(&mut self, segment: usize, identity: IdentityDigest, timestamp: i64) {
+        let relocated = self.segments[segment].insert_new(identity, timestamp);
+        self.len += 1;
+        self.occupied |= 1 << segment;
+        self.largest_relocation = self.largest_relocation.max(relocated);
+        self.sync_budget();
+    }
+
     // Moves the cursor over at most `budget` entries. It drops the expired
     // ones and, near a limit, the ones below the capacity cutoff. The cursor
-    // stays between calls and wraps at the end of the array, so successive
+    // stays between calls and wraps after the last segment, so successive
     // calls walk the whole index in bounded slices. This is the only eviction
     // that `classify` and `populate` do.
     fn sweep_step(&mut self, budget: usize) {
         let expiry_cutoff = self.max_ts.saturating_sub(self.window_ms);
         for _ in 0..budget {
-            if self.map.is_empty() {
+            if self.len == 0 {
+                self.sweep_segment = 0;
                 self.sweep_pos = 0;
                 return;
             }
-            if self.sweep_pos >= self.map.len() {
-                // The cursor reached the end, so its histogram now covers the
-                // index: make it the next cutoff, and wrap. A removal elsewhere
-                // can also leave the cursor past the end. That ends the pass
-                // early on a partial histogram, which a soft target can
-                // accept, and it stays a function of the call sequence.
-                self.sweep_pos = 0;
-                self.finish_pass();
+            if self.sweep_pos >= self.segments[self.sweep_segment].table.len() {
+                // A removal elsewhere can also leave the cursor past the end
+                // of its segment. The cursor then moves on early, which a
+                // soft target can accept, and it stays a function of the call
+                // sequence.
+                self.advance_segment();
             }
-            let Some((_, &stamp)) = self.map.get_index(self.sweep_pos) else {
+            let segment = self.sweep_segment;
+            let Some((_, &stamp)) = self.segments[segment].table.get_index(self.sweep_pos) else {
                 return;
             };
             self.sweep_visits += 1;
             if stamp < expiry_cutoff {
                 // Expired: it cannot match again, so dropping it costs no
                 // coverage. The cursor stays, because the removal moved the
-                // last entry, not yet visited, into this slot.
-                self.remove_at(self.sweep_pos);
+                // last entry of the segment, not yet visited, into this slot.
+                self.remove_at(segment, self.sweep_pos);
                 continue;
             }
             if stamp < self.capacity_cutoff && self.over_soft_limit() {
                 // Inside the window, so this is coverage lost. Doing it a few
                 // entries at a time from the soft limit up keeps the index from
                 // dropping a quarter of itself in one step at the limit.
-                self.remove_at(self.sweep_pos);
+                self.remove_at(segment, self.sweep_pos);
                 self.counters.capacity_evicted_entries += 1;
                 continue;
             }
@@ -468,15 +630,33 @@ impl DedupWindowFilter {
         }
     }
 
-    // One bounded extra sweep, because a new identity arrived with the index
-    // at a limit. Never a scan: if it frees nothing, the caller admits the
-    // record unindexed, at a cost that does not depend on the index size. The
-    // cursor advances either way, so later attempts walk the index and
-    // complete a pass, which computes a new cutoff.
-    fn make_room_for_one(&mut self) -> bool {
+    // Moves the cursor to the start of the next segment that holds an entry.
+    // Past the last one, the cursor wraps, and its histogram now covers the
+    // index: it becomes the next cutoff. The occupied mask makes this constant
+    // work however many segments are empty, so a sparse index costs no more
+    // per call than a dense one. The caller makes sure an entry exists.
+    fn advance_segment(&mut self) {
+        let after = u32::try_from(self.sweep_segment + 1).unwrap_or(u32::MAX);
+        let later = self.occupied & u64::MAX.checked_shl(after).unwrap_or(0);
+        let next = if later == 0 {
+            self.finish_pass();
+            self.occupied.trailing_zeros()
+        } else {
+            later.trailing_zeros()
+        };
+        self.sweep_segment = usize::try_from(next).expect("a bit index of a u64 fits in usize");
+        self.sweep_pos = 0;
+    }
+
+    // One bounded extra sweep, because a new identity arrived with the index,
+    // or its segment, at a limit. Never a scan: if it frees nothing, the
+    // caller admits the record unindexed, at a cost that does not depend on
+    // the index size. The cursor advances either way, so later attempts walk
+    // the index and complete a pass, which computes a new cutoff.
+    fn make_room_for_one(&mut self, segment: usize) -> bool {
         self.counters.capacity_sweeps += 1;
         self.sweep_step(CAPACITY_EMERGENCY_BUDGET);
-        !self.at_capacity()
+        !self.at_capacity(segment)
     }
 
     // Freezes the frame that a pass measures entries against, and clears the
@@ -512,10 +692,23 @@ impl DedupWindowFilter {
         self.begin_pass();
     }
 
-    // Removes the entry at `index`. The map moves its last entry into the
-    // slot, so a cursor at `index` must look at the same index again.
-    fn remove_at(&mut self, index: usize) {
-        self.map.swap_remove_index(index);
+    // Removes the entry at `index` of `segment`. The segment moves its last
+    // entry into the slot, so a cursor at `index` must look at the same index
+    // again.
+    fn remove_at(&mut self, segment: usize, index: usize) {
+        self.segments[segment].table.swap_remove_index(index);
+        self.after_removal(segment);
+    }
+
+    // Accounts for one entry removed from `segment`, and shrinks the segment
+    // when it is a quarter full.
+    fn after_removal(&mut self, segment: usize) {
+        self.len -= 1;
+        let relocated = self.segments[segment].shrink_if_sparse(self.shrink_floor);
+        self.largest_relocation = self.largest_relocation.max(relocated);
+        if self.segments[segment].table.is_empty() {
+            self.occupied &= !(1 << segment);
+        }
         self.sync_budget();
     }
 
@@ -526,7 +719,7 @@ impl DedupWindowFilter {
         let Some(budget) = &self.budget else {
             return;
         };
-        let size = self.map.len();
+        let size = self.len;
         if size > self.budget_accounted {
             budget.add(size - self.budget_accounted);
         } else {
@@ -535,10 +728,11 @@ impl DedupWindowFilter {
         self.budget_accounted = size;
     }
 
-    // Whether a new identity would exceed this partition's limit or the
-    // broker's.
-    fn at_capacity(&self) -> bool {
-        self.map.len() >= self.max_entries
+    // Whether a new identity for `segment` would exceed this partition's
+    // limit, the segment's, or the broker's.
+    fn at_capacity(&self, segment: usize) -> bool {
+        self.len >= self.max_entries
+            || self.segments[segment].table.len() >= self.segment_limit
             || self
                 .budget
                 .as_deref()
@@ -549,7 +743,7 @@ impl DedupWindowFilter {
     // is within a tenth of its own limit, or the broker is within a tenth of
     // its limit.
     fn over_soft_limit(&self) -> bool {
-        self.map.len() >= soft_limit_of(self.max_entries)
+        self.len >= soft_limit_of(self.max_entries)
             || self
                 .budget
                 .as_deref()
@@ -570,11 +764,47 @@ impl fmt::Debug for DedupWindowFilter {
         f.debug_struct("DedupWindowFilter")
             .field("window_ms", &self.window_ms)
             .field("max_entries", &self.max_entries)
-            .field("len", &self.map.len())
+            .field("len", &self.len)
             .field("max_timestamp_ms", &self.max_ts)
             .field("counters", &self.counters)
             .finish_non_exhaustive()
     }
+}
+
+fn empty_segments() -> Box<[Segment]> {
+    (0..DedupWindowFilter::SEGMENTS)
+        .map(|_| Segment::default())
+        .collect()
+}
+
+// The segment of an identity. The in-segment hasher takes `lo`, so routing by
+// the top bits of `hi` keeps the two independent: every segment gets an even
+// share, and each segment's table still sees well-spread hashes.
+fn segment_of(identity: IdentityDigest) -> usize {
+    let index = identity
+        .hi
+        .checked_shr(u64::BITS - SEGMENT_BITS)
+        .unwrap_or(0);
+    usize::try_from(index).expect("a segment index is below SEGMENTS")
+}
+
+// Twice the even share of the entry limit, and at least the floor.
+fn segment_limit_of(max_entries: usize) -> usize {
+    max_entries
+        .div_ceil(DedupWindowFilter::SEGMENTS)
+        .saturating_mul(SEGMENT_LIMIT_FACTOR)
+        .max(SEGMENT_LIMIT_FLOOR)
+}
+
+// The heap of one segment with room for `capacity` entries: its dense array,
+// and its hash table. hashbrown fills at most 7/8 of its buckets and rounds
+// the bucket count up to a power of two, at least 4.
+fn segment_heap_bytes(capacity: usize) -> usize {
+    if capacity == 0 {
+        return 0;
+    }
+    let buckets = (capacity.saturating_mul(8) / 7).next_power_of_two().max(4);
+    capacity * ENTRY_BYTES + buckets * INDEX_BUCKET_BYTES + CONTROL_TAIL_BYTES
 }
 
 // A tenth below the limit, and at least one entry below it, so a very small

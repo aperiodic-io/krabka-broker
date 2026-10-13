@@ -14,6 +14,7 @@ The broker drops a plain produce record when a record with the same dedup identi
 - A follower path, `populate`, that rebuilds the same index from the log. It is idempotent and keeps the highest timestamp per identity, and it sweeps at the same point as the leader path, so replicas hold the same entries in the same order.
 - Fixed-size entries: a 128-bit xxh3 digest and a timestamp, whatever the size of the identity.
 - Bounded work per record. A cursor visits a few entries for each new identity, drops expired ones, and near the entry limit drops the oldest quarter that its last pass measured.
+- A segmented index: 64 hash tables, chosen by digest bits. A table that grows or shrinks moves only its own entries, so the largest single move is about 1/32 of the entry limit and not the whole index. A table that falls to a quarter of its capacity shrinks, so the heap follows the live entries down after a burst. `largest_relocation` and `heap_bytes` report both.
 - A per-partition entry limit and an optional broker-wide `DedupBudget` shared across threads. A full index admits a new identity unindexed and counts it.
 - Record timestamps clamped to the broker's time, so one future-dated record cannot disable dedup for a partition.
 - Counters for drops, clamped timestamps, unindexed records, capacity evictions, and partial drops that make the broker rebuild a batch.

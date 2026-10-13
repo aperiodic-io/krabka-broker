@@ -56,6 +56,10 @@ fn populate_n(
     }
 }
 
+fn capacity(filter: &DedupWindowFilter) -> usize {
+    filter.segments.iter().map(|segment| segment.capacity).sum()
+}
+
 fn entries(filter: &DedupWindowFilter) -> Vec<(IdentityDigest, i64)> { filter.iter().collect() }
 
 fn inserted(name: &str, applied_timestamp: i64) -> UndoEntry {
@@ -703,12 +707,14 @@ fn leader_and_follower_converge_across_the_entry_limit() {
 fn clear_resets_the_index_and_releases_memory() {
     let mut f = filter(SECOND);
     populate_n(&mut f, "s", 300, 0, 0);
-    let grown = f.map_capacity();
+    let grown = capacity(&f);
     assert!(grown >= 300);
+    let grown_heap = f.heap_bytes();
 
     f.clear();
     assert!(f.is_empty());
-    assert!(f.map_capacity() < grown);
+    assert!(capacity(&f) == 0);
+    assert!(f.heap_bytes() < grown_heap);
     assert!(f.max_timestamp_ms() == i64::MIN);
 
     populate(&mut f, "after-clear", 1000);
@@ -1028,7 +1034,9 @@ fn at_the_limit_a_filter_with_nothing_freeable_admits_unindexed() {
     let mut idle = DedupWindowFilter::new(100 * SECOND, 1000, Some(shared.clone()));
     {
         let mut full = DedupWindowFilter::new(100 * SECOND, 1000, Some(shared.clone()));
-        populate_n(&mut full, "full", LIMIT, 1000, 1);
+        // One timestamp, so that no histogram frame can cut a slice and the
+        // full partition holds the whole budget.
+        populate_n(&mut full, "full", LIMIT, 1000, 0);
         assert!(shared.entries() == LIMIT);
 
         assert!(kept(&mut idle, "new", 1000));
