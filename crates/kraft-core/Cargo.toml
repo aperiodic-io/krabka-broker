@@ -34,8 +34,8 @@ derive_more = { workspace = true }
 bon = { workspace = true }
 assert2 = { workspace = true }
 krabka-voters = { version = "0.6.0" }
-krabka-macros = { version = "1.0.3", path = "../macros" }
-krabka-verified = { version = "1.0.3", path = "../verified" }
+krabka-macros = { version = "1.0.4", path = "../macros" }
+krabka-verified = { version = "1.0.4", path = "../verified" }
 krabka-units = { workspace = true }
 bytes = { workspace = true }
 refined_type = { workspace = true }

@@ -32,15 +32,15 @@ tracing = { workspace = true }
 bytes = { workspace = true }
 krabka-protocol = { version = "0.6.0", default-features = false }
 krabka-ids = { version = "0.6.0" }
-krabka-verified = { version = "1.0.3", path = "../verified" }
-krabka-macros = { version = "1.0.3", path = "../macros" }
+krabka-verified = { version = "1.0.4", path = "../verified" }
+krabka-macros = { version = "1.0.4", path = "../macros" }
 krabka-units = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync"] }
 assert2 = { workspace = true }
-krabka-log = { version = "1.0.3", path = "../log" }
+krabka-log = { version = "1.0.4", path = "../log" }
 mutants = { workspace = true }
 stateright = { workspace = true }
 tempfile = { workspace = true }

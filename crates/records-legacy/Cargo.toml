@@ -43,5 +43,5 @@ krabka-protocol = { version = "0.6.0", default-features = false }
 krabka-units = { workspace = true }
 
 [dev-dependencies]
-krabka-macros = { version = "1.0.3", path = "../macros" }
+krabka-macros = { version = "1.0.4", path = "../macros" }
 proptest = { workspace = true }

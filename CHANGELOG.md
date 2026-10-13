@@ -23,33 +23,42 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-13
+
+1.0.4 changes no on-disk format and adds no setting, so it upgrades from any
+1.x release in place and rolls back to 1.0.3 the same way. Its changes apply
+to partitions with `preallocate=true`, which write through `O_DIRECT`; other
+partitions behave as in 1.0.3. After a crash, the active segment of such a
+partition can now hold zeros between batches that were not yet synced, as
+page-cache writeback can leave. The tail recovery of every 1.x release cuts
+the file at the first bytes that do not decode as a batch, so a rollback
+reads it too.
+
 ### Changed
 
-- The default `log_tail_cache_size` is 32 MiB, up from 1 MiB. A partition with
-  `preallocate=true` writes through `O_DIRECT`, which leaves nothing in the
-  page cache, so a consumer that fell more than the tail cache behind the
-  producer read from the disk and fell further behind. With 1 MiB, a consumer
-  of one partition taking about 600 MB/s fell seconds behind the producer;
-  with 32 MiB its end-to-end p99 stayed under 100 ms (#1370). Each partition
-  with `preallocate=true` now holds up to 32 MiB of its newest data in memory.
-  Set `log_tail_cache_size` to keep the old value.
-- A partition with `preallocate=true` acknowledges a produce request once
-  its `O_DIRECT` write is queued, not once the write is on the disk, as a
+- A partition with `preallocate=true` acknowledges a produce request once its
+  `O_DIRECT` write is queued, not once the write is on the disk, as a
   partition without `preallocate` acknowledges once its bytes are in the page
-  cache, and as Redpanda does with write caching. Shared write threads put
-  up to four of a segment's writes on the disk at the same time. Unwritten
-  bytes stay in memory for reads. A write that fails afterwards fails every
-  later append and sync of the segment. Before, the append waited for the
-  write under the partition's log lock, so one slow device write stalled the
-  producer, the followers and the consumers of the partition: at RF3 and
-  10,000 records/s the end-to-end p99.9 was 387 to 440 ms, and is now 2 to
-  4 ms (#1371).
-- A fetch from a segment that wrote through `O_DIRECT` no longer offers the
-  segment to `sendfile`. Those bytes are not in the page cache, so walking
-  their batch headers was one small synchronous disk read per batch under
-  the log lock, and `sendfile` then read them from the disk again. The fetch
-  now takes the newest bytes from memory as a shared slice, without a copy,
-  and older ones in one large read.
+  cache. Shared write threads put up to four of a segment's writes on the
+  disk at the same time, and unwritten bytes stay in memory for reads. A write
+  that fails afterwards fails every later append and sync of the segment.
+  Before, the append waited for the write under the partition's log lock, so
+  one slow device write stalled the producer, the followers and the consumers
+  of the partition, which gave a long end-to-end latency tail at RF3 (#1371).
+- The default `log_tail_cache_size` is 32 MiB, up from 1 MiB. A consumer that
+  fell more than the tail cache behind the producer of a `preallocate=true`
+  partition read from the disk and could fall further behind (#1370). Each
+  such partition now holds up to 32 MiB of its newest data in memory. Set
+  `log_tail_cache_size` to keep the old value.
+
+### Fixed
+
+- A fetch from a segment that wrote through `O_DIRECT`, sealed or not, no
+  longer takes the `sendfile` path. Those bytes are not in the page cache, so
+  walking their batch headers was one small synchronous disk read per batch
+  under the log lock, and `sendfile` then read them from the disk again. The
+  fetch now takes the newest bytes from memory without a copy and older ones
+  in one large read, so a consumer that falls behind catches up (#1370).
 
 ## [1.0.3] - 2026-10-12
 
@@ -1524,7 +1533,8 @@ robot-head/crabka.
 - An audit stamp carries the value that its freeze signature covers.
 - The release publishes the image digest that cosign signed.
 
-[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.4
 [1.0.3]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.3
 [1.0.2]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.2
 [1.0.1]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.1

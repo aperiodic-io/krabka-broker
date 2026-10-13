@@ -26,11 +26,11 @@ bytes = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 krabka-audit = { workspace = true }
 krabka-ids = { version = "0.6.0" }
-krabka-macros = { version = "1.0.3", path = "../macros" }
-krabka-object-store = { version = "1.0.3", path = "../object-store" }
+krabka-macros = { version = "1.0.4", path = "../macros" }
+krabka-object-store = { version = "1.0.4", path = "../object-store" }
 krabka-protocol = { version = "0.6.0", default-features = false }
 krabka-units = { workspace = true }
-krabka-verified = { version = "1.0.3", path = "../verified" }
+krabka-verified = { version = "1.0.4", path = "../verified" }
 derive_more = { workspace = true }
 # Streams the object listing, and the object bodies a deep verify re-hashes.
 futures-util = { workspace = true }
@@ -56,7 +56,7 @@ async-trait = { workspace = true }
 # The lookup tests of `max.decompressed.message.bytes` write a compressed batch,
 # and the library itself carries no codec.
 krabka-compression = { version = "0.6.0", default-features = false, features = ["gzip"] }
-krabka-log = { version = "1.0.3", path = "../log" }
+krabka-log = { version = "1.0.4", path = "../log" }
 krabka-protocol = { version = "0.6.0", default-features = false }
 proptest = { workspace = true }
 # `gcs_emulator` creates its buckets through the emulator's JSON control

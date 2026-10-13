@@ -3,7 +3,7 @@
 //! These synchronous kernels have Creusot contracts proved under their stated
 //! preconditions. Host state, concurrency, and I/O remain outside that boundary.
 //! See `docs/verification.md` and `docs/proof-contract-audit.md`.
-#![doc(html_root_url = "https://docs.rs/krabka-verified/1.0.3")]
+#![doc(html_root_url = "https://docs.rs/krabka-verified/1.0.4")]
 // Rust's backend does not see names used only in Creusot contracts, and treats
 // the grouping parentheses in Pearlite expressions as redundant Rust syntax.
 #![cfg_attr(creusot, allow(unused_imports, unused_parens))]

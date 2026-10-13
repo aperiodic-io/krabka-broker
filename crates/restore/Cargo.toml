@@ -29,22 +29,22 @@ maplit = { workspace = true }
 # The target cluster is formatted through the same code path `krabka format`
 # uses, with the recovered topic and partition records seeded into the
 # bootstrap stream.
-krabka-format = { version = "1.0.3", path = "../format" }
+krabka-format = { version = "1.0.4", path = "../format" }
 krabka-ids = { version = "0.6.0" }
-krabka-log = { version = "1.0.3", path = "../log" }
+krabka-log = { version = "1.0.4", path = "../log" }
 krabka-metadata = { version = "0.6.0" }
 # The archive handle is built straight onto the object-store layer. The broker
 # owns the same mapping, but a recovery tool must not carry the broker.
-krabka-object-store = { version = "1.0.3", path = "../object-store", features = ["clap"] }
+krabka-object-store = { version = "1.0.4", path = "../object-store", features = ["clap"] }
 krabka-protocol = { version = "0.6.0", default-features = false }
-krabka-raft = { version = "1.0.3", path = "../raft" }
+krabka-raft = { version = "1.0.4", path = "../raft" }
 # The KIP-405 archive key codec and segment metadata model.
-krabka-remote-storage = { version = "1.0.3", path = "../remote-storage" }
+krabka-remote-storage = { version = "1.0.4", path = "../remote-storage" }
 # `Snapshot::load` reads a broker's `remote-log-metadata/snapshot` for
 # `--rlmm-snapshot`, the authoritative-metadata cross-check against the
 # bucket scan.
-krabka-remote-storage-topic = { version = "1.0.3", path = "../remote-storage-topic" }
-krabka-verified = { version = "1.0.3", path = "../verified" }
+krabka-remote-storage-topic = { version = "1.0.4", path = "../remote-storage-topic" }
+krabka-verified = { version = "1.0.4", path = "../verified" }
 # `--cluster-id` accepts Kafka's base64 `Uuid` form, what `Metadata` and
 # `DescribeCluster` report (#1042), as well as the hyphenated form.
 base64 = { workspace = true }
@@ -63,7 +63,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 # `cli_main!` writes the binary's `main`.
-krabka-macros = { version = "1.0.3", path = "../macros" }
+krabka-macros = { version = "1.0.4", path = "../macros" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -81,8 +81,8 @@ crc32c = { workspace = true }
 krabka-audit = { workspace = true }
 # `dr_roundtrip` drives the operator's own backup tool: the capture it asserts
 # on is the one an operator runs, not a re-implementation of it.
-krabka-backup = { version = "1.0.3", path = "../backup-cli" }
-krabka-broker = { version = "1.0.3", path = "../broker", features = ["test-helpers"] }
+krabka-backup = { version = "1.0.4", path = "../backup-cli" }
+krabka-broker = { version = "1.0.4", path = "../broker", features = ["test-helpers"] }
 # `dr_roundtrip` reads a group's committed offsets back with `OffsetFetch`.
 krabka-client-admin = { version = "0.6.0" }
 krabka-client-core = { version = "0.6.0" }
