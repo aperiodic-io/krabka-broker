@@ -61,6 +61,9 @@ struct SettledAck {
     sent_at: Instant,
 }
 
+/// The most in-flight requests per connection an idempotent producer accepts,
+/// Kafka's `max.in.flight.requests.per.connection` ceiling for idempotence.
+const IDEMPOTENT_MAX_IN_FLIGHT: usize = 5;
 pub const MAX_CLIENT_REQUEST_TIMEOUT: Time = millis(2_147_483_647);
 pub const DEFAULT_PRODUCER_REQUEST_TIMEOUT: Time = secs(2);
 pub const DEFAULT_KRABKA_CONSUMER_REQUEST_TIMEOUT: Time = secs(5);
@@ -1081,8 +1084,13 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
         // partitions it services concurrently per drain cycle). The default (5)
         // throttles topics with more partitions than that — our scenarios run 6
         // to 100 partitions — so raise it well past the max partition count to
-        // keep every partition's pipeline busy.
-        .max_in_flight_per_connection(128)
+        // keep every partition's pipeline busy. The idempotent producer (acks=all)
+        // refuses more than Kafka's limit of 5, so it gets that limit.
+        .max_in_flight_per_connection(if enable_idempotence {
+            IDEMPOTENT_MAX_IN_FLIGHT
+        } else {
+            128
+        })
         // A produce to a healthy broker completes in low single-digit ms, so a
         // 2s ceiling should not trip under normal load — but it bounds how long a
         // send to a *killed* leader blocks before the client re-routes, so the
@@ -1215,8 +1223,20 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
                 handle_ack!(res, t0);
             }
         }
+        // Settle acks while waiting for the next token. Collecting them only
+        // between tokens would stamp each ack at the next token, so a paced run
+        // would report its send period as latency.
         if let Some(p) = pacer.as_mut() {
-            p.await_token().await;
+            let token = p.await_token();
+            tokio::pin!(token);
+            loop {
+                tokio::select! {
+                    biased;
+                    Some(SettledAck { result: res, sent_at: t0 }) = inflight.next(),
+                        if !inflight.is_empty() => handle_ack!(res, t0),
+                    () = &mut token => break,
+                }
+            }
         }
         let value = payload::stamp_into(&mut tmpl, scenario_id);
         // A scenario that sets `key_size` gets keyed records. The key changes

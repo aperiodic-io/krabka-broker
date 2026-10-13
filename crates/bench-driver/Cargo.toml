@@ -24,6 +24,12 @@ path = "src/main.rs"
 
 # The aggregator. It reads the per-run JSON the driver wrote and renders the
 # summary, the CSVs and the HTML report.
+# Starts a krabka cluster on this machine from the release binaries and runs
+# one scenario against it.
+[[bin]]
+name = "krabka-bench-local"
+path = "src/local_main.rs"
+
 [[bin]]
 name = "krabka-bench-report"
 path = "src/report_main.rs"

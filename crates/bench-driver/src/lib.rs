@@ -57,6 +57,7 @@ pub mod failover;
 pub mod graph;
 pub mod hist;
 pub mod ids;
+pub mod local_cluster;
 mod numeric;
 pub mod payload;
 pub mod prom;
