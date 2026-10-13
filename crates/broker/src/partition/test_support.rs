@@ -13,7 +13,8 @@ use {
         delivery::DeliveryHandles,
         log_dir_status::LogDirRegistry,
         partition::{
-            Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
+            Partition, WriterGate, WriterMessage, empty_marker_materialization,
+            initial_replication_target,
         },
         partition_writer::run,
         producer_state::ProducerState,
@@ -45,6 +46,7 @@ pub(crate) fn test_partition(hw_advance_notify: Arc<Notify>) -> (Partition, temp
         log_dir: Arc::new(ArcSwap::from_pointee(dir.path().to_path_buf())),
         log: Arc::new(Mutex::new(log)),
         writer_tx: tx,
+        writer_gate: WriterGate::shared(false),
         marker_materialization: empty_marker_materialization(),
         append_notify: Arc::new(Notify::new()),
         replica_state: Arc::new(tokio::sync::Mutex::new(ReplicaState::new())),

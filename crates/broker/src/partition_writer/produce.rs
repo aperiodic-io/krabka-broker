@@ -66,6 +66,28 @@ pub(super) async fn handle_produce(
         first,
         max_size: max_produce_group,
     } = group;
+    let mut jobs = vec![first];
+    while jobs.len() < max_produce_group {
+        match rx.try_recv() {
+            Ok(WriterMessage::Produce(job)) => jobs.push(job),
+            Ok(other) => {
+                *pending = Some(other);
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    append_group(identity, jobs, storage, signals, diskless).await;
+}
+
+/// Appends a group of produce jobs, in order, and answers each one.
+pub(super) async fn append_group(
+    identity: WriterPartition<'_>,
+    jobs: Vec<ProduceJob>,
+    storage: ProduceStorage<'_>,
+    signals: ProduceSignals<'_>,
+    diskless: DisklessParts<'_>,
+) {
     let DisklessParts { wal, sequencer } = diskless;
     let ProduceStorage {
         log,
@@ -80,17 +102,6 @@ pub(super) async fn handle_produce(
         replica_state,
         hw_advance_notify,
     } = signals;
-    let mut jobs = vec![first];
-    while jobs.len() < max_produce_group {
-        match rx.try_recv() {
-            Ok(WriterMessage::Produce(job)) => jobs.push(job),
-            Ok(other) => {
-                *pending = Some(other);
-                break;
-            }
-            Err(_) => break,
-        }
-    }
 
     let mut acks = Vec::with_capacity(jobs.len());
     let mut datas = Vec::with_capacity(jobs.len());

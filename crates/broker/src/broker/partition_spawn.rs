@@ -11,10 +11,10 @@ use {
         error::BrokerError,
         log_dir_status::LogDirRegistry,
         partition::{
-            Partition, PartitionRuntimeConfig, ReplicationTarget, WriterMessage,
+            Partition, PartitionRuntimeConfig, ReplicationTarget, WriterGate, WriterMessage,
             empty_marker_materialization, initial_replication_target,
         },
-        partition_writer::run_with_sequencer,
+        partition_writer::{WriterPolicy, run_gated},
         producer_state::ProducerState,
         replica_state::ReplicaState,
         wal::{
@@ -276,7 +276,10 @@ pub(crate) fn try_spawn_partition_with_replication_target(
         .try_write()
         .expect("new partition target is uncontended") = initial_target;
     let log_dir = Arc::new(arc_swap::ArcSwap::from_pointee(log_dir));
-    let writer_future = run_with_sequencer(
+    // A partition that assigns offsets through a sequencer or acknowledges
+    // through a WAL keeps every append on its writer.
+    let writer_gate = WriterGate::shared(wal.is_none() && sequencer.is_none());
+    let writer_future = run_gated(
         (topic.clone(), partition_id),
         (log.clone(), log_dir.clone()),
         rx,
@@ -287,8 +290,11 @@ pub(crate) fn try_spawn_partition_with_replication_target(
             delivery.clone(),
         ),
         (log_dir_status, producer_state, wal),
-        max_produce_group,
-        sequencer,
+        WriterPolicy {
+            max_produce_group,
+            sequencer,
+            gate: Some(Arc::clone(&writer_gate)),
+        },
     );
     let writer = if let Some(engine) = wal_engine {
         let replica_state = replica_state.clone();
@@ -321,6 +327,7 @@ pub(crate) fn try_spawn_partition_with_replication_target(
         log_dir,
         log,
         writer_tx: tx,
+        writer_gate,
         marker_materialization: empty_marker_materialization(),
         append_notify: notify,
         replica_state,

@@ -882,6 +882,6 @@ mod tests {
                 last: (1_000_000_000, 7),
             }),
         ]);
-        check!((committed_per_sec(&spans) - 1_500.0).abs() < 1e-6);
+        check!((committed_per_sec(&spans) - 1_500.0).abs() < 1.0e-6);
     }
 }

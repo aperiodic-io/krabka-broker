@@ -48,6 +48,9 @@ mod commit_wait;
 mod leadership;
 mod messages;
 mod watermark;
+mod writer_gate;
+
+pub(crate) use self::writer_gate::WriterGate;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -150,6 +153,9 @@ pub struct Partition {
     pub log_dir: Arc<ArcSwap<PathBuf>>,
     pub log: Arc<Mutex<Log>>,
     pub writer_tx: mpsc::Sender<WriterMessage>,
+    /// Lets a produce append on its own task while the writer is idle; see
+    /// [`WriterGate`].
+    pub(crate) writer_gate: Arc<WriterGate>,
     /// Serializes transaction-marker admission, append, and any offset
     /// resolution for this partition. Holds, per producer, the resolution a
     /// durable `__consumer_offsets` marker still owes the group actors: the
@@ -237,6 +243,7 @@ impl Partition {
             log_dir,
             log,
             writer_tx,
+            writer_gate: WriterGate::shared(false),
             marker_materialization: empty_marker_materialization(),
             append_notify,
             replica_state,

@@ -26,6 +26,7 @@ use {
         codes,
         error::BrokerError,
         partition::{Partition, ReplicatedBatch},
+        partition_writer::replicate_inline,
     },
     bytes::Buf as _,
     krabka_ids::PartitionIndex,
@@ -424,7 +425,13 @@ impl ReplicatedRun {
         }
         let batches = std::mem::take(&mut self.batches);
         let bytes = std::mem::take(&mut self.bytes);
-        if let Err(error) = part.replicate_verbatim_batches(batches).await {
+        // An idle writer means the append runs here, with no hop to the
+        // writer task and back; see `WriterGate`.
+        let result = match replicate_inline(part, batches, &cfg.log_dir_status).await {
+            Ok(result) => result,
+            Err(batches) => part.replicate_verbatim_batches(batches).await,
+        };
+        if let Err(error) = result {
             return Err(append_failed(part, cfg, &error));
         }
         record_replicated(cfg, u64::try_from(bytes).unwrap_or(0));
