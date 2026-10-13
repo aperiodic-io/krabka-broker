@@ -212,6 +212,20 @@ impl Log {
     ) -> Result<RawReadDesc, LogError> {
         let read_ahead_max = self.config.read().unwrap().read_ahead_max;
         self.check_locally_readable(fetch_offset)?;
+        // A segment that wrote through `O_DIRECT` is never described: its
+        // bytes are not in the page cache. The walk stops before the first
+        // one, so the fetch sends the runs before it, or, when it starts in
+        // that segment, gets nothing and falls back to the byte-copy path.
+        // Passing over it would send a later segment's runs and skip its
+        // offsets.
+        let limit_offset = self
+            .segments
+            .iter()
+            .chain(self.active.as_ref())
+            .find(|segment| segment.wrote_direct() && segment.last_offset() >= fetch_offset)
+            .map_or(limit_offset, |segment| {
+                limit_offset.min(segment.base_offset())
+            });
         if fetch_offset >= limit_offset {
             return Ok(RawReadDesc::empty(fetch_offset));
         }

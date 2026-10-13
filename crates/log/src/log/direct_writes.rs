@@ -44,7 +44,6 @@ const BLOCK: usize = 512;
 struct AlignedDisk {
     /// Fail the next direct write with a full disk.
     fail_next: AtomicBool,
-    partial_next: AtomicBool,
     fail_target: Mutex<Option<IoTarget>>,
     /// Every direct write.
     writes: Mutex<Vec<DirectWrite>>,
@@ -77,10 +76,6 @@ impl LogIo for AlignedDisk {
             offset,
             len: buf.len(),
         });
-        if self.partial_next.swap(false, Ordering::SeqCst) {
-            self.fail_next.store(true, Ordering::SeqCst);
-            return file.write_at(&buf[..BLOCK], offset);
-        }
         file.write_at(buf, offset)
     }
 
@@ -127,7 +122,8 @@ fn log_len(dir: &Path, base: i64) -> u64 {
 }
 
 /// Batches of any size go out as whole blocks, the last one zero-padded and
-/// written again by the next append, and read back as written. The padding
+/// written again once the next append completes it, and read back as
+/// written. The padding
 /// lasts only while the segment is active: the seal leaves the file exactly
 /// as long as its batches.
 #[test]
@@ -137,15 +133,14 @@ fn direct_writes_cover_whole_blocks_and_read_back_as_written() {
     for records in [1, 7, 3, 40] {
         append_samples(&mut log, 1, records);
     }
+    log.sync().unwrap();
 
     assert2::assert!(batches(&log) == [span(0, 0), span(1, 6), span(8, 2), span(11, 39)]);
     let written = log.size().bytes_u64();
     let padded = log_len(dir.path(), 0);
     assert2::assert!(padded % BLOCK as u64 == 0);
     assert2::assert!((written..written + BLOCK as u64).contains(&padded));
-    // Each append rewrites the block its predecessor ended in.
     let writes = disk.writes.lock().unwrap().clone();
-    assert2::assert!(writes.len() == 4);
     assert2::assert!(writes[0].offset == 0);
     assert2::assert!(writes.iter().all(|write| write.len % BLOCK == 0));
 
@@ -204,21 +199,63 @@ fn the_newest_bytes_are_read_from_memory() {
     assert2::assert!(newest.batches.len() == 1);
     assert2::assert!(newest.batches[0].base_offset == 6);
     assert2::assert!(newest.batches[0].records.len() == 3);
+
+    // The raw path a fetch takes serves them from memory too.
+    let raw = log
+        .read_raw(Offset(6), log.log_end_offset(), NO_LIMIT)
+        .unwrap();
+    assert2::assert!(raw.start_offset == 6);
+    assert2::assert!(raw.last_offset == Some(Offset(8)));
+    assert2::assert!(raw.bytes.len() == usize::try_from(newest_len).unwrap());
+    assert2::assert!(raw.bytes.iter().any(|&byte| byte != 0));
 }
 
 #[krabka_macros::sendfile_cfg]
-/// `sendfile` reads through the page cache, which does not hold the
-/// newest bytes, so they are not offered to it and the fetch reads them
-/// from memory instead. Older ones, outside the cache, still are.
+/// None of a segment that wrote through `O_DIRECT` is in the page cache, so
+/// none of it is offered to `sendfile`, which would read it from the disk one
+/// header at a time and again for the run. The fetch takes the byte-copy path
+/// instead: the newest bytes from memory, older ones in one large read. That
+/// holds after the segment is sealed too.
 #[test]
-fn the_newest_bytes_are_not_offered_to_sendfile() {
+fn a_direct_segment_is_never_offered_to_sendfile() {
     let disk = Arc::new(AlignedDisk::default());
-    let NewestCached { dir: _dir, log, .. } = newest_cached(&disk);
+    let NewestCached {
+        dir: _dir, mut log, ..
+    } = newest_cached(&disk);
 
     let cached = log.read_raw_desc(Offset(6), Offset(9), NO_LIMIT).unwrap();
     assert2::assert!(cached.regions.is_empty());
     let older = log.read_raw_desc(Offset(0), Offset(3), NO_LIMIT).unwrap();
-    assert2::assert!(older.regions.len() == 1);
+    assert2::assert!(older.regions.is_empty());
+    let raw = log.read_raw(Offset(0), Offset(3), NO_LIMIT).unwrap();
+    assert2::assert!(raw.start_offset == 0);
+    assert2::assert!(raw.last_offset == Some(Offset(2)));
+
+    log.sync().unwrap();
+    assert2::assert!(log.roll().unwrap());
+    let sealed = log.read_raw_desc(Offset(0), Offset(9), NO_LIMIT).unwrap();
+    assert2::assert!(sealed.regions.is_empty());
+}
+
+#[krabka_macros::sendfile_cfg]
+/// The descriptor walk stops at a segment that wrote through `O_DIRECT`, so
+/// a fetch that starts there falls back to the byte-copy path rather than
+/// sending a later, buffered segment's runs and skipping the direct one's
+/// offsets.
+#[test]
+fn a_descriptor_walk_never_passes_over_a_direct_segment() {
+    let disk = Arc::new(AlignedDisk::default());
+    let TempLog { dir: _dir, mut log } = one_synced_batch(&disk);
+    assert2::assert!(log.roll().unwrap());
+    log.set_config(LogConfig::default());
+    append_samples(&mut log, 1, 3);
+    let end = log.log_end_offset();
+
+    let from_direct = log.read_raw_desc(Offset(0), end, NO_LIMIT).unwrap();
+    assert2::assert!(from_direct.regions.is_empty());
+    let from_buffered = log.read_raw_desc(Offset(3), end, NO_LIMIT).unwrap();
+    assert2::assert!(from_buffered.start_offset == 3);
+    assert2::assert!(from_buffered.regions.len() == 1);
 }
 
 /// A truncate puts the writer back on the block the new end falls in and
@@ -240,14 +277,21 @@ fn a_truncate_rewinds_the_direct_writer_and_its_cache() {
     assert2::assert!(batches(&log) == [span(0, 2), span(3, 4), span(8, 4)]);
 }
 
+/// A direct log holding one batch of three records, synced to the disk.
+fn one_synced_batch(disk: &Arc<AlignedDisk>) -> TempLog {
+    let TempLog { dir, mut log } = direct_log(disk, mebibytes(1));
+    append_samples(&mut log, 1, 3);
+    log.sync().unwrap();
+    TempLog { dir, log }
+}
+
 /// Turning `preallocate` off puts the active segment back on the page cache
 /// before its next append, which cuts the padding: from then on its file is
 /// exactly as long as its batches again.
 #[test]
 fn turning_preallocate_off_goes_back_to_the_page_cache() {
     let disk = Arc::new(AlignedDisk::default());
-    let TempLog { dir, mut log } = direct_log(&disk, mebibytes(1));
-    append_samples(&mut log, 1, 3);
+    let TempLog { dir, mut log } = one_synced_batch(&disk);
     let direct_writes = disk.writes.lock().unwrap().len();
 
     log.set_config(LogConfig::default());
@@ -258,20 +302,26 @@ fn turning_preallocate_off_goes_back_to_the_page_cache() {
     assert2::assert!(batches(&log) == [span(0, 2), span(3, 2)]);
 }
 
-/// A direct write that fails leaves the log as it was: the append is
-/// refused, and the next one lands where the failed one would have.
+/// An append does not wait for its direct write, so a write that fails
+/// fails the log from then on, as a page-cache writeback error would: the
+/// batch was already acknowledged. Reads still find it in memory, the next
+/// sync and append report the error, and a reopen finds only the batches
+/// that reached the disk.
 #[test]
-fn a_failed_direct_write_leaves_the_log_as_it_was() {
+fn a_failed_direct_write_fails_the_log_from_then_on() {
     let disk = Arc::new(AlignedDisk::default());
-    let TempLog { dir: _dir, mut log } = direct_log(&disk, mebibytes(1));
-    append_samples(&mut log, 1, 3);
+    let TempLog { dir, mut log } = one_synced_batch(&disk);
 
     disk.fail_next.store(true, Ordering::SeqCst);
+    append_samples(&mut log, 1, 3);
+    assert2::assert!(batches(&log) == [span(0, 2), span(3, 2)]);
+    assert2::assert!(log.sync().is_err());
     let mut refused = super::test_support::sample_batch(3);
     assert2::assert!(log.append(&mut refused).is_err());
-    append_samples(&mut log, 1, 3);
 
-    assert2::assert!(batches(&log) == [span(0, 2), span(3, 2)]);
+    drop(log);
+    let reopened = Log::open(dir.path(), direct(mebibytes(1))).unwrap();
+    assert2::assert!(batches(&reopened) == [span(0, 2)]);
 }
 
 /// A crash under `O_DIRECT` leaves the active segment ending in up to a
@@ -346,7 +396,7 @@ fn producer_batches() -> Vec<VerbatimBatch> {
 }
 
 #[test]
-fn a_direct_group_matches_individual_appends_with_one_write() {
+fn a_direct_group_matches_individual_appends() {
     for cache in [bytes(1), mebibytes(1)] {
         let grouped_disk = Arc::new(AlignedDisk::default());
         let individual_disk = Arc::new(AlignedDisk::default());
@@ -370,8 +420,8 @@ fn a_direct_group_matches_individual_appends_with_one_write() {
             .map(|batch| individual.append_verbatim(batch).unwrap().0)
             .collect();
         assert2::assert!(assigned == expected);
-        assert2::assert!(grouped_disk.writes.lock().unwrap().len() == 2);
-        assert2::assert!(individual_disk.writes.lock().unwrap().len() == 65);
+        grouped.sync().unwrap();
+        individual.sync().unwrap();
         assert2::assert!(
             grouped.read(Offset(0), NO_LIMIT).unwrap().batches
                 == individual.read(Offset(0), NO_LIMIT).unwrap().batches
@@ -384,7 +434,6 @@ fn a_direct_group_matches_individual_appends_with_one_write() {
             std::fs::read(name::log_path(dir.path(), 0)).unwrap()
                 == std::fs::read(name::log_path(individual_dir.path(), 0)).unwrap()
         );
-        grouped.sync().unwrap();
         grouped.roll().unwrap();
         drop(grouped);
         let reopened = Log::open(dir.path(), direct(cache)).unwrap();
@@ -401,10 +450,9 @@ fn a_direct_group_matches_individual_appends_with_one_write() {
 #[test]
 fn failed_direct_groups_restore_bytes_indexes_and_producer_state() {
     for target in [
-        None,
-        Some(IoTarget::OffsetIndex),
-        Some(IoTarget::TimeIndex),
-        Some(IoTarget::LeaderEpochCheckpoint),
+        IoTarget::OffsetIndex,
+        IoTarget::TimeIndex,
+        IoTarget::LeaderEpochCheckpoint,
     ] {
         let disk = Arc::new(AlignedDisk::default());
         let TempLog { dir, mut log } = direct_log(&disk, mebibytes(1));
@@ -419,8 +467,7 @@ fn failed_direct_groups_restore_bytes_indexes_and_producer_state() {
         let mut group = batches[1..4].to_vec();
         // A new epoch forces checkpoint I/O after producer state has advanced.
         group[0].leader_epoch = LeaderEpoch(2);
-        *disk.fail_target.lock().unwrap() = target;
-        disk.partial_next.store(target.is_none(), Ordering::SeqCst);
+        *disk.fail_target.lock().unwrap() = Some(target);
         let error = log
             .try_append_verbatim_group(&group.iter().collect::<Vec<_>>())
             .unwrap()
@@ -484,6 +531,7 @@ fn direct_groups_leave_special_policies_and_rolls_to_individual_appends() {
         let disk = Arc::new(AlignedDisk::default());
         let TempLog { dir: _dir, mut log } = direct_log(&disk, mebibytes(1));
         append_samples(&mut log, 1, 7);
+        log.sync().unwrap();
         let before = log.size();
         let writes = disk.writes.lock().unwrap().len();
         log.set_config(config);
@@ -511,6 +559,8 @@ fn direct_groups_refuse_invalid_transactional_and_oversized_batches_without_writ
             .is_none()
     );
     append_samples(&mut log, 1, 7);
+    log.sync().unwrap();
+    let writes = disk.writes.lock().unwrap().len();
     let mut short = valid[0].clone();
     short.bytes = bytes::Bytes::from_static(b"short");
     let mut invalid = valid[0].clone();
@@ -532,6 +582,7 @@ fn direct_groups_refuse_invalid_transactional_and_oversized_batches_without_writ
     ] {
         assert2::assert!(log.try_append_verbatim_group(&batches).is_none());
         assert2::assert!(log.log_end_offset() == Offset(7));
-        assert2::assert!(disk.writes.lock().unwrap().len() == 1);
+        log.sync().unwrap();
+        assert2::assert!(disk.writes.lock().unwrap().len() == writes);
     }
 }

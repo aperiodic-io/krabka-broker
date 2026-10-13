@@ -186,6 +186,7 @@ impl Segment {
     /// # Errors
     /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
     pub fn flush(&mut self) -> Result<(), LogError> {
+        self.drain_direct()?;
         self.io.sync_data(&self.log_file)?;
         self.offset_index.flush()?;
         self.time_index.flush()?;
@@ -212,6 +213,7 @@ impl Segment {
             max_timestamp,
             max_timestamp_offset,
         } = snapshot;
+        self.settle_direct();
         self.log_file.set_len(position)?;
         self.first_timestamp = None;
         seek_to_log_size(&self.log_file, position)?;
@@ -238,6 +240,9 @@ impl Segment {
     pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn LogIo>) {
         self.offset_index.set_io(io.clone());
         self.time_index.set_io(io.clone());
+        if let Some(mode) = self.direct.as_ref() {
+            mode.writer.set_io(io.clone());
+        }
         self.io = io;
     }
 
@@ -297,6 +302,7 @@ impl Segment {
             }
         }
 
+        self.settle_direct();
         self.log_file.set_len(pos)?;
         self.first_timestamp = None;
         seek_to_log_size(&self.log_file, pos)?;

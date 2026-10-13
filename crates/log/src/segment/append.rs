@@ -220,7 +220,6 @@ impl Segment {
                 }
             };
         };
-        let io = &*self.io;
         let DirectParts { parts, cached } = match batch {
             BatchBytes::Whole(bytes) => DirectParts {
                 parts: &[bytes],
@@ -231,9 +230,8 @@ impl Segment {
                 cached: Bytes::from([header, body].concat()),
             },
         };
-        mode.writer.append(parts, |file, buf, offset| {
-            io.write_direct(file, buf, offset)
-        })?;
+        mode.writer.append(parts)?;
+        mode.cache.set_written(mode.writer.written());
         if chunk_ends.is_empty() {
             mode.cache.push(cached);
         } else {

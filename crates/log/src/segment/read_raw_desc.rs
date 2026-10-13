@@ -92,13 +92,16 @@ impl Segment {
         else {
             return Ok(RawSegmentDesc::empty());
         };
-        // A run that starts in the bytes an `O_DIRECT` segment holds in
-        // memory is not in the page cache, so `sendfile` would read it from
-        // the disk. Describing nothing hands the fetch to the byte-copy path,
-        // which reads it from memory: an empty description is what the
-        // broker falls back on, and a segment that contributes nothing is
-        // one the log's walk passes over.
-        if self.cached_from().is_some_and(|cached| start_pos >= cached) {
+        // The bytes of a segment that wrote through `O_DIRECT` are not in
+        // the page cache: the newest are in its tail cache, and the rest are
+        // only on the disk, sealed or not. Walking their batch headers here
+        // would be one small synchronous disk read per batch under the log
+        // lock, and `sendfile` would then read the run from the disk again.
+        // Describing nothing hands the fetch to the byte-copy path, which
+        // takes the newest bytes from memory and the rest in one large read:
+        // an empty description is what the broker falls back on, and a
+        // segment that contributes nothing is one the log's walk passes over.
+        if self.wrote_direct {
             return Ok(RawSegmentDesc::empty());
         }
 

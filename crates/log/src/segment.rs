@@ -94,6 +94,12 @@ pub struct Segment {
     /// Whether [`Segment::write_direct`] has asked for an `O_DIRECT` handle
     /// since the segment last wrote through the page cache, granted or not.
     direct_asked: bool,
+    /// Whether this segment has written through `O_DIRECT` since it was
+    /// opened, sealed or not. Its bytes are then mostly not in the page
+    /// cache, so a fetch reads them in one large read rather than walking
+    /// the batch headers one small read at a time and sending the run from
+    /// the file. See `read_raw_desc`.
+    wrote_direct: bool,
 }
 
 /// Verbatim, decode-free output of [`Segment::read_raw`].

@@ -33,6 +33,23 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
   with 32 MiB its end-to-end p99 stayed under 100 ms (#1370). Each partition
   with `preallocate=true` now holds up to 32 MiB of its newest data in memory.
   Set `log_tail_cache_size` to keep the old value.
+- A partition with `preallocate=true` acknowledges a produce request once
+  its `O_DIRECT` write is queued, not once the write is on the disk, as a
+  partition without `preallocate` acknowledges once its bytes are in the page
+  cache, and as Redpanda does with write caching. Shared write threads put
+  up to four of a segment's writes on the disk at the same time. Unwritten
+  bytes stay in memory for reads. A write that fails afterwards fails every
+  later append and sync of the segment. Before, the append waited for the
+  write under the partition's log lock, so one slow device write stalled the
+  producer, the followers and the consumers of the partition: at RF3 and
+  10,000 records/s the end-to-end p99.9 was 387 to 440 ms, and is now 2 to
+  4 ms (#1371).
+- A fetch from a segment that wrote through `O_DIRECT` no longer offers the
+  segment to `sendfile`. Those bytes are not in the page cache, so walking
+  their batch headers was one small synchronous disk read per batch under
+  the log lock, and `sendfile` then read them from the disk again. The fetch
+  now takes the newest bytes from memory as a shared slice, without a copy,
+  and older ones in one large read.
 
 ## [1.0.3] - 2026-10-12
 

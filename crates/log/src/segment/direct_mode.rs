@@ -45,13 +45,19 @@ impl std::fmt::Debug for DirectMode {
 }
 
 impl Drop for DirectMode {
-    /// Cut the padding past the last batch, so a segment closed cleanly is
-    /// exactly as long as its batches. A failure leaves it for recovery.
-    fn drop(&mut self) { let _ = self.writer.file().set_len(self.writer.end()); }
+    /// Cut the padding past the last batch once the queued writes are done,
+    /// so a segment closed cleanly is exactly as long as its batches. A
+    /// failure leaves it for recovery.
+    fn drop(&mut self) { let _ = self.writer.cut_padding(); }
 }
 
 impl Segment {
     pub(crate) fn writes_direct(&self) -> bool { self.direct.is_some() }
+
+    /// Whether this segment has written through `O_DIRECT` since it was
+    /// opened, sealed or not. See `wrote_direct` on [`Segment`].
+    #[krabka_macros::sendfile_cfg]
+    pub(crate) fn wrote_direct(&self) -> bool { self.wrote_direct }
 
     /// Write this segment's appends through `O_DIRECT` from here on, keeping
     /// up to `tail_cache` of the newest bytes in memory for reads.
@@ -67,7 +73,10 @@ impl Segment {
         }
         self.direct_asked = true;
         match self.open_direct_mode(tail_cache) {
-            Ok(mode) => self.direct = Some(Box::new(mode)),
+            Ok(mode) => {
+                self.direct = Some(Box::new(mode));
+                self.wrote_direct = true;
+            }
             Err(error) => super::lifecycle::log_refused("direct", self.base_offset, &error),
         }
     }
@@ -89,6 +98,7 @@ impl Segment {
             },
             self.log_size,
             tail,
+            std::sync::Arc::clone(&self.io),
         )?;
         Ok(DirectMode {
             writer,
@@ -101,7 +111,9 @@ impl Segment {
     ///
     /// # Errors
     /// Returns the truncate or seek error.
+    /// The error of a queued write that failed, so a seal does not hide it.
     pub(crate) fn write_buffered(&mut self) -> Result<(), LogError> {
+        self.drain_direct()?;
         self.direct_asked = false;
         if self.direct.take().is_some() {
             self.log_file.set_len(self.log_size)?;
@@ -109,6 +121,21 @@ impl Segment {
         }
         Ok(())
     }
+
+    /// Wait until every queued `O_DIRECT` write is on the disk.
+    ///
+    /// # Errors
+    /// The error of a failed write.
+    pub(crate) fn drain_direct(&self) -> std::io::Result<()> {
+        self.direct
+            .as_ref()
+            .map_or(Ok(()), |mode| mode.writer.drain())
+    }
+
+    /// Wait until no queued `O_DIRECT` write is running, whatever became of
+    /// them. A truncate waits for this, so no write lands past the new end
+    /// after it.
+    pub(super) fn settle_direct(&self) { let _ = self.drain_direct(); }
 
     /// Bring the direct writer and the cache back in line with `log_size`
     /// after a truncate: the partial last block is now whatever the file
@@ -146,11 +173,10 @@ impl Segment {
     }
 }
 
-#[krabka_macros::sendfile_cfg]
 impl Segment {
-    /// Where the bytes this segment holds in memory begin, when it writes
-    /// directly. A read at or past it is served from memory.
-    pub(super) fn cached_from(&self) -> Option<u64> {
-        self.direct.as_ref().map(|mode| mode.cache.start())
+    /// The cached bytes from `pos` on, up to about `max`, when the segment
+    /// writes directly and holds `pos` in memory. See [`TailCache::bytes_from`].
+    pub(super) fn cached_bytes(&self, pos: u64, max: usize) -> Option<bytes::Bytes> {
+        self.direct.as_ref()?.cache.bytes_from(pos, max)
     }
 }

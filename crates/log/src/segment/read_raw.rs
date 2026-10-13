@@ -154,6 +154,25 @@ impl Segment {
         // crosses back to `usize` once, here.
         let max_bytes = max_size.bytes_usize();
         let first_read = max_bytes.max(HEADER_LEN);
+        // A segment that writes directly holds its newest batches in memory.
+        // Serve them as a slice of what it holds, without the copy below:
+        // the fetch runs under the log lock, which the producer's appends
+        // wait for.
+        if let Some(cached) = self.cached_bytes(start_pos, first_read) {
+            let range =
+                select_raw_range(fetch_offset, limit_offset, max_bytes, cached.len(), |pos| {
+                    RawBatch::decode(&cached[pos..pos + HEADER_LEN]).map(Some)
+                })?;
+            if let Some(range) = range.filter(|range| range.positions.end <= cached.len()) {
+                let bytes = cached.slice(range.positions);
+                tracing::Span::current().record("bytes", bytes.len());
+                return Ok(RawSegmentRead {
+                    start_offset: range.start_offset,
+                    last_offset: range.last_offset,
+                    bytes,
+                });
+            }
+        }
         self.advise_read(start_pos, first_read as u64, read_ahead_max);
         let mut buf: Vec<u8> = Vec::with_capacity(first_read.min(read_buffer_cap.bytes_usize()));
         self.read_log_range(start_pos, &mut buf, first_read)?;

@@ -76,6 +76,7 @@ impl Segment {
             reserve_requested: 0,
             direct: None,
             direct_asked: false,
+            wrote_direct: false,
         })
     }
 

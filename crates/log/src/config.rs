@@ -130,10 +130,15 @@ pub enum SegmentAllocation {
     /// as they grow it, and write its batches through `O_DIRECT`. A truncate
     /// gives the reservation up, and the segment takes it again.
     ///
-    /// The `O_DIRECT` writes bypass the page cache. The newest
-    /// [`LogConfig::tail_cache_size`] of the segment stays in memory to serve
-    /// reads, and a direct write covers whole blocks, so the active segment's
-    /// file runs up to a block past its last batch until it is sealed. Where
+    /// The `O_DIRECT` writes bypass the page cache. An append returns once
+    /// its write is queued, and shared write threads put the queued writes on
+    /// the disk, several at a time, so a produce request is acknowledged
+    /// before its bytes reach the disk, as it is through the page cache. The
+    /// newest [`LogConfig::tail_cache_size`] of the segment, and every byte
+    /// that is not on the disk yet, stays in memory to serve reads. A write
+    /// that fails fails every later append and sync of the segment. A direct
+    /// write covers whole blocks, so the active segment's file runs up to a
+    /// block past its last batch until it is sealed. Where
     /// the kernel does not report the alignment `O_DIRECT` needs (before Linux
     /// 6.1, or on tmpfs), the segment writes through the page cache.
     ///

@@ -424,58 +424,68 @@ mod tests {
             .collect()
     }
 
+    /// A log under `preallocate` that writes through `disk`, holding one
+    /// batch when `seeded`, and stamping `LogAppendTime` when `append_time`.
+    fn preallocated_log(
+        seeded: bool,
+        append_time: bool,
+        disk: &Arc<FailNthWrite>,
+    ) -> (tempfile::TempDir, Mutex<Log>) {
+        let dir = tempdir().unwrap();
+        let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
+        if seeded {
+            log.append(&mut sample_batch().call()).unwrap();
+        }
+        log.test_set_io(disk.clone());
+        log.set_config(LogConfig {
+            segment_allocation: krabka_log::SegmentAllocation::Preallocate,
+            segment_size: mebibytes(16),
+            message_timestamp_type: if append_time {
+                krabka_protocol::records::TimestampType::LogAppendTime
+            } else {
+                krabka_protocol::records::TimestampType::CreateTime
+            },
+            ..LogConfig::default()
+        });
+        (dir, Mutex::new(log))
+    }
+
+    fn verbatim_jobs(jobs: usize, payload: usize) -> Vec<ProduceData> {
+        let mut bytes = bytes::BytesMut::new();
+        let mut sample = sample_batch().call();
+        sample.records[0].value = Some(bytes::Bytes::from(vec![7; payload]));
+        sample.encode(&mut bytes).unwrap();
+        let bytes = bytes.freeze();
+        let validated = krabka_protocol::records::validate_one_v2_batch(&bytes).unwrap();
+        let batch = krabka_log::VerbatimBatch::from_header(validated.header, bytes.clone());
+        (0..jobs)
+            .map(|_| ProduceData::Verbatim(batch.clone()))
+            .collect()
+    }
+
+    /// Every batch of a verbatim produce group gets its base offset in
+    /// order, under the shared direct write or the individual appends a log
+    /// policy falls back to, and every batch reads back.
     #[test]
-    fn verbatim_produce_groups_share_a_write_and_ack_only_written_offsets() {
-        for (jobs, payload, seeded, append_time, fail_at, writes, failed) in [
-            (8, 0, true, false, usize::MAX, 1, 0),
-            (8, 0, true, false, 1, 1, 8),
-            (8, 0, false, false, usize::MAX, 2, 0),
-            (1_024, 2_048, true, false, usize::MAX, 16, 0),
-            (1_024, 2_048, true, false, 2, 16, 64),
-            (16, 128 * 1_024, true, false, usize::MAX, 3, 0),
-            (8, 0, true, true, usize::MAX, 8, 0),
+    fn verbatim_produce_groups_ack_every_batch_in_order() {
+        for (jobs, payload, seeded, append_time) in [
+            (8, 0, true, false),
+            (8, 0, false, false),
+            (1_024, 2_048, true, false),
+            (16, 128 * 1_024, true, false),
+            (8, 0, true, true),
         ] {
-            let dir = tempdir().unwrap();
-            let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
-            if seeded {
-                log.append(&mut sample_batch().call()).unwrap();
-            }
             let disk = Arc::new(FailNthWrite {
                 next: std::sync::atomic::AtomicUsize::new(0),
-                fail_at,
+                fail_at: usize::MAX,
             });
-            log.test_set_io(disk.clone());
-            log.set_config(LogConfig {
-                segment_allocation: krabka_log::SegmentAllocation::Preallocate,
-                segment_size: mebibytes(16),
-                message_timestamp_type: if append_time {
-                    krabka_protocol::records::TimestampType::LogAppendTime
-                } else {
-                    krabka_protocol::records::TimestampType::CreateTime
-                },
-                ..LogConfig::default()
-            });
-            let mut bytes = bytes::BytesMut::new();
-            let mut sample = sample_batch().call();
-            sample.records[0].value = Some(bytes::Bytes::from(vec![7; payload]));
-            sample.encode(&mut bytes).unwrap();
-            let bytes = bytes.freeze();
-            let validated = krabka_protocol::records::validate_one_v2_batch(&bytes).unwrap();
-            let batch = krabka_log::VerbatimBatch::from_header(validated.header, bytes.clone());
-            let log = Mutex::new(log);
-            let datas = (0..jobs)
-                .map(|_| ProduceData::Verbatim(batch.clone()))
-                .collect();
-            let (results, leo, controls) = append_produce_batch(&log, None, (datas, Vec::new()));
+            let (_dir, log) = preallocated_log(seeded, append_time, &disk);
+            let (results, leo, controls) =
+                append_produce_batch(&log, None, (verbatim_jobs(jobs, payload), Vec::new()));
             assert!(controls.is_empty());
-            assert!(disk.next.load(std::sync::atomic::Ordering::Relaxed) == writes);
-            let failures: Vec<_> = results.iter().filter(|result| result.is_err()).collect();
-            assert!(failures.len() == failed);
-            assert!(failures.iter().all(|result| matches!(result,
-                    Err(crate::error::BrokerError::Log(krabka_log::LogError::Io(error)))
-                    if error.kind() == std::io::ErrorKind::StorageFull)));
+            assert!(results.iter().all(Result::is_ok));
             let base = i64::from(seeded);
-            let end = base + i64::try_from(jobs - failed).unwrap();
+            let end = base + i64::try_from(jobs).unwrap();
             for result in results.iter().flatten() {
                 assert!(result.log_append_time_ms.is_some() == append_time);
             }
@@ -486,15 +496,36 @@ mod tests {
                 .collect();
             assert!(assigned == (base..end).map(Offset).collect::<Vec<_>>());
             assert!(leo == Offset(end));
+            let mut log = lock_log(&log);
+            log.sync().unwrap();
             assert!(
-                lock_log(&log)
-                    .read(Offset(0), mebibytes(16))
-                    .unwrap()
-                    .batches
-                    .len()
+                log.read(Offset(0), mebibytes(16)).unwrap().batches.len()
                     == usize::try_from(leo.0).unwrap()
             );
         }
+    }
+
+    /// The batches of a group are acknowledged once their direct write is
+    /// queued, so a write that fails afterwards cannot fail them. It fails
+    /// the next group instead, and every group after it, as a page-cache
+    /// writeback error fails the next sync.
+    #[test]
+    fn a_direct_write_that_fails_after_the_ack_fails_the_next_group() {
+        let disk = Arc::new(FailNthWrite {
+            next: std::sync::atomic::AtomicUsize::new(0),
+            fail_at: 1,
+        });
+        let (_dir, log) = preallocated_log(true, false, &disk);
+        let (first, leo, _) =
+            append_produce_batch(&log, None, (verbatim_jobs(64, 2_048), Vec::new()));
+        assert!(first.iter().all(Result::is_ok));
+        assert!(leo == Offset(65));
+        assert!(lock_log(&log).sync().is_err());
+
+        let (next, _, _) = append_produce_batch(&log, None, (verbatim_jobs(8, 0), Vec::new()));
+        assert!(next.iter().all(|result| matches!(result,
+            Err(crate::error::BrokerError::Log(krabka_log::LogError::Io(error)))
+            if error.kind() == std::io::ErrorKind::StorageFull)));
     }
 
     #[test]
