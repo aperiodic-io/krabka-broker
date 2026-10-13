@@ -18,6 +18,9 @@ pub struct DedupCounterDelta {
     pub records_dropped: u64,
     /// Records admitted without being indexed because an index limit was full.
     pub records_unindexed: u64,
+    /// Records already outside the window by the broker clock on arrival,
+    /// admitted without being indexed.
+    pub records_expired_on_arrival: u64,
     /// Records whose future timestamp was clamped to the broker clock.
     pub records_skew_clamped: u64,
     /// Still-live identities evicted to make room at an entry limit.
@@ -46,6 +49,7 @@ impl BrokerMetrics {
         let DedupCounterDelta {
             records_dropped,
             records_unindexed,
+            records_expired_on_arrival,
             records_skew_clamped,
             capacity_evicted_entries,
             batches_rebuilt,
@@ -54,6 +58,10 @@ impl BrokerMetrics {
         for (family, amount) in [
             (&self.dedup_records_dropped, records_dropped),
             (&self.dedup_records_unindexed, records_unindexed),
+            (
+                &self.dedup_records_expired_on_arrival,
+                records_expired_on_arrival,
+            ),
             (&self.dedup_records_skew_clamped, records_skew_clamped),
             (
                 &self.dedup_capacity_evicted_entries,
@@ -122,10 +130,14 @@ mod tests {
     /// Every dedup counter family, named the way the cases below name it.
     fn counter_families(
         m: &BrokerMetrics,
-    ) -> [(&'static str, &Family<PartitionLabel, Counter>); 6] {
+    ) -> [(&'static str, &Family<PartitionLabel, Counter>); 7] {
         [
             ("records_dropped", &m.dedup_records_dropped),
             ("records_unindexed", &m.dedup_records_unindexed),
+            (
+                "records_expired_on_arrival",
+                &m.dedup_records_expired_on_arrival,
+            ),
             ("records_skew_clamped", &m.dedup_records_skew_clamped),
             (
                 "capacity_evicted_entries",
@@ -187,6 +199,10 @@ mod tests {
                 records_unindexed: 3,
                 ..DedupCounterDelta::default()
             }),
+            ("records_expired_on_arrival", DedupCounterDelta {
+                records_expired_on_arrival: 3,
+                ..DedupCounterDelta::default()
+            }),
             ("records_skew_clamped", DedupCounterDelta {
                 records_skew_clamped: 3,
                 ..DedupCounterDelta::default()
@@ -231,6 +247,7 @@ mod tests {
         let delta = DedupCounterDelta {
             records_dropped: 2,
             records_unindexed: 1,
+            records_expired_on_arrival: 1,
             records_skew_clamped: 1,
             capacity_evicted_entries: 4,
             batches_rebuilt: 1,
@@ -242,6 +259,7 @@ mod tests {
         let want = vec![
             ("records_dropped", Some(4)),
             ("records_unindexed", Some(2)),
+            ("records_expired_on_arrival", Some(2)),
             ("records_skew_clamped", Some(2)),
             ("capacity_evicted_entries", Some(8)),
             ("batches_rebuilt", Some(2)),
@@ -274,6 +292,7 @@ mod tests {
         let delta = DedupCounterDelta {
             records_dropped: 1,
             records_unindexed: 1,
+            records_expired_on_arrival: 1,
             records_skew_clamped: 1,
             capacity_evicted_entries: 1,
             batches_rebuilt: 1,

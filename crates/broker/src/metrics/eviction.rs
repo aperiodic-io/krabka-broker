@@ -152,6 +152,7 @@ impl BrokerMetrics {
             &self.log_compactions_total,
             &self.dedup_records_dropped,
             &self.dedup_records_unindexed,
+            &self.dedup_records_expired_on_arrival,
             &self.dedup_records_skew_clamped,
             &self.dedup_capacity_evicted_entries,
             &self.dedup_batches_rebuilt,
@@ -436,6 +437,7 @@ mod tests {
             DedupCounterDelta {
                 records_dropped: 1,
                 records_unindexed: 1,
+                records_expired_on_arrival: 1,
                 records_skew_clamped: 1,
                 capacity_evicted_entries: 1,
                 batches_rebuilt: 1,

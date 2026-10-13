@@ -1181,6 +1181,16 @@ pub struct BrokerMetrics {
         a non-zero rate calls for a larger dedup_max_entries_per_partition \
         or dedup_max_entries.")]
     pub dedup_records_unindexed: Family<PartitionLabel, Counter>,
+    /// KFC-10 cumulative count of records whose timestamp was already more
+    /// than `dedup.window.ms` behind the broker clock when they arrived, so
+    /// they were appended without being indexed. A backfill of old data
+    /// shows up here: its duplicates are not detected.
+    #[metric(
+        help = "KFC-10 cumulative count of records whose timestamp was already \
+        outside the dedup window by the broker clock on arrival. They are \
+        appended without being indexed, so their duplicates are not detected."
+    )]
+    pub dedup_records_expired_on_arrival: Family<PartitionLabel, Counter>,
     /// KFC-10 cumulative count of records whose timestamp was ahead of the
     /// broker clock and was clamped before it reached the index.
     ///

@@ -392,6 +392,9 @@ krabka_broker_dedup_records_dropped_total{topic="orders",partition="0"} 0
 # HELP krabka_broker_dedup_records_unindexed KFC-10 cumulative count of records admitted without being indexed because the partition index or the broker-wide index budget was full. Duplicates of these records are not detected; a non-zero rate calls for a larger dedup_max_entries_per_partition or dedup_max_entries..
 # TYPE krabka_broker_dedup_records_unindexed counter
 krabka_broker_dedup_records_unindexed_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_records_expired_on_arrival KFC-10 cumulative count of records whose timestamp was already outside the dedup window by the broker clock on arrival. They are appended without being indexed, so their duplicates are not detected..
+# TYPE krabka_broker_dedup_records_expired_on_arrival counter
+krabka_broker_dedup_records_expired_on_arrival_total{topic="orders",partition="0"} 0
 # HELP krabka_broker_dedup_records_skew_clamped KFC-10 cumulative count of records whose timestamp was ahead of the broker clock and was clamped before reaching the dedup index. A non-zero rate means producer clock skew..
 # TYPE krabka_broker_dedup_records_skew_clamped counter
 krabka_broker_dedup_records_skew_clamped_total{topic="orders",partition="0"} 0

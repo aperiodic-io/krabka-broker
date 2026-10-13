@@ -76,6 +76,7 @@ fn seed_dedup(m: &BrokerMetrics, topic: &Arc<str>) {
         DedupCounterDelta {
             records_dropped: 1,
             records_unindexed: 1,
+            records_expired_on_arrival: 1,
             records_skew_clamped: 1,
             capacity_evicted_entries: 1,
             batches_rebuilt: 1,
@@ -96,6 +97,7 @@ async fn dedup_metrics_are_registered_with_the_broker_prefix() {
     for needle in [
         "krabka_broker_dedup_records_dropped_total",
         "krabka_broker_dedup_records_unindexed_total",
+        "krabka_broker_dedup_records_expired_on_arrival_total",
         "krabka_broker_dedup_records_skew_clamped_total",
         "krabka_broker_dedup_capacity_evicted_entries_total",
         "krabka_broker_dedup_batches_rebuilt_total",
