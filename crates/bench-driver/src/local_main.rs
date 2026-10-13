@@ -91,10 +91,7 @@ fn print_raw_summary(name: &str, out: &RawOutcome) {
         "consume             {:.0} msg/s",
         to_rate(out.consumed, window)
     );
-    println!(
-        "committed           {:.0} msg/s",
-        to_rate(out.committed, window)
-    );
+    println!("committed           {:.0} msg/s", out.committed_per_sec);
     println!(
         "produce ack latency p50 {}  p99 {}  p999 {}  max {}",
         p.p50.human(),

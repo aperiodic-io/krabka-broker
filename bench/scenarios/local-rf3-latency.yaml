@@ -14,5 +14,5 @@ acks: leader
 compression: none
 linger: 0ms
 batch_size: 16KiB
-warmup: 5s
+warmup: 10s
 duration: 20s

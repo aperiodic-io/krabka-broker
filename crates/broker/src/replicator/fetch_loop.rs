@@ -15,7 +15,7 @@ use {
         connection::{connect_with_backoff, sleep_or_cancel},
         ensure_local_partition,
         follower_throttle::{FetchThrottleDecision, follower_partition_fetch_cap},
-        raw_fetch::RawFetchRequest,
+        raw_fetch::{RawFetchRequest, fetch_raw},
         replication_target_changed,
         response::{FollowedIndex, KeyedAction, RoundEntry, RowAction, apply_response_indexed},
         session::{FollowerFetchSession, SessionKey, SessionOutcome, WantedRows},
@@ -166,7 +166,7 @@ pub(super) async fn run_fetcher_loop(fetcher: &FetcherConfig) -> Result<(), Stri
         ));
         let send = tokio::select! {
             () = fetcher.shutdown.cancelled() => return Ok(()),
-            r = connection.send(request) => r,
+            r = fetch_raw(connection, request) => r,
         };
 
         let mut resp: FetchResponse = match send {

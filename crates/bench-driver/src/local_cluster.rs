@@ -35,10 +35,10 @@ const TOPIC_ALREADY_EXISTS: i16 = 36;
 const CLUSTER_ID: &str = "DX4vWpscTB6KPyttHkyfEA";
 
 /// The most bytes the benchmark topic keeps per partition replica.
-const RETENTION_BYTES: u64 = 256 * 1024 * 1024;
+const RETENTION_BYTES: u64 = 48 * 1024 * 1024;
 /// The segment size of the benchmark topic, small enough that retention can
 /// delete in steps well below [`RETENTION_BYTES`].
-const SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
+const SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
 /// How often the brokers apply retention, as a duration flag value.
 const RETENTION_CHECK_INTERVAL: &str = "2s";
 
@@ -236,8 +236,10 @@ impl LocalCluster {
     /// full in-sync replica set.
     ///
     /// The topic keeps at most [`RETENTION_BYTES`] per partition, in
-    /// [`SEGMENT_BYTES`] segments, so a saturating run does not fill the disk
-    /// it shares with the build.
+    /// [`SEGMENT_BYTES`] segments. A saturating run then neither fills the
+    /// disk nor waits on it: retention deletes the data before the page cache
+    /// writes it back, as it must on one machine whose single disk carries
+    /// all three replicas, where a real cluster gives each broker its own.
     ///
     /// # Errors
     ///

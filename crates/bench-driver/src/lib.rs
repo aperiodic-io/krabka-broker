@@ -65,4 +65,5 @@ pub mod rate;
 pub mod raw_load;
 pub mod report;
 pub mod scenario;
+pub mod wire;
 pub mod workload;

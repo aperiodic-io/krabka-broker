@@ -28,10 +28,10 @@ use {
         hist,
         rate::Pacer,
         scenario::{Acks, LoadMode, Scenario},
+        wire::{ProduceWire, Settle, Settled, Tag},
     },
     anyhow::{Context, Result, bail},
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    futures::{StreamExt as _, stream::FuturesUnordered},
     hdrhistogram::Histogram,
     krabka_client_core::{Connection, ConnectionOptions},
     krabka_protocol::{
@@ -52,6 +52,7 @@ use {
         tagged_fields::read_tagged_fields,
     },
     krabka_units::prelude::*,
+    num_traits::ToPrimitive as _,
     std::{
         collections::BTreeMap,
         net::{SocketAddr, ToSocketAddrs},
@@ -61,7 +62,7 @@ use {
         },
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
-    tokio::{task::JoinSet, time::Instant},
+    tokio::{sync::oneshot, task::JoinSet, time::Instant},
 };
 
 /// Produce requests each connection keeps outstanding, Kafka's default
@@ -84,11 +85,12 @@ pub struct RawOutcome {
     pub produced: u64,
     /// Records the consumer read that were sent inside the window.
     pub consumed: u64,
-    /// Records that became readable -- replicated below the high watermark --
-    /// while the window was open, whenever they were sent. Under a load the
-    /// followers cannot keep up with, this is the replication throughput, and
-    /// it is the rate the cluster can sustain.
-    pub committed: u64,
+    /// Records per second that became readable -- replicated below the high
+    /// watermark -- while the window was open, from how far each partition's
+    /// high watermark moved. Under a load the followers cannot keep up with,
+    /// this is the replication throughput, and it is the rate the cluster can
+    /// sustain. A consumer that falls behind does not lower it.
+    pub committed_per_sec: f64,
     /// The measurement window.
     pub window: Time,
     /// Per-record acknowledgement latency, in microseconds.
@@ -123,7 +125,8 @@ struct Shared {
     ack: Mutex<Histogram<u64>>,
     end_to_end: Mutex<Histogram<u64>>,
     consumed: AtomicU64,
-    committed: AtomicU64,
+    /// Each partition's high watermark, as fetches inside the window saw it.
+    high_watermarks: Mutex<BTreeMap<i32, WatermarkSpan>>,
     /// The measurement window, as epoch nanoseconds of the send time.
     window_start_ns: u64,
     window_end_ns: u64,
@@ -148,6 +151,27 @@ fn now_ns() -> u64 {
     u64::try_from(since.as_nanos()).unwrap_or(u64::MAX)
 }
 
+/// The first and the last high watermark of one partition that a fetch inside
+/// the window saw, each with the epoch nanosecond it was seen at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WatermarkSpan {
+    first: (u64, i64),
+    last: (u64, i64),
+}
+
+/// The summed rate at which the partitions' high watermarks advanced.
+fn committed_per_sec(spans: &BTreeMap<i32, WatermarkSpan>) -> f64 {
+    spans
+        .values()
+        .filter(|span| span.last.0 > span.first.0)
+        .map(|span| {
+            let records = (span.last.1 - span.first.1).to_f64().unwrap_or(0.0);
+            let seconds = (span.last.0 - span.first.0).to_f64().unwrap_or(1.0) / 1.0e9;
+            records / seconds
+        })
+        .sum()
+}
+
 /// Runs `scenario` against the cluster at `bootstrap` with the raw generator.
 ///
 /// # Errors
@@ -170,7 +194,7 @@ pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<Ra
         ack: Mutex::new(hist::new()),
         end_to_end: Mutex::new(hist::new()),
         consumed: AtomicU64::new(0),
-        committed: AtomicU64::new(0),
+        high_watermarks: Mutex::new(BTreeMap::new()),
         window_start_ns: start_ns + warmup_ns,
         window_end_ns: start_ns + warmup_ns + window_ns,
     });
@@ -194,16 +218,19 @@ pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<Ra
     }
 
     let mut producers = JoinSet::new();
+    let mut readers = Vec::new();
+    let settler = || -> Arc<dyn Settle> { Arc::clone(&shared) as Arc<dyn Settle> };
     match scenario.mode {
         LoadMode::Saturate => {
             let records = records_per_batch(scenario);
             let template = batch_template(scenario.msg_size, records)?;
             for leader in &leaders {
                 for _ in 0..scenario.producers.max(1) {
-                    let connection = connect(leader.addr, "bench-raw-producer").await?;
+                    let (wire, reader) = ProduceWire::connect(leader.addr, settler()).await?;
+                    readers.push(reader);
                     for _ in 0..IN_FLIGHT_PER_CONNECTION {
                         producers.spawn(produce_saturate(SaturateTask {
-                            connection: connection.clone(),
+                            wire: Arc::clone(&wire),
                             topic: topic.clone(),
                             partitions: leader.partitions.clone(),
                             template: template.clone(),
@@ -219,9 +246,10 @@ pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<Ra
             let template = batch_template(scenario.msg_size, 1)?;
             let mut routes = Vec::new();
             for leader in &leaders {
-                let connection = connect(leader.addr, "bench-raw-producer").await?;
+                let (wire, reader) = ProduceWire::connect(leader.addr, settler()).await?;
+                readers.push(reader);
                 for &partition in &leader.partitions {
-                    routes.push((connection.clone(), partition));
+                    routes.push((Arc::clone(&wire), partition));
                 }
             }
             routes.sort_by_key(|(_, partition)| *partition);
@@ -240,6 +268,11 @@ pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<Ra
     tokio::time::sleep(run_for).await;
     shared.stop.store(true, Ordering::Relaxed);
     while producers.join_next().await.is_some() {}
+    // A paced run does not wait on its acks; give the last ones time to land.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    for reader in readers {
+        reader.abort();
+    }
     // Let the consumers read what was produced up to the end of the window.
     let drain_until = Instant::now() + Duration::from_secs(5);
     let produced = shared.produced.load(Ordering::Relaxed);
@@ -249,13 +282,16 @@ pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<Ra
     consumers.abort_all();
     while consumers.join_next().await.is_some() {}
 
+    if std::env::var_os("BENCH_DEBUG_WATERMARKS").is_some() {
+        eprintln!("{:#?}", shared.high_watermarks.lock().expect("watermarks"));
+    }
     let ack = shared.ack.lock().expect("ack histogram").clone();
     let end_to_end = shared.end_to_end.lock().expect("e2e histogram").clone();
     let first_error = shared.first_error.lock().expect("error slot").clone();
     Ok(RawOutcome {
         produced,
         consumed: shared.consumed.load(Ordering::Relaxed),
-        committed: shared.committed.load(Ordering::Relaxed),
+        committed_per_sec: committed_per_sec(&shared.high_watermarks.lock().expect("watermarks")),
         window: scenario.duration,
         ack,
         end_to_end,
@@ -423,47 +459,33 @@ fn produce_request(topic: &TopicRef, acks: i16, batches: Vec<(i32, Bytes)>) -> P
     }
 }
 
-/// Sends `request` and tallies its records, its latency and its errors.
-async fn send_and_tally(
-    connection: &Connection,
-    request: ProduceRequest,
-    records: u64,
-    sent: u64,
-    shared: &Shared,
-) {
-    let started = Instant::now();
-    let response = connection.send(request).await;
-    let latency = started.elapsed();
-    match response {
-        Ok(response) => {
-            let failed = response
-                .responses
-                .iter()
-                .flat_map(|topic| &topic.partition_responses)
-                .find(|partition| partition.error_code != 0);
-            if let Some(partition) = failed {
-                shared.error(format!(
-                    "partition {} answered error code {}",
-                    partition.index, partition.error_code
-                ));
-                return;
+impl Settle for Shared {
+    fn settle(&self, tag: Tag, round_trip: Duration, settled: Settled) {
+        match settled {
+            Settled::Acked => {
+                if self.in_window(tag.sent_ns) {
+                    self.produced.fetch_add(tag.records, Ordering::Relaxed);
+                    let micros = u64::try_from(round_trip.as_micros())
+                        .unwrap_or(u64::MAX)
+                        .max(1);
+                    let mut ack = self.ack.lock().expect("ack histogram");
+                    let high = ack.high();
+                    let _ = ack.record_n(micros.min(high), tag.records);
+                }
             }
-            if shared.in_window(sent) {
-                shared.produced.fetch_add(records, Ordering::Relaxed);
-                let micros = u64::try_from(latency.as_micros())
-                    .unwrap_or(u64::MAX)
-                    .max(1);
-                let mut ack = shared.ack.lock().expect("ack histogram");
-                let high = ack.high();
-                let _ = ack.record_n(micros.min(high), records);
-            }
+            Settled::Failed {
+                partition,
+                error_code,
+            } => self.error(format!(
+                "partition {partition} answered error code {error_code}"
+            )),
+            Settled::Undecodable(error) => self.error(format!("produce response: {error}")),
         }
-        Err(error) => shared.error(format!("produce: {error}")),
     }
 }
 
 struct SaturateTask {
-    connection: Connection,
+    wire: Arc<ProduceWire>,
     topic: TopicRef,
     partitions: Vec<i32>,
     template: Bytes,
@@ -474,7 +496,7 @@ struct SaturateTask {
 
 async fn produce_saturate(task: SaturateTask) {
     let SaturateTask {
-        connection,
+        wire,
         topic,
         partitions,
         template,
@@ -488,18 +510,27 @@ async fn produce_saturate(task: SaturateTask) {
     };
     let records = u64::try_from(records * partitions.len()).unwrap_or(u64::MAX);
     while !shared.stop.load(Ordering::Relaxed) {
-        let sent = now_ns();
+        let sent_ns = now_ns();
         let batches = partitions
             .iter()
-            .map(|&partition| (partition, stamped(&template, value_at, sent)))
+            .map(|&partition| (partition, stamped(&template, value_at, sent_ns)))
             .collect();
         let request = produce_request(&topic, acks, batches);
-        send_and_tally(&connection, request, records, sent, &shared).await;
+        let (done, settled) = oneshot::channel();
+        let tag = Tag { sent_ns, records };
+        if let Err(error) = wire.send(&request, tag, Some(done)).await {
+            shared.error(format!("produce: {error:#}"));
+            return;
+        }
+        if settled.await.is_err() {
+            shared.error("produce: the connection closed".to_owned());
+            return;
+        }
     }
 }
 
 struct PacedTask {
-    routes: Vec<(Connection, i32)>,
+    routes: Vec<(Arc<ProduceWire>, i32)>,
     topic: TopicRef,
     template: Bytes,
     acks: i16,
@@ -507,6 +538,9 @@ struct PacedTask {
     shared: Arc<Shared>,
 }
 
+/// Sends one single-record request per pacer token, round robin over the
+/// partitions. The wire's reader settles each one, so this task never waits
+/// on an ack and a slow one cannot delay the next send.
 async fn produce_paced(task: PacedTask) {
     let PacedTask {
         routes,
@@ -521,33 +555,25 @@ async fn produce_paced(task: PacedTask) {
         return;
     };
     let mut pacer = Pacer::new(rate);
-    // The sends run on this task rather than one spawned task each, so an ack
-    // is settled where it lands and its latency carries no scheduling hop.
-    let mut sends = FuturesUnordered::new();
-    for (connection, partition) in routes.iter().cycle() {
+    for (wire, partition) in routes.iter().cycle() {
         if shared.stop.load(Ordering::Relaxed) {
             break;
         }
-        let token = pacer.await_token();
-        tokio::pin!(token);
-        loop {
-            tokio::select! {
-                biased;
-                Some(()) = sends.next(), if !sends.is_empty() => {}
-                () = &mut token => break,
-            }
-        }
-        let sent = now_ns();
+        pacer.await_token().await;
+        let sent_ns = now_ns();
         let request = produce_request(&topic, acks, vec![(
             *partition,
-            stamped(&template, value_at, sent),
+            stamped(&template, value_at, sent_ns),
         )]);
-        let shared = &shared;
-        sends.push(async move {
-            send_and_tally(connection, request, 1, sent, shared).await;
-        });
+        let tag = Tag {
+            sent_ns,
+            records: 1,
+        };
+        if let Err(error) = wire.send(&request, tag, None).await {
+            shared.error(format!("produce: {error:#}"));
+            return;
+        }
     }
-    while sends.next().await.is_some() {}
 }
 
 /// Fetches `partitions` from their leader from offset zero, and tallies every
@@ -592,25 +618,39 @@ async fn consume(
         let now = now_ns();
         let read_in_window = shared.in_window(now);
         let mut tally = Vec::new();
+        let mut watermarks = Vec::new();
         for fetched in &response.partitions {
             if fetched.error_code == OFFSET_OUT_OF_RANGE {
                 // Retention deleted what this consumer had not read yet.
                 offsets.insert(fetched.partition, fetched.log_start_offset);
                 continue;
             }
+            if read_in_window && fetched.error_code == 0 {
+                watermarks.push((fetched.partition, fetched.high_watermark));
+            }
             let Some(records) = &fetched.records else {
                 continue;
             };
             for batch in BatchHeaders::of(records) {
                 offsets.insert(fetched.partition, batch.next_offset);
-                if read_in_window {
-                    shared.committed.fetch_add(batch.records, Ordering::Relaxed);
-                }
                 if let Some(sent) = batch.sent_ns
                     && shared.in_window(sent)
                 {
                     tally.push((now.saturating_sub(sent) / 1_000, batch.records));
                 }
+            }
+        }
+        if !watermarks.is_empty() {
+            let mut spans = shared.high_watermarks.lock().expect("watermarks");
+            for (partition, high_watermark) in watermarks {
+                let seen = (now, high_watermark);
+                spans
+                    .entry(partition)
+                    .and_modify(|span| span.last = seen)
+                    .or_insert(WatermarkSpan {
+                        first: seen,
+                        last: seen,
+                    });
             }
         }
         if !tally.is_empty() {
@@ -703,6 +743,7 @@ struct RawFetched {
 struct FetchedPartition {
     partition: i32,
     error_code: i16,
+    high_watermark: i64,
     log_start_offset: i64,
     records: Option<Bytes>,
 }
@@ -724,7 +765,7 @@ impl Decode<'_> for RawFetched {
             for _ in 0..get_array_len(buf, true)? {
                 let partition = get_i32(buf)?;
                 let error_code = get_i16(buf)?;
-                let _high_watermark = get_i64(buf)?;
+                let high_watermark = get_i64(buf)?;
                 let _last_stable_offset = get_i64(buf)?;
                 let log_start_offset = get_i64(buf)?;
                 if let Some(aborted) = get_nullable_array_len(buf, true)? {
@@ -738,6 +779,7 @@ impl Decode<'_> for RawFetched {
                 partitions.push(FetchedPartition {
                     partition,
                     error_code,
+                    high_watermark,
                     log_start_offset,
                     records,
                 });
@@ -782,5 +824,25 @@ mod tests {
             .collect::<Vec<_>>();
 
         check!(headers == vec![(14, 4, Some(11)), (18, 4, Some(22))]);
+    }
+
+    #[test]
+    fn the_committed_rate_sums_each_partitions_watermark_advance() {
+        let spans = BTreeMap::from([
+            (0, WatermarkSpan {
+                first: (1_000_000_000, 100),
+                last: (3_000_000_000, 2_100),
+            }),
+            (1, WatermarkSpan {
+                first: (1_000_000_000, 0),
+                last: (2_000_000_000, 500),
+            }),
+            // Seen once: no span, no rate.
+            (2, WatermarkSpan {
+                first: (1_000_000_000, 7),
+                last: (1_000_000_000, 7),
+            }),
+        ]);
+        check!(committed_per_sec(&spans) == 1_500.0);
     }
 }
