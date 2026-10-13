@@ -84,6 +84,7 @@ fn seed_dedup(m: &BrokerMetrics, topic: &Arc<str>) {
         5,
     );
     m.set_dedup_broker_index(5, 1_000);
+    m.set_dedup_index_heap_bytes(topic, 0, 8_192);
 }
 
 #[tokio::test]
@@ -100,6 +101,7 @@ async fn dedup_metrics_are_registered_with_the_broker_prefix() {
         "krabka_broker_dedup_batches_rebuilt_total",
         "krabka_broker_dedup_index_rebuilds_total",
         "krabka_broker_dedup_index_entries",
+        "krabka_broker_dedup_index_heap_bytes",
         "krabka_broker_dedup_broker_index_entries",
         "krabka_broker_dedup_broker_index_max_entries",
     ] {

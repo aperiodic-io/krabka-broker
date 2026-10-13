@@ -255,6 +255,7 @@ it, with the rest of its per-partition series.
 | `krabka_broker_dedup_batches_rebuilt_total` | counter | `topic`, `partition` | - | KFC-10 produce batches re-encoded and recompressed because some but not all of their records were duplicates. This rate drives dedup's produce-path cost. |
 | `krabka_broker_dedup_index_rebuilds_total` | counter | `topic`, `partition` | - | KFC-10 rebuilds of the partition's index from the log, after a restart, a truncation, or a dedup config change. |
 | `krabka_broker_dedup_index_entries` | gauge | `topic`, `partition` | - | KFC-10 identities in this partition replica's dedup index. |
+| `krabka_broker_dedup_index_heap_bytes` | gauge | `topic`, `partition` | - | KFC-10 estimated heap of this partition replica's dedup index, from its table capacities. It stays within a small constant factor of `dedup_index_entries` plus a fixed floor, because the index grows one of 64 segments at a time and shrinks a segment once it is a quarter full. |
 | `krabka_broker_dedup_broker_index_entries` | gauge | - | - | KFC-10 identities across every dedup index on this broker. At `dedup_broker_index_max_entries`, records are admitted unindexed. |
 | `krabka_broker_dedup_broker_index_max_entries` | gauge | - | - | KFC-10 broker-wide limit on dedup index identities, `dedup_max_entries`. |
 

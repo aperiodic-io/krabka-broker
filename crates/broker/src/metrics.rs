@@ -1227,6 +1227,14 @@ pub struct BrokerMetrics {
     #[metric(help = "KFC-10 identities held in this partition replica's dedup \
         index (gauge).")]
     pub dedup_index_entries: Family<PartitionLabel, Gauge>,
+    /// KFC-10 heap that this partition replica's dedup index holds, an
+    /// estimate from its table capacities (gauge). It bounds the index's
+    /// memory the way `dedup_index_entries` bounds its identities: growth
+    /// doubles one of 64 segments at a time, and a segment shrinks again
+    /// once it is a quarter full.
+    #[metric(help = "KFC-10 estimated heap bytes held by this partition replica's \
+        dedup index (gauge).")]
+    pub dedup_index_heap_bytes: Family<PartitionLabel, Gauge>,
     /// KFC-10 identities held across every dedup index on this broker
     /// (gauge). Read against `dedup_broker_index_max_entries` to see how
     /// close the broker is to the budget that, once reached, admits records

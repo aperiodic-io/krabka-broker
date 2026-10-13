@@ -22,7 +22,7 @@ The feature is advisory, as a cache is. It is not exactly-once delivery. Its con
 
 ## Public Interfaces
 
-The feature adds two topic configs, two broker settings and nine metrics. It adds no API key, no error code and no field to a request or a response.
+The feature adds two topic configs, two broker settings and ten metrics. It adds no API key, no error code and no field to a request or a response.
 
 ### Topic Configs
 
@@ -67,6 +67,7 @@ A consumer of a deduplicated topic sees gaps in the offsets, as a consumer of a 
 | `krabka_broker_dedup_batches_rebuilt_total` | counter | topic, partition | Batches re-encoded because some, but not all, of their records were dropped. This is the cost driver of the feature. |
 | `krabka_broker_dedup_index_rebuilds_total` | counter | topic, partition | Times the index was rebuilt from the log. |
 | `krabka_broker_dedup_index_entries` | gauge | topic, partition | Identities in the partition replica's index. |
+| `krabka_broker_dedup_index_heap_bytes` | gauge | topic, partition | Estimated heap of the partition replica's index, from its table capacities. |
 | `krabka_broker_dedup_broker_index_entries` | gauge | none | Identities in all indexes on the broker. |
 | `krabka_broker_dedup_broker_index_max_entries` | gauge | none | The value of `dedup_max_entries`. |
 
@@ -116,6 +117,12 @@ Transactional batches bypass deduplication on the leader and are not indexed on 
 
 No step of the produce path or the follower path does work in proportion to the size of the index. The index removes expired entries with a cursor that advances a few entries for each new identity. A full pass over a multi-million-entry index takes long enough to stall a writer task. Every replica reaches the same pass at the same log position, so a whole-index pass would stall the leader and every follower together, and nobody would be free to complete an `acks=all` quorum.
 
+### Growth Without Stalls
+
+A hash table that grows moves every entry it holds. At two million identities, one such move in a single table took about 90 milliseconds, and every replica makes it at the same log position. So the index is 64 tables, chosen by the high bits of the digest, and each one grows on its own by doubling. The largest move is then one table, about 1/64 of the index. At two million identities, the slowest single call fell to about 4 milliseconds. A table also shrinks to twice its size when removals leave it a quarter full, so the heap follows the live identities back down after a burst. `dedup_index_heap_bytes` reports it.
+
+A producer could choose keys that all land in one table, because the digest does not resist chosen input. Each table therefore holds at most twice its fair share of `dedup_max_entries_per_partition`. A new identity for a full table is appended without being indexed, like an identity at the partition limit, so no choice of keys brings the whole-index move back.
+
 ### Entry Limits
 
 From 90% of `dedup_max_entries_per_partition`, the cursor also removes entries in the oldest quarter of the index. If a new identity arrives with the index at the limit, one bounded extra step looks for room. If it finds none, the record is appended without being indexed. That is counted in `dedup_records_unindexed`, and the broker logs a warning at most every five minutes. The broker-wide `dedup_max_entries` applies the same rule to the sum of all indexes, because the per-partition limit alone does not bound a broker that leads many busy partitions.
@@ -147,9 +154,11 @@ These edges are part of the contract. Each one is bounded by about one window.
 
 ## Test Plan
 
-- **Index unit tests** in `krabka-dedup`. They cover the rule, the window, every capacity path, the budget accounting, the clamp, give-back and its interaction with later writes, and a property test that holds the budget equal to the sum of the indexes. A leader-path and follower-path test given the same identities checks for the same contents in the same internal order.
+- **Index unit tests** in `krabka-dedup`. They cover the rule, the window, every capacity path, the budget accounting, the clamp, give-back and its interaction with later writes, and a property test that holds the budget equal to the sum of the indexes. A leader-path and follower-path test given the same identities checks for the same contents in the same internal order. Bounds tests prove, without a clock, that no call moves more than one table, that the heap stays within a constant factor of the limit, that it shrinks after a burst, and that the work of every call is bounded at every size.
 - **Writer-level tests** in the broker's `dedup` module, against a real log. They cover offset gaps, empty batches, a failed append, a rebuild from the window, truncation, a change of identity rule, a wider and a narrower window, and a follower that holds its leader's index.
-- **Broker tests** that produce through the Kafka protocol. They cover duplicates across requests and within one request, exact base offsets, an idempotent producer, the header rule and its `INVALID_RECORD` refusal, transactional bypass, a restart, and the config validation.
+- **Acceptance tests** that produce through the Kafka protocol. They cover duplicates across requests and within one request, exact base offsets, every codec, an idempotent producer, the header rule and its `INVALID_RECORD` refusal, transactional bypass, the clock-skew clamp, `LogAppendTime`, every `acks` value, and the config surface.
+- **Recovery tests.** A restart, a torn log tail, a config change while a broker is down, a leader failover, a follower truncation and a rolling restart, each checked against what the recovered log holds.
+- **Bounds and stall tests.** The per-partition and broker-wide limits hold under load. Produce latency stays flat when an index is full and while it grows. Fetches continue during a rebuild, because the rebuild takes the log lock per read.
 
 ## Rejected Alternatives
 

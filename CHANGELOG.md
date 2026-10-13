@@ -33,8 +33,8 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
   produce response stays exact and idempotent producers keep working.
   Transactional produce bypasses it. The `[runtime]` settings
   `dedup_max_entries_per_partition` and `dedup_max_entries` bound the
-  in-memory index, and nine `krabka_broker_dedup_*` metrics report drops,
-  saturation, clock skew and rebuild cost. Nothing new is written to disk.
+  in-memory index, and ten `krabka_broker_dedup_*` metrics report drops,
+  saturation, clock skew, index memory and rebuild cost. Nothing new is written to disk.
   Set the two topic configs only after every broker runs this release: an
   older broker refuses `IncrementalAlterConfigs` on a topic that carries
   them.

@@ -164,6 +164,7 @@ impl BrokerMetrics {
             &self.delivery_watermark,
             &self.delivery_pending_records,
             &self.dedup_index_entries,
+            &self.dedup_index_heap_bytes,
         ] {
             family.remove(label);
         }

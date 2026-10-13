@@ -407,6 +407,9 @@ krabka_broker_dedup_index_rebuilds_total{topic="orders",partition="0"} 0
 # HELP krabka_broker_dedup_index_entries KFC-10 identities held in this partition replica's dedup index (gauge)..
 # TYPE krabka_broker_dedup_index_entries gauge
 krabka_broker_dedup_index_entries{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_index_heap_bytes KFC-10 estimated heap bytes held by this partition replica's dedup index (gauge)..
+# TYPE krabka_broker_dedup_index_heap_bytes gauge
+krabka_broker_dedup_index_heap_bytes{topic="orders",partition="0"} 0
 # HELP krabka_broker_dedup_broker_index_entries KFC-10 identities held across every dedup index on this broker (gauge). Read against dedup_broker_index_max_entries: at the limit, records are admitted unindexed..
 # TYPE krabka_broker_dedup_broker_index_entries gauge
 krabka_broker_dedup_broker_index_entries 0

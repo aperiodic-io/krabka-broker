@@ -284,6 +284,7 @@ fn every_family_is_accounted_for(metrics: &BrokerMetrics) {
         dedup_batches_rebuilt: _,
         dedup_index_rebuilds: _,
         dedup_index_entries: _,
+        dedup_index_heap_bytes: _,
         dedup_broker_index_entries: _,
         dedup_broker_index_max_entries: _,
         diskless_wal_durable_watermark: _,
@@ -407,6 +408,7 @@ fn seed_grouped_families(metrics: &BrokerMetrics) {
         &metrics.delivery_watermark,
         &metrics.delivery_pending_records,
         &metrics.dedup_index_entries,
+        &metrics.dedup_index_heap_bytes,
     ]);
     seed(&api_key, &[
         &metrics.api_requests,

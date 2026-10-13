@@ -74,6 +74,18 @@ impl BrokerMetrics {
         self.track_partition_series(&label);
     }
 
+    /// KFC-10: publish the estimated heap of one partition's dedup index.
+    pub fn set_dedup_index_heap_bytes(&self, topic: &Arc<str>, partition: i32, heap_bytes: usize) {
+        let label = PartitionLabel {
+            topic: Arc::clone(topic),
+            partition,
+        };
+        self.dedup_index_heap_bytes
+            .get_or_create(&label)
+            .set(saturating_i64(heap_bytes));
+        self.track_partition_series(&label);
+    }
+
     /// KFC-10: publish the identities held across every dedup index on this
     /// broker and the broker-wide limit on them.
     pub fn set_dedup_broker_index(&self, entries: usize, max_entries: usize) {
@@ -136,6 +148,23 @@ mod tests {
 
     fn index_entries(m: &BrokerMetrics) -> Option<i64> {
         m.dedup_index_entries.get(&label()).map(|gauge| gauge.get())
+    }
+
+    fn heap_bytes(m: &BrokerMetrics) -> Option<i64> {
+        m.dedup_index_heap_bytes
+            .get(&label())
+            .map(|gauge| gauge.get())
+    }
+
+    #[test]
+    fn the_heap_gauge_takes_the_latest_estimate_and_saturates() {
+        let m = BrokerMetrics::new();
+        let mut seen = Vec::new();
+        for bytes in [8_192, 4_096, usize::MAX] {
+            m.set_dedup_index_heap_bytes(&topic(), PARTITION, bytes);
+            seen.push(heap_bytes(&m));
+        }
+        assert!(seen == [Some(8_192), Some(4_096), Some(i64::MAX)]);
     }
 
     #[test]
@@ -246,7 +275,9 @@ mod tests {
             index_rebuilds: 1,
         };
         m.record_dedup_partition(&topic(), PARTITION, delta, 5);
+        m.set_dedup_index_heap_bytes(&topic(), PARTITION, 8_192);
         assert!(index_entries(&m) == Some(5));
+        assert!(heap_bytes(&m) == Some(8_192));
 
         m.evict_partition_series(&label());
 
@@ -256,5 +287,6 @@ mod tests {
             .collect();
         assert!(counter_values(&m) == want);
         assert!(index_entries(&m).is_none());
+        assert!(heap_bytes(&m).is_none());
     }
 }

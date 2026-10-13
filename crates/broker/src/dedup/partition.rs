@@ -15,7 +15,10 @@ use {
     krabka_protocol::records::{
         Attributes, RecordBatch, RecordBorrowed, TimestampType, validate_one_v2_batch,
     },
-    std::sync::{Arc, Mutex, PoisonError},
+    std::{
+        sync::{Arc, Mutex, PoisonError},
+        time::{Duration, Instant},
+    },
     tracing::warn,
 };
 
@@ -107,7 +110,12 @@ struct ActiveIndex {
     reported: DedupCounters,
     rebuilds: u64,
     reported_rebuilds: u64,
+    /// When this index last warned that it admits records unindexed.
+    saturation_warned_at: Option<Instant>,
 }
+
+/// How often one partition may warn that its index admits records unindexed.
+const SATURATION_WARNING_INTERVAL: Duration = Duration::from_secs(300);
 
 impl ActiveIndex {
     fn new(config: DedupConfig) -> Self {
@@ -124,7 +132,35 @@ impl ActiveIndex {
             covered_through: None,
             rebuilds: 0,
             reported_rebuilds: 0,
+            saturation_warned_at: None,
         }
+    }
+
+    /// Warn, at most once per [`SATURATION_WARNING_INTERVAL`], that records
+    /// were appended without being indexed. Their duplicates go undetected,
+    /// and raising either limit needs a broker restart, so an operator has to
+    /// hear about it rather than find it in a counter.
+    fn warn_if_saturated(&mut self, delta: &DedupCounterDelta, topic: &str, partition: i32) {
+        if delta.records_unindexed == 0
+            || self
+                .saturation_warned_at
+                .is_some_and(|at| at.elapsed() < SATURATION_WARNING_INTERVAL)
+        {
+            return;
+        }
+        self.saturation_warned_at = Some(Instant::now());
+        let budget = self.config.runtime.budget();
+        warn!(
+            topic,
+            partition,
+            index_entries = self.filter.len(),
+            max_entries_per_partition = self.filter.max_entries(),
+            broker_entries = budget.entries(),
+            max_entries = budget.max_entries(),
+            unindexed = delta.records_unindexed,
+            "dedup: index is full, so new identities are appended without deduplication; \
+             raise dedup_max_entries_per_partition or dedup_max_entries"
+        );
     }
 
     fn policy(&self) -> RecordDecompressionPolicy { self.config.runtime.policy() }
@@ -483,7 +519,11 @@ impl PartitionDedup {
             return;
         };
         let delta = active.take_delta();
-        let size = active.filter.len();
+        active.warn_if_saturated(&delta, &self.topic, self.partition);
+        let size = IndexSize {
+            entries: active.filter.len(),
+            heap_bytes: active.filter.heap_bytes(),
+        };
         report(&self.topic, self.partition, &active.config, delta, size);
     }
 
@@ -496,8 +536,21 @@ impl PartitionDedup {
         let delta = active.take_delta();
         let config = active.config.clone();
         drop(active);
-        report(&self.topic, self.partition, &config, delta, 0);
+        report(
+            &self.topic,
+            self.partition,
+            &config,
+            delta,
+            IndexSize::default(),
+        );
     }
+}
+
+/// The size of one partition's index, as its gauges report it.
+#[derive(Debug, Default, Clone, Copy)]
+struct IndexSize {
+    entries: usize,
+    heap_bytes: usize,
 }
 
 fn report(
@@ -505,10 +558,11 @@ fn report(
     partition: i32,
     config: &DedupConfig,
     delta: DedupCounterDelta,
-    index_entries: usize,
+    size: IndexSize,
 ) {
     let runtime = &config.runtime;
     let metrics = runtime.metrics();
-    metrics.record_dedup_partition(topic, partition, delta, index_entries);
+    metrics.record_dedup_partition(topic, partition, delta, size.entries);
+    metrics.set_dedup_index_heap_bytes(topic, partition, size.heap_bytes);
     metrics.set_dedup_broker_index(runtime.budget().entries(), runtime.budget().max_entries());
 }
