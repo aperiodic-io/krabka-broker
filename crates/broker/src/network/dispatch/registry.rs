@@ -168,11 +168,10 @@ async fn dispatch_registered_bytes(
             .with_correlation_id(parsed.correlation_id);
             let body_offset = frame.len() - parsed.body.len();
             let body_bytes = frame.slice(body_offset..);
-            let response_required =
-                match response_required(parsed.body, body_bytes.clone(), parsed.api_version) {
-                    Ok(required) => required,
-                    Err(error) => return Some(Err(error)),
-                };
+            let response_required = match response_required(parsed.body, parsed.api_version) {
+                Ok(required) => required,
+                Err(error) => return Some(Err(error)),
+            };
             let encoded = encode_dispatch_result(
                 parsed,
                 handler(broker, parsed.api_version, parsed.body, body_bytes, &ctx).await,

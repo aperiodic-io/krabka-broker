@@ -35,10 +35,12 @@ const TOPIC_ALREADY_EXISTS: i16 = 36;
 const CLUSTER_ID: &str = "DX4vWpscTB6KPyttHkyfEA";
 
 /// The most bytes the benchmark topic keeps per partition replica.
-const RETENTION_BYTES: u64 = 48 * 1024 * 1024;
+pub const RETENTION_BYTES: u64 = 128 * 1024 * 1024;
 /// The segment size of the benchmark topic, small enough that retention can
 /// delete in steps well below [`RETENTION_BYTES`].
-const SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
+pub const SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
+/// How long a deleted segment's file outlives its deletion, in milliseconds.
+const FILE_DELETE_DELAY_MS: &str = "1000";
 /// How often the brokers apply retention, as a duration flag value.
 const RETENTION_CHECK_INTERVAL: &str = "2s";
 
@@ -92,6 +94,12 @@ pub struct LocalClusterSpec {
     /// Extra environment variables for every broker, as `KEY=VALUE`.
     #[builder(default)]
     pub broker_env: Vec<String>,
+    /// The benchmark topic's `retention.bytes`.
+    #[builder(default = RETENTION_BYTES)]
+    pub retention_bytes: u64,
+    /// The benchmark topic's `segment.bytes`.
+    #[builder(default = SEGMENT_BYTES)]
+    pub segment_bytes: u64,
 }
 
 /// A running local cluster. Dropping it kills every node.
@@ -102,6 +110,8 @@ pub struct LocalCluster {
     /// The node data directories, deleted when the cluster drops. A
     /// saturating run writes gigabytes; the logs and metrics beside them stay.
     data_dirs: Vec<PathBuf>,
+    retention_bytes: u64,
+    segment_bytes: u64,
 }
 
 impl LocalCluster {
@@ -144,6 +154,8 @@ impl LocalCluster {
                 .collect::<Vec<_>>()
                 .join(","),
             nodes: spec.nodes,
+            retention_bytes: spec.retention_bytes,
+            segment_bytes: spec.segment_bytes,
             data_dirs: (0..spec.nodes)
                 .map(|index| spec.work_dir.join(format!("node-{}", index + 1)))
                 .collect(),
@@ -235,8 +247,9 @@ impl LocalCluster {
     /// Creates `topic` and waits until every partition has a leader and a
     /// full in-sync replica set.
     ///
-    /// The topic keeps at most [`RETENTION_BYTES`] per partition, in
-    /// [`SEGMENT_BYTES`] segments. A saturating run then neither fills the
+    /// The topic keeps at most `retention_bytes` per partition, in
+    /// `segment_bytes` segments, [`RETENTION_BYTES`] and [`SEGMENT_BYTES`]
+    /// unless the spec says otherwise. A saturating run then neither fills the
     /// disk nor waits on it: retention deletes the data before the page cache
     /// writes it back, as it must on one machine whose single disk carries
     /// all three replicas, where a real cluster gives each broker its own.
@@ -260,12 +273,22 @@ impl LocalCluster {
                     configs: vec![
                         CreatableTopicConfig {
                             name: "retention.bytes".to_owned(),
-                            value: Some(RETENTION_BYTES.to_string()),
+                            value: Some(self.retention_bytes.to_string()),
                             ..Default::default()
                         },
                         CreatableTopicConfig {
                             name: "segment.bytes".to_owned(),
-                            value: Some(SEGMENT_BYTES.to_string()),
+                            value: Some(self.segment_bytes.to_string()),
+                            ..Default::default()
+                        },
+                        // Kafka holds a deleted segment for a minute before it
+                        // removes the file. At a few hundred megabytes a
+                        // second that minute is tens of gigabytes of page
+                        // cache on a machine whose memory all three brokers
+                        // share.
+                        CreatableTopicConfig {
+                            name: "file.delete.delay.ms".to_owned(),
+                            value: Some(FILE_DELETE_DELAY_MS.to_owned()),
                             ..Default::default()
                         },
                     ],

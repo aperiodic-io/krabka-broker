@@ -15,13 +15,14 @@ use {
     anyhow::{Context, Result},
     bytes::{BufMut, Bytes, BytesMut},
     krabka_protocol::{
-        Decode, Encode, ProtocolRequest,
+        Decode, ProtocolRequest,
         owned::{produce_request::ProduceRequest, produce_response::ProduceResponse},
         primitives::fixed::get_i32,
         tagged_fields::read_tagged_fields,
     },
     std::{
         collections::VecDeque,
+        io::IoSlice,
         net::SocketAddr,
         sync::{Arc, Mutex},
     },
@@ -129,7 +130,7 @@ impl ProduceWire {
     /// can do.
     pub async fn send(
         &self,
-        request: &ProduceRequest,
+        request: &ProduceFrame<'_>,
         tag: Tag,
         done: Option<oneshot::Sender<()>>,
     ) -> Result<()> {
@@ -141,17 +142,7 @@ impl ProduceWire {
         } = &mut *writer;
         let correlation_id = *next_correlation_id;
         *next_correlation_id = next_correlation_id.wrapping_add(1);
-        frame.clear();
-        frame.put_i32(0); // the length, filled in below
-        frame.put_i16(<ProduceRequest as ProtocolRequest>::API_KEY);
-        frame.put_i16(PRODUCE_VERSION);
-        frame.put_i32(correlation_id);
-        frame.put_i16(i16::try_from(CLIENT_ID.len())?);
-        frame.put_slice(CLIENT_ID);
-        frame.put_u8(0); // no tagged fields
-        request.encode(frame, PRODUCE_VERSION)?;
-        let length = i32::try_from(frame.len() - 4)?;
-        frame[..4].copy_from_slice(&length.to_be_bytes());
+        let segments = request.segments(frame, correlation_id)?;
         // Queue before writing, under the writer lock: the queue order is
         // the wire order, which is the order the responses come back in.
         self.pending
@@ -162,10 +153,85 @@ impl ProduceWire {
                 tag,
                 done,
             });
-        half.write_all(frame)
+        write_all_vectored(half, &segments)
             .await
             .context("write a produce request")
     }
+}
+
+/// A `Produce` request of record batches already encoded, one per partition
+/// of one topic.
+pub struct ProduceFrame<'a> {
+    pub topic: &'a str,
+    pub acks: i16,
+    pub timeout_ms: i32,
+    pub batches: &'a [(i32, Bytes)],
+}
+
+impl ProduceFrame<'_> {
+    /// The request frame as the bytes around each batch and the batches
+    /// themselves, so the batches go out without being copied into a frame
+    /// buffer. `scratch` holds the bytes between them.
+    fn segments(&self, scratch: &mut BytesMut, correlation_id: i32) -> Result<Vec<Bytes>> {
+        let mut segments = Vec::with_capacity(self.batches.len() * 2 + 1);
+        scratch.clear();
+        scratch.put_i32(0); // the length, filled in below
+        scratch.put_i16(<ProduceRequest as ProtocolRequest>::API_KEY);
+        scratch.put_i16(PRODUCE_VERSION);
+        scratch.put_i32(correlation_id);
+        scratch.put_i16(i16::try_from(CLIENT_ID.len())?);
+        scratch.put_slice(CLIENT_ID);
+        scratch.put_u8(0); // no header tagged fields
+        scratch.put_u8(0); // a null transactional id
+        scratch.put_i16(self.acks);
+        scratch.put_i32(self.timeout_ms);
+        put_uvarint(scratch, 2); // one topic
+        put_uvarint(scratch, u64::try_from(self.topic.len())? + 1);
+        scratch.put_slice(self.topic.as_bytes());
+        put_uvarint(scratch, u64::try_from(self.batches.len())? + 1);
+        let mut length = 0usize;
+        for (index, batch) in self.batches {
+            scratch.put_i32(*index);
+            put_uvarint(scratch, u64::try_from(batch.len())? + 1);
+            length += scratch.len();
+            segments.push(scratch.split().freeze());
+            length += batch.len();
+            segments.push(batch.clone());
+            scratch.put_u8(0); // no partition tagged fields
+        }
+        scratch.put_u8(0); // no topic tagged fields
+        scratch.put_u8(0); // no request tagged fields
+        length += scratch.len();
+        segments.push(scratch.split().freeze());
+        let mut first = BytesMut::from(&segments[0][..]);
+        first[..4].copy_from_slice(&i32::try_from(length - 4)?.to_be_bytes());
+        segments[0] = first.freeze();
+        Ok(segments)
+    }
+}
+
+/// Appends `value` as an unsigned varint.
+fn put_uvarint(buf: &mut BytesMut, mut value: u64) {
+    while value >= 0x80 {
+        buf.put_u8(u8::try_from(value & 0x7f).unwrap_or(0) | 0x80);
+        value >>= 7;
+    }
+    buf.put_u8(u8::try_from(value).unwrap_or(0));
+}
+
+/// Writes every segment, in order, with as few vectored writes as the socket
+/// takes them in.
+async fn write_all_vectored(half: &mut OwnedWriteHalf, segments: &[Bytes]) -> std::io::Result<()> {
+    let mut slices: Vec<IoSlice<'_>> = segments.iter().map(|s| IoSlice::new(s)).collect();
+    let mut slices = slices.as_mut_slice();
+    while !slices.is_empty() {
+        let written = half.write_vectored(slices).await?;
+        if written == 0 {
+            return Err(std::io::ErrorKind::WriteZero.into());
+        }
+        IoSlice::advance_slices(&mut slices, written);
+    }
+    Ok(())
 }
 
 /// Reads responses in order and settles the oldest pending request with
@@ -224,8 +290,9 @@ mod tests {
     use {
         super::*,
         assert2::check,
-        krabka_protocol::owned::produce_response::{
-            PartitionProduceResponse, TopicProduceResponse,
+        krabka_protocol::{
+            Encode as _,
+            owned::produce_response::{PartitionProduceResponse, TopicProduceResponse},
         },
     };
 
@@ -264,5 +331,57 @@ mod tests {
             settled(Bytes::from_static(&[0, 0])),
             Settled::Undecodable(_)
         ));
+    }
+
+    #[test]
+    fn a_produce_frame_matches_the_typed_encoding() {
+        use krabka_protocol::{
+            owned::produce_request::{PartitionProduceData, TopicProduceData},
+            records::RecordsPayload,
+        };
+        let batches = [
+            (0, Bytes::from_static(b"first batch bytes")),
+            (5, Bytes::from(vec![7_u8; 300])),
+        ];
+        let frame = ProduceFrame {
+            topic: "bench-topic",
+            acks: 1,
+            timeout_ms: 30_000,
+            batches: &batches,
+        };
+        let mut scratch = BytesMut::new();
+        let wire = frame.segments(&mut scratch, 42).expect("segments").concat();
+
+        let mut expected = BytesMut::new();
+        expected.put_i32(0);
+        expected.put_i16(0);
+        expected.put_i16(PRODUCE_VERSION);
+        expected.put_i32(42);
+        expected.put_i16(i16::try_from(CLIENT_ID.len()).expect("short"));
+        expected.put_slice(CLIENT_ID);
+        expected.put_u8(0);
+        ProduceRequest {
+            acks: 1,
+            timeout_ms: 30_000,
+            topic_data: vec![TopicProduceData {
+                name: "bench-topic".to_owned(),
+                partition_data: batches
+                    .iter()
+                    .map(|(index, batch)| PartitionProduceData {
+                        index: *index,
+                        records: Some(RecordsPayload::Raw(batch.clone())),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+        .encode(&mut expected, PRODUCE_VERSION)
+        .expect("encode");
+        let length = i32::try_from(expected.len() - 4).expect("short");
+        expected[..4].copy_from_slice(&length.to_be_bytes());
+
+        check!(wire == expected.to_vec());
     }
 }

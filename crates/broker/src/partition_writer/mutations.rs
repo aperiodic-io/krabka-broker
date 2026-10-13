@@ -125,9 +125,12 @@ pub(super) async fn handle_replicate_verbatim(
     let log_for_blocking = Arc::clone(log);
     let result = run_log_append(
         move || {
-            let mut guard = lock_log(&log_for_blocking);
+            // The lock is taken per batch, not across the run: a fetch row can
+            // carry megabytes, and every reader of this partition -- a fetch, an
+            // epoch check, an offset lookup -- blocks its worker thread on the
+            // lock while it is held.
             for ReplicatedBatch { batch, base_offset } in &batches {
-                guard
+                lock_log(&log_for_blocking)
                     .append_verbatim_at(batch, *base_offset)
                     .map_err(BrokerError::from)?;
             }

@@ -28,7 +28,7 @@ use {
         hist,
         rate::Pacer,
         scenario::{Acks, LoadMode, Scenario},
-        wire::{ProduceWire, Settle, Settled, Tag},
+        wire::{ProduceFrame, ProduceWire, Settle, Settled, Tag},
     },
     anyhow::{Context, Result, bail},
     bytes::{Buf, BufMut, Bytes, BytesMut},
@@ -40,7 +40,6 @@ use {
             fetch_request::{FetchPartition, FetchRequest, FetchTopic},
             fetch_response::AbortedTransaction,
             metadata_request::{MetadataRequest, MetadataRequestTopic},
-            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
         },
         primitives::{
             array::{get_array_len, get_nullable_array_len},
@@ -48,7 +47,7 @@ use {
             string_bytes::{get_compact_nullable_bytes_owned, get_compact_string_owned},
             uuid::Uuid,
         },
-        records::{Record, RecordBatch, RecordsPayload},
+        records::{Record, RecordBatch},
         tagged_fields::read_tagged_fields,
     },
     krabka_units::prelude::*,
@@ -68,6 +67,13 @@ use {
 /// Produce requests each connection keeps outstanding, Kafka's default
 /// `max.in.flight.requests.per.connection`.
 pub const IN_FLIGHT_PER_CONNECTION: usize = 5;
+
+/// One batched request in this many carries freshly stamped batches; the
+/// rest resend batches stamped zero.
+const STAMP_EVERY: u32 = 8;
+
+/// The `timeout_ms` of every produce request.
+const PRODUCE_TIMEOUT_MS: i32 = 30_000;
 
 /// Offset of the CRC in a v2 batch header, and of the bytes it covers.
 const CRC_AT: usize = 17;
@@ -174,6 +180,9 @@ fn committed_per_sec(spans: &BTreeMap<i32, WatermarkSpan>) -> f64 {
 
 /// Runs `scenario` against the cluster at `bootstrap` with the raw generator.
 ///
+/// A saturating scenario runs flat out unless `batched_rate` caps it: its
+/// batches are then paced to that many records a second in all.
+///
 /// # Errors
 ///
 /// When the topic's metadata cannot be read or a connection cannot be made.
@@ -181,7 +190,12 @@ fn committed_per_sec(spans: &BTreeMap<i32, WatermarkSpan>) -> f64 {
 /// # Panics
 ///
 /// If a tally lock is poisoned, which only a panicking task can do.
-pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<RawOutcome> {
+pub async fn run(
+    scenario: &Scenario,
+    bootstrap: &str,
+    topic: &str,
+    batched_rate: Option<Frequency>,
+) -> Result<RawOutcome> {
     let (topic, leaders) = discover(bootstrap, topic).await?;
     let start_ns = now_ns();
     let warmup_ns = u64::try_from(scenario.warmup.nanos_i64()).unwrap_or(0);
@@ -224,7 +238,14 @@ pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<Ra
         LoadMode::Saturate => {
             let records = records_per_batch(scenario);
             let template = batch_template(scenario.msg_size, records)?;
+            let slots = leaders.len() * scenario.producers.max(1) * IN_FLIGHT_PER_CONNECTION;
             for leader in &leaders {
+                // Each slot's share of the capped rate, in requests a second.
+                let pace = batched_rate.map(|rate| {
+                    let per_request = (records * leader.partitions.len()).to_f64().unwrap_or(1.0);
+                    let slots = slots.to_f64().unwrap_or(1.0);
+                    rate / (slots * per_request)
+                });
                 for _ in 0..scenario.producers.max(1) {
                     let (wire, reader) = ProduceWire::connect(leader.addr, settler()).await?;
                     readers.push(reader);
@@ -236,6 +257,7 @@ pub async fn run(scenario: &Scenario, bootstrap: &str, topic: &str) -> Result<Ra
                             template: template.clone(),
                             records,
                             acks,
+                            pace,
                             shared: Arc::clone(&shared),
                         }));
                     }
@@ -438,27 +460,6 @@ fn stamped(template: &Bytes, value_at: usize, sent: u64) -> Bytes {
     batch.freeze()
 }
 
-fn produce_request(topic: &TopicRef, acks: i16, batches: Vec<(i32, Bytes)>) -> ProduceRequest {
-    ProduceRequest {
-        acks,
-        timeout_ms: 30_000,
-        topic_data: vec![TopicProduceData {
-            name: topic.name.clone(),
-            topic_id: topic.id,
-            partition_data: batches
-                .into_iter()
-                .map(|(index, batch)| PartitionProduceData {
-                    index,
-                    records: Some(RecordsPayload::Raw(batch)),
-                    ..Default::default()
-                })
-                .collect(),
-            ..Default::default()
-        }],
-        ..Default::default()
-    }
-}
-
 impl Settle for Shared {
     fn settle(&self, tag: Tag, round_trip: Duration, settled: Settled) {
         match settled {
@@ -491,6 +492,8 @@ struct SaturateTask {
     template: Bytes,
     records: usize,
     acks: i16,
+    /// Requests a second this slot is paced to, or `None` for flat out.
+    pace: Option<Frequency>,
     shared: Arc<Shared>,
 }
 
@@ -502,20 +505,53 @@ async fn produce_saturate(task: SaturateTask) {
         template,
         records,
         acks,
+        pace,
         shared,
     } = task;
+    // Send `n` is due at `start + n * period`: an absolute schedule, which a
+    // late send catches up on, so the slot holds its rate on average unless
+    // the cluster cannot take it. A tick-relative interval would instead
+    // drift a little behind every time a tick fired late.
+    let schedule = pace.map(|rate| (Instant::now(), rate.period().to_std()));
+    let mut sends: u32 = 0;
     let Some(value_at) = first_value_at(&template) else {
         shared.error("the batch template has no first record".to_owned());
         return;
     };
     let records = u64::try_from(records * partitions.len()).unwrap_or(u64::MAX);
+    // The batches most requests resend: valid, but stamped zero, which the
+    // consumer leaves out of the end-to-end latency. Restamping and re-CRCing
+    // every batch of every request cost the generator a copy and a checksum
+    // of everything it produced, CPU the brokers it shares the machine with
+    // then lacked; one request in `STAMP_EVERY` still carries fresh stamps.
+    let unstamped: Vec<(i32, Bytes)> = partitions
+        .iter()
+        .map(|&partition| (partition, stamped(&template, value_at, 0)))
+        .collect();
+    let mut requests: u32 = 0;
     while !shared.stop.load(Ordering::Relaxed) {
+        if let Some((start, period)) = schedule {
+            sends = sends.saturating_add(1);
+            tokio::time::sleep_until(start + period * sends).await;
+        }
         let sent_ns = now_ns();
-        let batches = partitions
-            .iter()
-            .map(|&partition| (partition, stamped(&template, value_at, sent_ns)))
-            .collect();
-        let request = produce_request(&topic, acks, batches);
+        requests = requests.wrapping_add(1);
+        let fresh;
+        let batches = if requests.is_multiple_of(STAMP_EVERY) {
+            fresh = partitions
+                .iter()
+                .map(|&partition| (partition, stamped(&template, value_at, sent_ns)))
+                .collect::<Vec<_>>();
+            &fresh
+        } else {
+            &unstamped
+        };
+        let request = ProduceFrame {
+            topic: &topic.name,
+            acks,
+            timeout_ms: PRODUCE_TIMEOUT_MS,
+            batches,
+        };
         let (done, settled) = oneshot::channel();
         let tag = Tag { sent_ns, records };
         if let Err(error) = wire.send(&request, tag, Some(done)).await {
@@ -561,10 +597,13 @@ async fn produce_paced(task: PacedTask) {
         }
         pacer.await_token().await;
         let sent_ns = now_ns();
-        let request = produce_request(&topic, acks, vec![(
-            *partition,
-            stamped(&template, value_at, sent_ns),
-        )]);
+        let batches = [(*partition, stamped(&template, value_at, sent_ns))];
+        let request = ProduceFrame {
+            topic: &topic.name,
+            acks,
+            timeout_ms: PRODUCE_TIMEOUT_MS,
+            batches: &batches,
+        };
         let tag = Tag {
             sent_ns,
             records: 1,
@@ -633,7 +672,7 @@ async fn consume(
             };
             for batch in BatchHeaders::of(records) {
                 offsets.insert(fetched.partition, batch.next_offset);
-                if let Some(sent) = batch.sent_ns
+                if let Some(sent) = batch.sent_ns.filter(|&sent| sent != 0)
                     && shared.in_window(sent)
                 {
                     tally.push((now.saturating_sub(sent) / 1_000, batch.records));
@@ -843,6 +882,6 @@ mod tests {
                 last: (1_000_000_000, 7),
             }),
         ]);
-        check!(committed_per_sec(&spans) == 1_500.0);
+        check!((committed_per_sec(&spans) - 1_500.0).abs() < 1e-6);
     }
 }
