@@ -12,25 +12,33 @@ pub enum IdentityLookup<'a> {
 /// Selects the dedup identity of one record.
 ///
 /// With `key_header` unset (key mode), the identity is the record's Kafka key, and a null key gives [`IdentityLookup::NoIdentity`]. With `key_header` set (header mode), the identity is the value of the first header whose name equals `key_header`. The first match makes repeated header names deterministic. The Kafka key is never read in header mode. A header with a null value gives [`IdentityLookup::MissingHeader`], the same as an absent header.
-pub fn identity_of<'a, H>(
+///
+/// `find_header` answers the header lookup the way [`first_header`] does: the value of the first header with the name it is given, `Some(None)` for a null value, and `None` for no such header. A caller whose record format can look a header up without decoding every name passes that lookup instead.
+pub fn identity_of<'a>(
     key: Option<&'a [u8]>,
-    headers: H,
+    find_header: impl FnOnce(&str) -> Option<Option<&'a [u8]>>,
     key_header: Option<&str>,
-) -> IdentityLookup<'a>
-where
-    H: IntoIterator<Item = (&'a str, Option<&'a [u8]>)>,
-{
+) -> IdentityLookup<'a> {
     let Some(key_header) = key_header else {
         return key.map_or(IdentityLookup::NoIdentity, IdentityLookup::Identity);
     };
     // A null value is not an empty one. Digesting it as empty would give every
     // record with a null-valued header the same identity and drop unrelated
     // records against each other, so the record has no identity instead.
+    find_header(key_header)
+        .flatten()
+        .map_or(IdentityLookup::MissingHeader, IdentityLookup::Identity)
+}
+
+/// The value of the first of `headers` named `name`: `Some(None)` for a null value, and `None` when no header has the name.
+pub fn first_header<'a>(
+    headers: impl IntoIterator<Item = (&'a str, Option<&'a [u8]>)>,
+    name: &str,
+) -> Option<Option<&'a [u8]>> {
     headers
         .into_iter()
-        .find(|(name, _)| *name == key_header)
-        .and_then(|(_, value)| value)
-        .map_or(IdentityLookup::MissingHeader, IdentityLookup::Identity)
+        .find(|(header, _)| *header == name)
+        .map(|(_, value)| value)
 }
 
 #[cfg(test)]
@@ -139,7 +147,11 @@ mod tests {
     #[test]
     fn identity_selection() {
         for case in cases() {
-            let actual = identity_of(case.key, case.headers.iter().copied(), case.key_header);
+            let actual = identity_of(
+                case.key,
+                |name| first_header(case.headers.iter().copied(), name),
+                case.key_header,
+            );
             assert!(actual == case.expected, "{}", case.name);
         }
     }

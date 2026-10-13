@@ -30,7 +30,7 @@
 //! let now_ms = 1_700_000_000_000;
 //!
 //! let record = |key: &[u8], timestamp_ms| {
-//!     let identity = match identity_of(Some(key), [], None) {
+//!     let identity = match identity_of(Some(key), |_| None, None) {
 //!         IdentityLookup::Identity(bytes) => Some(IdentityDigest::of(bytes)),
 //!         IdentityLookup::NoIdentity | IdentityLookup::MissingHeader => None,
 //!     };
@@ -65,5 +65,5 @@ pub use self::{
     budget::DedupBudget,
     digest::{DigestBuildHasher, DigestHasher, IdentityDigest},
     filter::{Classification, DedupCounters, DedupRecord, DedupWindowFilter, Undo, UndoEntry},
-    identity::{IdentityLookup, identity_of},
+    identity::{IdentityLookup, first_header, identity_of},
 };

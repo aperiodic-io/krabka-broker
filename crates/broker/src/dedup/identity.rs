@@ -8,7 +8,7 @@
 use {
     bytes::Bytes,
     krabka_compression::RecordDecompressionPolicy,
-    krabka_dedup::{DedupRecord, IdentityDigest, IdentityLookup, identity_of},
+    krabka_dedup::{DedupRecord, IdentityDigest, IdentityLookup, first_header, identity_of},
     krabka_protocol::records::{
         Attributes, Record, RecordBatch, RecordBorrowed, TimestampType, validate_one_v2_batch,
     },
@@ -36,17 +36,15 @@ pub(crate) enum RecordIdentity {
     MissingHeader,
 }
 
-/// Read the identity of one record from its key and headers.
-pub(crate) fn record_identity<'a, H>(
+/// Read the identity of one record from its key and its header lookup; see
+/// [`identity_of`].
+pub(crate) fn record_identity<'a>(
     key: Option<&'a [u8]>,
-    headers: H,
+    find_header: impl FnOnce(&str) -> Option<Option<&'a [u8]>>,
     key_header: Option<&str>,
     timestamp_ms: i64,
-) -> RecordIdentity
-where
-    H: IntoIterator<Item = (&'a str, Option<&'a [u8]>)>,
-{
-    let identity = match identity_of(key, headers, key_header) {
+) -> RecordIdentity {
+    let identity = match identity_of(key, find_header, key_header) {
         IdentityLookup::Identity(bytes) => Some(IdentityDigest::of(bytes)),
         IdentityLookup::NoIdentity => None,
         IdentityLookup::MissingHeader => return RecordIdentity::MissingHeader,
@@ -128,10 +126,7 @@ pub(crate) fn visit_wire_batch(
     let _ = validated.validate_records_with(policy, |record| {
         visit(record_identity(
             record.key,
-            record
-                .headers
-                .iter()
-                .map(|header| (header.key, header.value)),
+            |name| record.headers.find(name),
             key_header,
             stored_record_timestamp(
                 attributes,
@@ -189,10 +184,15 @@ fn owned_record_identity(
 ) -> RecordIdentity {
     record_identity(
         record.key.as_deref(),
-        record
-            .headers
-            .iter()
-            .map(|header| (header.key.as_str(), header.value.as_deref())),
+        |name| {
+            first_header(
+                record
+                    .headers
+                    .iter()
+                    .map(|header| (header.key.as_str(), header.value.as_deref())),
+                name,
+            )
+        },
         key_header,
         timestamp_ms,
     )
@@ -239,10 +239,7 @@ impl IdentityCollector {
     pub(crate) fn visit_borrowed(&mut self, record: &RecordBorrowed<'_>) {
         let identity = record_identity(
             record.key,
-            record
-                .headers
-                .iter()
-                .map(|header| (header.key, header.value)),
+            |name| record.headers.find(name),
             self.key_header.as_deref(),
             self.base_timestamp.saturating_add(record.timestamp_delta),
         );
