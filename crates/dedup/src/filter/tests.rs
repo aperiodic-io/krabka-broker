@@ -1,6 +1,6 @@
 use {
     super::{
-        test_support::{NOW, OpRun, OpSpace},
+        test_support::{OpRun, OpSpace},
         *,
     },
     assert2::assert,
@@ -12,6 +12,9 @@ const SECOND: i64 = 1_000;
 const MINUTE: i64 = 60 * SECOND;
 const HOUR: i64 = 60 * MINUTE;
 const DEFAULT: usize = DedupWindowFilter::DEFAULT_MAX_ENTRIES;
+// A broker time far ahead of the fixed timestamps of the other tests, for the
+// tests about clock skew.
+const NOW: i64 = 1_000_000_000_000;
 
 fn id(name: &str) -> IdentityDigest { IdentityDigest::of(name.as_bytes()) }
 
@@ -33,13 +36,34 @@ fn filter(window_ms: i64) -> DedupWindowFilter { DedupWindowFilter::new(window_m
 
 fn budget(max_entries: usize) -> Arc<DedupBudget> { Arc::new(DedupBudget::new(max_entries)) }
 
-// Whether a single-record request for `name` is kept.
+// Most tests run the broker's clock at the newest record time, so that the
+// watermark follows the records and no timestamp is clamped. The tests about
+// the clock give it explicitly.
+
+// Classifies `records` at the broker time of the newest one.
+fn classify(filter: &mut DedupWindowFilter, records: &[DedupRecord]) -> Classification {
+    let now_ms = records
+        .iter()
+        .map(|record| record.timestamp_ms)
+        .max()
+        .unwrap_or(i64::MIN);
+    filter.classify(records, now_ms)
+}
+
+// Whether a single-record request for `name` is kept at broker time `now_ms`.
+fn kept_at(filter: &mut DedupWindowFilter, name: &str, timestamp_ms: i64, now_ms: i64) -> bool {
+    filter
+        .classify(&[rec(name, timestamp_ms)], now_ms)
+        .all_kept()
+}
+
+// Whether a single-record request for `name` is kept at its own time.
 fn kept(filter: &mut DedupWindowFilter, name: &str, timestamp_ms: i64) -> bool {
-    filter.classify(&[rec(name, timestamp_ms)], NOW).all_kept()
+    kept_at(filter, name, timestamp_ms, timestamp_ms)
 }
 
 fn populate(filter: &mut DedupWindowFilter, name: &str, timestamp_ms: i64) {
-    filter.populate(id(name), timestamp_ms, NOW);
+    filter.populate(id(name), timestamp_ms, timestamp_ms);
 }
 
 fn populate_n(
@@ -135,13 +159,30 @@ fn first_wins_within_window() {
     assert!(kept(&mut f, "k", 2100));
 }
 
+// The entry is at 5000 and the window is a second. A record is a duplicate
+// while the entry is live at the broker's time and the two timestamps are a
+// window apart or less. A record that is itself older than the window at the
+// broker's time is kept.
 #[test]
 fn window_edge_is_inclusive_on_both_sides() {
-    let mut f = filter(SECOND);
-    populate(&mut f, "k", 5000);
-    assert!(!kept(&mut f, "k", 6000));
-    assert!(!kept(&mut f, "k", 4000));
-    assert!(kept(&mut f, "k", 6001));
+    let cases = [
+        ("a later record at the edge", 6000, 6000, false),
+        ("an earlier record at the edge", 4000, 5000, false),
+        ("an earlier record inside the window", 4500, 5500, false),
+        ("a later record past the edge", 6001, 6001, true),
+        ("an earlier record past the edge", 3999, 5000, true),
+        (
+            "an earlier record behind the broker's window",
+            4999,
+            6000,
+            true,
+        ),
+    ];
+    for (name, timestamp, now, expected) in cases {
+        let mut f = filter(SECOND);
+        populate(&mut f, "k", 5000);
+        assert!(kept_at(&mut f, "k", timestamp, now) == expected, "{name}");
+    }
 }
 
 #[test]
@@ -153,33 +194,68 @@ fn different_identities_do_not_interfere() {
     assert!(!kept(&mut f, "b", 1500));
 }
 
-// A clock-skewed record that pins an identity far ahead must not drop every
-// later, correctly timed record for that identity.
+// A record far behind the stored one arrives outside the broker's window. It
+// is kept, and it does not touch the stored entry.
 #[test]
 fn record_older_than_stored_by_more_than_window_is_not_duplicate() {
     let mut f = filter(SECOND);
     assert!(kept(&mut f, "k", 1_000_000));
-    assert!(kept(&mut f, "k", 2000));
-    // Max-wins: the stored timestamp did not go back, so a duplicate of the
-    // skewed record is still dropped.
+    assert!(kept_at(&mut f, "k", 2000, 1_000_000));
+    assert!(f.timestamp_of(id("k")) == Some(1_000_000));
     assert!(!kept(&mut f, "k", 1_000_500));
 }
 
-// An all-duplicate request writes nothing to the log, so it must not move the
-// expiry watermark either.
+// One call that moves the watermark.
+#[derive(Clone, Copy)]
+enum Call {
+    // A one-record request, for an identity or for a record without one.
+    Classify(Option<&'static str>),
+    EmptyClassify,
+    Populate,
+    Tick,
+}
+
+impl Call {
+    fn apply(self, f: &mut DedupWindowFilter, now_ms: i64) {
+        match self {
+            Call::Classify(Some(name)) => drop(f.classify(&[rec(name, 1000)], now_ms)),
+            Call::Classify(None) => drop(f.classify(&[no_identity(1000)], now_ms)),
+            Call::EmptyClassify => drop(f.classify(&[], now_ms)),
+            Call::Populate => f.populate(id("p"), 1000, now_ms),
+            Call::Tick => f.tick(now_ms),
+        }
+    }
+}
+
+// The watermark is the broker's time, whatever the records carry, and every
+// call moves it: a duplicate, a record without identity, a populate and a
+// tick. A call with an earlier time does not move it back.
 #[test]
-fn duplicate_does_not_advance_eviction_clock() {
+fn watermark_follows_the_broker_clock_and_never_moves_back() {
     let mut f = filter(SECOND);
-    assert!(kept(&mut f, "k", 1000));
-    assert!(f.max_timestamp_ms() == 1000);
-    assert!(!kept(&mut f, "k", 1500));
-    assert!(f.max_timestamp_ms() == 1000);
+    assert!(f.watermark_ms() == i64::MIN);
+    let steps = [
+        ("a new identity", Call::Classify(Some("k")), 2000, 2000),
+        ("a duplicate", Call::Classify(Some("k")), 2000, 2000),
+        ("an earlier time", Call::Classify(Some("k")), 1500, 2000),
+        ("no identity", Call::Classify(None), 2500, 2500),
+        ("an empty request", Call::EmptyClassify, 3000, 3000),
+        ("a populate", Call::Populate, 3500, 3500),
+        ("a tick", Call::Tick, 4000, 4000),
+        ("an earlier tick", Call::Tick, 1, 4000),
+    ];
+    for (name, call, now, watermark) in steps {
+        call.apply(&mut f, now);
+        assert!(f.watermark_ms() == watermark, "{name}");
+    }
+    f.clear();
+    assert!(f.watermark_ms() == i64::MIN);
 }
 
 #[test]
 fn classify_returns_undo_for_new_and_readmitted_identities() {
     let mut f = filter(SECOND);
-    let first = f.classify(&[rec("a", 1000), rec("b", 1000), rec("a", 1000)], NOW);
+    let first = classify(&mut f, &[rec("a", 1000), rec("b", 1000), rec("a", 1000)]);
     assert!(
         first
             == Classification {
@@ -189,7 +265,7 @@ fn classify_returns_undo_for_new_and_readmitted_identities() {
             }
     );
 
-    let again = f.classify(&[rec("a", 2500)], NOW);
+    let again = classify(&mut f, &[rec("a", 2500)]);
     assert!(
         again
             == Classification {
@@ -200,15 +276,68 @@ fn classify_returns_undo_for_new_and_readmitted_identities() {
     );
 }
 
-// An out-of-order readmission keeps the higher stored timestamp, and its undo
-// entry records what the index holds.
+// A record older than the window at the broker's time, such as a backfill,
+// is admitted and not indexed on both paths, and counted the same way, so a
+// leader, a follower and a rebuild hold the same index. It neither replaces
+// nor matches the stored entry.
 #[test]
-fn readmission_with_an_older_timestamp_keeps_the_stored_one() {
+fn record_older_than_the_window_on_arrival_is_admitted_unindexed() {
+    const STORED: i64 = 10_000;
+    const NOW_MS: i64 = STORED + 5 * SECOND;
+    let names = ["stored", "new"];
+    let expected_counters = DedupCounters {
+        expired_on_arrival_records: 2,
+        ..DedupCounters::default()
+    };
+    let mut leader = filter(10 * SECOND);
+    let mut follower = filter(10 * SECOND);
+    for f in [&mut leader, &mut follower] {
+        populate(f, "stored", STORED);
+    }
+    let old = NOW_MS - 10 * SECOND - 1;
+    let result = leader.classify(&[rec(names[0], old), rec(names[1], old)], NOW_MS);
+    for name in names {
+        follower.populate(id(name), old, NOW_MS);
+    }
+    assert!(
+        result
+            == Classification {
+                dropped: vec![false, false],
+                kept: 2,
+                undo: Undo::default(),
+            }
+    );
+    for f in [&leader, &follower] {
+        assert!(entries(f) == vec![(id("stored"), STORED)]);
+        assert!(f.counters() == expected_counters);
+    }
+    // One millisecond later it is inside the window, so it is a duplicate.
+    assert!(!kept_at(&mut leader, "stored", old + 1, NOW_MS));
+}
+
+// An entry that is no longer live counts as absent before a sweep removes it.
+// The record replaces it, and a revert puts the expired entry back exactly.
+#[test]
+fn expired_entry_is_absent_before_it_is_swept() {
     let mut f = filter(SECOND);
-    populate(&mut f, "k", 10_000);
-    let classification = f.classify(&[rec("k", 5000)], NOW);
-    assert!(classification.undo == undo(vec![readmitted("k", 10_000, 10_000)]));
-    assert!(f.timestamp_of(id("k")) == Some(10_000));
+    populate(&mut f, "k", 1000);
+    // The entry and the record are 500 ms apart, but the entry is 1500 ms
+    // behind the broker's time.
+    let result = f.classify(&[rec("k", 1500)], 2500);
+    assert!(
+        result
+            == Classification {
+                dropped: vec![false],
+                kept: 1,
+                undo: undo(vec![readmitted("k", 1500, 1000)]),
+            }
+    );
+    assert!(entries(&f) == vec![(id("k"), 1500)]);
+
+    f.revert(&result.undo);
+    assert!(entries(&f) == vec![(id("k"), 1000)]);
+    // The restored entry is still not live, so it still drops nothing.
+    assert!(kept_at(&mut f, "k", 1500, 2500));
 }
 
 #[test]
@@ -216,25 +345,25 @@ fn revert_restores_pre_request_state() {
     let mut f = filter(SECOND);
     assert!(kept(&mut f, "a", 1000));
 
-    let result = f.classify(&[rec("a", 2500), rec("b", 2500)], NOW);
+    let result = classify(&mut f, &[rec("a", 2500), rec("b", 2500)]);
     assert!(result.all_kept());
     assert!(f.len() == 2);
 
     f.revert(&result.undo);
     assert!(entries(&f) == vec![(id("a"), 1000)]);
-    // "a" is back at its old timestamp, so a record in its first window is a
-    // duplicate again, and "b" is new again.
-    assert!(!kept(&mut f, "a", 1500));
-    assert!(kept(&mut f, "b", 1500));
+    // "b" is new again. The watermark is not reverted, so "a" is back at its
+    // old timestamp, which is no longer live.
+    assert!(kept(&mut f, "b", 2500));
+    assert!(kept(&mut f, "a", 2500));
 }
 
 #[test]
 fn revert_leaves_newer_overwrites_untouched() {
     let mut f = filter(SECOND);
-    let first = f.classify(&[rec("k", 1000)], NOW);
+    let first = classify(&mut f, &[rec("k", 1000)]);
     // A later request readmits the identity before the first one's
     // replication outcome is known.
-    let second = f.classify(&[rec("k", 2500)], NOW);
+    let second = classify(&mut f, &[rec("k", 2500)]);
     assert!(second.all_kept());
 
     f.revert(&first.undo);
@@ -242,22 +371,35 @@ fn revert_leaves_newer_overwrites_untouched() {
     assert!(!kept(&mut f, "k", 3000));
 }
 
+// One request has one broker time, so two of its records for one identity are
+// either a duplicate or not live on arrival: the undo holds one change for
+// the identity.
 #[test]
-fn revert_unwinds_same_identity_mutations_within_one_request() {
+fn one_request_changes_an_identity_once() {
     let mut f = filter(SECOND);
-    // The second record is outside the window of the first, so both are kept
-    // and the undo holds two entries for one identity.
-    let result = f.classify(&[rec("k", 1000), rec("k", 2500)], NOW);
+    let result = f.classify(&[rec("k", 1000), rec("k", 2000), rec("k", 2500)], 2500);
     assert!(
         result
             == Classification {
-                dropped: vec![false, false],
+                dropped: vec![false, false, true],
                 kept: 2,
-                undo: undo(vec![inserted("k", 1000), readmitted("k", 2500, 1000)]),
+                undo: undo(vec![inserted("k", 2000)]),
             }
     );
-
     f.revert(&result.undo);
+    assert!(f.is_empty());
+}
+
+// Revert unwinds several changes to one identity in reverse order. Classify no
+// longer makes such an undo, so this one is written out.
+#[test]
+fn revert_unwinds_same_identity_mutations_in_reverse() {
+    let mut f = filter(SECOND);
+    populate(&mut f, "k", 2500);
+    f.revert(&undo(vec![
+        inserted("k", 1000),
+        readmitted("k", 2500, 1000),
+    ]));
     assert!(f.is_empty());
 }
 
@@ -268,7 +410,7 @@ fn revert_after_partial_drop_restores_exactly() {
     let mut f = filter(SECOND);
     assert!(kept(&mut f, "dup", 1000));
 
-    let result = f.classify(&[rec("a", 1000), rec("dup", 1000), rec("b", 1000)], NOW);
+    let result = classify(&mut f, &[rec("a", 1000), rec("dup", 1000), rec("b", 1000)]);
     assert!(result.dropped == vec![false, true, false]);
     assert!(f.len() == 3);
 
@@ -282,13 +424,10 @@ fn revert_after_partial_drop_restores_exactly() {
 #[test]
 fn revert_of_an_all_duplicate_request_is_a_noop() {
     let mut f = filter(SECOND);
-    assert!(
-        f.classify(&[rec("a", 1000), rec("b", 1000)], NOW)
-            .all_kept()
-    );
+    assert!(classify(&mut f, &[rec("a", 1000), rec("b", 1000)]).all_kept());
     let before = entries(&f);
 
-    let result = f.classify(&[rec("a", 1200), rec("b", 1200)], NOW);
+    let result = classify(&mut f, &[rec("a", 1200), rec("b", 1200)]);
     assert!(result.none_kept());
     assert!(result.undo.is_empty());
 
@@ -302,15 +441,12 @@ fn records_without_identity_are_always_kept_and_never_indexed() {
     let mut f = filter(SECOND);
     assert!(kept(&mut f, "dup", 1000));
 
-    let result = f.classify(
-        &[
-            no_identity(1000),
-            rec("dup", 1000),
-            no_identity(1000),
-            rec("a", 1000),
-        ],
-        NOW,
-    );
+    let result = classify(&mut f, &[
+        no_identity(1000),
+        rec("dup", 1000),
+        no_identity(1000),
+        rec("a", 1000),
+    ]);
     assert!(
         result
             == Classification {
@@ -320,10 +456,7 @@ fn records_without_identity_are_always_kept_and_never_indexed() {
             }
     );
     assert!(f.len() == 2);
-    assert!(
-        f.classify(&[no_identity(1000), no_identity(1000)], NOW)
-            .all_kept()
-    );
+    assert!(classify(&mut f, &[no_identity(1000), no_identity(1000)]).all_kept());
     assert!(f.len() == 2);
 }
 
@@ -388,7 +521,7 @@ fn drops_land_on_the_right_records() {
             assert!(kept(&mut f, seed, 1000), "{name}");
         }
         let records: Vec<DedupRecord> = request.iter().map(|key| rec(key, 1000)).collect();
-        let result = f.classify(&records, NOW);
+        let result = classify(&mut f, &records);
         assert!(result.dropped == expected, "{name}");
         assert!(
             result.kept == expected.iter().filter(|dropped| !**dropped).count(),
@@ -411,7 +544,7 @@ fn large_request_keeps_the_right_records() {
         records.push(rec(&key, 1000));
         expected.push(seeded);
     }
-    let result = f.classify(&records, NOW);
+    let result = classify(&mut f, &records);
     assert!(result.dropped == expected);
     assert!(result.kept == 2000);
 }
@@ -421,19 +554,13 @@ fn large_request_keeps_the_right_records() {
 #[test]
 fn rebuilt_batches_counts_only_partial_drops() {
     let mut f = filter(SECOND);
-    assert!(
-        f.classify(&[rec("a", 1000), rec("b", 1000)], NOW)
-            .all_kept()
-    );
+    assert!(classify(&mut f, &[rec("a", 1000), rec("b", 1000)]).all_kept());
     assert!(f.counters().rebuilt_batches == 0);
 
-    assert!(
-        f.classify(&[rec("a", 1500), rec("b", 1500)], NOW)
-            .none_kept()
-    );
+    assert!(classify(&mut f, &[rec("a", 1500), rec("b", 1500)]).none_kept());
     assert!(f.counters().rebuilt_batches == 0);
 
-    let partial = f.classify(&[rec("a", 1500), rec("c", 1500)], NOW);
+    let partial = classify(&mut f, &[rec("a", 1500), rec("c", 1500)]);
     assert!(partial.kept == 1);
     assert!(f.counters().rebuilt_batches == 1);
 
@@ -713,7 +840,7 @@ fn leader_and_follower_converge_across_the_entry_limit() {
     feed_leader_and_follower(&mut leader, &mut follower, 60, 1500);
     assert!(leader.counters().capacity_evicted_entries > 0);
     assert!(entries(&leader) == entries(&follower));
-    assert!(leader.max_timestamp_ms() == follower.max_timestamp_ms());
+    assert!(leader.watermark_ms() == follower.watermark_ms());
     assert!(leader.counters() == follower.counters());
     assert!(leader.sweep_visits() == follower.sweep_visits());
 }
@@ -730,7 +857,7 @@ fn clear_resets_the_index_and_releases_memory() {
     assert!(f.is_empty());
     assert!(capacity(&f) == 0);
     assert!(f.heap_bytes() < grown_heap);
-    assert!(f.max_timestamp_ms() == i64::MIN);
+    assert!(f.watermark_ms() == i64::MIN);
 
     populate(&mut f, "after-clear", 1000);
     assert!(f.len() == 1);
@@ -758,24 +885,32 @@ fn clear_resets_the_cursor_and_the_histogram() {
     assert!(cleared.sweep_visits() - before_visits == fresh.sweep_visits());
 }
 
-// A future-dated record must not evict entries that a later, correctly timed
-// duplicate still has to match. Without the clamp it would move the expiry
-// cutoff an hour ahead, and the next sweep would empty the index.
+// A future-dated record does not move the watermark: only the broker's time
+// does. Entries that a later, correctly timed duplicate has to match stay.
 #[test]
-fn future_timestamp_does_not_poison_the_eviction_cutoff() {
+fn future_timestamp_does_not_move_the_watermark() {
     let mut f = filter(5 * MINUTE);
-    assert!(kept(&mut f, "a", NOW));
-    assert!(kept(&mut f, "skewed", NOW + HOUR));
+    assert!(kept_at(&mut f, "a", NOW, NOW));
+    assert!(kept_at(&mut f, "skewed", NOW + HOUR, NOW));
+    assert!(f.watermark_ms() == NOW);
     // A new identity gives the cursor its budget.
-    assert!(kept(&mut f, "filler", NOW));
-    assert!(!kept(&mut f, "a", NOW));
+    assert!(kept_at(&mut f, "filler", NOW, NOW));
+    assert!(!kept_at(&mut f, "a", NOW, NOW));
 }
 
+// Without the clamp, the skewed entry would stay live for an hour past its
+// window and drop correctly timed records all that time.
 #[test]
 fn future_timestamp_is_clamped_and_counted() {
     let mut f = filter(5 * MINUTE);
-    assert!(kept(&mut f, "skewed", NOW + HOUR));
-    assert!(f.max_timestamp_ms() == NOW);
+    assert!(kept_at(&mut f, "skewed", NOW + HOUR, NOW));
+    assert!(entries(&f) == vec![(id("skewed"), NOW)]);
+    assert!(kept_at(
+        &mut f,
+        "skewed",
+        NOW + 5 * MINUTE + 1,
+        NOW + 5 * MINUTE + 1
+    ));
     assert!(
         f.counters()
             == DedupCounters {
@@ -791,7 +926,7 @@ fn future_timestamp_is_clamped_and_counted() {
 #[test]
 fn future_timestamp_is_clamped_in_the_stored_entry() {
     let mut f = filter(5 * MINUTE);
-    populate(&mut f, "skewed", NOW + HOUR);
+    f.populate(id("skewed"), NOW + HOUR, NOW);
     assert!(entries(&f) == vec![(id("skewed"), NOW)]);
     assert!(f.counters().skew_clamped_records == 1);
 }
@@ -869,8 +1004,8 @@ fn window_comparison_is_exact_at_the_extremes() {
     ];
     for (name, window, first, second, duplicate) in cases {
         let mut f = DedupWindowFilter::new(window, DEFAULT, None);
-        f.populate(id("k"), first, i64::MAX);
-        let result = f.classify(&[rec("k", second)], i64::MAX);
+        populate(&mut f, "k", first);
+        let result = f.classify(&[rec("k", second)], first.max(second));
         assert!(result.none_kept() == duplicate, "{name}");
     }
 }
@@ -927,10 +1062,7 @@ fn budget_counts_every_filter() {
 fn budget_counts_produce_path_inserts() {
     let shared = budget(1000);
     let mut f = DedupWindowFilter::new(100 * SECOND, 1000, Some(shared.clone()));
-    assert!(
-        f.classify(&[rec("a", 1000), rec("b", 1000), rec("c", 1000)], NOW)
-            .all_kept()
-    );
+    assert!(classify(&mut f, &[rec("a", 1000), rec("b", 1000), rec("c", 1000)]).all_kept());
     assert!(shared.entries() == 3);
     assert!(!kept(&mut f, "a", 1100));
     assert!(shared.entries() == 3);
@@ -941,7 +1073,11 @@ fn reverted_request_gives_its_entries_back() {
     let shared = budget(1000);
     let mut f = DedupWindowFilter::new(100 * SECOND, 1000, Some(shared.clone()));
     populate_n(&mut f, "kept", 4, 1000, 1);
-    let result = f.classify(&[rec("x", 5000), rec("y", 5000), rec("kept-0", 5000)], NOW);
+    let result = classify(&mut f, &[
+        rec("x", 5000),
+        rec("y", 5000),
+        rec("kept-0", 5000),
+    ]);
     assert!(shared.entries() == 6);
 
     f.revert(&result.undo);

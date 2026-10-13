@@ -5,12 +5,15 @@
 
 use {
     super::{
-        test_support::{NOW, OpRun, OpSpace, VISITS_PER_CALL, check_invariants, nth},
+        test_support::{OpRun, OpSpace, VISITS_PER_CALL, VISITS_PER_TICK, check_invariants, nth},
         *,
     },
     assert2::assert,
     proptest::prelude::*,
-    std::{sync::Arc, time::Instant},
+    std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    },
 };
 
 const SECOND: i64 = 1_000;
@@ -37,7 +40,8 @@ enum Path {
 }
 
 impl Path {
-    // Indexes one new identity the way a leader or a follower does.
+    // Indexes one new identity the way a leader or a follower does, at a
+    // broker time equal to the record's.
     fn apply(self, filter: &mut DedupWindowFilter, identity: IdentityDigest, timestamp_ms: i64) {
         match self {
             Path::Leader => {
@@ -46,10 +50,10 @@ impl Path {
                         identity: Some(identity),
                         timestamp_ms,
                     }],
-                    NOW,
+                    timestamp_ms,
                 );
             }
-            Path::Follower => filter.populate(identity, timestamp_ms, NOW),
+            Path::Follower => filter.populate(identity, timestamp_ms, timestamp_ms),
         }
     }
 }
@@ -378,7 +382,7 @@ fn crowded_segment_is_bounded_by_its_limit() {
     let limit = filter.segment_limit;
     assert!(limit == SEGMENT_LIMIT_FLOOR);
     for identity in &crowd {
-        filter.populate(*identity, 1000, NOW);
+        filter.populate(*identity, 1000, 1000);
     }
     check_invariants(&filter);
     assert!(filter.len() == limit);
@@ -401,13 +405,52 @@ fn crowded_segment_is_bounded_by_its_limit() {
         identity: Some(spread),
         timestamp_ms: 1000,
     };
-    assert!(filter.classify(&[record], NOW).all_kept());
-    assert!(filter.classify(&[record], NOW).none_kept());
+    assert!(filter.classify(&[record], 1000).all_kept());
+    assert!(filter.classify(&[record], 1000).none_kept());
 }
 
-// The follower applies only what the leader kept, as it does from the log.
-// Through capacity pressure, expiry waves, and the shrinks they cause, both
-// hold the same entries in the same order and made the same moves.
+// The state that a leader and a follower must agree on after the same calls:
+// the entries in cursor order, the watermark, the work and the moves. The
+// follower never sees a dropped record, so only that count differs.
+fn assert_converged(leader: &DedupWindowFilter, follower: &DedupWindowFilter) {
+    check_invariants(leader);
+    check_invariants(follower);
+    assert!(leader.iter().collect::<Vec<_>>() == follower.iter().collect::<Vec<_>>());
+    assert!(leader.watermark_ms() == follower.watermark_ms());
+    assert!(leader.largest_relocation() == follower.largest_relocation());
+    assert!(leader.heap_bytes() == follower.heap_bytes());
+    assert!(leader.sweep_visits() == follower.sweep_visits());
+    assert!(
+        DedupCounters {
+            dropped_records: 0,
+            ..leader.counters()
+        } == follower.counters()
+    );
+}
+
+// Feeds one record to the leader, and to the follower when the leader keeps
+// it, as the follower reads it from the log. Returns whether it was kept.
+fn feed(
+    leader: &mut DedupWindowFilter,
+    follower: &mut DedupWindowFilter,
+    identity: IdentityDigest,
+    timestamp_ms: i64,
+) -> bool {
+    let record = DedupRecord {
+        identity: Some(identity),
+        timestamp_ms,
+    };
+    let kept = leader.classify(&[record], timestamp_ms).all_kept();
+    if kept {
+        follower.populate(identity, timestamp_ms, timestamp_ms);
+    }
+    kept
+}
+
+// The follower applies only what the leader kept, as it does from the log,
+// and both tick at the same times. Through capacity pressure, expiry waves,
+// and the shrinks they cause, both hold the same entries in the same order
+// and made the same moves.
 #[test]
 fn leader_and_follower_agree_through_growth_and_shrink() {
     const MAX: usize = 3_000;
@@ -434,35 +477,100 @@ fn leader_and_follower_agree_through_growth_and_shrink() {
     }
 
     let mut shrinks = 0;
-    for (identity, timestamp_ms) in traffic {
-        let record = DedupRecord {
-            identity: Some(identity),
-            timestamp_ms,
-        };
+    for (index, (identity, timestamp_ms)) in traffic.into_iter().enumerate() {
         let heap = leader.heap_bytes();
-        if leader.classify(&[record], NOW).all_kept() {
-            follower.populate(identity, timestamp_ms, NOW);
+        feed(&mut leader, &mut follower, identity, timestamp_ms);
+        // A tick now and then, at the time of the last record.
+        if index % 97 == 0 {
+            leader.tick(timestamp_ms);
+            follower.tick(timestamp_ms);
         }
         if leader.heap_bytes() < heap {
             shrinks += 1;
         }
     }
-    check_invariants(&leader);
-    check_invariants(&follower);
     assert!(shrinks > 0);
     assert!(leader.counters().capacity_evicted_entries > 0);
     assert!(leader.counters().dropped_records > 0);
-    assert!(leader.iter().collect::<Vec<_>>() == follower.iter().collect::<Vec<_>>());
-    assert!(leader.largest_relocation() == follower.largest_relocation());
-    assert!(leader.heap_bytes() == follower.heap_bytes());
-    assert!(leader.sweep_visits() == follower.sweep_visits());
-    // The follower never sees a dropped record, so only that count differs.
-    assert!(
-        DedupCounters {
-            dropped_records: 0,
-            ..leader.counters()
-        } == follower.counters()
-    );
+    assert_converged(&leader, &follower);
+
+    // With no more traffic, ticks alone empty both.
+    for _ in 0..=MAX.div_ceil(DedupWindowFilter::TICK_VISITS) {
+        leader.tick(timestamp + 20 * SECOND);
+        follower.tick(timestamp + 20 * SECOND);
+    }
+    assert!(leader.is_empty());
+    assert_converged(&leader, &follower);
+}
+
+// The problem that ticks solve: a partition with no traffic. Its entries, and
+// their share of the broker budget, go back once they expire, through ticks
+// alone, and its heap shrinks back to the floor. No tick visits more than
+// `TICK_VISITS` entries.
+#[test]
+fn ticks_release_an_idle_filter() {
+    const IDENTITIES: u64 = 100_000;
+    const START: i64 = 1_000_000;
+    const WINDOW: i64 = 10 * SECOND;
+    let identities = usize::try_from(IDENTITIES).unwrap();
+    let floor = heap_bound(1, 0);
+    for path in PATHS {
+        let shared = Arc::new(DedupBudget::new(4 * identities));
+        let mut filter = DedupWindowFilter::new(
+            WINDOW,
+            DedupWindowFilter::DEFAULT_MAX_ENTRIES,
+            Some(shared.clone()),
+        );
+        for index in 0..IDENTITIES {
+            path.apply(&mut filter, nth(index), START);
+        }
+        assert!(filter.len() == identities, "{path:?}");
+        let peak = filter.heap_bytes();
+
+        // At the edge of the window every entry is still live, so a tick
+        // drops nothing.
+        filter.tick(START + WINDOW);
+        assert!(filter.len() == identities, "{path:?}");
+
+        let mut ticks = 0;
+        let mut now = START + WINDOW + 1;
+        while !filter.is_empty() {
+            assert!(
+                ticks <= identities.div_ceil(DedupWindowFilter::TICK_VISITS),
+                "{path:?}"
+            );
+            let before = filter.sweep_visits();
+            filter.tick(now);
+            assert!(
+                filter.sweep_visits() - before <= VISITS_PER_TICK,
+                "{path:?}"
+            );
+            assert!(shared.entries() == filter.len(), "{path:?}");
+            ticks += 1;
+            now += 1;
+        }
+        check_invariants(&filter);
+        assert!(shared.entries() == 0, "{path:?}");
+        assert!(filter.heap_bytes() <= floor, "{path:?}");
+        assert!(filter.heap_bytes() * 4 < peak, "{path:?}");
+        assert!(filter.largest_relocation() <= 2 * identities.div_ceil(SEGMENTS));
+
+        // A tick on an empty filter visits nothing.
+        let before = filter.sweep_visits();
+        filter.tick(now);
+        assert!(filter.sweep_visits() == before, "{path:?}");
+    }
+}
+
+// The time of the slowest of `calls` calls of `call`, and the index of that call.
+fn slowest_of(calls: u64, mut call: impl FnMut(u64)) -> (Duration, u64) {
+    let mut slowest = (Duration::ZERO, 0);
+    for index in 0..calls {
+        let started = Instant::now();
+        call(index);
+        slowest = slowest.max((started.elapsed(), index));
+    }
+    slowest
 }
 
 // Prints the slowest single classify while one partition grows to two million
@@ -474,22 +582,14 @@ fn leader_and_follower_agree_through_growth_and_shrink() {
 fn report_slowest_classify_while_growing() {
     const IDENTITIES: u64 = 2_000_000;
     let mut filter = DedupWindowFilter::new(HOUR, DedupWindowFilter::MAX_MAX_ENTRIES, None);
-    let mut slowest = std::time::Duration::ZERO;
-    let mut slowest_at = 0;
     let started = Instant::now();
-    for index in 0..IDENTITIES {
+    let (slowest, slowest_at) = slowest_of(IDENTITIES, |index| {
         let record = DedupRecord {
             identity: Some(nth(index)),
             timestamp_ms: 1000,
         };
-        let call = Instant::now();
-        filter.classify(&[record], NOW);
-        let elapsed = call.elapsed();
-        if elapsed > slowest {
-            slowest = elapsed;
-            slowest_at = index;
-        }
-    }
+        filter.classify(&[record], 1000);
+    });
     println!(
         "segments {SEGMENTS}: {} identities in {:?}; slowest classify {:?} at identity {slowest_at}; largest relocation {} entries; heap estimate {} MiB",
         filter.len(),
@@ -500,17 +600,107 @@ fn report_slowest_classify_while_growing() {
     );
 }
 
+// Prints the slowest single tick of an idle partition of two million
+// identities: while they are all live, so that each tick only surveys, and
+// while they all expire, so that each tick removes entries and shrinks
+// segments. Like the report above, it asserts nothing and runs only on
+// request.
+#[test]
+#[ignore = "timing report; run with --ignored --release --nocapture"]
+fn report_slowest_tick_while_idle() {
+    const IDENTITIES: u64 = 2_000_000;
+    const START: i64 = 1000;
+    let mut filter = DedupWindowFilter::new(HOUR, DedupWindowFilter::MAX_MAX_ENTRIES, None);
+    for index in 0..IDENTITIES {
+        filter.populate(nth(index), START, START);
+    }
+    let peak = filter.heap_bytes();
+    let surveys = IDENTITIES / u64::try_from(DedupWindowFilter::TICK_VISITS).unwrap();
+    let (slowest_live, _) = slowest_of(surveys, |_| filter.tick(START + HOUR));
+    let started = Instant::now();
+    let mut ticks = 0;
+    let (slowest_expired, slowest_at) = slowest_of(2 * surveys, |index| {
+        if !filter.is_empty() {
+            ticks += 1;
+            filter.tick(START + HOUR + 1 + i64::try_from(index).unwrap());
+        }
+    });
+    println!(
+        "tick of an idle index of {IDENTITIES} identities, {} visits each: slowest while live {slowest_live:?}; {ticks} ticks to drain in {:?}, slowest {slowest_expired:?} at tick {slowest_at}; heap estimate {} MiB to {} KiB; largest relocation {} entries",
+        DedupWindowFilter::TICK_VISITS,
+        started.elapsed(),
+        peak >> 20,
+        filter.heap_bytes() >> 10,
+        filter.largest_relocation(),
+    );
+}
+
 // Small segments that shrink and fill, so that random sequences reach the
 // shrink and the segment limit with the cursor inside the segment.
-fn small_filter(shared: &Arc<DedupBudget>) -> DedupWindowFilter {
-    let mut filter = DedupWindowFilter::new(5 * SECOND, 150, Some(shared.clone()));
+fn with_small_segments(mut filter: DedupWindowFilter) -> DedupWindowFilter {
     filter.shrink_floor = 4;
     filter.segment_limit = 3;
     filter
 }
 
+fn small_filter(shared: &Arc<DedupBudget>) -> DedupWindowFilter {
+    with_small_segments(DedupWindowFilter::new(
+        5 * SECOND,
+        150,
+        Some(shared.clone()),
+    ))
+}
+
+// One step of a leader and its follower: a record for a key after a step of
+// the clock, or a tick of both after a step of the clock.
+#[derive(Clone, Copy, Debug)]
+enum Step {
+    Record { key: u16, advance: i64 },
+    Tick { advance: i64 },
+}
+
+fn step() -> impl Strategy<Value = Step> {
+    prop_oneof![
+        6 => (0..400_u16, 0..300_i64).prop_map(|(key, advance)| Step::Record { key, advance }),
+        1 => (0..3000_i64).prop_map(|advance| Step::Tick { advance }),
+    ]
+}
+
+// A leader or a follower with small segments that shrink and fill.
+fn small_replica() -> DedupWindowFilter {
+    with_small_segments(DedupWindowFilter::new(5 * SECOND, 150, None))
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(96))]
+
+    // A leader and a follower that make the same calls at the same times,
+    // ticks among them, end in the same state.
+    #[test]
+    fn leader_and_follower_agree_with_ticks(steps in prop::collection::vec(step(), 1..1500)) {
+        let mut leader = small_replica();
+        let mut follower = small_replica();
+        let mut clock = 100_000;
+        for step in steps {
+            match step {
+                Step::Record { key, advance } => {
+                    clock += advance;
+                    feed(&mut leader, &mut follower, nth(u64::from(key)), clock);
+                }
+                Step::Tick { advance } => {
+                    clock += advance;
+                    leader.tick(clock);
+                    follower.tick(clock);
+                }
+            }
+        }
+        // A dropped record moves only the leader's watermark, and nothing
+        // else. The follower's next call catches up, so one more tick each
+        // makes the watermarks comparable.
+        leader.tick(clock);
+        follower.tick(clock);
+        assert_converged(&leader, &follower);
+    }
 
     // Whatever mix of operations runs, with time moving both ways, no limit
     // is crossed, the budget stays exact, and the cursor never leaves the

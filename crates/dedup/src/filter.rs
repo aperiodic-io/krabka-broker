@@ -22,6 +22,16 @@ mod tests;
 // quorum.
 const SWEEP_BUDGET: usize = 8;
 
+// What one sweep step may drop. Expired entries can match nothing, so dropping
+// them costs no coverage at any time. Live entries below the capacity cutoff
+// can still match, so only a step that makes room for a new identity drops
+// them: a tick makes room for nobody.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SweepMode {
+    Expired,
+    ExpiredAndCapacity,
+}
+
 // Extra entries the cursor may visit when a new identity arrives with the
 // index exactly at its limit: enough to find something to free while the soft
 // limit keeps the tail trimmed, and small enough to pay on every record. The
@@ -205,7 +215,7 @@ impl Classification {
 
 /// What a filter has done over its lifetime.
 ///
-/// The filter can stop deduplicating without failing a request in two ways: through producer clock skew and through a full index. Both are counted, with the drop count that makes them readable.
+/// The filter can stop deduplicating without failing a request in three ways: through producer clock skew, through a full index, and through records that arrive older than the window. Each is counted, with the drop count that makes them readable.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DedupCounters {
     /// Records dropped as duplicates.
@@ -218,17 +228,23 @@ pub struct DedupCounters {
     pub capacity_evicted_entries: u64,
     /// Bounded extra sweep steps taken because a new identity arrived with the index at its limit. Non-zero means the soft limit does not keep up with the rate of new identities.
     pub capacity_sweeps: u64,
+    /// Records admitted without their identity being indexed, because their timestamp was already more than the window behind the broker's time when they arrived. A backfill with old `CreateTime`s does this. Such a record can be neither a duplicate nor matched later.
+    pub expired_on_arrival_records: u64,
     /// Requests where some, but not all, records were dropped. Only these make the caller rebuild and recompress a batch, so this rate drives the cost of dedup on the produce path.
     pub rebuilt_batches: u64,
 }
 
 /// The first-wins dedup index of one partition.
 ///
-/// A record is dropped when an earlier record with the same identity was admitted, and the two timestamps are at most `window_ms` apart. The leader classifies produce requests with [`classify`](Self::classify) and undoes one with [`revert`](Self::revert) when its replication fails. Every replica, the leader included after a restart, rebuilds the index from the log with [`populate`](Self::populate).
+/// A record is dropped when the index holds a live entry for its identity, and the two timestamps are at most `window_ms` apart. The leader classifies each produce batch with [`classify`](Self::classify) under the partition's log lock, immediately before it appends the batch, and undoes the classification with [`revert`](Self::revert) when that append fails. Every replica indexes the batches it appends with [`populate`](Self::populate), and rebuilds a stale index from the log the same way.
 ///
-/// Call it only for plain produce batches. Idempotent and transactional batches bypass dedup, so that their producer sequence numbers stay intact.
+/// Call it for plain and idempotent produce batches. A dropped record of an idempotent batch leaves a gap in the offsets, and the batch keeps its offset span, so the producer's sequence numbers stay intact. Transactional batches bypass dedup, because a transactional record can still abort.
 ///
-/// Memory is bounded in three ways. Each entry is a fixed-size [`IdentityDigest`]. Entries older than the window, relative to the highest timestamp seen, cannot cause a drop again, and a cursor that visits a few entries per new identity drops them. A hard entry limit, and an optional broker-wide [`DedupBudget`], stop a large window, many identities, or timestamps that do not advance from using all memory. From a soft limit a tenth below either limit, the same cursor also drops the entries that a completed pass found in the oldest quarter. The effective window then narrows to about the limit divided by the rate of new identities, and dedup does not stop for new identities.
+/// Expiry uses the broker's clock, as Kafka's `retention.ms` does. The filter keeps a watermark: the highest `now_ms` that a call gave it. It never moves back. An entry with timestamp `ts` is live while `watermark - ts <= window_ms`. A lookup treats an entry that is not live as absent, so the time at which a sweep removes it never changes a decision. A record that is already not live when it arrives, for example a backfill with old `CreateTime`s, is admitted and not indexed, on every path. A running index and an index rebuilt from the log at the same time therefore agree on which records are live, because the rebuild also reads only the records of the last window before the broker's time.
+///
+/// An entry leaves the index only when the cursor visits it. A partition with no traffic makes no calls, so without ticks it would hold its expired entries, and their share of the [`DedupBudget`], forever. The caller calls [`tick`](Self::tick) at a regular interval, which moves the watermark and gives the cursor those visits.
+///
+/// Memory is bounded in three ways. Each entry is a fixed-size [`IdentityDigest`]. Entries that are not live cannot cause a drop, and a cursor drops them: it visits a few entries for each new identity, and [`TICK_VISITS`](Self::TICK_VISITS) for each tick. A hard entry limit, and an optional broker-wide [`DedupBudget`], stop a large window or many identities from using all memory. From a soft limit a tenth below either limit, the cursor also drops, for each new identity, the entries that a completed pass found in the oldest quarter. The effective window then narrows to about the limit divided by the rate of new identities, and dedup does not stop for new identities.
 ///
 /// The broker budget makes the effective capacity of a partition depend on the other partitions of its broker, and replicas of one partition seldom share a broker with the same set. Under broker pressure, replicas can therefore trim different amounts. This is the same best-effort divergence that capacity trimming already has.
 ///
@@ -238,7 +254,7 @@ pub struct DedupCounters {
 ///
 /// The per-segment limit binds only when identities crowd one segment. Well-spread digests stay far below it, but xxh3 does not resist chosen input, so a producer can choose identities that share a segment. A new identity for a full segment is then admitted unindexed and counted, as at the entry limit.
 ///
-/// The highest timestamp seen is a client-supplied `CreateTime` with no order guarantee, so each record timestamp is clamped to the broker's time before it reaches the index. Without the clamp, one future-dated record would move the expiry cutoff past the whole index and disable dedup for the partition. The clamp does not bound reordering within the window, so eviction at the window edge stays approximate.
+/// Record timestamps are client-supplied `CreateTime`s, so each one is clamped to the broker's time before it reaches the index. Without the clamp, an entry dated ahead of the broker would stay live until the broker's time passed it by a whole window, and would drop correctly timed records for that long. The clamp does not bound reordering within the window, so the window edge stays approximate.
 pub struct DedupWindowFilter {
     window_ms: i64,
     max_entries: usize,
@@ -260,22 +276,28 @@ pub struct DedupWindowFilter {
     shrink_floor: usize,
     // The most entries that one grow or shrink of a segment moved.
     largest_relocation: usize,
-    // The highest record timestamp seen: the reference "now" for expiry.
-    max_ts: i64,
+    // The highest broker time that a call gave: the reference "now" for
+    // expiry. Every stored timestamp is at or below it, because each one was
+    // clamped to the `now_ms` of its call.
+    watermark_ms: i64,
     // A position in the segments' dense arrays: a segment, and an index in
-    // it. Replicas agree on it because they insert the same identities in
-    // the same order and so lay out the arrays the same way. `revert` is the
-    // exception: it removes entries a follower never inserted, which permutes
-    // the leader's arrays. The two then sweep equal sets in different orders
-    // and can drop different live entries for capacity. That needs the index
-    // above 90% of its limit, and which live entry goes is already
+    // it. Replicas that make the same calls with the same times agree on it,
+    // because they insert the same identities in the same order and so lay
+    // out the arrays the same way. Two things break that. `revert` removes
+    // entries a follower never inserted, which permutes the leader's arrays.
+    // And each broker ticks on its own clock, so the cursors of two replicas
+    // stand at different places. The two then sweep equal sets in different
+    // orders and can drop different live entries for capacity. That needs the
+    // index above 90% of its limit, and which live entry goes is already
     // best-effort, but it is inherent to bounded work: a cursor is a position
-    // in a layout.
+    // in a layout. Expiry itself never makes replicas decide differently,
+    // because a lookup treats an entry that is not live as absent.
     sweep_segment: usize,
     sweep_pos: usize,
     // The histogram of the entries the current pass visited, measured against
-    // a frame frozen at the start of the pass. `max_ts` moves while the cursor
-    // walks, and buckets that move under it would describe no single moment.
+    // a frame frozen at the start of the pass. The watermark moves while the
+    // cursor walks, and buckets that move under it would describe no single
+    // moment.
     pass_counts: Box<[usize; CAPACITY_EVICT_BUCKETS]>,
     pass_visited: usize,
     pass_lo: i64,
@@ -298,10 +320,23 @@ impl DedupWindowFilter {
     pub const MAX_MAX_ENTRIES: usize = 10_000_000;
     /// The number of hash tables the index is split into.
     pub const SEGMENTS: usize = 1 << SEGMENT_BITS;
+    /// The most entries that one [`tick`](Self::tick) visits.
+    ///
+    /// The cursor drops an expired entry when it visits it, so a filter with no traffic releases at most this many entries for each tick. The interval of the caller's ticks therefore sets how soon an idle partition gives its expired entries back: an index of `len` entries needs `ceil(len / TICK_VISITS)` ticks after the last one expires.
+    // 1024 is the sweep work of 128 new identities. A visit reads one entry
+    // and a removal is a swap in one segment. On an idle index of two million
+    // entries, a release build took about 0.1 ms for one tick, and about 1 ms
+    // for a tick that also shrank a segment (`report_slowest_tick_while_idle`).
+    // A caller can run that between two appends under the log lock without a
+    // pause that a producer sees. A shrink moves at most one segment, as on
+    // every other path. At one tick per second, a full default index of 10^6
+    // entries is released in about 16 minutes after it expires, and at one
+    // tick per 100 ms in under 2.
+    pub const TICK_VISITS: usize = 1024;
 
     /// Makes an empty filter.
     ///
-    /// `max_entries` is the per-partition entry limit. A filter with a `budget` also keeps the sum over every filter on that budget under the budget's limit. A negative `window_ms` makes no record a duplicate.
+    /// `max_entries` is the per-partition entry limit. A filter with a `budget` also keeps the sum over every filter on that budget under the budget's limit. A negative `window_ms` makes no record a duplicate: every record is then not live on arrival, and none is indexed.
     ///
     /// The filter allocates no entry space until it indexes an identity, so an idle partition costs a few KiB.
     #[must_use]
@@ -317,7 +352,7 @@ impl DedupWindowFilter {
             segment_limit: segment_limit_of(max_entries),
             shrink_floor: SHRINK_FLOOR,
             largest_relocation: 0,
-            max_ts: i64::MIN,
+            watermark_ms: i64::MIN,
             sweep_segment: 0,
             sweep_pos: 0,
             pass_counts: Box::new([0; CAPACITY_EVICT_BUCKETS]),
@@ -335,8 +370,9 @@ impl DedupWindowFilter {
 
     /// Classifies the records of one produce request in order, and indexes the kept ones.
     ///
-    /// Classification is first-wins in record order, so two records with one identity in the same request resolve as they would across requests. Each timestamp is first clamped to `now_ms`, the broker's time. A duplicate does not change the index, so a request that is all duplicates changes nothing.
+    /// Classification is first-wins in record order, so two records with one identity in the same request resolve as they would across requests. `now_ms` is the broker's time: it moves the watermark, and each timestamp is first clamped to it. A duplicate does not change the index, so a request that is all duplicates changes only the watermark. A record that is not live on arrival is kept and not indexed.
     pub fn classify(&mut self, records: &[DedupRecord], now_ms: i64) -> Classification {
+        self.advance_watermark(now_ms);
         let mut classification = Classification {
             dropped: Vec::with_capacity(records.len()),
             kept: 0,
@@ -360,15 +396,17 @@ impl DedupWindowFilter {
 
     /// Undoes the index changes of one request from [`classify`](Self::classify).
     ///
-    /// This is compare-and-revert: an entry is restored or removed only while the index still holds the timestamp this request wrote. An identity that a later request overwrote keeps the later state. Sweeps and the highest timestamp seen are not reverted: an expired entry cannot change a decision, and a higher watermark only makes expiry sooner.
+    /// This is compare-and-revert: an entry is restored or removed only while the index still holds the timestamp this request wrote. An identity that a later request overwrote keeps the later state. A restored entry can be one that is no longer live, which a lookup treats as absent. Sweeps and the watermark are not reverted: an expired entry cannot change a decision, and the watermark is the broker's time, which the failed request did not change.
     pub fn revert(&mut self, undo: &Undo) {
         // Only this request's own entries come back. A capacity eviction that
         // classifying it forced stays done, so a failed request can cost
         // coverage that was not its own. That is bounded by one slice.
         //
-        // Reverse order, so that several changes to one identity in a request
-        // unwind correctly: the last entry restores what the one before it
-        // wrote, and the first restores the state before the request.
+        // Reverse order, so that several changes to one identity unwind
+        // correctly: the last entry restores what the one before it wrote,
+        // and the first restores the state before the request. One request
+        // has one broker time, so `classify` makes at most one change per
+        // identity today, but the order keeps `revert` correct for any undo.
         for entry in undo.entries.iter().rev() {
             let segment = segment_of(entry.identity);
             let Some(timestamp) = self.segments[segment].table.get_mut(&entry.identity) else {
@@ -388,14 +426,19 @@ impl DedupWindowFilter {
 
     /// Records an identity that the log admitted.
     ///
-    /// The index keeps the highest timestamp per identity, so applying one log prefix any number of times gives the same index. The timestamp is clamped to `now_ms` first, which changes nothing for a record behind the broker's time, so log replay stays deterministic.
+    /// The index keeps the highest timestamp per identity, so applying one log prefix any number of times at one broker time gives the same index. `now_ms` is the broker's time: it moves the watermark, and the timestamp is clamped to it, which changes nothing for a record behind the broker's time. A record that is not live on arrival is not indexed, as in [`classify`](Self::classify).
     pub fn populate(&mut self, identity: IdentityDigest, timestamp_ms: i64, now_ms: i64) {
+        self.advance_watermark(now_ms);
         let timestamp = self.clamp_to_now(timestamp_ms, now_ms);
-        self.max_ts = self.max_ts.max(timestamp);
+        if self.expired_on_arrival(timestamp) {
+            return;
+        }
         let segment = segment_of(identity);
         // Followers apply the leader's capacity rule at the same point as
         // `is_duplicate` does: look up, sweep, then insert. Expiry timing never
-        // changes a decision, because an expired entry cannot match. Capacity
+        // changes a decision, because a lookup treats an expired entry as
+        // absent, and max-wins replaces it: a live timestamp is above every
+        // expired one. Capacity
         // trimming drops entries that could still match, so the position of
         // the sweep relative to the insert decides what the index holds.
         if let Some(stored) = self.segments[segment].table.get_mut(&identity) {
@@ -404,12 +447,20 @@ impl DedupWindowFilter {
             }
             return;
         }
-        self.sweep_step(SWEEP_BUDGET);
+        self.sweep_step(SWEEP_BUDGET, SweepMode::ExpiredAndCapacity);
         if self.at_capacity(segment) && !self.make_room_for_one(segment) {
             self.counters.unindexed_records += 1;
             return;
         }
         self.insert_new(segment, identity, timestamp);
+    }
+
+    /// Moves the watermark to `now_ms`, and drops the entries that are no longer live from one bounded slice of the index.
+    ///
+    /// The cursor visits at most [`TICK_VISITS`](Self::TICK_VISITS) entries, and a tick on an empty filter does nothing else. A tick drops only entries that are not live, so it costs no coverage. A segment that a tick empties to a quarter shrinks, so the heap and the [`DedupBudget`] follow the live entries down with no traffic. Call it at a regular interval for every filter, with the broker's time.
+    pub fn tick(&mut self, now_ms: i64) {
+        self.advance_watermark(now_ms);
+        self.sweep_step(Self::TICK_VISITS, SweepMode::Expired);
     }
 
     /// Changes the window, for example on a topic configuration change.
@@ -423,7 +474,7 @@ impl DedupWindowFilter {
 
     /// Removes every entry and gives the memory back.
     ///
-    /// The cursor, its histogram, and the highest timestamp seen reset as well. The counters, [`sweep_visits`](Self::sweep_visits) and [`largest_relocation`](Self::largest_relocation) stay.
+    /// The cursor, its histogram, and the watermark reset as well, so the filter then indexes a log as a new filter does. The counters, [`sweep_visits`](Self::sweep_visits) and [`largest_relocation`](Self::largest_relocation) stay.
     pub fn clear(&mut self) {
         // New segments, not `IndexMap::clear`, which keeps the capacity each
         // grew to: tens of MiB at the default limit. Every caller wants it
@@ -432,7 +483,7 @@ impl DedupWindowFilter {
         self.len = 0;
         self.occupied = 0;
         self.sync_budget();
-        self.max_ts = i64::MIN;
+        self.watermark_ms = i64::MIN;
         self.sweep_segment = 0;
         self.sweep_pos = 0;
         self.capacity_cutoff = i64::MIN;
@@ -451,9 +502,9 @@ impl DedupWindowFilter {
     #[must_use]
     pub fn max_entries(&self) -> usize { self.max_entries }
 
-    /// The highest clamped record timestamp seen, or `i64::MIN` when none was.
+    /// The highest broker time that a call gave since the filter was made or cleared, or `i64::MIN` when no call did.
     #[must_use]
-    pub fn max_timestamp_ms(&self) -> i64 { self.max_ts }
+    pub fn watermark_ms(&self) -> i64 { self.watermark_ms }
 
     /// The stored timestamp of `identity`, or `None` when it is not indexed.
     #[must_use]
@@ -507,17 +558,14 @@ impl DedupWindowFilter {
     #[must_use]
     pub fn budget(&self) -> Option<&DedupBudget> { self.budget.as_deref() }
 
-    // Client `CreateTime` is untrusted. The broker admits records ahead of its
-    // own clock, and `max_ts` is a running maximum, so one future-dated record
-    // would push the expiry cutoff past every entry. The next sweeps would
-    // empty the index, and each later entry would already be below the cutoff:
-    // dedup would stay off for the partition.
+    // Client `CreateTime` is untrusted, and the broker admits records ahead of
+    // its own clock. An entry stored ahead of the broker's time would stay
+    // live until the watermark passed it by a whole window, and would drop
+    // correctly timed records for up to that long. The clamp also keeps every
+    // stored timestamp at or below the watermark.
     //
     // The clamp changes nothing for a record at or behind the broker's time,
-    // which is every record seen during log replay, so the index stays a
-    // function of the log and not of the replay timing. It applies to the
-    // stored entry as well as the watermark: an entry stored ahead of the
-    // broker's time would stay above the cutoff and never expire.
+    // which is every record seen during log replay.
     fn clamp_to_now(&mut self, timestamp_ms: i64, now_ms: i64) -> i64 {
         if timestamp_ms > now_ms {
             self.counters.skew_clamped_records += 1;
@@ -527,35 +575,35 @@ impl DedupWindowFilter {
     }
 
     fn is_duplicate(&mut self, identity: IdentityDigest, timestamp: i64, undo: &mut Undo) -> bool {
+        if self.expired_on_arrival(timestamp) {
+            return false;
+        }
         let segment = segment_of(identity);
+        let (watermark, window) = (self.watermark_ms, self.window_ms);
         if let Some(stored) = self.segments[segment].table.get_mut(&identity) {
             let previous = *stored;
-            // Exact in i128, so that extreme client timestamps cannot wrap.
-            let distance = (i128::from(timestamp) - i128::from(previous)).abs();
-            if distance <= i128::from(self.window_ms) {
+            // An entry that is not live counts as absent, whether or not a
+            // sweep has removed it yet, so sweep timing changes no decision.
+            if is_live(watermark, window, previous) && within_window(window, timestamp, previous) {
                 self.counters.dropped_records += 1;
                 return true;
             }
-            // Max-wins, as in `populate`: a classification that arrives out of
-            // order must not lower the stored timestamp below what the
-            // follower's apply of the same log computes.
+            // Max-wins, as in `populate`. Only an entry that is not live gets
+            // here, and a live timestamp is above it, so the record replaces it.
             if timestamp > previous {
                 *stored = timestamp;
             }
-            let applied = *stored;
-            self.max_ts = self.max_ts.max(timestamp);
             undo.entries.push(UndoEntry {
                 identity,
-                applied_timestamp: applied,
+                applied_timestamp: *stored,
                 previous_timestamp: Some(previous),
             });
             return false;
         }
-        self.max_ts = self.max_ts.max(timestamp);
         // Before the insert, not after: `populate` sweeps at the same point,
         // and capacity trimming changes decisions, so the two orders must
         // match or replicas drift apart.
-        self.sweep_step(SWEEP_BUDGET);
+        self.sweep_step(SWEEP_BUDGET, SweepMode::ExpiredAndCapacity);
         if self.at_capacity(segment) && !self.make_room_for_one(segment) {
             // The bounded step freed nothing. The record is admitted, and its
             // identity is not remembered.
@@ -571,6 +619,30 @@ impl DedupWindowFilter {
         false
     }
 
+    // Moves the watermark to the broker's time. It never moves back, so a
+    // clock that steps back cannot make an expired entry live again.
+    fn advance_watermark(&mut self, now_ms: i64) {
+        self.watermark_ms = self.watermark_ms.max(now_ms);
+    }
+
+    // Whether an entry with `timestamp` can still match a record.
+    fn is_live(&self, timestamp: i64) -> bool {
+        is_live(self.watermark_ms, self.window_ms, timestamp)
+    }
+
+    // Counts a record whose clamped timestamp is already outside the window
+    // of the watermark. It can match no entry, and no later record can match
+    // it, so both paths admit it without indexing it and without a sweep. An
+    // index rebuilt from the log at this time would not hold it either: the
+    // rebuild starts one window before the broker's time.
+    fn expired_on_arrival(&mut self, timestamp: i64) -> bool {
+        if self.is_live(timestamp) {
+            return false;
+        }
+        self.counters.expired_on_arrival_records += 1;
+        true
+    }
+
     // Inserts an identity that no segment holds.
     fn insert_new(&mut self, segment: usize, identity: IdentityDigest, timestamp: i64) {
         let relocated = self.segments[segment].insert_new(identity, timestamp);
@@ -580,13 +652,13 @@ impl DedupWindowFilter {
         self.sync_budget();
     }
 
-    // Moves the cursor over at most `budget` entries. It drops the expired
-    // ones and, near a limit, the ones below the capacity cutoff. The cursor
-    // stays between calls and wraps after the last segment, so successive
-    // calls walk the whole index in bounded slices. This is the only eviction
-    // that `classify` and `populate` do.
-    fn sweep_step(&mut self, budget: usize) {
-        let expiry_cutoff = self.max_ts.saturating_sub(self.window_ms);
+    // Moves the cursor over at most `budget` entries. It drops the ones that
+    // are not live and, in `ExpiredAndCapacity` mode near a limit, the ones
+    // below the capacity cutoff. The cursor stays between calls and wraps
+    // after the last segment, so successive calls walk the whole index in
+    // bounded slices. This is the only eviction that `classify`, `populate`
+    // and `tick` do.
+    fn sweep_step(&mut self, budget: usize, mode: SweepMode) {
         for _ in 0..budget {
             if self.len == 0 {
                 self.sweep_segment = 0;
@@ -605,14 +677,17 @@ impl DedupWindowFilter {
                 return;
             };
             self.sweep_visits += 1;
-            if stamp < expiry_cutoff {
+            if !self.is_live(stamp) {
                 // Expired: it cannot match again, so dropping it costs no
                 // coverage. The cursor stays, because the removal moved the
                 // last entry of the segment, not yet visited, into this slot.
                 self.remove_at(segment, self.sweep_pos);
                 continue;
             }
-            if stamp < self.capacity_cutoff && self.over_soft_limit() {
+            if mode == SweepMode::ExpiredAndCapacity
+                && stamp < self.capacity_cutoff
+                && self.over_soft_limit()
+            {
                 // Inside the window, so this is coverage lost. Doing it a few
                 // entries at a time from the soft limit up keeps the index from
                 // dropping a quarter of itself in one step at the limit.
@@ -657,7 +732,7 @@ impl DedupWindowFilter {
     // the index and complete a pass, which computes a new cutoff.
     fn make_room_for_one(&mut self, segment: usize) -> bool {
         self.counters.capacity_sweeps += 1;
-        self.sweep_step(CAPACITY_EMERGENCY_BUDGET);
+        self.sweep_step(CAPACITY_EMERGENCY_BUDGET, SweepMode::ExpiredAndCapacity);
         !self.at_capacity(segment)
     }
 
@@ -669,7 +744,7 @@ impl DedupWindowFilter {
         self.pass_counts.fill(0);
         self.pass_visited = 0;
         self.pass_span = self.window_ms.max(0);
-        self.pass_lo = self.max_ts.saturating_sub(self.pass_span);
+        self.pass_lo = self.watermark_ms.saturating_sub(self.pass_span);
         self.pass_width = self.pass_span / LAST_BUCKET + 1;
     }
 
@@ -767,7 +842,7 @@ impl fmt::Debug for DedupWindowFilter {
             .field("window_ms", &self.window_ms)
             .field("max_entries", &self.max_entries)
             .field("len", &self.len)
-            .field("max_timestamp_ms", &self.max_ts)
+            .field("watermark_ms", &self.watermark_ms)
             .field("counters", &self.counters)
             .finish_non_exhaustive()
     }
@@ -788,6 +863,19 @@ fn segment_of(identity: IdentityDigest) -> usize {
         .checked_shr(u64::BITS - SEGMENT_BITS)
         .unwrap_or(0);
     usize::try_from(index).expect("a segment index is below SEGMENTS")
+}
+
+// Whether an entry with `timestamp` is live at `watermark_ms`: at most
+// `window_ms` behind it. Exact in i128, so that extreme client timestamps and
+// windows cannot wrap. A negative window holds nothing live.
+fn is_live(watermark_ms: i64, window_ms: i64, timestamp: i64) -> bool {
+    i128::from(watermark_ms) - i128::from(timestamp) <= i128::from(window_ms)
+}
+
+// Whether two record timestamps are at most `window_ms` apart, in either
+// order. Exact in i128, as `is_live` is.
+fn within_window(window_ms: i64, first: i64, second: i64) -> bool {
+    (i128::from(first) - i128::from(second)).abs() <= i128::from(window_ms)
 }
 
 // Twice the even share of the entry limit, and at least the floor.

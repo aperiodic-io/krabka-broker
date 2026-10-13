@@ -10,12 +10,11 @@ use {
     std::ops::Range,
 };
 
-// Far ahead of every fixed timestamp in the tests, so the clamp changes
-// nothing except in the tests that are about it.
-pub(super) const NOW: i64 = 1_000_000_000_000;
-
 // The most entries the cursor visits in one call for one record.
 pub(super) const VISITS_PER_CALL: u64 = (SWEEP_BUDGET + CAPACITY_EMERGENCY_BUDGET) as u64;
+
+// The most entries the cursor visits in one tick.
+pub(super) const VISITS_PER_TICK: u64 = DedupWindowFilter::TICK_VISITS as u64;
 
 // How many filters share the budget in a run of random operations.
 pub(super) const FILTERS: usize = 3;
@@ -46,6 +45,11 @@ pub(super) fn check_invariants(filter: &DedupWindowFilter) {
     assert!(filter.len() <= filter.max_entries());
     assert!(filter.largest_relocation() <= filter.segment_limit);
     assert!(filter.sweep_segment < DedupWindowFilter::SEGMENTS);
+    // Every timestamp was clamped to the time of its call, and the watermark
+    // never moves back, so no entry is ahead of it.
+    for (identity, timestamp) in filter.iter() {
+        assert!(timestamp <= filter.watermark_ms(), "{identity:?}");
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -66,6 +70,11 @@ pub(super) enum Op {
     Jump {
         advance: i64,
     },
+    // A tick of one filter with no record, after a step of the clock.
+    Tick {
+        filter: usize,
+        advance: i64,
+    },
     Revert,
     Clear {
         filter: usize,
@@ -79,7 +88,7 @@ pub(super) enum Op {
 pub(super) struct OpSpace {
     // Keys are drawn below this, so a smaller space repeats identities more.
     pub(super) keys: u16,
-    // The clock step a record brings with it.
+    // The clock step a record or a tick brings with it.
     pub(super) advance: Range<i64>,
     // The clock step of a jump, or `None` for a run without jumps.
     pub(super) jump: Option<Range<i64>>,
@@ -108,12 +117,18 @@ impl OpSpace {
             ),
             (
                 8,
-                (0..FILTERS, 0..keys, advance)
+                (0..FILTERS, 0..keys, advance.clone())
                     .prop_map(|(filter, key, advance)| Op::Populate {
                         filter,
                         key,
                         advance,
                     })
+                    .boxed(),
+            ),
+            (
+                2,
+                (0..FILTERS, advance)
+                    .prop_map(|(filter, advance)| Op::Tick { filter, advance })
                     .boxed(),
             ),
         ];
@@ -140,6 +155,9 @@ impl OpSpace {
 }
 
 // A run of random operations against `FILTERS` filters that share one budget.
+// The run's clock is the broker's time, and each record carries it as its
+// timestamp, so a step back of the clock brings records from behind the
+// watermark.
 pub(super) struct OpRun {
     pub(super) budget: usize,
     pub(super) start_ms: i64,
@@ -151,7 +169,7 @@ pub(super) struct OpRun {
 impl OpRun {
     // Applies `ops` in order. After each one the budget equals the sum of the
     // filters' sizes and stays within its limit, every filter keeps its
-    // invariants, and no call visits more than its share of entries. When the
+    // invariants, and no call or tick visits more than its share of entries. When the
     // filters go, the budget drops to zero.
     pub(super) fn run(&self, ops: Vec<Op>) {
         let shared = Arc::new(DedupBudget::new(self.budget));
@@ -173,7 +191,7 @@ impl OpRun {
                         timestamp_ms: clock,
                     };
                     let before = filters[filter].sweep_visits();
-                    let result = filters[filter].classify(&[record], NOW);
+                    let result = filters[filter].classify(&[record], clock);
                     assert!(filters[filter].sweep_visits() - before <= VISITS_PER_CALL);
                     if keep_undo {
                         pending.push((filter, result.undo));
@@ -186,10 +204,16 @@ impl OpRun {
                 } => {
                     clock += advance;
                     let before = filters[filter].sweep_visits();
-                    filters[filter].populate((self.identity)(key), clock, NOW);
+                    filters[filter].populate((self.identity)(key), clock, clock);
                     assert!(filters[filter].sweep_visits() - before <= VISITS_PER_CALL);
                 }
                 Op::Jump { advance } => clock += advance,
+                Op::Tick { filter, advance } => {
+                    clock += advance;
+                    let before = filters[filter].sweep_visits();
+                    filters[filter].tick(clock);
+                    assert!(filters[filter].sweep_visits() - before <= VISITS_PER_TICK);
+                }
                 Op::Revert => {
                     if let Some((filter, undo)) = pending.pop() {
                         filters[filter].revert(&undo);
