@@ -91,9 +91,13 @@ pub struct LocalClusterSpec {
     /// `RUST_LOG` for the brokers.
     #[builder(default = "warn".to_owned())]
     pub broker_log: String,
-    /// Extra environment variables for every broker, as `KEY=VALUE`.
+    /// Extra environment variables for every broker, as `KEY=VALUE`. They
+    /// win over the worker count below.
     #[builder(default)]
     pub broker_env: Vec<String>,
+    /// Tokio worker threads per broker. `None` gives each broker its share
+    /// of this machine's cores; see [`fair_share_workers`].
+    pub broker_workers: Option<usize>,
     /// The benchmark topic's `retention.bytes`.
     #[builder(default = RETENTION_BYTES)]
     pub retention_bytes: u64,
@@ -372,6 +376,10 @@ fn start_node(
         bail!("krabka-format for node {node_id} failed with {status}");
     }
     let log = File::create(spec.work_dir.join(format!("node-{node_id}.log")))?;
+    let workers = spec.broker_workers.unwrap_or_else(|| {
+        let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+        fair_share_workers(cores, spec.nodes)
+    });
     let client_addr = format!("127.0.0.1:{}", ports.client);
     Command::new(broker_bin)
         .arg("--log-dir")
@@ -398,6 +406,7 @@ fn start_node(
         ])
         .args(&spec.broker_args)
         .env("RUST_LOG", &spec.broker_log)
+        .env("TOKIO_WORKER_THREADS", workers.to_string())
         .envs(
             spec.broker_env
                 .iter()
@@ -409,9 +418,29 @@ fn start_node(
         .with_context(|| format!("start node {node_id}"))
 }
 
+/// The Tokio worker threads each of `nodes` brokers gets on a machine with
+/// `cores` cores: an equal share, and at least one.
+///
+/// Each broker sizes its runtime to every core it can see, as it should when
+/// it owns its machine. Three of them on one machine then run three times as
+/// many workers as there are cores, and the extra wakeups, steals and
+/// preemptions cost more than the work they share. A share per broker is
+/// what a cluster of separate machines gives each one.
+#[must_use]
+pub fn fair_share_workers(cores: usize, nodes: u16) -> usize {
+    (cores / usize::from(nodes.max(1))).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use {super::*, assert2::check};
+
+    #[test]
+    fn each_broker_gets_an_equal_share_of_the_cores_and_at_least_one() {
+        let shares = [(4, 3), (8, 3), (16, 4), (2, 3), (4, 0)]
+            .map(|(cores, nodes)| fair_share_workers(cores, nodes));
+        check!(shares == [1, 2, 4, 1, 4]);
+    }
 
     #[test]
     fn node_ports_take_a_block_of_ten() {

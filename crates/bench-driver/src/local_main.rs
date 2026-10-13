@@ -66,6 +66,10 @@ struct Cli {
     /// `TOKIO_WORKER_THREADS=2`. Repeat it for several.
     #[arg(long = "broker-env")]
     broker_env: Vec<String>,
+    /// Tokio worker threads per broker. The default is an equal share of
+    /// this machine's cores, as separate machines would give each broker.
+    #[arg(long)]
+    broker_workers: Option<usize>,
     /// The benchmark topic's `retention.bytes`, per partition.
     #[arg(long, value_parser = krabka_units::parse::positive_byte_size)]
     retention: Option<ByteSize>,
@@ -278,6 +282,7 @@ async fn main() -> Result<()> {
         .broker_args(cli.broker_args)
         .broker_log(cli.broker_log)
         .broker_env(cli.broker_env)
+        .maybe_broker_workers(cli.broker_workers)
         .retention_bytes(cli.retention.map_or(RETENTION_BYTES, ByteSize::bytes_u64))
         .segment_bytes(cli.segment.map_or(SEGMENT_BYTES, ByteSize::bytes_u64))
         .build();
