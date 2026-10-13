@@ -113,7 +113,7 @@ pub struct RuntimeFileConfig {
     /// segment through `O_DIRECT`, which bypasses the page cache, so without
     /// this a consumer reading right behind the producer reads from disk.
     /// Every such partition holds up to this much, plus one batch. The
-    /// default is 1 MiB, and 0 keeps only the newest batch.
+    /// default is 32 MiB, and 0 keeps only the newest batch.
     pub log_tail_cache_size: Option<ByteSize>,
     /// Size of the window a timestamp search reads the log in.
     pub log_timestamp_scan_window: Option<ByteSize>,
