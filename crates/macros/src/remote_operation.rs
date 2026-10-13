@@ -1,7 +1,7 @@
 //! Shared tracing on ordinary remote-storage methods without recursive signature wrappers.
 
 use {
-    crate::meta::{compact, item_body, no_arguments},
+    crate::meta::{ItemBody, compact, item_body, no_arguments},
     moxy::{
         ast::{FnParam, ItemFn, ParseError},
         token::{TokenStream, TokenTree},
@@ -9,9 +9,18 @@ use {
     proc_macro::TokenStream as NativeTokenStream,
 };
 
+struct Instrumentation {
+    debug: bool,
+    parameters: &'static [&'static str],
+    fields: TokenStream,
+}
+
 fn instrumentation(meta: &TokenStream, item: &TokenStream) -> Result<TokenStream, ParseError> {
     no_arguments(meta.clone(), "remote_operation")?;
-    let (mut header, body) = item_body(item.clone(), "remote_operation", TokenTree::is_keyword_fn)?;
+    let ItemBody {
+        tokens: mut header,
+        body_index: body,
+    } = item_body(item.clone(), "remote_operation", TokenTree::is_keyword_fn)?;
     if body + 1 != header.len() {
         return Err(ParseError::new(
             item.span(),
@@ -23,21 +32,31 @@ fn instrumentation(meta: &TokenStream, item: &TokenStream) -> Result<TokenStream
     };
     group.tokens = TokenStream::new();
     let method: ItemFn = moxy::parse!({ TokenStream::from(header) })?;
-    let (debug, parameters, fields) = match method.sig.ident.text() {
-        "copy_log_segment_data" => (false, &["metadata", "data"][..], moxy::template! {
-            start_offset = metadata.start_offset(), end_offset = metadata.end_offset(),
-        }),
-        "fetch_log_segment" => (
-            true,
-            &["metadata", "start_position", "end_position"][..],
-            moxy::template! {
-                start_position = start_position, end_position = ?end_position,
-            },
-        ),
-        "fetch_index" => (true, &["metadata", "index_type"][..], moxy::template! {
-            index_type = ?index_type,
-        }),
-        "delete_log_segment_data" => (false, &["metadata"][..], TokenStream::new()),
+    let Instrumentation {
+        debug,
+        parameters,
+        fields,
+    } = match method.sig.ident.text() {
+        "copy_log_segment_data" => Instrumentation {
+            debug: false,
+            parameters: &["metadata", "data"],
+            fields: moxy::template! { start_offset = metadata.start_offset(), end_offset = metadata.end_offset(), },
+        },
+        "fetch_log_segment" => Instrumentation {
+            debug: true,
+            parameters: &["metadata", "start_position", "end_position"],
+            fields: moxy::template! { start_position = start_position, end_position = ?end_position, },
+        },
+        "fetch_index" => Instrumentation {
+            debug: true,
+            parameters: &["metadata", "index_type"],
+            fields: moxy::template! { index_type = ?index_type, },
+        },
+        "delete_log_segment_data" => Instrumentation {
+            debug: false,
+            parameters: &["metadata"],
+            fields: TokenStream::new(),
+        },
         _ => {
             return Err(ParseError::new(
                 method.sig.ident.span(),
@@ -92,45 +111,51 @@ mod tests {
 
     #[test]
     fn every_operation_emits_its_existing_tracing_level_and_fields() {
-        for (method, debug, operation_fields) in [
-            (
-                "fn copy_log_segment_data(&self, metadata: &Metadata, data: &Data) -> Result<Option<CustomMetadata>, Error> {}",
-                false,
-                &[
+        struct Case<'a> {
+            method: &'a str,
+            debug: bool,
+            operation_fields: &'a [&'a str],
+        }
+        for case in [
+            Case {
+                method: "fn copy_log_segment_data(&self, metadata: &Metadata, data: &Data) -> Result<Option<CustomMetadata>, Error> {}",
+                debug: false,
+                operation_fields: &[
                     "start_offset=metadata.start_offset()",
                     "end_offset=metadata.end_offset()",
                 ][..],
-            ),
-            (
-                "fn fetch_log_segment(&self, metadata: &Metadata, start_position: u32, end_position: Option<u32>) -> Result<Vec<u8>, Error> {}",
-                true,
-                &[
+            },
+            Case {
+                method: "fn fetch_log_segment(&self, metadata: &Metadata, start_position: u32, end_position: Option<u32>) -> Result<Vec<u8>, Error> {}",
+                debug: true,
+                operation_fields: &[
                     "start_position=start_position",
                     "end_position=?end_position",
                 ][..],
-            ),
-            (
-                "fn fetch_index(&self, metadata: &Metadata, index_type: IndexType) -> Result<Vec<u8>, Error> {}",
-                true,
-                &["index_type=?index_type"][..],
-            ),
-            (
-                "fn delete_log_segment_data(&self, metadata: &Metadata) -> Result<(), Error> {}",
-                false,
-                &[][..],
-            ),
+            },
+            Case {
+                method: "fn fetch_index(&self, metadata: &Metadata, index_type: IndexType) -> Result<Vec<u8>, Error> {}",
+                debug: true,
+                operation_fields: &["index_type=?index_type"][..],
+            },
+            Case {
+                method: "fn delete_log_segment_data(&self, metadata: &Metadata) -> Result<(), Error> {}",
+                debug: false,
+                operation_fields: &[][..],
+            },
         ] {
-            let attribute = instrumentation(&TokenStream::new(), &method.parse().unwrap()).unwrap();
+            let attribute =
+                instrumentation(&TokenStream::new(), &case.method.parse().unwrap()).unwrap();
             let text = compact(&attribute);
             assert!(text.starts_with("#[tracing::instrument("));
-            assert!(text.contains("level=\"debug\"") == debug);
+            assert!(text.contains("level=\"debug\"") == case.debug);
             for field in [
                 "topic_id=%metadata.remote_log_segment_id().topic_id_partition.topic_id",
                 "partition=metadata.remote_log_segment_id().topic_id_partition.partition",
                 "segment=%metadata.remote_log_segment_id().id",
             ]
             .into_iter()
-            .chain(operation_fields.iter().copied())
+            .chain(case.operation_fields.iter().copied())
             {
                 assert!(text.contains(field));
             }

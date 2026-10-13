@@ -1,7 +1,7 @@
 //! One admission step before an ordinary voter handler's operation body.
 
 use {
-    crate::meta::{Tokens, compact, edit_native_body, item_body},
+    crate::meta::{ItemBody, Tokens, compact, edit_native_body, item_body},
     moxy::{
         ast::{FnParam, FromMeta, ItemFn, Meta, ParseError},
         token::{TokenStream, TokenTree},
@@ -27,7 +27,10 @@ fn prefix(meta: &TokenStream, item: &TokenStream) -> Result<TokenStream, ParseEr
         gate,
         refusals,
     } = Admission::from_meta(&options)?;
-    let (mut header, body) = item_body(item.clone(), "voter_admission", TokenTree::is_keyword_fn)?;
+    let ItemBody {
+        tokens: mut header,
+        body_index: body,
+    } = item_body(item.clone(), "voter_admission", TokenTree::is_keyword_fn)?;
     if body + 1 != header.len() {
         return Err(ParseError::new(
             item.span(),
@@ -56,7 +59,10 @@ fn prefix(meta: &TokenStream, item: &TokenStream) -> Result<TokenStream, ParseEr
             "expected async fn handle(broker: ..., version: ..., req_bytes: ..., ctx: ...)",
         ));
     }
-    let (request, api, gate, refusals) = (request.0, api.0, gate.0, refusals.0);
+    let request = request.tokens;
+    let api = api.tokens;
+    let gate = gate.tokens;
+    let refusals = refusals.tokens;
     Ok(moxy::template! {
         let crate::handlers::raft_voter::Admitted { req, image, quorum } =
             match crate::handlers::raft_voter::prelude::<{{ request }}, _>(

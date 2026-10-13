@@ -35,7 +35,11 @@ mod model {
     }
 }
 
-fn pair<A, B>(first: A, second: B) -> (A, B) { (first, second) }
+struct Pair<A, B> {
+    first: A,
+    second: B,
+}
+fn pair<A, B>(first: A, second: B) -> Pair<A, B> { Pair { first, second } }
 
 #[test]
 fn nested_constructors_preserve_shorthand_paths_versions_and_error_codes() {
@@ -74,7 +78,11 @@ fn arbitrary_expressions_keep_qualified_calls_closures_and_macro_tokens() {
         version: if 1 < 2 { 4 } else { 0 },
         error_code: <i16 as From<i8>>::from(-1),
         values: values(
-            pair::<i32, i64>(2, 3).0,
+            {
+                let pair = pair::<i32, i64>(2, 3);
+                assert!(pair.second == 3);
+                pair.first
+            },
             vec![4].into_iter().next().unwrap(),
         )
     });
@@ -102,7 +110,7 @@ fn multiline_if_else_blocks_retain_their_original_delimiter_locations() {
                     },
                     (),
                 )
-                .0,
+                .first,
             })],
         });
         let record = &response.records[0];

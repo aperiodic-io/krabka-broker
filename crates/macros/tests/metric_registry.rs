@@ -6,11 +6,13 @@ use {
     std::sync::{Mutex, MutexGuard},
 };
 
-struct RegistryLock(Mutex<Registry>);
+struct RegistryLock {
+    inner: Mutex<Registry>,
+}
 
 impl RegistryLock {
     fn lock(&self) -> std::future::Ready<MutexGuard<'_, Registry>> {
-        std::future::ready(self.0.lock().unwrap())
+        std::future::ready(self.inner.lock().unwrap())
     }
 }
 
@@ -24,7 +26,9 @@ fn metrics() -> Metrics {
     count.inc_by(7);
     registry.register("fixture", "fixture counter", count);
     Metrics {
-        registry: RegistryLock(Mutex::new(registry)),
+        registry: RegistryLock {
+            inner: Mutex::new(registry),
+        },
     }
 }
 
@@ -38,9 +42,9 @@ async fn unwrap_keeps_the_guard_until_the_caller_drops_it() {
     let metrics = metrics();
     krabka_macros::metric_registry_fixture!(metrics, rendered, guard; unwrap());
     assert!(rendered.contains("fixture_total 7"));
-    assert!(metrics.registry.0.try_lock().is_err());
+    assert!(metrics.registry.inner.try_lock().is_err());
     drop(guard);
-    assert!(metrics.registry.0.try_lock().is_ok());
+    assert!(metrics.registry.inner.try_lock().is_ok());
 }
 
 #[tokio::test]

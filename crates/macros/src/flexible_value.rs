@@ -2,7 +2,7 @@
 
 use {
     crate::{
-        meta::{compact, edit_native_body, is_plain_sync, item_body},
+        meta::{ItemBody, compact, edit_native_body, is_plain_sync, item_body},
         value_framing::decode_method,
     },
     moxy::{
@@ -22,7 +22,10 @@ fn wrappers(meta: &TokenStream, item: &TokenStream) -> Result<TokenStream, Parse
         moxy::template! { flexible_value({{ meta }}) }
     })?;
     let args = ValueArgs::from_meta(&options)?;
-    let (mut tokens, body) = item_body(item.clone(), "flexible_value", TokenTree::is_keyword_impl)?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = item_body(item.clone(), "flexible_value", TokenTree::is_keyword_impl)?;
     if body + 1 != tokens.len() {
         return Err(ParseError::new(item.span(), "expected one inherent impl"));
     }

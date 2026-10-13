@@ -79,16 +79,37 @@ fn every_fact_combination_returns_the_first_refusal() {
                 let require_digests = bits & 16 != 0;
                 let digests_match = bits & 32 != 0;
                 let expected = [
-                    (object_count == 0, Empty),
-                    (!unique_keys, DuplicateKey),
-                    (!coordinates_match, CoordinateMismatch),
-                    (!all_present, MissingObject),
-                    (object_count != listed_count, CountMismatch),
-                    (!sizes_match, SizeMismatch),
-                    (require_digests && !digests_match, DigestMismatch),
+                    RefusalCase {
+                        refused: object_count == 0,
+                        decision: Empty,
+                    },
+                    RefusalCase {
+                        refused: !unique_keys,
+                        decision: DuplicateKey,
+                    },
+                    RefusalCase {
+                        refused: !coordinates_match,
+                        decision: CoordinateMismatch,
+                    },
+                    RefusalCase {
+                        refused: !all_present,
+                        decision: MissingObject,
+                    },
+                    RefusalCase {
+                        refused: object_count != listed_count,
+                        decision: CountMismatch,
+                    },
+                    RefusalCase {
+                        refused: !sizes_match,
+                        decision: SizeMismatch,
+                    },
+                    RefusalCase {
+                        refused: require_digests && !digests_match,
+                        decision: DigestMismatch,
+                    },
                 ]
                 .into_iter()
-                .find_map(|(refused, decision)| refused.then_some(decision))
+                .find_map(|case| case.refused.then_some(case.decision))
                 .unwrap_or(Admit);
                 let facts = Facts {
                     object_count,
@@ -163,19 +184,69 @@ fn observations_keep_native_macro_scope_short_circuiting_and_repeated_reads() {
         Admit, CoordinateMismatch, CountMismatch, DuplicateKey, Empty, MissingObject,
     };
 
-    for (counts, unique_keys, coordinates_match, all_present, listed, expected, expected_events) in [
-        (&[0][..], false, false, false, 1, Empty, &["count"][..]),
-        (&[1][..], false, false, false, 1, DuplicateKey, &["count"]),
-        (&[1][..], true, false, false, 1, CoordinateMismatch, &[
-            "count",
-        ]),
-        (&[1][..], true, true, false, 1, MissingObject, &["count"]),
-        (&[1, 2][..], true, true, true, 1, CountMismatch, &[
-            "count", "count", "listed",
-        ]),
-        (&[1, 2][..], true, true, true, 2, Admit, &[
-            "count", "count", "listed",
-        ]),
+    for ObservationCase {
+        counts,
+        unique_keys,
+        coordinates_match,
+        all_present,
+        listed,
+        expected,
+        expected_events,
+    } in [
+        ObservationCase {
+            counts: &[0][..],
+            unique_keys: false,
+            coordinates_match: false,
+            all_present: false,
+            listed: 1,
+            expected: Empty,
+            expected_events: &["count"][..],
+        },
+        ObservationCase {
+            counts: &[1][..],
+            unique_keys: false,
+            coordinates_match: false,
+            all_present: false,
+            listed: 1,
+            expected: DuplicateKey,
+            expected_events: &["count"],
+        },
+        ObservationCase {
+            counts: &[1][..],
+            unique_keys: true,
+            coordinates_match: false,
+            all_present: false,
+            listed: 1,
+            expected: CoordinateMismatch,
+            expected_events: &["count"],
+        },
+        ObservationCase {
+            counts: &[1][..],
+            unique_keys: true,
+            coordinates_match: true,
+            all_present: false,
+            listed: 1,
+            expected: MissingObject,
+            expected_events: &["count"],
+        },
+        ObservationCase {
+            counts: &[1, 2][..],
+            unique_keys: true,
+            coordinates_match: true,
+            all_present: true,
+            listed: 1,
+            expected: CountMismatch,
+            expected_events: &["count", "count", "listed"],
+        },
+        ObservationCase {
+            counts: &[1, 2][..],
+            unique_keys: true,
+            coordinates_match: true,
+            all_present: true,
+            listed: 2,
+            expected: Admit,
+            expected_events: &["count", "count", "listed"],
+        },
     ] {
         let events = RefCell::new(Vec::new());
         let facts = Observed {
@@ -198,4 +269,19 @@ fn observations_keep_native_macro_scope_short_circuiting_and_repeated_reads() {
         assert!(observed(facts) == expected);
         assert!(events.borrow().as_slice() == expected_events);
     }
+}
+
+struct ObservationCase {
+    counts: &'static [u64],
+    unique_keys: bool,
+    coordinates_match: bool,
+    all_present: bool,
+    listed: u64,
+    expected: WormObjectSetDecision,
+    expected_events: &'static [&'static str],
+}
+
+struct RefusalCase {
+    refused: bool,
+    decision: WormObjectSetDecision,
 }

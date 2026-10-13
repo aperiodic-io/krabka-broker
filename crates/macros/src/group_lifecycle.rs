@@ -227,13 +227,30 @@ mod tests {
 
     #[test]
     fn refuses_each_required_field_for_the_selected_protocol() {
-        for (protocol, missing) in [
-            ("consumer", "group_epoch"),
-            ("consumer", "members"),
-            ("share", "assignment_timestamp_ms"),
-            ("streams", "dirty"),
+        struct RequiredField {
+            protocol: &'static str,
+            missing: &'static str,
+        }
+        for case in [
+            RequiredField {
+                protocol: "consumer",
+                missing: "group_epoch",
+            },
+            RequiredField {
+                protocol: "consumer",
+                missing: "members",
+            },
+            RequiredField {
+                protocol: "share",
+                missing: "assignment_timestamp_ms",
+            },
+            RequiredField {
+                protocol: "streams",
+                missing: "dirty",
+            },
         ] {
-            let mut item = declaration(protocol);
+            let missing = case.missing;
+            let mut item = declaration(case.protocol);
             let Fields::Named(fields) = &mut item.fields else {
                 panic!("named state fixture")
             };

@@ -63,7 +63,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
             "`RuntimeOverlay` needs `#[overlay(target = Type)]` on the struct",
         ));
     };
-    let target = target.target.0;
+    let target = target.target.tokens;
     let copies = named_fields(&item, "RuntimeOverlay")?
         .iter()
         .map(copy)

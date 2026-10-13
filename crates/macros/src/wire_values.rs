@@ -97,12 +97,25 @@ mod tests {
 
     #[test]
     fn detects_whether_the_explicit_fields_need_a_separator() {
-        for (input, needs_comma) in [
-            ("module::Response {}", false),
-            ("module::Response { version: 2, error_code }", true),
-            ("module::Response { version: 2, error_code, }", false),
+        struct SeparatorCase {
+            input: &'static str,
+            needs_comma: bool,
+        }
+        for case in [
+            SeparatorCase {
+                input: "module::Response {}",
+                needs_comma: false,
+            },
+            SeparatorCase {
+                input: "module::Response { version: 2, error_code }",
+                needs_comma: true,
+            },
+            SeparatorCase {
+                input: "module::Response { version: 2, error_code, }",
+                needs_comma: false,
+            },
         ] {
-            assert!(validate(&input.parse().unwrap()).unwrap() == needs_comma);
+            assert!(validate(&case.input.parse().unwrap()).unwrap() == case.needs_comma);
         }
     }
 

@@ -1,7 +1,7 @@
 //! Construct the flat broker configuration declaration in one expansion.
 
 use {
-    crate::meta::{named_body, named_fields},
+    crate::meta::{ItemBody, named_body, named_fields},
     moxy::{
         ast::{ItemStruct, ParseError, Visibility},
         token::{Span, TokenStream, TokenTree},
@@ -9,7 +9,10 @@ use {
 };
 
 pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
-    let (mut header, body) = named_body(input.clone(), "broker_config")?;
+    let ItemBody {
+        tokens: mut header,
+        body_index: body,
+    } = named_body(input.clone(), "broker_config")?;
     let Some(TokenTree::Group(fields)) = input.last() else {
         return Err(ParseError::new(
             input.span(),

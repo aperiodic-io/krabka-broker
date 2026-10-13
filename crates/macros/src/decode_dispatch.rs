@@ -15,7 +15,9 @@ struct DecodeArgs {
     binding: RequestBinding,
 }
 
-struct RequestBinding(PatIdent);
+struct RequestBinding {
+    pattern: PatIdent,
+}
 
 impl FromMeta for RequestBinding {
     fn from_meta(meta: &Meta) -> Result<Self, ParseError> {
@@ -43,7 +45,7 @@ impl FromMeta for RequestBinding {
                 "binding must be a name or `mut name`",
             ));
         }
-        Ok(Self(binding))
+        Ok(Self { pattern: binding })
     }
 }
 
@@ -52,12 +54,12 @@ fn prefix(meta: &TokenStream, item: &TokenStream) -> Result<TokenStream, ParseEr
         moxy::template! { decode_dispatch({{ meta }}) }
     })?;
     let args = DecodeArgs::from_meta(&options)?;
-    let request_parser = Parser::from_tokens(&args.request.0);
+    let request_parser = Parser::from_tokens(&args.request.tokens);
     let request = Path::parse(&request_parser)?;
     if request.is_empty() || !request_parser.is_empty() {
         return Err(request_parser.error("expected a request type path"));
     }
-    let binding = args.binding.0;
+    let binding = args.binding.pattern;
 
     let function = function_signature(item)?;
     let parameters = &function.params.inner.inputs;

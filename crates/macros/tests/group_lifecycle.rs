@@ -107,14 +107,27 @@ impl Streams {
 }
 
 fn sessions(base: Instant) -> HashMap<String, Member> {
-    [("old", 0), ("boundary", 1), ("future", 12)]
-        .into_iter()
-        .map(|(id, offset)| {
-            (id.into(), Member {
-                last_seen: base + Duration::from_secs(offset),
-            })
+    [
+        SessionAge {
+            id: "old",
+            offset: 0,
+        },
+        SessionAge {
+            id: "boundary",
+            offset: 1,
+        },
+        SessionAge {
+            id: "future",
+            offset: 12,
+        },
+    ]
+    .into_iter()
+    .map(|SessionAge { id, offset }| {
+        (id.into(), Member {
+            last_seen: base + Duration::from_secs(offset),
         })
-        .collect()
+    })
+    .collect()
 }
 
 #[test]
@@ -183,7 +196,20 @@ fn consumer_and_share_preserve_assignment_delay_boundaries() {
     assert!(!share.assignment_delayed(interval, 1));
     consumer.assignment_timestamp_ms = 100;
     share.assignment_timestamp_ms = 100;
-    for (now, delayed) in [(109, true), (110, false), (111, false)] {
+    for DelayCase { now, delayed } in [
+        DelayCase {
+            now: 109,
+            delayed: true,
+        },
+        DelayCase {
+            now: 110,
+            delayed: false,
+        },
+        DelayCase {
+            now: 111,
+            delayed: false,
+        },
+    ] {
         assert!(consumer.assignment_delayed(interval, now) == delayed);
         assert!(share.assignment_delayed(interval, now) == delayed);
     }
@@ -210,4 +236,14 @@ fn rebalance_fences_preserve_due_order_and_use_protocol_removal() {
     assert!(streams.dirty && !streams.members.contains_key("boundary"));
     assert!(consumer.fence_rebalance_timeouts(now).is_empty());
     assert!(streams.fence_rebalance_timeouts(now).is_empty());
+}
+
+struct DelayCase {
+    now: i64,
+    delayed: bool,
+}
+
+struct SessionAge {
+    id: &'static str,
+    offset: u64,
 }

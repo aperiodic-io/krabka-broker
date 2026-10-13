@@ -34,10 +34,30 @@ struct WriteBatch {
 
 #[test]
 fn every_direction_preserves_signed_fields_and_resets_wire_extensions() {
-    for (first, last, state, attempts) in [
-        (i64::MIN, i64::MAX, i8::MIN, i16::MAX),
-        (-1, -1, i8::MAX, i16::MIN),
-        (10, 19, 2, 3),
+    for BatchCase {
+        first,
+        last,
+        state,
+        attempts,
+    } in [
+        BatchCase {
+            first: i64::MIN,
+            last: i64::MAX,
+            state: i8::MIN,
+            attempts: i16::MAX,
+        },
+        BatchCase {
+            first: -1,
+            last: -1,
+            state: i8::MAX,
+            attempts: i16::MIN,
+        },
+        BatchCase {
+            first: 10,
+            last: 19,
+            state: 2,
+            attempts: 3,
+        },
     ] {
         let value = Batch {
             first_offset: Position(first),
@@ -57,4 +77,11 @@ fn every_direction_preserves_signed_fields_and_resets_wire_extensions() {
         // The borrowed request remains usable after conversion.
         assert!(write.future_flag);
     }
+}
+
+struct BatchCase {
+    first: i64,
+    last: i64,
+    state: i8,
+    attempts: i16,
 }

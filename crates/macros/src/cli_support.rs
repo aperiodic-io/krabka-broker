@@ -3,7 +3,7 @@
 use {
     crate::{
         fixtures::{name, named_arguments},
-        meta::{arguments, item_body, named_body},
+        meta::{ItemBody, arguments, item_body, named_body},
     },
     moxy::{
         ast::ParseError,
@@ -69,7 +69,8 @@ pub(crate) fn argv_entrypoint(
     item: TokenStream,
 ) -> Result<TokenStream, ParseError> {
     no_options(meta)?;
-    let (tokens, body_index) = item_body(item, "argv_entrypoint", TokenTree::is_keyword_fn)?;
+    let ItemBody { tokens, body_index } =
+        item_body(item, "argv_entrypoint", TokenTree::is_keyword_fn)?;
     let function = tokens.iter().position(TokenTree::is_keyword_fn).unwrap();
     let declaration = &tokens[function + 1..body_index];
     let [
@@ -112,7 +113,10 @@ pub(crate) fn bootstrap_cli_fields(
     item: TokenStream,
 ) -> Result<TokenStream, ParseError> {
     no_options(meta)?;
-    let (mut tokens, body) = named_body(item, "bootstrap_cli_fields")?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = named_body(item, "bootstrap_cli_fields")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

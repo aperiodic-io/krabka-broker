@@ -16,7 +16,11 @@ struct StartedBroker {
 }
 
 async fn start_broker() -> StartedBroker {
-    let (broker, _controller_addr, dir) = start_bound(|_| {}).await;
+    let StartedBoundBroker {
+        broker,
+        controller_addr: _,
+        dir,
+    } = start_bound(|_| {}).await;
     StartedBroker { broker, dir }
 }
 

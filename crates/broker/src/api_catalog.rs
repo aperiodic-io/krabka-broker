@@ -2434,12 +2434,18 @@ mod tests {
             && std::path::Path::new(path).extension() == Some(std::ffi::OsStr::new("rs"))
     }
 
+    struct AnnotationTest {
+        path: &'static str,
+        test: &'static str,
+    }
+
     fn annotation_test_paths(
         tests: &'static [&'static str],
-    ) -> impl Iterator<Item = (&'static str, &'static str)> {
-        tests
-            .iter()
-            .map(|test| (test.split_once("::").map_or(*test, |(path, _)| path), *test))
+    ) -> impl Iterator<Item = AnnotationTest> {
+        tests.iter().map(|test| AnnotationTest {
+            path: test.split_once("::").map_or(*test, |(path, _)| path),
+            test,
+        })
     }
 
     #[test]
@@ -2452,7 +2458,7 @@ mod tests {
                 row.key,
                 row.module
             );
-            for (path, test) in annotation_test_paths(row.tests) {
+            for AnnotationTest { path, test } in annotation_test_paths(row.tests) {
                 assert!(
                     is_rust_source_path(path),
                     "{} test {test} is not a Rust source path from the repository root",
@@ -2552,7 +2558,7 @@ mod tests {
                 row.key,
                 row.module
             );
-            for (path, _) in annotation_test_paths(row.tests) {
+            for AnnotationTest { path, .. } in annotation_test_paths(row.tests) {
                 assert!(
                     root.join(path).is_file(),
                     "{} test {path} is missing",

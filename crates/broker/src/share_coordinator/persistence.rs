@@ -241,14 +241,41 @@ mod tests {
 
     #[test]
     fn state_batches_convert_between_the_owned_read_and_borrowed_write_contracts() {
+        struct BatchCase {
+            first: i64,
+            last: i64,
+            delivery_state: i8,
+            delivery_count: i16,
+        }
+
         use krabka_protocol::owned::{
             read_share_group_state_response::StateBatch as ReadBatch,
             write_share_group_state_request::StateBatch as WriteBatch,
         };
-        for (first, last, delivery_state, delivery_count) in [
-            (-1, -1, 0, 1),
-            (10, 19, 2, 3),
-            (i64::MIN, i64::MAX, i8::MAX, i16::MAX),
+        for BatchCase {
+            first,
+            last,
+            delivery_state,
+            delivery_count,
+        } in [
+            BatchCase {
+                first: -1,
+                last: -1,
+                delivery_state: 0,
+                delivery_count: 1,
+            },
+            BatchCase {
+                first: 10,
+                last: 19,
+                delivery_state: 2,
+                delivery_count: 3,
+            },
+            BatchCase {
+                first: i64::MIN,
+                last: i64::MAX,
+                delivery_state: i8::MAX,
+                delivery_count: i16::MAX,
+            },
         ] {
             let value = StateBatch {
                 first_offset: Offset(first),

@@ -78,22 +78,26 @@ struct Quantity {
 impl Quantity {
     /// The quantity that `name` names.
     fn named(name: &Tokens) -> Result<Self, ParseError> {
-        let (to_raw, from_raw, raw, parse, unit) = match name.0.to_string().as_str() {
+        let (to_raw, from_raw, raw, parse, unit) = match name.tokens.to_string().as_str() {
             "ByteSize" => ("bytes_i64", "from_bytes_i64", "i64", "byte_size", "bytes"),
             "Time" => ("millis_i64", "from_millis", "i64", "time", "milliseconds"),
             "Frequency" => ("per_sec_u64", "from_per_sec_u64", "u64", "frequency", "Hz"),
             _ => {
                 return Err(ParseError::new(
-                    name.0.span(),
+                    name.tokens.span(),
                     "`quantity` is `ByteSize`, `Time` or `Frequency`",
                 ));
             }
         };
-        let ident = |text: &str| Ident::new(text).with_span(name.0.span()).to_token_stream();
-        let ext = ident(&format!("{}Ext", name.0));
+        let ident = |text: &str| {
+            Ident::new(text)
+                .with_span(name.tokens.span())
+                .to_token_stream()
+        };
+        let ext = ident(&format!("{}Ext", name.tokens));
         let parse = ident(parse);
         Ok(Self {
-            ty: moxy::template! { ::krabka_units::{{ name.0 }} },
+            ty: moxy::template! { ::krabka_units::{{ name.tokens }} },
             ext: moxy::template! { ::krabka_units::convert::{{ ext }} },
             to_raw: ident(to_raw),
             from_raw: ident(from_raw),
@@ -151,7 +155,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     let rule = args.rule.0;
     let getter = args
         .getter
-        .map_or_else(|| moxy::template! { into_value }, |getter| getter.0);
+        .map_or_else(|| moxy::template! { into_value }, |getter| getter.tokens);
     let span = ident.span();
     let default_expect = LitStr::new(&format!("the default {ident} satisfies its rule"), span);
     let error = if string_error {
@@ -192,7 +196,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     };
     let parse_fn = args.parse_fn.map(|name| {
         let doc = LitStr::new(&parse_fn_doc(&ident.to_string()), span);
-        (name.0, doc)
+        (name.tokens, doc)
     });
 
     // `new` takes the field's type, or the quantity, which has to be a whole
@@ -241,10 +245,10 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     );
     let quantity_getter = args
         .quantity_getter
-        .map(|name| name.0)
+        .map(|name| name.tokens)
         .zip(quantity.as_ref().map(|quantity| quantity.ty.clone()));
 
-    let default_value = args.default_value.map(|tokens| tokens.0);
+    let default_value = args.default_value.map(|tokens| tokens.tokens);
     let from_str = args.from_str;
     let display = match (&as_quantity, args.display) {
         (_, false) => None,
@@ -325,4 +329,162 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::expand,
+        crate::meta::compact,
+        assert2::assert,
+        moxy::{
+            ast::{File, Item, ItemStruct},
+            token::{ToTokenStream, TokenStream},
+        },
+    };
+
+    struct Expansion {
+        tokens: TokenStream,
+        items: File,
+    }
+
+    fn expanded(source: &str) -> Expansion {
+        let item: ItemStruct = moxy::parse!({ source }).expect("valid newtype declaration");
+        let tokens = expand(item).expect("valid refined policy");
+        let items = moxy::parse!({ tokens.clone() }).expect("generated outer items");
+        Expansion { tokens, items }
+    }
+
+    #[test]
+    fn quantity_contracts_expose_checked_units_getters_defaults_and_text_parsers() {
+        struct QuantityContract {
+            name: &'static str,
+            to_raw: &'static str,
+            from_raw: &'static str,
+            raw: &'static str,
+            parser: &'static str,
+            default: &'static str,
+        }
+        for case in [
+            QuantityContract {
+                name: "ByteSize",
+                to_raw: "bytes_i64",
+                from_raw: "from_bytes_i64",
+                raw: "i64",
+                parser: "byte_size",
+                default: "::krabka_units::bytes(7)",
+            },
+            QuantityContract {
+                name: "Time",
+                to_raw: "millis_i64",
+                from_raw: "from_millis",
+                raw: "i64",
+                parser: "time",
+                default: "::krabka_units::millis(7)",
+            },
+            QuantityContract {
+                name: "Frequency",
+                to_raw: "per_sec_u64",
+                from_raw: "from_per_sec_u64",
+                raw: "u64",
+                parser: "frequency",
+                default: "::krabka_units::per_sec(7)",
+            },
+        ] {
+            let source = format!(
+                "#[refined(rule(GreaterI32<0>), quantity = {}, getter = raw, quantity_getter = quantity, parse_fn = parse_amount, default = {}, from_str, display)] pub struct Amount(i32);",
+                case.name, case.default
+            );
+            let expansion = expanded(&source);
+            let text = compact(&expansion.tokens);
+            for signature in [
+                format!(
+                    "fnnew(value:::krabka_units::{})->::core::result::Result<Self,::std::string::String>",
+                    case.name
+                ),
+                "constfnraw(self)->i32".to_owned(),
+                format!("fnquantity(self)->::krabka_units::{}", case.name),
+            ] {
+                assert!(text.contains(&format!("pub{signature}")), "{signature}");
+            }
+            assert!(text.contains(&format!("TryFrom<::krabka_units::{}>forAmount", case.name)));
+            assert!(text.contains(&format!(
+                "as::krabka_units::convert::{}Ext>::{}(value)",
+                case.name, case.to_raw
+            )));
+            assert!(text.contains(&format!(
+                "as::krabka_units::convert::{}Ext>::{}(raw)==value",
+                case.name, case.from_raw
+            )));
+            assert!(text.contains(&format!(
+                "<i32as::core::convert::TryFrom<{}>>::try_from(raw).ok()",
+                case.raw
+            )));
+            assert!(text.contains(&format!("Self::new({}).expect", case.default)));
+            assert!(text.contains("impl::core::str::FromStrforAmount"));
+            assert!(text.contains(&format!("::krabka_units::parse::{}(value)", case.parser)));
+            assert!(text.contains("::krabka_units::fmt::Human::human"));
+            let parser = expansion
+                .items
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Fn(function) if function.sig.ident == "parse_amount" => Some(function),
+                    _ => None,
+                })
+                .expect("public text parser");
+            assert!(compact(&parser.vis.to_token_stream()) == "pub");
+            assert!(
+                compact(&parser.sig.to_token_stream())
+                    == "fnparse_amount(value:&str)->::core::result::Result<Amount,::std::string::String>"
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_policy_keeps_rule_errors_and_parses_through_the_inner_type() {
+        let expansion = expanded(
+            "#[refined(rule(MinMaxU32<0, 100>), from_str, parse_fn = parse_percent, default = 7)] pub struct Percent(u32);",
+        );
+        let text = compact(&expansion.tokens);
+        assert!(text.contains(
+            "fnnew(value:u32)->::core::result::Result<Self,::refined_type::result::Error<u32>>"
+        ));
+        assert!(text.contains("constfninto_value(self)->u32"));
+        assert!(text.contains("value.parse::<u32>()"));
+        assert!(text.contains("<Percent>::new(value).map_err"));
+        assert!(text.contains("Self::new(7).expect"));
+        assert!(text.contains(
+            "fnparse_percent(value:&str)->::core::result::Result<Percent,::std::string::String>"
+        ));
+        assert!(!text.contains("TryFrom<"));
+    }
+
+    #[test]
+    fn rejects_unsupported_quantities_and_getters_without_a_quantity() {
+        struct RejectedPolicy {
+            source: &'static str,
+            diagnostic: &'static str,
+        }
+        for case in [
+            RejectedPolicy {
+                source: "#[refined(rule(GreaterI32<0>), quantity = DataRate)] struct Value(i32);",
+                diagnostic: "`quantity` is `ByteSize`, `Time` or `Frequency`",
+            },
+            RejectedPolicy {
+                source: "#[refined(rule(GreaterI32<0>), quantity_getter = quantity)] struct Value(i32);",
+                diagnostic: "`quantity_getter` needs `quantity = ByteSize|Time|Frequency`",
+            },
+            RejectedPolicy {
+                source: "#[refined(rule(GreaterI32<0>), label = \"value\")] struct Value(i32);",
+                diagnostic: "`label` prefixes a `String` error: add `string_error`",
+            },
+        ] {
+            let item: ItemStruct = moxy::parse!({ case.source }).unwrap();
+            let Err(error) = expand(item) else {
+                panic!("invalid refined policy was accepted");
+            };
+            assert!(error.to_string().contains(case.diagnostic));
+        }
+    }
 }

@@ -1,6 +1,9 @@
 //! The common transport failures, preceding each caller's unchanged protocol-specific errors.
 
-use crate::{meta::item_body, prelude::*};
+use crate::{
+    meta::{ItemBody, item_body},
+    prelude::*,
+};
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     if meta.into_iter().next().is_some() {
@@ -9,7 +12,10 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
             "transport_errors takes no arguments",
         ));
     }
-    let (mut tokens, body) = item_body(item, "transport_errors", TokenTree::is_keyword_enum)?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = item_body(item, "transport_errors", TokenTree::is_keyword_enum)?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

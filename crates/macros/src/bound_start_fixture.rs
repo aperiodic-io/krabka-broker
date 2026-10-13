@@ -48,9 +48,15 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
                 moxy::template! { unwrap }
             };
             Ok(moxy::template! {
+                struct StartedBoundBroker {
+                    broker: {{ namespace }}::BrokerHandle,
+                    controller_addr: ::std::net::SocketAddr,
+                    dir: ::tempfile::TempDir,
+                }
+
                 async fn {{ name }}(
                     customize: impl FnOnce(&mut {{ namespace }}::BrokerConfig),
-                ) -> ({{ namespace }}::BrokerHandle, ::std::net::SocketAddr, ::tempfile::TempDir) {
+                ) -> StartedBoundBroker {
                     let dir = ::tempfile::TempDir::new().{{ finish }}(@if expect { "tempdir" });
                     let data_listener = ::tokio::net::TcpListener::bind("127.0.0.1:0")
                         .await.{{ finish }}(@if expect { "bind data listener" });
@@ -64,7 +70,7 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
                     let broker = {{ namespace }}::Broker::start_with_listeners(
                         config, Some(controller_listener), Some(data_listener)
                     ).await.{{ finish }}(@if expect { "broker start" });
-                    (broker, controller_addr, dir)
+                    StartedBoundBroker { broker, controller_addr, dir }
                 }
             })
         }
@@ -262,7 +268,10 @@ mod tests {
                 .parse()
                 .unwrap();
             let output = expand(input).unwrap();
-            let _: moxy::ast::ItemFn = moxy::parse!({ output.clone() }).unwrap();
+            let parser = moxy::ast::Parser::from_tokens(&output);
+            let _: moxy::ast::ItemStruct = moxy::ast::Parse::parse(&parser).unwrap();
+            let _: moxy::ast::ItemFn = moxy::ast::Parse::parse(&parser).unwrap();
+            assert!(parser.is_empty());
             let rendered = output.to_string();
             assert!(!rendered.contains("macro_rules"));
             assert!(!rendered.contains("fixture_result"));

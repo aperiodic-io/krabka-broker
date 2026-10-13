@@ -67,18 +67,18 @@ fn metric(field: &Field) -> Result<Metric, ParseError> {
     let constructor = match (args.new, args.buckets) {
         (Some(_), Some(buckets)) => {
             return Err(ParseError::new(
-                buckets.0.span(),
+                buckets.tokens.span(),
                 "give `new` or `buckets`, not both",
             ));
         }
-        (Some(new), None) => new.0,
+        (Some(new), None) => new.tokens,
         (None, Some(buckets)) if is_family(field) => moxy::template! {
             ::prometheus_client::metrics::family::Family::new_with_constructor(|| {
-                ::prometheus_client::metrics::histogram::Histogram::new({{ buckets.0 }})
+                ::prometheus_client::metrics::histogram::Histogram::new({{ buckets.tokens }})
             })
         },
         (None, Some(buckets)) => moxy::template! {
-            ::prometheus_client::metrics::histogram::Histogram::new({{ buckets.0 }})
+            ::prometheus_client::metrics::histogram::Histogram::new({{ buckets.tokens }})
         },
         (None, None) => moxy::template! { ::core::default::Default::default() },
     };
@@ -97,7 +97,7 @@ fn metric(field: &Field) -> Result<Metric, ParseError> {
             .unwrap_or_else(|| default_name(ident.text()).to_owned());
         Some(Registration {
             name: LitStr::new(&name, ident.span()),
-            help: help.0,
+            help: help.tokens,
         })
     };
 

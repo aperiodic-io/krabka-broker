@@ -7,7 +7,7 @@
 //! moxy's [`Meta`] parser.
 
 use {
-    crate::meta::{compact, named_body},
+    crate::meta::{ItemBody, compact, named_body},
     moxy::{
         ast::{List, Meta, ParseError, Parser},
         token::{Group, TokenStream, TokenTree},
@@ -163,7 +163,10 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
             "`#[human_units]` takes no arguments",
         ));
     }
-    let (mut tokens, body) = named_body(item, "human_units")?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = named_body(item, "human_units")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

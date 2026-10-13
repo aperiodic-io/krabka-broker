@@ -12,9 +12,15 @@ use {
     uuid::Uuid,
 };
 
+#[derive(Debug, PartialEq, Eq)]
+struct DispatchCall {
+    logged: bool,
+    resource: String,
+}
+
 #[derive(Debug, Default)]
 struct DispatchProbe {
-    calls: Mutex<Vec<(bool, String)>>,
+    calls: Mutex<Vec<DispatchCall>>,
 }
 
 impl DispatchProbe {
@@ -22,10 +28,10 @@ impl DispatchProbe {
         assert!(request.resource_type == ResourceType::Topic);
         assert!(request.operation == AclOperation::Write);
         assert!(request.principal.name == "batch" && request.host.ip().is_loopback());
-        self.calls
-            .lock()
-            .unwrap()
-            .push((logged, request.resource_name.to_owned()));
+        self.calls.lock().unwrap().push(DispatchCall {
+            logged,
+            resource: request.resource_name.to_owned(),
+        });
         AuthorizationResult::Deny
     }
 }
@@ -83,15 +89,11 @@ fn batch_dispatch_keeps_quiet_checks_borrowed_keys_and_repeated_names() {
                     .values()
                     .all(|decision| *decision == AuthorizationResult::Deny)
         );
-        assert!(
-            probe
-                .calls
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|(mode, name)| (*mode, name.as_str()))
-                .eq([(logged, "first"), (logged, "first"), (logged, "second")])
-        );
+        let expected = ["first", "first", "second"].map(|resource| DispatchCall {
+            logged,
+            resource: resource.to_owned(),
+        });
+        assert!(probe.calls.lock().unwrap().as_slice() == expected.as_slice());
         for original in &topics {
             let (borrowed, _) = decisions.get_key_value(original.as_str()).unwrap();
             assert!(std::ptr::eq(borrowed.as_ptr(), original.as_ptr()));

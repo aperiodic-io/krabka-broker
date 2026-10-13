@@ -11,25 +11,27 @@ use {
     },
 };
 
-struct ReplayProtocol(Ident);
+struct ReplayProtocol {
+    variant: Ident,
+}
 
 impl FromMeta for ReplayProtocol {
     fn from_meta(meta: &Meta) -> Result<Self, ParseError> {
         let requested = String::from_meta(meta)?;
-        let variant = [
-            ("consumer", "Consumer"),
-            ("share", "Share"),
-            ("streams", "Streams"),
-        ]
-        .into_iter()
-        .find_map(|(selector, variant)| (requested == selector).then_some(variant))
-        .ok_or_else(|| {
-            ParseError::new(
-                meta.span(),
-                "replay protocol must be consumer, share or streams",
-            )
-        })?;
-        Ok(Self(Ident::new(variant).with_span(meta.span())))
+        let variant = match requested.as_str() {
+            "consumer" => "Consumer",
+            "share" => "Share",
+            "streams" => "Streams",
+            _ => {
+                return Err(ParseError::new(
+                    meta.span(),
+                    "replay protocol must be consumer, share or streams",
+                ));
+            }
+        };
+        Ok(Self {
+            variant: Ident::new(variant).with_span(meta.span()),
+        })
     }
 }
 
@@ -89,7 +91,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     let metadata = map("members")?;
     let current = map("current_per_member")?;
     map("target_per_member")?;
-    let protocol = options.protocol.0;
+    let protocol = options.protocol.variant;
     Ok(impl_block(item, &TokenStream::new(), &moxy::template! {
         pub(super) fn install_current_member(
             &mut self,
@@ -178,56 +180,67 @@ mod tests {
 
     #[test]
     fn rejects_unknown_protocols_incomplete_maps_and_wrong_record_containers() {
-        for (declaration, expected) in [
-            ("struct Seed {}", "needs `#[replay_member_maps"),
-            (
-                "#[replay_member_maps(protocol = \"classic\")] struct Seed {}",
-                "replay protocol",
-            ),
-            (
-                "#[replay_member_maps(protocol = 1)] struct Seed {}",
-                "string",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"share\")] struct Seed();",
-                "named fields",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"consumer\")] struct Seed {}",
-                "members",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"consumer\")] struct Seed { members: HashMap<String, M> }",
-                "current_per_member",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"streams\")] struct Seed { members: HashMap<String, M>, current_per_member: HashMap<String, C> }",
-                "target_per_member",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"share\")] struct Seed { members: Vec<M> }",
-                "HashMap",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap }",
-                "HashMap",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<u32, M> }",
-                "HashMap",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<String> }",
-                "HashMap",
-            ),
-            (
-                "#[replay_member_maps(protocol = \"share\")] struct Seed { members: (String, M) }",
-                "HashMap",
-            ),
+        struct RejectedSeed {
+            declaration: &'static str,
+            expected: &'static str,
+        }
+        for case in [
+            RejectedSeed {
+                declaration: "struct Seed {}",
+                expected: "needs `#[replay_member_maps",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"classic\")] struct Seed {}",
+                expected: "replay protocol",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = 1)] struct Seed {}",
+                expected: "string",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed();",
+                expected: "named fields",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"consumer\")] struct Seed {}",
+                expected: "members",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"consumer\")] struct Seed { members: HashMap<String, M> }",
+                expected: "current_per_member",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"streams\")] struct Seed { members: HashMap<String, M>, current_per_member: HashMap<String, C> }",
+                expected: "target_per_member",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: Vec<M> }",
+                expected: "HashMap",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap }",
+                expected: "HashMap",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<u32, M> }",
+                expected: "HashMap",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<String> }",
+                expected: "HashMap",
+            },
+            RejectedSeed {
+                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: (String, M) }",
+                expected: "HashMap",
+            },
         ] {
+            let declaration = case.declaration;
             let item: ItemStruct = moxy::parse!({ declaration }).unwrap();
             assert!(
-                expand(item).unwrap_err().to_string().contains(expected),
+                expand(item)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(case.expected),
                 "{declaration}"
             );
         }

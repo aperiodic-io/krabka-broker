@@ -1,7 +1,7 @@
 //! Item generators for fixtures shared across crate boundaries.
 
 use {
-    crate::meta::{arguments, item_body, mode, required_tokens},
+    crate::meta::{ItemBody, arguments, item_body, mode, required_tokens},
     moxy::{
         ast::ParseError,
         token::{Ident, Span, TokenStream, TokenTree},
@@ -372,7 +372,10 @@ pub(crate) fn metadata_log_delegate(
     root: TokenStream,
     item: TokenStream,
 ) -> Result<TokenStream, ParseError> {
-    let (mut tokens, body) = item_body(item, "metadata_log_delegate", TokenTree::is_keyword_impl)?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = item_body(item, "metadata_log_delegate", TokenTree::is_keyword_impl)?;
     let mut root_tokens: Vec<_> = root.into_iter().collect();
     // Optional transport operations require explicit selectors.
     let mut keyed = false;

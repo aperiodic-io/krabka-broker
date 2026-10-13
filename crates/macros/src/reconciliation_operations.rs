@@ -35,7 +35,7 @@ struct Transition {
 }
 
 fn name(value: &Tokens) -> Result<Ident, ParseError> {
-    let parser = Parser::from_tokens(&value.0);
+    let parser = Parser::from_tokens(&value.tokens);
     let ident = Ident::parse(&parser)?;
     if !parser.is_empty() {
         return Err(parser.error("expected one operation binding"));
@@ -44,7 +44,7 @@ fn name(value: &Tokens) -> Result<Ident, ParseError> {
 }
 
 fn path(value: &Tokens) -> Result<Path, ParseError> {
-    let parser = Parser::from_tokens(&value.0);
+    let parser = Parser::from_tokens(&value.tokens);
     let path = Path::parse(&parser)?;
     if !parser.is_empty() || path.is_empty() {
         return Err(parser.error("expected one operation helper path"));

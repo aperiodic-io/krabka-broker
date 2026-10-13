@@ -10,25 +10,27 @@ use {
     proc_macro::TokenStream as NativeTokenStream,
 };
 
-struct DerivePaths(List<Path, Token![,]>);
+struct DerivePaths {
+    paths: List<Path, Token![,]>,
+}
 
 impl DerivePaths {
     fn proof_default() -> Self {
-        Self(
-            List::parse_all(&Parser::from_tokens(&moxy::template! {
+        Self {
+            paths: List::parse_all(&Parser::from_tokens(&moxy::template! {
                 std::clone::Clone, Copy, DeepModel
             }))
             .expect("fixed proof derives"),
-        )
+        }
     }
 
     fn runtime_default() -> Self {
-        Self(
-            List::parse_all(&Parser::from_tokens(&moxy::template! {
+        Self {
+            paths: List::parse_all(&Parser::from_tokens(&moxy::template! {
                 Clone, Copy, Debug, PartialEq, Eq
             }))
             .expect("fixed runtime derives"),
-        )
+        }
     }
 }
 
@@ -58,7 +60,7 @@ impl FromMeta for DerivePaths {
                 "expected at least one derive path without generic arguments",
             ));
         }
-        Ok(Self(paths))
+        Ok(Self { paths })
     }
 }
 
@@ -82,8 +84,8 @@ fn attributes(meta: &TokenStream, declaration: &TokenStream) -> Result<TokenStre
         moxy::template! { model_type({{ meta }}) }
     })?;
     let ModelPolicy {
-        proof: DerivePaths(proof),
-        runtime: DerivePaths(runtime),
+        proof: DerivePaths { paths: proof },
+        runtime: DerivePaths { paths: runtime },
     } = ModelPolicy::from_meta(&options)?;
     Ok(moxy::template! {
         #[cfg_attr(creusot, derive({{ proof }}))]
@@ -119,7 +121,28 @@ mod tests {
         ModelPolicy::from_meta(&options).unwrap()
     }
 
-    fn conditional_derives(item: &Item) -> Vec<(String, Vec<String>)> {
+    #[derive(Debug, PartialEq, Eq)]
+    struct ConditionalDerive {
+        condition: String,
+        paths: Vec<String>,
+    }
+
+    impl ConditionalDerive {
+        fn from_names(condition: &str, paths: &[&str]) -> Self {
+            Self {
+                condition: condition.to_owned(),
+                paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+            }
+        }
+    }
+
+    struct OverrideCase {
+        arguments: &'static str,
+        proof: Vec<&'static str>,
+        runtime: Vec<&'static str>,
+    }
+
+    fn conditional_derives(item: &Item) -> Vec<ConditionalDerive> {
         item.attrs()
             .iter()
             .map(|attribute| {
@@ -139,15 +162,15 @@ mod tests {
                         .iter()
                         .map(|path| path.to_token_stream().to_string().replace(' ', ""))
                         .collect();
-                (
-                    entries
+                ConditionalDerive {
+                    condition: entries
                         .first()
                         .unwrap()
                         .to_token_stream()
                         .to_string()
                         .replace(' ', ""),
                     paths,
-                )
+                }
             })
             .collect()
     }
@@ -168,8 +191,12 @@ mod tests {
             assert!(
                 conditional_derives(&declaration)
                     == [
-                        ("creusot", vec!["std::clone::Clone", "Copy", "DeepModel"]),
-                        ("not(creusot)", vec![
+                        ConditionalDerive::from_names("creusot", &[
+                            "std::clone::Clone",
+                            "Copy",
+                            "DeepModel"
+                        ]),
+                        ConditionalDerive::from_names("not(creusot)", &[
                             "Clone",
                             "Copy",
                             "Debug",
@@ -177,26 +204,22 @@ mod tests {
                             "Eq"
                         ]),
                     ]
-                    .map(|(condition, paths)| (
-                        condition.to_owned(),
-                        paths.into_iter().map(str::to_owned).collect::<Vec<_>>(),
-                    ))
             );
         }
     }
 
     #[test]
     fn overrides_replace_only_the_selected_list_in_original_path_order() {
-        for (arguments, proof, runtime) in [
-            (
-                "proof(std::clone::Clone, Copy)",
-                vec!["std::clone::Clone", "Copy"],
-                vec!["Clone", "Copy", "Debug", "PartialEq", "Eq"],
-            ),
-            (
-                "runtime(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)",
-                vec!["std::clone::Clone", "Copy", "DeepModel"],
-                vec![
+        for case in [
+            OverrideCase {
+                arguments: "proof(std::clone::Clone, Copy)",
+                proof: vec!["std::clone::Clone", "Copy"],
+                runtime: vec!["Clone", "Copy", "Debug", "PartialEq", "Eq"],
+            },
+            OverrideCase {
+                arguments: "runtime(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)",
+                proof: vec!["std::clone::Clone", "Copy", "DeepModel"],
+                runtime: vec![
                     "Clone",
                     "Copy",
                     "Debug",
@@ -205,11 +228,11 @@ mod tests {
                     "Eq",
                     "Hash",
                 ],
-            ),
-            (
-                "proof(DeepModel), runtime(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into)",
-                vec!["DeepModel"],
-                vec![
+            },
+            OverrideCase {
+                arguments: "proof(DeepModel), runtime(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into)",
+                proof: vec!["DeepModel"],
+                runtime: vec![
                     "Debug",
                     "Clone",
                     "Copy",
@@ -222,17 +245,17 @@ mod tests {
                     "From",
                     "Into",
                 ],
-            ),
+            },
         ] {
-            let options = policy(arguments);
+            let options = policy(case.arguments);
             let names = |paths: &List<Path, Token![,]>| {
                 paths
                     .iter()
                     .map(|path| path.to_token_stream().to_string().replace(' ', ""))
                     .collect::<Vec<_>>()
             };
-            assert!(names(&options.proof.0) == proof);
-            assert!(names(&options.runtime.0) == runtime);
+            assert!(names(&options.proof.paths) == case.proof);
+            assert!(names(&options.runtime.paths) == case.runtime);
         }
     }
 

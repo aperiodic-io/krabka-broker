@@ -73,18 +73,26 @@ struct Value {
 
 #[test]
 fn keeps_exact_kafka_bytes_and_every_truncation_error() {
-    for (epoch, timestamp, golden) in [
-        (7, 0, &b"\x00\x00\x00\x00\x00\x07\x00"[..]),
-        (
-            7,
-            42,
-            &b"\x00\x00\x00\x00\x00\x07\x01\x00\x08\x00\x00\x00\x00\x00\x00\x00\x2a"[..],
-        ),
-        (
-            -1,
-            -1,
-            &b"\x00\x00\xff\xff\xff\xff\x01\x00\x08\xff\xff\xff\xff\xff\xff\xff\xff"[..],
-        ),
+    for EpochCase {
+        epoch,
+        timestamp,
+        golden,
+    } in [
+        EpochCase {
+            epoch: 7,
+            timestamp: 0,
+            golden: &b"\x00\x00\x00\x00\x00\x07\x00"[..],
+        },
+        EpochCase {
+            epoch: 7,
+            timestamp: 42,
+            golden: &b"\x00\x00\x00\x00\x00\x07\x01\x00\x08\x00\x00\x00\x00\x00\x00\x00\x2a"[..],
+        },
+        EpochCase {
+            epoch: -1,
+            timestamp: -1,
+            golden: &b"\x00\x00\xff\xff\xff\xff\x01\x00\x08\xff\xff\xff\xff\xff\xff\xff\xff"[..],
+        },
     ] {
         let value = Value {
             assignment_epoch: epoch,
@@ -116,4 +124,10 @@ fn retains_record_specific_version_errors_and_codec_errors() {
                 assignment_timestamp_ms: 0,
             })
     );
+}
+
+struct EpochCase {
+    epoch: i32,
+    timestamp: i64,
+    golden: &'static [u8],
 }

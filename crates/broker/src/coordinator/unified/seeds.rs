@@ -175,6 +175,11 @@ mod replay_member_maps_tests {
         std::cell::Cell,
     };
 
+    struct TombstoneCase {
+        result: Result<bool, BrokerError>,
+        record: &'static str,
+    }
+
     #[test]
     fn share_replay_creates_metadata_lazily_and_removes_only_current_and_metadata() {
         let mut seed = ShareGroupSeed::new_group();
@@ -226,18 +231,18 @@ mod replay_member_maps_tests {
         streams
             .members
             .insert("member".into(), streams_member("streams"));
-        for (result, record) in [
-            (
-                consumer.member_tombstone("member"),
-                "ConsumerGroupCurrentMemberAssignmentValue",
-            ),
-            (
-                streams.member_tombstone("member"),
-                "StreamsGroupCurrentMemberAssignmentValue",
-            ),
+        for case in [
+            TombstoneCase {
+                result: consumer.member_tombstone("member"),
+                record: "ConsumerGroupCurrentMemberAssignmentValue",
+            },
+            TombstoneCase {
+                result: streams.member_tombstone("member"),
+                record: "StreamsGroupCurrentMemberAssignmentValue",
+            },
         ] {
             assert!(
-                matches!(result, Err(BrokerError::Startup(message)) if message.contains(record))
+                matches!(case.result, Err(BrokerError::Startup(message)) if message.contains(case.record))
             );
         }
         consumer.install_current_member("member", next_current(-1), || panic!("existing metadata"));
@@ -258,18 +263,18 @@ mod replay_member_maps_tests {
             "member".into(),
             StreamsGroupTargetAssignmentMemberValue::default(),
         );
-        for (result, record) in [
-            (
-                consumer.member_tombstone("member"),
-                "ConsumerGroupTargetAssignmentMetadataValue",
-            ),
-            (
-                streams.member_tombstone("member"),
-                "StreamsGroupTargetAssignmentMetadataValue",
-            ),
+        for case in [
+            TombstoneCase {
+                result: consumer.member_tombstone("member"),
+                record: "ConsumerGroupTargetAssignmentMetadataValue",
+            },
+            TombstoneCase {
+                result: streams.member_tombstone("member"),
+                record: "StreamsGroupTargetAssignmentMetadataValue",
+            },
         ] {
             assert!(
-                matches!(result, Err(BrokerError::Startup(message)) if message.contains(record))
+                matches!(case.result, Err(BrokerError::Startup(message)) if message.contains(case.record))
             );
         }
         consumer.remove_replayed_member("member");

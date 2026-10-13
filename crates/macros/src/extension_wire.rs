@@ -22,7 +22,12 @@ struct Adapter {
     tracing: TokenStream,
 }
 
-fn binding(parameter: &FnParam) -> Result<(&PatType, &PatIdent), ParseError> {
+struct ParameterBinding<'a> {
+    parameter: &'a PatType,
+    binding: &'a PatIdent,
+}
+
+fn binding(parameter: &FnParam) -> Result<ParameterBinding<'_>, ParseError> {
     let FnParam::Typed(parameter) = parameter else {
         return Err(ParseError::new(
             parameter.span(),
@@ -46,7 +51,7 @@ fn binding(parameter: &FnParam) -> Result<(&PatType, &PatIdent), ParseError> {
             "extension bindings must be plain names distinct from raw wire parameters",
         ));
     }
-    Ok((parameter, binding))
+    Ok(ParameterBinding { parameter, binding })
 }
 
 fn adapter(meta: &TokenStream, item: &TokenStream) -> Result<Adapter, ParseError> {
@@ -98,10 +103,22 @@ fn adapter(meta: &TokenStream, item: &TokenStream) -> Result<Adapter, ParseError
         .map(binding)
         .collect::<Result<Vec<_>, _>>()?;
     let [
-        (broker, broker_name),
-        (request, request_name),
-        (version, version_name),
-        (context, context_name),
+        ParameterBinding {
+            parameter: broker,
+            binding: broker_name,
+        },
+        ParameterBinding {
+            parameter: request,
+            binding: request_name,
+        },
+        ParameterBinding {
+            parameter: version,
+            binding: version_name,
+        },
+        ParameterBinding {
+            parameter: context,
+            binding: context_name,
+        },
     ] = parameters.as_slice()
     else {
         return Err(ParseError::new(

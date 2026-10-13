@@ -135,11 +135,13 @@ impl DispatchEntry {
 }
 
 #[derive(Default)]
-struct DispatchRegistry(BTreeMap<i16, DispatchEntry>);
+struct DispatchRegistry {
+    entries: BTreeMap<i16, DispatchEntry>,
+}
 
 impl DispatchRegistry {
     fn register(&mut self, entry: DispatchEntry) -> bool {
-        self.0.insert(entry.api_key, entry).is_none()
+        self.entries.insert(entry.api_key, entry).is_none()
     }
 }
 
@@ -530,7 +532,7 @@ struct Observed {
 }
 
 fn observe(registry: &DispatchRegistry, api: ApiKey) -> Option<Observed> {
-    let entry = *registry.0.get(&(api as i16))?;
+    let entry = *registry.entries.get(&(api as i16))?;
     Some(Observed {
         kind: match entry.handler {
             Handler::Context(_) => "context",
@@ -623,7 +625,7 @@ fn every_section_registers_an_adapter_that_reaches_its_handler() {
         ),
     ];
 
-    assert!(registry.0.len() == cases.len());
+    assert!(registry.entries.len() == cases.len());
     for (api, kind, flexible_min, reply, empty_body) in cases {
         let expected = Observed {
             kind,
@@ -645,7 +647,7 @@ fn check_typed_adapter_error(body: &[u8], error: &BrokerError) {
         ApiKey::ListConfigResources,
         ApiKey::DescribeAcls,
     ] {
-        let entry = registry.0[&(api as i16)];
+        let entry = registry.entries[&(api as i16)];
         assert!(call(entry, body).as_ref() == Err(error), "{api:?}");
     }
 }
@@ -663,8 +665,8 @@ fn only_a_typed_group_adapter_decodes_through_decode_group_request() {
     register_dispatch_table(&mut registry);
 
     let long = b"longer-than-eight";
-    let replies =
-        [ApiKey::ListGroups, ApiKey::Heartbeat].map(|api| call(registry.0[&(api as i16)], long));
+    let replies = [ApiKey::ListGroups, ApiKey::Heartbeat]
+        .map(|api| call(registry.entries[&(api as i16)], long));
     assert!(
         replies
             == [
@@ -706,21 +708,25 @@ enum Traced {
 
 /// Collects each recorded field's `Debug` rendering, or a `str` as is.
 #[derive(Default)]
-struct Fields(BTreeMap<&'static str, String>);
+struct Fields {
+    values: BTreeMap<&'static str, String>,
+}
 
 impl tracing::field::Visit for Fields {
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.0.insert(field.name(), value.to_owned());
+        self.values.insert(field.name(), value.to_owned());
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.0.insert(field.name(), format!("{value:?}"));
+        self.values.insert(field.name(), format!("{value:?}"));
     }
 }
 
 /// A layer that records every span it sees open and every event.
 #[derive(Clone, Default)]
-struct Capture(Arc<Mutex<Vec<Traced>>>);
+struct Capture {
+    traced: Arc<Mutex<Vec<Traced>>>,
+}
 
 impl<S> tracing_subscriber::Layer<S> for Capture
 where
@@ -734,21 +740,27 @@ where
     ) {
         let mut fields = Fields::default();
         attrs.record(&mut fields);
-        self.0.lock().expect("capture lock").push(Traced::Span {
-            name: attrs.metadata().name(),
-            level: *attrs.metadata().level(),
-            fields: fields.0,
-        });
+        self.traced
+            .lock()
+            .expect("capture lock")
+            .push(Traced::Span {
+                name: attrs.metadata().name(),
+                level: *attrs.metadata().level(),
+                fields: fields.values,
+            });
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         let mut fields = Fields::default();
         event.record(&mut fields);
-        self.0.lock().expect("capture lock").push(Traced::Event {
-            level: *event.metadata().level(),
-            span: ctx.event_span(event).map(|span| span.name()),
-            fields: fields.0,
-        });
+        self.traced
+            .lock()
+            .expect("capture lock")
+            .push(Traced::Event {
+                level: *event.metadata().level(),
+                span: ctx.event_span(event).map(|span| span.name()),
+                fields: fields.values,
+            });
     }
 }
 
@@ -756,9 +768,9 @@ where
 fn trace(registry: &DispatchRegistry, api: ApiKey, body: &[u8]) -> Vec<Traced> {
     let capture = Capture::default();
     let subscriber = tracing_subscriber::registry().with(capture.clone());
-    let entry = registry.0[&(api as i16)];
+    let entry = registry.entries[&(api as i16)];
     tracing::subscriber::with_default(subscriber, || drop(call(entry, body)));
-    std::mem::take(&mut *capture.0.lock().expect("capture lock"))
+    std::mem::take(&mut *capture.traced.lock().expect("capture lock"))
 }
 
 #[test]

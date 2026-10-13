@@ -71,9 +71,18 @@ async fn successful_decode_preserves_context_raw_bytes_and_early_answers() {
     let broker = Broker {
         operations: Cell::new(0),
     };
-    for (principal, expected) in [
-        ("admin", Ok(vec![7, 7, 42])),
-        ("guest", Err("operation denied")),
+    for AccessCase {
+        principal,
+        expected,
+    } in [
+        AccessCase {
+            principal: "admin",
+            expected: Ok(vec![7, 7, 42]),
+        },
+        AccessCase {
+            principal: "guest",
+            expected: Err("operation denied"),
+        },
     ] {
         let ctx = RequestContext {
             principal,
@@ -93,10 +102,26 @@ async fn failed_decoding_never_enters_the_original_body() {
         principal: "admin",
         correlation_id: 1,
     };
-    for (version, bytes, error) in [
-        (1, &b"\x07"[..], "unsupported version"),
-        (2, &b""[..], "truncated request"),
-        (2, &b"\xff"[..], "invalid request"),
+    for DecodeCase {
+        version,
+        bytes,
+        error,
+    } in [
+        DecodeCase {
+            version: 1,
+            bytes: &b"\x07"[..],
+            error: "unsupported version",
+        },
+        DecodeCase {
+            version: 2,
+            bytes: &b""[..],
+            error: "truncated request",
+        },
+        DecodeCase {
+            version: 2,
+            bytes: &b"\xff"[..],
+            error: "invalid request",
+        },
     ] {
         assert!(immutable::dispatch(&broker, version, bytes, &ctx).await == Err(error));
     }
@@ -161,11 +186,13 @@ fn synchronous_handle_preserves_its_correlation_parameter() {
 mod extension_handlers {
     use super::{ApiVersion, Broker, Decode, DispatchResult, Request, RequestContext};
 
-    struct MarkerRequest(Request);
+    struct MarkerRequest {
+        request: Request,
+    }
 
     impl Decode for MarkerRequest {
         fn decode(bytes: &[u8], version: ApiVersion) -> Result<Self, &'static str> {
-            Request::decode(bytes, version).map(Self)
+            Request::decode(bytes, version).map(|request| Self { request })
         }
     }
 
@@ -207,11 +234,11 @@ mod extension_handlers {
             version: ApiVersion,
             _ctx: &RequestContext<'_>,
         ) -> DispatchResult {
-            if req.0.value == 0 {
+            if req.request.value == 0 {
                 return Err("marker refused");
             }
             broker.operations.set(broker.operations.get() + 1);
-            Ok(vec![req.0.value])
+            Ok(vec![req.request.value])
         }
     }
 }
@@ -256,77 +283,94 @@ async fn extension_spans_wrap_decoding_and_native_operations_at_their_original_l
     let output = String::from_utf8(OUTPUT.lock().unwrap().clone()).unwrap();
     let lines: Vec<_> = output.lines().collect();
     assert!(lines.len() == 10);
-    for (line, level, operation, api) in [
-        (
-            lines[0],
-            "INFO",
-            "handle_extension_control",
-            "ExtensionControl",
-        ),
-        (
-            lines[1],
-            "INFO",
-            "handle_extension_control",
-            "ExtensionControl",
-        ),
-        (
-            lines[2],
-            "ERROR",
-            "handle_extension_control",
-            "ExtensionControl",
-        ),
-        (
-            lines[3],
-            "INFO",
-            "handle_extension_control",
-            "ExtensionControl",
-        ),
-        (
-            lines[4],
-            "ERROR",
-            "handle_extension_control",
-            "ExtensionControl",
-        ),
-        (
-            lines[5],
-            "DEBUG",
-            "handle_extension_marker",
-            "ExtensionMarker",
-        ),
-        (
-            lines[6],
-            "DEBUG",
-            "handle_extension_marker",
-            "ExtensionMarker",
-        ),
-        (
-            lines[7],
-            "ERROR",
-            "handle_extension_marker",
-            "ExtensionMarker",
-        ),
-        (
-            lines[8],
-            "DEBUG",
-            "handle_extension_marker",
-            "ExtensionMarker",
-        ),
-        (
-            lines[9],
-            "ERROR",
-            "handle_extension_marker",
-            "ExtensionMarker",
-        ),
+    for SpanCase {
+        line,
+        level,
+        operation,
+        api,
+    } in [
+        SpanCase {
+            line: lines[0],
+            level: "INFO",
+            operation: "handle_extension_control",
+            api: "ExtensionControl",
+        },
+        SpanCase {
+            line: lines[1],
+            level: "INFO",
+            operation: "handle_extension_control",
+            api: "ExtensionControl",
+        },
+        SpanCase {
+            line: lines[2],
+            level: "ERROR",
+            operation: "handle_extension_control",
+            api: "ExtensionControl",
+        },
+        SpanCase {
+            line: lines[3],
+            level: "INFO",
+            operation: "handle_extension_control",
+            api: "ExtensionControl",
+        },
+        SpanCase {
+            line: lines[4],
+            level: "ERROR",
+            operation: "handle_extension_control",
+            api: "ExtensionControl",
+        },
+        SpanCase {
+            line: lines[5],
+            level: "DEBUG",
+            operation: "handle_extension_marker",
+            api: "ExtensionMarker",
+        },
+        SpanCase {
+            line: lines[6],
+            level: "DEBUG",
+            operation: "handle_extension_marker",
+            api: "ExtensionMarker",
+        },
+        SpanCase {
+            line: lines[7],
+            level: "ERROR",
+            operation: "handle_extension_marker",
+            api: "ExtensionMarker",
+        },
+        SpanCase {
+            line: lines[8],
+            level: "DEBUG",
+            operation: "handle_extension_marker",
+            api: "ExtensionMarker",
+        },
+        SpanCase {
+            line: lines[9],
+            level: "ERROR",
+            operation: "handle_extension_marker",
+            api: "ExtensionMarker",
+        },
     ] {
         assert!(line.contains(level));
         assert!(line.contains(operation));
         assert!(line.contains(&format!("api=\"{api}\"")));
     }
-    for (line, error) in [
-        (lines[2], "truncated request"),
-        (lines[4], "control refused"),
-        (lines[7], "invalid request"),
-        (lines[9], "marker refused"),
+    for DiagnosticCase { line, error } in [
+        DiagnosticCase {
+            line: lines[2],
+            error: "truncated request",
+        },
+        DiagnosticCase {
+            line: lines[4],
+            error: "control refused",
+        },
+        DiagnosticCase {
+            line: lines[7],
+            error: "invalid request",
+        },
+        DiagnosticCase {
+            line: lines[9],
+            error: "marker refused",
+        },
     ] {
         assert!(line.contains(error));
     }
@@ -339,4 +383,27 @@ async fn extension_spans_wrap_decoding_and_native_operations_at_their_original_l
     ] {
         assert!(!output.contains(skipped));
     }
+}
+
+struct AccessCase {
+    principal: &'static str,
+    expected: DispatchResult,
+}
+
+struct DecodeCase {
+    version: ApiVersion,
+    bytes: &'static [u8],
+    error: &'static str,
+}
+
+struct SpanCase<'a> {
+    line: &'a str,
+    level: &'static str,
+    operation: &'static str,
+    api: &'static str,
+}
+
+struct DiagnosticCase<'a> {
+    line: &'a str,
+    error: &'static str,
 }

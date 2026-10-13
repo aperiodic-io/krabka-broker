@@ -2040,107 +2040,347 @@ pub fn validate_archive_rows(tokens: NativeTokenStream) -> Result<NativeTokenStr
 mod export_contract_tests {
     use {super::*, assert2::assert};
 
+    type Expand = fn(TokenStream) -> Result<TokenStream, ParseError>;
+    struct FunctionMacro {
+        name: &'static str,
+        expand: Expand,
+    }
+    const FUNCTION_MACROS: [FunctionMacro; 81] = [
+        FunctionMacro {
+            name: "dispatch_table",
+            expand: dispatch_table,
+        },
+        FunctionMacro {
+            name: "throttle_probes",
+            expand: throttle_probes,
+        },
+        FunctionMacro {
+            name: "cli_main",
+            expand: cli_main,
+        },
+        FunctionMacro {
+            name: "bounded_bfs",
+            expand: bounded_bfs,
+        },
+        FunctionMacro {
+            name: "delete_topic_request",
+            expand: delete_topic_request,
+        },
+        FunctionMacro {
+            name: "compacted_batch",
+            expand: compacted_batch,
+        },
+        FunctionMacro {
+            name: "record_batch_fixture",
+            expand: record_batch_fixture,
+        },
+        FunctionMacro {
+            name: "simulation_actions",
+            expand: simulation_actions,
+        },
+        FunctionMacro {
+            name: "simulation_transport",
+            expand: simulation_transport,
+        },
+        FunctionMacro {
+            name: "simulation_heartbeat",
+            expand: simulation_heartbeat,
+        },
+        FunctionMacro {
+            name: "benchmark_scenario_fixture",
+            expand: benchmark_scenario_fixture,
+        },
+        FunctionMacro {
+            name: "benchmark_latency_fixture",
+            expand: benchmark_latency_fixture,
+        },
+        FunctionMacro {
+            name: "s3_archive_config_fixture",
+            expand: s3_archive_config_fixture,
+        },
+        FunctionMacro {
+            name: "remote_segment_check",
+            expand: remote_segment_check,
+        },
+        FunctionMacro {
+            name: "simulation_step",
+            expand: simulation_step,
+        },
+        FunctionMacro {
+            name: "snapshot_topic_fixture",
+            expand: snapshot_topic_fixture,
+        },
+        FunctionMacro {
+            name: "timestamped_batch",
+            expand: timestamped_batch,
+        },
+        FunctionMacro {
+            name: "producer_batch_fixture",
+            expand: producer_batch_fixture,
+        },
+        FunctionMacro {
+            name: "create_topic_fixture",
+            expand: create_topic_fixture,
+        },
+        FunctionMacro {
+            name: "consumer_fetch_fixture",
+            expand: consumer_fetch_fixture,
+        },
+        FunctionMacro {
+            name: "single_replica_partition_fixture",
+            expand: single_replica_partition_fixture,
+        },
+        FunctionMacro {
+            name: "control_marker_fixture",
+            expand: control_marker_fixture,
+        },
+        FunctionMacro {
+            name: "topic_record_fixture",
+            expand: topic_record_fixture,
+        },
+        FunctionMacro {
+            name: "ephemeral_port_fixture",
+            expand: ephemeral_port_fixture,
+        },
+        FunctionMacro {
+            name: "projection_identity",
+            expand: projection_identity,
+        },
+        FunctionMacro {
+            name: "minio_fixture",
+            expand: minio_fixture,
+        },
+        FunctionMacro {
+            name: "scram_client_first",
+            expand: scram_client_first,
+        },
+        FunctionMacro {
+            name: "remote_segment_transition_matrix",
+            expand: remote_segment_transition_matrix,
+        },
+        FunctionMacro {
+            name: "capture_layer_fixture",
+            expand: capture_layer_fixture,
+        },
+        FunctionMacro {
+            name: "remote_segment_fixtures",
+            expand: remote_segment_fixtures,
+        },
+        FunctionMacro {
+            name: "remote_metadata_missing",
+            expand: remote_metadata_missing,
+        },
+        FunctionMacro {
+            name: "async_write_delegate",
+            expand: async_write_delegate,
+        },
+        FunctionMacro {
+            name: "timer_hooks",
+            expand: timer_hooks,
+        },
+        FunctionMacro {
+            name: "scram_client_proof_fixture",
+            expand: scram_client_proof_fixture,
+        },
+        FunctionMacro {
+            name: "single_partition_produce_fixture",
+            expand: single_partition_produce_fixture,
+        },
+        FunctionMacro {
+            name: "request_frame_fixture",
+            expand: request_frame_fixture,
+        },
+        FunctionMacro {
+            name: "patterned_bytes_fixture",
+            expand: patterned_bytes_fixture,
+        },
+        FunctionMacro {
+            name: "break_glass_golden_id",
+            expand: break_glass_golden_id,
+        },
+        FunctionMacro {
+            name: "jvm_principal_golden",
+            expand: jvm_principal_golden,
+        },
+        FunctionMacro {
+            name: "frame_prefix_fixture",
+            expand: frame_prefix_fixture,
+        },
+        FunctionMacro {
+            name: "file_region_fixture",
+            expand: file_region_fixture,
+        },
+        FunctionMacro {
+            name: "empty_endpoint_voters",
+            expand: empty_endpoint_voters,
+        },
+        FunctionMacro {
+            name: "epoch_record_batch_fixture",
+            expand: epoch_record_batch_fixture,
+        },
+        FunctionMacro {
+            name: "epoch_log_view",
+            expand: epoch_log_view,
+        },
+        FunctionMacro {
+            name: "legacy_policy_fixture",
+            expand: legacy_policy_fixture,
+        },
+        FunctionMacro {
+            name: "keyed_record_batch_fixture",
+            expand: keyed_record_batch_fixture,
+        },
+        FunctionMacro {
+            name: "duration_cases_fixture",
+            expand: duration_cases_fixture,
+        },
+        FunctionMacro {
+            name: "directory_tree_fixture",
+            expand: directory_tree_fixture,
+        },
+        FunctionMacro {
+            name: "parsed_cli_entrypoint",
+            expand: parsed_cli_entrypoint,
+        },
+        FunctionMacro {
+            name: "duration_parser_fixture",
+            expand: duration_parser_fixture,
+        },
+        FunctionMacro {
+            name: "bootstrap_parser_fixture",
+            expand: bootstrap_parser_fixture,
+        },
+        FunctionMacro {
+            name: "snapshot_node_fixture",
+            expand: snapshot_node_fixture,
+        },
+        FunctionMacro {
+            name: "connect_cli_client",
+            expand: connect_cli_client,
+        },
+        FunctionMacro {
+            name: "format_directories_fixture",
+            expand: format_directories_fixture,
+        },
+        FunctionMacro {
+            name: "wal_capture_topic_fixture",
+            expand: wal_capture_topic_fixture,
+        },
+        FunctionMacro {
+            name: "flag_metadata_fixture",
+            expand: flag_metadata_fixture,
+        },
+        FunctionMacro {
+            name: "bind_retry_fixture",
+            expand: bind_retry_fixture,
+        },
+        FunctionMacro {
+            name: "bound_start_fixture",
+            expand: bound_start_fixture,
+        },
+        FunctionMacro {
+            name: "assignment_dirs_fixture",
+            expand: assignment_dirs_fixture,
+        },
+        FunctionMacro {
+            name: "metric_registry_fixture",
+            expand: metric_registry_fixture,
+        },
+        FunctionMacro {
+            name: "worm_segment_fixture",
+            expand: worm_segment_fixture,
+        },
+        FunctionMacro {
+            name: "remote_started_segment",
+            expand: remote_started_segment,
+        },
+        FunctionMacro {
+            name: "scram_users_fixture",
+            expand: scram_users_fixture,
+        },
+        FunctionMacro {
+            name: "record_header_text",
+            expand: record_header_text,
+        },
+        FunctionMacro {
+            name: "share_dlq_meters",
+            expand: share_dlq_meters,
+        },
+        FunctionMacro {
+            name: "export_segment_data_fixture",
+            expand: export_segment_data_fixture,
+        },
+        FunctionMacro {
+            name: "epoch_checkpoint_failure",
+            expand: epoch_checkpoint_failure,
+        },
+        FunctionMacro {
+            name: "jvm_checkpoint_dump_fixture",
+            expand: jvm_checkpoint_dump_fixture,
+        },
+        FunctionMacro {
+            name: "java_string_producer_source",
+            expand: java_string_producer_source,
+        },
+        FunctionMacro {
+            name: "epoch_millis_fn",
+            expand: epoch_millis_fn,
+        },
+        FunctionMacro {
+            name: "unix_millis_fixture",
+            expand: unix_millis_fixture,
+        },
+        FunctionMacro {
+            name: "vector_request_fixture",
+            expand: vector_request_fixture,
+        },
+        FunctionMacro {
+            name: "supported_features_fixture",
+            expand: supported_features_fixture,
+        },
+        FunctionMacro {
+            name: "supported_feature_fixture",
+            expand: supported_feature_fixture,
+        },
+        FunctionMacro {
+            name: "finalized_feature_fixture",
+            expand: finalized_feature_fixture,
+        },
+        FunctionMacro {
+            name: "record_limit_fixture",
+            expand: record_limit_fixture,
+        },
+        FunctionMacro {
+            name: "compaction_record_fixture",
+            expand: compaction_record_fixture,
+        },
+        FunctionMacro {
+            name: "registration_feature_projection",
+            expand: registration_feature_projection,
+        },
+        FunctionMacro {
+            name: "dispatch_capacity_parser",
+            expand: dispatch_capacity_parser,
+        },
+        FunctionMacro {
+            name: "splitmix64_step",
+            expand: splitmix64_step,
+        },
+        FunctionMacro {
+            name: "compression_bytes_fixture",
+            expand: compression_bytes_fixture,
+        },
+    ];
+
     #[test]
     fn function_macros_keep_their_empty_input_contract() {
-        type Expand = fn(TokenStream) -> Result<TokenStream, ParseError>;
-        let entries: [(&str, Expand); 81] = [
-            ("dispatch_table", dispatch_table),
-            ("throttle_probes", throttle_probes),
-            ("cli_main", cli_main),
-            ("bounded_bfs", bounded_bfs),
-            ("delete_topic_request", delete_topic_request),
-            ("compacted_batch", compacted_batch),
-            ("record_batch_fixture", record_batch_fixture),
-            ("simulation_actions", simulation_actions),
-            ("simulation_transport", simulation_transport),
-            ("simulation_heartbeat", simulation_heartbeat),
-            ("benchmark_scenario_fixture", benchmark_scenario_fixture),
-            ("benchmark_latency_fixture", benchmark_latency_fixture),
-            ("s3_archive_config_fixture", s3_archive_config_fixture),
-            ("remote_segment_check", remote_segment_check),
-            ("simulation_step", simulation_step),
-            ("snapshot_topic_fixture", snapshot_topic_fixture),
-            ("timestamped_batch", timestamped_batch),
-            ("producer_batch_fixture", producer_batch_fixture),
-            ("create_topic_fixture", create_topic_fixture),
-            ("consumer_fetch_fixture", consumer_fetch_fixture),
-            (
-                "single_replica_partition_fixture",
-                single_replica_partition_fixture,
-            ),
-            ("control_marker_fixture", control_marker_fixture),
-            ("topic_record_fixture", topic_record_fixture),
-            ("ephemeral_port_fixture", ephemeral_port_fixture),
-            ("projection_identity", projection_identity),
-            ("minio_fixture", minio_fixture),
-            ("scram_client_first", scram_client_first),
-            (
-                "remote_segment_transition_matrix",
-                remote_segment_transition_matrix,
-            ),
-            ("capture_layer_fixture", capture_layer_fixture),
-            ("remote_segment_fixtures", remote_segment_fixtures),
-            ("remote_metadata_missing", remote_metadata_missing),
-            ("async_write_delegate", async_write_delegate),
-            ("timer_hooks", timer_hooks),
-            ("scram_client_proof_fixture", scram_client_proof_fixture),
-            (
-                "single_partition_produce_fixture",
-                single_partition_produce_fixture,
-            ),
-            ("request_frame_fixture", request_frame_fixture),
-            ("patterned_bytes_fixture", patterned_bytes_fixture),
-            ("break_glass_golden_id", break_glass_golden_id),
-            ("jvm_principal_golden", jvm_principal_golden),
-            ("frame_prefix_fixture", frame_prefix_fixture),
-            ("file_region_fixture", file_region_fixture),
-            ("empty_endpoint_voters", empty_endpoint_voters),
-            ("epoch_record_batch_fixture", epoch_record_batch_fixture),
-            ("epoch_log_view", epoch_log_view),
-            ("legacy_policy_fixture", legacy_policy_fixture),
-            ("keyed_record_batch_fixture", keyed_record_batch_fixture),
-            ("duration_cases_fixture", duration_cases_fixture),
-            ("directory_tree_fixture", directory_tree_fixture),
-            ("parsed_cli_entrypoint", parsed_cli_entrypoint),
-            ("duration_parser_fixture", duration_parser_fixture),
-            ("bootstrap_parser_fixture", bootstrap_parser_fixture),
-            ("snapshot_node_fixture", snapshot_node_fixture),
-            ("connect_cli_client", connect_cli_client),
-            ("format_directories_fixture", format_directories_fixture),
-            ("wal_capture_topic_fixture", wal_capture_topic_fixture),
-            ("flag_metadata_fixture", flag_metadata_fixture),
-            ("bind_retry_fixture", bind_retry_fixture),
-            ("bound_start_fixture", bound_start_fixture),
-            ("assignment_dirs_fixture", assignment_dirs_fixture),
-            ("metric_registry_fixture", metric_registry_fixture),
-            ("worm_segment_fixture", worm_segment_fixture),
-            ("remote_started_segment", remote_started_segment),
-            ("scram_users_fixture", scram_users_fixture),
-            ("record_header_text", record_header_text),
-            ("share_dlq_meters", share_dlq_meters),
-            ("export_segment_data_fixture", export_segment_data_fixture),
-            ("epoch_checkpoint_failure", epoch_checkpoint_failure),
-            ("jvm_checkpoint_dump_fixture", jvm_checkpoint_dump_fixture),
-            ("java_string_producer_source", java_string_producer_source),
-            ("epoch_millis_fn", epoch_millis_fn),
-            ("unix_millis_fixture", unix_millis_fixture),
-            ("vector_request_fixture", vector_request_fixture),
-            ("supported_features_fixture", supported_features_fixture),
-            ("supported_feature_fixture", supported_feature_fixture),
-            ("finalized_feature_fixture", finalized_feature_fixture),
-            ("record_limit_fixture", record_limit_fixture),
-            ("compaction_record_fixture", compaction_record_fixture),
-            (
-                "registration_feature_projection",
-                registration_feature_projection,
-            ),
-            ("dispatch_capacity_parser", dispatch_capacity_parser),
-            ("splitmix64_step", splitmix64_step),
-            ("compression_bytes_fixture", compression_bytes_fixture),
-        ];
-        let accepted: Vec<_> = entries
+        let accepted: Vec<_> = FUNCTION_MACROS
             .into_iter()
-            .filter_map(|(name, expand)| expand(TokenStream::new()).is_ok().then_some(name))
+            .filter_map(|entry| {
+                (entry.expand)(TokenStream::new())
+                    .is_ok()
+                    .then_some(entry.name)
+            })
             .collect();
         // Dispatch and throttle tables permit zero entries; fixtures need arguments.
         assert!(accepted == ["dispatch_table", "throttle_probes"]);

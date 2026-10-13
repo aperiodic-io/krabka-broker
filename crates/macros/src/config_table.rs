@@ -1,13 +1,14 @@
 //! The common schema and deserialization recipe for TOML configuration tables.
 
 use crate::{
-    meta::{item_body, mode},
+    meta::{ItemBody, item_body, mode},
     prelude::*,
 };
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     let mode = mode(meta, ["strict", "open"])?;
-    let (item, _) = item_body(item, "config_table", TokenTree::is_keyword_struct)?;
+    let ItemBody { tokens: item, .. } =
+        item_body(item, "config_table", TokenTree::is_keyword_struct)?;
     let mut output = moxy::template! {
         #[derive(Debug, Clone, Default, ::serde::Deserialize, ::schemars::JsonSchema, PartialEq)]
     };

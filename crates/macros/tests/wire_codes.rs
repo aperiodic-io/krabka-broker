@@ -33,19 +33,57 @@ mod codes {
 
         let tables: Vec<Vec<_>> = [RELEASE, TRUNK, PRIVATE]
             .into_iter()
-            .map(|table| table.iter().map(|code| (code.name, code.code)).collect())
+            .map(|table| {
+                table
+                    .iter()
+                    .map(|code| NamedCode {
+                        name: code.name,
+                        code: code.code,
+                    })
+                    .collect()
+            })
             .collect();
         assert!(
             tables
                 == [
                     vec![
-                        ("NONE", 0),
-                        ("UNKNOWN", -1),
-                        ("MAX", 32767),
-                        ("MIN", -32768)
+                        NamedCode {
+                            name: "NONE",
+                            code: 0
+                        },
+                        NamedCode {
+                            name: "UNKNOWN",
+                            code: -1
+                        },
+                        NamedCode {
+                            name: "MAX",
+                            code: 32767
+                        },
+                        NamedCode {
+                            name: "MIN",
+                            code: -32768
+                        }
                     ],
-                    vec![("TOPOLOGY", 135), ("CONTROLLER", 136)],
-                    vec![("BUSY", 1000), ("REFUSED", 1013)],
+                    vec![
+                        NamedCode {
+                            name: "TOPOLOGY",
+                            code: 135
+                        },
+                        NamedCode {
+                            name: "CONTROLLER",
+                            code: 136
+                        }
+                    ],
+                    vec![
+                        NamedCode {
+                            name: "BUSY",
+                            code: 1000
+                        },
+                        NamedCode {
+                            name: "REFUSED",
+                            code: 1013
+                        }
+                    ],
                 ]
         );
     }

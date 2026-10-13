@@ -1,13 +1,16 @@
 //! Expand the shared file-upload method signature before async trait derives.
 
 use crate::{
-    meta::{item_body, no_arguments},
+    meta::{ItemBody, item_body, no_arguments},
     prelude::*,
 };
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     no_arguments(meta, "object_ops")?;
-    let (mut tokens, body) = item_body(item, "object_ops", |token| {
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = item_body(item, "object_ops", |token| {
         token.is_keyword_trait() || token.is_keyword_impl()
     })?;
     let TokenTree::Group(group) = &mut tokens[body] else {

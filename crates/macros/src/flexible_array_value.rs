@@ -42,8 +42,8 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         ));
     }
     let field = field_ident(array, "FlexibleArrayValue")?.clone();
-    let encode: Path = moxy::parse!({ codec.encode.0 })?;
-    let decode: Path = moxy::parse!({ codec.decode.0 })?;
+    let encode: Path = moxy::parse!({ codec.encode.tokens })?;
+    let decode: Path = moxy::parse!({ codec.decode.tokens })?;
     let record = LitStr::new(&codec.record, item.ident.span());
     let decode = decode_method(&record, &moxy::template! {
         |buf| Ok(Self { {{ field }}: {{ decode }}(buf)? })

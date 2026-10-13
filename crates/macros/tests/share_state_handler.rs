@@ -135,19 +135,30 @@ mod handlers {
     }
 }
 
+fn request_topic(topic_id: u8, partitions: &[i32]) -> protocol::RequestTopic {
+    protocol::RequestTopic {
+        topic_id,
+        partitions: partitions
+            .iter()
+            .map(|&partition| protocol::RequestPartition { partition })
+            .collect(),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ObservedTopic {
+    topic_id: u8,
+    partitions: Vec<i32>,
+}
+
 fn request() -> protocol::Request {
     protocol::Request {
         group_id: "group".into(),
-        topics: [(7, vec![3, 1]), (2, vec![]), (7, vec![4])]
-            .into_iter()
-            .map(|(topic_id, partitions)| protocol::RequestTopic {
-                topic_id,
-                partitions: partitions
-                    .into_iter()
-                    .map(|partition| protocol::RequestPartition { partition })
-                    .collect(),
-            })
-            .collect(),
+        topics: vec![
+            request_topic(7, &[3, 1]),
+            request_topic(2, &[]),
+            request_topic(7, &[4]),
+        ],
     }
 }
 
@@ -169,18 +180,31 @@ async fn denied_requests_keep_rows_defaults_and_order_without_running_the_operat
     let rows: Vec<_> = response
         .results
         .iter()
-        .map(|topic| {
-            (
-                topic.topic_id,
-                topic
-                    .partitions
-                    .iter()
-                    .map(|partition| partition.partition)
-                    .collect::<Vec<_>>(),
-            )
+        .map(|topic| ObservedTopic {
+            topic_id: topic.topic_id,
+            partitions: topic
+                .partitions
+                .iter()
+                .map(|partition| partition.partition)
+                .collect::<Vec<_>>(),
         })
         .collect();
-    assert!(rows == vec![(7, vec![3, 1]), (2, vec![]), (7, vec![4])]);
+    assert!(
+        rows == vec![
+            ObservedTopic {
+                topic_id: 7,
+                partitions: vec![3, 1]
+            },
+            ObservedTopic {
+                topic_id: 2,
+                partitions: vec![]
+            },
+            ObservedTopic {
+                topic_id: 7,
+                partitions: vec![4]
+            }
+        ]
+    );
     for topic in response.results {
         assert!(topic.retained == 73);
         for partition in topic.partitions {

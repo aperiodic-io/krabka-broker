@@ -92,12 +92,14 @@ impl Store {
 }
 
 #[derive(Clone, Default)]
-struct Buffer(Arc<Mutex<Vec<u8>>>);
+struct Buffer {
+    output: Arc<Mutex<Vec<u8>>>,
+}
 
 impl<'a> MakeWriter<'a> for Buffer {
     type Writer = MutexGuardWriter<'a, Vec<u8>>;
 
-    fn make_writer(&'a self) -> Self::Writer { self.0.as_ref().make_writer() }
+    fn make_writer(&'a self) -> Self::Writer { self.output.as_ref().make_writer() }
 }
 
 #[test]
@@ -134,17 +136,45 @@ fn records_only_the_operation_contract_and_preserves_results() {
         assert!(store.delete_log_segment_data(&metadata).is_ok());
         assert!(Store { fail: true }.delete_log_segment_data(&metadata) == Err("storage refused"));
     });
-    let output = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    let output = String::from_utf8(buffer.output.lock().unwrap().clone()).unwrap();
     let lines: Vec<_> = output.lines().collect();
     let target = format!("{}:", module_path!());
     assert!(lines.len() == 6);
-    for (line, operation, level) in [
-        (lines[0], "copy_log_segment_data", "INFO"),
-        (lines[1], "fetch_log_segment", "DEBUG"),
-        (lines[2], "fetch_index", "DEBUG"),
-        (lines[3], "delete_log_segment_data", "INFO"),
-        (lines[4], "delete_log_segment_data", "INFO"),
-        (lines[5], "delete_log_segment_data", "ERROR"),
+    for TraceCase {
+        line,
+        operation,
+        level,
+    } in [
+        TraceCase {
+            line: lines[0],
+            operation: "copy_log_segment_data",
+            level: "INFO",
+        },
+        TraceCase {
+            line: lines[1],
+            operation: "fetch_log_segment",
+            level: "DEBUG",
+        },
+        TraceCase {
+            line: lines[2],
+            operation: "fetch_index",
+            level: "DEBUG",
+        },
+        TraceCase {
+            line: lines[3],
+            operation: "delete_log_segment_data",
+            level: "INFO",
+        },
+        TraceCase {
+            line: lines[4],
+            operation: "delete_log_segment_data",
+            level: "INFO",
+        },
+        TraceCase {
+            line: lines[5],
+            operation: "delete_log_segment_data",
+            level: "ERROR",
+        },
     ] {
         assert!(line.contains(level));
         assert!(line.contains(operation));
@@ -159,4 +189,10 @@ fn records_only_the_operation_contract_and_preserves_results() {
     assert!(!output.contains("self="));
     assert!(!output.contains("metadata="));
     assert!(!output.contains("data="));
+}
+
+struct TraceCase<'a> {
+    line: &'a str,
+    operation: &'static str,
+    level: &'static str,
 }

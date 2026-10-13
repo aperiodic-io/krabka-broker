@@ -1,7 +1,7 @@
 //! Common policy fields of the TOML and command-line runtime configurations.
 
 use {
-    crate::meta::{mode, named_body},
+    crate::meta::{ItemBody, mode, named_body},
     moxy::{
         ast::{Field, List, ParseError, Parser, Token},
         token::{LitStr, Span, ToTokenStream, TokenStream, TokenTree},
@@ -325,7 +325,10 @@ fn insert_fields(
     item: TokenStream,
     fields: impl IntoIterator<Item = FieldGroup>,
 ) -> Result<TokenStream, ParseError> {
-    let (mut tokens, body) = named_body(item, "runtime_policy_fields")?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = named_body(item, "runtime_policy_fields")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

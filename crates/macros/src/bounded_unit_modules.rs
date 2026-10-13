@@ -66,7 +66,7 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
             ));
         }
         let codec = plain_path(
-            &options.codec.0,
+            &options.codec.tokens,
             metadata.span(),
             "quantity codec needs a plain module path",
         )?;

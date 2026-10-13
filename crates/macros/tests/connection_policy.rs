@@ -18,11 +18,14 @@ struct Config {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct RetryConfig(usize, Duration);
+struct RetryConfig {
+    attempts: usize,
+    timeout: Duration,
+}
 
 fn retry_config(attempts: usize, timeout: Duration) -> RetryConfig {
     record("retry_config");
-    RetryConfig(attempts, timeout)
+    RetryConfig { attempts, timeout }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -78,7 +81,7 @@ impl Builder {
 
 fn sdk_builder<const MAJOR: u8, const MINOR: u8>(kind: &'static str) -> Builder {
     record("builder");
-    assert!((MAJOR, MINOR) == (1, 2));
+    assert!(MAJOR == 1 && MINOR == 2);
     Builder {
         kind,
         retry: None,
@@ -105,7 +108,13 @@ fn connection_policy_preserves_opaque_builder_scope_and_method_order_for_both_sd
             config
         );
         assert!(configured.kind == kind);
-        assert!(configured.retry == Some(RetryConfig(3, Duration::from_secs(40))));
+        assert!(
+            configured.retry
+                == Some(RetryConfig {
+                    attempts: 3,
+                    timeout: Duration::from_secs(40)
+                })
+        );
         assert!(
             configured.client
                 == Some(ClientOptions {

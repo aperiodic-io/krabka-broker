@@ -63,17 +63,17 @@ fn declaration(input: &TokenStream) -> Result<Table, ParseError> {
         entries.push(Entry {
             adapter,
             api: plain_path(
-                &routing.api.0,
+                &routing.api.tokens,
                 group.span(),
                 "expected private API constant path",
             )?,
             flexible: plain_path(
-                &routing.flexible.0,
+                &routing.flexible.tokens,
                 group.span(),
                 "expected schema flexible-version constant path",
             )?,
             handler: plain_path(
-                &routing.handler.0,
+                &routing.handler.tokens,
                 group.span(),
                 "expected private handler function path",
             )?,

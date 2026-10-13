@@ -44,9 +44,9 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
             ));
         }
     }
-    let session = keys.session.0;
-    let heartbeat = keys.heartbeat.0;
-    let assignment = keys.assignment.0;
+    let session = keys.session.tokens;
+    let heartbeat = keys.heartbeat.tokens;
+    let assignment = keys.assignment.tokens;
     Ok(impl_block(item, &TokenStream::new(), &moxy::template! {
         /// The defaults with no assignment interval, for tests that assign each
         /// membership change at once.

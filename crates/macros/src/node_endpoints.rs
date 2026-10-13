@@ -2,7 +2,9 @@
 
 use moxy::ast::{ItemStruct, ParseError};
 
-struct Targets(Vec<moxy::ast::Path>);
+struct Targets {
+    paths: Vec<moxy::ast::Path>,
+}
 
 impl moxy::ast::FromMeta for Targets {
     fn from_meta(meta: &moxy::ast::Meta) -> Result<Self, ParseError> {
@@ -45,7 +47,7 @@ impl moxy::ast::FromMeta for Targets {
                 "list at least one endpoint target",
             ));
         }
-        Ok(Self(targets))
+        Ok(Self { paths: targets })
     }
 }
 
@@ -84,7 +86,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<moxy::token::TokenStream, Parse
             )
         })?
         .targets
-        .0;
+        .paths;
     let ident = item.ident;
     Ok(moxy::template! {
         @for target in &targets {

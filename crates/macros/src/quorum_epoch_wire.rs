@@ -98,13 +98,13 @@ fn response_body(metadata: &TokenStream, signature: &Signature) -> Result<TokenS
     })?;
     let args = EncoderArgs::from_meta(&args)?;
     let response_type = plain_path(
-        &args.response.0,
-        args.response.0.span(),
+        &args.response.tokens,
+        args.response.tokens.span(),
         "quorum response needs a concrete type path",
     )?;
     let wire = plain_path(
-        &args.wire.0,
-        args.wire.0.span(),
+        &args.wire.tokens,
+        args.wire.tokens.span(),
         "quorum response wire module needs a plain path",
     )?;
     let params = &signature.params.inner.inputs;

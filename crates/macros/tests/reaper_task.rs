@@ -18,12 +18,14 @@ use {
 };
 
 #[derive(Clone, Default)]
-struct CancellationToken(Arc<AtomicBool>);
+struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
 
 impl CancellationToken {
-    fn cancel(&self) { self.0.store(true, Ordering::SeqCst); }
+    fn cancel(&self) { self.cancelled.store(true, Ordering::SeqCst); }
 
-    fn is_cancelled(&self) -> bool { self.0.load(Ordering::SeqCst) }
+    fn is_cancelled(&self) -> bool { self.cancelled.load(Ordering::SeqCst) }
 }
 
 mod task_util {
@@ -90,19 +92,33 @@ impl Visit for Message {
     }
 }
 
-type RecordedEvents = Arc<Mutex<Vec<(Level, &'static str, String)>>>;
-struct ShutdownLog(RecordedEvents);
+struct RecordedEvent {
+    level: Level,
+    target: &'static str,
+    message: String,
+}
+type RecordedEvents = Arc<Mutex<Vec<RecordedEvent>>>;
+struct ShutdownLog {
+    events: RecordedEvents,
+}
 
 impl<S: Subscriber> Layer<S> for ShutdownLog {
     fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
         let metadata = event.metadata();
         let mut message = Message(String::new());
         event.record(&mut message);
-        self.0
-            .lock()
-            .unwrap()
-            .push((*metadata.level(), metadata.target(), message.0));
+        self.events.lock().unwrap().push(RecordedEvent {
+            level: *metadata.level(),
+            target: metadata.target(),
+            message: message.0,
+        });
     }
+}
+
+struct ExpectedShutdown<'a> {
+    event: &'a RecordedEvent,
+    target: &'static str,
+    message: &'static str,
 }
 
 fn is_send(_: impl Future<Output = ()> + Send) {}
@@ -110,7 +126,9 @@ fn is_send(_: impl Future<Output = ()> + Send) {}
 #[tokio::test(flavor = "current_thread")]
 async fn both_reapers_delegate_borrowing_bodies_and_log_at_the_original_targets() {
     let events = RecordedEvents::default();
-    let subscriber = tracing_subscriber::registry().with(ShutdownLog(Arc::clone(&events)));
+    let subscriber = tracing_subscriber::registry().with(ShutdownLog {
+        events: Arc::clone(&events),
+    });
     let _guard = tracing::subscriber::set_default(subscriber);
     let coord = Arc::new(Sweeps::default());
     let interval = Time::from_millis(1);
@@ -144,23 +162,27 @@ async fn both_reapers_delegate_borrowing_bodies_and_log_at_the_original_targets(
     assert!(coord.completed.load(Ordering::SeqCst) == 3);
     let events = events.lock().unwrap();
     assert!(events.len() == 3);
-    for (event, target, message) in [
-        (
-            &events[0],
-            concat!(module_path!(), "::abort_reaper"),
-            "txn idle-transaction reaper shutting down",
-        ),
-        (
-            &events[1],
-            concat!(module_path!(), "::id_reaper"),
-            "transactional-id expiry sweep shutting down",
-        ),
-        (
-            &events[2],
-            concat!(module_path!(), "::abort_reaper"),
-            "txn idle-transaction reaper shutting down",
-        ),
+    for expected in [
+        ExpectedShutdown {
+            event: &events[0],
+            target: concat!(module_path!(), "::abort_reaper"),
+            message: "txn idle-transaction reaper shutting down",
+        },
+        ExpectedShutdown {
+            event: &events[1],
+            target: concat!(module_path!(), "::id_reaper"),
+            message: "transactional-id expiry sweep shutting down",
+        },
+        ExpectedShutdown {
+            event: &events[2],
+            target: concat!(module_path!(), "::abort_reaper"),
+            message: "txn idle-transaction reaper shutting down",
+        },
     ] {
-        assert!(event.0 == Level::INFO && event.1 == target && event.2 == message);
+        assert!(
+            expected.event.level == Level::INFO
+                && expected.event.target == expected.target
+                && expected.event.message == expected.message
+        );
     }
 }

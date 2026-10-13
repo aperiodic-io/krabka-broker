@@ -203,7 +203,16 @@ mod context_only {
 fn codecs_keep_version_selection_flexible_tags_and_complete_consumption() {
     DELEGATIONS.with_borrow_mut(Vec::clear);
     let request = Message(42);
-    for (version, expected) in [(1, &[42][..]), (3, &[42, 0][..])] {
+    for EncodingCase { version, expected } in [
+        EncodingCase {
+            version: 1,
+            expected: &[42][..],
+        },
+        EncodingCase {
+            version: 3,
+            expected: &[42, 0][..],
+        },
+    ] {
         let encoded = variable::encode_request(&request, version);
         assert!(encoded.as_ref() == expected);
         assert!(variable::decode_response(&encoded, version) == request);
@@ -247,9 +256,18 @@ fn malformed_or_trailing_response_bytes_and_encoding_errors_still_panic() {
 fn context_keeps_borrowed_identity_client_scope_and_constructor_defaults() {
     DELEGATIONS.with_borrow_mut(Vec::clear);
     let peer: SocketAddr = "127.0.0.1:9092".parse().unwrap();
-    for (principal, expected_client) in [
-        (Principal("admin-client"), "admin-client"),
-        (Principal(""), "anonymous-client"),
+    for IdentityCase {
+        principal,
+        expected_client,
+    } in [
+        IdentityCase {
+            principal: Principal("admin-client"),
+            expected_client: "admin-client",
+        },
+        IdentityCase {
+            principal: Principal(""),
+            expected_client: "anonymous-client",
+        },
     ] {
         let context = variable::test_context(&principal, &peer);
         assert!(ptr::eq(
@@ -275,4 +293,14 @@ fn context_keeps_borrowed_identity_client_scope_and_constructor_defaults() {
                 ]
         );
     });
+}
+
+struct EncodingCase {
+    version: i16,
+    expected: &'static [u8],
+}
+
+struct IdentityCase {
+    principal: Principal,
+    expected_client: &'static str,
 }

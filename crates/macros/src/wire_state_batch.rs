@@ -14,6 +14,11 @@ struct WireArgs {
     write: Tokens,
 }
 
+struct Conversion<'a> {
+    wire: &'a moxy::ast::Path,
+    from_borrowed: bool,
+}
+
 pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     use {
         crate::meta::named_fields,
@@ -52,7 +57,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
             )
         })?;
     let mut targets = Vec::new();
-    for argument in [&args.read.0, &args.write.0] {
+    for argument in [&args.read.tokens, &args.write.tokens] {
         let path = plain_path(
             argument,
             argument.span(),
@@ -66,7 +71,16 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
             "read and write batch types must differ",
         ));
     }
-    let conversions = [(&targets[0], false), (&targets[1], true)];
+    let conversions = [
+        Conversion {
+            wire: &targets[0],
+            from_borrowed: false,
+        },
+        Conversion {
+            wire: &targets[1],
+            from_borrowed: true,
+        },
+    ];
     let offset = fields
         .iter()
         .find(|field| {
@@ -80,9 +94,9 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         .clone();
     let ident = item.ident;
     Ok(moxy::template! {
-        @for (wire, from_borrowed) in conversions {
-            impl ::core::convert::From<@if from_borrowed { & } {{ wire }}> for {{ ident }} {
-                fn from(batch: @if from_borrowed { & } {{ wire }}) -> Self {
+        @for conversion in conversions {
+            impl ::core::convert::From<@if conversion.from_borrowed { & } {{ conversion.wire }}> for {{ ident }} {
+                fn from(batch: @if conversion.from_borrowed { & } {{ conversion.wire }}) -> Self {
                     Self {
                         first_offset: {{ offset }}(batch.first_offset),
                         last_offset: {{ offset }}(batch.last_offset),
@@ -91,8 +105,8 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
                     }
                 }
             }
-            impl ::core::convert::From<@if !from_borrowed { & } {{ ident }}> for {{ wire }} {
-                fn from(batch: @if !from_borrowed { & } {{ ident }}) -> Self {
+            impl ::core::convert::From<@if !conversion.from_borrowed { & } {{ ident }}> for {{ conversion.wire }} {
+                fn from(batch: @if !conversion.from_borrowed { & } {{ ident }}) -> Self {
                     Self {
                         first_offset: batch.first_offset.0,
                         last_offset: batch.last_offset.0,

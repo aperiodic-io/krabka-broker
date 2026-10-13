@@ -1,13 +1,16 @@
 //! Shared retry and HTTP timeout fields of object-store configurations.
 
 use crate::{
-    meta::{named_body, no_arguments},
+    meta::{ItemBody, named_body, no_arguments},
     prelude::*,
 };
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     no_arguments(meta, "object_store_config")?;
-    let (mut tokens, body) = named_body(item, "object_store_config")?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = named_body(item, "object_store_config")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

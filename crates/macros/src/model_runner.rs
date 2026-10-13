@@ -36,19 +36,19 @@ fn options(metadata: &TokenStream) -> Result<Runner, ParseError> {
             "runner order must be properties_first or properties_last",
         ));
     }
-    for tokens in [&runner.bfs.0, &runner.pin.0] {
+    for tokens in [&runner.bfs.tokens, &runner.pin.tokens] {
         let parser = Parser::from_tokens(tokens);
         let _: Path = Parse::parse(&parser)?;
         if !parser.is_empty() {
             return Err(parser.error("runner helper must be a function path"));
         }
     }
-    let parser = Parser::from_tokens(&runner.checker.0);
+    let parser = Parser::from_tokens(&runner.checker.tokens);
     let _: Ident = Parse::parse(&parser)?;
     if !parser.is_empty() {
         return Err(parser.error("checker needs one local binding"));
     }
-    if runner.depth.0.is_empty() || runner.states.0.is_empty() {
+    if runner.depth.tokens.is_empty() || runner.states.tokens.is_empty() {
         return Err(ParseError::new(
             metadata.span(),
             "runner depth and state bounds must be nonempty",
@@ -81,11 +81,11 @@ fn statements(runner: Runner, signature: &Signature) -> Result<RunnerStatements,
         order,
         checker,
     } = runner;
-    let bfs = bfs.0;
-    let pin = pin.0;
-    let depth = depth.0;
-    let states = states.0;
-    let checker = checker.0;
+    let bfs = bfs.tokens;
+    let pin = pin.tokens;
+    let depth = depth.tokens;
+    let states = states.tokens;
+    let checker = checker.tokens;
     let before = moxy::template! { let {{ checker }} = {{ bfs }}({{ model }}, {{ label }}, {{ depth }}, {{ states }}); };
     let after = moxy::template! {
         @if order == "properties_first" { ::stateright::Checker::assert_properties(&{{ checker }}); }

@@ -141,7 +141,12 @@ fn function(declaration: &Declaration, pinned: bool) -> TokenStream {
 }
 
 /// Each declaration has one native value group; visibility's groups precede its fixed name.
-fn native_values(input: NativeTokenStream) -> Vec<(String, NativeTokenStream)> {
+struct NativeValue {
+    name: String,
+    value: NativeTokenStream,
+}
+
+fn native_values(input: NativeTokenStream) -> Vec<NativeValue> {
     let mut tokens = input.into_iter();
     let mut values = Vec::new();
     while let Some(token) = tokens.next() {
@@ -154,7 +159,10 @@ fn native_values(input: NativeTokenStream) -> Vec<(String, NativeTokenStream)> {
             let Some(NativeTokenTree::Group(group)) = tokens.next() else {
                 unreachable!("validated helper value")
             };
-            values.push((name.to_string(), group.stream()));
+            values.push(NativeValue {
+                name: name.to_string(),
+                value: group.stream(),
+            });
         }
     }
     values
@@ -165,8 +173,8 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
     let values = native_values(input);
     let version = values
         .iter()
-        .find(|(name, _)| name == "version")
-        .map(|(_, value)| value);
+        .find(|entry| entry.name == "version")
+        .map(|entry| &entry.value);
     let mut output = NativeTokenStream::new();
     for declaration in declarations
         .iter()
@@ -175,9 +183,9 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
         let value = if declaration.kind == Kind::Context {
             values
                 .iter()
-                .find(|(name, _)| name == "test_context")
+                .find(|entry| entry.name == "test_context")
                 .expect("validated context value")
-                .1
+                .value
                 .clone()
         } else {
             version

@@ -85,19 +85,36 @@ async fn handle(
 
 #[tokio::test]
 async fn preserves_admission_early_answers_errors_and_operation_results() {
-    for (mode, value, expected, events) in [
-        (AdmissionMode::Continue, 7, Ok(vec![8, 3, 4]), vec![
-            "admission",
-            "operation",
-        ]),
-        (AdmissionMode::Answer, 7, Ok(vec![31]), vec!["admission"]),
-        (AdmissionMode::Error, 7, Err("admission failed"), vec![
-            "admission",
-        ]),
-        (AdmissionMode::Continue, 0, Err("operation failed"), vec![
-            "admission",
-            "operation",
-        ]),
+    for AdmissionCase {
+        mode,
+        value,
+        expected,
+        events,
+    } in [
+        AdmissionCase {
+            mode: AdmissionMode::Continue,
+            value: 7,
+            expected: Ok(vec![8, 3, 4]),
+            events: vec!["admission", "operation"],
+        },
+        AdmissionCase {
+            mode: AdmissionMode::Answer,
+            value: 7,
+            expected: Ok(vec![31]),
+            events: vec!["admission"],
+        },
+        AdmissionCase {
+            mode: AdmissionMode::Error,
+            value: 7,
+            expected: Err("admission failed"),
+            events: vec!["admission"],
+        },
+        AdmissionCase {
+            mode: AdmissionMode::Continue,
+            value: 0,
+            expected: Err("operation failed"),
+            events: vec!["admission", "operation"],
+        },
     ] {
         let broker = Broker {
             mode,
@@ -107,4 +124,11 @@ async fn preserves_admission_early_answers_errors_and_operation_results() {
         assert!(handle(&broker, 2, &[value], &ctx).await == expected);
         assert!(*broker.events.borrow() == events);
     }
+}
+
+struct AdmissionCase {
+    mode: AdmissionMode,
+    value: u8,
+    expected: Result<Bytes, BrokerError>,
+    events: Vec<&'static str>,
 }

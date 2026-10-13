@@ -475,7 +475,11 @@ krabka_macros::bound_start_fixture!(
 
 /// Boot a broker leading a single-voter quorum with separate loopback listeners.
 pub(crate) async fn start_controller() -> (BrokerHandle, SocketAddr, tempfile::TempDir) {
-    let (controller, controller_addr, dir) = start_bound_controller(|_| {}).await;
+    let StartedBoundBroker {
+        broker: controller,
+        controller_addr,
+        dir,
+    } = start_bound_controller(|_| {}).await;
     // Bind the handle after the directory so a failed readiness wait drops the broker first.
     let broker = controller;
     broker.wait_until_controller_leader().await;

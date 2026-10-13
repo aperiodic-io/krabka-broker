@@ -90,25 +90,29 @@ impl<T> Builder<T> {
 }
 
 #[derive(Debug)]
-struct SpanExporter(Built);
+struct SpanExporter {
+    built: Built,
+}
 
 impl SpanExporter {
     fn builder() -> Builder<Self> { Builder::new() }
 }
 
 impl From<Built> for SpanExporter {
-    fn from(built: Built) -> Self { Self(built) }
+    fn from(built: Built) -> Self { Self { built } }
 }
 
 #[derive(Debug)]
-struct LogExporter(Built);
+struct LogExporter {
+    built: Built,
+}
 
 impl LogExporter {
     fn builder() -> Builder<Self> { Builder::new() }
 }
 
 impl From<Built> for LogExporter {
-    fn from(built: Built) -> Self { Self(built) }
+    fn from(built: Built) -> Self { Self { built } }
 }
 
 struct OtlpConfig {
@@ -137,9 +141,15 @@ impl OtlpConfig {
 
 #[test]
 fn grpc_and_http_protobuf_configure_both_exporter_types() {
-    for (protocol, expected) in [
-        (OtlpProtocol::Grpc, Protocol::Grpc),
-        (OtlpProtocol::HttpProtobuf, Protocol::HttpBinary),
+    for TransportCase { protocol, expected } in [
+        TransportCase {
+            protocol: OtlpProtocol::Grpc,
+            expected: Protocol::Grpc,
+        },
+        TransportCase {
+            protocol: OtlpProtocol::HttpProtobuf,
+            expected: Protocol::HttpBinary,
+        },
     ] {
         let cfg = OtlpConfig {
             protocol,
@@ -147,8 +157,8 @@ fn grpc_and_http_protobuf_configure_both_exporter_types() {
             timeout: 9,
         };
         for built in [
-            cfg.build_exporter().unwrap().0,
-            cfg.build_log_exporter().unwrap().0,
+            cfg.build_exporter().unwrap().built,
+            cfg.build_log_exporter().unwrap().built,
         ] {
             assert!(
                 built
@@ -166,10 +176,26 @@ fn grpc_and_http_protobuf_configure_both_exporter_types() {
 #[test]
 fn either_transport_propagates_the_sdk_error_through_both_methods() {
     for protocol in [OtlpProtocol::Grpc, OtlpProtocol::HttpProtobuf] {
-        for (endpoint, timeout, expected) in [
-            ("", 9, BuildError::Endpoint),
-            ("http://collector:4317", 0, BuildError::Timeout),
-            ("", 0, BuildError::Endpoint),
+        for RefusedBuildCase {
+            endpoint,
+            timeout,
+            expected,
+        } in [
+            RefusedBuildCase {
+                endpoint: "",
+                timeout: 9,
+                expected: BuildError::Endpoint,
+            },
+            RefusedBuildCase {
+                endpoint: "http://collector:4317",
+                timeout: 0,
+                expected: BuildError::Timeout,
+            },
+            RefusedBuildCase {
+                endpoint: "",
+                timeout: 0,
+                expected: BuildError::Endpoint,
+            },
         ] {
             let cfg = OtlpConfig {
                 protocol,
@@ -185,4 +211,15 @@ fn either_transport_propagates_the_sdk_error_through_both_methods() {
             }
         }
     }
+}
+
+struct TransportCase {
+    protocol: OtlpProtocol,
+    expected: Protocol,
+}
+
+struct RefusedBuildCase {
+    endpoint: &'static str,
+    timeout: u64,
+    expected: BuildError,
 }

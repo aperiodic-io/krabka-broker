@@ -201,13 +201,26 @@ fn a_state_request_with_an_id_over_32767_bytes_is_refused() {
 
 #[test]
 fn the_string_bound_counts_utf8_bytes_instead_of_characters() {
-    for (suffix, accepted) in [("abc", true), ("abcd", false)] {
+    struct Utf8BoundaryCase {
+        suffix: &'static str,
+        accepted: bool,
+    }
+    for case in [
+        Utf8BoundaryCase {
+            suffix: "abc",
+            accepted: true,
+        },
+        Utf8BoundaryCase {
+            suffix: "abcd",
+            accepted: false,
+        },
+    ] {
         let request = InitProducerIdRequest {
-            transactional_id: Some(format!("{}{suffix}", "🦀".repeat(8191))),
+            transactional_id: Some(format!("{}{}", "🦀".repeat(8191), case.suffix)),
             ..Default::default()
         };
-        assert!(request.longest_record_string() == if accepted { LIMIT } else { LIMIT + 1 });
-        assert!(decoded(&request, init_producer_id_request::MAX_VERSION).is_ok() == accepted);
+        assert!(request.longest_record_string() == if case.accepted { LIMIT } else { LIMIT + 1 });
+        assert!(decoded(&request, init_producer_id_request::MAX_VERSION).is_ok() == case.accepted);
     }
 }
 

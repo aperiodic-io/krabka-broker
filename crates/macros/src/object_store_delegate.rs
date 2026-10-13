@@ -1,7 +1,7 @@
 //! Explicit delegation of an object-store wrapper's unchanged methods.
 
 use {
-    crate::meta::item_body,
+    crate::meta::{ItemBody, item_body},
     moxy::{
         ast::ParseError,
         token::{Ident, Span, TokenStream, TokenTree},
@@ -112,7 +112,10 @@ fn implementation(name: &Ident) -> Result<TokenStream, ParseError> {
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     let names = methods(meta)?;
-    let (mut tokens, body) = item_body(item, "object_store_delegate", TokenTree::is_keyword_impl)?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = item_body(item, "object_store_delegate", TokenTree::is_keyword_impl)?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };

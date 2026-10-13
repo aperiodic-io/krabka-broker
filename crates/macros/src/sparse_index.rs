@@ -1,7 +1,7 @@
 //! Sparse-index construction and file operations, with shared open instrumentation.
 
 use {
-    crate::meta::{compact, impl_block, item_body, named_fields},
+    crate::meta::{ItemBody, compact, impl_block, item_body, named_fields},
     moxy::{
         ast::{Attributed, FnParam, FromMeta, ItemFn, ItemStruct, Meta, ParseError},
         token::{LitStr, Spanner, TokenStream, TokenTree},
@@ -43,6 +43,13 @@ fn open_instrumentation() -> TokenStream {
     }
 }
 
+struct IndexPolicy {
+    raw: TokenStream,
+    invariant: &'static str,
+    target: TokenStream,
+    documentation: Option<&'static str>,
+}
+
 pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     let options = item
         .parse_meta::<IndexArgs>("sparse_index")?
@@ -64,21 +71,26 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
             ));
         }
     }
-    let (raw, invariant, target, documentation) = match options.kind {
-        Kind::Offset => (
-            moxy::template! { OffsetEntryRaw },
-            "length is a multiple of OFFSET_ENTRY_SIZE and OffsetEntryRaw is Unaligned",
-            moxy::template! { crate::io::IoTarget::OffsetIndex },
-            Some(
+    let IndexPolicy {
+        raw,
+        invariant,
+        target,
+        documentation,
+    } = match options.kind {
+        Kind::Offset => IndexPolicy {
+            raw: moxy::template! { OffsetEntryRaw },
+            invariant: "length is a multiple of OFFSET_ENTRY_SIZE and OffsetEntryRaw is Unaligned",
+            target: moxy::template! { crate::io::IoTarget::OffsetIndex },
+            documentation: Some(
                 "Open or create an offset-index file. If the file exists, this method\nloads its entries into memory. If it does not exist, this method\ncreates an empty file.",
             ),
-        ),
-        Kind::Time => (
-            moxy::template! { TimeEntryRaw },
-            "length is a multiple of TIME_ENTRY_SIZE and TimeEntryRaw is Unaligned",
-            moxy::template! { crate::io::IoTarget::TimeIndex },
-            None,
-        ),
+        },
+        Kind::Time => IndexPolicy {
+            raw: moxy::template! { TimeEntryRaw },
+            invariant: "length is a multiple of TIME_ENTRY_SIZE and TimeEntryRaw is Unaligned",
+            target: moxy::template! { crate::io::IoTarget::TimeIndex },
+            documentation: None,
+        },
     };
     let invariant = LitStr::new(invariant, item.ident.span());
     let documentation = documentation.map(|text| LitStr::new(text, item.ident.span()));
@@ -124,7 +136,10 @@ fn validate_open(meta: &TokenStream, input: &TokenStream) -> Result<(), ParseErr
             "`index_open` takes no arguments",
         ));
     }
-    let (mut tokens, body) = item_body(input.clone(), "index_open", TokenTree::is_keyword_fn)?;
+    let ItemBody {
+        mut tokens,
+        body_index: body,
+    } = item_body(input.clone(), "index_open", TokenTree::is_keyword_fn)?;
     if body + 1 != tokens.len() {
         return Err(ParseError::new(
             input.span(),
@@ -177,7 +192,7 @@ mod tests {
     fn generates_the_complete_file_index_contract_for_both_kinds() {
         for kind in ["offset", "time"] {
             let source = format!(
-                "#[sparse_index(kind = \"{kind}\")] struct DiskIndex {{ entries: Vec<(i64, u32)>, io: Arc<dyn LogIo>, file: File }}"
+                "#[sparse_index(kind = \"{kind}\")] struct DiskIndex {{ entries: Vec<IndexEntry<i64, u32>>, io: Arc<dyn LogIo>, file: File }}"
             );
             let declaration: ItemStruct = moxy::parse!({ source }).unwrap();
             let implementation: ItemImpl = moxy::parse!({ expand(declaration).unwrap() }).unwrap();
@@ -201,8 +216,8 @@ mod tests {
             "#[sparse_index(kind = \"stamp\")] struct OtherKind {}",
             "#[sparse_index(kind = 1)] struct WrongType {}",
             "#[sparse_index(kind = \"time\")] struct Tuple(File);",
-            "#[sparse_index(kind = \"offset\")] struct NoFile { io: Arc<dyn LogIo>, entries: Vec<(u32, u32)> }",
-            "#[sparse_index(kind = \"time\")] struct NoIo { file: File, entries: Vec<(i64, u32)> }",
+            "#[sparse_index(kind = \"offset\")] struct NoFile { io: Arc<dyn LogIo>, entries: Vec<IndexEntry<u32, u32>> }",
+            "#[sparse_index(kind = \"time\")] struct NoIo { file: File, entries: Vec<IndexEntry<i64, u32>> }",
             "#[sparse_index(kind = \"offset\")] struct NoEntries { file: File, io: Arc<dyn LogIo> }",
         ] {
             let declaration: ItemStruct = moxy::parse!({ source }).unwrap();

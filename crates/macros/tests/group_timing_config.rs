@@ -51,10 +51,15 @@ struct Config {
     unrelated: u32,
 }
 
-fn overrides(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+struct Override<'a> {
+    key: &'a str,
+    value: &'a str,
+}
+
+fn overrides(entries: &[Override<'_>]) -> BTreeMap<String, String> {
     entries
         .iter()
-        .map(|&(key, value)| (key.into(), value.into()))
+        .map(|entry| (entry.key.into(), entry.value.into()))
         .collect()
 }
 
@@ -62,8 +67,14 @@ fn overrides(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
 fn absent_invalid_and_other_protocol_timings_borrow_the_original() {
     let config = Config::default();
     let ignored = overrides(&[
-        ("share.session.timeout.ms", "50000"),
-        (HEARTBEAT, "invalid"),
+        Override {
+            key: "share.session.timeout.ms",
+            value: "50000",
+        },
+        Override {
+            key: HEARTBEAT,
+            value: "invalid",
+        },
     ]);
     for values in [None, Some(&BTreeMap::new()), Some(&ignored)] {
         let Cow::Borrowed(actual) = config.for_group(values) else {
@@ -75,28 +86,80 @@ fn absent_invalid_and_other_protocol_timings_borrow_the_original() {
 
 #[test]
 fn applies_each_timing_and_keeps_unrelated_configuration() {
+    struct Case<'a> {
+        entries: Vec<Override<'a>>,
+        session: u64,
+        heartbeat: u64,
+        assignment: u64,
+    }
     let config = Config::default();
-    for (entries, expected) in [
-        (vec![(SESSION, "45000")], [45, 5, 1]),
-        (vec![(SESSION, "50000")], [50, 5, 1]),
-        (vec![(HEARTBEAT, "7000")], [45, 7, 1]),
-        (vec![(ASSIGNMENT, "0")], [45, 5, 0]),
-        (
-            vec![(SESSION, "0"), (HEARTBEAT, "20000"), (ASSIGNMENT, "20000")],
-            [45, 15, 15],
-        ),
+    for case in [
+        Case {
+            entries: vec![Override {
+                key: SESSION,
+                value: "45000",
+            }],
+            session: 45,
+            heartbeat: 5,
+            assignment: 1,
+        },
+        Case {
+            entries: vec![Override {
+                key: SESSION,
+                value: "50000",
+            }],
+            session: 50,
+            heartbeat: 5,
+            assignment: 1,
+        },
+        Case {
+            entries: vec![Override {
+                key: HEARTBEAT,
+                value: "7000",
+            }],
+            session: 45,
+            heartbeat: 7,
+            assignment: 1,
+        },
+        Case {
+            entries: vec![Override {
+                key: ASSIGNMENT,
+                value: "0",
+            }],
+            session: 45,
+            heartbeat: 5,
+            assignment: 0,
+        },
+        Case {
+            entries: vec![
+                Override {
+                    key: SESSION,
+                    value: "0",
+                },
+                Override {
+                    key: HEARTBEAT,
+                    value: "20000",
+                },
+                Override {
+                    key: ASSIGNMENT,
+                    value: "20000",
+                },
+            ],
+            session: 45,
+            heartbeat: 15,
+            assignment: 15,
+        },
     ] {
-        let values = overrides(&entries);
+        let values = overrides(&case.entries);
         let Cow::Owned(actual) = config.for_group(Some(&values)) else {
             panic!("a valid override must create a configuration")
         };
-        let [session, heartbeat, assignment] = expected;
         assert!(
             actual
                 == Config {
-                    session_timeout: Duration::from_secs(session),
-                    heartbeat_interval: Duration::from_secs(heartbeat),
-                    assignment_interval: Duration::from_secs(assignment),
+                    session_timeout: Duration::from_secs(case.session),
+                    heartbeat_interval: Duration::from_secs(case.heartbeat),
+                    assignment_interval: Duration::from_secs(case.assignment),
                     ..config.clone()
                 }
         );

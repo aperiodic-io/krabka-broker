@@ -23,10 +23,10 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
         moxy::template! { config_alter_handler({{ input }}) }
     })?;
     let options = Options::from_meta(&meta)?;
-    let request: Path = moxy::parse!({ options.request.0 })?;
-    let response: Path = moxy::parse!({ options.response.0 })?;
-    let audit: Path = moxy::parse!({ options.audit.0 })?;
-    let process: Path = moxy::parse!({ options.process.0 })?;
+    let request: Path = moxy::parse!({ options.request.tokens })?;
+    let response: Path = moxy::parse!({ options.response.tokens })?;
+    let audit: Path = moxy::parse!({ options.audit.tokens })?;
+    let process: Path = moxy::parse!({ options.process.tokens })?;
     let operation = LitStr::new(&options.operation, meta.span());
     let audits_in_process =
         moxy::template! { @if options.audits_in_process { true } @else { false } };

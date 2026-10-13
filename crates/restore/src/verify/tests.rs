@@ -411,10 +411,15 @@ fn segment_bytes(batch1_max_ts: i64, batch2_max_ts: i64) -> SegmentBytes {
 
 fn valid_segment_bytes() -> SegmentBytes { segment_bytes(1020, 1040) }
 
-fn write_valid_segment(dir: &std::path::Path) -> (SegmentBytes, SegmentInventory) {
+struct WrittenSegment {
+    fixture: SegmentBytes,
+    segment: SegmentInventory,
+}
+
+fn write_valid_segment(dir: &std::path::Path) -> WrittenSegment {
     let fixture = valid_segment_bytes();
     let segment = write_segment(dir, &fixture, &[]);
-    (fixture, segment)
+    WrittenSegment { fixture, segment }
 }
 
 fn write_segment(dir: &std::path::Path, bytes: &SegmentBytes, omit: &[&str]) -> SegmentInventory {
@@ -466,7 +471,7 @@ async fn a_clean_segment_verifies_and_reports_its_facts() {
         store,
         partition,
     } = verification_context();
-    let (fixture, segment) = write_valid_segment(dir.path());
+    let WrittenSegment { fixture, segment } = write_valid_segment(dir.path());
 
     let verified = verify_segment(&store, &partition, &segment)
         .await
@@ -495,7 +500,7 @@ async fn authenticated_fetch_rejects_object_replacement() {
         store,
         partition,
     } = verification_context();
-    let (fixture, segment) = write_valid_segment(dir.path());
+    let WrittenSegment { fixture, segment } = write_valid_segment(dir.path());
     let objects = segment
         .artifacts()
         .map(|artifact| {

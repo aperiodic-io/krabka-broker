@@ -148,7 +148,11 @@ krabka_macros::bound_start_fixture!(start, start_bound, ::krabka_broker, expect,
 pub async fn start_with_bound_listeners(
     customize: impl FnOnce(&mut BrokerConfig),
 ) -> (BrokerHandle, TempDir) {
-    let (broker, _controller_addr, dir) = start_bound(customize).await;
+    let StartedBoundBroker {
+        broker,
+        controller_addr: _,
+        dir,
+    } = start_bound(customize).await;
     (broker, dir)
 }
 
