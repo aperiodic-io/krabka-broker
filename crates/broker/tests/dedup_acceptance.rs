@@ -1,7 +1,35 @@
 //! KFC-10 produce-time deduplication, driven through the Kafka protocol
 //! against one in-process broker.
+//!
+//! Each child module covers one part of the contract in
+//! `docs/KFCs/KFC-10-produce-time-record-deduplication.md`: the first-wins
+//! rule and its offsets, the header identity, timestamps and the window,
+//! compressed batches, producer kinds and `acks`, the config surface, config
+//! changes on a live topic, the metrics, and large records. A `tests/*.rs`
+//! file is a crate root, so every child names its path.
 
 mod support;
+
+#[path = "dedup_acceptance/compression.rs"]
+mod compression;
+#[path = "dedup_acceptance/config_surface.rs"]
+mod config_surface;
+#[path = "dedup_acceptance/first_wins.rs"]
+mod first_wins;
+#[path = "dedup_acceptance/harness.rs"]
+mod harness;
+#[path = "dedup_acceptance/header_mode.rs"]
+mod header_mode;
+#[path = "dedup_acceptance/large_records.rs"]
+mod large_records;
+#[path = "dedup_acceptance/metrics.rs"]
+mod metrics;
+#[path = "dedup_acceptance/producers.rs"]
+mod producers;
+#[path = "dedup_acceptance/runtime_config.rs"]
+mod runtime_config;
+#[path = "dedup_acceptance/timestamps.rs"]
+mod timestamps;
 
 use {
     assert2::assert,
