@@ -23,66 +23,12 @@ use {
 /// A cluster ACL gate: `true` when the authorizer denies `ctx`'s principal.
 pub(super) type ClusterGate = fn(&dyn Authorizer, &MetadataImage, &RequestContext<'_>) -> bool;
 
-/// The encoded, contextual entry point of each KIP-853 voter operation.
-macro_rules! handler {
-    ($broker:ident, $version:ident, $bytes:ident, $ctx:ident, $body:block) => {
-        wire_handler!(async ($broker, $version, $bytes, $ctx), $body);
-    };
-}
-
-pub(super) use handler;
-
-/// Add/remove voter RPCs share the Cluster:Alter admission and leader-only refusal.
-macro_rules! leader_handler {
-    (
-        ($broker:ident, $version:ident, $bytes:ident, $ctx:ident),($request:ty, $response:ty, $api:expr, $denied:expr),($req:ident, $image:ident, $quorum:ident),
-        $body:block
-    ) => {
-        crate::handlers::raft_voter::handler!($broker, $version, $bytes, $ctx, {
-            let crate::handlers::raft_voter::Admitted {
-                req: $req,
-                image: $image,
-                quorum: $quorum,
-            } = crate::handlers::raft_voter::admit!(
-                $request,
-                ($broker, $version, $bytes, $ctx),
-                $api,
-                crate::handlers::cluster_alter_denied,
-                crate::handlers::raft_voter::Refusals::<$response>::messages(
-                    Some($denied.into()),
-                    Some(String::new()),
-                )
-            );
-            $body
-        });
-    };
-}
-pub(super) use leader_handler;
-
-/// Keep early encoded answers at the caller's entry point, before its own voter checks.
-macro_rules! admit {
-    (
-        $request:ty,($broker:expr, $version:expr, $bytes:expr, $ctx:expr),
-        $api:expr,
-        $gate:expr,
-        $refusals:expr
-    ) => {
-        match crate::handlers::raft_voter::prelude::<$request, _>(
-            $broker, $version, $bytes, $ctx, $api, $gate, $refusals,
-        )
-        .await?
-        {
-            std::ops::ControlFlow::Break(answer) => return Ok(answer),
-            std::ops::ControlFlow::Continue(admitted) => admitted,
-        }
-    };
-}
-pub(super) use admit;
-
 #[cfg(test)]
 macro_rules! test_dispatch {
     ($api:expr, $request:ty, $response:ty) => {
-        crate::test_support::context_helper!(client_id = "admin-client");
+        krabka_macros::wire_codec_helpers! {
+            test_context ["admin-client"];
+        }
         async fn answer(
             broker: &crate::broker::Broker,
             version: i16,
@@ -191,15 +137,13 @@ pub(super) struct Refusals<R> {
 }
 
 impl<R: ErrorResponse> Refusals<R> {
-    /// The add/remove leader-only refusals keep the caller's nullable messages.
-    /// Kafka sets only the error code on a failed leader check, so those callers
-    /// explicitly pass the generated empty-string default rather than null.
-    pub(super) fn messages(denied: Option<String>, not_leader: Option<String>) -> Self {
+    /// Add/remove refusals carry the denial message and Kafka's empty leader-check message.
+    pub(super) fn leader_only(denied: &str) -> Self {
         Self {
-            denied: R::error(CLUSTER_AUTHORIZATION_FAILED, denied),
+            denied: R::error(CLUSTER_AUTHORIZATION_FAILED, Some(denied.into())),
             not_leader: R::error(
                 krabka_raft::voter_requests::NOT_LEADER_OR_FOLLOWER,
-                not_leader,
+                Some(String::new()),
             ),
         }
     }

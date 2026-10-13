@@ -7,7 +7,10 @@ use crate::reconfiguration::{
 #[cfg(creusot)]
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Logical admission includes both the captured membership and the requested plan.
 pub(super) fn reconfiguration_admitted(
     old: Seq<u64>,
@@ -25,21 +28,27 @@ pub(super) fn reconfiguration_admitted(
             }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn has_node(nodes: Seq<u64>, count: Int, node: u64) -> bool {
     pearlite! { exists<i: Int> 0 <= i && i < count && nodes[i] == node }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn valid_old(nodes: Seq<u64>) -> bool {
     pearlite! { nodes.len() > 0 && crate::sequence::distinct(nodes) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn membership_coherent(
     nodes: Seq<u64>,
     node: u64,
@@ -49,9 +58,11 @@ pub fn membership_coherent(
     pearlite! { kind == VoterChangeKind::FinalizeKraftVersion
     || has_node(nodes, nodes.len(), node) == (membership != TargetMembership::Absent) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn expected_member(
     nodes: Seq<u64>,
     count: Int,
@@ -65,7 +76,6 @@ pub fn expected_member(
         VoterChangeKind::Update | VoterChangeKind::FinalizeKraftVersion => has_node(nodes, count, node),
     } }
 }
-}
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
@@ -75,7 +85,10 @@ pub fn expected_member(
 #[ensures(old / 2 + 1 + next / 2 + 1 > old.max(next))]
 pub fn adjacent_majorities_exceed_union(old: Int, next: Int) {}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Mathematical grant ledger over actual membership, rather than supplied
 /// counts. The extra candidate slot is ignored if its ID already occurs.
 #[variant(count)]
@@ -96,7 +109,6 @@ pub fn grant_count(
         } else { if count - 1 < old.len() && votes[count - 1].0 { 1 } else { 0 } }
     } }
 }
-}
 
 /// A prefix gains exactly the next node, including preservation of old IDs.
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
@@ -108,7 +120,10 @@ pub fn grant_count(
     == (has_node(nodes, count, id) || nodes[count] == id))]
 pub fn prefix_node_extend(nodes: Seq<u64>, count: Int) {}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn single_change_shape(
     old: Seq<u64>,
     next: Seq<u64>,
@@ -121,9 +136,11 @@ pub(super) fn single_change_shape(
         && (crate::sequence::distinct(next))
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The constructed membership matches the nonempty admitted plan.
 pub(super) fn admitted_membership(
     context: CurrentVoterSet,
@@ -135,9 +152,11 @@ pub(super) fn admitted_membership(
     pearlite! { admitted_plan(context, kind, plan) && may_reconfigure(leadership, context)
     && next.len() == plan.next_voter_count@ && next.len() > 0 }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every node in the new set agrees with the requested single-voter change.
 pub fn membership_matches_change(
     old: Seq<u64>,
@@ -146,5 +165,4 @@ pub fn membership_matches_change(
     node: u64,
 ) -> bool {
     pearlite! { forall<id: u64> has_node(next, next.len(), id) == expected_member(old, old.len(), kind, node, id) }
-}
 }

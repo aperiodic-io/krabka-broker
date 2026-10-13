@@ -20,7 +20,7 @@ impl RuntimeFileConfig {
     pub(super) fn apply_core(&mut self, cfg: &mut BrokerConfig) -> Result<(), FileConfigError> {
         let runtime = self;
 
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             positive_time: startup_leader_wait_timeout, self_registration_backoff_min,
                 self_registration_backoff_max, observer_poll_interval,
@@ -33,7 +33,7 @@ impl RuntimeFileConfig {
         if let Some(enabled) = runtime.legacy_request_versions_enable {
             cfg.features.legacy_request_versions = enabled.into();
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             kafka_int_bytes: fetch_max_bytes;
             positive_time: client_metrics_eviction_tick, client_metrics_stale_floor;
@@ -62,7 +62,7 @@ impl RuntimeFileConfig {
             }
             cfg.replication.fetchers = fetchers;
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_bytes_i32: replication_fetch_max => replication.fetch_max;
             whole_millis_i32_time: replication_fetch_max_wait => replication.fetch_max_wait;

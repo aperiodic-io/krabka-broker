@@ -105,7 +105,10 @@ pub(super) fn control_marker_bounds_committed_fetch(
     (visibility.limit_offset, aborted)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A decoded marker for this producer is entirely below the high watermark.
 fn committed_producer_marker(
     is_control: bool,
@@ -117,5 +120,4 @@ fn committed_producer_marker(
     pearlite! { is_control && key.len() >= 4 && key[2]@ == 0
     && (key[3]@ == 0 || key[3]@ == 1) && producer.0 == producer.1
     && high_watermark > marker_last }
-}
 }

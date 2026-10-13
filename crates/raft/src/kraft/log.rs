@@ -444,12 +444,7 @@ impl LogView for KraftLog {
         // The log seam speaks `krabka_ids::LeaderEpoch(i32)`; the core's
         // consensus `Epoch` is a `u32`. krabka-log epochs are non-negative
         // (0 for an empty log), so unwrap the newtype and convert to `u32`.
-        let latest: LeaderEpoch = self
-            .log
-            .epoch_checkpoint()
-            .latest_epoch()
-            .unwrap_or(LeaderEpoch(0));
-        u32::try_from(latest.0).unwrap_or(0)
+        latest_epoch_in(self.log.epoch_checkpoint())
     }
 
     fn end_offset_for_epoch(&self, epoch: Epoch) -> LogOffsetMetadata {
@@ -459,6 +454,13 @@ impl LogView for KraftLog {
             epoch,
         )
     }
+}
+
+/// The latest checkpoint epoch as the consensus log view's unsigned epoch.
+#[must_use]
+pub fn latest_epoch_in(checkpoint: &krabka_log::LeaderEpochCheckpoint) -> Epoch {
+    let latest = checkpoint.latest_epoch().unwrap_or(LeaderEpoch(0));
+    u32::try_from(latest.0).unwrap_or(0)
 }
 
 #[cfg(test)]

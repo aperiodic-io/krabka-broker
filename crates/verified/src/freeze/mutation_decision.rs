@@ -33,7 +33,10 @@ pub const fn freeze_timestamp_in_window(set_at_ms: i64, now_ms: i64, max_skew_ms
     set_at_ms >= earliest && set_at_ms <= latest
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn freeze_signature_preconditions(facts: FreezeSignatureFacts) -> bool {
     pearlite! { facts.identity == FreezeIdentityState::Bound
     && freeze_timestamp_in_window_model(
@@ -42,7 +45,6 @@ fn freeze_signature_preconditions(facts: FreezeSignatureFacts) -> bool {
         facts.max_skew_ms,
     )
     && (!facts.replaces || facts.set_at_ms@ > facts.replaced_set_at_ms@) }
-}
 }
 
 /// Apply the six signature rules in their security-sensitive order.

@@ -22,7 +22,10 @@ pub fn barrier_cut_expired(published_epoch: i64, retained_cuts: i32, held_epoch:
     held_epoch <= published_epoch - retained_cuts
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// How many segments the local walk may consider: every one of them, except
 /// a newest segment that is empty. That is Kafka's `deletableSegments`, which
 /// never returns a last segment of size zero (`isLastSegmentAndEmpty`), so a
@@ -37,9 +40,11 @@ pub fn local_retention_limit(segments: Seq<LocalRetentionSegment>) -> Int {
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The reference rule for local retention, from segment `i` onwards.
 ///
 /// Kafka's `UnifiedLog.deleteOldSegments` runs three passes over the local
@@ -80,7 +85,6 @@ pub fn local_retention_model(
             i
         }
     }
-}
 }
 
 /// Count the oldest local segments that Kafka's local retention passes
@@ -167,7 +171,10 @@ pub fn local_retention_prefix(segments: &[LocalRetentionSegment], size_debt: Opt
     len
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The reference rule for remote retention, from segment `i` onwards, with
 /// `debt` bytes of `retention.bytes` breach left to reclaim.
 ///
@@ -197,5 +204,4 @@ pub fn remote_retention_model(segments: Seq<RemoteRetentionSegment>, i: Int, deb
             i
         }
     }
-}
 }

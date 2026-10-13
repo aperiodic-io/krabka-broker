@@ -310,7 +310,7 @@ mod tests {
         index: PartitionIndex,
         start_offset: Offset,
     ) -> DescribeShareGroupOffsetsResponsePartition {
-        tagged_wire!(DescribeShareGroupOffsetsResponsePartition {
+        krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponsePartition {
             partition_index: index.0,
             start_offset: start_offset.0,
             leader_epoch: 0,
@@ -321,7 +321,7 @@ mod tests {
     }
 
     fn denied_partition(index: PartitionIndex) -> DescribeShareGroupOffsetsResponsePartition {
-        tagged_wire!(DescribeShareGroupOffsetsResponsePartition {
+        krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponsePartition {
             partition_index: index.0,
             start_offset: -1,
             leader_epoch: 0,
@@ -413,19 +413,20 @@ mod tests {
 
         let topic_id = uuid::Uuid::from_u128(0xD5C0);
         let orders_wire_id = WireUuid(*topic_id.as_bytes());
-        let orders_row = tagged_wire!(DescribeShareGroupOffsetsResponseTopic {
+        let orders_row = krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponseTopic {
             topic_name: "orders".into(),
             topic_id: orders_wire_id,
             partitions: vec![normal_partition(PartitionIndex(0), Offset(33))],
         });
-        let secret_denied_row = tagged_wire!(DescribeShareGroupOffsetsResponseTopic {
-            topic_name: "secret".into(),
-            topic_id: WireUuid::default(),
-            partitions: vec![
-                denied_partition(PartitionIndex(0)),
-                denied_partition(PartitionIndex(1))
-            ],
-        });
+        let secret_denied_row =
+            krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponseTopic {
+                topic_name: "secret".into(),
+                topic_id: WireUuid::default(),
+                partitions: vec![
+                    denied_partition(PartitionIndex(0)),
+                    denied_partition(PartitionIndex(1))
+                ],
+            });
         let cases = vec![
             Case {
                 name: "all topics allowed returns the normal row",
@@ -476,7 +477,7 @@ mod tests {
             )
             .await;
 
-            let expected = tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
+            let expected = krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
                 group_id: "g1".into(),
                 topics: case.expected,
                 error_code: codes::NONE,
@@ -583,7 +584,7 @@ mod tests {
         )
         .await;
 
-        let expected = tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
+        let expected = krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
             group_id: "g3".into(),
             topics: Vec::new(),
             error_code: codes::NONE,

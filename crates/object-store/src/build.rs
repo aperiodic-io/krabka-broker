@@ -44,21 +44,6 @@ fn client_options(
         .with_connect_timeout(connect_timeout)
 }
 
-// Both SDK builders expose the same connection policy methods.
-#[cfg(not(target_family = "wasm"))]
-macro_rules! connection_policy {
-    ($builder:expr, $cfg:expr) => {
-        $builder
-            .with_retry(retry_config($cfg.max_retries, $cfg.retry_timeout))
-            .with_client_options(client_options(
-                ClientOptions::new(),
-                $cfg.allow_http,
-                $cfg.request_timeout,
-                $cfg.connect_timeout,
-            ))
-    };
-}
-
 /// Build an `object_store` handle for `cfg`.
 ///
 /// The builder wiring covers the credential chains, the endpoints, and
@@ -98,7 +83,7 @@ pub fn build_object_store(
 pub(crate) fn build_s3_store(
     cfg: &S3Config,
 ) -> Result<object_store::aws::AmazonS3, ObjectStoreError> {
-    let mut builder = connection_policy!(
+    let mut builder = krabka_macros::connection_policy!(
         object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(&cfg.bucket)
             .with_region(&cfg.region)
@@ -145,7 +130,7 @@ pub(crate) fn build_gcs_store(
     if let Some(endpoint) = &cfg.endpoint {
         builder = builder.with_base_url(endpoint);
     }
-    builder = connection_policy!(builder, cfg);
+    builder = krabka_macros::connection_policy!(builder, cfg);
     let store = builder
         .build()
         .map_err(|e| ObjectStoreError::InvalidConfig(format!("GCS builder: {e}")))?;

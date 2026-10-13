@@ -26,7 +26,13 @@
 //! `UNKNOWN_TOPIC_OR_PARTITION` for any other.
 
 use {
-    crate::codes,
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, cluster_action_denied, encode_response,
+        },
+    },
     bytes::Bytes,
     krabka_protocol::owned::{
         fetch_snapshot_request::FetchSnapshotRequest,
@@ -39,38 +45,41 @@ use {
 /// `org.apache.kafka.common.Topic.CLUSTER_METADATA_TOPIC_NAME`.
 const CLUSTER_METADATA_TOPIC: &str = "__cluster_metadata";
 
-wire_handler! {
-    /// Checks `ClusterAction` on the cluster, then serves the byte range.
-    ///
-    /// The snapshot is the serialized metadata image, with every ACL, config,
-    /// SCRAM credential and delegation token record. Kafka's
-    /// `ControllerApis.handleFetchSnapshot` calls
-    /// `authorizeClusterOperation(request, CLUSTER_ACTION)` first, and a denial
-    /// becomes `FetchSnapshotRequest.getErrorResponse`: a top-level
-    /// `CLUSTER_AUTHORIZATION_FAILED` and no topics.
-    async (broker, version, req_bytes, ctx), {
-        let req = crate::handlers::decode_request::<FetchSnapshotRequest>(req_bytes, version)?;
-        if crate::handlers::cluster_action_denied(
-            broker.config.authorizer.as_ref(),
-            &broker.controller.current_image(),
-            ctx,
-        ) {
-            return crate::handlers::encode_response(
-                &FetchSnapshotResponse {
-                    error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-                    ..Default::default()
-                },
-                version,
-            );
-        }
-        match broker
-            .controller
-            .fetch_snapshot(version, Bytes::copy_from_slice(req_bytes))
-            .await
-        {
-            Some(answer) => Ok(answer?),
-            None => crate::handlers::encode_response(&without_metadata_log(&req), version),
-        }
+/// Checks `ClusterAction` on the cluster, then serves the byte range.
+///
+/// The snapshot is the serialized metadata image, with every ACL, config,
+/// SCRAM credential and delegation token record. Kafka's
+/// `ControllerApis.handleFetchSnapshot` calls
+/// `authorizeClusterOperation(request, CLUSTER_ACTION)` first, and a denial
+/// becomes `FetchSnapshotRequest.getErrorResponse`: a top-level
+/// `CLUSTER_AUTHORIZATION_FAILED` and no topics.
+#[krabka_macros::decode_dispatch(request = FetchSnapshotRequest, binding(req))]
+pub(crate) async fn handle(
+    broker: &Broker,
+    version: ApiVersion,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    if cluster_action_denied(
+        broker.config.authorizer.as_ref(),
+        &broker.controller.current_image(),
+        ctx,
+    ) {
+        return encode_response(
+            &FetchSnapshotResponse {
+                error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+                ..Default::default()
+            },
+            version,
+        );
+    }
+    match broker
+        .controller
+        .fetch_snapshot(version, Bytes::copy_from_slice(req_bytes))
+        .await
+    {
+        Some(answer) => Ok(answer?),
+        None => encode_response(&without_metadata_log(&req), version),
     }
 }
 

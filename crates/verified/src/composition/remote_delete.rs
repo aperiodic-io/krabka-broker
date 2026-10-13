@@ -9,20 +9,24 @@ use {
 
 type RemoteDeletion = (Vec<RemoteRetentionSegment>, usize, usize, i64);
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every whole range in the prefix reaches the initial floor or an earlier
 /// range. This geometric predicate does not run the floor-update fold.
 fn deletion_prefix_connected(rows: Seq<(i64, i64, u64, bool)>, initial: i64, count: Int) -> bool {
     pearlite! { forall<j: Int> 0 <= j && j < count ==> rows[j].1@ < i64::MAX@
     && (rows[j].0@ <= initial@ || exists<k: Int> 0 <= k && k < j && rows[j].0@ <= rows[k].1@ + 1) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Membership in the actual completed prefix, used as a quantifier trigger.
 fn deleted_prefix_covers(rows: Seq<(i64, i64, u64, bool)>, count: Int, offset: Int) -> bool {
     pearlite! { exists<j: Int> 0 <= j && j < count && rows[j].0@ <= offset && offset <= rows[j].1@ }
-}
 }
 
 /// Appending one range preserves every offset covered by the older prefix.
@@ -107,7 +111,10 @@ pub(super) fn completed_remote_retention_bounds_floor(
     (facts, planned, i, floor)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every selected whole range is requested by at least one retention policy.
 fn deletion_prefix_requested(
     facts: Seq<RemoteRetentionSegment>,
@@ -117,5 +124,4 @@ fn deletion_prefix_requested(
 ) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < count ==> facts[i].log_start_breached || finished[i].3
     || (crate::retention::remote_charge_funded(debt, remote_prefix_charge(facts, i), remote_prefix_charge(facts, i + 1))) }
-}
 }

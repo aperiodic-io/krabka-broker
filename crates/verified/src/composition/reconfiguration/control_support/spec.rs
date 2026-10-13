@@ -6,7 +6,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn control_record_count(version: u16, kind: VoterChangeKind) -> Int {
     pearlite! { match kind {
         VoterChangeKind::FinalizeKraftVersion => 2,
@@ -14,16 +17,20 @@ pub fn control_record_count(version: u16, kind: VoterChangeKind) -> Int {
         VoterChangeKind::Add | VoterChangeKind::Remove => 1,
     } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn next_size(count: Int, kind: VoterChangeKind) -> Int {
     pearlite! { match kind { VoterChangeKind::Add => count + 1,
     VoterChangeKind::Remove => count - 1, _ => count } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Count reports reaching the actual exclusive batch end, only for real IDs.
 #[variant(count)]
 pub fn prefix_count(
@@ -46,9 +53,11 @@ pub fn prefix_count(
             && expected_member(old, old.len(), kind, node, node) { 1 } else { 0 } }
     } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Both voter sets must report the actual exclusive control-batch end.
 pub(super) fn control_prefix_majorities(
     old: Seq<u64>,
@@ -61,7 +70,6 @@ pub(super) fn control_prefix_majorities(
         prefix_count(old, reports, kind, node, end, false, reports.len()) >= old.len() / 2 + 1
         && prefix_count(old, reports, kind, node, end, true, reports.len()) >= next_size(old.len(), kind) / 2 + 1
     }
-}
 }
 
 /// Bridge actual prefix reports to the previous composition's grant ledger.
@@ -118,7 +126,10 @@ pub(super) fn control_inputs_coherent(
     pearlite! { context.voter_count@ == old.len() && reports.len() == old.len() + 1 }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The common voter belongs to both sets and reports the actual control prefix.
 pub(super) fn common_prefix_reported(
     old: Seq<u64>,
@@ -130,7 +141,6 @@ pub(super) fn common_prefix_reported(
     pearlite! { exists<i: Int> 0 <= i && i < old.len() && old[i] == common
     && reports[i].0@ >= end && reports[i].1@ >= end
     && has_node(next, next.len(), common) }
-}
 }
 
 /// Preflight needs admission alone; a writing request also needs prefix support.

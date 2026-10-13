@@ -64,7 +64,7 @@ async fn disabled_feature_returns_requested_group_error_rows() {
 
     let resp = describe(&broker, &["g-disabled-a", "g-disabled-b"]).await;
 
-    let expected = unthrottled_wire!(StreamsGroupDescribeResponse {
+    let expected = krabka_macros::unthrottled_wire!(StreamsGroupDescribeResponse {
         groups: vec![
             error_group("g-disabled-a", codes::UNSUPPORTED_VERSION),
             error_group("g-disabled-b", codes::UNSUPPORTED_VERSION),
@@ -81,7 +81,7 @@ async fn enabled_missing_group_returns_not_found_rows() {
 
     let resp = describe(&broker, &["missing-a", "missing-b"]).await;
 
-    let expected = unthrottled_wire!(StreamsGroupDescribeResponse {
+    let expected = krabka_macros::unthrottled_wire!(StreamsGroupDescribeResponse {
         groups: vec![
             error_group("missing-a", codes::GROUP_ID_NOT_FOUND),
             error_group("missing-b", codes::GROUP_ID_NOT_FOUND),
@@ -114,7 +114,7 @@ async fn closed_streams_actor_returns_load_in_progress_row() {
 
     let resp = describe(&broker, &["stopped"]).await;
 
-    let expected = unthrottled_wire!(StreamsGroupDescribeResponse {
+    let expected = krabka_macros::unthrottled_wire!(StreamsGroupDescribeResponse {
         groups: vec![error_group("stopped", codes::COORDINATOR_LOAD_IN_PROGRESS)],
     });
     assert!(resp == expected);
@@ -134,7 +134,7 @@ async fn disabled_protocol_answers_every_requested_group_with_unsupported_versio
 
         let resp = describe(&broker, group_ids).await;
 
-        let expected = unthrottled_wire!(StreamsGroupDescribeResponse {
+        let expected = krabka_macros::unthrottled_wire!(StreamsGroupDescribeResponse {
             groups: group_ids
                 .iter()
                 .map(|gid| error_group(gid, codes::UNSUPPORTED_VERSION))
@@ -161,7 +161,7 @@ async fn protocol_gate_runs_before_the_group_acl_check() {
 
     let resp = describe_as(&broker, &alice, &["g1"], false).await;
 
-    let expected = unthrottled_wire!(StreamsGroupDescribeResponse {
+    let expected = krabka_macros::unthrottled_wire!(StreamsGroupDescribeResponse {
         groups: vec![error_group("g1", codes::UNSUPPORTED_VERSION)],
     });
     assert!(resp == expected);
@@ -192,7 +192,7 @@ async fn denied_group_rows_sort_first_regardless_of_request_order() {
     // Requested in ["allowed", "denied"] order; "denied" has no ACL grant.
     let resp = describe_as(&broker, &alice, &["allowed", "denied"], false).await;
 
-    let expected = unthrottled_wire!(StreamsGroupDescribeResponse {
+    let expected = krabka_macros::unthrottled_wire!(StreamsGroupDescribeResponse {
         groups: vec![
             error_group("denied", codes::GROUP_AUTHORIZATION_FAILED),
             error_group("allowed", codes::GROUP_ID_NOT_FOUND),

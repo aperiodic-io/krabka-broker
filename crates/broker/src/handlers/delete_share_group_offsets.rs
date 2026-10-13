@@ -16,13 +16,18 @@
 use {
     crate::{
         authorizer::{AuthorizationResult, authorize_topics},
+        broker::Broker,
         codes,
         coordinator::unified::{
             GroupType,
             share::actor::{DeleteTopicOutcome, ShareGroupActorMessage},
         },
         error::BrokerError,
-        handlers::ErrorResponse as _,
+        features::share_groups_enabled,
+        handlers::{
+            ApiVersion, ErrorResponse as _, RequestContext, acl_denied, group_coordinator_error,
+            share_group_not_found_message,
+        },
         task_util::{AskError, ask},
     },
     krabka_metadata::{AclOperation, ResourceType},
@@ -41,163 +46,161 @@ use {
 /// `handleDeleteShareGroupOffsetsRequest` puts on every denied topic row.
 const TOPIC_AUTHORIZATION_FAILED_MESSAGE: &str = "Topic authorization failed.";
 
-context_handler! {
-    DeleteShareGroupOffsetsRequest => DeleteShareGroupOffsetsResponse,
-    (broker, req, _version, ctx),
-    {
-        // Feature gate: share groups are on from a finalized `share.version` of 1,
-        // and below it the RPC is unsupported.
-        let image = broker.controller.current_image();
-        if !crate::features::share_groups_enabled(&image) {
-            return Ok(top_level(codes::UNSUPPORTED_VERSION, None));
-        }
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: DeleteShareGroupOffsetsRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<DeleteShareGroupOffsetsResponse, BrokerError> {
+    // Feature gate: share groups are on from a finalized `share.version` of 1,
+    // and below it the RPC is unsupported.
+    let image = broker.controller.current_image();
+    if !share_groups_enabled(&image) {
+        return Ok(top_level(codes::UNSUPPORTED_VERSION, None));
+    }
 
-        let coordinator = &broker.group_coordinator;
-        let gid = req.group_id;
+    let coordinator = &broker.group_coordinator;
+    let gid = req.group_id;
 
-        // ── ACL preamble ────────────────────────────────────
-        // Per-group `Delete` check. On Deny → top-level `error_code = 30`.
-        if crate::handlers::acl_denied(
-            broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            ResourceType::Group,
-            gid.as_str(),
-            AclOperation::Delete,
-        ) {
-            return Ok(top_level(codes::GROUP_AUTHORIZATION_FAILED, None));
-        }
+    // ── ACL preamble ────────────────────────────────────
+    // Per-group `Delete` check. On Deny → top-level `error_code = 30`.
+    if acl_denied(
+        broker.config.authorizer.as_ref(),
+        &image,
+        ctx,
+        ResourceType::Group,
+        gid.as_str(),
+        AclOperation::Delete,
+    ) {
+        return Ok(top_level(codes::GROUP_AUTHORIZATION_FAILED, None));
+    }
 
-        // Per-topic `Read` ACL. Kafka's `handleDeleteShareGroupOffsetsRequest`
-        // authorizes `READ` on each requested topic after the group `Delete`
-        // check; a denied topic gets `TOPIC_AUTHORIZATION_FAILED` and never
-        // reaches the coordinator. Denied rows come before the coordinator's.
-        let topic_names: Vec<String> = req.topics.iter().map(|rt| rt.topic_name.clone()).collect();
-        let topic_decisions = authorize_topics(
-            broker.config.authorizer.as_ref(),
-            &*image,
-            ctx.principal,
-            ctx.peer,
-            AclOperation::Read,
-            topic_names.iter().map(String::as_str),
-        );
-        let (denied_topics, allowed_topics): (Vec<_>, Vec<_>) =
-            req.topics.into_iter().partition(|rt| {
-                topic_decisions.get(rt.topic_name.as_str()) == Some(&AuthorizationResult::Deny)
-            });
+    // Per-topic `Read` ACL. Kafka's `handleDeleteShareGroupOffsetsRequest`
+    // authorizes `READ` on each requested topic after the group `Delete`
+    // check; a denied topic gets `TOPIC_AUTHORIZATION_FAILED` and never
+    // reaches the coordinator. Denied rows come before the coordinator's.
+    let topic_names: Vec<String> = req.topics.iter().map(|rt| rt.topic_name.clone()).collect();
+    let topic_decisions = authorize_topics(
+        broker.config.authorizer.as_ref(),
+        &*image,
+        ctx.principal,
+        ctx.peer,
+        AclOperation::Read,
+        topic_names.iter().map(String::as_str),
+    );
+    let (denied_topics, allowed_topics): (Vec<_>, Vec<_>) =
+        req.topics.into_iter().partition(|rt| {
+            topic_decisions.get(rt.topic_name.as_str()) == Some(&AuthorizationResult::Deny)
+        });
 
-        if let Some(error_code) = crate::handlers::group_coordinator_error(broker, &gid) {
-            return Ok(top_level(error_code, None));
-        }
-        // GroupCoordinatorService.deleteShareGroupOffsets rejects an empty id
-        // before it routes the group to a shard.
-        if gid.is_empty() {
-            return Ok(top_level(codes::INVALID_GROUP_ID, None));
-        }
-        // GroupCoordinatorShard.initiateDeleteShareGroupOffsets looks the group
-        // up through `shareGroup`, which refuses a missing group and a group of
-        // another type. No share actor is created for either.
-        let actor = match coordinator.group_type(&gid) {
-            Some(GroupType::Share) => Some(coordinator.get_or_create_share(&gid)),
-            Some(_) => None,
-            None => coordinator.find_share(&gid),
-        };
-        let Some(actor) = actor else {
-            return Ok(top_level(
-                codes::GROUP_ID_NOT_FOUND,
-                Some(crate::handlers::share_group_not_found_message(
-                    coordinator,
-                    &gid,
-                )),
-            ));
-        };
+    if let Some(error_code) = group_coordinator_error(broker, &gid) {
+        return Ok(top_level(error_code, None));
+    }
+    // GroupCoordinatorService.deleteShareGroupOffsets rejects an empty id
+    // before it routes the group to a shard.
+    if gid.is_empty() {
+        return Ok(top_level(codes::INVALID_GROUP_ID, None));
+    }
+    // GroupCoordinatorShard.initiateDeleteShareGroupOffsets looks the group
+    // up through `shareGroup`, which refuses a missing group and a group of
+    // another type. No share actor is created for either.
+    let actor = match coordinator.group_type(&gid) {
+        Some(GroupType::Share) => Some(coordinator.get_or_create_share(&gid)),
+        Some(_) => None,
+        None => coordinator.find_share(&gid),
+    };
+    let Some(actor) = actor else {
+        return Ok(top_level(
+            codes::GROUP_ID_NOT_FOUND,
+            Some(share_group_not_found_message(coordinator, &gid)),
+        ));
+    };
 
-        let mut responses: Vec<DeleteShareGroupOffsetsResponseTopic> = denied_topics
-            .into_iter()
-            .map(|rt| DeleteShareGroupOffsetsResponseTopic {
-                topic_name: rt.topic_name,
-                topic_id: Uuid::default(),
-                error_code: codes::TOPIC_AUTHORIZATION_FAILED,
-                error_message: Some(TOPIC_AUTHORIZATION_FAILED_MESSAGE.to_string()),
-                ..Default::default()
-            })
-            .collect();
-        let topic_names: Vec<String> = allowed_topics.into_iter().map(|rt| rt.topic_name).collect();
-
-        let asked = ask(&actor.tx, |reply| ShareGroupActorMessage::DeleteOffsets {
-            topic_names,
-            reply,
+    let mut responses: Vec<DeleteShareGroupOffsetsResponseTopic> = denied_topics
+        .into_iter()
+        .map(|rt| DeleteShareGroupOffsetsResponseTopic {
+            topic_name: rt.topic_name,
+            topic_id: Uuid::default(),
+            error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+            error_message: Some(TOPIC_AUTHORIZATION_FAILED_MESSAGE.to_string()),
+            ..Default::default()
         })
-        .await;
-        let actor_result = match asked {
-            Ok(actor_result) => actor_result,
-            Err(AskError::Closed) => return Ok(top_level(codes::COORDINATOR_NOT_AVAILABLE, None)),
-            Err(AskError::Dropped) => {
-                return Err(BrokerError::Share(
-                    "share-group delete actor stopped".into(),
-                ));
-            }
-        };
-        let outcomes = match actor_result {
-            Ok(outcomes) => outcomes,
-            Err(error_code) => return Ok(top_level(error_code, None)),
-        };
-        // The actor answers in Kafka's row order: the deleted topics, the topics
-        // `sharePartitionsEligibleForOffsetDeletion` refused, then the topics
-        // whose state delete failed.
-        for (topic_name, outcome) in outcomes {
-            responses.push(match outcome {
-                DeleteTopicOutcome::Deleted {
-                    topic_id,
-                    partitions,
-                } => {
-                    for partition in partitions {
-                        broker
-                            .share_partition_leaders
-                            .invalidate(&gid, topic_id, partition);
-                    }
-                    DeleteShareGroupOffsetsResponseTopic {
-                        topic_name,
-                        topic_id: Uuid(*topic_id.as_bytes()),
-                        error_code: codes::NONE,
-                        ..Default::default()
-                    }
+        .collect();
+    let topic_names: Vec<String> = allowed_topics.into_iter().map(|rt| rt.topic_name).collect();
+
+    let asked = ask(&actor.tx, |reply| ShareGroupActorMessage::DeleteOffsets {
+        topic_names,
+        reply,
+    })
+    .await;
+    let actor_result = match asked {
+        Ok(actor_result) => actor_result,
+        Err(AskError::Closed) => return Ok(top_level(codes::COORDINATOR_NOT_AVAILABLE, None)),
+        Err(AskError::Dropped) => {
+            return Err(BrokerError::Share(
+                "share-group delete actor stopped".into(),
+            ));
+        }
+    };
+    let outcomes = match actor_result {
+        Ok(outcomes) => outcomes,
+        Err(error_code) => return Ok(top_level(error_code, None)),
+    };
+    // The actor answers in Kafka's row order: the deleted topics, the topics
+    // `sharePartitionsEligibleForOffsetDeletion` refused, then the topics
+    // whose state delete failed.
+    for (topic_name, outcome) in outcomes {
+        responses.push(match outcome {
+            DeleteTopicOutcome::Deleted {
+                topic_id,
+                partitions,
+            } => {
+                for partition in partitions {
+                    broker
+                        .share_partition_leaders
+                        .invalidate(&gid, topic_id, partition);
                 }
-                DeleteTopicOutcome::UnknownTopic => DeleteShareGroupOffsetsResponseTopic {
-                    topic_name,
-                    topic_id: Uuid::default(),
-                    error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
-                    error_message: kafka_message(codes::UNKNOWN_TOPIC_OR_PARTITION).map(str::to_owned),
-                    ..Default::default()
-                },
-                DeleteTopicOutcome::NoState => DeleteShareGroupOffsetsResponseTopic {
-                    topic_name,
-                    topic_id: Uuid::default(),
-                    error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
-                    error_message: Some(NO_OFFSETS_MESSAGE.to_owned()),
-                    ..Default::default()
-                },
-                DeleteTopicOutcome::Failed {
-                    topic_id,
-                    error_code,
-                } => DeleteShareGroupOffsetsResponseTopic {
+                DeleteShareGroupOffsetsResponseTopic {
                     topic_name,
                     topic_id: Uuid(*topic_id.as_bytes()),
-                    error_code,
-                    error_message: kafka_message(error_code).map(str::to_owned),
+                    error_code: codes::NONE,
                     ..Default::default()
-                },
-            });
-        }
-
-        let resp = DeleteShareGroupOffsetsResponse {
-            throttle_time_ms: 0,
-            error_code: codes::NONE,
-            responses,
-            ..Default::default()
-        };
-        Ok(resp)
+                }
+            }
+            DeleteTopicOutcome::UnknownTopic => DeleteShareGroupOffsetsResponseTopic {
+                topic_name,
+                topic_id: Uuid::default(),
+                error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                error_message: kafka_message(codes::UNKNOWN_TOPIC_OR_PARTITION).map(str::to_owned),
+                ..Default::default()
+            },
+            DeleteTopicOutcome::NoState => DeleteShareGroupOffsetsResponseTopic {
+                topic_name,
+                topic_id: Uuid::default(),
+                error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                error_message: Some(NO_OFFSETS_MESSAGE.to_owned()),
+                ..Default::default()
+            },
+            DeleteTopicOutcome::Failed {
+                topic_id,
+                error_code,
+            } => DeleteShareGroupOffsetsResponseTopic {
+                topic_name,
+                topic_id: Uuid(*topic_id.as_bytes()),
+                error_code,
+                error_message: kafka_message(error_code).map(str::to_owned),
+                ..Default::default()
+            },
+        });
     }
+
+    let resp = DeleteShareGroupOffsetsResponse {
+        throttle_time_ms: 0,
+        error_code: codes::NONE,
+        responses,
+        ..Default::default()
+    };
+    Ok(resp)
 }
 
 /// Kafka's row message for a topic the group holds no share state for.
@@ -326,7 +329,9 @@ mod tests {
         }
     }
 
-    crate::test_support::context_helper!(client_id = "admin-client");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["admin-client"];
+    }
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
     struct ShareTopicsSetup<'a> {
@@ -378,7 +383,7 @@ mod tests {
     fn top_level_preserves_error_fields() {
         let resp = top_level(codes::UNSUPPORTED_VERSION, None);
 
-        let expected = unthrottled_wire!(DeleteShareGroupOffsetsResponse {
+        let expected = krabka_macros::unthrottled_wire!(DeleteShareGroupOffsetsResponse {
             error_code: codes::UNSUPPORTED_VERSION,
             error_message: Some("The version of API is not supported.".into()),
             responses: Vec::new(),
@@ -424,7 +429,7 @@ mod tests {
                 Arc::new(crate::authorizer::AllowAllAuthorizer),
                 crate::test_support::ShareApiSupport::Disabled,
                 vec!["missing"],
-                unthrottled_wire!(DeleteShareGroupOffsetsResponse {
+                krabka_macros::unthrottled_wire!(DeleteShareGroupOffsetsResponse {
                     error_code: codes::UNSUPPORTED_VERSION,
                     error_message: Some("The version of API is not supported.".into()),
                     responses: Vec::new(),
@@ -435,7 +440,7 @@ mod tests {
                 Arc::new(crate::test_support::ControllerPeerAllowed(DenyAll)),
                 crate::test_support::ShareApiSupport::Enabled,
                 vec!["missing"],
-                unthrottled_wire!(DeleteShareGroupOffsetsResponse {
+                krabka_macros::unthrottled_wire!(DeleteShareGroupOffsetsResponse {
                     error_code: codes::GROUP_AUTHORIZATION_FAILED,
                     error_message: Some("Group authorization failed.".into()),
                     responses: Vec::new(),
@@ -736,7 +741,7 @@ mod tests {
             .expect("handle delete");
 
             let denied_row = |name: &str| {
-                tagged_wire!(DeleteShareGroupOffsetsResponseTopic {
+                krabka_macros::tagged_wire!(DeleteShareGroupOffsetsResponseTopic {
                     topic_name: name.into(),
                     topic_id: Uuid::default(),
                     error_code: codes::TOPIC_AUTHORIZATION_FAILED,
@@ -744,7 +749,7 @@ mod tests {
                 })
             };
             let allowed_row = |name: &str, topic_id: uuid::Uuid| {
-                tagged_wire!(DeleteShareGroupOffsetsResponseTopic {
+                krabka_macros::tagged_wire!(DeleteShareGroupOffsetsResponseTopic {
                     topic_name: name.into(),
                     topic_id: Uuid(*topic_id.as_bytes()),
                     error_code: codes::NONE,
@@ -771,7 +776,7 @@ mod tests {
                 }
             }
 
-            let expected = unthrottled_wire!(DeleteShareGroupOffsetsResponse {
+            let expected = krabka_macros::unthrottled_wire!(DeleteShareGroupOffsetsResponse {
                 error_code: codes::NONE,
                 error_message: None,
                 responses: expected_responses,

@@ -4,7 +4,10 @@ use creusot_std::prelude::ensures;
 #[cfg(creusot)]
 use creusot_std::prelude::{Int, Seq, invariant, logic};
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The complete first-match guarantee shared by direct and indexed scans.
 pub(crate) fn first_timestamp_match(
     timestamps: Seq<i64>,
@@ -19,7 +22,6 @@ pub(crate) fn first_timestamp_match(
             None => forall<i: Int> 0 <= i && i < timestamps.len() ==> timestamps[i]@ < target,
         }
     }
-}
 }
 
 /// Select the first timestamp at or after `target`.

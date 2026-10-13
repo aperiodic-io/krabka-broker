@@ -38,7 +38,7 @@ use {
         elr::ElrPublisher,
         error::BrokerError,
         handlers::{
-            RequestContext, audit_admin_success, audit_resource, cluster_alter_denied,
+            ApiVersion, RequestContext, audit_admin_success, audit_resource, cluster_alter_denied,
             decode_request, encode_response,
             forward_to_controller::{
                 controller_listener_dispatch, guarded_operation_on_source, is_active_controller,
@@ -125,28 +125,31 @@ fn request_refusal(
     whole_request_error(request, code, message.unwrap_or_default())
 }
 
-context_handler! {
-    ElectLeadersRequest => ElectLeadersResponse,
-    (broker, req, _version, ctx),
-    {
-        let budget = Duration::from_millis(req.timeout_ms.max(0).unsigned_abs().into());
-        let result = guarded_operation_on_source(
-            broker.controller.as_ref(),
-            tokio::time::Instant::now() + budget,
-            |image| elect_leaders_once(broker, &req, ctx, image),
-        ).await;
-        Ok(match result {
-            Ok(Ok(response)) => response,
-            Ok(Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown)) =>
-                request_refusal(&req, codes::NOT_CONTROLLER, None),
-            Ok(Err(error)) => request_refusal(
-                &req,
-                submit_failure_code(&error, codes::COORDINATOR_NOT_AVAILABLE),
-                Some(&error.to_string()),
-            ),
-            Err(_) => request_refusal(&req, codes::REQUEST_TIMED_OUT, None),
-        })
-    }
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ElectLeadersRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<ElectLeadersResponse, BrokerError> {
+    let budget = Duration::from_millis(req.timeout_ms.max(0).unsigned_abs().into());
+    let result = guarded_operation_on_source(
+        broker.controller.as_ref(),
+        tokio::time::Instant::now() + budget,
+        |image| elect_leaders_once(broker, &req, ctx, image),
+    )
+    .await;
+    Ok(match result {
+        Ok(Ok(response)) => response,
+        Ok(Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown)) => {
+            request_refusal(&req, codes::NOT_CONTROLLER, None)
+        }
+        Ok(Err(error)) => request_refusal(
+            &req,
+            submit_failure_code(&error, codes::COORDINATOR_NOT_AVAILABLE),
+            Some(&error.to_string()),
+        ),
+        Err(_) => request_refusal(&req, codes::REQUEST_TIMED_OUT, None),
+    })
 }
 
 /// Rebuild all targets, authorization, eligibility and proposals on every attempt.

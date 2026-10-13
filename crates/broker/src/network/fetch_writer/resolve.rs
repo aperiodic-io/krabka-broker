@@ -50,27 +50,26 @@ fn encode_payload(payload: &RecordsPayload) -> Result<bytes::Bytes, BrokerError>
     Ok(buf.freeze())
 }
 
-crate::sendfile_cfg! {
-    /// Plaintext-sendfile (Increments D + E) records resolver: emit each
-    /// `FileRegion` of a `FileRegions` payload as its own [`WriteOp::File`],
-    /// one per contributing segment, for the kernel `sendfile` drain. Every
-    /// other payload kind defers to [`resolve_records_inline`], as does a
-    /// `FileRegions` payload that arrives here on a non-sendfile path. This
-    /// function compiles on the SENDFILE alias (Linux + Apple +
-    /// FreeBSD/DragonFly).
-    ///
-    /// # Errors
-    ///
-    /// A `FileRegions` payload cannot fail here: the regions are cloned, not
-    /// read. Every other payload kind carries [`resolve_records_inline`]'s
-    /// error conditions, because it is what serves them.
-    pub fn resolve_records_sendfile(payload: &RecordsPayload) -> Result<Vec<WriteOp>, BrokerError> {
-        match payload {
-            RecordsPayload::FileRegions(regions) => {
-                Ok(regions.iter().cloned().map(WriteOp::File).collect())
-            }
-            _ => resolve_records_inline(payload),
+/// Plaintext-sendfile (Increments D + E) records resolver: emit each
+/// `FileRegion` of a `FileRegions` payload as its own [`WriteOp::File`],
+/// one per contributing segment, for the kernel `sendfile` drain. Every
+/// other payload kind defers to [`resolve_records_inline`], as does a
+/// `FileRegions` payload that arrives here on a non-sendfile path. This
+/// function compiles on the SENDFILE alias (Linux + Apple +
+/// FreeBSD/DragonFly).
+///
+/// # Errors
+///
+/// A `FileRegions` payload cannot fail here: the regions are cloned, not
+/// read. Every other payload kind carries [`resolve_records_inline`]'s
+/// error conditions, because it is what serves them.
+#[krabka_macros::sendfile_cfg]
+pub fn resolve_records_sendfile(payload: &RecordsPayload) -> Result<Vec<WriteOp>, BrokerError> {
+    match payload {
+        RecordsPayload::FileRegions(regions) => {
+            Ok(regions.iter().cloned().map(WriteOp::File).collect())
         }
+        _ => resolve_records_inline(payload),
     }
 }
 

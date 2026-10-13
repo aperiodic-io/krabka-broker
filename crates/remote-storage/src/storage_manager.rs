@@ -12,66 +12,6 @@ use {
     uuid::Uuid,
 };
 
-/// Trace each storage operation with the same remote-segment identity.
-macro_rules! remote_operation {
-    (copy($receiver:ident, $metadata:ident, $data:ident) $body:block) => {
-        $crate::storage_manager::remote_operation! {
-            [] $metadata => [start_offset = $metadata.start_offset(), end_offset = $metadata.end_offset(),];
-            fn copy_log_segment_data(
-                &$receiver,
-                $metadata: &$crate::metadata::RemoteLogSegmentMetadata,
-                $data: &$crate::storage_manager::LogSegmentData,
-            ) -> Result<Option<$crate::metadata::CustomMetadata>, $crate::error::RemoteStorageError> $body
-        }
-    };
-    (fetch($receiver:ident, $metadata:ident, $start:ident, $end:ident) $body:block) => {
-        $crate::storage_manager::remote_operation! {
-            [level = "debug",] $metadata => [start_position = $start, end_position = ?$end,];
-            fn fetch_log_segment(
-                &$receiver,
-                $metadata: &$crate::metadata::RemoteLogSegmentMetadata,
-                $start: u32,
-                $end: Option<u32>,
-            ) -> Result<Vec<u8>, $crate::error::RemoteStorageError> $body
-        }
-    };
-    (index($receiver:ident, $metadata:ident, $kind:ident) $body:block) => {
-        $crate::storage_manager::remote_operation! {
-            [level = "debug",] $metadata => [index_type = ?$kind,];
-            fn fetch_index(
-                &$receiver,
-                $metadata: &$crate::metadata::RemoteLogSegmentMetadata,
-                $kind: $crate::storage_manager::IndexType,
-            ) -> Result<Vec<u8>, $crate::error::RemoteStorageError> $body
-        }
-    };
-    (delete($receiver:ident, $metadata:ident) $body:block) => {
-        $crate::storage_manager::remote_operation! {
-            [] $metadata => [];
-            fn delete_log_segment_data(
-                &$receiver,
-                $metadata: &$crate::metadata::RemoteLogSegmentMetadata,
-            ) -> Result<(), $crate::error::RemoteStorageError> $body
-        }
-    };
-    ([$($options:tt)*] $metadata:ident => [$($fields:tt)*]; $implementation:item) => {
-        #[tracing::instrument(
-            $($options)*
-            skip_all,
-            fields(
-                topic_id = %$metadata.remote_log_segment_id().topic_id_partition.topic_id,
-                partition = $metadata.remote_log_segment_id().topic_id_partition.partition,
-                segment = %$metadata.remote_log_segment_id().id,
-                $($fields)*
-            ),
-            err
-        )]
-        $implementation
-    };
-}
-
-pub(crate) use remote_operation;
-
 /// The kinds of index a segment carries alongside its `.log` data.
 ///
 /// Mirrors Kafka's `RemoteStorageManager.IndexType`. A

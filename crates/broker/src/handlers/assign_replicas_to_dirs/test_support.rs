@@ -18,7 +18,10 @@ krabka_macros::assignment_dirs_fixture!(assignment_request);
 
 pub(super) use assignment_request as request;
 
-crate::test_support::decode_helper!(pub(super) AssignReplicasToDirsResponse, version = VERSION);
+krabka_macros::wire_codec_helpers! {
+    pub(super) decode_response(AssignReplicasToDirsResponse);
+    version [VERSION];
+}
 
 /// The epoch broker 1 (the started broker itself) registered with. A request
 /// naming this epoch is the current, non-stale one.

@@ -441,7 +441,7 @@ fn a_topic_reports_its_override_above_the_cluster_default_with_the_whole_chain()
 
     assert!(
         result
-            == tagged_wire!(DescribeConfigsResult {
+            == krabka_macros::tagged_wire!(DescribeConfigsResult {
                 error_code: crate::codes::NONE,
                 error_message: None,
                 resource_type: RESOURCE_TYPE_TOPIC,
@@ -1122,7 +1122,7 @@ fn a_broker_resource_that_names_another_node_is_refused() {
 
     assert!(
         result
-            == tagged_wire!(DescribeConfigsResult {
+            == krabka_macros::tagged_wire!(DescribeConfigsResult {
                 error_code: crate::codes::INVALID_REQUEST,
                 error_message: Some(
                     "Unexpected broker id, expected 1 or empty string, but received 2".to_owned()
@@ -1230,7 +1230,7 @@ fn a_resource_name_kafka_refuses_is_refused_with_kafkas_error() {
         );
         check!(
             result
-                == tagged_wire!(DescribeConfigsResult {
+                == krabka_macros::tagged_wire!(DescribeConfigsResult {
                     error_code,
                     error_message: message.map(str::to_owned),
                     resource_type,
@@ -1478,7 +1478,7 @@ fn an_unhandled_resource_type_is_refused() {
 
     assert!(
         result
-            == tagged_wire!(DescribeConfigsResult {
+            == krabka_macros::tagged_wire!(DescribeConfigsResult {
                 error_code: crate::codes::INVALID_REQUEST,
                 error_message: Some("Unsupported resource type: 99".to_owned()),
                 resource_type: 99,
@@ -2935,7 +2935,7 @@ pub(super) fn expected_config_entry(
         config_type,
         documentation,
     } = setup;
-    tagged_wire!(DescribeConfigsResourceResult {
+    krabka_macros::tagged_wire!(DescribeConfigsResourceResult {
         name: name.to_owned(),
         value: value.map(str::to_owned),
         read_only: mutability == ConfigMutability::ReadOnly,

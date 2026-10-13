@@ -2,6 +2,10 @@
 //! child modules: the sample responses, the raw record batches behind them,
 //! and the temp-file records payload the sendfile tests need.
 
+#[krabka_macros::sendfile_cfg]
+use krabka_protocol::records::FileRegion;
+#[krabka_macros::sendfile_cfg]
+use std::{io::Write as _, sync::Arc};
 use {
     super::WriteOp,
     bytes::{Bytes, BytesMut},
@@ -10,12 +14,6 @@ use {
         records::{Record, RecordBatch, RecordsPayload},
     },
 };
-
-crate::sendfile_cfg! {
-    use std::{io::Write as _, sync::Arc};
-
-    use krabka_protocol::records::FileRegion;
-}
 
 pub(super) fn raw_batch(base: i64) -> Bytes {
     let rb = RecordBatch {
@@ -63,22 +61,21 @@ pub(super) fn sample_response(version: i16) -> FetchResponse {
     response_with_partitions(version, vec![p0, p1])
 }
 
-crate::sendfile_cfg! {
-    /// Write `bytes` to a temp file and return a single-region
-    /// `RecordsPayload::FileRegions` that covers the whole file from
-    /// offset 0.
-    pub(super) fn file_payload(bytes: &[u8]) -> (tempfile::NamedTempFile, RecordsPayload) {
-        let mut tf = tempfile::NamedTempFile::new().unwrap();
-        tf.write_all(bytes).unwrap();
-        tf.flush().unwrap();
-        let file = Arc::new(tf.reopen().unwrap());
-        let payload = RecordsPayload::FileRegions(vec![FileRegion {
-            file,
-            offset: 0,
-            len: bytes.len(),
-        }]);
-        (tf, payload)
-    }
+/// Write `bytes` to a temp file and return a single-region
+/// `RecordsPayload::FileRegions` that covers the whole file from
+/// offset 0.
+#[krabka_macros::sendfile_cfg]
+pub(super) fn file_payload(bytes: &[u8]) -> (tempfile::NamedTempFile, RecordsPayload) {
+    let mut tf = tempfile::NamedTempFile::new().unwrap();
+    tf.write_all(bytes).unwrap();
+    tf.flush().unwrap();
+    let file = Arc::new(tf.reopen().unwrap());
+    let payload = RecordsPayload::FileRegions(vec![FileRegion {
+        file,
+        offset: 0,
+        len: bytes.len(),
+    }]);
+    (tf, payload)
 }
 
 /// A one-topic, one-partition response whose partition serves `records`.

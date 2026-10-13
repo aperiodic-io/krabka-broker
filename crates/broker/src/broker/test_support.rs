@@ -9,7 +9,9 @@ use {
         broker::BrokerHandle,
         log_dir::partition_dir,
         partition::Partition,
-        test_support::{FakeMetadataSource, single_partition_topic, spawn_standalone_partition},
+        test_support::{
+            FakeMetadataSource, record_values, single_partition_topic, spawn_standalone_partition,
+        },
     },
     assert2::assert,
     krabka_ids::{LeaderEpoch, NodeId, PartitionIndex},
@@ -76,15 +78,7 @@ pub(super) fn local_partition_with_records(
     if !values.is_empty() {
         let mut batch = krabka_protocol::records::RecordBatch {
             last_offset_delta: i32::try_from(values.len() - 1).expect("record count fits"),
-            records: values
-                .iter()
-                .enumerate()
-                .map(|(idx, value)| krabka_protocol::records::Record {
-                    offset_delta: i32::try_from(idx).expect("offset delta fits"),
-                    value: Some(bytes::Bytes::from_static(value)),
-                    ..Default::default()
-                })
-                .collect(),
+            records: record_values(values),
             ..Default::default()
         };
         part.log

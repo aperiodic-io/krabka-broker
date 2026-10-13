@@ -4,28 +4,26 @@ use creusot_std::prelude::ensures;
 #[cfg(creusot)]
 use creusot_std::prelude::{DeepModel, Int, invariant};
 
-model_types! {
-    @derives (derive(std::clone::Clone, Copy, DeepModel))
-        (derive(Debug, Clone, Copy, PartialEq, Eq));
-    /// Admission result for an administrative share-offset mutation.
-    pub enum ShareOffsetMutationDecision {
-        NotCoordinator,
-        NonEmptyGroup,
-        Unrequested,
-        FencedLeaderEpoch,
-        StateEpochOverflow,
-        ExactRetry,
-        Apply { next_state_epoch: i32 },
-    }
+/// Admission result for an administrative share-offset mutation.
+#[krabka_macros::model_type(runtime(Debug, Clone, Copy, PartialEq, Eq))]
+pub enum ShareOffsetMutationDecision {
+    NotCoordinator,
+    NonEmptyGroup,
+    Unrequested,
+    FencedLeaderEpoch,
+    StateEpochOverflow,
+    ExactRetry,
+    Apply { next_state_epoch: i32 },
+}
 
-    /// The ordered coordinator, membership, request, and retry gate established
-    /// by the host before the epoch checks.
-    pub enum ShareOffsetMutationGate {
-        NotCoordinator,
-        NonEmptyGroup,
-        Unrequested,
-        Admissible { exact_retry: bool },
-    }
+/// The ordered coordinator, membership, request, and retry gate established
+/// by the host before the epoch checks.
+#[krabka_macros::model_type(runtime(Debug, Clone, Copy, PartialEq, Eq))]
+pub enum ShareOffsetMutationGate {
+    NotCoordinator,
+    NonEmptyGroup,
+    Unrequested,
+    Admissible { exact_retry: bool },
 }
 
 /// Admit a requested share-offset mutation and choose its next state epoch.

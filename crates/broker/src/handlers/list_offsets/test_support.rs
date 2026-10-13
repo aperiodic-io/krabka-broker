@@ -15,11 +15,11 @@ use {
     },
 };
 
-crate::test_support::wire_helpers!(
-    pub(super) ListOffsetsRequest,
-    ListOffsetsResponse,
-    client_id = "admin-client"
-);
+krabka_macros::wire_codec_helpers! {
+    pub(super) encode_request(ListOffsetsRequest);
+    pub(super) decode_response(ListOffsetsResponse);
+    pub(super) test_context ["admin-client"];
+}
 
 pub(super) async fn client_for(broker: &BrokerHandle) -> krabka_client_core::Client {
     krabka_client_core::Client::builder()

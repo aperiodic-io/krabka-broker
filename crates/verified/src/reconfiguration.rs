@@ -10,91 +10,96 @@
 #[cfg(creusot)]
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// The KIP-853 control operation being validated.
-    pub enum VoterChangeKind {
-        Add,
-        Remove,
-        Update,
-        FinalizeKraftVersion,
-    }
+/// The KIP-853 control operation being validated.
+#[krabka_macros::model_type]
+pub enum VoterChangeKind {
+    Add,
+    Remove,
+    Update,
+    FinalizeKraftVersion,
+}
 
-    /// The receiving node's leadership state for one reconfiguration.
-    pub struct ReconfigurationLeadership {
-        /// The node is the current `KRaft` leader.
-        pub is_leader: bool,
-        /// No earlier voter change is waiting for its record to commit.
-        pub no_pending_change: bool,
-        /// The leader has committed its own epoch, so Kafka's leader HWM exists.
-        pub epoch_committed: bool,
-    }
+/// The receiving node's leadership state for one reconfiguration.
+#[krabka_macros::model_type]
+pub struct ReconfigurationLeadership {
+    /// The node is the current `KRaft` leader.
+    pub is_leader: bool,
+    /// No earlier voter change is waiting for its record to commit.
+    pub no_pending_change: bool,
+    /// The leader has committed its own epoch, so Kafka's leader HWM exists.
+    pub epoch_committed: bool,
+}
 
-    /// The committed voter set the change applies to.
-    pub struct CurrentVoterSet {
-        pub voter_count: usize,
-        /// The committed `kraft.version`.
-        pub kraft_version: u16,
-        /// The latest voter set and `kraft.version` in the log equal the
-        /// committed ones: no control record is uncommitted.
-        pub latest_controls_committed: bool,
-        /// Every current voter's supported range covers the requested
-        /// `kraft.version`. Only a finalization reads it.
-        pub all_voters_support_requested: bool,
-    }
+/// The committed voter set the change applies to.
+#[krabka_macros::model_type]
+pub struct CurrentVoterSet {
+    pub voter_count: usize,
+    /// The committed `kraft.version`.
+    pub kraft_version: u16,
+    /// The latest voter set and `kraft.version` in the log equal the
+    /// committed ones: no control record is uncommitted.
+    pub latest_controls_committed: bool,
+    /// Every current voter's supported range covers the requested
+    /// `kraft.version`. Only a finalization reads it.
+    pub all_voters_support_requested: bool,
+}
 
-    /// One requested control operation.
-    pub struct VoterChangeRequest {
-        pub kind: VoterChangeKind,
-        /// The `kraft.version` a finalization asks for.
-        pub requested_kraft_version: u16,
-    }
+/// One requested control operation.
+#[krabka_macros::model_type]
+pub struct VoterChangeRequest {
+    pub kind: VoterChangeKind,
+    /// The `kraft.version` a finalization asks for.
+    pub requested_kraft_version: u16,
+}
 
-    /// How the request's voter key relates to the current voter set.
-    pub enum TargetMembership {
-        /// No current voter has the request's voter id.
-        Absent,
-        /// The voter id is current, and its stored directory id is unknown.
-        PresentUnknownDirectory,
-        /// The voter id is current, with the request's directory id.
-        PresentSameDirectory,
-        /// The voter id is current, with a different known directory id.
-        PresentOtherDirectory,
-    }
+/// How the request's voter key relates to the current voter set.
+#[krabka_macros::model_type]
+pub enum TargetMembership {
+    /// No current voter has the request's voter id.
+    Absent,
+    /// The voter id is current, and its stored directory id is unknown.
+    PresentUnknownDirectory,
+    /// The voter id is current, with the request's directory id.
+    PresentSameDirectory,
+    /// The voter id is current, with a different known directory id.
+    PresentOtherDirectory,
+}
 
-    /// Facts about the voter an add, remove, or update names. A finalization
-    /// names no voter and does not read them.
-    pub struct TargetVoter {
-        pub membership: TargetMembership,
-        /// The voter's supported range covers the committed `kraft.version`.
-        pub version_compatible: bool,
-        /// The voter has fetched up to the leader's log end.
-        pub caught_up: bool,
-    }
+/// Facts about the voter an add, remove, or update names. A finalization
+/// names no voter and does not read them.
+#[krabka_macros::model_type]
+pub struct TargetVoter {
+    pub membership: TargetMembership,
+    /// The voter's supported range covers the committed `kraft.version`.
+    pub version_compatible: bool,
+    /// The voter has fetched up to the leader's log end.
+    pub caught_up: bool,
+}
 
-    /// The exact control-record shape of an admitted change.
-    pub struct VoterReconfigurationPlan {
-        pub next_voter_count: usize,
-        pub next_kraft_version: u16,
-        pub write_voters: bool,
-        pub write_kraft_version: bool,
-        pub preflight_only: bool,
-    }
+/// The exact control-record shape of an admitted change.
+#[krabka_macros::model_type]
+pub struct VoterReconfigurationPlan {
+    pub next_voter_count: usize,
+    pub next_kraft_version: u16,
+    pub write_voters: bool,
+    pub write_kraft_version: bool,
+    pub preflight_only: bool,
+}
 
-    pub enum VoterReconfigurationDecision {
-        NotLeader,
-        InProgress,
-        EpochUncommitted,
-        EmptyCurrentVoterSet,
-        UnsupportedKraftVersion,
-        DuplicateVoter,
-        IncompatibleVoter,
-        VoterNotCaughtUp,
-        VoterNotFound,
-        DirectoryMismatch,
-        InvalidVersionTransition,
-        Admit(VoterReconfigurationPlan),
-    }
+#[krabka_macros::model_type]
+pub enum VoterReconfigurationDecision {
+    NotLeader,
+    InProgress,
+    EpochUncommitted,
+    EmptyCurrentVoterSet,
+    UnsupportedKraftVersion,
+    DuplicateVoter,
+    IncompatibleVoter,
+    VoterNotCaughtUp,
+    VoterNotFound,
+    DirectoryMismatch,
+    InvalidVersionTransition,
+    Admit(VoterReconfigurationPlan),
 }
 
 /// The leadership and committed voter-set snapshot captured for one control change.

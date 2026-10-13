@@ -17,7 +17,15 @@
 //! encodes what goes back on the wire.
 
 use {
-    crate::{codes, error::BrokerError, handlers::forward_to_controller::is_active_controller},
+    crate::{
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::{
+            ApiVersion, RequestContext, cluster_action_denied,
+            forward_to_controller::is_active_controller,
+        },
+    },
     krabka_protocol::owned::{
         assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
         assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
@@ -36,63 +44,64 @@ use self::{
     validation::check_broker_epoch,
 };
 
-context_handler! {
-    AssignReplicasToDirsRequest => AssignReplicasToDirsResponse,
-    (broker, req, _version, ctx),
-    {
-        let controller = broker.controller.clone();
-        let image = controller.current_image();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: AssignReplicasToDirsRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<AssignReplicasToDirsResponse, BrokerError> {
+    let controller = broker.controller.clone();
+    let image = controller.current_image();
 
-        // ── ACL preamble ────────────────────────────────────────────
-        // Inter-broker control-plane RPC: `ClusterAction` on
-        // `Cluster("kafka-cluster")`. On Deny → whole-response
-        // `error_code = CLUSTER_AUTHORIZATION_FAILED (31)`, as Kafka's
-        // `ControllerApis.handleAssignReplicasToDirs` requires before it forwards
-        // to the controller.
-        if crate::handlers::cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            return Ok(AssignReplicasToDirsResponse {
-                error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-                ..Default::default()
-            });
-        }
-
-        if !is_active_controller(broker) {
-            return Ok(not_controller_response());
-        }
-
-        // Kafka's `ClusterControlManager.checkBrokerEpoch`, which
-        // `ReplicationControlManager.handleAssignReplicasToDirs` runs before it
-        // looks at the reported rows. Fences out a stale or restarted broker: an
-        // unregistered id (a negative wire value included) gets
-        // `BROKER_ID_NOT_REGISTERED`, and a registered id reporting the wrong
-        // epoch gets `STALE_BROKER_EPOCH`.
-        let broker_slot_id = match check_broker_epoch(&image, req.broker_id, req.broker_epoch) {
-            Ok(broker_slot_id) => broker_slot_id,
-            Err(error_code) => {
-                return Ok(AssignReplicasToDirsResponse {
-                    error_code,
-                    ..Default::default()
-                });
-            }
-        };
-        if image.finalized_metadata_version().is_some_and(|level| {
-            level < krabka_metadata::metadata_version::DIRECTORY_ASSIGNMENT_MIN_LEVEL
-        }) {
-            return Ok(AssignReplicasToDirsResponse {
-                error_code: codes::UNSUPPORTED_VERSION,
-                ..Default::default()
-            });
-        }
-        let AssignmentPlan { changes, response } = plan_assignments(&image, broker_slot_id, &req);
-
-        if !changes.is_empty()
-            && let Err(e) = controller.submit_change(changes).await
-        {
-            return Err(BrokerError::Replication(format!("submit_change: {e}")));
-        }
-
-        Ok(response)
+    // ── ACL preamble ────────────────────────────────────────────
+    // Inter-broker control-plane RPC: `ClusterAction` on
+    // `Cluster("kafka-cluster")`. On Deny → whole-response
+    // `error_code = CLUSTER_AUTHORIZATION_FAILED (31)`, as Kafka's
+    // `ControllerApis.handleAssignReplicasToDirs` requires before it forwards
+    // to the controller.
+    if cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        return Ok(AssignReplicasToDirsResponse {
+            error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+            ..Default::default()
+        });
     }
+
+    if !is_active_controller(broker) {
+        return Ok(not_controller_response());
+    }
+
+    // Kafka's `ClusterControlManager.checkBrokerEpoch`, which
+    // `ReplicationControlManager.handleAssignReplicasToDirs` runs before it
+    // looks at the reported rows. Fences out a stale or restarted broker: an
+    // unregistered id (a negative wire value included) gets
+    // `BROKER_ID_NOT_REGISTERED`, and a registered id reporting the wrong
+    // epoch gets `STALE_BROKER_EPOCH`.
+    let broker_slot_id = match check_broker_epoch(&image, req.broker_id, req.broker_epoch) {
+        Ok(broker_slot_id) => broker_slot_id,
+        Err(error_code) => {
+            return Ok(AssignReplicasToDirsResponse {
+                error_code,
+                ..Default::default()
+            });
+        }
+    };
+    if image.finalized_metadata_version().is_some_and(|level| {
+        level < krabka_metadata::metadata_version::DIRECTORY_ASSIGNMENT_MIN_LEVEL
+    }) {
+        return Ok(AssignReplicasToDirsResponse {
+            error_code: codes::UNSUPPORTED_VERSION,
+            ..Default::default()
+        });
+    }
+    let AssignmentPlan { changes, response } = plan_assignments(&image, broker_slot_id, &req);
+
+    if !changes.is_empty()
+        && let Err(e) = controller.submit_change(changes).await
+    {
+        return Err(BrokerError::Replication(format!("submit_change: {e}")));
+    }
+
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -205,13 +214,13 @@ mod tests {
             actual.push((report, resp));
             expected.push((
                 report,
-                unthrottled_wire!(AssignReplicasToDirsResponse {
+                krabka_macros::unthrottled_wire!(AssignReplicasToDirsResponse {
                     error_code: codes::NONE,
-                    directories: vec![tagged_wire!(RespDirData {
+                    directories: vec![krabka_macros::tagged_wire!(RespDirData {
                         id: ProtocolUuid(dir_uuid.into_bytes()),
-                        topics: vec![tagged_wire!(RespTopicData {
+                        topics: vec![krabka_macros::tagged_wire!(RespTopicData {
                             topic_id: ProtocolUuid(topic_id.into_bytes()),
-                            partitions: vec![tagged_wire!(RespPartData {
+                            partitions: vec![krabka_macros::tagged_wire!(RespPartData {
                                 partition_index,
                                 error_code,
                             })],

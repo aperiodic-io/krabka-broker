@@ -12,9 +12,14 @@
 
 use {
     crate::{
+        broker::Broker,
         codes,
         coordinator::unified::actor::{GroupActorMessage, LeaveResult},
-        handlers::{ErrorCodeResponse as _, group_read_denied},
+        error::BrokerError,
+        handlers::{
+            ApiVersion, ErrorCodeResponse as _, RequestContext, group_coordinator_error,
+            group_read_denied,
+        },
         task_util::{AskError, ask},
     },
     krabka_protocol::owned::{
@@ -26,72 +31,73 @@ use {
 #[cfg(test)]
 mod tests;
 
-context_handler! {
-    LeaveGroupRequest => LeaveGroupResponse,
-    (broker, req, version, ctx),
-    {
-        let coordinator = broker.group_coordinator.clone();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: LeaveGroupRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<LeaveGroupResponse, BrokerError> {
+    let coordinator = broker.group_coordinator.clone();
 
-        // ── ACL preamble ────────────────────────────────────────────────
-        // `Read` on `Group(group_id)`. On Deny → whole-response
-        // `error_code = GROUP_AUTHORIZATION_FAILED (30)`.
-        let image = broker.controller.current_image();
-        if group_read_denied(
-            broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            &req.group_id,
-        ) {
-            return Ok(LeaveGroupResponse::error(codes::GROUP_AUTHORIZATION_FAILED));
-        }
-
-        // `GroupCoordinatorService.leaveGroup`'s `isGroupIdNotEmpty` check runs
-        // before the request is routed to a coordinator shard.
-        if req.group_id.is_empty() {
-            return Ok(LeaveGroupResponse::error(codes::INVALID_GROUP_ID));
-        }
-
-        if let Some(error_code) = crate::handlers::group_coordinator_error(broker, &req.group_id) {
-            return Ok(LeaveGroupResponse::error(error_code));
-        }
-
-        let result = match coordinator.find(&req.group_id) {
-            None => unknown_group_result(&req, version),
-            Some(handle) => {
-                let asked = ask(&handle.tx, |reply| GroupActorMessage::ClassicLeave {
-                    req: req.clone(),
-                    version,
-                    reply,
-                })
-                .await;
-                match asked {
-                    Err(AskError::Closed) => LeaveResult {
-                        error_code: codes::COORDINATOR_LOAD_IN_PROGRESS,
-                        members: Vec::new(),
-                    },
-                    asked => match asked.unwrap_or_default() {
-                        // The actor answers a group of a kind the classic leave
-                        // cannot reach with `UNKNOWN_MEMBER_ID`, which Kafka
-                        // shapes exactly as a missing group.
-                        result
-                            if result.error_code == codes::UNKNOWN_MEMBER_ID
-                                && result.members.is_empty() =>
-                        {
-                            unknown_group_result(&req, version)
-                        }
-                        result => result,
-                    },
-                }
-            }
-        };
-
-        Ok(LeaveGroupResponse {
-            error_code: result.error_code,
-            throttle_time_ms: 0,
-            members: result.members,
-            ..Default::default()
-        })
+    // ── ACL preamble ────────────────────────────────────────────────
+    // `Read` on `Group(group_id)`. On Deny → whole-response
+    // `error_code = GROUP_AUTHORIZATION_FAILED (30)`.
+    let image = broker.controller.current_image();
+    if group_read_denied(
+        broker.config.authorizer.as_ref(),
+        &image,
+        ctx,
+        &req.group_id,
+    ) {
+        return Ok(LeaveGroupResponse::error(codes::GROUP_AUTHORIZATION_FAILED));
     }
+
+    // `GroupCoordinatorService.leaveGroup`'s `isGroupIdNotEmpty` check runs
+    // before the request is routed to a coordinator shard.
+    if req.group_id.is_empty() {
+        return Ok(LeaveGroupResponse::error(codes::INVALID_GROUP_ID));
+    }
+
+    if let Some(error_code) = group_coordinator_error(broker, &req.group_id) {
+        return Ok(LeaveGroupResponse::error(error_code));
+    }
+
+    let result = match coordinator.find(&req.group_id) {
+        None => unknown_group_result(&req, version),
+        Some(handle) => {
+            let asked = ask(&handle.tx, |reply| GroupActorMessage::ClassicLeave {
+                req: req.clone(),
+                version,
+                reply,
+            })
+            .await;
+            match asked {
+                Err(AskError::Closed) => LeaveResult {
+                    error_code: codes::COORDINATOR_LOAD_IN_PROGRESS,
+                    members: Vec::new(),
+                },
+                asked => match asked.unwrap_or_default() {
+                    // The actor answers a group of a kind the classic leave
+                    // cannot reach with `UNKNOWN_MEMBER_ID`, which Kafka
+                    // shapes exactly as a missing group.
+                    result
+                        if result.error_code == codes::UNKNOWN_MEMBER_ID
+                            && result.members.is_empty() =>
+                    {
+                        unknown_group_result(&req, version)
+                    }
+                    result => result,
+                },
+            }
+        }
+    };
+
+    Ok(LeaveGroupResponse {
+        error_code: result.error_code,
+        throttle_time_ms: 0,
+        members: result.members,
+        ..Default::default()
+    })
 }
 
 /// Kafka's answer for a group the coordinator does not hold: one

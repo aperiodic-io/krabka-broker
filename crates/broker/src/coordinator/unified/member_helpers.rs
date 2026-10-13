@@ -6,128 +6,13 @@
 //! that calls them.
 
 use {
+    crate::coordinator::unified::consumer_state::same_assignment,
     krabka_protocol::primitives::uuid::Uuid,
     std::{
         collections::HashMap,
         time::{Duration, Instant},
     },
 };
-
-/// Query expiration consistently across group protocols.
-macro_rules! expired_members_method {
-    () => {
-        /// The members whose session expired at `now`, without removing them.
-        #[must_use]
-        pub fn expired_members(
-            &self,
-            now: std::time::Instant,
-            session_timeout: std::time::Duration,
-        ) -> Vec<String> {
-            $crate::coordinator::unified::expired_member_ids(
-                self.members
-                    .iter()
-                    .map(|(id, member)| (id.as_str(), member.last_seen)),
-                now,
-                session_timeout,
-            )
-        }
-    };
-}
-pub(crate) use expired_members_method;
-
-/// Consumer and streams groups fence through their own deadline and removal transitions.
-macro_rules! fence_rebalance_timeouts_method {
-    ($(#[$doc:meta])*) => {
-        $(#[$doc])*
-        pub fn fence_rebalance_timeouts(&mut self, now: std::time::Instant) -> Vec<String> {
-            let fenced = self.rebalance_timeouts_due(now);
-            for member_id in &fenced {
-                self.remove_member(member_id);
-            }
-            fenced
-        }
-    };
-}
-pub(crate) use fence_rebalance_timeouts_method;
-
-/// Evicts expired members through the group's own removal transition.
-macro_rules! evict_expired {
-    ($(#[$doc:meta])*) => {
-        $(#[$doc])*
-        pub fn evict_expired(
-            &mut self,
-            now: std::time::Instant,
-            session_timeout: std::time::Duration,
-        ) -> Vec<String> {
-            $crate::coordinator::unified::member_helpers::evict_expired!(self, now, session_timeout)
-        }
-    };
-    ($group:expr, $now:expr, $timeout:expr) => {{
-        let group = $group;
-        let expired = $crate::coordinator::unified::expired_member_ids(
-            group
-                .members
-                .iter()
-                .map(|(id, member)| (id.as_str(), member.last_seen)),
-            $now,
-            $timeout,
-        );
-        for id in &expired {
-            group.remove_member(id);
-        }
-        expired
-    }};
-}
-
-pub(crate) use evict_expired;
-
-/// Every group refuses the proved successor at exhaustion; only selected protocols mark it dirty.
-macro_rules! bump_group_epoch {
-    ($(#[$doc:meta])* $group:ident; $($after:tt)*) => {
-        $(#[$doc])*
-        pub fn bump_epoch(&mut $group) -> bool {
-            let Some(epoch) = $crate::metadata_epoch::next_i32($group.group_epoch) else {
-                return false;
-            };
-            $group.group_epoch = epoch;
-            $($after)*
-            true
-        }
-    };
-}
-pub(crate) use bump_group_epoch;
-
-/// The same assignment-delay query on each protocol's stored
-/// `AssignmentTimestamp`.
-macro_rules! assignment_delay_method {
-    () => {
-        /// Kafka's `GroupMetadataManager.canComputeNextTargetAssignment`, negated:
-        /// `true` while the assignment `interval` holds the next target
-        /// assignment back at `now_ms`.
-        #[must_use]
-        pub(crate) fn assignment_delayed(
-            &self,
-            interval: std::time::Duration,
-            now_ms: i64,
-        ) -> bool {
-            !$crate::coordinator::unified::member_helpers::can_compute_next_target_assignment(
-                self.assignment_timestamp_ms,
-                interval,
-                now_ms,
-            )
-        }
-    };
-}
-use crate::coordinator::unified::consumer_state::same_assignment;
-pub(crate) use assignment_delay_method;
-
-macro_rules! shared_group_state_methods {
-    () => {
-        $crate::coordinator::unified::member_helpers::assignment_delay_method!();
-        $crate::coordinator::unified::member_helpers::bump_group_epoch!(self;);
-    };
-}
-pub(crate) use shared_group_state_methods;
 
 /// An absent heartbeat field keeps the stored value; allocate only when it changes.
 pub(crate) fn update_present<T: Clone + PartialEq>(

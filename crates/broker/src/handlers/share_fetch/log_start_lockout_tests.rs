@@ -27,7 +27,7 @@ use {
                 OffsetRun, RecordCount, StartedBroker,
                 create_topic as create_topic_from_test_support,
                 produce_records as produce_records_from_test_support, share_fetch_partition_rows,
-                share_fetch_topics, share_fetch_wire,
+                share_fetch_topics, share_fetch_wire, share_topic_uuid,
             },
         },
         test_support::{initialize_share_state, peer, principal, start_broker_no_audit_with},
@@ -225,13 +225,11 @@ async fn share_fetch_one(
 
 use crate::handlers::test_support::acquired_share_records as acquired;
 
-fn topic_uuid(topic_id: WireUuid) -> uuid::Uuid { uuid::Uuid::from_bytes(topic_id.0) }
-
 async fn spso(broker: &BrokerHandle, group: &str, topic_id: WireUuid, partition_index: i32) -> i64 {
     let shared = broker.broker_arc_for_test();
     shared
         .share_partition_leaders
-        .peek_for_test(group, topic_uuid(topic_id), partition_index)
+        .peek_for_test(group, share_topic_uuid(topic_id), partition_index)
         .expect("a cached share-partition leader")
         .lock()
         .await
@@ -325,7 +323,7 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
         let topic = format!("lockout-row-{index}");
         let group = format!("g-lockout-row-{index}");
         let topic_id = create_topic(&broker, &topic, 1).await;
-        initialize_share_state(&broker, &group, topic_uuid(topic_id), 0).await;
+        initialize_share_state(&broker, &group, share_topic_uuid(topic_id), 0).await;
 
         // Prime the leader cell at SPSO 0 before any record exists, so a
         // later `DeleteRecords` moves the log start out from under a cell
@@ -387,35 +385,46 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
     broker.shutdown().await;
 }
 
-/// Kafka's `ShareFetchUtils.processFetchResponse` turns the log read error of
-/// one partition into that partition's error code with no records, and the
-/// other partitions of the request still return theirs. A batch that does not
-/// check out is `CORRUPT_MESSAGE`. The request must not fail as a whole, which
-/// closes the connection.
-#[tokio::test]
-async fn an_unreadable_partition_fails_alone() {
+#[derive(Clone, Copy)]
+enum IsolatedPartitionFailure {
+    CorruptBatch,
+    LogStartPastSpso,
+}
+
+/// One bad partition stays local to itself: an unreadable batch returns its
+/// error, and a log start past the SPSO recovers that partition. The healthy
+/// partition still supplies records in both cases.
+#[yare::parameterized(
+    corrupt_batch = { IsolatedPartitionFailure::CorruptBatch },
+    log_start_past_spso = { IsolatedPartitionFailure::LogStartPastSpso },
+)]
+#[test_macro(tokio::test)]
+async fn a_partition_failure_does_not_affect_other_partitions(failure: IsolatedPartitionFailure) {
+    use assert2::assert;
+
     let StartedBroker { broker, dir } = start().await;
-    let topic = "unreadable-and-healthy";
-    let group = "g-unreadable-and-healthy";
+    let (topic, group) = match failure {
+        IsolatedPartitionFailure::CorruptBatch => {
+            ("unreadable-and-healthy", "g-unreadable-and-healthy")
+        }
+        IsolatedPartitionFailure::LogStartPastSpso => {
+            ("lockout-and-healthy", "g-lockout-and-healthy")
+        }
+    };
     let topic_id = primed_pair(&broker, topic, group).await;
 
-    // Give the only batch of partition 0 a length of zero, which is shorter
-    // than a batch header: bytes 8 to 11 of a record batch are its
-    // `batch_length`.
-    let segment = std::fs::read_dir(dir.path().join(format!("{topic}-0")))
-        .expect("the partition directory")
-        .map(|entry| entry.expect("a directory entry").path())
-        .find(|path| path.extension().is_some_and(|ext| ext == "log"))
-        .expect("a segment file");
-    let mut bytes = std::fs::read(&segment).expect("read the segment");
-    bytes[8..12].copy_from_slice(&0_i32.to_be_bytes());
-    std::fs::write(&segment, bytes).expect("corrupt the segment");
-
-    let by_partition = fetch_incremental_pair(&broker, group, topic_id).await;
-
-    assert!(
-        by_partition
-            == vec![
+    let expected: Vec<PartitionOutcome> = match failure {
+        IsolatedPartitionFailure::CorruptBatch => {
+            // `batch_length` is bytes 8 to 11; zero is shorter than a batch header.
+            let segment = std::fs::read_dir(dir.path().join(format!("{topic}-0")))
+                .expect("the partition directory")
+                .map(|entry| entry.expect("a directory entry").path())
+                .find(|path| path.extension().is_some_and(|ext| ext == "log"))
+                .expect("a segment file");
+            let mut bytes = std::fs::read(&segment).expect("read the segment");
+            bytes[8..12].copy_from_slice(&0_i32.to_be_bytes());
+            std::fs::write(&segment, bytes).expect("corrupt the segment");
+            vec![
                 PartitionOutcome {
                     partition_index: 0,
                     error_code: codes::CORRUPT_MESSAGE,
@@ -423,29 +432,17 @@ async fn an_unreadable_partition_fails_alone() {
                 },
                 acquired_run(1, 0, 4),
             ]
-    );
-    broker.shutdown().await;
-}
+        }
+        IsolatedPartitionFailure::LogStartPastSpso => {
+            // Only partition 0's log start moves past its SPSO.
+            let delete_error = delete_records(&broker, topic, 0, 3).await;
+            assert!(delete_error == codes::NONE, "{delete_error}");
+            vec![acquired_run(0, 3, 4), acquired_run(1, 0, 4)]
+        }
+    };
 
-/// A second, healthy partition in the same `ShareFetch` request must still
-/// get its records when the first partition's log start has moved past its
-/// SPSO: the recovery is per-partition, not per-request.
-#[tokio::test]
-async fn a_healthy_partition_in_the_same_request_is_unaffected() {
-    let StartedBroker { broker, dir: _dir } = start().await;
-    let topic = "lockout-and-healthy";
-    let group = "g-lockout-and-healthy";
-    let topic_id = primed_pair(&broker, topic, group).await;
-
-    // Only partition 0's log start moves past its SPSO.
-    let delete_error = delete_records(&broker, topic, 0, 3).await;
-    assert!(delete_error == codes::NONE, "{delete_error}");
-
-    // The partitions rotate by session epoch, so the rows come in either
-    // order.
     let by_partition = fetch_incremental_pair(&broker, group, topic_id).await;
-
-    assert!(by_partition == vec![acquired_run(0, 3, 4), acquired_run(1, 0, 4)]);
+    assert!(by_partition == expected);
     broker.shutdown().await;
 }
 
@@ -464,7 +461,7 @@ async fn a_member_that_does_not_acknowledge_gets_no_more_than_the_record_lock_li
     let topic = "record-lock-limit";
     let group = "g-record-lock-limit";
     let topic_id = create_topic(&broker, topic, 1).await;
-    initialize_share_state(&broker, group, topic_uuid(topic_id), 0).await;
+    initialize_share_state(&broker, group, share_topic_uuid(topic_id), 0).await;
     let opened = share_fetch_one(&broker, group, 0, topic_id).await;
     assert!(opened.error_code == codes::NONE, "{opened:?}");
     produce_records(&broker, topic, 0, 250).await;
@@ -477,7 +474,7 @@ async fn a_member_that_does_not_acknowledge_gets_no_more_than_the_record_lock_li
     let end_offset = broker
         .broker_arc_for_test()
         .share_partition_leaders
-        .peek_for_test(group, topic_uuid(topic_id), 0)
+        .peek_for_test(group, share_topic_uuid(topic_id), 0)
         .expect("a cached share-partition leader")
         .lock()
         .await
@@ -504,8 +501,8 @@ async fn a_member_that_does_not_acknowledge_gets_no_more_than_the_record_lock_li
 /// Prime both partitions in one session while empty, then append five records each.
 async fn primed_pair(broker: &BrokerHandle, topic: &str, group: &str) -> WireUuid {
     let topic_id = create_topic(broker, topic, 2).await;
-    initialize_share_state(broker, group, topic_uuid(topic_id), 0).await;
-    initialize_share_state(broker, group, topic_uuid(topic_id), 1).await;
+    initialize_share_state(broker, group, share_topic_uuid(topic_id), 0).await;
+    initialize_share_state(broker, group, share_topic_uuid(topic_id), 1).await;
     let opened = share_fetch_rows()
         .broker(broker)
         .group(group)

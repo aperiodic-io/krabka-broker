@@ -25,7 +25,9 @@ use {
     std::sync::Arc,
 };
 
-crate::test_support::context_helper!(client_id = "broker-client");
+krabka_macros::wire_codec_helpers! {
+    test_context ["broker-client"];
+}
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct EmptyAlterPartitionSetup {
@@ -47,7 +49,7 @@ async fn check_empty_alter_partition(
     let response = super::handle(broker, request, setup.version.0, ctx)
         .await
         .expect("handle");
-    let expected = unthrottled_wire!(AlterPartitionResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterPartitionResponse {
         error_code: setup.expected.0,
         topics: Vec::new(),
     });
@@ -125,9 +127,9 @@ async fn concurrent_isr_updates_revalidate_the_partition_epoch_at_append() {
     responses.sort_unstable_by_key(|response| response.topics[0].partitions[0].error_code);
     let expected = [
         accepted_isr_response(),
-        unthrottled_wire!(AlterPartitionResponse {
+        krabka_macros::unthrottled_wire!(AlterPartitionResponse {
             error_code: codes::NONE,
-            topics: vec![tagged_wire!(RespTopicData {
+            topics: vec![krabka_macros::tagged_wire!(RespTopicData {
                 topic_id: wire_topic_id(),
                 partitions: vec![RespPartitionData {
                     partition_index: 0,
@@ -227,7 +229,7 @@ async fn topic_row_error_follows_version_and_topic_id() {
         let partitions = if kind == TopicIdKind::Known {
             partition_epoch += 1;
             vec![
-                tagged_wire!(RespPartitionData {
+                krabka_macros::tagged_wire!(RespPartitionData {
                     partition_index: 0,
                     error_code: codes::NONE,
                     leader_id: 1,
@@ -247,9 +249,9 @@ async fn topic_row_error_follows_version_and_topic_id() {
         expected.push((
             version,
             kind,
-            unthrottled_wire!(AlterPartitionResponse {
+            krabka_macros::unthrottled_wire!(AlterPartitionResponse {
                 error_code: codes::NONE,
-                topics: vec![tagged_wire!(RespTopicData {
+                topics: vec![krabka_macros::tagged_wire!(RespTopicData {
                     topic_id,
                     partitions,
                 })],
@@ -293,7 +295,7 @@ async fn a_stale_sender_broker_epoch_refuses_the_whole_request() {
         let resp = super::handle(&broker, req, version, &ctx)
             .await
             .expect("handle");
-        let expected = unthrottled_wire!(AlterPartitionResponse {
+        let expected = krabka_macros::unthrottled_wire!(AlterPartitionResponse {
             error_code: codes::STALE_BROKER_EPOCH,
             topics: Vec::new(),
         });
@@ -322,11 +324,11 @@ fn single_partition_request(broker: &Broker) -> AlterPartitionRequest {
 }
 
 fn accepted_isr_response() -> AlterPartitionResponse {
-    unthrottled_wire!(AlterPartitionResponse {
+    krabka_macros::unthrottled_wire!(AlterPartitionResponse {
         error_code: codes::NONE,
-        topics: vec![tagged_wire!(RespTopicData {
+        topics: vec![krabka_macros::tagged_wire!(RespTopicData {
             topic_id: wire_topic_id(),
-            partitions: vec![tagged_wire!(RespPartitionData {
+            partitions: vec![krabka_macros::tagged_wire!(RespPartitionData {
                 partition_index: 0,
                 error_code: codes::NONE,
                 leader_id: 1,

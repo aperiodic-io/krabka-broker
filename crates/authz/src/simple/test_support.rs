@@ -41,15 +41,7 @@ impl AliceAuthorizer {
         name: &str,
         operation: AclOperation,
     ) -> AuthorizationResult {
-        self.authorizer.authorize(
-            image,
-            &req()
-                .p(&self.principal)
-                .host(&self.host)
-                .name(name)
-                .op(operation)
-                .call(),
-        )
+        self.authorize_on(image, ResourceType::Topic, name, operation)
     }
 
     pub fn authorize_by_resource_type(

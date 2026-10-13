@@ -2,13 +2,15 @@
 use super::{count_ge, count_ge_prefix, hwm_member_at, lemma_hwm_member_maximal};
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The current watermark and follower acknowledgements fit within the log.
 fn watermark_inputs_bounded(current: Int, end: Int, followers: Seq<i64>) -> bool {
     pearlite! {
         current <= end && (forall<k: Int> 0 <= k && k < followers.len() ==> followers[k]@ <= end)
     }
-}
 }
 
 #[requires(1 <= majority@ && majority@ <= follower_offsets@.len() + 1)]

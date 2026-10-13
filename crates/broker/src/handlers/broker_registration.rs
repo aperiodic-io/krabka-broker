@@ -1,7 +1,16 @@
 //! `BrokerRegistration` (`api_key=62`). KIP-631/KIP-903 broker registration.
 
 use {
-    crate::{broker::Broker, clean_shutdown::restart_was_clean, codes},
+    crate::{
+        broker::Broker,
+        clean_shutdown::restart_was_clean,
+        cluster_id::matches as cluster_id_matches,
+        codes,
+        error::BrokerError,
+        handlers::{ApiVersion, RequestContext},
+        leader_election::{FailoverPlan, compute_unclean_restart_changes},
+        unclean_recovery::RecoveryJob,
+    },
     krabka_metadata::{BrokerEndpoint, BrokerRegistrationRecord, MetadataRecord, NodeId},
     krabka_protocol::owned::{
         broker_registration_request::{BrokerRegistrationRequest, Listener},
@@ -11,179 +20,174 @@ use {
     std::collections::HashSet,
 };
 
-context_handler! {
-    BrokerRegistrationRequest => BrokerRegistrationResponse,
-    (broker, req, version, ctx),
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: BrokerRegistrationRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<BrokerRegistrationResponse, BrokerError> {
+    let image = broker.controller.current_image();
+
+    // ClusterAction is checked before the active-controller requirement.
+    if let Some(code) = super::registration_listeners::registration_refusal(broker, &image, ctx) {
+        return Ok(response(code, -1));
+    }
+    // Kafka's controller decides one registration at a time on its event
+    // thread. Hold the registration turn from the session check to the
+    // session replacement, so two registrations of one broker id, or of one
+    // log directory, cannot both pass against the same image.
+    let turn = broker.liveness.registration_turn().await;
+    let image = broker.controller.current_image();
+
+    let node_id = match u64::try_from(req.broker_id) {
+        Ok(id) => NodeId(id),
+        Err(_) => return Ok(response(codes::INVALID_REGISTRATION, -1)),
+    };
+    // The checks run in the order of `ClusterControlManager.registerBroker`,
+    // so a request with more than one fault gets Kafka's error code.
+    if !cluster_id_matches(&req.cluster_id, image.cluster_id()) {
+        return Ok(response(codes::INCONSISTENT_CLUSTER_ID, -1));
+    }
+    let incarnation_id = uuid::Uuid::from_bytes(req.incarnation_id.0);
+    let existing = image.broker(node_id);
+    // A new incarnation is refused only while the previous one still holds a
+    // heartbeat session. A restarted broker has a new incarnation id, and it
+    // registers once the session of the process it replaced expires.
+    if let Some(existing) = existing
+        && existing.incarnation_id != incarnation_id
+        && broker.liveness.has_valid_session(node_id.0).await
     {
-        let image = broker.controller.current_image();
+        return Ok(response(codes::DUPLICATE_BROKER_REGISTRATION, -1));
+    }
+    if req.is_migrating_zk_broker {
+        return Ok(response(codes::BROKER_ID_NOT_REGISTERED, -1));
+    }
+    let directory_assignment = image.finalized_metadata_version().is_some_and(|level| {
+        level >= krabka_metadata::metadata_version::DIRECTORY_ASSIGNMENT_MIN_LEVEL
+    });
+    if directory_assignment && let Err(code) = validate_log_dirs(&req, &image, node_id) {
+        return Ok(response(code, -1));
+    }
+    let endpoints = match decode_listeners(&req.listeners) {
+        Ok(endpoints) => endpoints,
+        Err(code) => return Ok(response(code, -1)),
+    };
+    if let Err(code) = validate_features(&req, &image) {
+        return Ok(response(code, -1));
+    }
 
-        // ClusterAction is checked before the active-controller requirement.
-        if let Some(code) = super::registration_listeners::registration_refusal(broker, &image, ctx) {
-            return Ok(response(code, -1));
-        }
-        // Kafka's controller decides one registration at a time on its event
-        // thread. Hold the registration turn from the session check to the
-        // session replacement, so two registrations of one broker id, or of one
-        // log directory, cannot both pass against the same image.
-        let turn = broker.liveness.registration_turn().await;
-        let image = broker.controller.current_image();
-
-        let node_id = match u64::try_from(req.broker_id) {
-            Ok(id) => NodeId(id),
-            Err(_) => return Ok(response(codes::INVALID_REGISTRATION, -1)),
-        };
-        // The checks run in the order of `ClusterControlManager.registerBroker`,
-        // so a request with more than one fault gets Kafka's error code.
-        if !crate::cluster_id::matches(&req.cluster_id, image.cluster_id()) {
-            return Ok(response(codes::INCONSISTENT_CLUSTER_ID, -1));
-        }
-        let incarnation_id = uuid::Uuid::from_bytes(req.incarnation_id.0);
-        let existing = image.broker(node_id);
-        // A new incarnation is refused only while the previous one still holds a
-        // heartbeat session. A restarted broker has a new incarnation id, and it
-        // registers once the session of the process it replaced expires.
-        if let Some(existing) = existing
-            && existing.incarnation_id != incarnation_id
-            && broker.liveness.has_valid_session(node_id.0).await
-        {
-            return Ok(response(codes::DUPLICATE_BROKER_REGISTRATION, -1));
-        }
-        if req.is_migrating_zk_broker {
-            return Ok(response(codes::BROKER_ID_NOT_REGISTERED, -1));
-        }
-        let directory_assignment = image.finalized_metadata_version().is_some_and(|level| {
-            level >= krabka_metadata::metadata_version::DIRECTORY_ASSIGNMENT_MIN_LEVEL
-        });
-        if directory_assignment && let Err(code) = validate_log_dirs(&req, &image, node_id) {
-            return Ok(response(code, -1));
-        }
-        let endpoints = match decode_listeners(&req.listeners) {
-            Ok(endpoints) => endpoints,
-            Err(code) => return Ok(response(code, -1)),
-        };
-        if let Err(code) = validate_features(&req, &image) {
-            return Ok(response(code, -1));
-        }
-
-        let first = &endpoints[0];
-        let features = req
-            .features
-            .iter()
-            .map(|feature| {
-                (
-                    feature.name.clone(),
-                    (feature.min_supported_version, feature.max_supported_version),
-                )
-            })
-            .collect();
-        let log_dirs = if directory_assignment {
-            req.log_dirs
-                .iter()
-                .map(|directory| uuid::Uuid::from_bytes(directory.0))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let amended = existing.filter(|existing| existing.incarnation_id == incarnation_id);
-        let record = BrokerRegistrationRecord {
-            // `ClusterControlManager.registerBroker`: a new registration keeps the
-            // schema default `Fenced = true` and is not in controlled shutdown,
-            // and an amend copies both from the registration it amends.
-            fenced: amended.is_none_or(|existing| existing.fenced),
-            in_controlled_shutdown: amended.is_some_and(|existing| existing.in_controlled_shutdown),
-            cordoned_log_dirs: None,
-            node_id,
-            // An amend keeps the epoch it registered at, and the controller
-            // applies it only while the broker is still registered at that epoch.
-            // Any other registration carries no epoch (-1), and the controller
-            // stamps the offset it commits at.
-            broker_epoch: amended.map_or(-1, |existing| existing.broker_epoch),
-            incarnation_id,
-            host: first.host.clone(),
-            port: first.port,
-            rack: req.rack.clone(),
-            endpoints,
-            log_dirs,
-            features,
-        };
-        if amended.is_some() {
-            // The same process registered again, after a lost response or a
-            // controller change. Kafka rewrites the record with the listeners and
-            // features the request carries and keeps the epoch; nothing about the
-            // broker's log changed, so no restart handling runs.
-            if let Err(error) = broker
-                .controller
-                .submit_change(vec![MetadataRecord::V1BrokerRegistration(record)])
-                .await
-            {
-                return Ok(response(raft_error_code(&error), -1));
-            }
-            return Ok(registered_response(broker, node_id, incarnation_id));
-        }
-        let clean_restart = clean_shutdown_proven(&req, version, &image, node_id);
-        // KIP-966: a broker that cannot prove it stopped gracefully may have lost
-        // an unflushed log tail, so nothing the cluster still believes about that
-        // log holds -- not its ELR membership, and not its ISR seat either.
-        // `ClusterControlManager.registerBroker` calls
-        // `handleBrokerShutdown(id, isCleanShutdown, records)` before it appends
-        // the `RegisterBrokerRecord`, and the branch that boolean picks is the
-        // whole difference: `isElrFeatureEnabled() && !isCleanShutdown` runs two
-        // `generateLeaderAndIsrUpdates` calls, which is what
-        // `compute_unclean_restart_changes` is. A restart that proves itself
-        // clean takes none of that.
-        let restart = if clean_restart {
-            crate::leader_election::FailoverPlan::default()
-        } else {
-            crate::leader_election::compute_unclean_restart_changes(
-                &image,
-                node_id,
-                &broker.liveness,
-                &broker.metrics,
+    let first = &endpoints[0];
+    let features = req
+        .features
+        .iter()
+        .map(|feature| {
+            (
+                feature.name.clone(),
+                (feature.min_supported_version, feature.max_supported_version),
             )
-            .await
-        };
-        for (topic, partition) in &restart.unavailable {
-            tracing::warn!(
-                %topic, partition, node_id = node_id.0,
-                "returning broker led this partition and no live ISR replica can take it; partition unavailable"
-            );
-        }
+        })
+        .collect();
+    let log_dirs = if directory_assignment {
+        req.log_dirs
+            .iter()
+            .map(|directory| uuid::Uuid::from_bytes(directory.0))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let amended = existing.filter(|existing| existing.incarnation_id == incarnation_id);
+    let record = BrokerRegistrationRecord {
+        // `ClusterControlManager.registerBroker`: a new registration keeps the
+        // schema default `Fenced = true` and is not in controlled shutdown,
+        // and an amend copies both from the registration it amends.
+        fenced: amended.is_none_or(|existing| existing.fenced),
+        in_controlled_shutdown: amended.is_some_and(|existing| existing.in_controlled_shutdown),
+        cordoned_log_dirs: None,
+        node_id,
+        // An amend keeps the epoch it registered at, and the controller
+        // applies it only while the broker is still registered at that epoch.
+        // Any other registration carries no epoch (-1), and the controller
+        // stamps the offset it commits at.
+        broker_epoch: amended.map_or(-1, |existing| existing.broker_epoch),
+        incarnation_id,
+        host: first.host.clone(),
+        port: first.port,
+        rack: req.rack.clone(),
+        endpoints,
+        log_dirs,
+        features,
+    };
+    if amended.is_some() {
+        // The same process registered again, after a lost response or a
+        // controller change. Kafka rewrites the record with the listeners and
+        // features the request carries and keeps the epoch; nothing about the
+        // broker's log changed, so no restart handling runs.
         if let Err(error) = broker
             .controller
-            .submit_change(registration_records(restart.changes, record))
+            .submit_change(vec![MetadataRecord::V1BrokerRegistration(record)])
             .await
         {
             return Ok(response(raft_error_code(&error), -1));
         }
-        // The session of the previous incarnation, if there was one, belongs to
-        // a process that is gone. `ClusterControlManager.registerBroker` removes
-        // it and registers the new incarnation fenced. It happens at once, inside
-        // the registration turn, so no heartbeat of the new process can come
-        // before it.
-        broker.liveness.replace_incarnation(node_id.0).await;
-        let answer = registered_response(broker, node_id, incarnation_id);
-        drop(turn);
-        // KIP-966: a partition whose topic opted into an offset-aware recovery
-        // strategy is handed to the Unclean Recovery Manager, the same way the
-        // dead-broker failover hands one over. Fire and forget.
-        for (topic, partition, strategy) in restart.recoveries {
-            broker
-                .unclean_recovery
-                .enqueue(crate::unclean_recovery::RecoveryJob {
-                    topic,
-                    partition,
-                    strategy,
-                    reply: None,
-                    // Nobody asked for this recovery, so there is no proposal to
-                    // name and nobody to refuse; `break_glass` decides whether the
-                    // URM runs it.
-                    proposal: None,
-                })
-                .await;
-        }
-
-        Ok(answer)
+        return Ok(registered_response(broker, node_id, incarnation_id));
     }
+    let clean_restart = clean_shutdown_proven(&req, version, &image, node_id);
+    // KIP-966: a broker that cannot prove it stopped gracefully may have lost
+    // an unflushed log tail, so nothing the cluster still believes about that
+    // log holds -- not its ELR membership, and not its ISR seat either.
+    // `ClusterControlManager.registerBroker` calls
+    // `handleBrokerShutdown(id, isCleanShutdown, records)` before it appends
+    // the `RegisterBrokerRecord`, and the branch that boolean picks is the
+    // whole difference: `isElrFeatureEnabled() && !isCleanShutdown` runs two
+    // `generateLeaderAndIsrUpdates` calls, which is what
+    // `compute_unclean_restart_changes` is. A restart that proves itself
+    // clean takes none of that.
+    let restart = if clean_restart {
+        FailoverPlan::default()
+    } else {
+        compute_unclean_restart_changes(&image, node_id, &broker.liveness, &broker.metrics).await
+    };
+    for (topic, partition) in &restart.unavailable {
+        tracing::warn!(
+            %topic, partition, node_id = node_id.0,
+            "returning broker led this partition and no live ISR replica can take it; partition unavailable"
+        );
+    }
+    if let Err(error) = broker
+        .controller
+        .submit_change(registration_records(restart.changes, record))
+        .await
+    {
+        return Ok(response(raft_error_code(&error), -1));
+    }
+    // The session of the previous incarnation, if there was one, belongs to
+    // a process that is gone. `ClusterControlManager.registerBroker` removes
+    // it and registers the new incarnation fenced. It happens at once, inside
+    // the registration turn, so no heartbeat of the new process can come
+    // before it.
+    broker.liveness.replace_incarnation(node_id.0).await;
+    let answer = registered_response(broker, node_id, incarnation_id);
+    drop(turn);
+    // KIP-966: a partition whose topic opted into an offset-aware recovery
+    // strategy is handed to the Unclean Recovery Manager, the same way the
+    // dead-broker failover hands one over. Fire and forget.
+    for (topic, partition, strategy) in restart.recoveries {
+        broker
+            .unclean_recovery
+            .enqueue(RecoveryJob {
+                topic,
+                partition,
+                strategy,
+                reply: None,
+                // Nobody asked for this recovery, so there is no proposal to
+                // name and nobody to refuse; `break_glass` decides whether the
+                // URM runs it.
+                proposal: None,
+            })
+            .await;
+    }
+
+    Ok(answer)
 }
 
 /// The answer to an accepted registration: the epoch the image now holds for

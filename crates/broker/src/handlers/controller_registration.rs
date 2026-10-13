@@ -6,7 +6,12 @@
 //! 15) with `UNSUPPORTED_VERSION`, and writes `zkMigrationReady` false.
 
 use {
-    crate::codes,
+    crate::{
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::{ApiVersion, RequestContext},
+    },
     krabka_metadata::{BrokerEndpoint, ControllerRegistrationRecord, MetadataRecord, NodeId},
     krabka_protocol::owned::{
         controller_registration_request::ControllerRegistrationRequest,
@@ -16,96 +21,97 @@ use {
     std::collections::BTreeMap,
 };
 
-context_handler! {
-    ControllerRegistrationRequest => ControllerRegistrationResponse,
-    (broker, req, _version, ctx),
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ControllerRegistrationRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<ControllerRegistrationResponse, BrokerError> {
+    let image = broker.controller.current_image();
+    if let Some(code) = super::registration_listeners::registration_refusal(broker, &image, ctx) {
+        let message =
+            (code == codes::CLUSTER_AUTHORIZATION_FAILED).then(|| "cluster action denied".into());
+        return Ok(response(code, message));
+    }
+    // Kafka's `MetadataVersion.isControllerRegistrationSupported`. Before the
+    // bootstrap records commit there is no finalized level, and Kafka's
+    // `metadataVersionOrThrow` refuses the registration as well: a record
+    // written now could precede a bootstrap level that does not support it.
+    if image
+        .finalized_metadata_version()
+        .is_none_or(|level| level < krabka_metadata::metadata_version::ONLINE_DOWNGRADE_MIN_LEVEL)
     {
-        let image = broker.controller.current_image();
-        if let Some(code) = super::registration_listeners::registration_refusal(broker, &image, ctx) {
-            let message = (code == codes::CLUSTER_AUTHORIZATION_FAILED)
-                .then(|| "cluster action denied".into());
-            return Ok(response(code, message));
-        }
-        // Kafka's `MetadataVersion.isControllerRegistrationSupported`. Before the
-        // bootstrap records commit there is no finalized level, and Kafka's
-        // `metadataVersionOrThrow` refuses the registration as well: a record
-        // written now could precede a bootstrap level that does not support it.
-        if image
-            .finalized_metadata_version()
-            .is_none_or(|level| level < krabka_metadata::metadata_version::ONLINE_DOWNGRADE_MIN_LEVEL)
-        {
-            return Ok(response(
-                codes::UNSUPPORTED_VERSION,
-                Some(
-                    "The current MetadataVersion is too old to support controller registrations."
-                        .into(),
-                ),
-            ));
-        }
+        return Ok(response(
+            codes::UNSUPPORTED_VERSION,
+            Some(
+                "The current MetadataVersion is too old to support controller registrations."
+                    .into(),
+            ),
+        ));
+    }
 
-        let node_id = match u64::try_from(req.controller_id) {
-            Ok(id) => NodeId(id),
-            Err(_) => {
-                return Ok(response(
-                    codes::INVALID_REGISTRATION,
-                    Some("controller id must be non-negative".into()),
-                ));
-            }
-        };
-
-        let endpoints = match decode_listeners(&req.listeners) {
-            Ok(endpoints) => endpoints,
-            Err(message) => return Ok(response(codes::INVALID_REGISTRATION, Some(message))),
-        };
-        let features = req
-            .features
-            .into_iter()
-            .map(|feature| {
-                (
-                    feature.name,
-                    (feature.min_supported_version, feature.max_supported_version),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        if features
-            .iter()
-            .any(|(name, (min, max))| name.is_empty() || min > max)
-        {
+    let node_id = match u64::try_from(req.controller_id) {
+        Ok(id) => NodeId(id),
+        Err(_) => {
             return Ok(response(
                 codes::INVALID_REGISTRATION,
-                Some("invalid controller feature range".into()),
+                Some("controller id must be non-negative".into()),
             ));
         }
+    };
 
-        let record = ControllerRegistrationRecord {
-            node_id,
-            incarnation_id: uuid::Uuid::from_bytes(req.incarnation_id.0),
-            // ZooKeeper migration is gone. Kafka writes false whatever the request
-            // says.
-            zk_migration_ready: false,
-            endpoints,
-            features,
-        };
-        if image.controller(node_id) == Some(&record) {
-            return Ok(success());
-        }
-        Ok(
-            match broker
-                .controller
-                .submit_change(vec![MetadataRecord::V1ControllerRegistration(record)])
-                .await
-            {
-                Ok(_) => success(),
-                Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown) => {
-                    response(codes::NOT_CONTROLLER, None)
-                }
-                Err(RaftError::Metadata(error)) => {
-                    response(codes::INVALID_REGISTRATION, Some(error.to_string()))
-                }
-                Err(error) => response(codes::UNKNOWN_SERVER_ERROR, Some(error.to_string())),
-            },
-        )
+    let endpoints = match decode_listeners(&req.listeners) {
+        Ok(endpoints) => endpoints,
+        Err(message) => return Ok(response(codes::INVALID_REGISTRATION, Some(message))),
+    };
+    let features = req
+        .features
+        .into_iter()
+        .map(|feature| {
+            (
+                feature.name,
+                (feature.min_supported_version, feature.max_supported_version),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if features
+        .iter()
+        .any(|(name, (min, max))| name.is_empty() || min > max)
+    {
+        return Ok(response(
+            codes::INVALID_REGISTRATION,
+            Some("invalid controller feature range".into()),
+        ));
     }
+
+    let record = ControllerRegistrationRecord {
+        node_id,
+        incarnation_id: uuid::Uuid::from_bytes(req.incarnation_id.0),
+        // ZooKeeper migration is gone. Kafka writes false whatever the request
+        // says.
+        zk_migration_ready: false,
+        endpoints,
+        features,
+    };
+    if image.controller(node_id) == Some(&record) {
+        return Ok(success());
+    }
+    Ok(
+        match broker
+            .controller
+            .submit_change(vec![MetadataRecord::V1ControllerRegistration(record)])
+            .await
+        {
+            Ok(_) => success(),
+            Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown) => {
+                response(codes::NOT_CONTROLLER, None)
+            }
+            Err(RaftError::Metadata(error)) => {
+                response(codes::INVALID_REGISTRATION, Some(error.to_string()))
+            }
+            Err(error) => response(codes::UNKNOWN_SERVER_ERROR, Some(error.to_string())),
+        },
+    )
 }
 
 fn decode_listeners(
@@ -143,7 +149,9 @@ mod tests {
         krabka_security::ListenerProtocol,
     };
 
-    crate::test_support::context_helper!(client_id = "controller");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["controller"];
+    }
 
     #[test]
     fn controller_listener_validation_is_strict() {
@@ -195,7 +203,7 @@ mod tests {
 
         assert2::check!(
             answer
-                == unthrottled_wire!(ControllerRegistrationResponse {
+                == krabka_macros::unthrottled_wire!(ControllerRegistrationResponse {
                     error_code: 0,
                     error_message: Some(String::new()),
                 })

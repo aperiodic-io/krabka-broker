@@ -251,7 +251,7 @@ mod tests {
             topology_description: None,
         });
 
-        let expected = tagged_wire!(DescribedGroup {
+        let expected = krabka_macros::tagged_wire!(DescribedGroup {
             error_code: codes::NONE,
             error_message: None,
             group_id: "streams-app".into(),
@@ -259,7 +259,7 @@ mod tests {
             group_epoch: 11,
             assignment_epoch: 10,
             topology: Some(expected_rendered_topology()),
-            members: vec![tagged_wire!(Member {
+            members: vec![krabka_macros::tagged_wire!(Member {
                 member_id: "member-1".into(),
                 member_epoch: 7,
                 instance_id: Some("instance-a".into()),
@@ -268,30 +268,30 @@ mod tests {
                 client_host: "/127.0.0.1".into(),
                 topology_epoch: 9,
                 process_id: "process-a".into(),
-                user_endpoint: Some(tagged_wire!(Endpoint {
+                user_endpoint: Some(krabka_macros::tagged_wire!(Endpoint {
                     host: "host-a".into(),
                     port: 8080,
                 })),
-                client_tags: vec![tagged_wire!(KeyValue {
+                client_tags: vec![krabka_macros::tagged_wire!(KeyValue {
                     key: "zone".into(),
                     value: "z1".into(),
                 })],
-                task_offsets: vec![tagged_wire!(TaskOffset {
+                task_offsets: vec![krabka_macros::tagged_wire!(TaskOffset {
                     subtopology_id: "sub-a".into(),
                     partition: 0,
                     offset: 5,
                 })],
-                task_end_offsets: vec![tagged_wire!(TaskOffset {
+                task_end_offsets: vec![krabka_macros::tagged_wire!(TaskOffset {
                     subtopology_id: "sub-a".into(),
                     partition: 0,
                     offset: 10,
                 })],
-                assignment: tagged_wire!(Assignment {
+                assignment: krabka_macros::tagged_wire!(Assignment {
                     active_tasks: vec![expected_task_ids("sub-a", vec![0, 2])],
                     standby_tasks: vec![expected_task_ids("sub-a", vec![1])],
                     warmup_tasks: vec![expected_task_ids("sub-b", vec![3, 4])],
                 }),
-                target_assignment: tagged_wire!(Assignment {
+                target_assignment: krabka_macros::tagged_wire!(Assignment {
                     active_tasks: vec![expected_task_ids("sub-a", vec![0])],
                     standby_tasks: vec![expected_task_ids("sub-a", vec![1, 2])],
                     warmup_tasks: Vec::new(),

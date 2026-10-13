@@ -55,6 +55,8 @@ mod verbatim;
 mod verbatim_group;
 mod verification;
 
+#[krabka_macros::sendfile_cfg]
+pub use self::read::RawReadDesc;
 pub use self::{
     active_producers::ActiveProducer,
     compaction::CompactionContext,
@@ -64,10 +66,6 @@ pub use self::{
     verbatim::VerbatimBatch,
     verification::{TransactionAppendRefusal, TransactionalBatch, VerificationGuard},
 };
-
-crate::sendfile_cfg! {
-    pub use self::read::RawReadDesc;
-}
 
 /// The jitter sample that shortens the roll interval of one active segment.
 #[derive(Debug, Clone, Copy)]

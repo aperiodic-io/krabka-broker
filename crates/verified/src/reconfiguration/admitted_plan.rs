@@ -6,7 +6,10 @@ use super::{
 #[cfg(creusot)]
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// KIP-853's one-change-at-a-time rule: only a leader whose epoch is
 /// committed, with no pending change and no uncommitted control record, may
 /// start a voter change.
@@ -18,9 +21,11 @@ pub fn may_reconfigure(leadership: ReconfigurationLeadership, voters: CurrentVot
             && voters.latest_controls_committed
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Whether a decision admits the change.
 pub fn is_admit(decision: VoterReconfigurationDecision) -> bool {
     pearlite! {
@@ -30,9 +35,11 @@ pub fn is_admit(decision: VoterReconfigurationDecision) -> bool {
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Whether Kafka's `VoterSet.removeVoter` returns a new voter set: the
 /// stored `ReplicaKey` equals the requested one, and at least one voter
 /// remains. `KafkaRaftClient` rejects a request without a directory id, so an
@@ -43,9 +50,11 @@ pub fn voter_set_removes(membership: TargetMembership, voters: CurrentVoterSet) 
         membership == TargetMembership::PresentSameDirectory && voters.voter_count@ > 1
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Whether the request's voter key names a current voter for an update:
 /// Kafka's `VoterNode.isVoter`, which accepts an unknown stored directory and
 /// an equal one but rejects a different known one.
@@ -61,9 +70,11 @@ pub fn update_key_matches(membership: TargetMembership) -> bool {
             || membership == TargetMembership::PresentSameDirectory
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The first rejection for a request, in Kafka's precedence order, or `None`
 /// when the request is admitted.
 ///
@@ -147,9 +158,11 @@ pub fn voter_reconfiguration_rejection(
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The exact result shape of an admitted change: add and remove write one
 /// `VotersRecord` for one more or one fewer voter; an update rewrites the
 /// set at version 1 and is in-memory preflight data at version 0; a
@@ -177,5 +190,4 @@ pub fn admitted_plan(
                 && plan.write_voters && plan.write_kraft_version && !plan.preflight_only,
         }
     }
-}
 }

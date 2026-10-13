@@ -25,7 +25,7 @@ async fn declared_clock_bound_is_exported_in_seconds() {
         let m = BrokerMetrics::new();
         m.delivery_clock_uncertainty_seconds.set(bound.secs_f64());
 
-        crate::metrics::test_support::render_registry!(m, buf, r; unwrap());
+        krabka_macros::metric_registry_fixture!(m, buf, r; unwrap());
         drop(r);
 
         let name = "krabka_broker_delivery_clock_uncertainty_seconds ";
@@ -164,7 +164,7 @@ async fn registry_has_broker_prefix_and_all_metrics() {
     m.isr_shrinks_total.inc();
     m.isr_expands_total.inc_by(2);
 
-    crate::metrics::test_support::render_registry!(m, buf, r; unwrap());
+    krabka_macros::metric_registry_fixture!(m, buf, r; unwrap());
     // Spot-check every metric is present and prefixed.
     for needle in [
         "krabka_broker_topic_bytes_in_total",
@@ -327,7 +327,7 @@ async fn kfc9_families_scrape_under_their_names_with_their_labels() {
     m.record_break_glass_refusal(BreakGlassAction(GatedAction::DeleteTopic));
     m.record_break_glass_bypass(BreakGlassAction(GatedAction::UncleanRecovery));
 
-    crate::metrics::test_support::render_registry!(m, buf, r; unwrap());
+    krabka_macros::metric_registry_fixture!(m, buf, r; unwrap());
     drop(r);
 
     let cases = [
@@ -370,7 +370,7 @@ async fn break_glass_state_label_covers_every_state() {
         m.record_break_glass_proposals(state, count);
     }
 
-    crate::metrics::test_support::render_registry!(m, buf, r; unwrap());
+    krabka_macros::metric_registry_fixture!(m, buf, r; unwrap());
     drop(r);
 
     for (label, _, count) in cases {
@@ -414,7 +414,7 @@ async fn break_glass_action_label_covers_every_gated_transition() {
         m.record_break_glass_bypass(BreakGlassAction(action));
     }
 
-    crate::metrics::test_support::render_registry!(m, buf, r; unwrap());
+    krabka_macros::metric_registry_fixture!(m, buf, r; unwrap());
     drop(r);
 
     for (i, (label, _)) in cases.into_iter().enumerate() {

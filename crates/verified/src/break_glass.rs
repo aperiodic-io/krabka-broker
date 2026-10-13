@@ -2,42 +2,43 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// First fail-closed reason that prevents a proposal from being spent.
-    pub enum BreakGlassAdmission {
-        Withdrawn,
-        Consumed,
-        Expired,
-        NotEnoughApprovals,
-        Unsigned,
-        Usable,
-    }
+/// First fail-closed reason that prevents a proposal from being spent.
+#[krabka_macros::model_type]
+pub enum BreakGlassAdmission {
+    Withdrawn,
+    Consumed,
+    Expired,
+    NotEnoughApprovals,
+    Unsigned,
+    Usable,
+}
 
-    /// Whether the configured policy requires signed approvals for the action.
-    pub enum BreakGlassSignaturePolicy {
-        Optional,
-        Required,
-    }
+/// Whether the configured policy requires signed approvals for the action.
+#[krabka_macros::model_type]
+pub enum BreakGlassSignaturePolicy {
+    Optional,
+    Required,
+}
 
-    /// Whether the proposal carries at least one approval and every approval
-    /// carries a key id and a signature.
-    pub enum BreakGlassApprovalSigning {
-        AllSigned,
-        NotAllSigned,
-    }
+/// Whether the proposal carries at least one approval and every approval
+/// carries a key id and a signature.
+#[krabka_macros::model_type]
+pub enum BreakGlassApprovalSigning {
+    AllSigned,
+    NotAllSigned,
+}
 
-    /// The independent lifecycle and approval facts of one covering proposal.
-    pub struct BreakGlassProposalFacts {
-        pub withdrawn: bool,
-        pub consumed: bool,
-        pub expired: bool,
-        /// Distinct approving principals.
-        pub held_approvals: usize,
-        pub required_approvals: usize,
-        pub signature_policy: BreakGlassSignaturePolicy,
-        pub signing: BreakGlassApprovalSigning,
-    }
+/// The independent lifecycle and approval facts of one covering proposal.
+#[krabka_macros::model_type]
+pub struct BreakGlassProposalFacts {
+    pub withdrawn: bool,
+    pub consumed: bool,
+    pub expired: bool,
+    /// Distinct approving principals.
+    pub held_approvals: usize,
+    pub required_approvals: usize,
+    pub signature_policy: BreakGlassSignaturePolicy,
+    pub signing: BreakGlassApprovalSigning,
 }
 
 /// Apply the break-glass lifecycle and approval checks in reporting order:

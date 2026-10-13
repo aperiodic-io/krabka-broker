@@ -134,7 +134,10 @@ pub(super) fn corrupt_snapshot_fallback_preserves_replay(
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// No other noncorrupt retained snapshot lies above this selected candidate.
 fn newest_readable_snapshot(
     offsets: Seq<i64>,
@@ -147,11 +150,12 @@ fn newest_readable_snapshot(
     && outcomes[i] != 1u8 && floor < offsets[i]@ && offsets[i]@ <= cut
     ==> offsets[i]@ <= offsets[index]@ }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The logical retained range contains the truncation cut used for replay.
 fn replay_range_covers_cut(range: ProducerReloadRange, cut: Int) -> bool {
     pearlite! { 0 <= range.log_start@ && range.log_start@ <= cut && cut <= range.log_end@ }
-}
 }

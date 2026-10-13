@@ -32,7 +32,6 @@ use {
             flex::{
                 get_compact_array, get_compact_string, get_string_array, put_compact_array,
                 put_compact_string, put_empty_tagged_fields, put_string_array, skip_tagged_fields,
-                value_codec,
             },
             get_i16, get_i32,
         },
@@ -166,15 +165,16 @@ pub struct StreamsGroupTopologyValue {
     pub subtopologies: Vec<StoredSubtopology>,
 }
 
-value_codec! {
-    StreamsGroupTopologyValue("StreamsGroupTopologyValue"),
-    encode(&self) -> buf {
+#[krabka_macros::flexible_value(record = "StreamsGroupTopologyValue")]
+impl StreamsGroupTopologyValue {
+    fn encode_fields(&self, buf: &mut BytesMut) {
         buf.put_i32(self.epoch);
         put_compact_array(buf, self.subtopologies.iter(), |buf, s| {
             s.encode_into(buf);
         });
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let epoch = get_i32(buf)?;
         let subtopologies = get_compact_array(buf, StoredSubtopology::decode_from)?;
         Ok(Self {

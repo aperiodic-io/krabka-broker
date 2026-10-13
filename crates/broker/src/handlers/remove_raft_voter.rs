@@ -16,7 +16,15 @@
 //! `INVALID_REQUEST (42)`.
 
 use {
-    crate::{codes, handlers::raft_voter::respond},
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, audit_admin_success, audit_resource,
+            cluster_alter_denied,
+            raft_voter::{Refusals, respond},
+        },
+    },
     krabka_protocol::owned::{
         remove_raft_voter_request::RemoveRaftVoterRequest,
         remove_raft_voter_response::RemoveRaftVoterResponse,
@@ -24,48 +32,46 @@ use {
     krabka_raft::{reconfig::RemoveVoter, voter_requests},
 };
 
-crate::handlers::raft_voter::leader_handler!(
-    (broker, version, req_bytes, ctx),
-    (
-        RemoveRaftVoterRequest,
-        RemoveRaftVoterResponse,
-        81,
-        "remove-raft-voter denied"
-    ),
-    (req, image, quorum),
+#[krabka_macros::voter_admission(
+    request = RemoveRaftVoterRequest,
+    api = 81,
+    gate = cluster_alter_denied,
+    refusals = Refusals::<RemoveRaftVoterResponse>::leader_only("remove-raft-voter denied"),
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    version: ApiVersion,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    if let Some((error_code, error_message)) =
+        voter_requests::remove_voter_refusal(&req, &image.cluster_id().to_string(), &quorum)
     {
-        if let Some((error_code, error_message)) =
-            voter_requests::remove_voter_refusal(&req, &image.cluster_id().to_string(), &quorum)
-        {
-            return respond::<RemoveRaftVoterResponse>(version, error_code, error_message);
-        }
-
-        let id = u64::try_from(req.voter_id).unwrap_or_default();
-        let (error_code, error_message) = voter_requests::reconfiguration_refusal(
-            broker
-                .controller
-                .remove_voter(RemoveVoter {
-                    id: krabka_raft::NodeId(id),
-                    directory_id: uuid::Uuid::from_bytes(req.voter_directory_id.0),
-                })
-                .await,
-            voter_requests::VoterOperation::Remove,
-            req.voter_id,
-            req.voter_directory_id,
-        );
-
-        if error_code == codes::NONE {
-            crate::handlers::audit_admin_success(
-                broker.audit_log.as_ref(),
-                ctx,
-                "RemoveRaftVoter",
-                vec![crate::handlers::audit_resource("RaftVoter", id.to_string())],
-            );
-        }
-
-        respond::<RemoveRaftVoterResponse>(version, error_code, error_message)
+        return respond::<RemoveRaftVoterResponse>(version, error_code, error_message);
     }
-);
+
+    let id = u64::try_from(req.voter_id).unwrap_or_default();
+    let (error_code, error_message) = voter_requests::reconfiguration_refusal(
+        broker
+            .controller
+            .remove_voter(RemoveVoter {
+                id: krabka_raft::NodeId(id),
+                directory_id: uuid::Uuid::from_bytes(req.voter_directory_id.0),
+            })
+            .await,
+        voter_requests::VoterOperation::Remove,
+        req.voter_id,
+        req.voter_directory_id,
+    );
+
+    if error_code == codes::NONE {
+        audit_admin_success(broker.audit_log.as_ref(), ctx, "RemoveRaftVoter", vec![
+            audit_resource("RaftVoter", id.to_string()),
+        ]);
+    }
+
+    respond::<RemoveRaftVoterResponse>(version, error_code, error_message)
+}
 
 #[cfg(test)]
 mod tests {

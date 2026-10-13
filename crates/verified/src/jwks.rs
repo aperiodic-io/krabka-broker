@@ -6,23 +6,22 @@ use creusot_std::prelude::ensures;
 use creusot_std::prelude::{DeepModel, logic};
 pub use publication::jwks_publication_generations;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Whether a validator may use one observed JWKS cache generation.
-    pub enum JwksCacheDecision {
-        Reject,
-        Admit,
-    }
+/// Whether a validator may use one observed JWKS cache generation.
+#[krabka_macros::model_type]
+pub enum JwksCacheDecision {
+    Reject,
+    Admit,
+}
 
-    /// Values read around one key validation.
-    pub struct JwksCacheFacts {
-        pub generation_before: u64,
-        pub generation_after: u64,
-        pub last_successful_fetch_ms: i64,
-        pub now_ms: i64,
-        pub expiry_enabled: bool,
-        pub expiry_ms: i64,
-    }
+/// Values read around one key validation.
+#[krabka_macros::model_type]
+pub struct JwksCacheFacts {
+    pub generation_before: u64,
+    pub generation_after: u64,
+    pub last_successful_fetch_ms: i64,
+    pub now_ms: i64,
+    pub expiry_enabled: bool,
+    pub expiry_ms: i64,
 }
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
@@ -67,13 +66,11 @@ pub fn jwks_cache_admission(facts: JwksCacheFacts) -> JwksCacheDecision {
     }
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Whether an on-demand signal may start a fetch.
-    pub enum JwksOnDemandDecision {
-        RateLimited,
-        Refresh { next_refresh_ms: i64 },
-    }
+/// Whether an on-demand signal may start a fetch.
+#[krabka_macros::model_type]
+pub enum JwksOnDemandDecision {
+    RateLimited,
+    Refresh { next_refresh_ms: i64 },
 }
 
 /// Whether an on-demand refresh may start at `now_ms`: the clock and pause are

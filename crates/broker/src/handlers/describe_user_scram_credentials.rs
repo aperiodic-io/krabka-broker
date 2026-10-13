@@ -338,29 +338,33 @@ mod tests {
     #[test]
     fn describe_filter_returns_only_listed_users() {
         let resp = run_handle_filter(Some(vec!["alice".into()]), &ALICE_AND_BOB);
-        let expected = vec![tagged_wire!(DescribeUserScramCredentialsResult {
-            user: "alice".to_string(),
-            error_code: 0,
-            error_message: None,
-            credential_infos: vec![tagged_wire!(CredentialInfo {
-                mechanism: 2,
-                iterations: 4096,
-            })],
-        })];
+        let expected = vec![krabka_macros::tagged_wire!(
+            DescribeUserScramCredentialsResult {
+                user: "alice".to_string(),
+                error_code: 0,
+                error_message: None,
+                credential_infos: vec![krabka_macros::tagged_wire!(CredentialInfo {
+                    mechanism: 2,
+                    iterations: 4096,
+                })],
+            }
+        )];
         assert!(resp.results == expected);
     }
 
     #[test]
     fn unknown_user_returns_resource_not_found() {
         let resp = run_handle_filter(Some(vec!["ghost".into()]), &ALICE_ONLY);
-        let expected = vec![tagged_wire!(DescribeUserScramCredentialsResult {
-            user: "ghost".to_string(),
-            error_code: 91,
-            error_message: Some(
-                "Attempt to describe a user credential that does not exist: ghost".to_string(),
-            ),
-            credential_infos: Vec::new(),
-        })];
+        let expected = vec![krabka_macros::tagged_wire!(
+            DescribeUserScramCredentialsResult {
+                user: "ghost".to_string(),
+                error_code: 91,
+                error_message: Some(
+                    "Attempt to describe a user credential that does not exist: ghost".to_string(),
+                ),
+                credential_infos: Vec::new(),
+            }
+        )];
         assert!(resp.results == expected);
     }
 
@@ -394,7 +398,7 @@ mod tests {
         assert!(bob.error_code == 0);
         assert!(
             bob.credential_infos
-                == vec![tagged_wire!(CredentialInfo {
+                == vec![krabka_macros::tagged_wire!(CredentialInfo {
                     mechanism: 2,
                     iterations: 8192,
                 })]
@@ -449,7 +453,7 @@ mod tests {
         );
 
         assert!(
-            resp == unthrottled_wire!(DescribeUserScramCredentialsResponse {
+            resp == krabka_macros::unthrottled_wire!(DescribeUserScramCredentialsResponse {
                 error_code: 0,
                 error_message: None,
                 results: Vec::new(),
@@ -467,7 +471,7 @@ mod tests {
         );
 
         assert!(
-            resp == unthrottled_wire!(DescribeUserScramCredentialsResponse {
+            resp == krabka_macros::unthrottled_wire!(DescribeUserScramCredentialsResponse {
                 error_code: CLUSTER_AUTHORIZATION_FAILED,
                 error_message: None,
                 results: Vec::new(),
@@ -480,7 +484,7 @@ mod tests {
     fn denied_response_matches_kafka_get_error_response() {
         use krabka_protocol::owned::describe_user_scram_credentials_request::UserName;
 
-        let denied_row = tagged_wire!(DescribeUserScramCredentialsResult {
+        let denied_row = krabka_macros::tagged_wire!(DescribeUserScramCredentialsResult {
             user: String::new(),
             error_code: CLUSTER_AUTHORIZATION_FAILED,
             error_message: None,
@@ -507,7 +511,7 @@ mod tests {
                 }),
                 ..Default::default()
             };
-            let want = unthrottled_wire!(DescribeUserScramCredentialsResponse {
+            let want = krabka_macros::unthrottled_wire!(DescribeUserScramCredentialsResponse {
                 error_code: CLUSTER_AUTHORIZATION_FAILED,
                 error_message: None,
                 results: want_rows,

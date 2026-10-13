@@ -47,7 +47,7 @@ use {
             MESSAGE_TIMESTAMP_TYPE_CREATE,
         },
         coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
-        internal_topics::is_internal_topic,
+        handlers::metadata::topic_error_row,
         share_coordinator::bootstrap::{
             TOPIC as SHARE_TOPIC, topic_configs as share_topic_configs,
         },
@@ -57,13 +57,10 @@ use {
     },
     dashmap::DashMap,
     krabka_log::topic_name::validate_topic_name,
-    krabka_protocol::{
-        owned::{
-            create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
-            create_topics_response::CreateTopicsResponse,
-            metadata_response::MetadataResponseTopic,
-        },
-        primitives::uuid::Uuid as WireUuid,
+    krabka_protocol::owned::{
+        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
+        create_topics_response::CreateTopicsResponse,
+        metadata_response::MetadataResponseTopic,
     },
     std::{
         cmp::Reverse,
@@ -308,22 +305,23 @@ impl AutoTopicCreation {
         names: &[&str],
         identity: Option<ForwardedIdentity>,
     ) -> Vec<MetadataResponseTopic> {
-        let row = |error_code, name: &str| MetadataResponseTopic {
-            error_code,
-            name: Some(name.to_owned()),
-            topic_id: WireUuid::ZERO,
-            is_internal: is_internal_topic(&broker.config, name),
-            ..Default::default()
-        };
         let mut uncreatable = Vec::new();
         let mut creatable = Vec::new();
         for name in names {
             if validate_topic_name(name).is_err() {
-                uncreatable.push(row(codes::INVALID_TOPIC_EXCEPTION, name));
+                uncreatable.push(topic_error_row(
+                    broker,
+                    name,
+                    codes::INVALID_TOPIC_EXCEPTION,
+                ));
             } else if self.begin(name) {
                 creatable.push(creatable_topic(&broker.config, name));
             } else {
-                uncreatable.push(row(codes::UNKNOWN_TOPIC_OR_PARTITION, name));
+                uncreatable.push(topic_error_row(
+                    broker,
+                    name,
+                    codes::UNKNOWN_TOPIC_OR_PARTITION,
+                ));
             }
         }
         if creatable.is_empty() {
@@ -331,7 +329,7 @@ impl AutoTopicCreation {
         }
         let rows = creatable
             .iter()
-            .map(|topic| row(codes::UNKNOWN_TOPIC_OR_PARTITION, &topic.name));
+            .map(|topic| topic_error_row(broker, &topic.name, codes::UNKNOWN_TOPIC_OR_PARTITION));
         uncreatable.extend(rows);
         self.send_create_topic_request(broker, creatable, identity, None);
         uncreatable

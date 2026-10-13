@@ -7,8 +7,11 @@
 
 use {
     crate::{
+        broker::Broker,
         client_metrics::manager::{ACCEPTED_COMPRESSION_TYPES, SubscriptionDecision},
-        handlers::context::TelemetryContext,
+        handlers::{
+            ApiVersion, CorrelationId, DispatchResult, context::TelemetryContext, encode_response,
+        },
     },
     krabka_protocol::{
         owned::{
@@ -20,38 +23,40 @@ use {
     uuid::Uuid,
 };
 
-wire_handler! {
-    (broker, version, _correlation_id, req_bytes, ctx: TelemetryContext<'_>), {
-        let req =
-            crate::handlers::decode_request::<GetTelemetrySubscriptionsRequest>(req_bytes, version)?;
+#[krabka_macros::decode_dispatch(request = GetTelemetrySubscriptionsRequest, binding(req))]
+pub(crate) fn handle(
+    broker: &Broker,
+    version: ApiVersion,
+    _correlation_id: CorrelationId,
+    req_bytes: &[u8],
+    ctx: &TelemetryContext<'_>,
+) -> DispatchResult {
+    let attrs = ctx.client_attributes(Uuid::from_bytes(req.client_instance_id.0));
 
-        let attrs = ctx.client_attributes(Uuid::from_bytes(req.client_instance_id.0));
-
-        let image = broker.controller.current_image();
-        let resp = match broker
-            .client_metrics
-            .manager
-            .get_subscription(&image, &attrs)
-        {
-            SubscriptionDecision::Assign(assignment) => GetTelemetrySubscriptionsResponse {
-                client_instance_id: WireUuid(assignment.client_instance_id.into_bytes()),
-                subscription_id: assignment.subscription_id,
-                accepted_compression_types: ACCEPTED_COMPRESSION_TYPES.to_vec(),
-                push_interval_ms: assignment.push_interval_ms,
-                telemetry_max_bytes: broker.client_metrics.manager.telemetry_max_bytes(),
-                delta_temporality: true,
-                requested_metrics: assignment.metrics,
-                ..Default::default()
-            },
-            // Kafka answers a rejected request with `throttle_time_ms` 0; only the
-            // request quota raises it.
-            SubscriptionDecision::Reject { error_code } => GetTelemetrySubscriptionsResponse {
-                error_code,
-                ..Default::default()
-            },
-        };
-        crate::handlers::encode_response(&resp, version)
-    }
+    let image = broker.controller.current_image();
+    let resp = match broker
+        .client_metrics
+        .manager
+        .get_subscription(&image, &attrs)
+    {
+        SubscriptionDecision::Assign(assignment) => GetTelemetrySubscriptionsResponse {
+            client_instance_id: WireUuid(assignment.client_instance_id.into_bytes()),
+            subscription_id: assignment.subscription_id,
+            accepted_compression_types: ACCEPTED_COMPRESSION_TYPES.to_vec(),
+            push_interval_ms: assignment.push_interval_ms,
+            telemetry_max_bytes: broker.client_metrics.manager.telemetry_max_bytes(),
+            delta_temporality: true,
+            requested_metrics: assignment.metrics,
+            ..Default::default()
+        },
+        // Kafka answers a rejected request with `throttle_time_ms` 0; only the
+        // request quota raises it.
+        SubscriptionDecision::Reject { error_code } => GetTelemetrySubscriptionsResponse {
+            error_code,
+            ..Default::default()
+        },
+    };
+    encode_response(&resp, version)
 }
 
 #[cfg(test)]
@@ -70,11 +75,11 @@ mod tests {
         krabka_protocol::owned::get_telemetry_subscriptions_response,
     };
 
-    crate::test_support::codec_helpers!(
-        GetTelemetrySubscriptionsRequest,
-        GetTelemetrySubscriptionsResponse,
-        version = get_telemetry_subscriptions_response::MAX_VERSION
-    );
+    krabka_macros::wire_codec_helpers! {
+        encode_request(GetTelemetrySubscriptionsRequest);
+        decode_response(GetTelemetrySubscriptionsResponse);
+        version [get_telemetry_subscriptions_response::MAX_VERSION];
+    }
 
     /// Kafka answers with the client instance id it used: a new one for a
     /// zero request id, the request's id otherwise (#665). An early repeat

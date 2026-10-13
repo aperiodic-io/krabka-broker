@@ -6,25 +6,25 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Binary authorization result used at the OPA proof boundary.
-    pub enum OpaAuthorizationDecision {
-        Allow,
-        Deny,
-    }
+/// Binary authorization result used at the OPA proof boundary.
+#[krabka_macros::model_type]
+pub enum OpaAuthorizationDecision {
+    Allow,
+    Deny,
+}
 
-    /// Result of checking one exact-key cache entry.
-    pub enum OpaCacheAdmission {
-        Miss,
-        Hit(OpaAuthorizationDecision),
-    }
+/// Result of checking one exact-key cache entry.
+#[krabka_macros::model_type]
+pub enum OpaCacheAdmission {
+    Miss,
+    Hit(OpaAuthorizationDecision),
+}
 
-    /// Result of computing a monotonic cache deadline.
-    pub enum OpaCacheExpiry {
-        DoNotCache,
-        CacheUntil { expires_at_ms: i128 },
-    }
+/// Result of computing a monotonic cache deadline.
+#[krabka_macros::model_type]
+pub enum OpaCacheExpiry {
+    DoNotCache,
+    CacheUntil { expires_at_ms: i128 },
 }
 
 /// Reuse an entry's decision only while its deadline is strictly in the

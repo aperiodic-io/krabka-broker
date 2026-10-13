@@ -53,7 +53,10 @@ pub(super) fn stable_time_range_preserves_first(
     Ok((lso, visibility.limit_offset, selected))
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// No inspected record is both visible in the offset window and inside the timestamp interval.
 fn timestamp_prefix_excluded(
     offsets: Seq<u32>,
@@ -65,5 +68,4 @@ fn timestamp_prefix_excluded(
     targets: (i64, i64),
 ) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < count ==> base + offsets[i]@ < floor || base + offsets[i]@ >= limit || super::timestamp::outside_timestamp_interval(timestamps[i]@, targets) }
-}
 }

@@ -33,25 +33,6 @@ pub(crate) fn producer_fenced_wire_code(version: i16, code: i16) -> i16 {
     }
 }
 
-/// The timed transaction sweep tasks share cadence and shutdown handling.
-macro_rules! reaper_task {
-    ($(#[$doc:meta])* $name:ident($coord:ident, $controller:ident, $interval:ident $(, $arg:ident: $arg_type:ty)*; $shutdown:ident) => $sweep:expr; $message:literal) => {
-        $(#[$doc])*
-        pub(crate) async fn $name(
-            $coord: std::sync::Arc<$crate::txn::coordinator::TxnCoordinator>,
-            $controller: std::sync::Arc<dyn $crate::metadata_source::MetadataSource>,
-            $interval: krabka_units::Time,
-            $($arg: $arg_type,)*
-            $shutdown: tokio_util::sync::CancellationToken,
-        ) {
-            use krabka_units::convert::TimeExt as _;
-            let tick = tokio::time::interval($interval.to_std());
-            $crate::task_util::run_every(tick, &$shutdown, || $sweep).await;
-            tracing::info!($message);
-        }
-    };
-}
-pub(super) use reaper_task;
 use {
     crate::codes::{INVALID_PRODUCER_EPOCH, PRODUCER_FENCED},
     krabka_log::ProducerId,

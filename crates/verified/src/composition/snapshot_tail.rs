@@ -24,7 +24,10 @@ type SeededRetry = (
     Option<(Option<usize>, i64, i64, bool)>,
 );
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn replay_data_row(
     loaded: LoadedData,
     tail: Seq<ProducerSnapshotEntryFacts>,
@@ -35,16 +38,17 @@ fn replay_data_row(
         None => match loaded { Some((_, row)) => row, None => None },
     } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn retry_matches_row(
     row: Option<ProducerSnapshotEntryFacts>,
     request: (i16, i32, i32, bool),
 ) -> bool {
     pearlite! { match row { None => false, Some(row) => request.0 == row.producer_epoch
     && snapshot_sequence_matches(row, request.1@, request.2@) } }
-}
 }
 
 /// Reconstruct a data-only PID from an admitted snapshot seed and the exact

@@ -7,7 +7,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn selection_input_valid(
     frame: RestoreBatchFrame,
     records: Seq<(RestoreRecordDeltas, RestoreExclusions)>,
@@ -17,9 +20,11 @@ pub(super) fn selection_input_valid(
     && forall<i: Int> 0 <= i && i < records.len()
         ==> crate::restore::restore_record_placeable(frame, records[i].0) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn restore_source_selected(
     frame: RestoreBatchFrame,
     row: (RestoreRecordDeltas, RestoreExclusions),
@@ -32,15 +37,16 @@ pub(super) fn restore_source_selected(
         && !(row.1.producer || row.1.offset || row.1.content.key || row.1.content.header)
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn selection_ordered(selected: Seq<usize>, count: Int) -> bool {
     pearlite! {
         (forall<j: Int> 0 <= j && j < selected.len() ==> selected[j]@ < count)
         && (crate::sequence::strictly_increasing(selected))
     }
-}
 }
 
 /// Return the original indices of exactly every selected record, in source

@@ -32,7 +32,7 @@ use {
     crate::{
         coordinator::unified::persistence::{
             flex::{
-                epoch_value, get_value_version, put_compact_array_len, put_compact_string,
+                get_value_version, put_compact_array_len, put_compact_string,
                 put_empty_tagged_fields, put_tagged_fields, read_tagged,
             },
             get_i32, get_i64,
@@ -185,16 +185,16 @@ fn get_last_assignment_configs(
     Ok(Some(configs))
 }
 
-epoch_value!(
-    /// Key v20 value: the target-assignment epoch and the KIP-1263
-    /// `AssignmentTimestamp`.
-    StreamsGroupTargetAssignmentMetadataValue("StreamsGroupTargetAssignmentMetadataValue") {
-        assignment_epoch,
-        /// Kafka's `AssignmentTimestamp`: the wall-clock time in milliseconds at
-        /// which the assignment calculation finished, or 0 when it is unknown.
-        assignment_timestamp_ms,
-    }
-);
+/// Key v20 value: the target-assignment epoch and the KIP-1263
+/// `AssignmentTimestamp`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, krabka_macros::FlexibleEpochValue)]
+#[epoch_value(record = "StreamsGroupTargetAssignmentMetadataValue")]
+pub struct StreamsGroupTargetAssignmentMetadataValue {
+    pub assignment_epoch: i32,
+    /// Kafka's `AssignmentTimestamp`: the wall-clock time in milliseconds at
+    /// which the assignment calculation finished, or 0 when it is unknown.
+    pub assignment_timestamp_ms: i64,
+}
 
 #[cfg(test)]
 mod tests {

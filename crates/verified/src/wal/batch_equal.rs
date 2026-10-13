@@ -81,7 +81,10 @@ pub fn exact_wal_batch_range(bases: &[i64], lasts: &[i64], start: i64, target: i
     expected == target
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 // cargo-mutants: #[cfg(creusot)] mathematical layout; not compiled at runtime.
 pub fn wal_batch_layout(bases: Seq<i64>, lasts: Seq<i64>, start: Int, target: Int) -> bool {
     pearlite! {
@@ -94,7 +97,6 @@ pub fn wal_batch_layout(bases: Seq<i64>, lasts: Seq<i64>, start: Int, target: In
             && target == if bases.len() == 0 { start } else { lasts[bases.len() - 1]@ + 1 }
         }
     }
-}
 }
 
 /// Whole batches may cover an interior logical floor. They must still form

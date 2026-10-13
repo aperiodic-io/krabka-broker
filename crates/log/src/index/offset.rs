@@ -32,7 +32,14 @@ impl OffsetIndexEntry {
     }
 }
 
-#[derive(Debug)]
+// Byte positions strictly increase across real entries. A Kafka
+// index file is preallocated to `segment.index.bytes` and only
+// truncated on clean roll/shutdown, so an unclean copy carries
+// trailing zero-padding that decodes to `(0, 0)`. Stop at the
+// first non-increasing position to keep `lookup`'s binary search
+// operating over a monotonic slice.
+#[derive(Debug, krabka_macros::SparseIndex)]
+#[sparse_index(kind = "offset")]
 pub struct OffsetIndex {
     file: File,
     io: std::sync::Arc<dyn LogIo>,
@@ -42,22 +49,6 @@ pub struct OffsetIndex {
 }
 
 impl OffsetIndex {
-    index_methods!(IoTarget::OffsetIndex);
-
-    // Byte positions strictly increase across real entries. A Kafka
-    // index file is preallocated to `segment.index.bytes` and only
-    // truncated on clean roll/shutdown, so an unclean copy carries
-    // trailing zero-padding that decodes to `(0, 0)`. Stop at the
-    // first non-increasing position to keep `lookup`'s binary search
-    // operating over a monotonic slice.
-    index_constructor!(OffsetEntryRaw,
-        "length is a multiple of OFFSET_ENTRY_SIZE and OffsetEntryRaw is Unaligned",
-        |raw| (raw.key.get(), raw.coordinate.get());
-        /// Open or create an offset-index file. If the file exists, this method
-        /// loads its entries into memory. If it does not exist, this method
-        /// creates an empty file.
-    );
-
     /// Append a new entry. The caller must keep the entries monotonic.
     pub fn append(&mut self, relative_offset: u32, position: u32) -> Result<(), LogError> {
         let raw = OffsetEntryRaw {

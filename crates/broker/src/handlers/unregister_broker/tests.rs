@@ -63,7 +63,7 @@ fn response_preserves_error_fields_and_throttle() {
     let resp =
         UnregisterBrokerResponse::error(codes::UNKNOWN_SERVER_ERROR, Some("submit failed".into()));
 
-    let expected = unthrottled_wire!(UnregisterBrokerResponse {
+    let expected = krabka_macros::unthrottled_wire!(UnregisterBrokerResponse {
         error_code: codes::UNKNOWN_SERVER_ERROR,
         error_message: Some("submit failed".into()),
     });
@@ -79,7 +79,7 @@ async fn handle_denies_cluster_alter_with_message_and_throttle() {
     );
     let resp = answer(&broker, version, 1).await;
 
-    let expected = unthrottled_wire!(UnregisterBrokerResponse {
+    let expected = krabka_macros::unthrottled_wire!(UnregisterBrokerResponse {
         error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
         error_message: Some("unregister-broker denied".into()),
     });
@@ -109,7 +109,7 @@ async fn handle_answers_broker_id_not_registered_for_unknown_ids() {
             .expect("handle");
         let resp = decode_response(&resp);
 
-        let expected = unthrottled_wire!(UnregisterBrokerResponse {
+        let expected = krabka_macros::unthrottled_wire!(UnregisterBrokerResponse {
             error_code: codes::BROKER_ID_NOT_REGISTERED,
             error_message: Some(format!("Broker ID {broker_id} is not currently registered")),
         });
@@ -127,7 +127,7 @@ async fn handle_unregisters_registered_broker_with_success_shape() {
     );
     let resp = answer(&broker, version, 1).await;
 
-    let expected = unthrottled_wire!(UnregisterBrokerResponse {
+    let expected = krabka_macros::unthrottled_wire!(UnregisterBrokerResponse {
         error_code: codes::NONE,
         error_message: None,
     });

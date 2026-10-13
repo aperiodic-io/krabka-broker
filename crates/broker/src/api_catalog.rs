@@ -26,7 +26,90 @@
 pub use krabka_raft::UnstableApiVersions;
 use {
     crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR,
-    krabka_protocol::owned::api_versions_response::ApiVersion,
+    krabka_protocol::{
+        ProtocolRequest,
+        owned::{
+            add_offsets_to_txn_request::AddOffsetsToTxnRequest,
+            add_partitions_to_txn_request::AddPartitionsToTxnRequest,
+            add_raft_voter_request::AddRaftVoterRequest,
+            allocate_producer_ids_request::AllocateProducerIdsRequest,
+            alter_client_quotas_request::AlterClientQuotasRequest,
+            alter_configs_request::AlterConfigsRequest,
+            alter_partition_reassignments_request::AlterPartitionReassignmentsRequest,
+            alter_partition_request::AlterPartitionRequest,
+            alter_replica_log_dirs_request::AlterReplicaLogDirsRequest,
+            alter_share_group_offsets_request::AlterShareGroupOffsetsRequest,
+            alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
+            api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersion,
+            assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
+            broker_heartbeat_request::BrokerHeartbeatRequest,
+            broker_registration_request::BrokerRegistrationRequest,
+            consumer_group_describe_request::ConsumerGroupDescribeRequest,
+            consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+            controller_registration_request::ControllerRegistrationRequest,
+            create_acls_request::CreateAclsRequest,
+            create_delegation_token_request::CreateDelegationTokenRequest,
+            create_partitions_request::CreatePartitionsRequest,
+            create_topics_request::CreateTopicsRequest, delete_acls_request::DeleteAclsRequest,
+            delete_groups_request::DeleteGroupsRequest,
+            delete_records_request::DeleteRecordsRequest,
+            delete_share_group_offsets_request::DeleteShareGroupOffsetsRequest,
+            delete_share_group_state_request::DeleteShareGroupStateRequest,
+            delete_topics_request::DeleteTopicsRequest, describe_acls_request::DescribeAclsRequest,
+            describe_client_quotas_request::DescribeClientQuotasRequest,
+            describe_cluster_request::DescribeClusterRequest,
+            describe_configs_request::DescribeConfigsRequest,
+            describe_delegation_token_request::DescribeDelegationTokenRequest,
+            describe_groups_request::DescribeGroupsRequest,
+            describe_log_dirs_request::DescribeLogDirsRequest,
+            describe_producers_request::DescribeProducersRequest,
+            describe_quorum_request::DescribeQuorumRequest,
+            describe_share_group_offsets_request::DescribeShareGroupOffsetsRequest,
+            describe_topic_partitions_request::DescribeTopicPartitionsRequest,
+            describe_transactions_request::DescribeTransactionsRequest,
+            describe_user_scram_credentials_request::DescribeUserScramCredentialsRequest,
+            elect_leaders_request::ElectLeadersRequest, end_txn_request::EndTxnRequest,
+            expire_delegation_token_request::ExpireDelegationTokenRequest,
+            fetch_snapshot_request::FetchSnapshotRequest,
+            find_coordinator_request::FindCoordinatorRequest,
+            get_replica_log_info_request::GetReplicaLogInfoRequest,
+            get_telemetry_subscriptions_request::GetTelemetrySubscriptionsRequest,
+            heartbeat_request::HeartbeatRequest,
+            incremental_alter_configs_request::IncrementalAlterConfigsRequest,
+            init_producer_id_request::InitProducerIdRequest,
+            initialize_share_group_state_request::InitializeShareGroupStateRequest,
+            join_group_request::JoinGroupRequest, leave_group_request::LeaveGroupRequest,
+            list_config_resources_request::ListConfigResourcesRequest,
+            list_groups_request::ListGroupsRequest,
+            list_partition_reassignments_request::ListPartitionReassignmentsRequest,
+            list_transactions_request::ListTransactionsRequest, metadata_request::MetadataRequest,
+            offset_commit_request::OffsetCommitRequest, offset_delete_request::OffsetDeleteRequest,
+            offset_fetch_request::OffsetFetchRequest,
+            offset_for_leader_epoch_request::OffsetForLeaderEpochRequest,
+            push_telemetry_request::PushTelemetryRequest,
+            read_share_group_state_request::ReadShareGroupStateRequest,
+            read_share_group_state_summary_request::ReadShareGroupStateSummaryRequest,
+            remove_raft_voter_request::RemoveRaftVoterRequest,
+            renew_delegation_token_request::RenewDelegationTokenRequest,
+            sasl_authenticate_request::SaslAuthenticateRequest,
+            sasl_handshake_request::SaslHandshakeRequest,
+            share_acknowledge_request::ShareAcknowledgeRequest,
+            share_fetch_request::ShareFetchRequest,
+            share_group_describe_request::ShareGroupDescribeRequest,
+            share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+            streams_group_describe_request::StreamsGroupDescribeRequest,
+            streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+            streams_group_topology_description_update_request::StreamsGroupTopologyDescriptionUpdateRequest,
+            sync_group_request::SyncGroupRequest,
+            txn_offset_commit_request::TxnOffsetCommitRequest,
+            unregister_broker_request::UnregisterBrokerRequest,
+            unregister_controller_request::UnregisterControllerRequest,
+            update_features_request::UpdateFeaturesRequest,
+            update_raft_voter_request::UpdateRaftVoterRequest,
+            write_share_group_state_request::WriteShareGroupStateRequest,
+            write_txn_markers_request::WriteTxnMarkersRequest,
+        },
+    },
 };
 
 /// How far the broker takes one KIP.
@@ -1256,14 +1339,9 @@ pub const KIP_ANNOTATIONS: &[KipAnnotation] = &[
 ];
 // END KIP_ANNOTATIONS
 
-macro_rules! v {
-    ($mod:ident) => {
-        CatalogApi::new(
-            krabka_protocol::owned::$mod::API_KEY,
-            krabka_protocol::owned::$mod::MIN_VERSION,
-            krabka_protocol::owned::$mod::MAX_VERSION,
-        )
-    };
+/// Read the complete decodable range from the generated request schema.
+const fn catalog_request<R: ProtocolRequest>() -> CatalogApi {
+    CatalogApi::new(R::API_KEY, R::MIN_VERSION, R::MAX_VERSION)
 }
 
 /// Whether the broker serves the request versions Kafka 4.x removed.
@@ -1640,7 +1718,7 @@ pub fn supported_apis(
 fn client_facing_apis() -> Vec<CatalogApi> {
     use krabka_protocol::owned;
     vec![
-        v!(api_versions_request),
+        catalog_request::<ApiVersionsRequest>(),
         // Kafka 4.0 removed `Produce` v0-2, `Fetch` v0-3 and `ListOffsets`
         // v0. krabka still decodes them -- `Produce` up-converts the legacy
         // `MessageSet`, `Fetch` answers from the `kafka_3_6_2` flavor and
@@ -1662,154 +1740,154 @@ fn client_facing_apis() -> Vec<CatalogApi> {
             0,
             owned::list_offsets_request::MAX_VERSION,
         ),
-        v!(metadata_request),
-        v!(find_coordinator_request),
-        v!(join_group_request),
-        v!(sync_group_request),
-        v!(heartbeat_request),
-        v!(leave_group_request),
-        v!(sasl_handshake_request),
-        v!(sasl_authenticate_request),
-        v!(offset_commit_request),
-        v!(offset_fetch_request),
+        catalog_request::<MetadataRequest>(),
+        catalog_request::<FindCoordinatorRequest>(),
+        catalog_request::<JoinGroupRequest>(),
+        catalog_request::<SyncGroupRequest>(),
+        catalog_request::<HeartbeatRequest>(),
+        catalog_request::<LeaveGroupRequest>(),
+        catalog_request::<SaslHandshakeRequest>(),
+        catalog_request::<SaslAuthenticateRequest>(),
+        catalog_request::<OffsetCommitRequest>(),
+        catalog_request::<OffsetFetchRequest>(),
     ]
 }
 
 fn admin_apis() -> Vec<CatalogApi> {
     vec![
-        v!(create_topics_request),
-        v!(delete_topics_request),
-        v!(delete_records_request),
-        v!(init_producer_id_request),
+        catalog_request::<CreateTopicsRequest>(),
+        catalog_request::<DeleteTopicsRequest>(),
+        catalog_request::<DeleteRecordsRequest>(),
+        catalog_request::<InitProducerIdRequest>(),
         // AllocateProducerIds is the controller-backed broker RPC used to
         // reserve durable, cluster-wide producer-ID blocks.
-        v!(allocate_producer_ids_request),
-        v!(offset_for_leader_epoch_request),
-        v!(add_partitions_to_txn_request),
-        v!(add_offsets_to_txn_request),
-        v!(end_txn_request),
-        v!(write_txn_markers_request),
+        catalog_request::<AllocateProducerIdsRequest>(),
+        catalog_request::<OffsetForLeaderEpochRequest>(),
+        catalog_request::<AddPartitionsToTxnRequest>(),
+        catalog_request::<AddOffsetsToTxnRequest>(),
+        catalog_request::<EndTxnRequest>(),
+        catalog_request::<WriteTxnMarkersRequest>(),
         // Version 6 (KIP-1319, topic ids) is Kafka trunk's; 4.3.1 stops at 5,
         // so v6 is served only under `unstable.api.versions.enable`.
-        v!(txn_offset_commit_request),
-        v!(describe_configs_request),
-        v!(alter_replica_log_dirs_request),
-        v!(describe_log_dirs_request),
-        v!(describe_groups_request),
-        v!(list_groups_request),
-        v!(alter_configs_request),
-        v!(create_partitions_request),
-        v!(delete_groups_request),
-        v!(incremental_alter_configs_request),
-        v!(alter_partition_request),
-        v!(assign_replicas_to_dirs_request),
-        v!(describe_cluster_request),
-        v!(broker_heartbeat_request),
-        v!(broker_registration_request),
-        v!(controller_registration_request),
+        catalog_request::<TxnOffsetCommitRequest>(),
+        catalog_request::<DescribeConfigsRequest>(),
+        catalog_request::<AlterReplicaLogDirsRequest>(),
+        catalog_request::<DescribeLogDirsRequest>(),
+        catalog_request::<DescribeGroupsRequest>(),
+        catalog_request::<ListGroupsRequest>(),
+        catalog_request::<AlterConfigsRequest>(),
+        catalog_request::<CreatePartitionsRequest>(),
+        catalog_request::<DeleteGroupsRequest>(),
+        catalog_request::<IncrementalAlterConfigsRequest>(),
+        catalog_request::<AlterPartitionRequest>(),
+        catalog_request::<AssignReplicasToDirsRequest>(),
+        catalog_request::<DescribeClusterRequest>(),
+        catalog_request::<BrokerHeartbeatRequest>(),
+        catalog_request::<BrokerRegistrationRequest>(),
+        catalog_request::<ControllerRegistrationRequest>(),
         // UnregisterBroker (KIP-919) — admin RPC to permanently drop a
         // broker registration from the cluster's metadata image.
-        v!(unregister_broker_request),
+        catalog_request::<UnregisterBrokerRequest>(),
         // UnregisterController (KIP-1312, Kafka trunk) — drops a controller
         // registration. Tagged `broker` and `controller`: a broker listener
         // forwards it to the active controller. Kafka 4.3.1 has no api key 94,
         // so it is advertised and accepted only under
         // `unstable.api.versions.enable`.
-        v!(unregister_controller_request),
-        v!(alter_user_scram_credentials_request),
+        catalog_request::<UnregisterControllerRequest>(),
+        catalog_request::<AlterUserScramCredentialsRequest>(),
         // UpdateFeatures (api_key 57, KIP-584) — `kafka-features` admin tool
         // finalizes broker-supported features through a Raft-persisted path.
-        v!(update_features_request),
-        v!(describe_acls_request),
-        v!(create_acls_request),
-        v!(delete_acls_request),
-        v!(elect_leaders_request),
-        v!(alter_partition_reassignments_request),
-        v!(list_partition_reassignments_request),
+        catalog_request::<UpdateFeaturesRequest>(),
+        catalog_request::<DescribeAclsRequest>(),
+        catalog_request::<CreateAclsRequest>(),
+        catalog_request::<DeleteAclsRequest>(),
+        catalog_request::<ElectLeadersRequest>(),
+        catalog_request::<AlterPartitionReassignmentsRequest>(),
+        catalog_request::<ListPartitionReassignmentsRequest>(),
         // OffsetDelete (api_key 47, KIP-496): completes
         // `kafka-consumer-groups --delete-offsets` parity.
-        v!(offset_delete_request),
-        v!(describe_client_quotas_request),
-        v!(alter_client_quotas_request),
-        v!(describe_user_scram_credentials_request),
+        catalog_request::<OffsetDeleteRequest>(),
+        catalog_request::<DescribeClientQuotasRequest>(),
+        catalog_request::<AlterClientQuotasRequest>(),
+        catalog_request::<DescribeUserScramCredentialsRequest>(),
         // KIP-48: delegation-token RPCs. Conditional on the
         // broker having a master key configured is tempting, but Kafka
         // always advertises these — clients discover support at this
         // level then get DELEGATION_TOKEN_AUTH_DISABLED (61) on the
         // actual call when the broker isn't configured for tokens.
-        v!(create_delegation_token_request),
-        v!(renew_delegation_token_request),
-        v!(expire_delegation_token_request),
-        v!(describe_delegation_token_request),
+        catalog_request::<CreateDelegationTokenRequest>(),
+        catalog_request::<RenewDelegationTokenRequest>(),
+        catalog_request::<ExpireDelegationTokenRequest>(),
+        catalog_request::<DescribeDelegationTokenRequest>(),
         // DescribeProducers (KIP-664) — admin introspection of
         // per-(topic, partition) idempotent / transactional producer state.
-        v!(describe_producers_request),
+        catalog_request::<DescribeProducersRequest>(),
         // DescribeTransactions + ListTransactions (KIP-664) — admin
         // introspection of the TxnCoordinator's local state map.
-        v!(describe_transactions_request),
-        v!(list_transactions_request),
+        catalog_request::<DescribeTransactionsRequest>(),
+        catalog_request::<ListTransactionsRequest>(),
         // DescribeTopicPartitions (KIP-966) — paginated topic listing
         // used by JVM admin clients 3.7+ in place of fanned-out Metadata
         // calls for `kafka-topics --describe`.
-        v!(describe_topic_partitions_request),
+        catalog_request::<DescribeTopicPartitionsRequest>(),
         // KIP-714 client-metrics push handshake, advertised only behind
         // `ClientMetricsReceiver::Configured`. Kafka advertises the pair only
         // when `metric.reporters` holds a `ClientTelemetry` implementation, so
         // a client that sees the rows has somewhere to push to.
-        v!(get_telemetry_subscriptions_request),
-        v!(push_telemetry_request),
+        catalog_request::<GetTelemetrySubscriptionsRequest>(),
+        catalog_request::<PushTelemetryRequest>(),
         // ListConfigResources (KIP-1142) — typed enumeration of every
         // configurable resource (topics + brokers + client_metrics). v0
         // is the legacy ListClientMetricsResources surface (KIP-714); v1
         // adds the `resource_types` filter.
-        v!(list_config_resources_request),
+        catalog_request::<ListConfigResourcesRequest>(),
         // DescribeQuorum (KIP-595) — `kafka-metadata-quorum --describe`
         // admin introspection of the controller-raft quorum.
-        v!(describe_quorum_request),
+        catalog_request::<DescribeQuorumRequest>(),
         // FetchSnapshot (KIP-630) — controller-snapshot byte-range fetch
         // used by replicas catching up via __cluster_metadata snapshots.
-        v!(fetch_snapshot_request),
+        catalog_request::<FetchSnapshotRequest>(),
         // KIP-848 next-gen consumer group protocol.
-        v!(consumer_group_heartbeat_request),
-        v!(consumer_group_describe_request),
+        catalog_request::<ConsumerGroupHeartbeatRequest>(),
+        catalog_request::<ConsumerGroupDescribeRequest>(),
         // KIP-932 share-group membership protocol.
-        v!(share_group_heartbeat_request),
-        v!(share_group_describe_request),
+        catalog_request::<ShareGroupHeartbeatRequest>(),
+        catalog_request::<ShareGroupDescribeRequest>(),
         // KIP-1071 streams-group rebalance protocol. Version 1 of both
         // (KIP-1331, KIP-1357) is Kafka trunk's and is served only under
         // `unstable.api.versions.enable`.
-        v!(streams_group_heartbeat_request),
-        v!(streams_group_describe_request),
+        catalog_request::<StreamsGroupHeartbeatRequest>(),
+        catalog_request::<StreamsGroupDescribeRequest>(),
         // KIP-1331 topology description push (Kafka trunk). krabka stores it
         // in Kafka's in-memory plugin when
         // `group.streams.topology.description.plugin.class` names it, and
         // answers as a trunk broker without a plugin otherwise. Kafka 4.3.1
         // has no api key 93, so it is advertised and accepted only under
         // `unstable.api.versions.enable`.
-        v!(streams_group_topology_description_update_request),
+        catalog_request::<StreamsGroupTopologyDescriptionUpdateRequest>(),
         // KIP-932 ShareFetch / ShareAcknowledge data-plane RPCs.
-        v!(share_fetch_request),
-        v!(share_acknowledge_request),
+        catalog_request::<ShareFetchRequest>(),
+        catalog_request::<ShareAcknowledgeRequest>(),
         // KIP-932 share-group admin offset RPCs.
-        v!(describe_share_group_offsets_request),
-        v!(alter_share_group_offsets_request),
-        v!(delete_share_group_offsets_request),
+        catalog_request::<DescribeShareGroupOffsetsRequest>(),
+        catalog_request::<AlterShareGroupOffsetsRequest>(),
+        catalog_request::<DeleteShareGroupOffsetsRequest>(),
         // KIP-932 share-coordinator (persister) RPCs.
-        v!(initialize_share_group_state_request),
-        v!(read_share_group_state_request),
-        v!(write_share_group_state_request),
-        v!(delete_share_group_state_request),
-        v!(read_share_group_state_summary_request),
+        catalog_request::<InitializeShareGroupStateRequest>(),
+        catalog_request::<ReadShareGroupStateRequest>(),
+        catalog_request::<WriteShareGroupStateRequest>(),
+        catalog_request::<DeleteShareGroupStateRequest>(),
+        catalog_request::<ReadShareGroupStateSummaryRequest>(),
         // GetReplicaLogInfo (KIP-966) — inter-broker RPC the controller's
         // unclean recovery manager uses to read each replica's LEO + leader
         // epoch. Advertised so InterBrokerClient version negotiation succeeds.
-        v!(get_replica_log_info_request),
+        catalog_request::<GetReplicaLogInfoRequest>(),
         // KIP-853 dynamic-quorum reconfiguration — `kafka-metadata-quorum
         // --add-controller / --remove-controller` and the controller
         // auto-join path.
-        v!(add_raft_voter_request),
-        v!(remove_raft_voter_request),
-        v!(update_raft_voter_request),
+        catalog_request::<AddRaftVoterRequest>(),
+        catalog_request::<RemoveRaftVoterRequest>(),
+        catalog_request::<UpdateRaftVoterRequest>(),
     ]
 }
 
@@ -2356,6 +2434,14 @@ mod tests {
             && std::path::Path::new(path).extension() == Some(std::ffi::OsStr::new("rs"))
     }
 
+    fn annotation_test_paths(
+        tests: &'static [&'static str],
+    ) -> impl Iterator<Item = (&'static str, &'static str)> {
+        tests
+            .iter()
+            .map(|test| (test.split_once("::").map_or(*test, |(path, _)| path), *test))
+    }
+
     #[test]
     fn kip_annotation_rows_are_complete() {
         for row in KIP_ANNOTATIONS {
@@ -2366,8 +2452,7 @@ mod tests {
                 row.key,
                 row.module
             );
-            for test in row.tests {
-                let path = test.split_once("::").map_or(*test, |(path, _)| path);
+            for (path, test) in annotation_test_paths(row.tests) {
                 assert!(
                     is_rust_source_path(path),
                     "{} test {test} is not a Rust source path from the repository root",
@@ -2467,8 +2552,7 @@ mod tests {
                 row.key,
                 row.module
             );
-            for test in row.tests {
-                let path = test.split_once("::").map_or(*test, |(path, _)| path);
+            for (path, _) in annotation_test_paths(row.tests) {
                 assert!(
                     root.join(path).is_file(),
                     "{} test {path} is missing",

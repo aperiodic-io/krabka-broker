@@ -1,20 +1,24 @@
 use {super::completion_offset, creusot_std::prelude::*};
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn insertion_source(count: Int, position: Int, ordinal: Int) -> Int {
     pearlite! { if ordinal == position { count }
     else if ordinal > position { ordinal - 1 } else { ordinal } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn insertion_ordered(ends: Seq<i64>, incoming: i64, position: Int) -> bool {
     pearlite! {
         (crate::sequence::strictly_increasing(ends))
         && (forall<i: Int> 0 <= i && i < position ==> ends[i]@ < incoming@)
         && (forall<i: Int> position <= i && i < ends.len() ==> incoming@ < ends[i]@)
     }
-}
 }
 
 /// Any two positions in a sorted insertion retain their strict offset order.

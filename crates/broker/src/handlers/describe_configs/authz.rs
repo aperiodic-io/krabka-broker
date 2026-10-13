@@ -190,7 +190,7 @@ mod tests {
             "t".into(),
             TOPIC_AUTHORIZATION_FAILED,
         );
-        let expected = tagged_wire!(DescribeConfigsResult {
+        let expected = krabka_macros::tagged_wire!(DescribeConfigsResult {
             error_code: crate::codes::TOPIC_AUTHORIZATION_FAILED,
             error_message: Some("Topic authorization failed.".to_string()),
             resource_type: super::RESOURCE_TYPE_TOPIC,
@@ -245,7 +245,7 @@ mod tests {
         );
         assert!(
             denied
-                == tagged_wire!(DescribeConfigsResult {
+                == krabka_macros::tagged_wire!(DescribeConfigsResult {
                     error_code: crate::codes::CLUSTER_AUTHORIZATION_FAILED,
                     error_message: Some("Cluster authorization failed.".to_owned()),
                     resource_type: super::RESOURCE_TYPE_CLIENT_METRICS,
@@ -275,7 +275,7 @@ mod tests {
 
         let mixed = [resource(RESOURCE_TYPE_TOPIC, "t"), resource(0, "x")];
         let refused = |resource_type, name: &str| {
-            tagged_wire!(DescribeConfigsResult {
+            krabka_macros::tagged_wire!(DescribeConfigsResult {
                 error_code: crate::codes::INVALID_REQUEST,
                 error_message: Some(
                     "This most likely occurs because of a request being malformed by the client \

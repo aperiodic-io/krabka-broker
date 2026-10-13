@@ -360,17 +360,33 @@ mod tests {
         assert!(out.max_message_size == bytes(2048));
     }
 
-    #[test]
-    fn apply_max_message_bytes_leaves_base_alone_on_a_corrupt_value() {
+    #[derive(Clone, Copy)]
+    enum SizeField {
+        Message,
+        Segment,
+    }
+
+    #[yare::parameterized(
+        max_message_bytes = { MAX_MESSAGE_BYTES, SizeField::Message },
+        internal_segment_bytes = { INTERNAL_SEGMENT_BYTES, SizeField::Segment },
+    )]
+    fn corrupt_size_values_leave_the_base_alone(key: &str, field: SizeField) {
+        use assert2::assert;
+
         let base = LogConfig {
             max_message_size: bytes(4096),
+            segment_size: bytes(8192),
             ..LogConfig::default()
         };
         for corrupt in ["-1", "not-a-number", "2147483648"] {
             let mut o = BTreeMap::new();
-            o.insert(MAX_MESSAGE_BYTES.into(), corrupt.into());
+            o.insert(key.into(), corrupt.into());
             let out = apply_to_log_config(&o, &base);
-            assert!(out.max_message_size == bytes(4096), "corrupt {corrupt}");
+            let retained = match field {
+                SizeField::Message => out.max_message_size == base.max_message_size,
+                SizeField::Segment => out.segment_size == base.segment_size,
+            };
+            assert!(retained, "{key}={corrupt}");
         }
     }
 
@@ -550,22 +566,6 @@ mod tests {
         o.insert(INTERNAL_SEGMENT_BYTES.into(), "1".into());
         let out = apply_to_log_config(&o, &LogConfig::default());
         assert!(out.segment_size == bytes(1));
-    }
-
-    /// A corrupt or negative internal value leaves the base segment size
-    /// alone rather than wrapping into an enormous one.
-    #[test]
-    fn apply_internal_segment_bytes_leaves_base_alone_on_a_corrupt_value() {
-        let base = LogConfig {
-            segment_size: bytes(4096),
-            ..LogConfig::default()
-        };
-        for corrupt in ["-1", "not-a-number", "2147483648"] {
-            let mut o = BTreeMap::new();
-            o.insert(INTERNAL_SEGMENT_BYTES.into(), corrupt.into());
-            let out = apply_to_log_config(&o, &base);
-            assert!(out.segment_size == bytes(4096), "corrupt {corrupt}");
-        }
     }
 }
 

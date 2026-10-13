@@ -44,6 +44,21 @@ const TOPIC: &str = "group-validation";
 const MEMBER: &str = "m1";
 const GENERATION: i32 = 3;
 
+fn offset_commit_request(
+    group_id: impl Into<String>,
+    generation: i32,
+    member_id: impl Into<String>,
+    topics: Vec<OffsetCommitRequestTopic>,
+) -> OffsetCommitRequest {
+    OffsetCommitRequest {
+        group_id: group_id.into(),
+        generation_id_or_member_epoch: generation,
+        member_id: member_id.into(),
+        topics,
+        ..Default::default()
+    }
+}
+
 /// The group that one row commits to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -130,13 +145,9 @@ async fn drive(broker: &BrokerHandle, row: usize, case: Case) -> Driven {
     let shared = broker.broker_arc_for_test();
     let group_id = format!("group-validation-{row}");
     seed(&shared, &group_id, case.group);
-    let request = OffsetCommitRequest {
-        group_id: group_id.clone(),
-        generation_id_or_member_epoch: case.generation,
-        member_id: case.member_id.to_string(),
-        topics: vec![super::test_topic_row().name(TOPIC.to_string()).call()],
-        ..Default::default()
-    };
+    let request = offset_commit_request(group_id.clone(), case.generation, case.member_id, vec![
+        super::test_topic_row().name(TOPIC.to_string()).call(),
+    ]);
     request_identity!(
         (user, address, ctx),
         principal("consumer"),
@@ -323,13 +334,7 @@ async fn topic_read_is_checked_before_the_group() {
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (group_id, topics, answers) in cases {
-        let request = OffsetCommitRequest {
-            group_id: group_id.to_string(),
-            generation_id_or_member_epoch: GENERATION + 1,
-            member_id: MEMBER.to_string(),
-            topics,
-            ..Default::default()
-        };
+        let request = offset_commit_request(group_id, GENERATION + 1, MEMBER, topics);
         let response: OffsetCommitResponse = dispatch_wire(
             &shared,
             krabka_protocol::owned::offset_commit_request::API_KEY,
@@ -599,11 +604,8 @@ async fn consumer_group_commit_follows_kip_1251() {
             .send(GroupActorMessage::Seed(consumer_group_seed(topic_id)))
             .await
             .expect("seed");
-        let request = OffsetCommitRequest {
-            group_id,
-            generation_id_or_member_epoch: row.epoch,
-            member_id: row.member_id.into(),
-            topics: vec![OffsetCommitRequestTopic {
+        let request = offset_commit_request(group_id, row.epoch, row.member_id, vec![
+            OffsetCommitRequestTopic {
                 name: TOPIC.into(),
                 partitions: row
                     .partitions
@@ -615,9 +617,8 @@ async fn consumer_group_commit_follows_kip_1251() {
                     })
                     .collect(),
                 ..Default::default()
-            }],
-            ..Default::default()
-        };
+            },
+        ]);
         let response: OffsetCommitResponse = dispatch_wire(
             &shared,
             krabka_protocol::owned::offset_commit_request::API_KEY,

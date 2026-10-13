@@ -276,89 +276,83 @@ fn parse_signed(text: &str) -> Option<i128> {
     })
 }
 
-crate::coordinator::unified::config::membership_config_type! {
-    /// KIP-1071 streams-group membership and assignment configuration. Static
-    /// broker values provide defaults; GROUP resources can override the supported
-    /// `streams.*` keys for one group through `IncrementalAlterConfigs`.
-    #[derive(Debug, Clone, PartialEq, Eq, krabka_macros::FieldDefaults)]
-    pub struct StreamsGroupConfig;
-    prefix {
-        /// Config-level kill switch. The real gate is the `streams.version`
-        /// feature (KIP-1071 early access, default-disabled). This switch lets an
-        /// operator turn the protocol off even where the feature is finalized.
-        #[default(true)]
-        pub enable: bool,
-    }
-    session_timeout;
-    heartbeat_interval;
-    before_bounds {}
-    bounds {
-        min_session_timeout;
-        max_session_timeout;
-        min_heartbeat_interval;
-        max_heartbeat_interval;
-    }
-    suffix {
-        /// Max members per group: Kafka's `group.streams.max.size`, whose default
-        /// is `Integer.MAX_VALUE`.
-        #[default(MAX_SIZE_DEFAULT)]
-        pub max_size: usize,
-        /// Kafka's `group.streams.initial.rebalance.delay.ms`: how long the first
-        /// assignment of a group that a member joins while it is empty waits for
-        /// more members. Zero assigns at once.
-        #[default(Duration::from_secs(3))]
-        pub initial_rebalance_delay: Duration,
-        /// Kafka's `group.streams.assignment.interval.ms`: the least time between
-        /// two target assignments. Zero does not wait.
-        #[default(Duration::from_secs(1))]
-        pub assignment_interval: Duration,
-        /// `num.standby.replicas`: standby copies per stateful task.
-        // Kafka GA defaults: no standby copies, up to 2 warmups,
-        // acceptable lag 10k records.
-        pub num_standby_replicas: i32,
-        /// `max.warmup.replicas`: cap on concurrent warmup tasks. A warmup task
-        /// migrates state.
-        #[default(2)]
-        pub num_warmup_replicas: i32,
-        /// `acceptable.recovery.lag`: the maximum changelog lag in records at which
-        /// a warmup task is caught up. The assignor can then promote the task to
-        /// active or standby.
-        #[default(10_000)]
-        pub acceptable_recovery_lag: i64,
-        /// How often a member reports task offsets, so the assignor can evaluate
-        /// warmup catch-up. This is `task_offset_interval_ms` in the heartbeat
-        /// response.
-        #[default(Duration::from_mins(1))]
-        pub task_offset_interval: Duration,
-        /// Server-side assignor selection.
-        #[default(StreamsAssignorKind::Auto)]
-        pub assignor: StreamsAssignorKind,
-        /// Kafka's `group.streams.rack.aware.assignment.tags`, which a group
-        /// overrides with `streams.rack.aware.assignment.tags`: the client tag
-        /// keys every member must send. A version 1 heartbeat of a member that
-        /// sends only some of them carries the `MISSING_CLIENT_TAGS` status.
-        pub rack_aware_assignment_tags: Vec<String>,
-        /// KIP-932 share-partition start strategy for a group with no persisted
-        /// share state.
-        #[default(ShareAutoOffsetReset::Latest)]
-        pub share_auto_offset_reset: ShareAutoOffsetReset,
-        /// Kafka's internal `unstable.api.versions.enable`. While it is
-        /// [`Disabled`][UnstableApiVersions::Disabled], the default, the group
-        /// answers as Kafka 4.3.1 does: a heartbeat response leaves
-        /// `TaskOffsetIntervalMs` at 0, `partitionsByUserEndpoint` follows 4.3.1's
-        /// `EndpointToPartitionsManager`, and a join at a full group is refused even
-        /// for a member already in it. [`Enabled`][UnstableApiVersions::Enabled]
-        /// serves Kafka trunk's behavior for those.
-        #[default(UnstableApiVersions::Disabled)]
-        pub unstable_api_versions: UnstableApiVersions,
-        /// Kafka trunk's `group.streams.topology.description.plugin.class`
-        /// (KIP-1331): the plugin that stores the topology descriptions the
-        /// members push. With none, the default, the broker never asks for one.
-        #[default(TopologyDescriptionPlugin::None)]
-        pub topology_description_plugin: TopologyDescriptionPlugin,
-        #[default(64)]
-        pub actor_mailbox_capacity: usize,
-    }
+/// KIP-1071 streams-group membership and assignment configuration. Static
+/// broker values provide defaults; GROUP resources can override the supported
+/// `streams.*` keys for one group through `IncrementalAlterConfigs`.
+#[krabka_macros::membership_defaults]
+#[derive(Debug, Clone, PartialEq, Eq, krabka_macros::FieldDefaults)]
+pub struct StreamsGroupConfig {
+    /// Config-level kill switch. The real gate is the `streams.version`
+    /// feature (KIP-1071 early access, default-disabled). This switch lets an
+    /// operator turn the protocol off even where the feature is finalized.
+    #[default(true)]
+    pub enable: bool,
+    pub session_timeout: Duration,
+    pub heartbeat_interval: Duration,
+    pub min_session_timeout: Duration,
+    pub max_session_timeout: Duration,
+    pub min_heartbeat_interval: Duration,
+    pub max_heartbeat_interval: Duration,
+
+    /// Max members per group: Kafka's `group.streams.max.size`, whose default
+    /// is `Integer.MAX_VALUE`.
+    #[default(MAX_SIZE_DEFAULT)]
+    pub max_size: usize,
+    /// Kafka's `group.streams.initial.rebalance.delay.ms`: how long the first
+    /// assignment of a group that a member joins while it is empty waits for
+    /// more members. Zero assigns at once.
+    #[default(Duration::from_secs(3))]
+    pub initial_rebalance_delay: Duration,
+    /// Kafka's `group.streams.assignment.interval.ms`: the least time between
+    /// two target assignments. Zero does not wait.
+    #[default(Duration::from_secs(1))]
+    pub assignment_interval: Duration,
+    /// `num.standby.replicas`: standby copies per stateful task.
+    // Kafka GA defaults: no standby copies, up to 2 warmups,
+    // acceptable lag 10k records.
+    pub num_standby_replicas: i32,
+    /// `max.warmup.replicas`: cap on concurrent warmup tasks. A warmup task
+    /// migrates state.
+    #[default(2)]
+    pub num_warmup_replicas: i32,
+    /// `acceptable.recovery.lag`: the maximum changelog lag in records at which
+    /// a warmup task is caught up. The assignor can then promote the task to
+    /// active or standby.
+    #[default(10_000)]
+    pub acceptable_recovery_lag: i64,
+    /// How often a member reports task offsets, so the assignor can evaluate
+    /// warmup catch-up. This is `task_offset_interval_ms` in the heartbeat
+    /// response.
+    #[default(Duration::from_mins(1))]
+    pub task_offset_interval: Duration,
+    /// Server-side assignor selection.
+    #[default(StreamsAssignorKind::Auto)]
+    pub assignor: StreamsAssignorKind,
+    /// Kafka's `group.streams.rack.aware.assignment.tags`, which a group
+    /// overrides with `streams.rack.aware.assignment.tags`: the client tag
+    /// keys every member must send. A version 1 heartbeat of a member that
+    /// sends only some of them carries the `MISSING_CLIENT_TAGS` status.
+    pub rack_aware_assignment_tags: Vec<String>,
+    /// KIP-932 share-partition start strategy for a group with no persisted
+    /// share state.
+    #[default(ShareAutoOffsetReset::Latest)]
+    pub share_auto_offset_reset: ShareAutoOffsetReset,
+    /// Kafka's internal `unstable.api.versions.enable`. While it is
+    /// [`Disabled`][UnstableApiVersions::Disabled], the default, the group
+    /// answers as Kafka 4.3.1 does: a heartbeat response leaves
+    /// `TaskOffsetIntervalMs` at 0, `partitionsByUserEndpoint` follows 4.3.1's
+    /// `EndpointToPartitionsManager`, and a join at a full group is refused even
+    /// for a member already in it. [`Enabled`][UnstableApiVersions::Enabled]
+    /// serves Kafka trunk's behavior for those.
+    #[default(UnstableApiVersions::Disabled)]
+    pub unstable_api_versions: UnstableApiVersions,
+    /// Kafka trunk's `group.streams.topology.description.plugin.class`
+    /// (KIP-1331): the plugin that stores the topology descriptions the
+    /// members push. With none, the default, the broker never asks for one.
+    #[default(TopologyDescriptionPlugin::None)]
+    pub topology_description_plugin: TopologyDescriptionPlugin,
+    #[default(64)]
+    pub actor_mailbox_capacity: usize,
 }
 
 /// Kafka's `STREAMS_GROUP_MAX_SIZE_DEFAULT`, `Integer.MAX_VALUE`.

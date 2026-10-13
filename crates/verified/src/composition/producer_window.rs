@@ -12,7 +12,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn retry_row_matches(
     rows: Seq<ProducerSnapshotEntryFacts>,
     request: (i16, i32, i32, bool),
@@ -20,11 +23,10 @@ pub(super) fn retry_row_matches(
     publication: (Int, Int, bool),
 ) -> bool {
     pearlite! { publication.2 == (publication.0 >= publication.1)
-        && request.0 == rows[window.1].producer_epoch
-        && snapshot_sequence_matches(rows[window.1], request.1@, request.2@)
-        && (forall<i: Int> window.0 <= i && i < window.1 ==>
-            !snapshot_sequence_matches(rows[i], request.1@, request.2@)) }
-}
+    && request.0 == rows[window.1].producer_epoch
+    && snapshot_sequence_matches(rows[window.1], request.1@, request.2@)
+    && (forall<i: Int> window.0 <= i && i < window.1 ==>
+        !snapshot_sequence_matches(rows[i], request.1@, request.2@)) }
 }
 
 type RebuiltRetry = (usize, ProducerDecision, Option<(usize, i64, i64, bool)>);

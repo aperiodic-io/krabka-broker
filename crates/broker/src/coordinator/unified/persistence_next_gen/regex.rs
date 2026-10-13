@@ -17,11 +17,14 @@
 //! [`NextGenKey::RegularExpression`](super::NextGenKey::RegularExpression).
 
 use {
-    crate::coordinator::unified::persistence::{
-        flex::{get_string_array, put_string_array, value_codec},
-        get_i64,
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{get_string_array, put_string_array},
+            get_i64,
+        },
+        error::BrokerError,
     },
-    bytes::BufMut,
+    bytes::{BufMut, BytesMut},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,14 +38,15 @@ pub struct RegularExpressionValue {
     pub timestamp_ms: i64,
 }
 
-value_codec! {
-    RegularExpressionValue("ConsumerGroupRegularExpressionValue"),
-    encode(&self) -> buf {
+#[krabka_macros::flexible_value(record = "ConsumerGroupRegularExpressionValue")]
+impl RegularExpressionValue {
+    fn encode_fields(&self, buf: &mut BytesMut) {
         put_string_array(buf, &self.topics);
         buf.put_i64(self.version);
         buf.put_i64(self.timestamp_ms);
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let topics = get_string_array(buf)?;
         let version = get_i64(buf)?;
         let timestamp_ms = get_i64(buf)?;

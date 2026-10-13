@@ -2,10 +2,12 @@
 use super::{ProducerDecision, ProducerEntryFacts, RetainedSequenceRange};
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn sequence_modulo_2_31(sequence: Int) -> Int {
     pearlite! { sequence.rem_euclid(2147483648) }
-}
 }
 
 /// Advance a Kafka producer sequence modulo `2^31`.
@@ -49,7 +51,10 @@ pub fn decrement_sequence(sequence: i32, decrement: i32) -> i32 {
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn retained_matches(
     slot: Option<RetainedSequenceRange>,
     base_sequence: i32,
@@ -64,9 +69,11 @@ pub fn retained_matches(
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn retained_duplicate_exists(
     entry: Option<ProducerEntryFacts>,
     retained: Seq<Option<RetainedSequenceRange>>,
@@ -83,9 +90,11 @@ pub fn retained_duplicate_exists(
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn first_retained_duplicate(
     entry: Option<ProducerEntryFacts>,
     retained: Seq<Option<RetainedSequenceRange>>,
@@ -105,9 +114,11 @@ pub fn first_retained_duplicate(
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn sequence_decision(
     entry: Option<ProducerEntryFacts>,
     producer_epoch: i16,
@@ -133,5 +144,4 @@ pub fn sequence_decision(
             },
         }
     }
-}
 }

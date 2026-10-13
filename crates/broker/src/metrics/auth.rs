@@ -146,7 +146,7 @@ mod tests {
 
         m.record_client_software("render-lib", "2.0.0");
 
-        crate::metrics::test_support::render_registry!(m, body, registry; unwrap());
+        krabka_macros::metric_registry_fixture!(m, body, registry; unwrap());
         assert!(body.contains(
             "krabka_broker_client_software_versions_total{software_name=\"render-lib\",software_version=\"2.0.0\"} 1"
         ));

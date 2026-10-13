@@ -2,25 +2,24 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Security-relevant class of a failed schema-registry lookup.
-    pub enum SchemaFailureKind {
-        /// The registry answered that the schema ID does not exist.
-        Unknown,
-        /// No authoritative answer is available yet: transport, throttling, or 5xx.
-        Transient,
-        /// The registry definitively rejected the request, such as with another 4xx.
-        Permanent,
-        /// A successful response could not be decoded into the required shape.
-        Malformed,
-    }
+/// Security-relevant class of a failed schema-registry lookup.
+#[krabka_macros::model_type]
+pub enum SchemaFailureKind {
+    /// The registry answered that the schema ID does not exist.
+    Unknown,
+    /// No authoritative answer is available yet: transport, throttling, or 5xx.
+    Transient,
+    /// The registry definitively rejected the request, such as with another 4xx.
+    Permanent,
+    /// A successful response could not be decoded into the required shape.
+    Malformed,
+}
 
-    /// Whether a failed lookup rejects the record or admits it without validation.
-    pub enum SchemaFailureDecision {
-        Reject,
-        AllowUnvalidated,
-    }
+/// Whether a failed lookup rejects the record or admits it without validation.
+#[krabka_macros::model_type]
+pub enum SchemaFailureDecision {
+    Reject,
+    AllowUnvalidated,
 }
 
 /// Apply the configured fail-open policy to a classified registry failure.
@@ -40,26 +39,26 @@ pub fn schema_failure_decision(
     }
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// A schema-validated record field's role in subject selection.
-    pub enum SchemaFieldRole {
-        Key,
-        Value,
-    }
+/// A schema-validated record field's role in subject selection.
+#[krabka_macros::model_type]
+pub enum SchemaFieldRole {
+    Key,
+    Value,
+}
 
-    /// Whether the schema gate skips a field or validates it under one role.
-    pub enum SchemaFieldAction {
-        Skip,
-        CheckKey,
-        CheckValue,
-    }
+/// Whether the schema gate skips a field or validates it under one role.
+#[krabka_macros::model_type]
+pub enum SchemaFieldAction {
+    Skip,
+    CheckKey,
+    CheckValue,
+}
 
-    /// Whether every applicable field in a record batch was admitted.
-    pub enum SchemaBatchAdmission {
-        Admit,
-        Reject,
-    }
+/// Whether every applicable field in a record batch was admitted.
+#[krabka_macros::model_type]
+pub enum SchemaBatchAdmission {
+    Admit,
+    Reject,
 }
 
 /// Decode the exact big-endian schema ID from a complete Confluent prefix.

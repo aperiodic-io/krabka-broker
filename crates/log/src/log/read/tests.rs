@@ -158,7 +158,7 @@ fn log_read_raw_spans_multiple_segments() {
     drop(dir);
 }
 
-crate::sendfile_cfg! {
+#[krabka_macros::sendfile_cfg]
 /// Increment D/E: `Log::read_raw_desc` across a segment seam must yield
 /// regions whose **concatenation** is byte-identical to the coalesced
 /// bytes of `read_raw`. The result must be several `FileRegion`s, one for
@@ -168,7 +168,7 @@ fn log_read_raw_desc_multi_segment_regions_equal_read_raw() {
     use std::os::unix::fs::FileExt;
     let dir = tempdir().unwrap();
     // tiny: roll roughly each batch
-    let mut log = crate::test_support::segmented_log(dir.path(), bytes(100));
+    let mut log = segmented_log(dir.path(), bytes(100));
 
     let n: i64 = 6;
     for off in 0..n {
@@ -179,7 +179,9 @@ fn log_read_raw_desc_multi_segment_regions_equal_read_raw() {
 
     let log_end = log.log_end_offset();
     let raw = log.read_raw(Offset(0), log_end, mebibytes(10)).unwrap();
-    let desc = log.read_raw_desc(Offset(0), log_end, mebibytes(10)).unwrap();
+    let desc = log
+        .read_raw_desc(Offset(0), log_end, mebibytes(10))
+        .unwrap();
 
     assert2::assert!(desc.start_offset == raw.start_offset);
     assert2::assert!(desc.total == raw.total);
@@ -208,6 +210,7 @@ fn log_read_raw_desc_multi_segment_regions_equal_read_raw() {
     drop(dir);
 }
 
+#[krabka_macros::sendfile_cfg]
 /// The descriptor twin of `a_read_never_skips_past_a_segment_its_budget_clipped`:
 /// the zero-copy path a plaintext follower fetch takes.
 #[test]
@@ -218,7 +221,10 @@ fn a_descriptor_read_never_skips_past_a_segment_its_budget_clipped() {
             let mut wire = Vec::new();
             for region in log.read_raw_desc(offset, end, budget).unwrap().regions {
                 let mut bytes = vec![0u8; region.len];
-                region.file.read_exact_at(&mut bytes, region.offset).unwrap();
+                region
+                    .file
+                    .read_exact_at(&mut bytes, region.offset)
+                    .unwrap();
                 wire.extend_from_slice(&bytes);
             }
             batch_bases(&wire)
@@ -226,7 +232,6 @@ fn a_descriptor_read_never_skips_past_a_segment_its_budget_clipped() {
         |bases| bases,
     );
 }
-} // sendfile_cfg!
 
 /// The log of [`seam_log`], the directory that holds it, and the encoded size of
 /// a one-record batch.
@@ -498,7 +503,7 @@ fn a_small_budget_preserves_unindexed_records_before_a_segment_seam() {
     check!(actual == expected);
 }
 
-crate::sendfile_cfg! {
+#[krabka_macros::sendfile_cfg]
 /// The file-region path must preserve the same first eligible batch, including
 /// the anti-stall batch whose payload is larger than the requested budget.
 #[test]
@@ -526,9 +531,8 @@ fn a_small_budget_preserves_unindexed_descriptor_records_before_a_seam() {
     }
     check!(actual == expected);
 }
-}
 
-crate::sendfile_cfg! {
+#[krabka_macros::sendfile_cfg]
 /// The configured `read_ahead_max` reaches the readahead hint of both
 /// verbatim reads: each asks for its window and at most that much more, not
 /// the default 4 MiB past it.
@@ -553,16 +557,11 @@ fn configured_read_ahead_max_reaches_both_verbatim_reads() {
         log.read_raw_desc(Offset(0), end, budget).unwrap();
         actual.push((read_ahead_max, "read_raw_desc", advice.take()));
         for path in ["read_raw", "read_raw_desc"] {
-            expected.push((
-                read_ahead_max,
-                path,
-                vec![AdviceCall {
-                    offset: 0,
-                    len: hinted,
-                }],
-            ));
+            expected.push((read_ahead_max, path, vec![AdviceCall {
+                offset: 0,
+                len: hinted,
+            }]));
         }
     }
     check!(actual == expected);
-}
 }

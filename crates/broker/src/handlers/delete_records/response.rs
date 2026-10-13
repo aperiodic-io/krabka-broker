@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn response_helpers_preserve_topic_and_partition_fields() {
         let denied = error_partition_result(7, codes::TOPIC_AUTHORIZATION_FAILED);
-        let expected_denied = tagged_wire!(DeleteRecordsPartitionResult {
+        let expected_denied = krabka_macros::tagged_wire!(DeleteRecordsPartitionResult {
             partition_index: 7,
             low_watermark: -1,
             error_code: codes::TOPIC_AUTHORIZATION_FAILED,
@@ -65,7 +65,7 @@ mod tests {
         assert!(denied == expected_denied);
 
         let ok = partition_result(3, 44, codes::NONE);
-        let expected_ok = tagged_wire!(DeleteRecordsPartitionResult {
+        let expected_ok = krabka_macros::tagged_wire!(DeleteRecordsPartitionResult {
             partition_index: 3,
             low_watermark: 44,
             error_code: codes::NONE,
@@ -73,14 +73,14 @@ mod tests {
         assert!(ok == expected_ok);
 
         let topic = topic_result("orders".into(), vec![denied]);
-        let expected_topic = tagged_wire!(DeleteRecordsTopicResult {
+        let expected_topic = krabka_macros::tagged_wire!(DeleteRecordsTopicResult {
             name: "orders".into(),
             partitions: vec![expected_denied],
         });
         assert!(topic == expected_topic);
 
         let resp = delete_records_response(vec![topic]);
-        let expected_resp = unthrottled_wire!(DeleteRecordsResponse {
+        let expected_resp = krabka_macros::unthrottled_wire!(DeleteRecordsResponse {
             topics: vec![expected_topic],
         });
         assert!(resp == expected_resp);

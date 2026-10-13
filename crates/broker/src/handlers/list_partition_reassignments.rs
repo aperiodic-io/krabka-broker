@@ -137,12 +137,14 @@ mod tests {
 
     const VERSION: i16 = krabka_protocol::owned::list_partition_reassignments_response::MAX_VERSION;
 
-    crate::test_support::context_helper!(client_id = "admin-client");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["admin-client"];
+    }
 
     use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
 
     fn expected_empty_partition(partition_index: i32) -> OngoingPartitionReassignment {
-        tagged_wire!(OngoingPartitionReassignment {
+        krabka_macros::tagged_wire!(OngoingPartitionReassignment {
             partition_index,
             replicas: vec![],
             adding_replicas: vec![],
@@ -171,7 +173,7 @@ mod tests {
                     partition_indexes: vec![],
                     ..Default::default()
                 }]),
-                expected_topics: vec![tagged_wire!(OngoingTopicReassignment {
+                expected_topics: vec![krabka_macros::tagged_wire!(OngoingTopicReassignment {
                     name: "orders-add".to_string(),
                     partitions: vec![],
                 })],
@@ -183,7 +185,7 @@ mod tests {
                     partition_indexes: vec![0, 1],
                     ..Default::default()
                 }]),
-                expected_topics: vec![tagged_wire!(OngoingTopicReassignment {
+                expected_topics: vec![krabka_macros::tagged_wire!(OngoingTopicReassignment {
                     name: "orders-add".to_string(),
                     partitions: vec![expected_empty_partition(0), expected_empty_partition(1),],
                 })],
@@ -203,11 +205,11 @@ mod tests {
                     },
                 ]),
                 expected_topics: vec![
-                    tagged_wire!(OngoingTopicReassignment {
+                    krabka_macros::tagged_wire!(OngoingTopicReassignment {
                         name: "orders-add".to_string(),
                         partitions: vec![expected_empty_partition(0)],
                     }),
-                    tagged_wire!(OngoingTopicReassignment {
+                    krabka_macros::tagged_wire!(OngoingTopicReassignment {
                         name: "orders-remove".to_string(),
                         partitions: vec![expected_empty_partition(2)],
                     }),
@@ -232,7 +234,7 @@ mod tests {
                 &ctx,
             );
 
-            let expected = unthrottled_wire!(ListPartitionReassignmentsResponse {
+            let expected = krabka_macros::unthrottled_wire!(ListPartitionReassignmentsResponse {
                 error_code: CLUSTER_AUTHORIZATION_FAILED,
                 error_message: Some("list-reassignment denied".to_string()),
                 topics: case.expected_topics,
@@ -292,7 +294,7 @@ mod tests {
         test_ctx!(ctx, "admin");
 
         let row = |partition_index: i32| {
-            tagged_wire!(OngoingPartitionReassignment {
+            krabka_macros::tagged_wire!(OngoingPartitionReassignment {
                 partition_index,
                 replicas: vec![1, 2, 3],
                 adding_replicas: vec![3],
@@ -300,7 +302,7 @@ mod tests {
             })
         };
         let topic = |name: &str, partitions: &[i32]| {
-            tagged_wire!(OngoingTopicReassignment {
+            krabka_macros::tagged_wire!(OngoingTopicReassignment {
                 name: name.to_string(),
                 partitions: partitions.iter().map(|&p| row(p)).collect(),
             })
@@ -395,7 +397,7 @@ mod tests {
                 &ctx,
             );
 
-            let expected = unthrottled_wire!(ListPartitionReassignmentsResponse {
+            let expected = krabka_macros::unthrottled_wire!(ListPartitionReassignmentsResponse {
                 error_code: 0,
                 error_message: None,
                 topics: expected_topics,

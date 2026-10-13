@@ -73,7 +73,10 @@ pub(super) fn timestamp_list_offsets_finds_first_visible(
     })
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A candidate lies below the replica bound and every applicable unstable start.
 fn list_offset_candidate_visible(
     frontiers: (i64, i64, i64),
@@ -84,5 +87,4 @@ fn list_offset_candidate_visible(
     pearlite! { offset < (if request.0@ == -1 { frontiers.2@ } else { frontiers.1@ })
     && (request.0@ == -1 && request.1@ == 1 ==>
         forall<j: Int> 0 <= j && j < starts.len() ==> offset < starts[j]@) }
-}
 }

@@ -206,20 +206,19 @@ fn the_newest_bytes_are_read_from_memory() {
     assert2::assert!(newest.batches[0].records.len() == 3);
 }
 
-crate::sendfile_cfg! {
-    /// `sendfile` reads through the page cache, which does not hold the
-    /// newest bytes, so they are not offered to it and the fetch reads them
-    /// from memory instead. Older ones, outside the cache, still are.
-    #[test]
-    fn the_newest_bytes_are_not_offered_to_sendfile() {
-        let disk = Arc::new(AlignedDisk::default());
-        let NewestCached { dir: _dir, log, .. } = newest_cached(&disk);
+#[krabka_macros::sendfile_cfg]
+/// `sendfile` reads through the page cache, which does not hold the
+/// newest bytes, so they are not offered to it and the fetch reads them
+/// from memory instead. Older ones, outside the cache, still are.
+#[test]
+fn the_newest_bytes_are_not_offered_to_sendfile() {
+    let disk = Arc::new(AlignedDisk::default());
+    let NewestCached { dir: _dir, log, .. } = newest_cached(&disk);
 
-        let cached = log.read_raw_desc(Offset(6), Offset(9), NO_LIMIT).unwrap();
-        assert2::assert!(cached.regions.is_empty());
-        let older = log.read_raw_desc(Offset(0), Offset(3), NO_LIMIT).unwrap();
-        assert2::assert!(older.regions.len() == 1);
-    }
+    let cached = log.read_raw_desc(Offset(6), Offset(9), NO_LIMIT).unwrap();
+    assert2::assert!(cached.regions.is_empty());
+    let older = log.read_raw_desc(Offset(0), Offset(3), NO_LIMIT).unwrap();
+    assert2::assert!(older.regions.len() == 1);
 }
 
 /// A truncate puts the writer back on the block the new end falls in and

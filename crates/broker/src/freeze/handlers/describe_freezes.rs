@@ -20,9 +20,13 @@
 
 use {
     crate::{
+        broker::Broker,
         codes,
         freeze::handlers::{FreezeFilter, cluster_describe_denied, pattern_type_filter},
-        handlers::{acl_wire::pattern_type_to_wire, encode_response},
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, acl_wire::pattern_type_to_wire,
+            encode_response,
+        },
     },
     krabka_metadata::{MetadataImage, TopicFreezeRecord},
     krabka_protocol::{
@@ -33,38 +37,37 @@ use {
     },
 };
 
-wire_handler!(
-    handle,
-    "handle_describe_topic_freezes",
-    "DescribeTopicFreezes",
-    "info",
-    DescribeTopicFreezesRequest,
-    |broker, version, req, ctx| {
-        let image = broker.controller.current_image();
-        if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            return encode_response(
-                &DescribeTopicFreezesResponse {
-                    error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-                    error_message: Some("describe-topic-freezes denied".to_owned()),
-                    ..DescribeTopicFreezesResponse::default()
-                },
-                version,
-            );
-        }
-
-        encode_response(
+#[krabka_macros::extension_wire(
+    name = "handle_describe_topic_freezes",
+    api = "DescribeTopicFreezes",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: DescribeTopicFreezesRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
+    if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        return encode_response(
             &DescribeTopicFreezesResponse {
-                freezes: matching_freezes(
-                    &image,
-                    req.scope_filter.as_deref(),
-                    req.pattern_type_filter,
-                ),
+                error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+                error_message: Some("describe-topic-freezes denied".to_owned()),
                 ..DescribeTopicFreezesResponse::default()
             },
             version,
-        )
+        );
     }
-);
+
+    encode_response(
+        &DescribeTopicFreezesResponse {
+            freezes: matching_freezes(&image, req.scope_filter.as_deref(), req.pattern_type_filter),
+            ..DescribeTopicFreezesResponse::default()
+        },
+        version,
+    )
+}
 
 /// The live registry entries that the two filters select, in a stable order.
 ///

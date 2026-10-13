@@ -360,7 +360,7 @@ mod tests {
         .await
         .unwrap();
 
-        crate::metrics::test_support::render_registry!(metrics, body, registry; unwrap());
+        krabka_macros::metric_registry_fixture!(metrics, body, registry; unwrap());
         assert!(!body.contains(&topic_id.to_string()));
     }
 
@@ -395,7 +395,7 @@ mod tests {
         .expect_err("the object-store root became a file");
         assert!(error.to_string().contains("diskless wal put"));
 
-        crate::metrics::test_support::render_registry!(metrics, body, registry; unwrap());
+        krabka_macros::metric_registry_fixture!(metrics, body, registry; unwrap());
         assert!(body.contains("krabka_broker_diskless_wal_flush_failures_total 1"));
     }
 

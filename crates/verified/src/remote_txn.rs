@@ -2,17 +2,15 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Whether an aborted-transaction entry intersects a requested offset range.
-    pub enum RemoteTxnOverlapDecision {
-        /// At least one interval is inverted.
-        Invalid,
-        /// Both intervals are valid and do not intersect.
-        Disjoint,
-        /// Both intervals are valid and intersect inclusively.
-        Overlap,
-    }
+/// Whether an aborted-transaction entry intersects a requested offset range.
+#[krabka_macros::model_type]
+pub enum RemoteTxnOverlapDecision {
+    /// At least one interval is inverted.
+    Invalid,
+    /// Both intervals are valid and do not intersect.
+    Disjoint,
+    /// Both intervals are valid and intersect inclusively.
+    Overlap,
 }
 
 /// Classify the inclusive entry interval `[entry_start, entry_last]` against

@@ -169,7 +169,7 @@ mod tests {
     fn response_helpers_preserve_topic_identity_error_and_throttle_fields() {
         let id = WireUuid([9; 16]);
         let unknown_id = delete_topic_result(None, id, codes::UNKNOWN_TOPIC_ID);
-        let expected_unknown = tagged_wire!(DeletableTopicResult {
+        let expected_unknown = krabka_macros::tagged_wire!(DeletableTopicResult {
             name: None,
             topic_id: id,
             error_code: codes::UNKNOWN_TOPIC_ID,
@@ -182,7 +182,7 @@ mod tests {
             WireUuid::ZERO,
             codes::TOPIC_AUTHORIZATION_FAILED,
         );
-        let expected_denied = tagged_wire!(DeletableTopicResult {
+        let expected_denied = krabka_macros::tagged_wire!(DeletableTopicResult {
             name: Some("secret".into()),
             topic_id: WireUuid::ZERO,
             error_code: codes::TOPIC_AUTHORIZATION_FAILED,
@@ -191,7 +191,7 @@ mod tests {
         assert!(denied == expected_denied);
 
         let resp = delete_topics_response(vec![denied], 123);
-        let expected_resp = tagged_wire!(DeleteTopicsResponse {
+        let expected_resp = krabka_macros::tagged_wire!(DeleteTopicsResponse {
             throttle_time_ms: 123,
             responses: vec![expected_denied],
         });
@@ -204,7 +204,7 @@ mod tests {
     fn rows_carry_kafkas_default_messages() {
         let id = WireUuid([3; 16]);
         let row = |code, message: Option<&str>| {
-            tagged_wire!(DeletableTopicResult {
+            krabka_macros::tagged_wire!(DeletableTopicResult {
                 name: Some("t".into()),
                 topic_id: id,
                 error_code: code,

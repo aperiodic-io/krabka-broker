@@ -105,7 +105,8 @@ pub struct ShareTargetAssignment {
 }
 
 /// Full membership state of a single share group.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, krabka_macros::GroupLifecycle)]
+#[group_lifecycle(protocol = "share")]
 pub struct ShareGroupState {
     pub group_id: String,
     pub group_epoch: i32,
@@ -160,13 +161,6 @@ pub struct ShareGroupState {
 }
 
 impl ShareGroupState {
-    crate::coordinator::unified::member_helpers::shared_group_state_methods!();
-
-    crate::coordinator::unified::member_helpers::evict_expired! {
-        /// Remove members whose `last_seen` is older than `session_timeout`, and
-        /// return the evicted member ids.
-    }
-
     pub fn new(group_id: impl Into<String>) -> Self {
         Self {
             group_id: group_id.into(),
@@ -452,22 +446,6 @@ impl ShareGroupState {
         } else {
             Err(FENCED_MEMBER_EPOCH)
         }
-    }
-
-    /// The members whose session expired at `now`, without removing them.
-    #[must_use]
-    pub fn expired_members(
-        &self,
-        now: Instant,
-        session_timeout: std::time::Duration,
-    ) -> Vec<String> {
-        super::super::expired_member_ids(
-            self.members
-                .iter()
-                .map(|(id, member)| (id.as_str(), member.last_seen)),
-            now,
-            session_timeout,
-        )
     }
 
     /// Install a freshly computed target assignment stamped with the current

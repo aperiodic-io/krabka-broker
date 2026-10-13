@@ -87,19 +87,16 @@ use {
     krabka_ids::{LeaderEpoch, Offset},
 };
 
-model_types! {
-    @derives (derive(std::clone::Clone, Copy, DeepModel))
-        (derive(Clone, Copy, Debug));
-    /// One User-resource ACL projected for a token owner's `DescribeTokens` check.
-    /// Equality, prefix and CIDR facts must faithfully describe the stored entry.
-    struct TokenDescriptionAcl {
-        resource: AclResourceFacts,
-        pattern: AclPatternKind,
-        operation: AclOperationKind,
-        allow: bool,
-        principal: (bool, bool),  // wildcard, exact
-        host: (bool, bool, bool), // wildcard, exact, supported CIDR match
-    }
+/// One User-resource ACL projected for a token owner's `DescribeTokens` check.
+/// Equality, prefix and CIDR facts must faithfully describe the stored entry.
+#[krabka_macros::model_type(runtime(Clone, Copy, Debug))]
+struct TokenDescriptionAcl {
+    resource: AclResourceFacts,
+    pattern: AclPatternKind,
+    operation: AclOperationKind,
+    allow: bool,
+    principal: (bool, bool),  // wildcard, exact
+    host: (bool, bool, bool), // wildcard, exact, supported CIDR match
 }
 
 type WalFetchSupport = (i64, i64, Vec<(u64, i64)>);
@@ -244,12 +241,14 @@ use timestamp::{
     validated_remote_and_local_time_starts_agree,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every finished remote segment has representable inclusive range boundaries.
 fn finished_ranges_valid(count: Int, ranges: creusot_std::logic::Mapping<Int, (i64, i64)>) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < count
     ==> offset_range_valid(ranges.get(i).0@, ranges.get(i).1@) }
-}
 }
 
 /// Project completed remote ranges into the facts consumed by retention policy.
@@ -353,9 +352,11 @@ use jwks_publication::published_keys_bound_oauth_session;
 mod controller_session;
 use controller_session::published_controller_session_bounds_quorum_requests;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A nonnegative offset range has an ordered inclusive end.
 pub fn offset_range_valid(start: Int, end: Int) -> bool {
     pearlite! { 0 <= start && start <= end }
-}
 }

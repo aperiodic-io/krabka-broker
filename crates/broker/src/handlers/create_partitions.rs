@@ -16,6 +16,10 @@
 //! throttle.
 
 use {
+    crate::{
+        error::BrokerError,
+        handlers::{ApiVersion, DispatchResult, audit_admin_success, audit_resource},
+    },
     krabka_metadata::{AclOperation, MetadataImage, TopicRecord},
     krabka_protocol::owned::{
         create_partitions_request::{self, CreatePartitionsRequest, CreatePartitionsTopic},
@@ -74,21 +78,28 @@ use {
     },
 };
 
-raw_dispatch! {
+krabka_macros::decoded_dispatch! {
     /// Apply explicit assignments and placement rules after the request reaches the controller.
-    CreatePartitionsRequest, (broker, version, req_bytes, ctx, req), {
-    forward_if_not_controller!(
-        broker,
-        ctx,
-        create_partitions_request::API_KEY,
-        req_bytes,
-        version,
-        |code, message| encode_response(&request_refusal(&req, code, message), version)
-    );
-    if !is_active_controller(broker) {
-        return encode_response(&request_refusal(&req, codes::NOT_CONTROLLER, None), version);
-    }
-    encode_response(&handle(broker, req, version, ctx).await?, version)
+    pub(crate) async fn dispatch(
+        broker: &Broker,
+        version: ApiVersion,
+        req_bytes: &[u8],
+        ctx: &RequestContext<'_>,
+    )
+        [request = CreatePartitionsRequest, binding(req)] -> DispatchResult
+    {
+        forward_if_not_controller!(
+            broker,
+            ctx,
+            create_partitions_request::API_KEY,
+            req_bytes,
+            version,
+            |code, message| encode_response(&request_refusal(&req, code, message), version)
+        );
+        if !is_active_controller(broker) {
+            return encode_response(&request_refusal(&req, codes::NOT_CONTROLLER, None), version);
+        }
+        encode_response(&handle(broker, req, version, ctx).await?, version)
     }
 }
 
@@ -112,107 +123,125 @@ fn request_refusal(
     }
 }
 
-context_handler! {
-    CreatePartitionsRequest => CreatePartitionsResponse,
-    (broker, req, version, ctx),
-    {
-        let image = broker.controller.current_image();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: CreatePartitionsRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<CreatePartitionsResponse, BrokerError> {
+    let image = broker.controller.current_image();
 
-        // Kafka's `ControllerApis.createPartitions` answers each duplicated name
-        // once with INVALID_REQUEST and grows none of its rows. Growing the same
-        // topic twice from one image would write its new partitions twice.
-        let duplicates = duplicate_names(&req.topics);
-        let mut results: Vec<CreatePartitionsTopicResult> = duplicates
+    // Kafka's `ControllerApis.createPartitions` answers each duplicated name
+    // once with INVALID_REQUEST and grows none of its rows. Growing the same
+    // topic twice from one image would write its new partitions twice.
+    let duplicates = duplicate_names(&req.topics);
+    let mut results: Vec<CreatePartitionsTopicResult> = duplicates
+        .iter()
+        .map(|name| CreatePartitionsTopicResult {
+            name: name.clone(),
+            error_code: codes::INVALID_REQUEST,
+            error_message: Some("Duplicate topic name.".into()),
+            ..Default::default()
+        })
+        .collect();
+
+    // ── ACL preamble ────────────────────────────────────────
+    // Batch-authorize every other topic name for `Alter`. Kafka answers the
+    // denied names next, with no message, and hands the rest to the
+    // controller, whose rows come last.
+    let names: Vec<&str> = req
+        .topics
+        .iter()
+        .map(|topic| topic.name.as_str())
+        .filter(|name| !duplicates.iter().any(|duplicate| duplicate == name))
+        .collect();
+    let denied_topics = denied_topics(
+        broker.config.authorizer.as_ref(),
+        &image,
+        ctx,
+        AclOperation::Alter,
+        names.iter().copied(),
+    );
+    results.extend(
+        names
             .iter()
+            .filter(|name| denied_topics.contains(**name))
             .map(|name| CreatePartitionsTopicResult {
-                name: name.clone(),
-                error_code: codes::INVALID_REQUEST,
-                error_message: Some("Duplicate topic name.".into()),
+                name: (*name).to_owned(),
+                error_code: codes::TOPIC_AUTHORIZATION_FAILED,
                 ..Default::default()
-            })
-            .collect();
+            }),
+    );
 
-        // ── ACL preamble ────────────────────────────────────────
-        // Batch-authorize every other topic name for `Alter`. Kafka answers the
-        // denied names next, with no message, and hands the rest to the
-        // controller, whose rows come last.
-        let names: Vec<&str> = req
-            .topics
-            .iter()
-            .map(|topic| topic.name.as_str())
-            .filter(|name| !duplicates.iter().any(|duplicate| duplicate == name))
-            .collect();
-        let denied_topics = denied_topics(
-            broker.config.authorizer.as_ref(),
-            &image,
+    // KIP-599: Kafka's controller charges each topic with the partitions it
+    // adds, after the count checks on it pass (`createPartitions`). A strict
+    // version (v3+) refuses the topic that finds the bucket negative, and
+    // every topic after it.
+    let quota = Mutex::new(ctx.controller_mutation_quota(broker, &image, version >= 3));
+
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_millis(u64::try_from(req.timeout_ms).unwrap_or(0));
+    let validate_only = req.validate_only;
+
+    for t in req.topics {
+        if duplicates.contains(&t.name) || denied_topics.contains(&t.name) {
+            continue;
+        }
+        let prior_delay = quota.lock().await.delay();
+        let growth = GrowthContext {
+            broker,
             ctx,
-            AclOperation::Alter,
-            names.iter().copied(),
-        );
-        results.extend(
-            names
-                .iter()
-                .filter(|name| denied_topics.contains(**name))
-                .map(|name| CreatePartitionsTopicResult {
-                    name: (*name).to_owned(),
-                    error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+            quota: &quota,
+            charged: AtomicU64::new(0),
+            prior_delay,
+            validate_only,
+        };
+        let attempt = guarded_operation_on_source(broker.controller.as_ref(), deadline, |image| {
+            grow_topic(&growth, &t, image)
+        })
+        .await;
+        let out = match attempt {
+            Ok(Ok(row)) => row,
+            failure => {
+                let code = match failure {
+                    Err(_) => codes::REQUEST_TIMED_OUT,
+                    Ok(Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown)) => {
+                        codes::NOT_CONTROLLER
+                    }
+                    Ok(Err(error)) => {
+                        tracing::error!(%error, topic = %t.name, "CreatePartitions guarded submission failed");
+                        codes::UNKNOWN_SERVER_ERROR
+                    }
+                    Ok(Ok(_)) => unreachable!("successful response handled above"),
+                };
+                CreatePartitionsTopicResult {
+                    name: t.name,
+                    error_code: code,
                     ..Default::default()
-                }),
-        );
-
-        // KIP-599: Kafka's controller charges each topic with the partitions it
-        // adds, after the count checks on it pass (`createPartitions`). A strict
-        // version (v3+) refuses the topic that finds the bucket negative, and
-        // every topic after it.
-        let quota = Mutex::new(ctx.controller_mutation_quota(broker, &image, version >= 3));
-
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(u64::try_from(req.timeout_ms).unwrap_or(0));
-        let validate_only = req.validate_only;
-
-        for t in req.topics {
-            if duplicates.contains(&t.name) || denied_topics.contains(&t.name) {
-                continue;
-            }
-            let prior_delay = quota.lock().await.delay();
-            let growth = GrowthContext { broker, ctx, quota: &quota, charged: AtomicU64::new(0), prior_delay, validate_only };
-            let attempt = guarded_operation_on_source(broker.controller.as_ref(), deadline, |image| {
-                grow_topic(&growth, &t, image)
-            })
-            .await;
-            let out = match attempt {
-                Ok(Ok(row)) => row,
-                failure => {
-                    let code = match failure {
-                        Err(_) => codes::REQUEST_TIMED_OUT,
-                        Ok(Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown)) => codes::NOT_CONTROLLER,
-                        Ok(Err(error)) => { tracing::error!(%error, topic = %t.name, "CreatePartitions guarded submission failed"); codes::UNKNOWN_SERVER_ERROR },
-                        Ok(Ok(_)) => unreachable!("successful response handled above"),
-                    };
-                    CreatePartitionsTopicResult { name: t.name, error_code: code, ..Default::default() }
                 }
-            };
-            results.push(out);
-        }
-
-        // A `--dry-run` request grows nothing, so it changed no topic.
-        if !validate_only {
-            crate::handlers::audit_admin_success(
-                broker.audit_log.as_ref(),
-                ctx,
-                "CreatePartitions",
-                results
-                    .iter()
-                    .filter(|result| result.error_code == codes::NONE)
-                    .map(|result| crate::handlers::audit_resource("Topic", result.name.clone()))
-                    .collect(),
-            );
-        }
-
-        // KIP-599: report the controller_mutation_rate throttle after response
-        // assembly. It sets throttle_time_ms and records the window for the
-        // connection loop's post-send mute (KIP-219).
-        Ok(finish_response(ctx, quota.lock().await.delay(), results))
+            }
+        };
+        results.push(out);
     }
+
+    // A `--dry-run` request grows nothing, so it changed no topic.
+    if !validate_only {
+        audit_admin_success(
+            broker.audit_log.as_ref(),
+            ctx,
+            "CreatePartitions",
+            results
+                .iter()
+                .filter(|result| result.error_code == codes::NONE)
+                .map(|result| audit_resource("Topic", result.name.clone()))
+                .collect(),
+        );
+    }
+
+    // KIP-599: report the controller_mutation_rate throttle after response
+    // assembly. It sets throttle_time_ms and records the window for the
+    // connection loop's post-send mute (KIP-219).
+    Ok(finish_response(ctx, quota.lock().await.delay(), results))
 }
 
 struct GrowthContext<'a, 'ctx> {

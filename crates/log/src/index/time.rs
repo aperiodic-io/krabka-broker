@@ -26,7 +26,13 @@ pub struct TimeIndexEntry {
     pub relative_offset: u32,
 }
 
-#[derive(Debug)]
+// Relative offsets strictly increase across real entries; trailing
+// `(0, 0)` padding from a preallocated Kafka index decodes as a
+// non-increasing offset. Stop there. Padding carries timestamp 0,
+// which is a legal timestamp, so the offset column is the
+// discriminator.
+#[derive(Debug, krabka_macros::SparseIndex)]
+#[sparse_index(kind = "time")]
 pub struct TimeIndex {
     file: File,
     io: std::sync::Arc<dyn LogIo>,
@@ -34,19 +40,6 @@ pub struct TimeIndex {
 }
 
 impl TimeIndex {
-    index_methods!(IoTarget::TimeIndex);
-
-    // Relative offsets strictly increase across real entries; trailing
-    // `(0, 0)` padding from a preallocated Kafka index decodes as a
-    // non-increasing offset. Stop there. Padding carries timestamp 0,
-    // which is a legal timestamp, so the offset column is the
-    // discriminator.
-    index_constructor!(TimeEntryRaw,
-        "length is a multiple of TIME_ENTRY_SIZE and TimeEntryRaw is Unaligned",
-        |raw| (raw.key.get(), raw.coordinate.get());
-
-    );
-
     /// Kafka's `TimeIndex.maybeAppend`: append the entry only when `timestamp`
     /// is greater than the newest entry's, so the timestamps in the file
     /// strictly increase. `kafka-dump-log` reports any other order as out of

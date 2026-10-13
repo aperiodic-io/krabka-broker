@@ -31,10 +31,11 @@
 use crate::handlers::raft_voter::add_voter_request;
 use {
     crate::{
+        broker::Broker,
         codes,
         handlers::{
-            ErrorCodeResponse as _, cluster_action_denied,
-            raft_voter::{Admitted, Refusals},
+            ApiVersion, DispatchResult, ErrorCodeResponse as _, RequestContext,
+            cluster_action_denied, encode_response, raft_voter::Refusals,
         },
     },
     krabka_metadata::{Voter, VoterEndpoint},
@@ -45,17 +46,21 @@ use {
     krabka_raft::{reconfig::UpdateVoter, voter_requests},
 };
 
-crate::handlers::raft_voter::handler!(broker, version, req_bytes, ctx, {
-    let Admitted { req, image, quorum } = crate::handlers::raft_voter::admit!(
-        UpdateRaftVoterRequest,
-        (broker, version, req_bytes, ctx),
-        82,
-        cluster_action_denied,
-        Refusals {
-            denied: UpdateRaftVoterResponse::error(codes::CLUSTER_AUTHORIZATION_FAILED),
-            not_leader: UpdateRaftVoterResponse::error(voter_requests::NOT_LEADER_OR_FOLLOWER),
-        }
-    );
+#[krabka_macros::voter_admission(
+    request = UpdateRaftVoterRequest,
+    api = 82,
+    gate = cluster_action_denied,
+    refusals = Refusals {
+        denied: UpdateRaftVoterResponse::error(codes::CLUSTER_AUTHORIZATION_FAILED),
+        not_leader: UpdateRaftVoterResponse::error(voter_requests::NOT_LEADER_OR_FOLLOWER),
+    },
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    version: ApiVersion,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
     let error_code = if let Some(code) =
         voter_requests::update_voter_refusal(&req, &image.cluster_id().to_string(), &quorum)
     {
@@ -99,7 +104,7 @@ crate::handlers::raft_voter::handler!(broker, version, req_bytes, ctx, {
 
     // Kafka's `RaftUtil.updateVoterResponse` names the leader in every answer.
     let quorum = broker.controller.quorum_snapshot().unwrap_or(quorum);
-    crate::handlers::encode_response(
+    encode_response(
         &UpdateRaftVoterResponse {
             error_code,
             current_leader: voter_requests::update_voter_current_leader(&quorum),
@@ -107,7 +112,7 @@ crate::handlers::raft_voter::handler!(broker, version, req_bytes, ctx, {
         },
         version,
     )
-});
+}
 
 #[cfg(test)]
 mod tests {
@@ -155,7 +160,10 @@ mod tests {
     /// Applies one malformation to an otherwise well-formed request.
     type Mutate = fn(&mut UpdateRaftVoterRequest);
 
-    crate::test_support::codec_helpers!(UpdateRaftVoterRequest, UpdateRaftVoterResponse);
+    krabka_macros::wire_codec_helpers! {
+        encode_request(UpdateRaftVoterRequest);
+        decode_response(UpdateRaftVoterResponse);
+    }
 
     crate::handlers::raft_voter::test_dispatch!(
         82,

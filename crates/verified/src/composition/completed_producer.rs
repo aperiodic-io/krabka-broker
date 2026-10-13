@@ -9,7 +9,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn completed_row(
     rows: Seq<ProducerSnapshotEntryFacts>,
     incoming: ProducerSnapshotEntryFacts,
@@ -17,9 +20,11 @@ pub fn completed_row(
 ) -> ProducerSnapshotEntryFacts {
     pearlite! { if index == rows.len() { incoming } else { rows[index] } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn matches_retry(
     rows: Seq<ProducerSnapshotEntryFacts>,
     incoming: ProducerSnapshotEntryFacts,
@@ -29,7 +34,6 @@ pub fn matches_retry(
     pearlite! { let row = completed_row(rows, incoming, index);
     request.0 == row.producer_epoch
     && snapshot_sequence_matches(row, request.1@, request.2@) }
-}
 }
 
 type CompletedRetry = (

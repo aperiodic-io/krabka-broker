@@ -574,63 +574,53 @@ mod tests {
         );
     }
 
-    #[test]
-    fn forgotten_topics_drop_partitions_from_cache() {
-        let cache = FetchSessionCache::new(10);
-        let initial = vec![
-            (
-                session_key().partition(0).call(),
-                CachedPartitionState::default(),
-            ),
-            (
-                session_key().partition(1).call(),
-                CachedPartitionState::default(),
-            ),
-            (
-                session_key().partition(2).call(),
-                CachedPartitionState::default(),
-            ),
-        ];
-        let id = allocate_session().cache(&cache).partitions(initial).call();
-
-        let forgotten = vec![
-            forgotten_topic()
-                .partitions(vec![krabka_ids::PartitionIndex(1)])
-                .call(),
-        ];
-        let r = req()
-            .session_id(id)
-            .session_epoch(1)
-            .forgotten(forgotten)
-            .call();
-        match cache.classify(&r, NAME_FETCH_VERSION) {
-            SessionDecision::Incremental { partitions, .. } => {
-                let mut parts: Vec<i32> = partitions.iter().map(|(k, _)| k.partition).collect();
-                parts.sort_unstable();
-                assert!(parts == vec![0, 2]);
-            }
-            other => panic!("expected Incremental, got {other:?}"),
-        }
+    #[derive(Clone, Copy)]
+    enum ForgottenPartitionsCase {
+        RemoveOne,
+        /// Forgetting every partition drops the session ID to zero (#871).
+        RemoveAll,
     }
 
-    /// An incremental that forgets every cached partition and adds none
-    /// leaves the session with nothing. Kafka's
-    /// `IncrementalFetchContext.updateAndGenerateResponseData` drops such a
-    /// session and answers `session_id = 0` (#871).
-    #[test]
-    fn incremental_that_empties_the_session_drops_it_and_reports_no_session() {
-        let cache = FetchSessionCache::new(10);
-        let key = session_key().call();
-        let id = allocate_session()
-            .cache(&cache)
-            .partitions(vec![(key, CachedPartitionState::default())])
-            .call();
+    #[yare::parameterized(
+        remove_one = { ForgottenPartitionsCase::RemoveOne },
+        remove_all = { ForgottenPartitionsCase::RemoveAll },
+    )]
+    fn forgetting_partitions_updates_the_cached_session(case: ForgottenPartitionsCase) {
+        use assert2::assert;
 
-        let forgotten = vec![forgotten_topic().call()];
+        let cache = FetchSessionCache::new(10);
+        let (initial, forgotten, expected_partitions) = match case {
+            ForgottenPartitionsCase::RemoveOne => (
+                vec![
+                    (
+                        session_key().partition(0).call(),
+                        CachedPartitionState::default(),
+                    ),
+                    (
+                        session_key().partition(1).call(),
+                        CachedPartitionState::default(),
+                    ),
+                    (
+                        session_key().partition(2).call(),
+                        CachedPartitionState::default(),
+                    ),
+                ],
+                forgotten_topic()
+                    .partitions(vec![krabka_ids::PartitionIndex(1)])
+                    .call(),
+                vec![0, 2],
+            ),
+            ForgottenPartitionsCase::RemoveAll => (
+                vec![(session_key().call(), CachedPartitionState::default())],
+                forgotten_topic().call(),
+                vec![],
+            ),
+        };
+        let id = allocate_session().cache(&cache).partitions(initial).call();
         let r = req()
             .session_id(id)
             .session_epoch(1)
-            .forgotten(forgotten)
+            .forgotten(vec![forgotten])
             .call();
         match cache.classify(&r, NAME_FETCH_VERSION) {
             SessionDecision::Incremental {
@@ -638,12 +628,21 @@ mod tests {
                 partitions,
                 ..
             } => {
-                check!(session_id == 0);
-                check!(partitions.is_empty());
+                let mut parts: Vec<i32> = partitions.iter().map(|(k, _)| k.partition).collect();
+                parts.sort_unstable();
+                assert!(parts == expected_partitions);
+                let expected_id = if matches!(case, ForgottenPartitionsCase::RemoveAll) {
+                    0
+                } else {
+                    id
+                };
+                check!(session_id == expected_id);
             }
             other => panic!("expected Incremental, got {other:?}"),
         }
-        assert!(cache.len() == 0);
-        assert!(cache.total_partitions_cached() == 0);
+        if matches!(case, ForgottenPartitionsCase::RemoveAll) {
+            assert!(cache.len() == 0);
+            assert!(cache.total_partitions_cached() == 0);
+        }
     }
 }

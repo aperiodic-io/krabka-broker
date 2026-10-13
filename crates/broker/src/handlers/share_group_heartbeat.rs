@@ -9,7 +9,14 @@ use {
         broker::Broker,
         codes,
         coordinator::unified::{GroupCoordinator, GroupType, share::actor::ShareGroupActorMessage},
-        handlers::{ErrorResponse as _, group_coordinator_error},
+        error::BrokerError,
+        features::share_groups_enabled,
+        handlers::{
+            ApiVersion, ErrorResponse as _, RequestContext,
+            acl_gates::{group_protocol_refusal, subscribed_names_refusal},
+            group_coordinator_error, group_coordinator_error_response,
+            share_fetch::member_id_is_valid,
+        },
         task_util::{AskError, ask},
     },
     krabka_protocol::owned::{
@@ -21,90 +28,93 @@ use {
 /// Kafka's `ShareGroupHeartbeatRequest.LEAVE_GROUP_MEMBER_EPOCH`.
 const LEAVE_GROUP_MEMBER_EPOCH: i32 = -1;
 
-context_handler! {
-    ShareGroupHeartbeatRequest => ShareGroupHeartbeatResponse,
-    (broker, req, _version, ctx),
-    {
-        let ng = broker.group_coordinator.clone();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ShareGroupHeartbeatRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<ShareGroupHeartbeatResponse, BrokerError> {
+    let ng = broker.group_coordinator.clone();
 
-        // ── Protocol gate ───────────────────────────────────────────
-        // Kafka's `handleShareGroupHeartbeat` checks whether share groups are
-        // enabled BEFORE any ACL check, so a disabled feature answers
-        // `UNSUPPORTED_VERSION` even to a caller with no ACLs on the group at
-        // all. They are enabled by a finalized `share.version` of 1.
-        let image = broker.controller.current_image();
+    // ── Protocol gate ───────────────────────────────────────────
+    // Kafka's `handleShareGroupHeartbeat` checks whether share groups are
+    // enabled BEFORE any ACL check, so a disabled feature answers
+    // `UNSUPPORTED_VERSION` even to a caller with no ACLs on the group at
+    // all. They are enabled by a finalized `share.version` of 1.
+    let image = broker.controller.current_image();
 
-        // ── ACL preamble ────────────────────────────────────────────
-        // KIP-932 share groups still gate membership on `Read` on
-        // `Group(group_id)`. On Deny → whole-response
-        // `error_code = GROUP_AUTHORIZATION_FAILED (30)`.
-        if let Some(error_code) = crate::handlers::acl_gates::group_protocol_refusal(
-            crate::features::share_groups_enabled(&image),
-            broker,
-            &image,
-            ctx,
-            &req.group_id,
-        ) {
-            return Ok(reply(error_code, None));
-        }
-
-        // Kafka's `KafkaApis.isMemberIdValid`: the member id must be set and
-        // at most 36 characters long. The share consumer mints its own id, so
-        // even a first join must carry one. `getErrorResponse` sets only the
-        // code. This runs before the topic `Describe` check, so a malformed
-        // request that names a denied topic answers `INVALID_REQUEST`.
-        if !crate::handlers::share_fetch::member_id_is_valid(&req.member_id) {
-            return Ok(reply(codes::INVALID_REQUEST, None));
-        }
-
-        // `Describe` on every distinct name in `subscribed_topic_names`
-        // (Kafka's `filterByAuthorized(request.context, DESCRIBE, TOPIC,
-        // subscribedTopicSet)`). Any denial fails the WHOLE heartbeat with
-        // `TOPIC_AUTHORIZATION_FAILED` (29); the group is never touched, so an
-        // unauthorized caller cannot learn a denied topic's id or partitions
-        // by being admitted as a member. This runs before
-        // `group_coordinator_error` -- Kafka authorizes the request before it
-        // ever reaches coordinator routing, so an unauthorized subscription
-        // must not be masked by `NOT_COORDINATOR` / `COORDINATOR_NOT_AVAILABLE`.
-        crate::handlers::acl_gates::authorize_subscription!(
-            (broker, &image, ctx), req.subscribed_topic_names.as_deref() => reply
-        );
-
-        // Kafka's `GroupCoordinatorService.throwIfShareGroupHeartbeatRequestIsInvalid`
-        // runs before the operation reaches a coordinator shard.
-        if let Some(message) = invalid_request_message(&req) {
-            return Ok(reply(codes::INVALID_REQUEST, Some(message.to_owned())));
-        }
-
-        if let Some(error_code) = crate::handlers::group_coordinator_error(broker, &req.group_id) {
-            return Ok(reply(error_code, None));
-        }
-
-        // Kafka creates a share group only on a join, and answers
-        // GROUP_ID_NOT_FOUND for a missing group on any other epoch and for a
-        // group of another type, without touching any group.
-        if let Some(message) = share_group_lookup_error(&ng, &req.group_id, req.member_epoch) {
-            return Ok(reply(codes::GROUP_ID_NOT_FOUND, Some(message)));
-        }
-
-        ng.mark_share(&req.group_id);
-        let handle = ng.get_or_create_share(&req.group_id);
-        let group_id = req.group_id.clone();
-        let asked = ask(&handle.tx, |reply| ShareGroupActorMessage::Heartbeat {
-            request: req,
-            client_id: ctx.client_id.unwrap_or_default().to_owned(),
-            client_host: ctx.client_host(),
-            reply,
-        })
-        .await;
-        Ok(match asked {
-            Ok(resp) => resp,
-            Err(AskError::Closed) => reply(codes::COORDINATOR_LOAD_IN_PROGRESS, None),
-            Err(AskError::Dropped) => {
-                ShareGroupHeartbeatResponse::error(stopped_actor_code(broker, &group_id), None)
-            }
-        })
+    // ── ACL preamble ────────────────────────────────────────────
+    // KIP-932 share groups still gate membership on `Read` on
+    // `Group(group_id)`. On Deny → whole-response
+    // `error_code = GROUP_AUTHORIZATION_FAILED (30)`.
+    if let Some(error_code) = group_protocol_refusal(
+        share_groups_enabled(&image),
+        broker,
+        &image,
+        ctx,
+        &req.group_id,
+    ) {
+        return Ok(reply(error_code, None));
     }
+
+    // Kafka's `KafkaApis.isMemberIdValid`: the member id must be set and
+    // at most 36 characters long. The share consumer mints its own id, so
+    // even a first join must carry one. `getErrorResponse` sets only the
+    // code. This runs before the topic `Describe` check, so a malformed
+    // request that names a denied topic answers `INVALID_REQUEST`.
+    if !member_id_is_valid(&req.member_id) {
+        return Ok(reply(codes::INVALID_REQUEST, None));
+    }
+
+    // `Describe` on every distinct name in `subscribed_topic_names`
+    // (Kafka's `filterByAuthorized(request.context, DESCRIBE, TOPIC,
+    // subscribedTopicSet)`). Any denial fails the WHOLE heartbeat with
+    // `TOPIC_AUTHORIZATION_FAILED` (29); the group is never touched, so an
+    // unauthorized caller cannot learn a denied topic's id or partitions
+    // by being admitted as a member. This runs before
+    // `group_coordinator_error` -- Kafka authorizes the request before it
+    // ever reaches coordinator routing, so an unauthorized subscription
+    // must not be masked by `NOT_COORDINATOR` / `COORDINATOR_NOT_AVAILABLE`.
+    if let Some(error_code) =
+        subscribed_names_refusal(broker, &image, ctx, req.subscribed_topic_names.as_deref())
+    {
+        return Ok(reply(error_code, None));
+    }
+
+    // Kafka's `GroupCoordinatorService.throwIfShareGroupHeartbeatRequestIsInvalid`
+    // runs before the operation reaches a coordinator shard.
+    if let Some(message) = invalid_request_message(&req) {
+        return Ok(reply(codes::INVALID_REQUEST, Some(message.to_owned())));
+    }
+
+    if let Some(response) = group_coordinator_error_response(broker, &req.group_id, reply) {
+        return Ok(response);
+    }
+
+    // Kafka creates a share group only on a join, and answers
+    // GROUP_ID_NOT_FOUND for a missing group on any other epoch and for a
+    // group of another type, without touching any group.
+    if let Some(message) = share_group_lookup_error(&ng, &req.group_id, req.member_epoch) {
+        return Ok(reply(codes::GROUP_ID_NOT_FOUND, Some(message)));
+    }
+
+    ng.mark_share(&req.group_id);
+    let handle = ng.get_or_create_share(&req.group_id);
+    let group_id = req.group_id.clone();
+    let asked = ask(&handle.tx, |reply| ShareGroupActorMessage::Heartbeat {
+        request: req,
+        client_id: ctx.client_id.unwrap_or_default().to_owned(),
+        client_host: ctx.client_host(),
+        reply,
+    })
+    .await;
+    Ok(match asked {
+        Ok(resp) => resp,
+        Err(AskError::Closed) => reply(codes::COORDINATOR_LOAD_IN_PROGRESS, None),
+        Err(AskError::Dropped) => {
+            ShareGroupHeartbeatResponse::error(stopped_actor_code(broker, &group_id), None)
+        }
+    })
 }
 
 /// The `GROUP_ID_NOT_FOUND` message for a heartbeat that must not reach a
@@ -266,7 +276,9 @@ mod tests {
         assert!(cur.is_empty(), "response decoder consumed all bytes");
     }
 
-    crate::test_support::context_helper!(client_id = "client-a");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["client-a"];
+    }
 
     macro_rules! share_group_view {
         (($actor:ident, $view:ident), $broker:ident, $group:expr) => {

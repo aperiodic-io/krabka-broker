@@ -121,7 +121,7 @@ fn expected_configs(overrides: &[ConfigPair<'_>]) -> Vec<CreatableTopicConfigs> 
             };
             let (value, config_source) =
                 stored.map_or(unset, |value| (Some(value), DYNAMIC_TOPIC_CONFIG));
-            tagged_wire!(CreatableTopicConfigs {
+            krabka_macros::tagged_wire!(CreatableTopicConfigs {
                 name: row.name.to_owned(),
                 value: (!row.is_sensitive())
                     .then_some(value)
@@ -185,7 +185,7 @@ fn expected_topic(
         configs,
         topic_config_error_code,
     } = setup;
-    tagged_wire!(CreatableTopicResult {
+    krabka_macros::tagged_wire!(CreatableTopicResult {
         name: name.into(),
         topic_id,
         error_code: error_code.0,
@@ -211,7 +211,7 @@ fn check_created_topic_response(
     setup: CreatedTopicExpectation<'_>,
 ) {
     assert!(response.topics.len() == 1);
-    let expected = unthrottled_wire!(CreateTopicsResponse {
+    let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
         topics: vec![
             expected_topic()
                 .name(setup.name)
@@ -278,7 +278,9 @@ fn request(topics: Vec<CreatableTopic>) -> CreateTopicsRequest {
     }
 }
 
-crate::test_support::context_helper!(client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    test_context ["admin-client"];
+}
 
 use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
 
@@ -323,7 +325,7 @@ async fn handle_falls_back_to_topic_authorization_failed_for_each_topic() {
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    let expected = unthrottled_wire!(CreateTopicsResponse {
+    let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
         topics: vec![
             expected_empty_topic(
                 "orders",
@@ -355,7 +357,7 @@ async fn handle_reports_invalid_partition_count_and_replication_factor() {
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
     let expected =
-        unthrottled_wire!(CreateTopicsResponse {
+        krabka_macros::unthrottled_wire!(CreateTopicsResponse {
             topics: vec![
             expected_empty_topic("bad-count", codes::INVALID_PARTITIONS, Some(
                     "Number of partitions was set to an invalid non-positive value.".into(),
@@ -505,7 +507,7 @@ async fn minus_one_takes_the_broker_topic_creation_defaults() {
 
         let image = broker_handle.controller_image_for_test();
         let created_ok = error_code == codes::NONE;
-        let expected = unthrottled_wire!(CreateTopicsResponse {
+        let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
             topics: vec![
                 expected_topic()
                     .name(&name)
@@ -547,7 +549,7 @@ async fn handle_success_persists_topic_config_and_success_fields() {
 
     let resp = drive_single_topic(&broker, &req, &test_context(&p, &peer)).await;
     assert!(resp.topics[0].topic_id != ProtoUuid([0; 16]));
-    let expected = unthrottled_wire!(CreateTopicsResponse {
+    let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
         topics: vec![
             // Randomly generated per create; the non-nil assertion above pins it.
             expected_topic()
@@ -982,7 +984,7 @@ async fn duplicate_topic_reports_error_without_success_fields() {
     let second = drive(&broker, &req, &test_context(&p, &peer)).await;
 
     assert!(second.topics.len() == 1);
-    let expected = unthrottled_wire!(CreateTopicsResponse {
+    let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
         topics: vec![expected_empty_topic(
             "dupe",
             codes::TOPIC_ALREADY_EXISTS,
@@ -1179,7 +1181,7 @@ async fn created_topic_configs_separate_a_request_value_from_an_inherited_defaul
             .unwrap_or_else(|| panic!("{name} in the configs list"))
     };
     // The value this very request carried, at DYNAMIC_TOPIC_CONFIG (1).
-    let expected_retention = tagged_wire!(CreatableTopicConfigs {
+    let expected_retention = krabka_macros::tagged_wire!(CreatableTopicConfigs {
         name: "retention.ms".into(),
         value: Some("60000".into()),
         read_only: false,
@@ -1188,7 +1190,7 @@ async fn created_topic_configs_separate_a_request_value_from_an_inherited_defaul
     });
     check!(entry("retention.ms") == expected_retention);
     // A key the request never mentioned, at DEFAULT_CONFIG (5).
-    let expected_cleanup = tagged_wire!(CreatableTopicConfigs {
+    let expected_cleanup = krabka_macros::tagged_wire!(CreatableTopicConfigs {
         name: "cleanup.policy".into(),
         value: Some("delete".into()),
         read_only: false,
@@ -1239,7 +1241,7 @@ async fn create_without_describe_configs_withholds_the_configs_but_creates_the_t
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    let expected = unthrottled_wire!(CreateTopicsResponse {
+    let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
         topics: vec![
             expected_topic()
                 .name("undescribable")
@@ -1277,7 +1279,7 @@ async fn v4_response_encodes_without_the_kip_525_fields() {
         &ctx,
     )
     .await;
-    let expected = unthrottled_wire!(CreateTopicsResponse {
+    let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
         topics: vec![expected_empty_topic("legacy", codes::NONE, None)],
     });
     assert!(resp == expected);
@@ -1414,7 +1416,7 @@ async fn handle_refuses_invalid_and_colliding_topic_names() {
 
             let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-            let expected = unthrottled_wire!(CreateTopicsResponse {
+            let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
                 topics: vec![expected_empty_topic(
                     name,
                     *error_code,
@@ -1547,7 +1549,7 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
         )
         .await;
 
-        let expected = unthrottled_wire!(CreateTopicsResponse {
+        let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
             topics: vec![expected_empty_topic(
                 "manual",
                 error_code,
@@ -1870,7 +1872,7 @@ async fn handle_authorizes_create_per_topic_when_cluster_create_is_denied() {
             .chain(denied.into_iter().map(row))
             .chain([protected_row])
             .collect();
-        let expected = unthrottled_wire!(CreateTopicsResponse { topics });
+        let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse { topics });
         check!(resp == expected, "case: {label}");
 
         let image = broker_handle.controller_image_for_test();
@@ -2282,7 +2284,7 @@ async fn rows_follow_kafkas_check_order_and_messages() {
         actual.push((case.label, resp, exist));
         expected.push((
             case.label,
-            unthrottled_wire!(CreateTopicsResponse { topics }),
+            krabka_macros::unthrottled_wire!(CreateTopicsResponse { topics }),
             case.exist.iter().map(|name| (*name).to_owned()).collect(),
         ));
         broker_handle.shutdown().await;

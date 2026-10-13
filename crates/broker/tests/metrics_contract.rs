@@ -40,8 +40,6 @@ use {
 
 mod support;
 
-krabka_macros::metric_registry_fixture!(render_registry);
-
 /// The dashboard and rules files, relative to the repository root.
 const CONTRACT_FILES: [&str; 2] = [
     "docs/operations/grafana-dashboard.json",
@@ -75,7 +73,7 @@ async fn fresh_body() -> String {
     seed_grouped_families(&metrics);
     seed_single_families(&metrics);
 
-    render_registry!(metrics, body, registry; expect("registry encodes"));
+    krabka_macros::metric_registry_fixture!(metrics, body, registry; expect("registry encodes"));
     canonical(&body)
 }
 

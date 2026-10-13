@@ -5,7 +5,10 @@
 
 use {
     crate::{
-        codes, coordinator::unified::actor::GroupActorMessage, handlers::ErrorCodeResponse as _,
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::{ApiVersion, ErrorCodeResponse as _, RequestContext},
         task_util::ask,
     },
     krabka_protocol::owned::{
@@ -13,44 +16,46 @@ use {
     },
 };
 
-context_handler! {
-    HeartbeatRequest => HeartbeatResponse,
-    (broker, req, _version, ctx),
-    {
-        let coordinator = broker.group_coordinator.clone();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: HeartbeatRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<HeartbeatResponse, BrokerError> {
+    use crate::{
+        coordinator::unified::actor::GroupActorMessage, handlers::acl_gates::classic_group_refusal,
+    };
 
-        // Kafka's `GroupCoordinatorService.heartbeat` answers an empty group
-        // id before any group lookup.
-        // `GroupCoordinatorService.heartbeat` answers `NONE` in place of
-        // `COORDINATOR_LOAD_IN_PROGRESS`, so a member keeps its session while
-        // the new coordinator loads.
-        if let Some(error_code) =
-            crate::handlers::acl_gates::classic_group_refusal(broker, ctx, &req.group_id)
-            .map(|code| {
-                if code == codes::COORDINATOR_LOAD_IN_PROGRESS {
-                    codes::NONE
-                } else {
-                    code
-                }
-            })
-        {
-            return Ok(HeartbeatResponse::error(error_code));
+    let coordinator = broker.group_coordinator.clone();
+
+    // Kafka's `GroupCoordinatorService.heartbeat` answers an empty group
+    // id before any group lookup.
+    // `GroupCoordinatorService.heartbeat` answers `NONE` in place of
+    // `COORDINATOR_LOAD_IN_PROGRESS`, so a member keeps its session while
+    // the new coordinator loads.
+    if let Some(error_code) = classic_group_refusal(broker, ctx, &req.group_id).map(|code| {
+        if code == codes::COORDINATOR_LOAD_IN_PROGRESS {
+            codes::NONE
+        } else {
+            code
         }
-
-        let error_code = match coordinator.find(&req.group_id) {
-            None => codes::UNKNOWN_MEMBER_ID,
-            // A closed mailbox and a dropped reply both read as a member the
-            // group no longer knows.
-            Some(handle) => ask(&handle.tx, |reply| GroupActorMessage::ClassicHeartbeat {
-                req,
-                reply,
-            })
-            .await
-            .unwrap_or(codes::UNKNOWN_MEMBER_ID),
-        };
-
-        Ok(HeartbeatResponse::error(error_code))
+    }) {
+        return Ok(HeartbeatResponse::error(error_code));
     }
+
+    let error_code = match coordinator.find(&req.group_id) {
+        None => codes::UNKNOWN_MEMBER_ID,
+        // A closed mailbox and a dropped reply both read as a member the
+        // group no longer knows.
+        Some(handle) => ask(&handle.tx, |reply| GroupActorMessage::ClassicHeartbeat {
+            req,
+            reply,
+        })
+        .await
+        .unwrap_or(codes::UNKNOWN_MEMBER_ID),
+    };
+
+    Ok(HeartbeatResponse::error(error_code))
 }
 
 #[cfg(test)]
@@ -74,7 +79,7 @@ mod tests {
 
         assert!(
             HeartbeatResponse::error(codes::GROUP_AUTHORIZATION_FAILED)
-                == unthrottled_wire!(HeartbeatResponse {
+                == krabka_macros::unthrottled_wire!(HeartbeatResponse {
                     error_code: codes::GROUP_AUTHORIZATION_FAILED,
                 })
         );

@@ -11,9 +11,10 @@
 
 use {
     crate::{
+        broker::Broker,
         codes,
-        coordinator::unified::actor::GroupActorMessage,
-        handlers::{ApiVersion, ErrorCodeResponse as _},
+        error::BrokerError,
+        handlers::{ApiVersion, ErrorCodeResponse as _, RequestContext},
         task_util::ask,
     },
     krabka_protocol::owned::{
@@ -22,54 +23,57 @@ use {
     krabka_units::convert::TimeExt as _,
 };
 
-context_handler! {
-    SyncGroupRequest => SyncGroupResponse,
-    (broker, req, version, ctx),
-    {
-        let coordinator = broker.group_coordinator.clone();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: SyncGroupRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<SyncGroupResponse, BrokerError> {
+    use crate::{
+        coordinator::unified::actor::GroupActorMessage, handlers::acl_gates::classic_group_refusal,
+    };
 
-        // Kafka's `KafkaApis.handleSyncGroupRequest` answers a v5+ request
-        // without a protocol type or name before the ACL check
-        // (`SyncGroupRequest.areMandatoryProtocolTypeAndNamePresent`).
-        if !mandatory_protocol_type_and_name_present(&req, version) {
-            return Ok(SyncGroupResponse::error(codes::INCONSISTENT_GROUP_PROTOCOL));
-        }
+    let coordinator = broker.group_coordinator.clone();
 
-        // Kafka's `GroupCoordinatorService.syncGroup` answers an empty group
-        // id before any group lookup.
-        if let Some(error_code) =
-            crate::handlers::acl_gates::classic_group_refusal(broker, ctx, &req.group_id)
-        {
-            return Ok(SyncGroupResponse::error(error_code));
-        }
-
-        let Some(handle) = coordinator.find(&req.group_id) else {
-            return Ok(SyncGroupResponse::error(codes::UNKNOWN_MEMBER_ID));
-        };
-
-        // The leader and the already-Stable follower reply immediately; a
-        // not-yet-synced follower is parked and resolved when the leader's
-        // SyncGroup installs assignments, bounded by the configured follower wait.
-        // A closed mailbox, a dropped reply and the wait running out all answer
-        // REBALANCE_IN_PROGRESS.
-        let asked = ask(&handle.tx, |reply| GroupActorMessage::ClassicSync {
-            req,
-            reply,
-        });
-        let Ok(Ok(result)) =
-            tokio::time::timeout(broker.config.sync_group_follower_wait.to_std(), asked).await
-        else {
-            return Ok(SyncGroupResponse::error(codes::REBALANCE_IN_PROGRESS));
-        };
-
-        Ok(SyncGroupResponse {
-            error_code: result.error_code,
-            assignment: result.assignment,
-            protocol_type: result.protocol_type,
-            protocol_name: result.protocol_name,
-            ..Default::default()
-        })
+    // Kafka's `KafkaApis.handleSyncGroupRequest` answers a v5+ request
+    // without a protocol type or name before the ACL check
+    // (`SyncGroupRequest.areMandatoryProtocolTypeAndNamePresent`).
+    if !mandatory_protocol_type_and_name_present(&req, version) {
+        return Ok(SyncGroupResponse::error(codes::INCONSISTENT_GROUP_PROTOCOL));
     }
+
+    // Kafka's `GroupCoordinatorService.syncGroup` answers an empty group
+    // id before any group lookup.
+    if let Some(error_code) = classic_group_refusal(broker, ctx, &req.group_id) {
+        return Ok(SyncGroupResponse::error(error_code));
+    }
+
+    let Some(handle) = coordinator.find(&req.group_id) else {
+        return Ok(SyncGroupResponse::error(codes::UNKNOWN_MEMBER_ID));
+    };
+
+    // The leader and the already-Stable follower reply immediately; a
+    // not-yet-synced follower is parked and resolved when the leader's
+    // SyncGroup installs assignments, bounded by the configured follower wait.
+    // A closed mailbox, a dropped reply and the wait running out all answer
+    // REBALANCE_IN_PROGRESS.
+    let asked = ask(&handle.tx, |reply| GroupActorMessage::ClassicSync {
+        req,
+        reply,
+    });
+    let Ok(Ok(result)) =
+        tokio::time::timeout(broker.config.sync_group_follower_wait.to_std(), asked).await
+    else {
+        return Ok(SyncGroupResponse::error(codes::REBALANCE_IN_PROGRESS));
+    };
+
+    Ok(SyncGroupResponse {
+        error_code: result.error_code,
+        assignment: result.assignment,
+        protocol_type: result.protocol_type,
+        protocol_name: result.protocol_name,
+        ..Default::default()
+    })
 }
 
 /// Kafka's `SyncGroupRequest.areMandatoryProtocolTypeAndNamePresent`: from v5
@@ -309,7 +313,7 @@ mod tests {
             .await
             .expect("SyncGroup");
 
-        let expected = unthrottled_wire!(SyncGroupResponse {
+        let expected = krabka_macros::unthrottled_wire!(SyncGroupResponse {
             error_code: codes::GROUP_AUTHORIZATION_FAILED,
             protocol_type: None,
             protocol_name: None,
@@ -343,7 +347,7 @@ mod tests {
             .await
             .expect("SyncGroup");
 
-        let expected = unthrottled_wire!(SyncGroupResponse {
+        let expected = krabka_macros::unthrottled_wire!(SyncGroupResponse {
             error_code: codes::NONE,
             protocol_type: Some(PROTOCOL_TYPE.into()),
             protocol_name: Some(PROTOCOL_NAME.into()),

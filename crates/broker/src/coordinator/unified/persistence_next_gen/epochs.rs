@@ -23,20 +23,23 @@
 //! tagged-field trailer, the single `0` byte whose absence is what makes
 //! Kafka's reader underflow.
 
-use crate::coordinator::unified::persistence::flex::epoch_value;
-
-epoch_value!(GroupMetadataValue("ConsumerGroupMetadataValue") {
-    epoch,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, krabka_macros::FlexibleEpochValue)]
+#[epoch_value(record = "ConsumerGroupMetadataValue")]
+pub struct GroupMetadataValue {
+    pub epoch: i32,
     /// Kafka's `MetadataHash`: the hash of the subscribed topics' metadata
     /// when the epoch was written.
-    metadata_hash,
-});
-epoch_value!(TargetAssignmentMetadataValue("ConsumerGroupTargetAssignmentMetadataValue") {
-    assignment_epoch,
+    pub metadata_hash: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, krabka_macros::FlexibleEpochValue)]
+#[epoch_value(record = "ConsumerGroupTargetAssignmentMetadataValue")]
+pub struct TargetAssignmentMetadataValue {
+    pub assignment_epoch: i32,
     /// Kafka's `AssignmentTimestamp`: the wall-clock time in milliseconds at
     /// which the assignment calculation finished, or 0 when it is unknown.
-    assignment_timestamp_ms,
-});
+    pub assignment_timestamp_ms: i64,
+}
 
 #[cfg(test)]
 mod tests {

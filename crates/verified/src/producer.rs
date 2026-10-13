@@ -2,34 +2,34 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// The sequence range of one batch a producer's entry retains: Kafka's
-    /// `BatchMetadata` `firstSeq` and `lastSeq`.
-    pub struct RetainedSequenceRange {
-        pub base_sequence: i32,
-        pub last_sequence: i32,
-    }
+/// The sequence range of one batch a producer's entry retains: Kafka's
+/// `BatchMetadata` `firstSeq` and `lastSeq`.
+#[krabka_macros::model_type]
+pub struct RetainedSequenceRange {
+    pub base_sequence: i32,
+    pub last_sequence: i32,
+}
 
-    /// The fields of one producer's tracked entry that the sequence check reads.
-    pub struct ProducerEntryFacts {
-        /// The entry's producer epoch.
-        pub epoch: i16,
-        /// The last sequence the entry accepted.
-        pub last_sequence: i32,
-    }
+/// The fields of one producer's tracked entry that the sequence check reads.
+#[krabka_macros::model_type]
+pub struct ProducerEntryFacts {
+    /// The entry's producer epoch.
+    pub epoch: i16,
+    /// The last sequence the entry accepted.
+    pub last_sequence: i32,
+}
 
-    /// Result of classifying an idempotent-producer batch.
-    pub enum ProducerDecision {
-        Append,
-        /// The batch repeats the retained batch at this index of the slice the
-        /// caller passed.
-        Duplicate {
-            retained: usize,
-        },
-        OutOfOrder,
-        Fenced,
-    }
+/// Result of classifying an idempotent-producer batch.
+#[krabka_macros::model_type]
+pub enum ProducerDecision {
+    Append,
+    /// The batch repeats the retained batch at this index of the slice the
+    /// caller passed.
+    Duplicate {
+        retained: usize,
+    },
+    OutOfOrder,
+    Fenced,
 }
 
 mod sequence_decision;

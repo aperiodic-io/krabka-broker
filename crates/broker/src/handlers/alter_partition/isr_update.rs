@@ -528,7 +528,7 @@ mod tests {
         let mut changes = Vec::new();
         let resp = response_for_non_default_partition(&image, &mut changes, 9);
 
-        let expected = tagged_wire!(RespPartitionData {
+        let expected = krabka_macros::tagged_wire!(RespPartitionData {
             partition_index: 7,
             error_code: codes::NONE,
             leader_id: 2,
@@ -760,7 +760,7 @@ mod tests {
             .new_isr(&[WireBrokerId(1), WireBrokerId(2)])
             .new_isr_with_epochs(&[bs(WireBrokerId(3), BrokerEpoch(30))])
             .call();
-        let expected = tagged_wire!(RespPartitionData {
+        let expected = krabka_macros::tagged_wire!(RespPartitionData {
             partition_index: 0,
             error_code: codes::NONE,
             leader_id: 1,

@@ -110,15 +110,13 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for WriteIdle<S> {
 }
 
 impl<S: SendfileSink> SendfileSink for WriteIdle<S> {
-    crate::sendfile_cfg! {
-        fn write_idle_window(&self) -> Option<Duration> {
-            self.window.or_else(|| self.inner.write_idle_window())
-        }
-
-        fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> {
-            self.inner.tcp_for_sendfile()
-        }
+    #[krabka_macros::sendfile_cfg]
+    fn write_idle_window(&self) -> Option<Duration> {
+        self.window.or_else(|| self.inner.write_idle_window())
     }
+
+    #[krabka_macros::sendfile_cfg]
+    fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> { self.inner.tcp_for_sendfile() }
 
     fn write_idle_is_enforced(&self) -> bool {
         self.window.is_some() || self.inner.write_idle_is_enforced()

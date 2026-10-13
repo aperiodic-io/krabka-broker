@@ -6,7 +6,10 @@ use {
 type InstalledPlacement = (Vec<(u64, u64)>, Vec<u64>, bool);
 type RackLossPlacement = (Vec<(u64, u64)>, Vec<u64>, bool, bool);
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A maximal local-first placement uses distinct nodes and racks from its input.
 fn placement_valid(
     candidates: Seq<(u64, u64)>,
@@ -22,7 +25,6 @@ fn placement_valid(
             && (crate::wal::placement_identities_distinct(selected))
             && (0 < selected.len() && selected.len() < requested ==> forall<i: Int> 0 <= i && i < candidates.len() ==> exists<j: Int> 0 <= j && j < selected.len() && (candidates[i].0 == selected[j].0 || candidates[i].1 == selected[j].1))
     }
-}
 }
 
 /// Return the actual placement, projected node IDs and exact installer admission.

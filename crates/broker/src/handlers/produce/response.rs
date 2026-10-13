@@ -71,7 +71,7 @@ mod tests {
         let resp = build_topic_error_response(&topic, UNKNOWN_TOPIC_ID);
 
         let error_partition = |index: i32| {
-            tagged_wire!(PartitionProduceResponse {
+            krabka_macros::tagged_wire!(PartitionProduceResponse {
                 index,
                 error_code: crate::codes::UNKNOWN_TOPIC_ID,
                 base_offset: -1,
@@ -79,13 +79,13 @@ mod tests {
                 log_start_offset: -1,
                 record_errors: vec![],
                 error_message: None,
-                current_leader: tagged_wire!(LeaderIdAndEpoch {
+                current_leader: krabka_macros::tagged_wire!(LeaderIdAndEpoch {
                     leader_id: -1,
                     leader_epoch: -1,
                 }),
             })
         };
-        let expected = tagged_wire!(TopicProduceResponse {
+        let expected = krabka_macros::tagged_wire!(TopicProduceResponse {
             name: "orders".to_string(),
             topic_id,
             partition_responses: vec![error_partition(0), error_partition(4)],

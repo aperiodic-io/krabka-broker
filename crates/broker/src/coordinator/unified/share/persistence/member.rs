@@ -14,8 +14,14 @@
 //! Every string is compact, the array is compact, and the message ends with its
 //! tagged-field count.
 
-use crate::coordinator::unified::persistence::flex::{
-    get_member_client, get_string_array, put_member_client, put_string_array, value_codec,
+use {
+    crate::{
+        coordinator::unified::persistence::flex::{
+            get_member_client, get_string_array, put_member_client, put_string_array,
+        },
+        error::BrokerError,
+    },
+    bytes::BytesMut,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,13 +32,19 @@ pub struct ShareGroupMemberMetadataValue {
     pub subscribed_topic_names: Vec<String>,
 }
 
-value_codec! {
-    ShareGroupMemberMetadataValue("ShareGroupMemberMetadataValue"),
-    encode(&self) -> buf {
-        put_member_client(buf, self.rack_id.as_deref(), &self.client_id, &self.client_host);
+#[krabka_macros::flexible_value(record = "ShareGroupMemberMetadataValue")]
+impl ShareGroupMemberMetadataValue {
+    fn encode_fields(&self, buf: &mut BytesMut) {
+        put_member_client(
+            buf,
+            self.rack_id.as_deref(),
+            &self.client_id,
+            &self.client_host,
+        );
         put_string_array(buf, &self.subscribed_topic_names);
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let (rack_id, client_id, client_host) = get_member_client(buf)?;
         let subscribed_topic_names = get_string_array(buf)?;
         Ok(Self {

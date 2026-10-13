@@ -8,7 +8,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Kafka's legal producer identities (`RecordBatch.NO_PRODUCER_ID`,
 /// `NO_PRODUCER_EPOCH`, `NO_SEQUENCE` are all `-1`).
 ///
@@ -34,9 +37,11 @@ pub fn legal_producer(producer: RestoreProducer) -> bool {
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every identity field at its `-1` sentinel and no transactional bit.
 pub fn non_idempotent_producer(producer: RestoreProducer) -> bool {
     pearlite! {
@@ -46,9 +51,11 @@ pub fn non_idempotent_producer(producer: RestoreProducer) -> bool {
             && producer.base_sequence@ == -1
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A batch header's offset layout is legal: nonnegative base, span and
 /// record count, an exclusive end that fits `i64`, and for a control batch
 /// Kafka's single-offset span holding at most its one marker. A control batch
@@ -63,7 +70,6 @@ pub fn legal_header(layout: RestoreLayout, control: bool) -> bool {
             && (control ==> layout.last_offset_delta@ == 0 && layout.records_count@ <= 1)
             && layout.base_offset@ + layout.last_offset_delta@ + 1 <= i64::MAX@
     }
-}
 }
 
 /// Admit a batch header synthesized or re-encoded by restore and return its
@@ -110,7 +116,10 @@ pub fn restore_rewritten_batch_header(
         .checked_add(1)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// One retained record is legal in a rewritten batch: it is placeable, its
 /// offset delta strictly follows the previous retained record's, and its
 /// Kafka timestamp does not exceed the preserved archived `max_timestamp`.
@@ -129,7 +138,6 @@ pub fn restore_rewrite_record_legal(
             }
             && kafka_record_timestamp(frame, record) <= frame.max_timestamp@
     }
-}
 }
 
 /// Validate one retained record against the synthesized header and return its

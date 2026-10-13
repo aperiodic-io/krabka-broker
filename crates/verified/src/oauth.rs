@@ -4,54 +4,60 @@ use creusot_std::prelude::ensures;
 #[cfg(creusot)]
 use creusot_std::prelude::{DeepModel, Int, logic};
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Whether token validation supplied an absolute expiry.
-    pub enum OAuthExpiryPresence {
-        Missing,
-        Present,
-    }
-
-    /// Whether the broker applies a maximum session lifetime.
-    pub enum OAuthSessionCap {
-        Disabled,
-        Enabled,
-    }
-
-    /// Authentication phase being admitted.
-    pub enum OAuthAuthenticationKind {
-        Initial,
-        Reauthentication,
-    }
-
-    /// Relationship between the prior and validated principals.
-    pub enum OAuthPrincipalMatch {
-        Matches,
-        Differs,
-    }
-
-    /// Inputs that bind a validated token to one broker session.
-    pub struct OAuthSessionFacts {
-        pub expiry: OAuthExpiryPresence,
-        pub token_expires_at_ms: i64,
-        pub now_ms: i64,
-        pub cap: OAuthSessionCap,
-        pub cap_ms: i64,
-        pub authentication: OAuthAuthenticationKind,
-        pub principal: OAuthPrincipalMatch,
-    }
-
-    /// Session state selected after token validation.
-    pub enum OAuthSessionDecision {
-        Reject,
-        Admit {
-            session_lifetime_ms: i64,
-            effective_expires_at_ms: i64,
-        },
-    }
+/// Whether token validation supplied an absolute expiry.
+#[krabka_macros::model_type]
+pub enum OAuthExpiryPresence {
+    Missing,
+    Present,
 }
 
-open_logic! {
+/// Whether the broker applies a maximum session lifetime.
+#[krabka_macros::model_type]
+pub enum OAuthSessionCap {
+    Disabled,
+    Enabled,
+}
+
+/// Authentication phase being admitted.
+#[krabka_macros::model_type]
+pub enum OAuthAuthenticationKind {
+    Initial,
+    Reauthentication,
+}
+
+/// Relationship between the prior and validated principals.
+#[krabka_macros::model_type]
+pub enum OAuthPrincipalMatch {
+    Matches,
+    Differs,
+}
+
+/// Inputs that bind a validated token to one broker session.
+#[krabka_macros::model_type]
+pub struct OAuthSessionFacts {
+    pub expiry: OAuthExpiryPresence,
+    pub token_expires_at_ms: i64,
+    pub now_ms: i64,
+    pub cap: OAuthSessionCap,
+    pub cap_ms: i64,
+    pub authentication: OAuthAuthenticationKind,
+    pub principal: OAuthPrincipalMatch,
+}
+
+/// Session state selected after token validation.
+#[krabka_macros::model_type]
+pub enum OAuthSessionDecision {
+    Reject,
+    Admit {
+        session_lifetime_ms: i64,
+        effective_expires_at_ms: i64,
+    },
+}
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Session admissibility at the clock when token validation completes.
 pub(crate) fn oauth_session_admissible_at(facts: OAuthSessionFacts, now: Int) -> bool {
     pearlite! {
@@ -62,7 +68,6 @@ pub(crate) fn oauth_session_admissible_at(facts: OAuthSessionFacts, now: Int) ->
             && (facts.authentication == OAuthAuthenticationKind::Initial
                 || facts.principal == OAuthPrincipalMatch::Matches)
     }
-}
 }
 
 /// Whether a validated token may bind a session: it carries an expiry

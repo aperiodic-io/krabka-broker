@@ -62,66 +62,6 @@ fn cluster_action_denied(broker: &Broker, ctx: &RequestContext<'_>) -> bool {
     )
 }
 
-/// Builds Kafka's `toGlobalErrorResponse` for a share-state request: one
-/// result row for each requested topic, and one partition row with
-/// `CLUSTER_AUTHORIZATION_FAILED` and Kafka's message for each requested
-/// partition.
-macro_rules! cluster_authorization_failed {
-    ($request:expr, $response:ident, $result:ident, $partition:ident) => {
-        $response {
-            results: $request
-                .topics
-                .iter()
-                .map(|topic| $result {
-                    topic_id: topic.topic_id,
-                    partitions: topic
-                        .partitions
-                        .iter()
-                        .map(|partition| $partition {
-                            partition: partition.partition,
-                            error_code: $crate::codes::CLUSTER_AUTHORIZATION_FAILED,
-                            error_message: Some(
-                                super::CLUSTER_AUTHORIZATION_FAILED_MESSAGE.to_string(),
-                            ),
-                            ..Default::default()
-                        })
-                        .collect(),
-                    ..Default::default()
-                })
-                .collect(),
-            ..Default::default()
-        }
-    };
-}
-use cluster_authorization_failed;
-
-/// The common ACL gate and metadata snapshot of the share-state RPCs.
-macro_rules! share_state_handler {
-    ($request:ident, $response:ident, $result:ident, $partition:ident, $serve:ident) => {
-        /// Checks `ClusterAction` on the cluster, then serves the request.
-        ///
-        #[doc = concat!("Kafka's `KafkaApis` answers a denied principal with `", stringify!($response), ".toGlobalErrorResponse`: `CLUSTER_AUTHORIZATION_FAILED` on every requested partition, and the share coordinator does not run.")]
-        pub(crate) async fn handle(
-            broker: &$crate::broker::Broker,
-            req: $request,
-            _version: i16,
-            ctx: &$crate::handlers::RequestContext<'_>,
-        ) -> Result<$response, $crate::error::BrokerError> {
-            Ok(if super::cluster_action_denied(broker, ctx) {
-                super::cluster_authorization_failed!(req, $response, $result, $partition)
-            } else {
-                $serve(
-                    &broker.share_coordinator,
-                    &broker.controller.current_image(),
-                    req,
-                )
-                .await
-            })
-        }
-    };
-}
-use share_state_handler;
-
 /// Runs each topic's partition operations together and keeps request order in the results.
 /// Each operation waits for its own records to commit, as Kafka's `ShareCoordinatorService` does.
 macro_rules! state_results {

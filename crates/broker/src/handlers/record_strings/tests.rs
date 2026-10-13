@@ -220,6 +220,18 @@ fn a_state_request_with_an_id_over_32767_bytes_is_refused() {
 }
 
 #[test]
+fn the_string_bound_counts_utf8_bytes_instead_of_characters() {
+    for (suffix, accepted) in [("abc", true), ("abcd", false)] {
+        let request = InitProducerIdRequest {
+            transactional_id: Some(format!("{}{suffix}", "🦀".repeat(8191))),
+            ..Default::default()
+        };
+        assert!(request.longest_record_string() == if accepted { LIMIT } else { LIMIT + 1 });
+        assert!(decoded(&request, init_producer_id_request::MAX_VERSION).is_ok() == accepted);
+    }
+}
+
+#[test]
 fn a_group_admin_request_with_a_name_over_32767_bytes_is_refused() {
     check_request(
         delete_groups_request::MAX_VERSION,

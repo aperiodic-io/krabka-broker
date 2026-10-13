@@ -33,8 +33,11 @@ use {
             error::BarrierError,
             handlers::{NO_EPOCH, cut_missing, cut_topics, error_code, error_text},
         },
+        broker::Broker,
         codes,
-        handlers::{cluster_alter_denied, encode_response},
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, cluster_alter_denied, encode_response,
+        },
     },
     krabka_protocol::krabka::barrier::{
         CUT_STATUS_PARTIAL, TriggerBarrierRequest, TriggerBarrierResponse,
@@ -42,29 +45,32 @@ use {
     krabka_units::{Time, millis},
 };
 
-wire_handler!(
-    handle,
-    "handle_trigger_barrier",
-    "TriggerBarrier",
-    "info",
-    TriggerBarrierRequest,
-    |broker, version, req, ctx| {
-        let image = broker.controller.current_image();
-        if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            return encode_response(&denied_response("trigger-barrier denied"), version);
-        }
-
-        let resp = match broker
-            .barrier_coordinator
-            .trigger_injection(&req.group, requested_timeout(req.timeout_ms))
-            .await
-        {
-            Ok(outcome) => cut_response(&outcome),
-            Err(error) => error_response(&error),
-        };
-        encode_response(&resp, version)
+#[krabka_macros::extension_wire(
+    name = "handle_trigger_barrier",
+    api = "TriggerBarrier",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: TriggerBarrierRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
+    if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        return encode_response(&denied_response("trigger-barrier denied"), version);
     }
-);
+
+    let resp = match broker
+        .barrier_coordinator
+        .trigger_injection(&req.group, requested_timeout(req.timeout_ms))
+        .await
+    {
+        Ok(outcome) => cut_response(&outcome),
+        Err(error) => error_response(&error),
+    };
+    encode_response(&resp, version)
+}
 
 /// The response that carries the cut of a finished injection.
 fn cut_response(outcome: &InjectionOutcome) -> TriggerBarrierResponse {

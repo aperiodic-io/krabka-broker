@@ -9,14 +9,19 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn scheduled_activation_due(activation: Int, uncertainty: Int, now: Int) -> bool {
     pearlite! { uncertainty >= 0 && activation + uncertainty <= i64::MAX@
     && activation + uncertainty <= now }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn scheduled_batches_valid(batches: Seq<(i64, i32)>, start: Int, end: Int) -> bool {
     pearlite! {
         (forall<i: Int> 0 <= i && i < batches.len() ==> batches[i].1@ >= 0
@@ -26,16 +31,20 @@ pub(super) fn scheduled_batches_valid(batches: Seq<(i64, i32)>, start: Int, end:
             else { batches[batches.len() - 1].0@ + batches[batches.len() - 1].1@ + 1 == end }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn scheduled_prefix_covers_pending(
-    batches: Seq<(i64, i32)>, activations: Seq<i64>, clock: (Int, Int), frontier: Int,
+    batches: Seq<(i64, i32)>,
+    activations: Seq<i64>,
+    clock: (Int, Int),
+    frontier: Int,
 ) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < batches.len()
-        && !scheduled_activation_due(activations[i]@, clock.0, clock.1)
-        ==> frontier <= batches[i].0@ }
-}
+    && !scheduled_activation_due(activations[i]@, clock.0, clock.1)
+    ==> frontier <= batches[i].0@ }
 }
 
 /// The maximum over actual batch activation times is due iff every batch is
@@ -128,7 +137,10 @@ pub(super) fn scheduled_prefix_bounds_fetch(
     Some((deliverable, consumer, follower))
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Scheduled batches and activation times have equal length, and log bounds are coherent.
 pub(super) fn scheduled_inputs_coherent(
     batches: Seq<(i64, i32)>,
@@ -137,5 +149,4 @@ pub(super) fn scheduled_inputs_coherent(
     end: Int,
 ) -> bool {
     pearlite! { batches.len() == activations.len() && super::offset_range_valid(start, end) }
-}
 }

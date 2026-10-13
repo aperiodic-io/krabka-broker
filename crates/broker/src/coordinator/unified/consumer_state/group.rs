@@ -11,8 +11,7 @@ use {
     crate::{
         codes,
         coordinator::unified::{
-            INITIAL_GROUP_EPOCH, actor::CommitFence, member_helpers,
-            persistence_next_gen::MemberAssignmentState,
+            INITIAL_GROUP_EPOCH, actor::CommitFence, persistence_next_gen::MemberAssignmentState,
         },
     },
     krabka_protocol::primitives::uuid::Uuid,
@@ -27,7 +26,8 @@ const FIRST_CONSUMER_PROTOCOL_COMMIT_VERSION: i16 = 9;
 /// Kafka's `JoinGroupRequest.UNKNOWN_GENERATION_ID`.
 const UNKNOWN_GENERATION_ID: i32 = -1;
 
-#[derive(Debug)]
+#[derive(Debug, krabka_macros::GroupLifecycle)]
+#[group_lifecycle(protocol = "consumer")]
 pub struct GroupState {
     pub group_id: String,
     pub group_epoch: i32,
@@ -78,29 +78,6 @@ enum LogPresence {
 }
 
 impl GroupState {
-    member_helpers::shared_group_state_methods!();
-
-    member_helpers::expired_members_method!();
-
-    member_helpers::evict_expired!();
-
-    member_helpers::fence_rebalance_timeouts_method! {
-    /// Removes every member whose rebalance timeout fired at `now` while the
-    /// member still had partitions to revoke. Returns the removed member ids,
-    /// sorted.
-    ///
-    /// This is the fence of Kafka's `scheduleConsumerGroupRebalanceTimeout`
-    /// (`consumerGroupFenceMember`). The removal frees the partitions the
-    /// member did not revoke, so their new owners can take them.
-    ///
-    /// A hosted classic member never sends `ConsumerGroupHeartbeat`, so no
-    /// heartbeat arms its timeout. This pass arms it the first time it sees
-    /// the member with partitions to revoke. Kafka bounds the same member with
-    /// its join and sync timers, which also use the rebalance timeout. The
-    /// pass also cancels the deadlines that no longer apply, so a past
-    /// deadline never stays armed.
-    }
-
     pub fn new(group_id: impl Into<String>) -> Self {
         Self {
             group_id: group_id.into(),

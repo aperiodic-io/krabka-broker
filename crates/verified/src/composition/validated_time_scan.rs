@@ -10,7 +10,10 @@ use {
 
 type TimeScanWitness = (usize, u32, u32, Option<usize>);
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn time_scan_input_valid(
     entries: Seq<(i64, u32)>,
     offsets: Seq<u32>,
@@ -23,7 +26,6 @@ fn time_scan_input_valid(
         && (crate::sequence::strictly_increasing(offsets))
         && (super::timestamp::sparse_rows_bound_records(entries, offsets, times))
     }
-}
 }
 
 /// Check canonical archived rows against complete decoded records, then consume

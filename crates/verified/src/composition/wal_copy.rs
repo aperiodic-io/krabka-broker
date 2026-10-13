@@ -8,11 +8,13 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Equality of decoded coordinates and the complete observed byte payload.
 pub fn copy_batch_equal(left: WalCopyBatch, right: WalCopyBatch) -> bool {
     pearlite! { left.0 == right.0 && left.1 == right.1 && left.2@ == right.2@ }
-}
 }
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
@@ -247,9 +249,11 @@ pub(super) fn covering_copy_preserves_logical_fetch(
     Some((physical, bytes_end, None))
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A copied data batch has a nonnegative base and representable exclusive end.
 fn copy_batch_coordinates_valid(batch: WalCopyBatch) -> bool {
     pearlite! { batch.0@ >= 0 && batch.1@ >= 0 && batch.0@ + batch.1@ + 1 <= i64::MAX@ }
-}
 }

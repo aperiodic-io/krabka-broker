@@ -1,9 +1,69 @@
 //! Syntax and attribute helpers shared by the macros.
 
 use moxy::{
-    ast::{Field, ItemStruct, List, ParseError, Token, Type},
+    ast::{
+        Attributes, Field, FnParam, ItemStruct, List, Parse, ParseError, Parser, Pattern,
+        Signature, Token, Type, Visibility,
+    },
     token::{Ident, Span, Spanner, TokenStream, TokenTree},
 };
+
+#[cfg(test)]
+pub(crate) fn assert_rejected_structs(
+    cases: &[(&str, &str)],
+    expand: impl Fn(ItemStruct) -> Result<TokenStream, ParseError>,
+) {
+    for &(label, declaration) in cases {
+        let item: ItemStruct = moxy::parse!({ declaration }).expect(label);
+        assert2::assert!(expand(item).is_err(), "{label}");
+    }
+}
+
+/// A safe, synchronous Rust signature without constness or generic parameters.
+pub(crate) fn is_plain_sync(signature: &Signature) -> bool {
+    signature.asyncness.is_none()
+        && signature.constness.is_none()
+        && signature.safety.is_none()
+        && signature.abi.is_none()
+        && signature.generics.params.is_empty()
+}
+
+pub(crate) fn parameter_ident<'a>(
+    parameter: &'a FnParam,
+    message: &str,
+) -> Result<&'a Ident, ParseError> {
+    if let FnParam::Typed(parameter) = parameter
+        && let Pattern::Ident(name) = parameter.pat.as_ref()
+        && name.by_ref.is_none()
+        && name.subpat.is_none()
+    {
+        Ok(&name.ident)
+    } else {
+        Err(ParseError::new(parameter.span(), message))
+    }
+}
+
+/// Parse an ordinary function's header while keeping its operation body opaque.
+pub(crate) fn function_signature(item: &TokenStream) -> Result<Signature, ParseError> {
+    let parser = Parser::from_tokens(item);
+    let _: Attributes = Parse::parse(&parser)?;
+    let _: Visibility = Parse::parse(&parser)?;
+    let signature = Signature::parse(&parser)?;
+    finish_braced_body(&parser, "expected one function with a body")?;
+    Ok(signature)
+}
+
+/// Consume the final native body without parsing its operations.
+pub(crate) fn finish_braced_body(parser: &Parser, message: &str) -> Result<(), ParseError> {
+    if !parser
+        .advance()
+        .is_some_and(|token| token.as_group().is_some_and(|group| group.delim.is_brace()))
+        || !parser.is_empty()
+    {
+        return Err(parser.error(message));
+    }
+    Ok(())
+}
 
 /// The named fields of a struct, or an error naming the derive.
 pub(crate) fn named_fields<'a>(
@@ -112,6 +172,21 @@ pub(crate) fn edit_named_body(
     };
     group.tokens = edit(group.tokens.clone())?;
     Ok(tokens.into())
+}
+
+/// Edit a validated item's final native body without rebuilding nested groups.
+pub(crate) fn edit_native_body(
+    item: proc_macro::TokenStream,
+    edit: impl FnOnce(proc_macro::TokenStream) -> proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let mut tokens: Vec<_> = item.into_iter().collect();
+    let Some(proc_macro::TokenTree::Group(body)) = tokens.pop() else {
+        unreachable!("validated item body")
+    };
+    let mut replacement = proc_macro::Group::new(body.delimiter(), edit(body.stream()));
+    replacement.set_span(body.span());
+    tokens.push(proc_macro::TokenTree::Group(replacement));
+    tokens.into_iter().collect()
 }
 
 /// Require a nonempty token argument without changing its tokens or error span.

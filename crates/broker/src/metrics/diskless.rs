@@ -136,7 +136,7 @@ mod tests {
         metrics.diskless_wal_cold_read_misses_total.inc();
         metrics.diskless_wal_cold_read_errors_total.inc();
 
-        crate::metrics::test_support::render_registry!(metrics, body, registry; unwrap());
+        krabka_macros::metric_registry_fixture!(metrics, body, registry; unwrap());
 
         for sample in [
             "krabka_broker_diskless_wal_durable_watermark{topic_id=\"00000000-0000-0000-0000-00000000002a\",partition=\"3\"} 17",

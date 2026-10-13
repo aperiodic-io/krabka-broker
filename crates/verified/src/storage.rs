@@ -2,13 +2,11 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Segment-prefix and active-segment selection for a tail truncation.
-    pub struct LocalTruncationPlan {
-        pub retained_sealed: usize,
-        pub keep_active: bool,
-    }
+/// Segment-prefix and active-segment selection for a tail truncation.
+#[krabka_macros::model_type]
+pub struct LocalTruncationPlan {
+    pub retained_sealed: usize,
+    pub keep_active: bool,
 }
 
 /// KIP-405 `RemoteLogSegmentState`, shared by every remote-segment kernel so
@@ -25,28 +23,27 @@ pub enum RemoteSegmentLifecycle {
     DeleteFinished,
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// KIP-405 `RemotePartitionDeleteState`.
-    pub enum RemotePartitionDeleteLifecycle {
-        Marked,
-        Started,
-        Finished,
-    }
+/// KIP-405 `RemotePartitionDeleteState`.
+#[krabka_macros::model_type]
+pub enum RemotePartitionDeleteLifecycle {
+    Marked,
+    Started,
+    Finished,
+}
 
-    /// Mutation of the primary remote-metadata cache and its derived epoch index.
-    pub enum RemoteCacheAction {
-        /// Reject a stale, conflicting, or resurrection attempt.
-        Reject,
-        /// Preserve state for an exact retry or an already-absent tombstone.
-        Noop,
-        /// Store the new readable state and rebuild the derived epoch index.
-        StoreFinished,
-        /// Store a non-readable state and rebuild the index without it.
-        StoreHidden,
-        /// Remove primary state and rebuild the index without it.
-        Remove,
-    }
+/// Mutation of the primary remote-metadata cache and its derived epoch index.
+#[krabka_macros::model_type]
+pub enum RemoteCacheAction {
+    /// Reject a stale, conflicting, or resurrection attempt.
+    Reject,
+    /// Preserve state for an exact retry or an already-absent tombstone.
+    Noop,
+    /// Store the new readable state and rebuild the derived epoch index.
+    StoreFinished,
+    /// Store a non-readable state and rebuild the index without it.
+    StoreHidden,
+    /// Remove primary state and rebuild the index without it.
+    Remove,
 }
 
 mod future_log_swap_admission;

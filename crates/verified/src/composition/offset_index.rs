@@ -5,7 +5,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn offset_archive_valid(entries: Seq<(u32, u32)>, max_relative: Int, log_bytes: Int) -> bool {
     pearlite! {
         (forall<i: Int> 0 <= i && i < entries.len()
@@ -13,7 +16,6 @@ pub fn offset_archive_valid(entries: Seq<(u32, u32)>, max_relative: Int, log_byt
         && (forall<i: Int, j: Int> 0 <= i && i < j && j < entries.len()
             ==> entries[i].0@ < entries[j].0@ && entries[i].1@ < entries[j].1@)
     }
-}
 }
 
 krabka_macros::validate_archive_rows! {

@@ -3,10 +3,12 @@ use creusot_std::prelude::*;
 #[cfg(creusot)]
 mod coverage;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn completion_offset(ends: Seq<i64>, incoming: i64, index: Int) -> Int {
     pearlite! { if index == ends.len() { incoming@ } else { ends[index]@ } }
-}
 }
 
 /// Name source membership so coverage laws have a term for each old origin.
@@ -122,21 +124,28 @@ pub fn producer_completion_window(
     (accepted, selected)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A physical completion is accepted only at the current epoch or a newer epoch.
 pub(crate) fn completion_epoch_accepts(current: Option<i16>, incoming: i16) -> bool {
     pearlite! { match current { None => true, Some(previous) => previous@ <= incoming@ } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A completion retains at most five entries and every accepted completion retains one.
 pub(crate) fn completion_window_bounded(selected: Seq<usize>, accepted: bool) -> bool {
     pearlite! { selected.len() <= 5 && (accepted ==> selected.len() > 0) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// All five retained completions are strictly above the omitted source.
 fn five_completions_above(
     ends: Seq<i64>,
@@ -145,5 +154,4 @@ fn five_completions_above(
     candidate: Int,
 ) -> bool {
     pearlite! { selected.len() == 5 && (forall<j: Int> 0 <= j && j < selected.len() ==> candidate < completion_offset(ends, incoming, selected[j]@)) }
-}
 }

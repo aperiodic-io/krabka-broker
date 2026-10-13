@@ -7,31 +7,33 @@ use {
     creusot_std::prelude::*,
 };
 
-model_types! {
-    @derives (derive(DeepModel))
-        (derive(Clone, Copy, Debug));
-    /// One field position from the decoded walk. `checked` means subject/body
-    /// validation succeeded; `failure` classifies a registry lookup failure.
-    /// Empty non-null fields are admitted by the host without registry validation.
-    pub struct SchemaWalkField {
-        pub role: SchemaFieldRole,
-        pub present: bool,
-        pub empty: bool,
-        pub prefix: Option<(u8, u8, u8, u8, u8)>,
-        pub checked: bool,
-        pub failure: Option<SchemaFailureKind>,
-    }
+/// One field position from the decoded walk. `checked` means subject/body
+/// validation succeeded; `failure` classifies a registry lookup failure.
+/// Empty non-null fields are admitted by the host without registry validation.
+#[krabka_macros::model_type(proof(DeepModel), runtime(Clone, Copy, Debug))]
+pub struct SchemaWalkField {
+    pub role: SchemaFieldRole,
+    pub present: bool,
+    pub empty: bool,
+    pub prefix: Option<(u8, u8, u8, u8, u8)>,
+    pub checked: bool,
+    pub failure: Option<SchemaFailureKind>,
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn required(field: SchemaWalkField, key: bool, value: bool) -> bool {
     pearlite! { field.present && match field.role {
         SchemaFieldRole::Key => key, SchemaFieldRole::Value => value,
     } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Acceptance over the actual field facts, independent of supplied counters.
 pub(super) fn field_admitted(
     field: SchemaWalkField,
@@ -46,9 +48,11 @@ pub(super) fn field_admitted(
             Some(failure) => fail_open && failure == SchemaFailureKind::Transient,
         }) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// IDs retain all four raw prefix bytes and exist only on applicable frames.
 pub(super) fn decoded_id(field: SchemaWalkField, key: bool, value: bool, id: Option<u32>) -> bool {
     pearlite! { match (field.prefix, id) {
@@ -58,7 +62,6 @@ pub(super) fn decoded_id(field: SchemaWalkField, key: bool, value: bool, id: Opt
             || match prefix { None => true, Some((magic, _, _, _, _)) => magic@ != 0 },
         (None, Some(_)) => false,
     } }
-}
 }
 
 type SchemaWalk = (

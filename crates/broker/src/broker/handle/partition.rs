@@ -21,12 +21,9 @@ impl BrokerHandle {
         topic: &str,
         partition: i32,
     ) -> Result<std::sync::Arc<Partition>, BrokerError> {
-        self.broker
-            .partitions
-            .get(topic, PartitionIndex(partition))
-            .ok_or_else(|| {
-                BrokerError::Replication(format!("partition {topic}-{partition} not local"))
-            })
+        self.maybe_local_partition(topic, partition).ok_or_else(|| {
+            BrokerError::Replication(format!("partition {topic}-{partition} not local"))
+        })
     }
 
     /// Test-only: truncate this broker's local partition log so no
@@ -135,10 +132,7 @@ impl BrokerHandle {
         topic: &str,
         partition: i32,
     ) -> Option<Vec<krabka_protocol::records::RecordBatch>> {
-        let part = self
-            .broker
-            .partitions
-            .get(topic, PartitionIndex(partition))?;
+        let part = self.maybe_local_partition(topic, partition)?;
         let log = part.log.lock().ok()?;
         let read = log
             .read(log.log_start_offset(), krabka_units::gibibytes(4))
@@ -204,7 +198,7 @@ impl BrokerHandle {
         partition: i32,
         offset: i64,
     ) -> bool {
-        let Some(part) = self.broker.partitions.get(topic, PartitionIndex(partition)) else {
+        let Some(part) = self.maybe_local_partition(topic, partition) else {
             return false;
         };
         part.replica_state.lock().await.hw = krabka_log::Offset(offset);
@@ -215,10 +209,7 @@ impl BrokerHandle {
     /// or `None` when the partition is not hosted here.
     #[cfg(any(test, feature = "test-helpers"))]
     pub async fn high_watermark_for_test(&self, topic: &str, partition: i32) -> Option<i64> {
-        let part = self
-            .broker
-            .partitions
-            .get(topic, PartitionIndex(partition))?;
+        let part = self.maybe_local_partition(topic, partition)?;
         Some(part.high_watermark().await.0)
     }
 

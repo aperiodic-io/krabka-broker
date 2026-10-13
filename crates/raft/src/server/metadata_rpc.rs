@@ -31,6 +31,11 @@ const SUBMIT_CHANGE_FAILED: i16 = 3;
 /// `leader_hint` sentinel meaning "the current leader is unknown".
 const LEADER_HINT_UNKNOWN: i64 = -1;
 
+fn decode_submit_change_request(body: &[u8]) -> Result<KrabkaSubmitChangeRequest, RaftError> {
+    let mut cur = body;
+    Ok(KrabkaSubmitChangeRequest::decode_v0(&mut cur)?)
+}
+
 /// Handle a follower-forwarded `submit_change` (1003). The forwarder wrapped a
 /// wincode-encoded `Vec<MetadataRecord>`; we submit it to the local engine
 /// (presumably the leader) and translate the result into the `error_code` enum:
@@ -39,8 +44,7 @@ pub(super) async fn dispatch_submit_change(
     body: &[u8],
     engine: &KraftController,
 ) -> Result<Bytes, RaftError> {
-    let mut cur = body;
-    let req = KrabkaSubmitChangeRequest::decode_v0(&mut cur)?;
+    let req = decode_submit_change_request(body)?;
     let records: Vec<krabka_metadata::MetadataRecord> = match <serde_wincode::SerdeCompat<
         Vec<krabka_metadata::MetadataRecord>,
     > as wincode::Deserialize>::deserialize(
@@ -111,8 +115,7 @@ pub(super) async fn dispatch_delegation_token_mutation(
     body: &[u8],
     engine: &KraftController,
 ) -> Result<Bytes, RaftError> {
-    let mut cur = body;
-    let req = KrabkaSubmitChangeRequest::decode_v0(&mut cur)?;
+    let req = decode_submit_change_request(body)?;
     let mutations: Vec<DelegationTokenMutation> = match <serde_wincode::SerdeCompat<
         Vec<DelegationTokenMutation>,
     > as wincode::Deserialize>::deserialize(
@@ -359,16 +362,7 @@ mod tests {
         .expect("metadata fetch dispatch");
         check!(
             decode_metadata_fetch_response(&fetch)
-                == KrabkaMetadataFetchResponse {
-                    error_code: PRIVATE_UNSUPPORTED_VERSION,
-                    leader_hint: -1,
-                    leader_epoch: -1,
-                    log_start_offset: -1,
-                    high_watermark: -1,
-                    quorum_high_watermark: -1,
-                    snapshot_id: None,
-                    records: Bytes::new(),
-                }
+                == KrabkaMetadataFetchResponse::unsupported_version()
         );
     }
 

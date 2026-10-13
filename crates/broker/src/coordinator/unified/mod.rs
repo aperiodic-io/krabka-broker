@@ -6,6 +6,8 @@
 //! [`GroupCoordinator`] is the single owner of the next-gen consumer-group
 //! machinery. It spawns per-group actors, tracks each group's locked type,
 //! and replays persisted state during bootstrap.
+use crate::codes;
+
 pub mod actor;
 pub mod assignor;
 pub(crate) mod classic_ops;
@@ -53,6 +55,15 @@ mod value_version_tests;
 /// assignment epoch 1. The first epoch bump of a new group therefore writes
 /// group epoch 2.
 pub const INITIAL_GROUP_EPOCH: i32 = 1;
+
+/// Map a coordinator actor's commit-validation reply to its protocol error.
+pub(crate) fn commit_validation_reply<E>(reply: &Result<Result<(), i16>, E>) -> Option<i16> {
+    match reply {
+        Ok(Ok(())) => None,
+        Ok(Err(code)) => Some(*code),
+        Err(_) => Some(codes::UNKNOWN_SERVER_ERROR),
+    }
+}
 
 pub use self::{
     group_coordinator::{GroupCoordinator, GroupType},

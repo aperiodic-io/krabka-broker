@@ -637,20 +637,18 @@ fn spawn_producers(
     } = *shared;
     for idx in 0..scenario.producers {
         tasks.spawn(run_producer(ProducerTask {
-            idx,
-            scenario: scenario.clone(),
-            bootstrap: cfg.bootstrap.clone(),
-            topic: cfg.topic.clone(),
-            scenario_id: cfg.scenario_id,
-            stop: Arc::clone(stop),
+            setup: TaskSetup::new(
+                idx,
+                scenario,
+                cfg,
+                security,
+                grid,
+                stop,
+                cfg.producer_request_timeout,
+            ),
             first_ack: Arc::clone(first_ack),
             kill_at: Arc::clone(kill_at),
-            security: security.cloned(),
-            grid,
-            request_timeout: cfg.producer_request_timeout,
             final_drain_timeout: cfg.producer_final_drain_timeout,
-            dispatch_queue_capacity: cfg.client_dispatch_queue_capacity,
-            frame_max: cfg.client_frame_max,
         }));
     }
 }
@@ -666,20 +664,18 @@ fn spawn_consumers(
 ) {
     for idx in 0..scenario.consumers {
         tasks.spawn(run_consumer(ConsumerTask {
-            idx,
-            scenario: scenario.clone(),
-            bootstrap: cfg.bootstrap.clone(),
-            topic: cfg.topic.clone(),
-            scenario_id: cfg.scenario_id,
-            stop: Arc::clone(stop),
-            security: security.cloned(),
-            grid,
-            request_timeout: cfg.consumer_request_timeout,
+            setup: TaskSetup::new(
+                idx,
+                scenario,
+                cfg,
+                security,
+                grid,
+                stop,
+                cfg.consumer_request_timeout,
+            ),
             build_retry_policy: cfg.consumer_build_retry_policy,
             poll_timeout: cfg.consumer_poll_timeout,
             poll_error_backoff: cfg.consumer_poll_error_backoff,
-            dispatch_queue_capacity: cfg.client_dispatch_queue_capacity,
-            frame_max: cfg.client_frame_max,
         }));
     }
 }
@@ -1006,24 +1002,54 @@ fn empty_output(
 
 // ── Producer task ───────────────────────────────────────────────────────────
 
-struct ProducerTask {
+struct TaskSetup {
     idx: usize,
     scenario: Scenario,
     bootstrap: String,
     topic: String,
     scenario_id: u64,
     stop: Arc<AtomicU8>,
+    security: Option<ClientSecurity>,
+    grid: Grid,
+    request_timeout: Time,
+    dispatch_queue_capacity: ConnectionDispatchQueueCapacity,
+    frame_max: ClientFrameMax,
+}
+
+impl TaskSetup {
+    fn new(
+        idx: usize,
+        scenario: &Scenario,
+        cfg: &DriverConfig,
+        security: Option<&ClientSecurity>,
+        grid: Grid,
+        stop: &Arc<AtomicU8>,
+        request_timeout: Time,
+    ) -> Self {
+        Self {
+            idx,
+            scenario: scenario.clone(),
+            bootstrap: cfg.bootstrap.clone(),
+            topic: cfg.topic.clone(),
+            scenario_id: cfg.scenario_id,
+            stop: Arc::clone(stop),
+            security: security.cloned(),
+            grid,
+            request_timeout,
+            dispatch_queue_capacity: cfg.client_dispatch_queue_capacity,
+            frame_max: cfg.client_frame_max,
+        }
+    }
+}
+
+struct ProducerTask {
+    setup: TaskSetup,
     first_ack: Arc<AtomicU64>,
     /// Epoch millisecond at which the failover task deleted the broker pod, or
     /// zero while no delete has succeeded. This is the only thing that says a
     /// kill happened. A producer error says the send failed and nothing more.
     kill_at: Arc<AtomicU64>,
-    security: Option<ClientSecurity>,
-    grid: Grid,
-    request_timeout: Time,
     final_drain_timeout: Time,
-    dispatch_queue_capacity: ConnectionDispatchQueueCapacity,
-    frame_max: ClientFrameMax,
 }
 
 struct TaskMeasurements {
@@ -1048,20 +1074,23 @@ impl TaskMeasurements {
 
 async fn run_producer(task: ProducerTask) -> ProducerOut {
     let ProducerTask {
-        idx,
-        scenario,
-        bootstrap,
-        topic,
-        scenario_id,
-        stop,
+        setup:
+            TaskSetup {
+                idx,
+                scenario,
+                bootstrap,
+                topic,
+                scenario_id,
+                stop,
+                security,
+                grid,
+                request_timeout,
+                dispatch_queue_capacity,
+                frame_max,
+            },
         first_ack,
         kill_at,
-        security,
-        grid,
-        request_timeout,
         final_drain_timeout,
-        dispatch_queue_capacity,
-        frame_max,
     } = task;
     // Idempotence forces acks=All; turn it off whenever the scenario
     // requested something weaker.
@@ -1294,38 +1323,31 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
 // ── Consumer task ───────────────────────────────────────────────────────────
 
 struct ConsumerTask {
-    idx: usize,
-    scenario: Scenario,
-    bootstrap: String,
-    topic: String,
-    scenario_id: u64,
-    stop: Arc<AtomicU8>,
-    security: Option<ClientSecurity>,
-    grid: Grid,
-    request_timeout: Time,
+    setup: TaskSetup,
     build_retry_policy: ConsumerBuildRetryPolicy,
     poll_timeout: Time,
     poll_error_backoff: Time,
-    dispatch_queue_capacity: ConnectionDispatchQueueCapacity,
-    frame_max: ClientFrameMax,
 }
 
 async fn run_consumer(task: ConsumerTask) -> ConsumerOut {
     let ConsumerTask {
-        idx,
-        scenario,
-        bootstrap,
-        topic,
-        scenario_id,
-        stop,
-        security,
-        grid,
-        request_timeout,
+        setup:
+            TaskSetup {
+                idx,
+                scenario,
+                bootstrap,
+                topic,
+                scenario_id,
+                stop,
+                security,
+                grid,
+                request_timeout,
+                dispatch_queue_capacity,
+                frame_max,
+            },
         build_retry_policy,
         poll_timeout,
         poll_error_backoff,
-        dispatch_queue_capacity,
-        frame_max,
     } = task;
     let group_id = format!("krabka-bench-{}", scenario.name);
     let mut consumer = match build_consumer_with_retry(
@@ -1671,22 +1693,28 @@ mod tests {
             scenario.linger = millis(20);
             let stop = Arc::new(AtomicU8::new(STATE_MEASURING));
             let first_ack = Arc::new(AtomicU64::new(0));
-            let producer = tokio::spawn(run_producer(ProducerTask {
-                idx: 0,
-                grid: Grid::new(Instant::now(), 0, &scenario, DEFAULT_SAMPLE_INTERVAL),
-                scenario,
+            let kill_at = Arc::new(AtomicU64::new(0));
+            let cfg = DriverConfig {
                 bootstrap: broker.addr.to_string(),
-                topic: "t".into(),
-                scenario_id: 0,
-                stop: Arc::clone(&stop),
-                first_ack: Arc::clone(&first_ack),
-                kill_at: Arc::new(AtomicU64::new(0)),
-                security: None,
-                request_timeout: secs(1),
-                final_drain_timeout: secs(1),
-                dispatch_queue_capacity: ConnectionDispatchQueueCapacity::default(),
-                frame_max: ClientFrameMax::default(),
-            }));
+                producer_request_timeout: secs(1),
+                producer_final_drain_timeout: secs(1),
+                ..cfg(1)
+            };
+            let grid = Grid::new(Instant::now(), 0, &scenario, cfg.sample_interval);
+            let mut producers = JoinSet::new();
+            spawn_producers(
+                &mut producers,
+                &scenario,
+                &cfg,
+                None,
+                grid,
+                &SharedHandles {
+                    stop: &stop,
+                    first_ack: &first_ack,
+                    kill_at: &kill_at,
+                },
+            );
+            assert!(producers.len() == scenario.producers);
             tokio::time::timeout(secs(10).to_std(), started)
                 .await
                 .unwrap()
@@ -1706,10 +1734,12 @@ mod tests {
             }
             tokio::time::sleep(millis(200).to_std()).await;
             stop.store(STATE_STOP, Ordering::SeqCst);
-            let output = tokio::time::timeout(secs(10).to_std(), producer)
+            let output = tokio::time::timeout(secs(10).to_std(), producers.join_next())
                 .await
                 .unwrap()
+                .expect("one producer task")
                 .unwrap();
+            assert!(producers.is_empty());
             broker.stop();
 
             assert!(output.interval_msgs.iter().sum::<u64>() == output.msgs);
@@ -1736,6 +1766,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn spawned_consumers_report_startup_failure_without_measurements() {
+        let mut scenario = scenario(1);
+        scenario.consumers = 2;
+        let cfg = DriverConfig {
+            bootstrap: String::new(),
+            consumer_build_retry_policy: ConsumerBuildRetryPolicy::new(
+                ConsumerBuildAttempts::new(1).unwrap(),
+                millis(1),
+                millis(1),
+            )
+            .unwrap(),
+            ..cfg(1)
+        };
+        let stop = Arc::new(AtomicU8::new(STATE_MEASURING));
+        let grid = Grid::new(Instant::now(), 0, &scenario, cfg.sample_interval);
+        let mut consumers = JoinSet::new();
+        spawn_consumers(&mut consumers, &scenario, &cfg, None, grid, &stop);
+        assert!(consumers.len() == scenario.consumers);
+        let mut errors = Vec::new();
+        // Empty bootstrap does no DNS or TCP work; paused time advances the
+        // consumer client's internal startup retries to their deadline.
+        while let Some(joined) = tokio::time::timeout(secs(600).to_std(), consumers.join_next())
+            .await
+            .expect("consumer startup retries end")
+        {
+            let output = joined.expect("consumer reports its build error");
+            assert!((output.msgs, output.bytes, output.latency.len()) == (0, 0, 0));
+            assert!(output.interval_msgs.is_empty() && output.interval_hist.is_empty());
+            errors.push(output.error);
+        }
+        errors.sort();
+        for (idx, error) in errors.iter().enumerate() {
+            assert!(error.starts_with(&format!(
+                "consumer-{idx}-build: build consumer failed after 1 attempts:"
+            )));
+        }
+        assert!(errors.len() == scenario.consumers);
     }
 
     #[test]

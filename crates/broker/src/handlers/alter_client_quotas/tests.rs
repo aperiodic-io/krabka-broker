@@ -26,17 +26,19 @@ use {
     std::sync::Arc,
 };
 
-crate::test_support::context_helper!(client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    test_context ["admin-client"];
+}
 
 fn expected_entry(
     entity: EntityPart<'_>,
     error_code: i16,
     error_message: Option<String>,
 ) -> RespEntry {
-    tagged_wire!(RespEntry {
+    krabka_macros::tagged_wire!(RespEntry {
         error_code,
         error_message,
-        entity: vec![tagged_wire!(RespEntity {
+        entity: vec![krabka_macros::tagged_wire!(RespEntity {
             entity_type: entity.entity_type.into(),
             entity_name: entity.entity_name.map(str::to_owned),
         })],
@@ -44,7 +46,7 @@ fn expected_entry(
 }
 
 fn expected_response(entries: Vec<RespEntry>) -> AlterClientQuotasResponse {
-    unthrottled_wire!(AlterClientQuotasResponse { entries })
+    krabka_macros::unthrottled_wire!(AlterClientQuotasResponse { entries })
 }
 
 #[bon::builder]

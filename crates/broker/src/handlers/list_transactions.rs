@@ -18,7 +18,14 @@
 //! so the mapping is direct.
 
 use {
-    crate::{codes, re2j::compile_full_match, txn::state::TxnState},
+    crate::{
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::{ApiVersion, RequestContext, acl_denied},
+        re2j::compile_full_match,
+        txn::{state::TxnState, util::now_millis},
+    },
     krabka_metadata::{AclOperation, ResourceType},
     krabka_protocol::owned::{
         list_transactions_request::ListTransactionsRequest,
@@ -64,132 +71,133 @@ fn compile_transactional_id_pattern(pattern: Option<&str>) -> Result<Option<rege
         .transpose()
 }
 
-context_handler! {
-    ListTransactionsRequest => ListTransactionsResponse,
-    (broker, req, _version, ctx),
-    {
-        // v0/v1 decode this field as `None`; v2 null and empty values both disable
-        // the filter. Kafka returns a top-level INVALID_REGULAR_EXPRESSION rather
-        // than treating malformed syntax as a pattern that matches nothing.
-        let transactional_id_pattern =
-            match compile_transactional_id_pattern(req.transactional_id_pattern.as_deref()) {
-                Ok(pattern) => pattern,
-                Err(error) => {
-                    tracing::debug!(
-                        pattern_bytes = req
-                            .transactional_id_pattern
-                            .as_deref()
-                            .map_or(0, str::len),
-                        %error,
-                        "invalid ListTransactions transactional-id pattern"
-                    );
-                    return Ok(ListTransactionsResponse {
-                        throttle_time_ms: 0,
-                        error_code: codes::INVALID_REGULAR_EXPRESSION,
-                        ..Default::default()
-                    });
-                }
-            };
-
-        // Kafka answers COORDINATOR_LOAD_IN_PROGRESS while any owned transaction
-        // state partition loads, because the list would be short of whatever those
-        // partitions hold.
-        if broker.txn_coordinator.any_partition_loading().await {
-            return Ok(ListTransactionsResponse {
-                throttle_time_ms: 0,
-                error_code: codes::COORDINATOR_LOAD_IN_PROGRESS,
-                ..Default::default()
-            });
-        }
-
-        let image = broker.controller.current_image();
-
-        // Snapshot every coordinator-local txn entry.
-        let entries = broker.txn_coordinator.snapshot().await;
-
-        let state_filter: std::collections::HashSet<String> =
-            req.state_filters.iter().cloned().collect();
-        let pid_filter: std::collections::HashSet<i64> =
-            req.producer_id_filters.iter().copied().collect();
-        let now_ms = crate::txn::util::now_millis();
-
-        // KIP-664: if filtered states include a string the broker doesn't
-        // recognize, surface it in `unknown_state_filters` so the client
-        // knows its filter is overly conservative.
-        // Kafka turns the filter list into a Set in `KafkaApis`, so each unknown
-        // name is reported once. `ALL_TXN_STATE_NAMES` is eight entries, so a
-        // linear scan beats hashing it into a set on every request.
-        let mut seen_unknown = std::collections::HashSet::new();
-        let unknown_state_filters: Vec<String> = req
-            .state_filters
-            .iter()
-            .filter(|name| !ALL_TXN_STATE_NAMES.contains(&name.as_str()))
-            .filter(|name| seen_unknown.insert(name.as_str()))
-            .cloned()
-            .collect();
-
-        let mut out: Vec<TransactionState> = Vec::with_capacity(entries.len());
-        for entry in entries {
-            // Kafka filters the `Dead` state out: it means the transactional id
-            // and its metadata are being expired.
-            if entry.state == TxnState::Dead {
-                continue;
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ListTransactionsRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<ListTransactionsResponse, BrokerError> {
+    // v0/v1 decode this field as `None`; v2 null and empty values both disable
+    // the filter. Kafka returns a top-level INVALID_REGULAR_EXPRESSION rather
+    // than treating malformed syntax as a pattern that matches nothing.
+    let transactional_id_pattern =
+        match compile_transactional_id_pattern(req.transactional_id_pattern.as_deref()) {
+            Ok(pattern) => pattern,
+            Err(error) => {
+                tracing::debug!(
+                    pattern_bytes = req
+                        .transactional_id_pattern
+                        .as_deref()
+                        .map_or(0, str::len),
+                    %error,
+                    "invalid ListTransactions transactional-id pattern"
+                );
+                return Ok(ListTransactionsResponse {
+                    throttle_time_ms: 0,
+                    error_code: codes::INVALID_REGULAR_EXPRESSION,
+                    ..Default::default()
+                });
             }
-            let state = entry.state.as_str();
+        };
 
-            // State filter: empty = no filter; otherwise the entry's state
-            // must be one of the requested ones.
-            if !state_filter.is_empty() && !state_filter.contains(state) {
-                continue;
-            }
-            // Producer-id filter: same semantics — empty means no filter. The
-            // wire filter set is raw `i64`; unwrap the entry's `ProducerId` to match.
-            if !pid_filter.is_empty() && !pid_filter.contains(&entry.producer_id.get()) {
-                continue;
-            }
-            // DurationFilter is present from v1. Decoding older versions supplies
-            // the protocol default (-1), which disables this strict lower bound.
-            if !matches_duration_filter(entry.start_ms, now_ms, req.duration_filter) {
-                continue;
-            }
-            // TransactionalIdPattern is present from v2. Null/empty values compile
-            // to `None`, while a non-empty pattern is a full-string match.
-            if transactional_id_pattern
-                .as_ref()
-                .is_some_and(|pattern| !pattern.is_match(&entry.transactional_id))
-            {
-                continue;
-            }
-            // ACL: per-tid `Describe` on `TransactionalId`. Silent filter on
-            // Deny.
-            if crate::handlers::acl_denied(
-                broker.config.authorizer.as_ref(),
-                &image,
-                ctx,
-                ResourceType::TransactionalId,
-                entry.transactional_id.as_str(),
-                AclOperation::Describe,
-            ) {
-                continue;
-            }
-
-            out.push(TransactionState {
-                transactional_id: entry.transactional_id.clone(),
-                // Unwrap into the raw-`i64` wire field.
-                producer_id: entry.producer_id.get(),
-                transaction_state: state.to_string(),
-                ..Default::default()
-            });
-        }
-
-        Ok(ListTransactionsResponse {
+    // Kafka answers COORDINATOR_LOAD_IN_PROGRESS while any owned transaction
+    // state partition loads, because the list would be short of whatever those
+    // partitions hold.
+    if broker.txn_coordinator.any_partition_loading().await {
+        return Ok(ListTransactionsResponse {
             throttle_time_ms: 0,
-            error_code: codes::NONE,
-            unknown_state_filters,
-            transaction_states: out,
+            error_code: codes::COORDINATOR_LOAD_IN_PROGRESS,
             ..Default::default()
-        })
+        });
     }
+
+    let image = broker.controller.current_image();
+
+    // Snapshot every coordinator-local txn entry.
+    let entries = broker.txn_coordinator.snapshot().await;
+
+    let state_filter: std::collections::HashSet<String> =
+        req.state_filters.iter().cloned().collect();
+    let pid_filter: std::collections::HashSet<i64> =
+        req.producer_id_filters.iter().copied().collect();
+    let now_ms = now_millis();
+
+    // KIP-664: if filtered states include a string the broker doesn't
+    // recognize, surface it in `unknown_state_filters` so the client
+    // knows its filter is overly conservative.
+    // Kafka turns the filter list into a Set in `KafkaApis`, so each unknown
+    // name is reported once. `ALL_TXN_STATE_NAMES` is eight entries, so a
+    // linear scan beats hashing it into a set on every request.
+    let mut seen_unknown = std::collections::HashSet::new();
+    let unknown_state_filters: Vec<String> = req
+        .state_filters
+        .iter()
+        .filter(|name| !ALL_TXN_STATE_NAMES.contains(&name.as_str()))
+        .filter(|name| seen_unknown.insert(name.as_str()))
+        .cloned()
+        .collect();
+
+    let mut out: Vec<TransactionState> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        // Kafka filters the `Dead` state out: it means the transactional id
+        // and its metadata are being expired.
+        if entry.state == TxnState::Dead {
+            continue;
+        }
+        let state = entry.state.as_str();
+
+        // State filter: empty = no filter; otherwise the entry's state
+        // must be one of the requested ones.
+        if !state_filter.is_empty() && !state_filter.contains(state) {
+            continue;
+        }
+        // Producer-id filter: same semantics — empty means no filter. The
+        // wire filter set is raw `i64`; unwrap the entry's `ProducerId` to match.
+        if !pid_filter.is_empty() && !pid_filter.contains(&entry.producer_id.get()) {
+            continue;
+        }
+        // DurationFilter is present from v1. Decoding older versions supplies
+        // the protocol default (-1), which disables this strict lower bound.
+        if !matches_duration_filter(entry.start_ms, now_ms, req.duration_filter) {
+            continue;
+        }
+        // TransactionalIdPattern is present from v2. Null/empty values compile
+        // to `None`, while a non-empty pattern is a full-string match.
+        if transactional_id_pattern
+            .as_ref()
+            .is_some_and(|pattern| !pattern.is_match(&entry.transactional_id))
+        {
+            continue;
+        }
+        // ACL: per-tid `Describe` on `TransactionalId`. Silent filter on
+        // Deny.
+        if acl_denied(
+            broker.config.authorizer.as_ref(),
+            &image,
+            ctx,
+            ResourceType::TransactionalId,
+            entry.transactional_id.as_str(),
+            AclOperation::Describe,
+        ) {
+            continue;
+        }
+
+        out.push(TransactionState {
+            transactional_id: entry.transactional_id.clone(),
+            // Unwrap into the raw-`i64` wire field.
+            producer_id: entry.producer_id.get(),
+            transaction_state: state.to_string(),
+            ..Default::default()
+        });
+    }
+
+    Ok(ListTransactionsResponse {
+        throttle_time_ms: 0,
+        error_code: codes::NONE,
+        unknown_state_filters,
+        transaction_states: out,
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]
@@ -269,7 +277,9 @@ mod tests {
         }
     }
 
-    crate::test_support::context_helper!(client_id = "admin-client");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["admin-client"];
+    }
 
     /// Serve `req` over the wire at `version`, so that the fields an older
     /// version drops never reach the handler.
@@ -414,7 +424,7 @@ mod tests {
 
         let resp = handle(&broker, req, version, &ctx).await.expect("handle");
 
-        let expected = unthrottled_wire!(ListTransactionsResponse {
+        let expected = krabka_macros::unthrottled_wire!(ListTransactionsResponse {
             error_code: codes::NONE,
             unknown_state_filters: vec!["MysteryState".to_string()],
             transaction_states: vec![],

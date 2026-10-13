@@ -32,15 +32,12 @@ use {
     },
     crate::{
         coordinator::unified::{
-            persistence::{
-                flex::{get_i8, value_codec},
-                get_i32,
-            },
+            persistence::{flex::get_i8, get_i32},
             streams::state::{StreamsMemberAssignmentState, TaskMap},
         },
         error::BrokerError,
     },
-    bytes::BufMut,
+    bytes::{BufMut, BytesMut},
     krabka_protocol::ProtocolError,
 };
 
@@ -101,14 +98,15 @@ pub struct StreamsGroupTargetAssignmentMemberValue {
     pub warmup: TaskMap,
 }
 
-value_codec! {
-    StreamsGroupTargetAssignmentMemberValue("StreamsGroupTargetAssignmentMemberValue"),
-    encode(&self) -> buf {
+#[krabka_macros::flexible_value(record = "StreamsGroupTargetAssignmentMemberValue")]
+impl StreamsGroupTargetAssignmentMemberValue {
+    fn encode_fields(&self, buf: &mut BytesMut) {
         encode_task_map(buf, &self.active);
         encode_task_map(buf, &self.standby);
         encode_task_map(buf, &self.warmup);
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let active = decode_task_map(buf)?;
         let standby = decode_task_map(buf)?;
         let warmup = decode_task_map(buf)?;
@@ -144,9 +142,9 @@ pub struct StreamsGroupCurrentMemberAssignmentValue {
     pub active_pending_revocation_epochs: TaskMap,
 }
 
-value_codec! {
-    StreamsGroupCurrentMemberAssignmentValue("StreamsGroupCurrentMemberAssignmentValue"),
-    encode(&self) -> buf {
+#[krabka_macros::flexible_value(record = "StreamsGroupCurrentMemberAssignmentValue")]
+impl StreamsGroupCurrentMemberAssignmentValue {
+    fn encode_fields(&self, buf: &mut BytesMut) {
         buf.put_i32(self.member_epoch);
         buf.put_i32(self.previous_member_epoch);
         buf.put_i8(self.state as i8);
@@ -161,7 +159,8 @@ value_codec! {
         encode_task_map(buf, &self.standby_pending_revocation);
         encode_task_map(buf, &self.warmup_pending_revocation);
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let member_epoch = get_i32(buf)?;
         let previous_member_epoch = get_i32(buf)?;
         let state = StreamsMemberWireState::from_i8(get_i8(buf)?)?;

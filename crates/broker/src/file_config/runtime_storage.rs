@@ -24,7 +24,7 @@ impl RuntimeFileConfig {
         cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             positive_time: unclean_recovery_aggressive_deadline,
                 unclean_recovery_balanced_deadline, operator_recovery_deadline, quota_throttle_max,
@@ -48,7 +48,7 @@ impl RuntimeFileConfig {
             }
             cfg.diskless_wal_trim_safety_lag = value;
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             positive_time: diskless_wal_index_projection_timeout;
             positive_usize: unclean_recovery_queue_capacity;
@@ -63,7 +63,7 @@ impl RuntimeFileConfig {
         // operator named them, so the loader records the provenance.
         cfg.static_config_origins.log.log_segment_bytes |= runtime.log_segment_bytes.is_some();
         cfg.static_config_origins.log.message_max_bytes |= runtime.message_max_bytes.is_some();
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_bytes_u64: log_segment_bytes => log_config.segment_size;
             kafka_int_bytes: message_max_bytes => log_config.max_message_size;
@@ -77,14 +77,14 @@ impl RuntimeFileConfig {
         cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
-        set_runtime! { runtime => cfg; whole_bytes_u32: socket_request_max; }
+        krabka_macros::set_runtime! { runtime => cfg; whole_bytes_u32: socket_request_max; }
         // Neither authentication limit is dynamic, so a named broker reports
         // one at `STATIC_BROKER_CONFIG` when the operator named it.
         let authentication = &mut cfg.static_config_origins.authentication;
         authentication.sasl_server_max_receive |= runtime.sasl_server_max_receive.is_some();
         authentication.connection_failed_authentication_delay |=
             runtime.connection_failed_authentication_delay.is_some();
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_bytes_u32: sasl_server_max_receive;
             nonnegative_time: connection_failed_authentication_delay;
@@ -93,7 +93,7 @@ impl RuntimeFileConfig {
         if let Some(bytes) = runtime.queued_max_request_bytes.take() {
             cfg.queued_max_request_bytes = Some(bytes);
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_bytes_usize: sendfile_min, socket_send_buffer, socket_receive_buffer;
             positive_i32: max_request_partition_size_limit;

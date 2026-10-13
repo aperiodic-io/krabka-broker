@@ -14,7 +14,7 @@
 use {
     crate::{
         error::LogError,
-        index::{open_index, rewrite_retained_entries, rewrite_sidecar_file},
+        index::{read_sidecar, rewrite_retained_entries, rewrite_sidecar_file},
     },
     krabka_ids::{Offset, ProducerId},
     std::{fs::OpenOptions, io::Write, path::PathBuf},
@@ -73,51 +73,50 @@ pub struct TxnIndex {
 }
 
 impl TxnIndex {
-    open_index! {
-        /// Open or recover a `.txnindex` file at the given path. This method
-        /// reads the entire file into memory at startup. An empty file or a
-        /// missing file is acceptable and means zero aborted transactions.
-        /// # Errors
-        /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
-        /// # Panics
-        /// Panics if synchronized log state is poisoned or a segment previously validated as nonempty is unexpectedly missing its required batch or index entry.
-        pub fn open(path: PathBuf) -> Result<Self, LogError> {
-            let entries = crate::index::read_sidecar::<AbortedTxnRaw, _>(
-                &path,
-                "txnindex",
-                "length is a multiple of ENTRY_BYTES and AbortedTxnRaw is Unaligned",
-                |raws| {
-                    let mut entries = Vec::with_capacity(raws.len());
-                    for raw in raws {
-                        if raw.version.get() != SUPPORTED_VERSION {
-                            return Err(LogError::Corrupt(format!(
-                                "txnindex {} contains an unsupported record version {}",
-                                path.display(),
-                                raw.version.get(),
-                            )));
-                        }
-                        let entry = AbortedTxn {
-                            start_offset: Offset(raw.first_offset.get()),
-                            last_offset: Offset(raw.last_offset.get()),
-                            producer_id: ProducerId(raw.producer_id.get()),
-                            last_stable_offset: Offset(raw.last_stable_offset.get()),
-                        };
-                        if !Self::entry_valid(entry) {
-                            return Err(LogError::Corrupt(format!(
-                                "txnindex {} contains an invalid aborted interval",
-                                path.display()
-                            )));
-                        }
-                        if !entries.contains(&entry) {
-                            entries.push(entry);
-                        }
+    #[krabka_macros::index_open]
+    /// Open or recover a `.txnindex` file at the given path. This method
+    /// reads the entire file into memory at startup. An empty file or a
+    /// missing file is acceptable and means zero aborted transactions.
+    /// # Errors
+    /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
+    /// # Panics
+    /// Panics if synchronized log state is poisoned or a segment previously validated as nonempty is unexpectedly missing its required batch or index entry.
+    pub fn open(path: PathBuf) -> Result<Self, LogError> {
+        let entries = read_sidecar::<AbortedTxnRaw, _>(
+            &path,
+            "txnindex",
+            "length is a multiple of ENTRY_BYTES and AbortedTxnRaw is Unaligned",
+            |raws| {
+                let mut entries = Vec::with_capacity(raws.len());
+                for raw in raws {
+                    if raw.version.get() != SUPPORTED_VERSION {
+                        return Err(LogError::Corrupt(format!(
+                            "txnindex {} contains an unsupported record version {}",
+                            path.display(),
+                            raw.version.get(),
+                        )));
                     }
-                    Ok(entries)
-                },
-            )?;
-            tracing::Span::current().record("entries", entries.len());
-            Ok(Self { path, entries })
-        }
+                    let entry = AbortedTxn {
+                        start_offset: Offset(raw.first_offset.get()),
+                        last_offset: Offset(raw.last_offset.get()),
+                        producer_id: ProducerId(raw.producer_id.get()),
+                        last_stable_offset: Offset(raw.last_stable_offset.get()),
+                    };
+                    if !Self::entry_valid(entry) {
+                        return Err(LogError::Corrupt(format!(
+                            "txnindex {} contains an invalid aborted interval",
+                            path.display()
+                        )));
+                    }
+                    if !entries.contains(&entry) {
+                        entries.push(entry);
+                    }
+                }
+                Ok(entries)
+            },
+        )?;
+        tracing::Span::current().record("entries", entries.len());
+        Ok(Self { path, entries })
     }
 
     /// Append one aborted-txn entry.

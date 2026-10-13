@@ -1,5 +1,5 @@
 #[cfg(creusot)]
-use super::epoch::{epoch_archive_valid, epoch_window_valid};
+use super::epoch::epoch_input_valid;
 use super::*;
 #[cfg(creusot)]
 use creusot_std::prelude::*;
@@ -12,13 +12,11 @@ type EpochSnapshotReplay = (i32, FetchWatermarks, FetchVisibility, Option<usize>
 /// bytes, complete enumeration, actual batch-aligned truncation and I/O remain
 /// external. Ok(None) preserves the distinct unplaceable-epoch outcome.
 #[ensures(match result {
-    Err(()) => !epoch_window_valid(segment_base@, w.log_start@, w.log_end@)
-        || !epoch_archive_valid(entries@, segment_base@, w.log_end@)
+    Err(()) => !epoch_input_valid(entries@, segment_base@, w.log_start@, w.log_end@)
         || local_start@ < 0 || local_start@ > w.log_end@
         || exists<f: Int, cut: Int> kafka_end_offset_for(entries@, requested@, w.log_end@, f, cut)
             && cut >= 0 && (cut < w.log_start@ || cut < local_start@),
-    Ok(None) => epoch_window_valid(segment_base@, w.log_start@, w.log_end@)
-        && epoch_archive_valid(entries@, segment_base@, w.log_end@)
+    Ok(None) => epoch_input_valid(entries@, segment_base@, w.log_start@, w.log_end@)
         && 0 <= local_start@ && local_start@ <= w.log_end@
         && kafka_end_offset_for(entries@, requested@, w.log_end@, -1, -1),
     Ok(Some((found, bounded, visibility, selected, cursor))) => super::epoch::resolved_epoch_cut(entries@, segment_base@, w, requested@, found@, bounded.log_end@)

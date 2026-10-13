@@ -7,7 +7,7 @@
 use {
     super::{RequestContext, acl_wire},
     crate::{
-        authorizer::{AuthorizationResult, Authorizer, authorize_topics},
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer, authorize_topics},
         broker::Broker,
         codes::{self, GROUP_AUTHORIZATION_FAILED, UNSUPPORTED_VERSION},
         handlers::describe_configs::{
@@ -15,7 +15,7 @@ use {
             RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
         },
     },
-    krabka_metadata::{AclOperation, ResourceType},
+    krabka_metadata::{AclOperation, MetadataImage, ResourceType},
     std::collections::{HashMap, HashSet},
 };
 
@@ -69,51 +69,41 @@ pub(crate) fn config_resource_refusal(
     .then(|| (code, message.to_owned()))
 }
 
-/// The request facts are identical for audited and quiet authorization.
-macro_rules! authorization_gates {
-    ($($name:ident => $method:ident),+ $(,)?) => {
-        $(pub(crate) fn $name(
-            authorizer: &dyn crate::authorizer::Authorizer,
-            image: &krabka_metadata::MetadataImage,
-            ctx: &RequestContext<'_>,
-            resource_type: ResourceType,
-            resource_name: &str,
-            operation: AclOperation,
-        ) -> bool {
-            authorizer.$method(
-                image,
-                &crate::authorizer::AuthorizationRequest {
-                    principal: ctx.principal,
-                    host: ctx.peer,
-                    resource_type,
-                    resource_name,
-                    operation,
-                },
-            ) == AuthorizationResult::Deny
-        })+
-    };
+pub(crate) fn acl_denied(
+    authorizer: &dyn Authorizer,
+    image: &MetadataImage,
+    ctx: &RequestContext<'_>,
+    resource_type: ResourceType,
+    resource_name: &str,
+    operation: AclOperation,
+) -> bool {
+    authorizer.authorize(image, &AuthorizationRequest {
+        principal: ctx.principal,
+        host: ctx.peer,
+        resource_type,
+        resource_name,
+        operation,
+    }) == AuthorizationResult::Deny
 }
 
-authorization_gates!(acl_denied => authorize, acl_denied_quiet => authorize_quiet);
-
-/// Resource and operation declarations for the common fixed ACL gates.
-macro_rules! named_acl_gates {
-    ($($(#[$doc:meta])* $name:ident: $resource:ident($operation:ident $(, $resource_name:ident)?)),+ $(,)?) => {
-        $($(#[$doc])* pub(crate) fn $name(
-            authorizer: &dyn crate::authorizer::Authorizer,
-            image: &krabka_metadata::MetadataImage,
-            ctx: &RequestContext<'_>,
-            $($resource_name: &str,)?
-        ) -> bool {
-            acl_denied(authorizer, image, ctx, ResourceType::$resource,
-                named_acl_gates!(@name $($resource_name)?), AclOperation::$operation)
-        })+
-    };
-    (@name $name:ident) => { $name };
-    (@name) => { acl_wire::CLUSTER_RESOURCE_NAME };
+pub(crate) fn acl_denied_quiet(
+    authorizer: &dyn Authorizer,
+    image: &MetadataImage,
+    ctx: &RequestContext<'_>,
+    resource_type: ResourceType,
+    resource_name: &str,
+    operation: AclOperation,
+) -> bool {
+    authorizer.authorize_quiet(image, &AuthorizationRequest {
+        principal: ctx.principal,
+        host: ctx.peer,
+        resource_type,
+        resource_name,
+        operation,
+    }) == AuthorizationResult::Deny
 }
 
-named_acl_gates!(
+krabka_macros::named_acl_gates!(
     group_read_denied: Group(Read, group_id),
     group_delete_denied: Group(Delete, group_id),
     /// The `Describe` gate on `Group(group_id)`, the twin of [`group_read_denied`].
@@ -143,35 +133,30 @@ pub(crate) fn cluster_shortcut_denied(
     )
 }
 
-/// Topic gate signatures share the same caller facts and borrowed topic names.
-macro_rules! topic_authorization_functions {
-    ($lifetime:lifetime; ($authorizer:ident, $image:ident, $context:ident, $operation:ident, $names:ident);
-        $($(#[$doc:meta])* $visibility:vis fn $name:ident $(($extra:ident: $extra_type:ty))? -> $result:ty $body:block)+
-    ) => {
-        $($(#[$doc])* $visibility fn $name<$lifetime>(
-            $authorizer: &dyn crate::authorizer::Authorizer,
-            $image: &krabka_metadata::MetadataImage,
-            $context: &RequestContext<'_>,
-            $operation: krabka_metadata::AclOperation,
-            $names: impl IntoIterator<Item = &$lifetime str>,
-            $($extra: $extra_type,)?
-        ) -> $result $body)+
-    };
-}
-
-topic_authorization_functions! {
-    'a; (authorizer, image, ctx, operation, names);
 /// The authorizer's decision on `operation` on `Topic(name)` for each of
 /// `names`, for `ctx`'s principal.
 ///
 /// Every name is authorized through [`authorize_topics`], so each denial is
 /// audited the way a per-topic refusal is.
-pub(crate) fn topic_decisions -> HashMap<&'a str, AuthorizationResult> {
+pub(crate) fn topic_decisions<'a>(
+    authorizer: &dyn Authorizer,
+    image: &MetadataImage,
+    ctx: &RequestContext<'_>,
+    operation: AclOperation,
+    names: impl IntoIterator<Item = &'a str>,
+) -> HashMap<&'a str, AuthorizationResult> {
     authorize_topics(authorizer, image, ctx.principal, ctx.peer, operation, names)
 }
 
 /// The names among `names` that [`topic_decisions`] decides `decision`.
-fn topics_decided (decision: AuthorizationResult) -> HashSet<String> {
+fn topics_decided<'a>(
+    authorizer: &dyn Authorizer,
+    image: &MetadataImage,
+    ctx: &RequestContext<'_>,
+    operation: AclOperation,
+    names: impl IntoIterator<Item = &'a str>,
+    decision: AuthorizationResult,
+) -> HashSet<String> {
     topic_decisions(authorizer, image, ctx, operation, names)
         .into_iter()
         .filter(|(_, result)| *result == decision)
@@ -183,31 +168,28 @@ fn topics_decided (decision: AuthorizationResult) -> HashSet<String> {
 /// denies to `ctx`'s principal.
 ///
 /// A name the caller never passed is absent, so a lookup reads it as allowed.
-pub(crate) fn denied_topics -> HashSet<String> {
-    topics_decided(
-        authorizer,
-        image,
-        ctx,
-        operation,
-        names,
-        AuthorizationResult::Deny,
-    )
+#[krabka_macros::topic_filter(Deny)]
+pub(crate) fn denied_topics<'a>(
+    authorizer: &dyn Authorizer,
+    image: &MetadataImage,
+    ctx: &RequestContext<'_>,
+    operation: AclOperation,
+    names: impl IntoIterator<Item = &'a str>,
+) -> HashSet<String> {
 }
 
 /// The names among `names` whose `operation` on `Topic` the authorizer
 /// allows to `ctx`'s principal, the twin of [`denied_topics`].
 ///
 /// A name the caller never passed is absent, so a lookup reads it as denied.
-pub(crate) fn allowed_topics -> HashSet<String> {
-    topics_decided(
-        authorizer,
-        image,
-        ctx,
-        operation,
-        names,
-        AuthorizationResult::Allow,
-    )
-}
+#[krabka_macros::topic_filter(Allow)]
+pub(crate) fn allowed_topics<'a>(
+    authorizer: &dyn Authorizer,
+    image: &MetadataImage,
+    ctx: &RequestContext<'_>,
+    operation: AclOperation,
+    names: impl IntoIterator<Item = &'a str>,
+) -> HashSet<String> {
 }
 
 /// `true` when `names` is non-empty and at least one of its distinct names is
@@ -237,18 +219,6 @@ pub(crate) fn subscribed_names_describe_denied(
     )
     .is_empty()
 }
-
-/// Preserve whole-request rejection at the caller before validation or coordinator routing.
-macro_rules! authorize_subscription {
-    (($broker:expr, $image:expr, $ctx:expr), $names:expr => $reply:expr) => {
-        if let Some(error_code) =
-            $crate::handlers::acl_gates::subscribed_names_refusal($broker, $image, $ctx, $names)
-        {
-            return Ok($reply(error_code, None));
-        }
-    };
-}
-pub(crate) use authorize_subscription;
 
 /// Subscription denial code shared by consumer and share heartbeats.
 pub(crate) fn subscribed_names_refusal(

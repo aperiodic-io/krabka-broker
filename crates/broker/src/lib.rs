@@ -120,26 +120,6 @@
 
 #![doc(html_root_url = "https://docs.rs/krabka-broker/1.0.3")]
 
-/// Emit the wrapped item(s) only on platforms with a usable file→socket
-/// `sendfile(2)` for the zero-copy fetch path: Linux, the Apple targets, and
-/// FreeBSD/DragonFly (the "SENDFILE alias"). Windows is excluded because there
-/// is no safe `TransmitFile` wrapper under `unsafe_code = "forbid"`. The fetch
-/// path therefore uses `pread` and `write_all` there, and `WriteOp` carries
-/// only the `Inline` variant.
-///
-/// One macro per crate keeps the predicate identical across every sendfile-gated
-/// item (the `WriteOp::File` drain helpers, the `tcp_for_sendfile` trait method,
-/// the sendfile resolver, and so on), so the cfg set cannot drift. File-region
-/// eligibility uses the broker's configured `sendfile_min_bytes` threshold.
-/// The single per-OS syscall *inside* `sendfile_region` is gated separately
-/// (Linux `rustix` vs Apple/BSD `nix`), not by this macro.
-macro_rules! sendfile_cfg {
-    ($($item:item)*) => {
-        $(krabka_macros::sendfile_platform! { $item })*
-    };
-}
-pub(crate) use sendfile_cfg;
-
 pub mod api_catalog;
 pub(crate) mod assign_dirs;
 pub mod audit_authorizer;
@@ -148,8 +128,6 @@ pub mod audit_sink;
 pub mod authorizer;
 pub(crate) mod auto_join;
 pub(crate) mod auto_topic_creation;
-#[macro_use]
-mod wire_handler;
 
 pub(crate) mod barrier;
 // The barrier marker's read half is public: `krabka-barrier verify` and any
@@ -295,13 +273,11 @@ pub use {
 /// socket through the kernel or through a buffer.
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod fetch_drain {
+    #[krabka_macros::sendfile_cfg]
+    pub use crate::network::fetch_writer::resolve_records_sendfile;
     pub use crate::network::fetch_writer::{
         SendfileSink, WriteOp, resolve_records_inline, write_fetch_plan,
     };
-
-    crate::sendfile_cfg! {
-        pub use crate::network::fetch_writer::resolve_records_sendfile;
-    }
 }
 /// Benchmark seam over the produce hot path, driven by `benches/produce.rs`.
 #[cfg(any(test, feature = "test-helpers"))]

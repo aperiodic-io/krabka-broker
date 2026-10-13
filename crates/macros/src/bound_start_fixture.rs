@@ -4,7 +4,7 @@ use {
     crate::fixtures::{CommaArguments, name as fixture_name},
     moxy::{
         ast::ParseError,
-        token::{Span, TokenStream, TokenTree},
+        token::{Delim, Span, TokenStream, TokenTree},
     },
 };
 
@@ -42,33 +42,28 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
                 [TokenTree::Ident(policy)] if policy == "unwrap" => false,
                 _ => return Err(arguments_error(arguments.span)),
             };
+            let finish = if expect {
+                moxy::template! { expect }
+            } else {
+                moxy::template! { unwrap }
+            };
             Ok(moxy::template! {
                 async fn {{ name }}(
                     customize: impl FnOnce(&mut {{ namespace }}::BrokerConfig),
                 ) -> ({{ namespace }}::BrokerHandle, ::std::net::SocketAddr, ::tempfile::TempDir) {
-                    macro_rules! fixture_result {
-                        ($value:expr, $message:literal) => {
-                            @if expect { ($value).expect($message) }
-                            @else { ($value).unwrap() }
-                        };
-                    }
-                    let dir = fixture_result!(::tempfile::TempDir::new(), "tempdir");
-                    let data_listener = fixture_result!(
-                        ::tokio::net::TcpListener::bind("127.0.0.1:0").await, "bind data listener"
-                    );
-                    let controller_listener = fixture_result!(
-                        ::tokio::net::TcpListener::bind("127.0.0.1:0").await, "bind controller listener"
-                    );
-                    let data_addr = fixture_result!(data_listener.local_addr(), "data addr");
-                    let controller_addr = fixture_result!(controller_listener.local_addr(), "controller addr");
+                    let dir = ::tempfile::TempDir::new().{{ finish }}(@if expect { "tempdir" });
+                    let data_listener = ::tokio::net::TcpListener::bind("127.0.0.1:0")
+                        .await.{{ finish }}(@if expect { "bind data listener" });
+                    let controller_listener = ::tokio::net::TcpListener::bind("127.0.0.1:0")
+                        .await.{{ finish }}(@if expect { "bind controller listener" });
+                    let data_addr = data_listener.local_addr().{{ finish }}(@if expect { "data addr" });
+                    let controller_addr = controller_listener.local_addr()
+                        .{{ finish }}(@if expect { "controller addr" });
                     let mut config = {{ config }}(dir.path(), data_addr, controller_addr);
                     customize(&mut config);
-                    let broker = fixture_result!(
-                        {{ namespace }}::Broker::start_with_listeners(
-                            config, Some(controller_listener), Some(data_listener)
-                        ).await,
-                        "broker start"
-                    );
+                    let broker = {{ namespace }}::Broker::start_with_listeners(
+                        config, Some(controller_listener), Some(data_listener)
+                    ).await.{{ finish }}(@if expect { "broker start" });
                     (broker, controller_addr, dir)
                 }
             })
@@ -145,15 +140,41 @@ pub(crate) fn assignment_dirs(input: TokenStream) -> Result<TokenStream, ParseEr
 
 /// Keep registry guards and finish diagnostics in the caller's original scope.
 pub(crate) fn metric_registry(input: TokenStream) -> Result<TokenStream, ParseError> {
-    let name = fixture_name(input)?;
+    let error = ParseError::new(
+        input.span(),
+        "expected metrics, output, guard; finish(args)",
+    );
+    let tokens = Vec::from(input);
+    let sections: Vec<_> = tokens.split(TokenTree::is_punct_semi).collect();
+    let [bindings, finish] = sections.as_slice() else {
+        return Err(error);
+    };
+    let [
+        metrics @ ..,
+        comma,
+        TokenTree::Ident(output),
+        comma2,
+        TokenTree::Ident(guard),
+    ] = *bindings
+    else {
+        return Err(error);
+    };
+    let [TokenTree::Ident(finish), TokenTree::Group(args)] = *finish else {
+        return Err(error);
+    };
+    if metrics.is_empty()
+        || !comma.is_punct_comma()
+        || !comma2.is_punct_comma()
+        || args.delim != Delim::Paren
+    {
+        return Err(error);
+    }
+    let metrics = TokenStream::from(metrics);
     Ok(moxy::template! {
-        macro_rules! {{ name }} {
-            ($metrics:expr, $output:ident, $guard:ident; $finish:ident($($args:tt)*)) => {
-                let mut $output = String::new();
-                let $guard = $metrics.registry.lock().await;
-                ::prometheus_client::encoding::text::encode(&mut $output, &$guard).$finish($($args)*);
-            };
-        }
+        let mut {{ output }} = String::new();
+        let {{ guard }} = ({{ metrics }}).registry.lock().await;
+        ::prometheus_client::encoding::text::encode(&mut {{ output }}, &{{ guard }})
+            .{{ finish }}{{ args }};
     })
 }
 
@@ -225,4 +246,41 @@ pub(crate) fn vector_request(input: TokenStream) -> Result<TokenStream, ParseErr
             out
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::{expand, metric_registry},
+        assert2::assert,
+    };
+
+    #[test]
+    fn startup_emits_direct_calls_with_the_selected_panic_policy() {
+        for policy in ["expect", "unwrap"] {
+            let input = format!("start, start_bound, broker, {policy}, bound_config")
+                .parse()
+                .unwrap();
+            let output = expand(input).unwrap();
+            let _: moxy::ast::ItemFn = moxy::parse!({ output.clone() }).unwrap();
+            let rendered = output.to_string();
+            assert!(!rendered.contains("macro_rules"));
+            assert!(!rendered.contains("fixture_result"));
+            assert!(rendered.matches(policy).count() == 6);
+            assert!(rendered.contains("broker start") == (policy == "expect"));
+            assert!(rendered.contains("bind controller listener") == (policy == "expect"));
+        }
+    }
+
+    #[test]
+    fn registry_requires_binding_names_and_a_parenthesized_finish() {
+        for input in [
+            "metrics, body + suffix, guard; unwrap()",
+            "metrics, body, guard; unwrap{}",
+            "metrics, body, guard; unwrap() extra",
+            "render_registry",
+        ] {
+            assert!(metric_registry(input.parse().unwrap()).is_err());
+        }
+    }
 }

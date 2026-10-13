@@ -619,7 +619,7 @@ async fn a_legacy_group_lookup_answers_in_the_top_level_fields() {
     // the top-level row.
     assert!(
         response
-            == unthrottled_wire!(FindCoordinatorResponse {
+            == krabka_macros::unthrottled_wire!(FindCoordinatorResponse {
                 error_code: codes::NONE,
                 error_message: Some("NONE".into()),
                 node_id: broker.config.broker_id,

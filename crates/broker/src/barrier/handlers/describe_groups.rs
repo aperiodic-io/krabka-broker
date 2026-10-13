@@ -19,8 +19,9 @@ use {
             coordinator::{BarrierCoordinator, GroupDescription},
             handlers::{cluster_describe_denied, interval_to_wire},
         },
+        broker::Broker,
         codes,
-        handlers::encode_response,
+        handlers::{ApiVersion, DispatchResult, RequestContext, encode_response},
     },
     krabka_metadata::MetadataImage,
     krabka_protocol::krabka::barrier::{
@@ -31,67 +32,70 @@ use {
 /// The `coordinator_id` of a group that no broker coordinates now.
 const NO_COORDINATOR: i32 = -1;
 
-wire_handler!(
-    handle,
-    "handle_describe_barrier_groups",
-    "DescribeBarrierGroups",
-    "info",
-    DescribeBarrierGroupsRequest,
-    |broker, version, req, ctx| {
-        let image = broker.controller.current_image();
-        if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            let groups = req
-                .groups
-                .iter()
-                .map(|group| {
-                    error_row(
-                        group,
-                        codes::CLUSTER_AUTHORIZATION_FAILED,
-                        "describe-barrier-groups denied",
-                    )
-                })
-                .collect();
-            return encode_response(&response(groups), version);
-        }
-
-        let coordinator = &broker.barrier_coordinator;
-        let held = coordinator.describe_groups(&req.groups).await;
-
-        let groups = if req.groups.is_empty() {
-            held.iter()
-                .map(|description| {
-                    described_row(
-                        description,
-                        coordinator_id(coordinator, &image, description),
-                    )
-                })
-                .collect()
-        } else {
-            let mut rows = Vec::with_capacity(req.groups.len());
-            for name in &req.groups {
-                let found = held.iter().find(|entry| &entry.group == name);
-                let row = if let Some(description) = found {
-                    described_row(
-                        description,
-                        coordinator_id(coordinator, &image, description),
-                    )
-                } else if coordinator.is_coordinator_for(name).await {
-                    error_row(name, codes::RESOURCE_NOT_FOUND, "no such barrier group")
-                } else {
-                    error_row(
-                        name,
-                        codes::NOT_COORDINATOR,
-                        "this broker does not coordinate the barrier group",
-                    )
-                };
-                rows.push(row);
-            }
-            rows
-        };
-
-        encode_response(&response(groups), version)
+#[krabka_macros::extension_wire(
+    name = "handle_describe_barrier_groups",
+    api = "DescribeBarrierGroups",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: DescribeBarrierGroupsRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
+    if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        let groups = req
+            .groups
+            .iter()
+            .map(|group| {
+                error_row(
+                    group,
+                    codes::CLUSTER_AUTHORIZATION_FAILED,
+                    "describe-barrier-groups denied",
+                )
+            })
+            .collect();
+        return encode_response(&response(groups), version);
     }
-);
+
+    let coordinator = &broker.barrier_coordinator;
+    let held = coordinator.describe_groups(&req.groups).await;
+
+    let groups = if req.groups.is_empty() {
+        held.iter()
+            .map(|description| {
+                described_row(
+                    description,
+                    coordinator_id(coordinator, &image, description),
+                )
+            })
+            .collect()
+    } else {
+        let mut rows = Vec::with_capacity(req.groups.len());
+        for name in &req.groups {
+            let found = held.iter().find(|entry| &entry.group == name);
+            let row = if let Some(description) = found {
+                described_row(
+                    description,
+                    coordinator_id(coordinator, &image, description),
+                )
+            } else if coordinator.is_coordinator_for(name).await {
+                error_row(name, codes::RESOURCE_NOT_FOUND, "no such barrier group")
+            } else {
+                error_row(
+                    name,
+                    codes::NOT_COORDINATOR,
+                    "this broker does not coordinate the barrier group",
+                )
+            };
+            rows.push(row);
+        }
+        rows
+    };
+
+    encode_response(&response(groups), version)
+}
 
 /// The node that leads the `__barrier_state` partition of a group.
 fn coordinator_id(

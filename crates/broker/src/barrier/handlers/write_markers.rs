@@ -44,9 +44,10 @@ use {
             injection::{MarkerAppendError, append_marker},
             marker::BarrierMarker,
         },
+        broker::Broker,
         codes,
         coordinator::unified::persistence::MAX_STRING_BYTES,
-        handlers::encode_response,
+        handlers::{ApiVersion, DispatchResult, RequestContext, encode_response},
         partition::Partition,
         partition_registry::PartitionRegistry,
     },
@@ -66,57 +67,60 @@ use {
 /// The `offset` of a partition row that placed no marker.
 const NO_OFFSET: i64 = -1;
 
-wire_handler!(
-    handle,
-    "handle_write_barrier_markers",
-    "WriteBarrierMarkers",
-    "debug",
-    WriteBarrierMarkersRequest,
-    |broker, version, req, ctx| {
-        let image = broker.controller.current_image();
-        let denied = cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx);
-        if let Some(code) = request_refusal(denied, &req.group) {
-            let topics = req
-                .topics
-                .iter()
-                .map(|topic| refused_topic(topic, code))
-                .collect();
-            return encode_response(&response(topics), version);
-        }
-
-        let marker = BarrierMarker {
-            group: req.group.clone(),
-            epoch: req.epoch,
-            triggered_at: req.triggered_at,
-        };
-
-        let mut topics = Vec::with_capacity(req.topics.len());
-        for topic in &req.topics {
-            let mut partitions = Vec::with_capacity(topic.partitions.len());
-            for requested in &topic.partitions {
-                partitions.push(
-                    mark(
-                        &broker.partitions,
-                        &image,
-                        broker.config.node_id,
-                        &marker,
-                        &topic.topic,
-                        PartitionIndex(requested.partition),
-                        requested.expected_leader_epoch,
-                    )
-                    .await,
-                );
-            }
-            topics.push(WrittenBarrierTopic {
-                topic: topic.topic.clone(),
-                partitions,
-                ..WrittenBarrierTopic::default()
-            });
-        }
-
-        encode_response(&response(topics), version)
+#[krabka_macros::extension_wire(
+    name = "handle_write_barrier_markers",
+    api = "WriteBarrierMarkers",
+    level = "debug"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: WriteBarrierMarkersRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
+    let denied = cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx);
+    if let Some(code) = request_refusal(denied, &req.group) {
+        let topics = req
+            .topics
+            .iter()
+            .map(|topic| refused_topic(topic, code))
+            .collect();
+        return encode_response(&response(topics), version);
     }
-);
+
+    let marker = BarrierMarker {
+        group: req.group.clone(),
+        epoch: req.epoch,
+        triggered_at: req.triggered_at,
+    };
+
+    let mut topics = Vec::with_capacity(req.topics.len());
+    for topic in &req.topics {
+        let mut partitions = Vec::with_capacity(topic.partitions.len());
+        for requested in &topic.partitions {
+            partitions.push(
+                mark(
+                    &broker.partitions,
+                    &image,
+                    broker.config.node_id,
+                    &marker,
+                    &topic.topic,
+                    PartitionIndex(requested.partition),
+                    requested.expected_leader_epoch,
+                )
+                .await,
+            );
+        }
+        topics.push(WrittenBarrierTopic {
+            topic: topic.topic.clone(),
+            partitions,
+            ..WrittenBarrierTopic::default()
+        });
+    }
+
+    encode_response(&response(topics), version)
+}
 
 /// The code that refuses the whole request, or `None` when it may go on.
 ///

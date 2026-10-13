@@ -19,8 +19,8 @@
 use {
     crate::{
         error::LogError,
-        index::{open_index, rewrite_retained_entries, rewrite_sidecar_file},
-        io::{IoTarget, LogIo, write_all},
+        index::{rewrite_retained_entries, rewrite_sidecar_file},
+        io::{IoTarget, LogIo, file_io, write_all},
     },
     krabka_ids::Offset,
     std::{fs::OpenOptions, path::PathBuf, sync::Arc},
@@ -100,69 +100,67 @@ pub struct StampIndex {
 }
 
 impl StampIndex {
-    open_index! {
-        /// Open or recover a `.stampindex` file at the given path. This method
-        /// reads the entire file into memory at startup. A missing file means
-        /// zero stamped ranges. So does an empty one: the first append creates
-        /// the file and then writes the header with its entry, so a crash between
-        /// the two leaves an empty file that holds nothing to misread.
-        /// # Errors
-        /// Returns [`LogError::MissingFormatVersion`] for the headerless layout a
-        /// broker before 1.0 wrote, [`LogError::UnsupportedFormatVersion`] for a
-        /// version other than `STAMP_INDEX_VERSION`, and an error when log I/O
-        /// fails or the entries are not a whole number of fixed-width records.
-        /// # Panics
-        /// Panics if the in-place reinterpretation of a length-validated,
-        /// `Unaligned` byte buffer fails. That invariant cannot be false.
-        pub fn open(path: PathBuf) -> Result<Self, LogError> {
-            let mut entries = Vec::new();
-            match std::fs::read(&path) {
-                Ok(bytes) if bytes.is_empty() => {}
-                Ok(bytes) => {
-                    let body = Self::versioned_body(&path, &bytes)?;
-                    if !body.len().is_multiple_of(ENTRY_BYTES) {
-                        return Err(LogError::Corrupt(format!(
-                            "stampindex {} has {} entry bytes, not divisible by {}",
-                            path.display(),
-                            body.len(),
-                            ENTRY_BYTES,
-                        )));
-                    }
-                    let raws = <[StampEntryRaw]>::ref_from_bytes(body).expect(
-                        "length is a multiple of ENTRY_BYTES and StampEntryRaw is Unaligned",
-                    );
-                    entries.reserve(raws.len());
-                    for raw in raws {
-                        entries.push(StampEntry {
-                            base_offset: Offset(raw.base_offset.get()),
-                            last_offset: Offset(raw.last_offset.get()),
-                            stamp: raw.stamp.get(),
-                        });
-                    }
-                    entries.sort_unstable_by_key(|entry| {
-                        (entry.base_offset.0, entry.last_offset.0, entry.stamp)
-                    });
-                    // A write followed by an uncertain sync can be retried and
-                    // leave an exact duplicate on disk. Canonicalize that retry,
-                    // but reject a duplicate range with a different stamp below.
-                    entries.dedup();
-                    if !Self::entries_valid(&entries) {
-                        return Err(LogError::Corrupt(format!(
-                            "stampindex {} contains inverted or overlapping ranges",
-                            path.display()
-                        )));
-                    }
+    #[krabka_macros::index_open]
+    /// Open or recover a `.stampindex` file at the given path. This method
+    /// reads the entire file into memory at startup. A missing file means
+    /// zero stamped ranges. So does an empty one: the first append creates
+    /// the file and then writes the header with its entry, so a crash between
+    /// the two leaves an empty file that holds nothing to misread.
+    /// # Errors
+    /// Returns [`LogError::MissingFormatVersion`] for the headerless layout a
+    /// broker before 1.0 wrote, [`LogError::UnsupportedFormatVersion`] for a
+    /// version other than `STAMP_INDEX_VERSION`, and an error when log I/O
+    /// fails or the entries are not a whole number of fixed-width records.
+    /// # Panics
+    /// Panics if the in-place reinterpretation of a length-validated,
+    /// `Unaligned` byte buffer fails. That invariant cannot be false.
+    pub fn open(path: PathBuf) -> Result<Self, LogError> {
+        let mut entries = Vec::new();
+        match std::fs::read(&path) {
+            Ok(bytes) if bytes.is_empty() => {}
+            Ok(bytes) => {
+                let body = Self::versioned_body(&path, &bytes)?;
+                if !body.len().is_multiple_of(ENTRY_BYTES) {
+                    return Err(LogError::Corrupt(format!(
+                        "stampindex {} has {} entry bytes, not divisible by {}",
+                        path.display(),
+                        body.len(),
+                        ENTRY_BYTES,
+                    )));
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(LogError::Io(e)),
+                let raws = <[StampEntryRaw]>::ref_from_bytes(body)
+                    .expect("length is a multiple of ENTRY_BYTES and StampEntryRaw is Unaligned");
+                entries.reserve(raws.len());
+                for raw in raws {
+                    entries.push(StampEntry {
+                        base_offset: Offset(raw.base_offset.get()),
+                        last_offset: Offset(raw.last_offset.get()),
+                        stamp: raw.stamp.get(),
+                    });
+                }
+                entries.sort_unstable_by_key(|entry| {
+                    (entry.base_offset.0, entry.last_offset.0, entry.stamp)
+                });
+                // A write followed by an uncertain sync can be retried and
+                // leave an exact duplicate on disk. Canonicalize that retry,
+                // but reject a duplicate range with a different stamp below.
+                entries.dedup();
+                if !Self::entries_valid(&entries) {
+                    return Err(LogError::Corrupt(format!(
+                        "stampindex {} contains inverted or overlapping ranges",
+                        path.display()
+                    )));
+                }
             }
-            tracing::Span::current().record("entries", entries.len());
-            Ok(Self {
-                path,
-                io: crate::io::file_io(),
-                entries,
-            })
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(LogError::Io(e)),
         }
+        tracing::Span::current().record("entries", entries.len());
+        Ok(Self {
+            path,
+            io: file_io(),
+            entries,
+        })
     }
 
     /// Check the header of a non-empty file and return the entry bytes after

@@ -301,11 +301,9 @@ mod tests {
             },
             Case {
                 label: "a duplicate name answers once and deletes nothing",
-                request: v6(vec![
-                    state(Some("orders"), WireUuid::ZERO),
-                    state(Some("orders"), WireUuid::ZERO),
-                    state(Some("orders"), WireUuid::ZERO),
-                ]),
+                request: v6((0..3)
+                    .map(|_| state(Some("orders"), WireUuid::ZERO))
+                    .collect()),
                 denied: &[],
                 topics: Vec::new(),
                 invalid: vec![invalid(Some("orders"), WireUuid::ZERO, DUPLICATE_NAME)],

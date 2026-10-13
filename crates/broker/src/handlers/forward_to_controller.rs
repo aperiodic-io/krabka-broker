@@ -21,7 +21,7 @@ use {
         codes,
         envelope::{self, ForwardedPrincipal, ForwardedRequest},
         error::BrokerError,
-        handlers::{ApiKeyCode, RequestContext},
+        handlers::{ApiKeyCode, RequestContext, decode_request, encode_response},
         metadata_source::MetadataSource,
     },
     bytes::{Bytes, BytesMut},
@@ -162,6 +162,33 @@ pub(crate) async fn to_active_controller(
         Ok(envelope_response) => unwrap(broker, api_key, &envelope_response, version, refusal),
         Err(_) => refusal(codes::REQUEST_TIMED_OUT, None),
     })
+}
+
+/// Forward a request to the active controller, or handle it locally when this
+/// broker is the active controller.
+pub(crate) async fn to_active_controller_or_handle<Request, Response, Refusal, Local, LocalFuture>(
+    broker: &Broker,
+    request: Request,
+    api_key: ApiKeyCode,
+    version: i16,
+    ctx: &RequestContext<'_>,
+    refusal: Refusal,
+    local: Local,
+) -> Result<Response, BrokerError>
+where
+    Request: Encode,
+    Response: for<'a> Decode<'a> + Encode,
+    Refusal: Fn(&Request, i16, Option<&str>) -> Response,
+    Local: FnOnce(Request) -> LocalFuture,
+    LocalFuture: Future<Output = Result<Response, BrokerError>>,
+{
+    let body = encode_response(&request, version)?;
+    let refusal =
+        |code, message: Option<&str>| encode_response(&refusal(&request, code, message), version);
+    match to_active_controller(broker, api_key, &body, version, ctx, refusal).await {
+        Some(answer) => decode_request(&answer?, version),
+        None => local(request).await,
+    }
 }
 
 /// Wrap `req_bytes` (an `api_key` request body at `version`) in a KIP-590

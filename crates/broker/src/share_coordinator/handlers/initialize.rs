@@ -15,7 +15,7 @@ use {
     },
 };
 
-super::share_state_handler!(
+krabka_macros::share_state_handler!(
     InitializeShareGroupStateRequest,
     InitializeShareGroupStateResponse,
     InitializeStateResult,

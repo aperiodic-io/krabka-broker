@@ -19,9 +19,16 @@
 //! query through the topology topic-Describe filter, and `render` projects
 //! the actor's describe view onto the response types.
 
-use krabka_protocol::owned::{
-    streams_group_describe_request::StreamsGroupDescribeRequest,
-    streams_group_describe_response::{DescribedGroup, StreamsGroupDescribeResponse},
+use {
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::{ApiVersion, RequestContext, group_describe_denied, streams_protocol_enabled},
+    },
+    krabka_protocol::owned::{
+        streams_group_describe_request::StreamsGroupDescribeRequest,
+        streams_group_describe_response::{DescribedGroup, StreamsGroupDescribeResponse},
+    },
 };
 
 mod group;
@@ -38,76 +45,72 @@ use {
     crate::codes,
 };
 
-context_handler! {
-    // cargo-mutants: streams-coordinator response projection; integration-tested.
-    #[cfg_attr(test, mutants::skip)]
-    StreamsGroupDescribeRequest => StreamsGroupDescribeResponse,
-    (broker, req, _version, ctx),
-    {
-        let image = broker.controller.current_image();
-        let ng = broker.group_coordinator.clone();
+// cargo-mutants: streams-coordinator response projection; integration-tested.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: StreamsGroupDescribeRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<StreamsGroupDescribeResponse, BrokerError> {
+    let image = broker.controller.current_image();
+    let ng = broker.group_coordinator.clone();
 
-        // KIP-1071: same gate as the heartbeat — finalized streams.version >= 1
-        // AND the config kill-switch. Kafka's
-        // `StreamsGroupDescribeRequest.getErrorResponse` answers every requested
-        // group id with UNSUPPORTED_VERSION when the protocol is off, checked
-        // once for the whole request and before any ACL check runs.
-        if !crate::handlers::streams_protocol_enabled(broker, &image) {
-            let groups = req
-                .group_ids
-                .iter()
-                .map(|gid| DescribedGroup {
-                    group_id: gid.clone(),
-                    error_code: codes::UNSUPPORTED_VERSION,
-                    ..Default::default()
-                })
-                .collect();
-            let resp = StreamsGroupDescribeResponse {
-                groups,
+    // KIP-1071: same gate as the heartbeat — finalized streams.version >= 1
+    // AND the config kill-switch. Kafka's
+    // `StreamsGroupDescribeRequest.getErrorResponse` answers every requested
+    // group id with UNSUPPORTED_VERSION when the protocol is off, checked
+    // once for the whole request and before any ACL check runs.
+    if !streams_protocol_enabled(broker, &image) {
+        let groups = req
+            .group_ids
+            .iter()
+            .map(|gid| DescribedGroup {
+                group_id: gid.clone(),
+                error_code: codes::UNSUPPORTED_VERSION,
                 ..Default::default()
-            };
-            return Ok(resp);
-        }
+            })
+            .collect();
+        let resp = StreamsGroupDescribeResponse {
+            groups,
+            ..Default::default()
+        };
+        return Ok(resp);
+    }
 
-        // Kafka puts `GROUP_AUTHORIZATION_FAILED` rows first, ahead of
-        // successfully-described (or otherwise-errored) rows, rather than
-        // preserving request order.
-        let mut denied_rows: Vec<DescribedGroup> = Vec::new();
-        let mut other_rows: Vec<DescribedGroup> = Vec::new();
-        for gid in &req.group_ids {
-            if crate::handlers::group_describe_denied(
-                broker.config.authorizer.as_ref(),
+    // Kafka puts `GROUP_AUTHORIZATION_FAILED` rows first, ahead of
+    // successfully-described (or otherwise-errored) rows, rather than
+    // preserving request order.
+    let mut denied_rows: Vec<DescribedGroup> = Vec::new();
+    let mut other_rows: Vec<DescribedGroup> = Vec::new();
+    for gid in &req.group_ids {
+        if group_describe_denied(broker.config.authorizer.as_ref(), &image, ctx, gid) {
+            denied_rows.push(DescribedGroup {
+                group_id: gid.clone(),
+                error_code: codes::GROUP_AUTHORIZATION_FAILED,
+                ..Default::default()
+            });
+            continue;
+        }
+        other_rows.push(
+            describe_group(
+                broker,
+                &ng,
                 &image,
                 ctx,
+                Included {
+                    authorized_operations: req.include_authorized_operations,
+                    topology_description: req.include_topology_description,
+                },
                 gid,
-            ) {
-                denied_rows.push(DescribedGroup {
-                    group_id: gid.clone(),
-                    error_code: codes::GROUP_AUTHORIZATION_FAILED,
-                    ..Default::default()
-                });
-                continue;
-            }
-            other_rows.push(
-                describe_group(
-                    broker,
-                    &ng,
-                    &image,
-                    ctx,
-                    Included {
-                        authorized_operations: req.include_authorized_operations,
-                        topology_description: req.include_topology_description,
-                    },
-                    gid,
-                )
-                .await,
-            );
-        }
-        denied_rows.extend(other_rows);
-
-        Ok(StreamsGroupDescribeResponse {
-            groups: denied_rows,
-            ..Default::default()
-        })
+            )
+            .await,
+        );
     }
+    denied_rows.extend(other_rows);
+
+    Ok(StreamsGroupDescribeResponse {
+        groups: denied_rows,
+        ..Default::default()
+    })
 }

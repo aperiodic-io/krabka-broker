@@ -1,5 +1,5 @@
 #[cfg(creusot)]
-use super::{count_ge, count_ge_prefix, hwm_member_at};
+use super::{count_ge, count_ge_prefix, hwm_member_at, valid_hwm_majority};
 use creusot_std::prelude::*;
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
@@ -115,7 +115,7 @@ pub fn least_hwm_member_ge_index(
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
 #[cfg_attr(test, mutants::skip)]
-#[requires(1 <= majority@ && majority@ <= s@.len() + 1)]
+#[requires(valid_hwm_majority(majority@, s@.len()))]
 #[ensures(forall<v: Int> count_ge(log_end@, s@, v, leader_counts) >= majority@
     ==> exists<k: Int> hwm_member_witness(log_end@, s@, k, v, majority@, leader_counts))]
 pub fn lemma_hwm_threshold_has_member(
@@ -132,7 +132,7 @@ pub fn lemma_hwm_threshold_has_member(
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
 #[cfg_attr(test, mutants::skip)]
-#[requires(1 <= majority@ && majority@ <= s@.len() + 1)]
+#[requires(valid_hwm_majority(majority@, s@.len()))]
 #[requires(forall<k: Int> 0 <= k && k < s@.len() + 1
     && count_ge(log_end@, s@, hwm_member_at(log_end@, s@, k), leader_counts) >= majority@
     ==> hwm_member_at(log_end@, s@, k) <= best@)]
@@ -186,7 +186,10 @@ pub const fn log_is_up_to_date(
     cand_epoch > my_epoch || (cand_epoch == my_epoch && cand_offset >= my_end)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// This actual high-watermark member reaches the threshold with a majority.
 fn hwm_member_witness(
     end: Int,
@@ -198,5 +201,4 @@ fn hwm_member_witness(
 ) -> bool {
     pearlite! { 0 <= index && index < offsets.len() + 1 && hwm_member_at(end, offsets, index) >= value
     && count_ge(end, offsets, hwm_member_at(end, offsets, index), leader_counts) >= majority }
-}
 }

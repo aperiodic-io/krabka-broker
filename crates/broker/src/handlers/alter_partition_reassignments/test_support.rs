@@ -91,7 +91,9 @@ pub(super) fn request(
     }
 }
 
-crate::test_support::context_helper!(pub(super) client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    pub(super) test_context ["admin-client"];
+}
 
 /// A registered six-broker image with one partition in the supplied reassignment state.
 #[derive(Clone, krabka_macros::FieldDefaults)]

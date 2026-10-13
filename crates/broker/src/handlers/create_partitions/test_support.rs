@@ -135,7 +135,7 @@ pub fn expected_result(
     error_code: i16,
     error_message: Option<String>,
 ) -> krabka_protocol::owned::create_partitions_response::CreatePartitionsTopicResult {
-    tagged_wire!(
+    krabka_macros::tagged_wire!(
         krabka_protocol::owned::create_partitions_response::CreatePartitionsTopicResult {
             name: name.into(),
             error_code,
@@ -147,7 +147,7 @@ pub fn expected_result(
 pub fn expected_response(
     results: Vec<krabka_protocol::owned::create_partitions_response::CreatePartitionsTopicResult>,
 ) -> krabka_protocol::owned::create_partitions_response::CreatePartitionsResponse {
-    unthrottled_wire!(
+    krabka_macros::unthrottled_wire!(
         krabka_protocol::owned::create_partitions_response::CreatePartitionsResponse { results }
     )
 }

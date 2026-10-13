@@ -30,7 +30,10 @@ use {
             },
         },
         error::BrokerError,
-        handlers::group_coordinator_error,
+        handlers::{
+            ApiVersion, RequestContext, group_coordinator_error, group_read_denied,
+            requested_topic_name,
+        },
         task_util::ask,
         time_util::now_ms,
     },
@@ -84,89 +87,90 @@ const FIRST_TOPIC_ID_VERSION: i16 = 10;
 /// group that does not exist. Earlier versions answer `ILLEGAL_GENERATION`.
 const FIRST_GROUP_ID_NOT_FOUND_VERSION: i16 = 9;
 
-context_handler! {
-    /// Serves one `OffsetCommit` request.
-    ///
-    /// The order of the checks is the order of Kafka's
-    /// `KafkaApis.handleOffsetCommitRequest`:
-    ///
-    /// 1. `Read` on `Group(group_id)`. A denial answers
-    ///    `GROUP_AUTHORIZATION_FAILED` on every partition row.
-    /// 2. At v10 and later, each `topic_id` resolves to a name. A row whose name
-    ///    stays empty answers `UNKNOWN_TOPIC_ID` on every partition row. The zero
-    ///    id is such a row.
-    /// 3. `Read` on each `Topic(name)`. A denied topic answers
-    ///    `TOPIC_AUTHORIZATION_FAILED` on every partition row.
-    /// 4. A topic or a partition that the image does not hold answers
-    ///    `UNKNOWN_TOPIC_OR_PARTITION` on its partition rows.
-    /// 5. The group coordinator commits the rows that remain, and a coordinator
-    ///    error goes on those rows only.
-    ///
-    /// The error rows come first in the response and the committed rows follow,
-    /// as `OffsetCommitResponse.Builder.merge` puts them. The handler writes no
-    /// offset for a row that steps 2 to 4 refuse.
-    OffsetCommitRequest => OffsetCommitResponse,
-    (broker, mut req, version, ctx),
-    {
-        let image = broker.controller.current_image();
+/// Serves one `OffsetCommit` request.
+///
+/// The order of the checks is the order of Kafka's
+/// `KafkaApis.handleOffsetCommitRequest`:
+///
+/// 1. `Read` on `Group(group_id)`. A denial answers
+///    `GROUP_AUTHORIZATION_FAILED` on every partition row.
+/// 2. At v10 and later, each `topic_id` resolves to a name. A row whose name
+///    stays empty answers `UNKNOWN_TOPIC_ID` on every partition row. The zero
+///    id is such a row.
+/// 3. `Read` on each `Topic(name)`. A denied topic answers
+///    `TOPIC_AUTHORIZATION_FAILED` on every partition row.
+/// 4. A topic or a partition that the image does not hold answers
+///    `UNKNOWN_TOPIC_OR_PARTITION` on its partition rows.
+/// 5. The group coordinator commits the rows that remain, and a coordinator
+///    error goes on those rows only.
+///
+/// The error rows come first in the response and the committed rows follow,
+/// as `OffsetCommitResponse.Builder.merge` puts them. The handler writes no
+/// offset for a row that steps 2 to 4 refuse.
+pub(crate) async fn handle(
+    broker: &Broker,
+    mut req: OffsetCommitRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<OffsetCommitResponse, BrokerError> {
+    let image = broker.controller.current_image();
 
-        if crate::handlers::group_read_denied(
+    if group_read_denied(
+        broker.config.authorizer.as_ref(),
+        &image,
+        ctx,
+        req.group_id.as_str(),
+    ) {
+        return Ok(build_response_all(&req, codes::GROUP_AUTHORIZATION_FAILED));
+    }
+
+    let use_topic_ids = version >= FIRST_TOPIC_ID_VERSION;
+    if use_topic_ids {
+        // v10+ rows carry only `topic_id`; a zero or unknown id keeps the
+        // empty name.
+        for topic in &mut req.topics {
+            topic.name = requested_topic_name(&image, &topic.name, topic.topic_id);
+        }
+    }
+
+    let allowed: Vec<bool> = {
+        let decisions = authorize_topics(
             broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            req.group_id.as_str(),
-        ) {
-            return Ok(build_response_all(&req, codes::GROUP_AUTHORIZATION_FAILED));
-        }
-
-        let use_topic_ids = version >= FIRST_TOPIC_ID_VERSION;
-        if use_topic_ids {
-            // v10+ rows carry only `topic_id`; a zero or unknown id keeps the
-            // empty name.
-            for topic in &mut req.topics {
-                topic.name = crate::handlers::requested_topic_name(&image, &topic.name, topic.topic_id);
-            }
-        }
-
-        let allowed: Vec<bool> = {
-            let decisions = authorize_topics(
-                broker.config.authorizer.as_ref(),
-                &*image,
-                ctx.principal,
-                ctx.peer,
-                AclOperation::Read,
-                req.topics
-                    .iter()
-                    .filter(|topic| !(use_topic_ids && topic.name.is_empty()))
-                    .map(|topic| topic.name.as_str()),
-            );
+            &*image,
+            ctx.principal,
+            ctx.peer,
+            AclOperation::Read,
             req.topics
                 .iter()
-                .map(|topic| {
-                    decisions.get(topic.name.as_str()).copied() == Some(AuthorizationResult::Allow)
-                })
-                .collect()
-        };
+                .filter(|topic| !(use_topic_ids && topic.name.is_empty()))
+                .map(|topic| topic.name.as_str()),
+        );
+        req.topics
+            .iter()
+            .map(|topic| {
+                decisions.get(topic.name.as_str()).copied() == Some(AuthorizationResult::Allow)
+            })
+            .collect()
+    };
 
-        let mut response = ResponseBuilder::new(use_topic_ids);
-        let mut accepted = Vec::with_capacity(req.topics.len());
-        for (topic, allowed) in std::mem::take(&mut req.topics).into_iter().zip(allowed) {
-            if use_topic_ids && topic.name.is_empty() {
-                response.add_topic(&topic, codes::UNKNOWN_TOPIC_ID);
-            } else if !allowed {
-                response.add_topic(&topic, codes::TOPIC_AUTHORIZATION_FAILED);
-            } else if let Some(topic) = existing_partitions(topic, &image, &mut response) {
-                accepted.push(topic);
-            }
+    let mut response = ResponseBuilder::new(use_topic_ids);
+    let mut accepted = Vec::with_capacity(req.topics.len());
+    for (topic, allowed) in std::mem::take(&mut req.topics).into_iter().zip(allowed) {
+        if use_topic_ids && topic.name.is_empty() {
+            response.add_topic(&topic, codes::UNKNOWN_TOPIC_ID);
+        } else if !allowed {
+            response.add_topic(&topic, codes::TOPIC_AUTHORIZATION_FAILED);
+        } else if let Some(topic) = existing_partitions(topic, &image, &mut response) {
+            accepted.push(topic);
         }
-        if accepted.is_empty() {
-            return Ok(response.build());
-        }
-
-        req.topics = accepted;
-        response.merge(commit(broker, &req, version).await);
-        Ok(response.build())
     }
+    if accepted.is_empty() {
+        return Ok(response.build());
+    }
+
+    req.topics = accepted;
+    response.merge(commit(broker, &req, version).await);
+    Ok(response.build())
 }
 
 /// Keeps the partitions of an authorized `topic` that the image holds.

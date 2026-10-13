@@ -148,7 +148,7 @@ fn non_leader_image() -> Arc<krabka_metadata::MetadataImage> {
 }
 
 fn non_leader_row() -> PartitionProduceResponse {
-    tagged_wire!(PartitionProduceResponse {
+    krabka_macros::tagged_wire!(PartitionProduceResponse {
         index: 0,
         error_code: crate::codes::NOT_LEADER_OR_FOLLOWER,
         base_offset: -1,
@@ -156,7 +156,7 @@ fn non_leader_row() -> PartitionProduceResponse {
         log_start_offset: -1,
         record_errors: vec![],
         error_message: None,
-        current_leader: tagged_wire!(LeaderIdAndEpoch {
+        current_leader: krabka_macros::tagged_wire!(LeaderIdAndEpoch {
             leader_id: 2,
             leader_epoch: 17,
         }),

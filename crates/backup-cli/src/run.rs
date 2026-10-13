@@ -1146,12 +1146,7 @@ mod tests {
         let id = "0000000000000001";
         let key = capture_key(id, MANIFEST);
         store.put(&key, b"{}".to_vec()).await.unwrap();
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(root.path().join(&key))
-            .unwrap()
-            .set_len(super::MAX_MANIFEST_BYTES + 1)
-            .unwrap();
+        set_file_len(root.path(), &key, super::MAX_MANIFEST_BYTES + 1);
         let error = super::read_manifest(&store, id).await.unwrap_err();
         check!(
             matches!(error, BackupError::ObjectStore(krabka_object_store::ObjectStoreError::TooLarge { max_bytes, .. }) if max_bytes == super::MAX_MANIFEST_BYTES)
@@ -1159,12 +1154,7 @@ mod tests {
 
         write_offsets_capture(&store, id, b"offsets", b"offsets").await;
         let key = capture_key(id, GROUP_OFFSETS);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(root.path().join(&key))
-            .unwrap()
-            .set_len(super::MAX_GROUP_OFFSETS_BYTES + 1)
-            .unwrap();
+        set_file_len(root.path(), &key, super::MAX_GROUP_OFFSETS_BYTES + 1);
         let error = verify(id, &archive).await.unwrap_err();
         check!(
             matches!(error, BackupError::ObjectStore(krabka_object_store::ObjectStoreError::TooLarge { max_bytes, .. }) if max_bytes == super::MAX_GROUP_OFFSETS_BYTES)
@@ -1195,6 +1185,15 @@ mod tests {
         archive_root: tempfile::TempDir,
         args: ArchiveArgs,
         id: String,
+    }
+
+    fn set_file_len(root: &std::path::Path, key: &str, len: u64) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(root.join(key))
+            .unwrap()
+            .set_len(len)
+            .unwrap();
     }
 
     async fn captured_node() -> CapturedNode {

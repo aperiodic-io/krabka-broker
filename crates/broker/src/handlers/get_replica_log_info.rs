@@ -11,9 +11,12 @@
 
 use {
     crate::{
+        broker::Broker,
         codes,
         error::BrokerError,
-        handlers::{cluster_action_denied, encode_response},
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, cluster_action_denied, encode_response,
+        },
     },
     bytes::Bytes,
     krabka_protocol::{
@@ -29,50 +32,53 @@ use {
     std::sync::atomic::Ordering,
 };
 
-wire_handler! {
-    (broker, version, req_bytes, ctx), {
-        let image = broker.controller.current_image();
+pub(crate) fn handle(
+    broker: &Broker,
+    version: ApiVersion,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
 
-        // ── ACL preamble ────────────────────────────────────────────
-        // Inter-broker control-plane RPC: `ClusterAction` on
-        // `Cluster("kafka-cluster")`. The response has no top-level error
-        // field (it's a list of per-partition log-info rows), so on Deny we
-        // stamp `CLUSTER_AUTHORIZATION_FAILED (31)` on every requested
-        // partition — mirroring `alter_replica_log_dirs`' cluster-deny path.
-        if cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            return respond(version, req_bytes, |_, partition| denied_row(partition));
-        }
-
-        respond(version, req_bytes, |topic_id, partition| {
-            let hosted = image
-                .topic_name_by_id(&uuid::Uuid::from_bytes(topic_id.0))
-                .and_then(|name| {
-                    broker
-                        .partitions
-                        .get(name, krabka_ids::PartitionIndex(partition))
-                });
-            match hosted {
-                Some(part) => {
-                    let epoch = part.current_leader_epoch.load(Ordering::Acquire);
-                    PartitionLogInfo {
-                        partition,
-                        last_written_leader_epoch: epoch,
-                        current_leader_epoch: epoch,
-                        // Unwrap the `Offset` into the wire `i64` field.
-                        log_end_offset: part.log_end_offset().0,
-                        error_code: codes::NONE,
-                        error_message: None,
-                        ..Default::default()
-                    }
-                }
-                None => unanswered(
-                    partition,
-                    codes::REPLICA_NOT_AVAILABLE,
-                    "partition not hosted locally",
-                ),
-            }
-        })
+    // ── ACL preamble ────────────────────────────────────────────
+    // Inter-broker control-plane RPC: `ClusterAction` on
+    // `Cluster("kafka-cluster")`. The response has no top-level error
+    // field (it's a list of per-partition log-info rows), so on Deny we
+    // stamp `CLUSTER_AUTHORIZATION_FAILED (31)` on every requested
+    // partition — mirroring `alter_replica_log_dirs`' cluster-deny path.
+    if cluster_action_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        return respond(version, req_bytes, |_, partition| denied_row(partition));
     }
+
+    respond(version, req_bytes, |topic_id, partition| {
+        let hosted = image
+            .topic_name_by_id(&uuid::Uuid::from_bytes(topic_id.0))
+            .and_then(|name| {
+                broker
+                    .partitions
+                    .get(name, krabka_ids::PartitionIndex(partition))
+            });
+        match hosted {
+            Some(part) => {
+                let epoch = part.current_leader_epoch.load(Ordering::Acquire);
+                PartitionLogInfo {
+                    partition,
+                    last_written_leader_epoch: epoch,
+                    current_leader_epoch: epoch,
+                    // Unwrap the `Offset` into the wire `i64` field.
+                    log_end_offset: part.log_end_offset().0,
+                    error_code: codes::NONE,
+                    error_message: None,
+                    ..Default::default()
+                }
+            }
+            None => unanswered(
+                partition,
+                codes::REPLICA_NOT_AVAILABLE,
+                "partition not hosted locally",
+            ),
+        }
+    })
 }
 
 /// Answers every requested `(topic_id, partition)` with the row `row` gives

@@ -2,27 +2,26 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @derives (derive(DeepModel))
-        (derive(Debug, Clone, Copy, PartialEq, Eq));
-    /// Result of checking one chain link against the running position.
-    pub enum ChainStep {
-        /// The record did not carry the next expected sequence number.
-        SequenceMismatch,
-        /// The record did not link to the running chain head.
-        HeadMismatch,
-        /// The record is valid, but no later `u64` sequence number exists.
-        Exhausted,
-        /// The record is valid and the chain continues at this sequence number.
-        Continue(u64),
-    }
+/// Result of checking one chain link against the running position.
+#[krabka_macros::model_type(proof(DeepModel), runtime(Debug, Clone, Copy, PartialEq, Eq))]
+pub enum ChainStep {
+    /// The record did not carry the next expected sequence number.
+    SequenceMismatch,
+    /// The record did not link to the running chain head.
+    HeadMismatch,
+    /// The record is valid, but no later `u64` sequence number exists.
+    Exhausted,
+    /// The record is valid and the chain continues at this sequence number.
+    Continue(u64),
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn chain_rank_precedes(left: (i64, u64, bool), right: (i64, u64, bool), allow_ties: bool) -> bool {
     pearlite! { left.0@ < right.0@ || (left.0@ == right.0@ &&
     if allow_ties { left.1@ <= right.1@ } else { left.1@ < right.1@ }) }
-}
 }
 
 /// Selects the eligible chain receipt with the greatest `(offset, sequence)`

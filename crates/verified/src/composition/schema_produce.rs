@@ -11,21 +11,25 @@ use {
 
 type PreparedSchemaAppend = Option<(Vec<(SchemaFieldAction, Option<u32>, bool)>, i64)>;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A coherent decoded walk has one key/value pair per record, in that order.
 fn record_pairs(fields: Seq<SchemaWalkField>) -> bool {
     pearlite! { fields.len() % 2 == 0 && fields.len() / 2 <= i32::MAX@
     && forall<i: Int> 0 <= i && i < fields.len() ==> fields[i].role
         == if i % 2 == 0 { SchemaFieldRole::Key } else { SchemaFieldRole::Value } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Header admission uses the actual pair count, rather than a supplied tally.
 fn header_admits(count: Int, delta: i32, flags: (bool, bool), producer: (i64, i32)) -> bool {
     pearlite! { 0 <= delta@ && delta@ < i32::MAX@ && count == delta@ + 1
     && count > 0 && !flags.0 && flags.1 && (producer.0@ < 0 || producer.1@ >= 0) }
-}
 }
 
 /// Connect per-position schema validation to real Produce header admission and

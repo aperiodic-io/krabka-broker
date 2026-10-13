@@ -8,11 +8,12 @@
 //! Kafka prints an `org.apache.kafka.common.Uuid` as 22 characters of unpadded
 //! base64url, for example `AQIDBAUGBwgJCgsMDQ4PEA`, not as the hyphenated hex
 //! form that [`uuid::Uuid`] prints. [`ClusterId`] and [`DirectoryId`] use the
-//! Kafka form for [`Display`](fmt::Display), [`FromStr`], and serde. An id
-//! that `format` writes can thus go into a Kafka tool, and an id from a Kafka
-//! cluster can go into `format`.
+//! Kafka form for [`Display`](core::fmt::Display), [`FromStr`](core::str::FromStr),
+//! and serde. An id that `format` writes can thus go into a Kafka tool, and an
+//! id from a Kafka cluster can go into `format`.
 //!
-//! [`FromStr`] accepts the same strings as Kafka 4.3.1's `Uuid.fromString`:
+//! [`FromStr`](core::str::FromStr) accepts the same strings as Kafka 4.3.1's
+//! `Uuid.fromString`:
 //! 22 base64url characters, optionally followed by `==`, with the unused low
 //! bits of the last character ignored. Parsing does not refuse the two
 //! reserved ids, because Kafka does not: `kafka-storage format -t
@@ -32,9 +33,7 @@ use {
         alphabet::URL_SAFE,
         engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
     },
-    core::{fmt, str::FromStr},
     derive_more::{From, Into},
-    serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _},
     thiserror::Error,
     uuid::Uuid,
 };
@@ -55,7 +54,7 @@ const KAFKA_BASE64: GeneralPurpose = GeneralPurpose::new(
 /// A Kafka cluster id: the identity that every node of a cluster shares.
 ///
 /// This id is distinct from [`DirectoryId`], which is per log directory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, From, Into)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, From, Into, krabka_macros::KafkaUuid)]
 pub struct ClusterId(pub Uuid);
 
 /// A log directory's stable id (KIP-858). The metadata directory's id is also
@@ -64,7 +63,7 @@ pub struct ClusterId(pub Uuid);
 /// `format` writes this id to `meta.properties`, and the broker reads it back
 /// on every boot. The type is distinct from [`ClusterId`], so a call site
 /// cannot transpose the two.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, From, Into)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, From, Into, krabka_macros::KafkaUuid)]
 pub struct DirectoryId(pub Uuid);
 
 impl ClusterId {
@@ -82,7 +81,7 @@ impl ClusterId {
     ///
     /// Returns [`KafkaUuidError::Hyphenated`] for an input that has the shape
     /// of the hyphenated form but is not hex. Otherwise returns the error of
-    /// [`FromStr`].
+    /// [`FromStr`](core::str::FromStr).
     pub fn parse_cli(input: &str) -> Result<Self, KafkaUuidError> {
         parse_kafka_or_hyphenated(input).map(Self)
     }
@@ -224,40 +223,6 @@ fn java_prefix(input: &str, max: usize) -> String {
     }
     prefix
 }
-
-// Both identifiers use Kafka's UUID representation on disk and in JSON.
-macro_rules! kafka_uuid_traits {
-    ($($id:ident),+ $(,)?) => {$(
-        impl fmt::Display for $id {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.pad(&encode(self.0))
-            }
-        }
-
-        impl FromStr for $id {
-            type Err = KafkaUuidError;
-
-            /// Parses the Kafka form only, as Kafka's `Uuid.fromString` does.
-            fn from_str(input: &str) -> Result<Self, Self::Err> {
-                decode(input).map(Self)
-            }
-        }
-
-        impl Serialize for $id {
-            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serializer.collect_str(self)
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $id {
-            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                String::deserialize(deserializer)?.parse().map_err(D::Error::custom)
-            }
-        }
-    )+};
-}
-
-kafka_uuid_traits!(ClusterId, DirectoryId);
 
 /// A string that is not a Kafka `Uuid`.
 ///

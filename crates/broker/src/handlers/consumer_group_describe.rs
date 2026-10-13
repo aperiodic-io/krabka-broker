@@ -27,12 +27,14 @@
 use {
     crate::{
         authorizer::Authorizer,
+        broker::Broker,
         codes,
         coordinator::unified::actor::{DescribeMember, DescribeView, GroupActorMessage},
+        error::BrokerError,
         handlers::{
-            RequestContext,
+            ApiVersion, RequestContext,
             authorized_operations::{DescribedGroupRow, fill_group_authorized_operations},
-            denied_topics, group_version_disabled,
+            denied_topics, group_coordinator_error, group_describe_denied, group_version_disabled,
         },
         task_util::{AskError, ask},
     },
@@ -58,100 +60,96 @@ const MEMBER_TYPE_CLASSIC: i8 = 0;
 /// `member_type` of a member that speaks the consumer protocol.
 const MEMBER_TYPE_CONSUMER: i8 = 1;
 
-context_handler! {
-    ConsumerGroupDescribeRequest => ConsumerGroupDescribeResponse,
-    (broker, req, _version, ctx),
-    {
-        let coordinator = broker.group_coordinator.clone();
-        let image = broker.controller.current_image();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ConsumerGroupDescribeRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<ConsumerGroupDescribeResponse, BrokerError> {
+    let coordinator = broker.group_coordinator.clone();
+    let image = broker.controller.current_image();
 
-        // Kafka's `isConsumerGroupProtocolEnabled` gate, checked before any
-        // authorization: the `consumer` rebalance protocol must be enabled and
-        // `group.version` must be finalized at 1 or above.
-        if !coordinator.config.next_gen_enabled() || group_version_disabled(&image) {
-            let described = req
-                .group_ids
-                .iter()
-                .map(|group_id| DescribedGroup::error_row(group_id, codes::UNSUPPORTED_VERSION, None))
-                .collect();
-            return Ok(response(described));
-        }
-
-        let default_assignor = coordinator
-            .config
-            .assignors
-            .first()
-            .map(|a| a.name())
-            .unwrap_or_default();
-        // Kafka places every GROUP_AUTHORIZATION_FAILED row first, ahead of the
-        // coordinator results, which keep request order among themselves.
-        let mut denied: Vec<DescribedGroup> = Vec::new();
-        let mut described: Vec<DescribedGroup> = Vec::with_capacity(req.group_ids.len());
-        for group_id in &req.group_ids {
-            if crate::handlers::group_describe_denied(
-                broker.config.authorizer.as_ref(),
-                &image,
-                ctx,
-                group_id,
-            ) {
-                denied.push(DescribedGroup::error_row(
-                    group_id,
-                    codes::GROUP_AUTHORIZATION_FAILED,
-                    None,
-                ));
-                continue;
-            }
-            // GroupCoordinatorService.consumerGroupDescribe rejects an empty id
-            // before it routes the group to a shard.
-            if group_id.is_empty() {
-                described.push(DescribedGroup::error_row("", codes::INVALID_GROUP_ID, None));
-                continue;
-            }
-            if let Some(error_code) = crate::handlers::group_coordinator_error(broker, group_id) {
-                described.push(DescribedGroup::error_row(group_id, error_code, None));
-                continue;
-            }
-            // The `Describe` arm dispatches on the actor's LIVE `group.kind`: it
-            // replies ONLY for a consumer-kind group and drops the sender
-            // otherwise, so an upgraded group is reachable and a classic group
-            // is not.
-            // A share or streams group is another type's group, which Kafka's
-            // `consumerGroup` lookup refuses whether or not an actor holds its
-            // offsets.
-            if coordinator.is_share_or_streams_group(group_id) {
-                described.push(not_found_row(group_id, "is not a consumer group"));
-                continue;
-            }
-            let Some(handle) = coordinator.find(group_id) else {
-                described.push(not_found_row(group_id, "not found"));
-                continue;
-            };
-            described.push(
-                match ask(&handle.tx, |reply| GroupActorMessage::Describe { reply }).await {
-                    Ok(view) => described_group(view, default_assignor, &image),
-                    Err(AskError::Closed) => {
-                        DescribedGroup::error_row(group_id, codes::COORDINATOR_LOAD_IN_PROGRESS, None)
-                    }
-                    Err(AskError::Dropped) => not_found_row(group_id, "is not a consumer group"),
-                },
-            );
-        }
-
-        // KIP-430: bitfield of group operations the principal is authorized for,
-        // filled only on opt-in and only for rows that came back clean. Denied
-        // and errored rows keep the wire-default `i32::MIN` sentinel.
-        fill_group_authorized_operations(
-            broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            req.include_authorized_operations,
-            &mut described,
-        );
-
-        denied.extend(described);
-        hide_undescribable_topics(broker.config.authorizer.as_ref(), &image, ctx, &mut denied);
-        Ok(response(denied))
+    // Kafka's `isConsumerGroupProtocolEnabled` gate, checked before any
+    // authorization: the `consumer` rebalance protocol must be enabled and
+    // `group.version` must be finalized at 1 or above.
+    if !coordinator.config.next_gen_enabled() || group_version_disabled(&image) {
+        let described = req
+            .group_ids
+            .iter()
+            .map(|group_id| DescribedGroup::error_row(group_id, codes::UNSUPPORTED_VERSION, None))
+            .collect();
+        return Ok(response(described));
     }
+
+    let default_assignor = coordinator
+        .config
+        .assignors
+        .first()
+        .map(|a| a.name())
+        .unwrap_or_default();
+    // Kafka places every GROUP_AUTHORIZATION_FAILED row first, ahead of the
+    // coordinator results, which keep request order among themselves.
+    let mut denied: Vec<DescribedGroup> = Vec::new();
+    let mut described: Vec<DescribedGroup> = Vec::with_capacity(req.group_ids.len());
+    for group_id in &req.group_ids {
+        if group_describe_denied(broker.config.authorizer.as_ref(), &image, ctx, group_id) {
+            denied.push(DescribedGroup::error_row(
+                group_id,
+                codes::GROUP_AUTHORIZATION_FAILED,
+                None,
+            ));
+            continue;
+        }
+        // GroupCoordinatorService.consumerGroupDescribe rejects an empty id
+        // before it routes the group to a shard.
+        if group_id.is_empty() {
+            described.push(DescribedGroup::error_row("", codes::INVALID_GROUP_ID, None));
+            continue;
+        }
+        if let Some(error_code) = group_coordinator_error(broker, group_id) {
+            described.push(DescribedGroup::error_row(group_id, error_code, None));
+            continue;
+        }
+        // The `Describe` arm dispatches on the actor's LIVE `group.kind`: it
+        // replies ONLY for a consumer-kind group and drops the sender
+        // otherwise, so an upgraded group is reachable and a classic group
+        // is not.
+        // A share or streams group is another type's group, which Kafka's
+        // `consumerGroup` lookup refuses whether or not an actor holds its
+        // offsets.
+        if coordinator.is_share_or_streams_group(group_id) {
+            described.push(not_found_row(group_id, "is not a consumer group"));
+            continue;
+        }
+        let Some(handle) = coordinator.find(group_id) else {
+            described.push(not_found_row(group_id, "not found"));
+            continue;
+        };
+        described.push(
+            match ask(&handle.tx, |reply| GroupActorMessage::Describe { reply }).await {
+                Ok(view) => described_group(view, default_assignor, &image),
+                Err(AskError::Closed) => {
+                    DescribedGroup::error_row(group_id, codes::COORDINATOR_LOAD_IN_PROGRESS, None)
+                }
+                Err(AskError::Dropped) => not_found_row(group_id, "is not a consumer group"),
+            },
+        );
+    }
+
+    // KIP-430: bitfield of group operations the principal is authorized for,
+    // filled only on opt-in and only for rows that came back clean. Denied
+    // and errored rows keep the wire-default `i32::MIN` sentinel.
+    fill_group_authorized_operations(
+        broker.config.authorizer.as_ref(),
+        &image,
+        ctx,
+        req.include_authorized_operations,
+        &mut described,
+    );
+
+    denied.extend(described);
+    hide_undescribable_topics(broker.config.authorizer.as_ref(), &image, ctx, &mut denied);
+    Ok(response(denied))
 }
 
 /// The message of the row Kafka substitutes for a group whose assignment names
@@ -424,7 +422,7 @@ mod tests {
             }
         };
         (@plain $type:ident $fields:tt) => { $type $fields };
-        (@tagged $type:ident $fields:tt) => { tagged_wire!($type $fields) };
+        (@tagged $type:ident $fields:tt) => { krabka_macros::tagged_wire!($type $fields) };
     }
 
     member_identity_fixture!(view_member -> DescribeMember, plain, {
@@ -446,7 +444,7 @@ mod tests {
     }
 
     fn topic(topic_id: Uuid, topic_name: &str, partitions: &[i32]) -> TopicPartitions {
-        tagged_wire!(TopicPartitions {
+        krabka_macros::tagged_wire!(TopicPartitions {
             topic_id,
             topic_name: topic_name.into(),
             partitions: partitions.to_vec(),
@@ -454,7 +452,7 @@ mod tests {
     }
 
     fn assigned(topics: Vec<TopicPartitions>) -> Assignment {
-        tagged_wire!(Assignment {
+        krabka_macros::tagged_wire!(Assignment {
             topic_partitions: topics,
         })
     }
@@ -466,7 +464,7 @@ mod tests {
     });
 
     fn wire_group(group_state: &str, assignor_name: &str, members: Vec<Member>) -> DescribedGroup {
-        tagged_wire!(DescribedGroup {
+        krabka_macros::tagged_wire!(DescribedGroup {
             error_code: codes::NONE,
             error_message: None,
             group_id: "cg".into(),
@@ -587,7 +585,7 @@ mod tests {
 
         let resp = response(vec![first, second]);
 
-        let expected = unthrottled_wire!(ConsumerGroupDescribeResponse {
+        let expected = krabka_macros::unthrottled_wire!(ConsumerGroupDescribeResponse {
             groups: vec![
                 error_group_row("a", codes::GROUP_ID_NOT_FOUND, None),
                 error_group_row("b", codes::UNSUPPORTED_VERSION, None),
@@ -597,7 +595,7 @@ mod tests {
     }
 
     fn error_group_row(group_id: &str, error_code: i16, message: Option<&str>) -> DescribedGroup {
-        tagged_wire!(DescribedGroup {
+        krabka_macros::tagged_wire!(DescribedGroup {
             error_code,
             error_message: message.map(str::to_string),
             group_id: group_id.to_string(),
@@ -738,7 +736,7 @@ mod tests {
                 .expect("ConsumerGroupDescribe handler");
 
             assert!(
-                resp == unthrottled_wire!(ConsumerGroupDescribeResponse {
+                resp == krabka_macros::unthrottled_wire!(ConsumerGroupDescribeResponse {
                     groups: vec![expected],
                 }),
                 "{group_id:?}"

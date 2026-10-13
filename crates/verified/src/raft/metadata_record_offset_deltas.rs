@@ -2,7 +2,10 @@ use super::{FetchContent, FetchFence, FetchResponseFacts, FetchResponseMutation}
 #[cfg(creusot)]
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The response is a successful answer from the leader this node already
 /// follows, in this node's epoch: only such a response may change the log or
 /// the HWM (`KafkaRaftClient.handleFetchResponse` applies content only for
@@ -16,9 +19,11 @@ pub fn leader_fence_holds(fence: FetchFence, response: FetchResponseFacts) -> bo
             && response.error_none
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Kafka's `maybeHandleCommonResponse` discovery case: a response in this
 /// node's epoch names a leader while the node knows none. It applies whatever
 /// the error is, since a follower that knows the leader answers
@@ -32,7 +37,6 @@ pub fn discovery_applies(fence: FetchFence, response: FetchResponseFacts) -> boo
             && response.epoch == fence.current_epoch
             && response.leader != None
     }
-}
 }
 
 /// Fence a Fetch response against the live role, leader, and epoch, then

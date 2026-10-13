@@ -1,6 +1,9 @@
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn finished_selection(
     starts: Seq<i64>,
     ends: Seq<i64>,
@@ -20,7 +23,6 @@ fn finished_selection(
                 ==> !finished[i] || starts[i]@ < 0 || ends[i]@ < starts[i]@,
         }
     }
-}
 }
 
 macro_rules! finished_selection_kernel {
@@ -167,7 +169,10 @@ pub fn remote_time_index_candidate_count(entries: &[(i64, u32)], target_timestam
     count
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The selected epoch is the greatest valid start in the scanned segment prefix.
 fn owning_epoch_selection(
     epochs: Seq<i32>,
@@ -186,5 +191,4 @@ fn owning_epoch_selection(
         None => forall<i: Int> 0 <= i && i < count
             ==> epochs[i]@ < 0 || starts[i]@ < first || last < starts[i]@,
     } }
-}
 }

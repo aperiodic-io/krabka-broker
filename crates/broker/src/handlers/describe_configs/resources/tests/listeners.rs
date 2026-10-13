@@ -173,7 +173,7 @@ fn named(
 // A key that `server.properties` does not name and that has no built-in
 // default: a null value at `DEFAULT_CONFIG`, with no synonym.
 fn unset(name: &str, config_type: ConfigType) -> DescribeConfigsResourceResult {
-    tagged_wire!(DescribeConfigsResourceResult {
+    krabka_macros::tagged_wire!(DescribeConfigsResourceResult {
         name: name.to_owned(),
         value: None,
         read_only: true,

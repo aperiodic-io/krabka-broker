@@ -174,33 +174,33 @@ mod tests {
         let responses = group_responses(pending);
 
         let expected = vec![
-            tagged_wire!(ShareFetchableTopicResponse {
+            krabka_macros::tagged_wire!(ShareFetchableTopicResponse {
                 topic_id: ProtoUuid(*first_topic.as_bytes()),
                 partitions: vec![
-                    tagged_wire!(PartitionData {
+                    krabka_macros::tagged_wire!(PartitionData {
                         partition_index: 0,
                         error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
                         error_message: None,
                         acknowledge_error_code: codes::NONE,
                         acknowledge_error_message: None,
-                        current_leader: tagged_wire!(LeaderIdAndEpoch {
+                        current_leader: krabka_macros::tagged_wire!(LeaderIdAndEpoch {
                             leader_id: -1,
                             leader_epoch: -1,
                         }),
                         records: None,
-                        acquired_records: vec![tagged_wire!(AcquiredRecords {
+                        acquired_records: vec![krabka_macros::tagged_wire!(AcquiredRecords {
                             first_offset: 4,
                             last_offset: 7,
                             delivery_count: 2,
                         })],
                     }),
-                    tagged_wire!(PartitionData {
+                    krabka_macros::tagged_wire!(PartitionData {
                         partition_index: 1,
                         error_code: codes::NONE,
                         error_message: None,
                         acknowledge_error_code: codes::NONE,
                         acknowledge_error_message: None,
-                        current_leader: tagged_wire!(LeaderIdAndEpoch {
+                        current_leader: krabka_macros::tagged_wire!(LeaderIdAndEpoch {
                             leader_id: 0,
                             leader_epoch: 0,
                         }),
@@ -209,15 +209,15 @@ mod tests {
                     }),
                 ],
             }),
-            tagged_wire!(ShareFetchableTopicResponse {
+            krabka_macros::tagged_wire!(ShareFetchableTopicResponse {
                 topic_id: ProtoUuid(*second_topic.as_bytes()),
-                partitions: vec![tagged_wire!(PartitionData {
+                partitions: vec![krabka_macros::tagged_wire!(PartitionData {
                     partition_index: 3,
                     error_code: codes::NOT_LEADER_OR_FOLLOWER,
                     error_message: None,
                     acknowledge_error_code: codes::NONE,
                     acknowledge_error_message: None,
-                    current_leader: tagged_wire!(LeaderIdAndEpoch {
+                    current_leader: krabka_macros::tagged_wire!(LeaderIdAndEpoch {
                         leader_id: 2,
                         leader_epoch: 9,
                     }),

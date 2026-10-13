@@ -74,6 +74,14 @@ pub(super) async fn replicator_loop(task: ReplicatorTask) {
     // A future log that a restart left on disk may hold a tail the current log
     // dropped while no task ran, which no in-memory mark tells of.
     let mut owes_epoch_check = true;
+    macro_rules! wait_retry_or_cancel {
+        ($cancel:expr, $backoff:expr) => {
+            tokio::select! {
+                () = $cancel.cancelled() => break,
+                () = tokio::time::sleep($backoff.to_std()) => continue,
+            }
+        };
+    }
     loop {
         if cancel.is_cancelled() {
             break;
@@ -103,10 +111,7 @@ pub(super) async fn replicator_loop(task: ReplicatorTask) {
                     error = %e,
                     "future-log replicator could not truncate the future log; retrying"
                 );
-                tokio::select! {
-                    () = cancel.cancelled() => break,
-                    () = tokio::time::sleep(policy.retry_backoff.to_std()) => continue,
-                }
+                wait_retry_or_cancel!(cancel, policy.retry_backoff);
             }
             owed_cut = None;
             owes_epoch_check = false;
@@ -121,18 +126,12 @@ pub(super) async fn replicator_loop(task: ReplicatorTask) {
                     error = %e,
                     "future-log replicator catch-up failed; retrying"
                 );
-                tokio::select! {
-                    () = cancel.cancelled() => break,
-                    () = tokio::time::sleep(policy.retry_backoff.to_std()) => continue,
-                }
+                wait_retry_or_cancel!(cancel, policy.retry_backoff);
             }
         };
 
         if advance.throttled {
-            tokio::select! {
-                () = cancel.cancelled() => break,
-                () = tokio::time::sleep(policy.retry_backoff.to_std()) => continue,
-            }
+            wait_retry_or_cancel!(cancel, policy.retry_backoff);
         }
 
         if !advance.caught_up {

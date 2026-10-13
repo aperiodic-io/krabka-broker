@@ -30,7 +30,7 @@ pub(super) fn apply_seed(state: &mut ShareGroupState, seed: ShareGroupSeed) {
         m.rack_id = meta.rack_id;
         state.members.insert(mid, m);
     }
-    crate::coordinator::unified::seeds::hydrate_member_epochs!(state, seed; m, cur {
+    krabka_macros::hydrate_member_epochs!(state, seed; m, cur {
             for (tid, parts) in cur.assigned_partitions {
                 m.assigned_partitions.insert(tid, parts);
             }
@@ -94,7 +94,7 @@ fn restore_named_partitions(
 /// Snapshot a `ShareGroupState` into a `ShareGroupSeed` that can restore
 /// a freshly-respawned actor. It mirrors what bootstrap replay produces.
 pub(super) fn snapshot_seed(state: &ShareGroupState) -> ShareGroupSeed {
-    crate::coordinator::unified::seeds::snapshot_member_maps! { state;
+    krabka_macros::snapshot_member_maps! { state;
         members, current_per_member, target_per_member;
         member_metadata_value, current_assignment_value; |mid, m| {
             if let Some(target) = state.target.per_member.get(mid) {

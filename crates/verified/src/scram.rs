@@ -2,62 +2,67 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Credential operation represented by one KIP-554 request row.
-    pub enum ScramAlterationKind {
-        Delete,
-        Upsert,
-    }
-
-    /// State left by an earlier row for the same user.
-    pub enum ScramPriorState {
-        Unseen,
-        Accepted,
-        Rejected,
-    }
-
-    /// Scalar facts projected from one request row and the current metadata image.
-    pub struct ScramAlterationFacts {
-        pub kind: ScramAlterationKind,
-        pub prior: ScramPriorState,
-        pub authorized: bool,
-        pub name_empty: bool,
-        pub mechanism: i8,
-        pub iterations: i32,
-        pub min_iterations: i32,
-        pub max_iterations: i32,
-        pub deletion_target_exists: bool,
-    }
-
-    /// The first applicable Kafka error, or the mechanism of one accepted row.
-    pub enum ScramAlterationDecision {
-        KeepPriorError,
-        Duplicate,
-        Unauthorized,
-        EmptyName,
-        UnsupportedMechanism,
-        TooFewIterations,
-        TooManyIterations,
-        MissingCredential,
-        AcceptSha256,
-        AcceptSha512,
-    }
+/// Credential operation represented by one KIP-554 request row.
+#[krabka_macros::model_type]
+pub enum ScramAlterationKind {
+    Delete,
+    Upsert,
 }
 
-open_logic! {
+/// State left by an earlier row for the same user.
+#[krabka_macros::model_type]
+pub enum ScramPriorState {
+    Unseen,
+    Accepted,
+    Rejected,
+}
+
+/// Scalar facts projected from one request row and the current metadata image.
+#[krabka_macros::model_type]
+pub struct ScramAlterationFacts {
+    pub kind: ScramAlterationKind,
+    pub prior: ScramPriorState,
+    pub authorized: bool,
+    pub name_empty: bool,
+    pub mechanism: i8,
+    pub iterations: i32,
+    pub min_iterations: i32,
+    pub max_iterations: i32,
+    pub deletion_target_exists: bool,
+}
+
+/// The first applicable Kafka error, or the mechanism of one accepted row.
+#[krabka_macros::model_type]
+pub enum ScramAlterationDecision {
+    KeepPriorError,
+    Duplicate,
+    Unauthorized,
+    EmptyName,
+    UnsupportedMechanism,
+    TooFewIterations,
+    TooManyIterations,
+    MissingCredential,
+    AcceptSha256,
+    AcceptSha512,
+}
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn alteration_mechanism_admitted(facts: ScramAlterationFacts) -> bool {
     pearlite! { alteration_name_admitted(facts)
     && (facts.mechanism@ == 1 || facts.mechanism@ == 2) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn alteration_name_admitted(facts: ScramAlterationFacts) -> bool {
     pearlite! { facts.prior == ScramPriorState::Unseen
     && facts.authorized
     && !facts.name_empty }
-}
 }
 
 /// Apply KIP-554 validation and conflict rules in their response precedence.

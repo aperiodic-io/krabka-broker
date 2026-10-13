@@ -127,7 +127,7 @@ async fn denied_handler_preserves_topic_and_partition_response_fields() {
     answer_request!((req, bytes, resp), broker, version, ctx);
 
     let denied_row = |partition_index: i32| {
-        tagged_wire!(ListOffsetsPartitionResponse {
+        krabka_macros::tagged_wire!(ListOffsetsPartitionResponse {
             partition_index,
             error_code: codes::TOPIC_AUTHORIZATION_FAILED,
             timestamp: -1,
@@ -135,8 +135,8 @@ async fn denied_handler_preserves_topic_and_partition_response_fields() {
             leader_epoch: -1,
         })
     };
-    let expected = unthrottled_wire!(ListOffsetsResponse {
-        topics: vec![tagged_wire!(ListOffsetsTopicResponse {
+    let expected = krabka_macros::unthrottled_wire!(ListOffsetsResponse {
+        topics: vec![krabka_macros::tagged_wire!(ListOffsetsTopicResponse {
             name: "orders".to_string(),
             partitions: vec![denied_row(0), denied_row(2)],
         })],

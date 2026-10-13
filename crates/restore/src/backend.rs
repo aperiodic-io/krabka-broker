@@ -143,20 +143,27 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn keys_are_built_under_the_prefix() {
+    #[yare::parameterized(
+        prefixed = { Some("/tier/") },
+        bare = { None },
+    )]
+    fn keys_are_built_with_an_optional_prefix(prefix: Option<&str>) {
         // `LocalFileSystem` canonicalizes its root, so the archive must exist.
         let archive = tempfile::tempdir().expect("temp dir");
-        let store = open_archive(&args_from(&[
-            "--archive-local",
-            &archive.path().display().to_string(),
-            "--archive-prefix",
-            "/tier/",
-        ]))
-        .expect("store");
-        check!(store.prefix() == Some("tier"));
-        check!(store.key("orders-0-abc/000.log") == Path::from("tier/orders-0-abc/000.log"));
-        check!(store.root() == Some(Path::from("tier")));
+        let local = archive.path().display().to_string();
+        let mut args = vec!["--archive-local", local.as_str()];
+        if let Some(prefix) = prefix {
+            args.extend(["--archive-prefix", prefix]);
+        }
+        let store = open_archive(&args_from(&args)).expect("store");
+        let expected_prefix = prefix.map(|_| Path::from("tier"));
+        let expected_key = match prefix {
+            Some(_) => "tier/orders-0-abc/000.log",
+            None => "orders-0-abc/000.log",
+        };
+        check!(store.prefix() == prefix.map(|_| "tier"));
+        check!(store.key("orders-0-abc/000.log") == Path::from(expected_key));
+        check!(store.root() == expected_prefix);
     }
 
     /// The seam a test drives the scan through: a store built elsewhere, with
@@ -191,18 +198,5 @@ mod tests {
         check!(bare.prefix().is_none());
         check!(bare.root().is_none());
         check!(bare.key("orders-0-abc/000.log") == Path::from("orders-0-abc/000.log"));
-    }
-
-    #[test]
-    fn keys_are_bare_without_a_prefix() {
-        let archive = tempfile::tempdir().expect("temp dir");
-        let store = open_archive(&args_from(&[
-            "--archive-local",
-            &archive.path().display().to_string(),
-        ]))
-        .expect("store");
-        check!(store.prefix().is_none());
-        check!(store.key("orders-0-abc/000.log") == Path::from("orders-0-abc/000.log"));
-        check!(store.root().is_none());
     }
 }

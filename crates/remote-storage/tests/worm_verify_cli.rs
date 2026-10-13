@@ -268,13 +268,35 @@ fn run(args: &[String]) -> Run {
     }
 }
 
+fn check_exit_code(result: &Run, expected: i32) {
+    check!(
+        result.code == Some(expected),
+        "expected exit code {expected}; stdout: {}; stderr: {}",
+        result.stdout,
+        result.stderr
+    );
+}
+
+fn edit_segment(fixture: &Fixture, edit: impl FnOnce(&mut Vec<u8>)) {
+    let victim = fixture.root().join(&fixture.log_keys[1]);
+    let mut body = std::fs::read(&victim).unwrap();
+    edit(&mut body);
+    std::fs::write(victim, body).unwrap();
+}
+
+#[derive(Clone, Copy)]
+enum BodyTampering {
+    Truncate,
+    SameLengthEdit,
+}
+
 #[test]
 fn a_clean_archive_verifies_and_prints_its_tip() {
     let fixture = Fixture::build().call();
 
     let result = run(&fixture.base_args());
 
-    check!(result.code == Some(0), "stderr: {}", result.stderr);
+    check_exit_code(&result, 0);
     check!(
         result
             .stdout
@@ -302,42 +324,41 @@ fn the_printed_tip_satisfies_expect_head_on_the_next_run() {
 
     let result = run(&args);
 
-    check!(result.code == Some(0), "stderr: {}", result.stderr);
+    check_exit_code(&result, 0);
 }
 
-#[test]
-fn a_truncated_object_is_reported_as_tampering() {
+#[yare::parameterized(
+    truncated = { BodyTampering::Truncate },
+    same_length_edit = { BodyTampering::SameLengthEdit },
+)]
+fn body_tampering_respects_the_deep_verification_boundary(tampering: BodyTampering) {
     let fixture = Fixture::build().call();
-    let victim = fixture.root().join(&fixture.log_keys[1]);
-    let body = std::fs::read(&victim).unwrap();
-    std::fs::write(&victim, &body[..body.len() - 1]).unwrap();
-
-    let result = run(&fixture.base_args());
-
-    check!(result.code == Some(1), "stdout: {}", result.stdout);
-    check!(result.stderr.contains("TAMPER DETECTED"));
-    check!(result.stderr.contains(&fixture.log_keys[1]));
-    check!(result.stderr.contains("the manifest records a size of"));
-}
-
-#[test]
-fn a_same_length_body_edit_needs_deep_to_be_seen() {
-    let fixture = Fixture::build().call();
-    let victim = fixture.root().join(&fixture.log_keys[1]);
-    let mut body = std::fs::read(&victim).unwrap();
-    body[0] ^= 0xff;
-    std::fs::write(&victim, &body).unwrap();
+    match tampering {
+        BodyTampering::Truncate => edit_segment(&fixture, |body| {
+            body.pop();
+        }),
+        BodyTampering::SameLengthEdit => edit_segment(&fixture, |body| {
+            body[0] ^= 0xff;
+        }),
+    }
 
     let shallow = run(&fixture.base_args());
-    check!(shallow.code == Some(0), "stderr: {}", shallow.stderr);
+    if matches!(tampering, BodyTampering::Truncate) {
+        check_exit_code(&shallow, 1);
+        check!(shallow.stderr.contains("TAMPER DETECTED"));
+        check!(shallow.stderr.contains(&fixture.log_keys[1]));
+        check!(shallow.stderr.contains("the manifest records a size of"));
+    } else {
+        check_exit_code(&shallow, 0);
 
-    let mut args = fixture.base_args();
-    args.push("--deep".to_string());
-    let deep = run(&args);
+        let mut args = fixture.base_args();
+        args.push("--deep".to_string());
+        let deep = run(&args);
 
-    check!(deep.code == Some(1), "stdout: {}", deep.stdout);
-    check!(deep.stderr.contains("TAMPER DETECTED"));
-    check!(deep.stderr.contains("hashes to"));
+        check_exit_code(&deep, 1);
+        check!(deep.stderr.contains("TAMPER DETECTED"));
+        check!(deep.stderr.contains("hashes to"));
+    }
 }
 
 #[yare::parameterized(
@@ -361,7 +382,7 @@ fn incomplete_attestation_is_reported(
 
     let result = run(&fixture.base_args());
 
-    check!(result.code == Some(1), "stdout: {}", result.stdout);
+    check_exit_code(&result, 1);
     check!(result.stderr.contains("INCOMPLETE ATTESTATION"));
     check!(result.stderr.contains(expected_detail));
 }
@@ -376,7 +397,7 @@ fn a_tip_that_differs_from_expect_head_is_a_head_mismatch() {
 
     let result = run(&args);
 
-    check!(result.code == Some(1), "stdout: {}", result.stdout);
+    check_exit_code(&result, 1);
     check!(result.stderr.contains("HEAD MISMATCH"));
     check!(result.stderr.contains(&expected.to_string()));
     check!(result.stderr.contains(&fixture.tip.to_string()));
@@ -396,7 +417,7 @@ fn an_object_no_manifest_names_is_reported_but_does_not_fail_the_run() {
 
     let result = run(&fixture.base_args());
 
-    check!(result.code == Some(0), "stderr: {}", result.stderr);
+    check_exit_code(&result, 0);
     check!(
         result
             .stderr
@@ -424,7 +445,7 @@ fn strict_orphans_grades_an_orphan_as_a_failure() {
     args.push("--strict-orphans".to_string());
     let result = run(&args);
 
-    check!(result.code == Some(1), "stdout: {}", result.stdout);
+    check_exit_code(&result, 1);
     check!(
         result
             .stderr
@@ -440,7 +461,7 @@ fn an_empty_archive_verifies() {
 
     let result = run(&["verify".to_string(), "--local-dir".to_string(), local_dir]);
 
-    check!(result.code == Some(0), "stderr: {}", result.stderr);
+    check_exit_code(&result, 0);
     check!(result.stdout.contains("OK: empty archive"));
 }
 
@@ -448,7 +469,7 @@ fn an_empty_archive_verifies() {
 fn naming_neither_a_bucket_nor_a_directory_is_a_usage_error() {
     let result = run(&["verify".to_string()]);
 
-    check!(result.code == Some(2), "stdout: {}", result.stdout);
+    check_exit_code(&result, 2);
     check!(result.stderr.contains("--bucket"));
 }
 
@@ -459,7 +480,7 @@ fn a_chain_restart_is_an_incomplete_attestation_that_names_its_fix() {
 
     let result = run(&fixture.base_args());
 
-    check!(result.code == Some(1), "stdout: {}", result.stdout);
+    check_exit_code(&result, 1);
     check!(
         result
             .stderr
@@ -480,7 +501,7 @@ fn allow_epoch_restarts_accepts_a_restarted_chain() {
 
     let result = run(&args);
 
-    check!(result.code == Some(0), "stderr: {}", result.stderr);
+    check_exit_code(&result, 0);
     check!(result.stdout.contains("2 epoch(s)"));
 }
 
@@ -496,7 +517,7 @@ fn an_emptied_archive_still_fails_against_an_expected_head() {
         ChainHead([0x5a; 32]).to_string(),
     ]);
 
-    check!(result.code == Some(1), "stdout: {}", result.stdout);
+    check_exit_code(&result, 1);
     check!(result.stderr.contains("HEAD MISMATCH"));
     check!(result.stderr.contains("archive tip none"));
 }
@@ -514,7 +535,7 @@ fn both_key_pairs_verify_an_archive_that_spans_a_rotation() {
 
     let result = run(&args);
 
-    check!(result.code == Some(0), "stderr: {}", result.stderr);
+    check_exit_code(&result, 0);
     check!(!result.stderr.contains("INCOMPLETE ATTESTATION"));
     check!(
         result
@@ -532,7 +553,7 @@ fn an_unpaired_key_flag_is_rejected_rather_than_dropped() {
 
     let result = run(&args);
 
-    check!(result.code == Some(1), "stdout: {}", result.stdout);
+    check_exit_code(&result, 1);
     check!(
         result.stderr.contains("pair by position"),
         "stderr: {}",

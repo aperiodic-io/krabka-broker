@@ -14,7 +14,7 @@ use krabka_protocol::owned::{
 
 /// Fully-specified expected partition row (no struct-update syntax).
 pub(super) fn expected_row(partition_index: i32, error_code: i16) -> OffsetDeleteResponsePartition {
-    tagged_wire!(OffsetDeleteResponsePartition {
+    krabka_macros::tagged_wire!(OffsetDeleteResponsePartition {
         partition_index,
         error_code,
     })
@@ -25,7 +25,7 @@ pub(super) fn expected_topic(
     name: &str,
     partitions: Vec<OffsetDeleteResponsePartition>,
 ) -> OffsetDeleteResponseTopic {
-    tagged_wire!(OffsetDeleteResponseTopic {
+    krabka_macros::tagged_wire!(OffsetDeleteResponseTopic {
         name: name.to_string(),
         partitions,
     })

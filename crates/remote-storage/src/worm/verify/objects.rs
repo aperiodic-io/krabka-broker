@@ -26,6 +26,23 @@ use {
     std::{collections::HashSet, sync::Arc},
 };
 
+fn object_is_in_manifest_segment(
+    key: &str,
+    manifest: &SegmentManifest,
+    suffix: Option<&str>,
+) -> bool {
+    let segment = &manifest.body.segment;
+    key.rsplit('/')
+        .next()
+        .and_then(parse_segment_file_name)
+        .is_some_and(|parsed| {
+            parsed.base_offset == segment.start_offset
+                && parsed.segment_id == segment.segment_id
+                && parsed.suffix != MANIFEST_SUFFIX
+                && suffix.is_none_or(|suffix| parsed.suffix == suffix)
+        })
+}
+
 /// Checks every object a manifest names, to the requested depth.
 ///
 /// An object must live in the manifest's own partition directory. A manifest
@@ -37,19 +54,9 @@ pub(super) async fn check_objects(
     listing: &DirListing,
     depth: VerifyDepth,
 ) -> Result<Option<String>, WormError> {
-    let segment = &manifest.body.segment;
     let listed_count = listing
         .keys()
-        .filter(|key| {
-            key.rsplit('/')
-                .next()
-                .and_then(parse_segment_file_name)
-                .is_some_and(|parsed| {
-                    parsed.base_offset == segment.start_offset
-                        && parsed.segment_id == segment.segment_id
-                        && parsed.suffix != MANIFEST_SUFFIX
-                })
-        })
+        .filter(|key| object_is_in_manifest_segment(key, manifest, None))
         .count();
     let mut keys = HashSet::new();
     let mut unique_keys = true;
@@ -69,17 +76,8 @@ pub(super) async fn check_objects(
             first_duplicate.get_or_insert_with(|| object.key.clone());
         }
 
-        let coordinate_matches = object
-            .key
-            .rsplit('/')
-            .next()
-            .and_then(parse_segment_file_name)
-            .is_some_and(|parsed| {
-                parsed.base_offset == segment.start_offset
-                    && parsed.segment_id == segment.segment_id
-                    && parsed.suffix == object.suffix
-                    && parsed.suffix != MANIFEST_SUFFIX
-            });
+        let coordinate_matches =
+            object_is_in_manifest_segment(&object.key, manifest, Some(&object.suffix));
         if !coordinate_matches {
             coordinates_match = false;
             first_coordinate.get_or_insert_with(|| object.key.clone());

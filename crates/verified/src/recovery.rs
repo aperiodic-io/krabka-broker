@@ -2,50 +2,52 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Whether controller recovery replays one metadata record.
-    pub enum ReplayRecordDecision {
-        /// Apply the record, which sits at this absolute offset.
-        Apply(i64),
-        /// Skip the record.
-        Skip,
-    }
+/// Whether controller recovery replays one metadata record.
+#[krabka_macros::model_type]
+pub enum ReplayRecordDecision {
+    /// Apply the record, which sits at this absolute offset.
+    Apply(i64),
+    /// Skip the record.
+    Skip,
+}
 
-    /// Whether a replay loop advances its cursor, and to where.
-    pub enum ReplayCursorDecision {
-        /// Continue replay from this exclusive next offset.
-        Advance(i64),
-        /// End replay.
-        Stop,
-    }
+/// Whether a replay loop advances its cursor, and to where.
+#[krabka_macros::model_type]
+pub enum ReplayCursorDecision {
+    /// Continue replay from this exclusive next offset.
+    Advance(i64),
+    /// End replay.
+    Stop,
+}
 
-    /// The keyed barrier-state record that recovery is folding.
-    pub enum BarrierRecoveryRecordKind {
-        Group,
-        InjectionStart,
-        Cut,
-    }
+/// The keyed barrier-state record that recovery is folding.
+#[krabka_macros::model_type]
+pub enum BarrierRecoveryRecordKind {
+    Group,
+    InjectionStart,
+    Cut,
+}
 
-    /// The only state mutation one ordered barrier record may perform.
-    pub enum BarrierRecoveryFoldAction {
-        DefineGroup,
-        RemoveGroup,
-        SetPending,
-        KeepPending,
-        ClearPending,
-        UpsertCut { retire_pending: bool },
-        RemoveCut,
-    }
+/// The only state mutation one ordered barrier record may perform.
+#[krabka_macros::model_type]
+pub enum BarrierRecoveryFoldAction {
+    DefineGroup,
+    RemoveGroup,
+    SetPending,
+    KeepPending,
+    ClearPending,
+    UpsertCut { retire_pending: bool },
+    RemoveCut,
+}
 
-    /// Whether recovery may close an interrupted barrier injection.
-    pub enum BarrierRecoveryFinalizeDecision {
-        NoPending,
-        MalformedPending,
-        UnknownCoordinator,
-        FencedCoordinator,
-        FinalizePartial,
-    }
+/// Whether recovery may close an interrupted barrier injection.
+#[krabka_macros::model_type]
+pub enum BarrierRecoveryFinalizeDecision {
+    NoPending,
+    MalformedPending,
+    UnknownCoordinator,
+    FencedCoordinator,
+    FinalizePartial,
 }
 
 mod replay_cursor_decision;

@@ -96,7 +96,13 @@ pub fn parse_state_key(mut buf: &[u8]) -> Result<ShareStateKey, BrokerError> {
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Share reads and writes carry the same batch fields in distinct wire types.
+/// Conversions keep protocol defaults for their tagged fields.
+#[derive(Debug, Clone, PartialEq, Eq, krabka_macros::WireStateBatch)]
+#[wire_state_batch(
+    read = krabka_protocol::owned::read_share_group_state_response::StateBatch,
+    write = krabka_protocol::owned::write_share_group_state_request::StateBatch,
+)]
 pub struct StateBatch {
     pub first_offset: Offset,
     pub last_offset: Offset,
@@ -104,38 +110,12 @@ pub struct StateBatch {
     pub delivery_count: i16,
 }
 
-/// Share reads and writes carry the same batch fields in distinct wire types.
-/// Conversions keep protocol defaults for their tagged fields.
-macro_rules! wire_state_batch {
-    ($wire:ty; from [$($from_ref:tt)*]; to [$($to_ref:tt)*]) => {
-        impl From<$($from_ref)* $wire> for StateBatch {
-            fn from(batch: $($from_ref)* $wire) -> Self {
-                Self {
-                    first_offset: Offset(batch.first_offset),
-                    last_offset: Offset(batch.last_offset),
-                    delivery_state: batch.delivery_state,
-                    delivery_count: batch.delivery_count,
-                }
-            }
-        }
-        impl From<$($to_ref)* StateBatch> for $wire {
-            fn from(batch: $($to_ref)* StateBatch) -> Self {
-                Self {
-                    first_offset: batch.first_offset.0,
-                    last_offset: batch.last_offset.0,
-                    delivery_state: batch.delivery_state,
-                    delivery_count: batch.delivery_count,
-                    ..Self::default()
-                }
-            }
-        }
-    };
-}
-wire_state_batch!(krabka_protocol::owned::read_share_group_state_response::StateBatch; from []; to [&]);
-wire_state_batch!(krabka_protocol::owned::write_share_group_state_request::StateBatch; from [&]; to []);
-
 /// Kafka's `ShareSnapshotValue` version 0, a full state image of one key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, krabka_macros::ShareStateValue)]
+#[share_state(
+    encode_doc = "Encodes the value with its `i16` version prefix, as Kafka's `CoordinatorRecordSerde.serializeValue` does.",
+    decode_doc = "Returns an error when the bytes are not a version 0 `ShareSnapshotValue`."
+)]
 pub struct ShareSnapshotValue {
     pub snapshot_epoch: i32,
     pub state_epoch: i32,
@@ -151,7 +131,11 @@ pub struct ShareSnapshotValue {
 
 /// Kafka's `ShareUpdateValue` version 0, a delta over the latest snapshot of
 /// one key. It has no state epoch and no timestamps.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, krabka_macros::ShareStateValue)]
+#[share_state(
+    encode_doc = "Encodes the value with its `i16` version prefix.",
+    decode_doc = "Returns an error when the bytes are not a version 0 `ShareUpdateValue`."
+)]
 pub struct ShareUpdateValue {
     pub snapshot_epoch: i32,
     pub leader_epoch: i32,
@@ -159,55 +143,6 @@ pub struct ShareUpdateValue {
     pub delivery_complete_count: i32,
     pub state_batches: Vec<StateBatch>,
 }
-
-/// The two schemas share framing, batches and tags, but declare their own wire fields.
-macro_rules! state_value_codec {
-    ($name:ident, $encode:literal, $error:literal; $($field:ident: $codec:ident),+ $(,)?) => {
-        impl $name {
-            #[doc = $encode]
-            #[must_use]
-            pub fn encode(&self) -> Bytes {
-                let mut buf = BytesMut::new();
-                buf.put_i16(0);
-                $(state_value_codec!(@put &mut buf, self.$field, $codec);)+
-                put_batches(&mut buf, &self.state_batches);
-                put_value_tags(&mut buf, self.delivery_complete_count);
-                buf.freeze()
-            }
-
-            /// # Errors
-            ///
-            #[doc = $error]
-            pub fn decode(mut buf: &[u8]) -> Result<Self, BrokerError> {
-                check_version(&mut buf)?;
-                $(let $field = state_value_codec!(@get &mut buf, $codec);)+
-                let state_batches = get_batches(&mut buf)?;
-                let delivery_complete_count = get_value_tags(&mut buf)?;
-                Ok(Self { $($field,)+ delivery_complete_count, state_batches })
-            }
-        }
-    };
-    (@put $buf:expr, $value:expr, i32) => { ($buf).put_i32($value) };
-    (@put $buf:expr, $value:expr, i64) => { ($buf).put_i64($value) };
-    (@put $buf:expr, $value:expr, Offset) => { ($buf).put_i64(($value).0) };
-    (@get $buf:expr, i32) => { get_i32($buf)? };
-    (@get $buf:expr, i64) => { get_i64($buf)? };
-    (@get $buf:expr, Offset) => { Offset(get_i64($buf)?) };
-}
-
-state_value_codec!(ShareSnapshotValue, "Encodes the value with its `i16` version prefix, as Kafka's `CoordinatorRecordSerde.serializeValue` does.", "Returns an error when the bytes are not a version 0 `ShareSnapshotValue`.";
-    snapshot_epoch: i32,
-    state_epoch: i32,
-    leader_epoch: i32,
-    start_offset: Offset,
-    create_timestamp: i64,
-    write_timestamp: i64,
-);
-state_value_codec!(ShareUpdateValue, "Encodes the value with its `i16` version prefix.", "Returns an error when the bytes are not a version 0 `ShareUpdateValue`.";
-    snapshot_epoch: i32,
-    leader_epoch: i32,
-    start_offset: Offset,
-);
 
 /// Reads the `i16` value version and refuses every version but 0, the only
 /// version of both schemas.
@@ -303,6 +238,49 @@ mod tests {
 
     /// Bytes from a hex string that may hold spaces.
     fn hex(s: &str) -> Vec<u8> { wire_bytes(&s.split_whitespace().collect::<Vec<_>>()) }
+
+    #[test]
+    fn state_batches_convert_between_the_owned_read_and_borrowed_write_contracts() {
+        use krabka_protocol::owned::{
+            read_share_group_state_response::StateBatch as ReadBatch,
+            write_share_group_state_request::StateBatch as WriteBatch,
+        };
+        for (first, last, delivery_state, delivery_count) in [
+            (-1, -1, 0, 1),
+            (10, 19, 2, 3),
+            (i64::MIN, i64::MAX, i8::MAX, i16::MAX),
+        ] {
+            let value = StateBatch {
+                first_offset: Offset(first),
+                last_offset: Offset(last),
+                delivery_state,
+                delivery_count,
+            };
+            let read = ReadBatch::from(&value);
+            check!(
+                read == ReadBatch {
+                    first_offset: first,
+                    last_offset: last,
+                    delivery_state,
+                    delivery_count,
+                    ..Default::default()
+                }
+            );
+            check!(StateBatch::from(read) == value);
+            let write = WriteBatch::from(value.clone());
+            check!(
+                write
+                    == WriteBatch {
+                        first_offset: first,
+                        last_offset: last,
+                        delivery_state,
+                        delivery_count,
+                        ..Default::default()
+                    }
+            );
+            check!(StateBatch::from(&write) == value);
+        }
+    }
 
     #[test]
     fn state_key_round_trip() {

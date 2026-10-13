@@ -26,22 +26,29 @@ use {
     },
     krabka_units::{Time, convert::TimeExt as _},
     std::sync::Arc,
+    tokio_util::sync::CancellationToken,
     tracing::{debug, info},
 };
 
-super::util::reaper_task! {
-    /// Entry point of the spawned task. It returns when `shutdown` is cancelled.
-    ///
-    /// The cadence is
-    /// [`crate::config::BrokerConfig::txn_id_expiration_cleanup_interval`], which
-    /// mirrors Kafka's
-    /// `transaction.remove.expired.transaction.cleanup.interval.ms` and defaults to
-    /// one hour. The broker spawns this task only when that interval is non-zero.
-    /// `expiration` is
-    /// [`crate::config::BrokerConfig::txn_id_expiration`], Kafka's
-    /// `transactional.id.expiration.ms`.
-    run(coord, controller, interval, expiration: Time; shutdown) => sweep_once(&coord, &*controller, expiration);
-    "transactional-id expiry sweep shutting down"
+/// Entry point of the spawned task. It returns when `shutdown` is cancelled.
+///
+/// The cadence is
+/// [`crate::config::BrokerConfig::txn_id_expiration_cleanup_interval`], which
+/// mirrors Kafka's
+/// `transaction.remove.expired.transaction.cleanup.interval.ms` and defaults to
+/// one hour. The broker spawns this task only when that interval is non-zero.
+/// `expiration` is
+/// [`crate::config::BrokerConfig::txn_id_expiration`], Kafka's
+/// `transactional.id.expiration.ms`.
+#[krabka_macros::reaper_task(shutdown_message = "transactional-id expiry sweep shutting down")]
+pub(crate) async fn run(
+    coord: Arc<TxnCoordinator>,
+    controller: Arc<dyn MetadataSource>,
+    interval: Time,
+    expiration: Time,
+    shutdown: CancellationToken,
+) {
+    sweep_once(&coord, &*controller, expiration).await;
 }
 
 /// Runs one sweep: refresh the leader-partition view, then expire.

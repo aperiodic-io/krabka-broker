@@ -152,21 +152,28 @@ pub fn covering_stamp_range_index(bases: &[i64], lasts: &[i64], offset: i64) -> 
     None
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Both parallel arrays contain every index before this scan cursor.
 fn stamp_cursor_in_bounds(bases: Seq<i64>, lasts: Seq<i64>, index: Int) -> bool {
     pearlite! { index <= bases.len() && stamp_range_arrays_parallel(bases, lasts) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every listed stamp range has one inclusive end.
 pub fn stamp_range_arrays_parallel(bases: Seq<i64>, lasts: Seq<i64>) -> bool {
     pearlite! { bases.len() == lasts.len() }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The scanned prefix contains no range with these exact inclusive boundaries.
 fn no_exact_stamp_range(
     bases: Seq<i64>,
@@ -177,13 +184,14 @@ fn no_exact_stamp_range(
 ) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < count ==> bases[i]@ != base || lasts[i]@ != last }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The scanned prefix contains no inclusive range covering this offset.
 fn no_covering_stamp_range(bases: Seq<i64>, lasts: Seq<i64>, count: Int, offset: Int) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < count ==> offset < bases[i]@ || lasts[i]@ < offset }
-}
 }
 
 #[cfg(test)]

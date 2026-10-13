@@ -12,6 +12,7 @@
 //! principal and the peer for the ACL check.
 
 use {
+    crate::{error::BrokerError, handlers::ApiVersion},
     krabka_protocol::owned::{
         update_features_request::UpdateFeaturesRequest,
         update_features_response::UpdateFeaturesResponse,
@@ -81,20 +82,21 @@ fn kraft_upgrade_refusal(
     }
 }
 
-context_handler! {
-    /// The `typed` dispatch entry point: [`answer`], which the generated adapter
-    /// encodes.
-    #[tracing::instrument(
-        name = "handle_update_features",
-        level = "info",
-        skip_all,
-        fields(api = "UpdateFeatures", version)
-    )]
-    UpdateFeaturesRequest => UpdateFeaturesResponse,
-    (broker, req, version, ctx),
-    {
-        Ok(answer(broker, req, version, ctx).await)
-    }
+/// The `typed` dispatch entry point: [`answer`], which the generated adapter
+/// encodes.
+#[tracing::instrument(
+    name = "handle_update_features",
+    level = "info",
+    skip_all,
+    fields(api = "UpdateFeatures", version)
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: UpdateFeaturesRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<UpdateFeaturesResponse, BrokerError> {
+    Ok(answer(broker, req, version, ctx).await)
 }
 
 /// Runs the `UpdateFeatures` request at `version` and returns the typed

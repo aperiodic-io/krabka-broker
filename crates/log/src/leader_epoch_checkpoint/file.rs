@@ -7,8 +7,7 @@ use {
     super::{EpochEntry, LeaderEpochCheckpoint, is_strict_successor},
     crate::{
         error::LogError,
-        index::open_index,
-        io::{IoTarget, write_atomic},
+        io::{IoTarget, file_io, write_atomic},
     },
     krabka_ids::{LeaderEpoch, Offset},
     std::{
@@ -29,27 +28,26 @@ pub(crate) const LEADER_EPOCH_CHECKPOINT_VERSION: i32 = 0;
 const ARTIFACT: &str = "leader-epoch-checkpoint";
 
 impl LeaderEpochCheckpoint {
-    open_index! {
-        /// Open or recover the checkpoint at `path`. A missing file gives an
-        /// empty checkpoint.
-        /// # Errors
-        /// Returns [`LogError::UnsupportedFormatVersion`] when the header line is
-        /// a version other than `LEADER_EPOCH_CHECKPOINT_VERSION`,
-        /// [`LogError::MissingFormatVersion`] when it is not a version at all, and
-        /// an error when log I/O fails or a row is corrupt.
-        pub fn open(path: PathBuf) -> Result<Self, LogError> {
-            let entries = match fs::read_to_string(&path) {
-                Ok(s) => Self::parse(&path, &s)?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-                Err(e) => return Err(LogError::Io(e)),
-            };
-            tracing::Span::current().record("entries", entries.len());
-            Ok(Self {
-                path,
-                io: crate::io::file_io(),
-                entries,
-            })
-        }
+    #[krabka_macros::index_open]
+    /// Open or recover the checkpoint at `path`. A missing file gives an
+    /// empty checkpoint.
+    /// # Errors
+    /// Returns [`LogError::UnsupportedFormatVersion`] when the header line is
+    /// a version other than `LEADER_EPOCH_CHECKPOINT_VERSION`,
+    /// [`LogError::MissingFormatVersion`] when it is not a version at all, and
+    /// an error when log I/O fails or a row is corrupt.
+    pub fn open(path: PathBuf) -> Result<Self, LogError> {
+        let entries = match fs::read_to_string(&path) {
+            Ok(s) => Self::parse(&path, &s)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(LogError::Io(e)),
+        };
+        tracing::Span::current().record("entries", entries.len());
+        Ok(Self {
+            path,
+            io: file_io(),
+            entries,
+        })
     }
 
     /// Parse the file's text. As Kafka's `CheckpointFile.read`, an empty

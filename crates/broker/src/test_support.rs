@@ -490,23 +490,24 @@ pub(crate) fn static_records_batch(
     values: &[&'static [u8]],
     timestamp_ms: UnixMillis,
 ) -> RecordBatch {
-    let records = values
-        .iter()
-        .enumerate()
-        .map(|(index, value)| Record {
-            attributes: 0,
-            offset_delta: i32::try_from(index).expect("record offset fits i32"),
-            timestamp_delta: 0,
-            key: None,
-            value: Some(Bytes::from_static(value)),
-            headers: vec![],
-        })
-        .collect();
+    let records = record_values(values);
     fixture_records_batch(
         records,
         RecordOffsetDelta(i32::try_from(values.len()).expect("record count fits i32") - 1),
         timestamp_ms,
     )
+}
+
+pub(crate) fn record_values(values: &[&'static [u8]]) -> Vec<Record> {
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| Record {
+            offset_delta: i32::try_from(index).expect("record offset fits i32"),
+            value: Some(Bytes::from_static(value)),
+            ..Default::default()
+        })
+        .collect()
 }
 
 #[derive(derive_more::From, derive_more::Into, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1816,7 +1817,7 @@ pub(crate) async fn finalize_share_version(broker: &Broker, level: i16) {
 /// Start an in-process broker with only its authorizer swapped in.
 ///
 /// This is the most common `start_broker` shape across handler test modules;
-/// see [`wire_helpers`]. A handler test drives an authorization-failure
+/// see [`krabka_macros::wire_codec_helpers`]. A handler test drives an authorization-failure
 /// path with [`DenyAll`] or a custom authorizer, and it otherwise takes
 /// the `for_tests` defaults.
 pub(crate) async fn start_broker_with_authorizer(
@@ -1922,91 +1923,6 @@ pub(crate) async fn start_share_broker(
     }
     (handle, dir)
 }
-
-/// Generate the `encode_request` / `decode_response` / `test_context`
-/// wrapper trio that every handler's `#[cfg(test)] mod handler_tests` binds
-/// over [`encode_request`], [`decode_response`], and [`request_context`].
-///
-/// `wire_helpers!(ReqTy, RespTy, version = V, client_id = "id")` pins one
-/// wire version; leaving out `version = V` makes `encode_request` and
-/// `decode_response` take the version per call instead, for
-/// version-negotiation tests. A leading visibility, as in
-/// `wire_helpers!(pub(super) ReqTy, ...)`, lets a shared `test_support`
-/// module hand the helpers to its sibling test modules.
-macro_rules! wire_helpers {
-    ($vis:vis $req:ty, $resp:ty, $(version = $version:expr,)? client_id = $client_id:expr) => {
-        crate::test_support::encode_helper!($vis $req $(, version = $version)?);
-        crate::test_support::response_helpers!($vis $resp, $(version = $version,)? client_id = $client_id);
-    };
-}
-pub(crate) use wire_helpers;
-
-/// Like [`wire_helpers`], but for handlers whose `handle()` takes an
-/// already-typed request, so there is nothing to encode, and returns wire
-/// `Bytes`. Only `decode_response` and `test_context` are needed.
-macro_rules! response_helpers {
-    ($vis:vis $resp:ty, $(version = $version:expr,)? client_id = $client_id:expr) => {
-        crate::test_support::decode_helper!($vis $resp $(, version = $version)?);
-        crate::test_support::context_helper!($vis client_id = $client_id);
-    };
-}
-pub(crate) use response_helpers;
-
-/// Like [`wire_helpers`], but for handlers that take no [`RequestContext`],
-/// so there is no `test_context` to generate. It generates only
-/// `encode_request` and `decode_response`.
-macro_rules! codec_helpers {
-    ($vis:vis $req:ty, $resp:ty $(, version = $version:expr)?) => {
-        crate::test_support::encode_helper!($vis $req $(, version = $version)?);
-        crate::test_support::decode_helper!($vis $resp $(, version = $version)?);
-    };
-}
-pub(crate) use codec_helpers;
-
-/// The `encode_request` that [`wire_helpers`] and [`codec_helpers`] generate.
-macro_rules! encode_helper {
-    ($vis:vis $req:ty, version = $version:expr) => {
-        $vis fn encode_request(req: &$req) -> ::bytes::Bytes {
-            crate::test_support::encode_request(req, $version)
-        }
-    };
-    ($vis:vis $req:ty) => {
-        $vis fn encode_request(req: &$req, version: i16) -> ::bytes::Bytes {
-            crate::test_support::encode_request(req, version)
-        }
-    };
-}
-pub(crate) use encode_helper;
-
-/// The `decode_response` that the other wire macros generate, usable on its
-/// own by a test module that decodes but never encodes or builds a context.
-macro_rules! decode_helper {
-    ($vis:vis $resp:ty, version = $version:expr) => {
-        $vis fn decode_response(bytes: &::bytes::Bytes) -> $resp {
-            crate::test_support::decode_response(bytes, $version)
-        }
-    };
-    ($vis:vis $resp:ty) => {
-        $vis fn decode_response(bytes: &::bytes::Bytes, version: i16) -> $resp {
-            crate::test_support::decode_response(bytes, version)
-        }
-    };
-}
-pub(crate) use decode_helper;
-
-/// The `test_context` that [`wire_helpers`] and [`response_helpers`]
-/// generate, usable on its own by a test module that needs only the context.
-macro_rules! context_helper {
-    ($vis:vis client_id = $client_id:expr) => {
-        $vis fn test_context<'a>(
-            principal: &'a krabka_security::Principal,
-            peer: &'a ::std::net::SocketAddr,
-        ) -> crate::handlers::RequestContext<'a> {
-            crate::test_support::request_context(principal, peer, $client_id)
-        }
-    };
-}
-pub(crate) use context_helper;
 
 /// Bind `$ctx` to the calling module's `test_context` for a request from the
 /// anonymous principal named `$name` at [`peer`].

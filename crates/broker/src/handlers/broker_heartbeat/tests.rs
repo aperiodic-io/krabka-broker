@@ -45,7 +45,9 @@ fn request(
     }
 }
 
-crate::test_support::context_helper!(client_id = "broker-heartbeat-test");
+krabka_macros::wire_codec_helpers! {
+    test_context ["broker-heartbeat-test"];
+}
 
 /// Every heartbeat is authorized against its own principal, on the
 /// controller listener too, as Kafka's
@@ -107,7 +109,7 @@ async fn handle_leader_success_preserves_response_shape() {
         .await
         .expect("BrokerHeartbeat handler");
 
-    let expected = unthrottled_wire!(BrokerHeartbeatResponse {
+    let expected = krabka_macros::unthrottled_wire!(BrokerHeartbeatResponse {
         error_code: codes::NONE,
         is_caught_up: true,
         is_fenced: false,

@@ -179,12 +179,10 @@ impl RemoteLogMetadataManager for InmemoryRemoteLogMetadataManager {
 mod tests {
     use {
         super::*,
-        crate::metadata::RemotePartitionDeleteState,
+        crate::metadata::{RemotePartitionDeleteState, test_topic_partition as tp},
         assert2::{assert, check},
         uuid::Uuid,
     };
-
-    fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "orders", 0) }
 
     krabka_macros::remote_segment_fixtures!(started, finish, crate, end);
 
@@ -192,12 +190,20 @@ mod tests {
 
     krabka_macros::remote_segment_check!(check_finished_segment);
 
+    fn manager_with_finished_segment() -> InmemoryRemoteLogMetadataManager {
+        let manager = InmemoryRemoteLogMetadataManager::new();
+        manager
+            .add_remote_log_segment_metadata(started(10, 0, 99))
+            .unwrap();
+        manager
+            .update_remote_log_segment_metadata(finish(10))
+            .unwrap();
+        manager
+    }
+
     #[test]
     fn add_finish_query_round_trip() {
-        let m = InmemoryRemoteLogMetadataManager::new();
-        m.add_remote_log_segment_metadata(started(10, 0, 99))
-            .unwrap();
-        m.update_remote_log_segment_metadata(finish(10)).unwrap();
+        let m = manager_with_finished_segment();
 
         check_finished_segment(&m, &tp());
     }
@@ -211,10 +217,7 @@ mod tests {
 
     #[test]
     fn list_by_epoch_returns_added_segment() {
-        let m = InmemoryRemoteLogMetadataManager::new();
-        m.add_remote_log_segment_metadata(started(10, 0, 99))
-            .unwrap();
-        m.update_remote_log_segment_metadata(finish(10)).unwrap();
+        let m = manager_with_finished_segment();
         let listed = m
             .list_remote_log_segments_by_epoch(&tp(), LeaderEpoch(0))
             .unwrap();

@@ -22,7 +22,7 @@ mod tests {
             codes::NOT_COORDINATOR,
             codes::GROUP_ID_NOT_FOUND,
         ] {
-            let expected = unthrottled_wire!(OffsetDeleteResponse {
+            let expected = krabka_macros::unthrottled_wire!(OffsetDeleteResponse {
                 error_code: code,
                 topics: Vec::new(),
             });

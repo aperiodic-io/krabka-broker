@@ -64,24 +64,6 @@
 
 #![doc(html_root_url = "https://docs.rs/krabka-log/1.0.3")]
 
-/// Emit the wrapped items only on platforms with a usable file-to-socket
-/// `sendfile(2)` for the zero-copy fetch path.
-///
-/// Those platforms are Linux, the Apple targets, and FreeBSD/DragonFly. They
-/// are the "SENDFILE alias". Windows is excluded, because there is no safe
-/// `TransmitFile` wrapper under `unsafe_code = "forbid"`. The fetch path there
-/// uses `pread` and `write_all`, and never needs the file-region descriptors.
-///
-/// One macro per crate keeps the predicate identical at every sendfile-gated
-/// site: the `read_raw_desc` descriptor types, their impls, and the re-exports.
-/// The cfg set therefore cannot drift between them.
-macro_rules! sendfile_cfg {
-    ($($item:item)*) => {
-        $(krabka_macros::sendfile_platform! { $item })*
-    };
-}
-pub(crate) use sendfile_cfg;
-
 mod compact;
 mod config;
 mod delivery;
@@ -110,6 +92,14 @@ mod txn_index;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub use io::{DirectFile, IoTarget, LogIo};
+#[krabka_macros::sendfile_cfg]
+pub use log::RawReadDesc;
+#[krabka_macros::sendfile_cfg]
+pub use segment::RawSegmentDesc;
+// Re-export the zero-copy fetch descriptor so broker code can name
+// `krabka_log::FileRegion` without depending on the protocol crate's path.
+#[cfg(any(test, feature = "test-helpers"))]
+pub use stamp_source::MonotonicStampSource;
 pub use {
     config::{
         CleanupPolicy, DEFAULT_MAX_MESSAGE_SIZE, DEFAULT_READ_AHEAD_MAX, DEFAULT_TAIL_CACHE_SIZE,
@@ -120,12 +110,8 @@ pub use {
     filter::{FilteredBatch, filter_batch},
     io::write_file_atomic,
     krabka_ids::{LeaderEpoch, Offset, ProducerId},
+    krabka_protocol::records::FileRegion,
     leader_epoch_checkpoint::{EpochEntry, LeaderEpochCheckpoint, epoch_and_offset_for_entries},
-};
-sendfile_cfg! {
-    pub use log::RawReadDesc;
-}
-pub use {
     log::{
         ActiveProducer, ActiveSegmentExport, BARRIER_CONTROL_TYPE, CompactionContext, Log, RawRead,
         ReadOutput, SegmentExport, TransactionAppendRefusal, TransactionalBatch, VerbatimBatch,
@@ -136,16 +122,6 @@ pub use {
         SnapshotDecodeError, decode as decode_producer_snapshot,
     },
     retention::now_ms as epoch_ms,
-};
-sendfile_cfg! {
-    pub use segment::RawSegmentDesc;
-}
-// Re-export the zero-copy fetch descriptor so broker code can name
-// `krabka_log::FileRegion` without depending on the protocol crate's path.
-#[cfg(any(test, feature = "test-helpers"))]
-pub use stamp_source::MonotonicStampSource;
-pub use {
-    krabka_protocol::records::FileRegion,
     segment::{RawSegmentRead, Segment},
     stamp_index::{StampEntry, StampIndex},
     stamp_source::StampSource,

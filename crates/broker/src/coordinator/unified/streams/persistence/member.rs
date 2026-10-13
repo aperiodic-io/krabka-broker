@@ -21,15 +21,18 @@
 
 use {
     super::codec::{decode_key_value_list, encode_key_value_list},
-    crate::coordinator::unified::persistence::{
-        flex::{
-            get_compact_nullable_string, get_compact_string, get_i8, get_member_client, get_u16,
-            put_compact_nullable_string, put_compact_string, put_empty_tagged_fields,
-            put_member_client, skip_tagged_fields, value_codec,
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                get_compact_nullable_string, get_compact_string, get_i8, get_member_client,
+                get_u16, put_compact_nullable_string, put_compact_string, put_empty_tagged_fields,
+                put_member_client, skip_tagged_fields,
+            },
+            get_i32,
         },
-        get_i32,
+        error::BrokerError,
     },
-    bytes::BufMut,
+    bytes::{BufMut, BytesMut},
 };
 
 /// A member's advertised host and port endpoint, for interactive-query
@@ -56,11 +59,16 @@ pub struct StreamsGroupMemberMetadataValue {
     pub topology_epoch: i32,
 }
 
-value_codec! {
-    StreamsGroupMemberMetadataValue("StreamsGroupMemberMetadataValue"),
-    encode(&self) -> buf {
+#[krabka_macros::flexible_value(record = "StreamsGroupMemberMetadataValue")]
+impl StreamsGroupMemberMetadataValue {
+    fn encode_fields(&self, buf: &mut BytesMut) {
         put_compact_nullable_string(buf, self.instance_id.as_deref());
-        put_member_client(buf, self.rack_id.as_deref(), &self.client_id, &self.client_host);
+        put_member_client(
+            buf,
+            self.rack_id.as_deref(),
+            &self.client_id,
+            &self.client_host,
+        );
         buf.put_i32(self.rebalance_timeout_ms);
         buf.put_i32(self.topology_epoch);
         put_compact_string(buf, &self.process_id);
@@ -75,7 +83,8 @@ value_codec! {
         }
         encode_key_value_list(buf, &self.client_tags);
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let instance_id = get_compact_nullable_string(buf)?;
         let (rack_id, client_id, client_host) = get_member_client(buf)?;
         let rebalance_timeout_ms = get_i32(buf)?;

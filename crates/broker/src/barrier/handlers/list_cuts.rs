@@ -21,58 +21,60 @@ use {
             coordinator::RetainedCut,
             handlers::{cluster_describe_denied, cut_missing, cut_topics, error_code, error_text},
         },
+        broker::Broker,
         codes,
-        handlers::{ErrorResponse as _, encode_response},
+        handlers::{
+            ApiVersion, DispatchResult, ErrorResponse as _, RequestContext, encode_response,
+        },
     },
     krabka_protocol::krabka::barrier::{
         BarrierCut, ListBarrierCutsRequest, ListBarrierCutsResponse,
     },
 };
 
-wire_handler!(
-    handle,
-    "handle_list_barrier_cuts",
-    "ListBarrierCuts",
-    "info",
-    ListBarrierCutsRequest,
-    |broker, version, req, ctx| {
-        let image = broker.controller.current_image();
-        if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            return encode_response(
-                &ListBarrierCutsResponse::error(
-                    codes::CLUSTER_AUTHORIZATION_FAILED,
-                    Some("list-barrier-cuts denied".to_owned()),
-                ),
-                version,
-            );
-        }
-
-        let coordinator = &broker.barrier_coordinator;
-        if !coordinator.is_coordinator_for(&req.group).await {
-            return encode_response(
-                &ListBarrierCutsResponse::error(
-                    codes::NOT_COORDINATOR,
-                    Some("this broker does not coordinate the barrier group".to_owned()),
-                ),
-                version,
-            );
-        }
-
-        let resp = match coordinator.list_cuts(&req.group).await {
-            Ok(cuts) => ListBarrierCutsResponse {
-                throttle_time_ms: 0,
-                error_code: codes::NONE,
-                error_message: None,
-                cuts: select(&cuts, req.from_epoch, req.max_results),
-                ..ListBarrierCutsResponse::default()
-            },
-            Err(error) => {
-                ListBarrierCutsResponse::error(error_code(&error), Some(error_text(&error)))
-            }
-        };
-        encode_response(&resp, version)
+#[krabka_macros::extension_wire(
+    name = "handle_list_barrier_cuts",
+    api = "ListBarrierCuts",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ListBarrierCutsRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
+    if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        let refusal = ListBarrierCutsResponse::error(
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            Some("list-barrier-cuts denied".to_owned()),
+        );
+        return encode_response(&refusal, version);
     }
-);
+
+    let coordinator = &broker.barrier_coordinator;
+    if !coordinator.is_coordinator_for(&req.group).await {
+        return encode_response(
+            &ListBarrierCutsResponse::error(
+                codes::NOT_COORDINATOR,
+                Some("this broker does not coordinate the barrier group".to_owned()),
+            ),
+            version,
+        );
+    }
+
+    let resp = match coordinator.list_cuts(&req.group).await {
+        Ok(cuts) => ListBarrierCutsResponse {
+            throttle_time_ms: 0,
+            error_code: codes::NONE,
+            error_message: None,
+            cuts: select(&cuts, req.from_epoch, req.max_results),
+            ..ListBarrierCutsResponse::default()
+        },
+        Err(error) => ListBarrierCutsResponse::error(error_code(&error), Some(error_text(&error))),
+    };
+    encode_response(&resp, version)
+}
 
 /// The cuts of the response, in ascending epoch order.
 ///

@@ -33,9 +33,12 @@
 //! `controller.submit_change`. One batched commit keeps the metadata image
 //! consistent across several rows in the same request.
 
-use krabka_protocol::owned::{
-    alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
-    alter_user_scram_credentials_response::AlterUserScramCredentialsResponse,
+use {
+    crate::{error::BrokerError, handlers::ApiVersion},
+    krabka_protocol::owned::{
+        alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
+        alter_user_scram_credentials_response::AlterUserScramCredentialsResponse,
+    },
 };
 
 mod plan;
@@ -62,20 +65,21 @@ use {
     },
 };
 
-context_handler! {
-    /// The `typed` dispatch entry point: [`answer`] at any version, which the
-    /// generated adapter encodes.
-    #[tracing::instrument(
-        name = "handle_alter_user_scram_credentials",
-        level = "info",
-        skip_all,
-        fields(api = "AlterUserScramCredentials")
-    )]
-    AlterUserScramCredentialsRequest => AlterUserScramCredentialsResponse,
-    (broker, req, _version, ctx),
-    {
-        Ok(answer(broker, req, ctx).await)
-    }
+/// The `typed` dispatch entry point: [`answer`] at any version, which the
+/// generated adapter encodes.
+#[tracing::instrument(
+    name = "handle_alter_user_scram_credentials",
+    level = "info",
+    skip_all,
+    fields(api = "AlterUserScramCredentials")
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: AlterUserScramCredentialsRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<AlterUserScramCredentialsResponse, BrokerError> {
+    Ok(answer(broker, req, ctx).await)
 }
 
 /// Runs the `AlterUserScramCredentials` request and returns the typed

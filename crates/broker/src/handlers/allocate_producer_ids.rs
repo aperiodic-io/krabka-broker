@@ -5,6 +5,8 @@ use {
     crate::{
         broker::Broker,
         codes,
+        error::BrokerError,
+        handlers::{ApiVersion, RequestContext, cluster_action_denied},
         producer_id_manager::{ProducerIdAllocationError, allocate_block},
     },
     krabka_metadata::NodeId,
@@ -14,30 +16,31 @@ use {
     },
 };
 
-context_handler! {
-    /// Checks `ClusterAction` on the cluster, then allocates a block.
-    ///
-    /// Kafka's `ControllerApis.handleAllocateProducerIdsRequest` calls
-    /// `authorizeClusterOperation(request, CLUSTER_ACTION)` before the controller
-    /// runs. A denial becomes `AllocateProducerIdsRequest.getErrorResponse`:
-    /// `CLUSTER_AUTHORIZATION_FAILED` and the default block fields, and no block
-    /// is allocated. A request that arrives in an `Envelope` runs this check
-    /// against the principal that the envelope names.
-    AllocateProducerIdsRequest => AllocateProducerIdsResponse,
-    (broker, request, _version, ctx),
-    {
-        if crate::handlers::cluster_action_denied(
-            broker.config.authorizer.as_ref(),
-            &broker.controller.current_image(),
-            ctx,
-        ) {
-            return Ok(AllocateProducerIdsResponse {
-                error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-                ..Default::default()
-            });
-        }
-        Ok(serve(broker, &request).await)
+/// Checks `ClusterAction` on the cluster, then allocates a block.
+///
+/// Kafka's `ControllerApis.handleAllocateProducerIdsRequest` calls
+/// `authorizeClusterOperation(request, CLUSTER_ACTION)` before the controller
+/// runs. A denial becomes `AllocateProducerIdsRequest.getErrorResponse`:
+/// `CLUSTER_AUTHORIZATION_FAILED` and the default block fields, and no block
+/// is allocated. A request that arrives in an `Envelope` runs this check
+/// against the principal that the envelope names.
+pub(crate) async fn handle(
+    broker: &Broker,
+    request: AllocateProducerIdsRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<AllocateProducerIdsResponse, BrokerError> {
+    if cluster_action_denied(
+        broker.config.authorizer.as_ref(),
+        &broker.controller.current_image(),
+        ctx,
+    ) {
+        return Ok(AllocateProducerIdsResponse {
+            error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+            ..Default::default()
+        });
     }
+    Ok(serve(broker, &request).await)
 }
 
 async fn serve(

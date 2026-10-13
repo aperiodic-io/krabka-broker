@@ -28,8 +28,10 @@ use {
                 cluster_describe_denied, from_wire_uuid, to_wire_uuid,
             },
         },
+        broker::Broker,
         codes,
-        handlers::encode_response,
+        handlers::{ApiVersion, DispatchResult, RequestContext, encode_response},
+        time_util::now_ms,
     },
     krabka_audit::{AuditOutcome, PrivilegedPhase},
     krabka_metadata::{BreakGlassProposalRecord, MetadataImage},
@@ -40,66 +42,69 @@ use {
     uuid::Uuid,
 };
 
-wire_handler!(
-    handle,
-    "handle_describe_break_glass",
-    "DescribeBreakGlass",
-    "info",
-    DescribeBreakGlassRequest,
-    |broker, version, req, ctx| {
-        let image = broker.controller.current_image();
-        let outcome = if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            Err(Refusal::new(
-                codes::CLUSTER_AUTHORIZATION_FAILED,
-                "describe-break-glass denied",
-            ))
-        } else {
-            select(
-                &image,
-                req.pending_only,
-                wanted_id(req.proposal_id),
-                crate::time_util::now_ms(),
-            )
-        };
+#[krabka_macros::extension_wire(
+    name = "handle_describe_break_glass",
+    api = "DescribeBreakGlass",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: DescribeBreakGlassRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
+    let outcome = if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        Err(Refusal::new(
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            "describe-break-glass denied",
+        ))
+    } else {
+        select(
+            &image,
+            req.pending_only,
+            wanted_id(req.proposal_id),
+            now_ms(),
+        )
+    };
 
-        let response = match outcome {
-            Ok(proposals) => DescribeBreakGlassResponse {
+    let response = match outcome {
+        Ok(proposals) => DescribeBreakGlassResponse {
+            throttle_time_ms: 0,
+            error_code: codes::NONE,
+            error_message: None,
+            proposals,
+            ..DescribeBreakGlassResponse::default()
+        },
+        Err(refusal) => {
+            let policy = BreakGlassPolicy::new(&broker.config.break_glass);
+            audit_privileged(
+                broker.audit_log.as_ref(),
+                ctx,
+                policy.fingerprint(),
+                &PrivilegedAudit {
+                    outcome: AuditOutcome::Failure,
+                    phase: PrivilegedPhase::Refused,
+                    action: UNKNOWN_ACTION,
+                    target: "",
+                    proposal_id: wanted_id(req.proposal_id),
+                    counterparties: &[],
+                    key_id: "",
+                    signature: &[],
+                    signature_verified: false,
+                    reason: &refusal.message,
+                },
+            );
+            DescribeBreakGlassResponse {
                 throttle_time_ms: 0,
-                error_code: codes::NONE,
-                error_message: None,
-                proposals,
+                error_code: refusal.code,
+                error_message: Some(refusal.message),
                 ..DescribeBreakGlassResponse::default()
-            },
-            Err(refusal) => {
-                let policy = BreakGlassPolicy::new(&broker.config.break_glass);
-                audit_privileged(
-                    broker.audit_log.as_ref(),
-                    ctx,
-                    policy.fingerprint(),
-                    &PrivilegedAudit {
-                        outcome: AuditOutcome::Failure,
-                        phase: PrivilegedPhase::Refused,
-                        action: UNKNOWN_ACTION,
-                        target: "",
-                        proposal_id: wanted_id(req.proposal_id),
-                        counterparties: &[],
-                        key_id: "",
-                        signature: &[],
-                        signature_verified: false,
-                        reason: &refusal.message,
-                    },
-                );
-                DescribeBreakGlassResponse {
-                    throttle_time_ms: 0,
-                    error_code: refusal.code,
-                    error_message: Some(refusal.message),
-                    ..DescribeBreakGlassResponse::default()
-                }
             }
-        };
-        encode_response(&response, version)
-    }
-);
+        }
+    };
+    encode_response(&response, version)
+}
 
 /// The proposal a request names, or `None` when it asks for every proposal.
 fn wanted_id(id: krabka_protocol::primitives::uuid::Uuid) -> Option<Uuid> {

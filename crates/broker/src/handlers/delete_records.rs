@@ -54,6 +54,7 @@
 //! boundary decisions in `offsets`, and the break-glass gate in `gate`.
 
 use {
+    crate::handlers::{ApiVersion, audit_admin_success, audit_resource, denied_topics},
     krabka_audit::PrivilegedPhase,
     krabka_log::Offset,
     krabka_metadata::{AclOperation, BreakGlassAction, MetadataImage},
@@ -101,100 +102,101 @@ use {
     },
 };
 
-context_handler! {
-    DeleteRecordsRequest => DeleteRecordsResponse,
-    (broker, req, _version, ctx),
-    {
-        let partitions = broker.partitions.clone();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: DeleteRecordsRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<DeleteRecordsResponse, BrokerError> {
+    let partitions = broker.partitions.clone();
 
-        let image = broker.controller.current_image();
+    let image = broker.controller.current_image();
 
-        // ── ACL preamble ────────────────────────────────────────
-        // Batch-authorize every topic name for `Delete`. Topics that come
-        // back `Deny` short-circuit the trim loop and emit
-        // TOPIC_AUTHORIZATION_FAILED on every partition row for that topic.
-        let denied_topics = crate::handlers::denied_topics(
-            broker.config.authorizer.as_ref(),
-            &image,
-            ctx,
-            AclOperation::Delete,
-            req.topics.iter().map(|t| t.name.as_str()),
-        );
+    // ── ACL preamble ────────────────────────────────────────
+    // Batch-authorize every topic name for `Delete`. Topics that come
+    // back `Deny` short-circuit the trim loop and emit
+    // TOPIC_AUTHORIZATION_FAILED on every partition row for that topic.
+    let denied_topics = denied_topics(
+        broker.config.authorizer.as_ref(),
+        &image,
+        ctx,
+        AclOperation::Delete,
+        req.topics.iter().map(|t| t.name.as_str()),
+    );
 
-        let env = TrimEnv {
-            broker,
-            image: &image,
-            ctx,
-            partitions: &partitions,
-        };
-        // KFC-9: the proposals this request already spent. One proposal on a bare
-        // topic name covers every partition of it, and it is spent once.
-        let mut spent: HashSet<Uuid> = HashSet::new();
-        let mut topic_results: Vec<DeleteRecordsTopicResult> = Vec::with_capacity(req.topics.len());
-        // The partitions whose deletion frontier actually moved. A stale request
-        // and an exact retry at the current log start answer success and delete
-        // nothing, so the wire code cannot say which partitions were trimmed.
-        let mut trimmed: Vec<krabka_audit::AuditResource> = Vec::new();
-        // The rows that trimmed on this leader and wait for the followers.
-        let mut waiting: Vec<low_watermark::Waiting> = Vec::new();
-        let timeout_ms = req.timeout_ms;
+    let env = TrimEnv {
+        broker,
+        image: &image,
+        ctx,
+        partitions: &partitions,
+    };
+    // KFC-9: the proposals this request already spent. One proposal on a bare
+    // topic name covers every partition of it, and it is spent once.
+    let mut spent: HashSet<Uuid> = HashSet::new();
+    let mut topic_results: Vec<DeleteRecordsTopicResult> = Vec::with_capacity(req.topics.len());
+    // The partitions whose deletion frontier actually moved. A stale request
+    // and an exact retry at the current log start answer success and delete
+    // nothing, so the wire code cannot say which partitions were trimmed.
+    let mut trimmed: Vec<krabka_audit::AuditResource> = Vec::new();
+    // The rows that trimmed on this leader and wait for the followers.
+    let mut waiting: Vec<low_watermark::Waiting> = Vec::new();
+    let timeout_ms = req.timeout_ms;
 
-        for topic in req.topics {
-            // Per-topic ACL check: if denied, mark every partition in the topic.
-            if denied_topics.contains(&topic.name) {
-                let part_results: Vec<DeleteRecordsPartitionResult> = topic
-                    .partitions
-                    .iter()
-                    .map(|fp| {
-                        error_partition_result(fp.partition_index, codes::TOPIC_AUTHORIZATION_FAILED)
-                    })
-                    .collect();
-                topic_results.push(topic_result(topic.name, part_results));
-                continue;
-            }
-
-            let mut part_results: Vec<DeleteRecordsPartitionResult> =
-                Vec::with_capacity(topic.partitions.len());
-
-            for fp in topic.partitions {
-                let TrimOutcome {
-                    row,
-                    deleted,
-                    waiting_for,
-                } = trim_one(&env, &mut spent, &topic.name, &fp).await;
-                if let Some(required) = waiting_for {
-                    waiting.push(low_watermark::Waiting {
-                        row: low_watermark::RowPosition {
-                            topic: topic_results.len(),
-                            partition: part_results.len(),
-                        },
-                        topic: topic.name.clone(),
-                        partition: row.partition_index,
-                        required,
-                    });
-                }
-                if deleted {
-                    trimmed.push(crate::handlers::audit_resource(
-                        "Partition",
-                        format!("{}-{}", topic.name, row.partition_index),
-                    ));
-                }
-                part_results.push(row);
-            }
-
+    for topic in req.topics {
+        // Per-topic ACL check: if denied, mark every partition in the topic.
+        if denied_topics.contains(&topic.name) {
+            let part_results: Vec<DeleteRecordsPartitionResult> = topic
+                .partitions
+                .iter()
+                .map(|fp| {
+                    error_partition_result(fp.partition_index, codes::TOPIC_AUTHORIZATION_FAILED)
+                })
+                .collect();
             topic_results.push(topic_result(topic.name, part_results));
+            continue;
         }
 
-        low_watermark::await_followers(broker, &mut topic_results, waiting, timeout_ms).await;
+        let mut part_results: Vec<DeleteRecordsPartitionResult> =
+            Vec::with_capacity(topic.partitions.len());
 
-        // A gated trim audits itself as a `PrivilegedAction`. On a cluster with no
-        // approver set the gate is inert, so every partition that was actually
-        // trimmed is audited here.
-        crate::handlers::audit_admin_success(broker.audit_log.as_ref(), ctx, "DeleteRecords", trimmed);
+        for fp in topic.partitions {
+            let TrimOutcome {
+                row,
+                deleted,
+                waiting_for,
+            } = trim_one(&env, &mut spent, &topic.name, &fp).await;
+            if let Some(required) = waiting_for {
+                waiting.push(low_watermark::Waiting {
+                    row: low_watermark::RowPosition {
+                        topic: topic_results.len(),
+                        partition: part_results.len(),
+                    },
+                    topic: topic.name.clone(),
+                    partition: row.partition_index,
+                    required,
+                });
+            }
+            if deleted {
+                trimmed.push(audit_resource(
+                    "Partition",
+                    format!("{}-{}", topic.name, row.partition_index),
+                ));
+            }
+            part_results.push(row);
+        }
 
-        let resp = delete_records_response(topic_results);
-        Ok(resp)
+        topic_results.push(topic_result(topic.name, part_results));
     }
+
+    low_watermark::await_followers(broker, &mut topic_results, waiting, timeout_ms).await;
+
+    // A gated trim audits itself as a `PrivilegedAction`. On a cluster with no
+    // approver set the gate is inert, so every partition that was actually
+    // trimmed is audited here.
+    audit_admin_success(broker.audit_log.as_ref(), ctx, "DeleteRecords", trimmed);
+
+    let resp = delete_records_response(topic_results);
+    Ok(resp)
 }
 
 /// Record the trim as the partition's diskless `DeleteRecords` floor, durably.

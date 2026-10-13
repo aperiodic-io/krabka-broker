@@ -6,7 +6,26 @@
 //! because both the replay paths and the registry that spawns the actors
 //! depend on them.
 
-use super::{persistence_next_gen, share, streams};
+use super::{
+    persistence_next_gen::{
+        CurrentMemberAssignmentValue, MemberMetadataValue, RegularExpressionValue,
+        TargetAssignmentMemberValue,
+    },
+    share::{
+        self,
+        persistence::{
+            ShareGroupCurrentMemberAssignmentValue, ShareGroupMemberMetadataValue,
+            ShareGroupTargetAssignmentMemberValue,
+        },
+    },
+    streams::{
+        self,
+        persistence::{
+            StreamsGroupCurrentMemberAssignmentValue, StreamsGroupMemberMetadataValue,
+            StreamsGroupTargetAssignmentMemberValue, StreamsGroupTopologyValue,
+        },
+    },
+};
 
 /// Hydration seed that the bootstrap replayer passes into a freshly-spawned
 /// [`actor::GroupActorHandle`].
@@ -14,7 +33,8 @@ use super::{persistence_next_gen, share, streams};
 /// All fields come directly from records decoded out of `__consumer_offsets`.
 ///
 /// [`actor::GroupActorHandle`]: super::actor::GroupActorHandle
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, krabka_macros::ReplayMemberMaps)]
+#[replay_member_maps(protocol = "consumer")]
 pub struct GroupSeed {
     pub group_epoch: i32,
     /// The `MetadataHash` of the last group metadata record.
@@ -23,16 +43,13 @@ pub struct GroupSeed {
     /// The `AssignmentTimestamp` of the last target assignment metadata
     /// record, 0 when unknown.
     pub assignment_timestamp_ms: i64,
-    pub members: std::collections::HashMap<String, persistence_next_gen::MemberMetadataValue>,
-    pub target_per_member:
-        std::collections::HashMap<String, persistence_next_gen::TargetAssignmentMemberValue>,
-    pub current_per_member:
-        std::collections::HashMap<String, persistence_next_gen::CurrentMemberAssignmentValue>,
+    pub members: std::collections::HashMap<String, MemberMetadataValue>,
+    pub target_per_member: std::collections::HashMap<String, TargetAssignmentMemberValue>,
+    pub current_per_member: std::collections::HashMap<String, CurrentMemberAssignmentValue>,
     /// The `ConsumerGroupRegularExpression` records: what each regular
     /// expression that the members subscribe to resolved to, by regular
     /// expression.
-    pub resolved_regexes:
-        std::collections::HashMap<String, persistence_next_gen::RegularExpressionValue>,
+    pub resolved_regexes: std::collections::HashMap<String, RegularExpressionValue>,
     /// Kafka's `ConsumerGroup.hasSubscriptionMetadataRecord`: the log holds a
     /// deprecated `ConsumerGroupPartitionMetadata` value (key v4) that no
     /// tombstone has removed yet.
@@ -43,7 +60,8 @@ pub struct GroupSeed {
 ///
 /// All fields come from share-group records decoded out of
 /// `__consumer_offsets`.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, krabka_macros::ReplayMemberMaps)]
+#[replay_member_maps(protocol = "share")]
 pub struct ShareGroupSeed {
     pub group_epoch: i32,
     /// The `MetadataHash` of the last group metadata record.
@@ -52,16 +70,10 @@ pub struct ShareGroupSeed {
     /// The `AssignmentTimestamp` of the last target assignment metadata
     /// record, 0 when unknown.
     pub assignment_timestamp_ms: i64,
-    pub members:
-        std::collections::HashMap<String, share::persistence::ShareGroupMemberMetadataValue>,
-    pub target_per_member: std::collections::HashMap<
-        String,
-        share::persistence::ShareGroupTargetAssignmentMemberValue,
-    >,
-    pub current_per_member: std::collections::HashMap<
-        String,
-        share::persistence::ShareGroupCurrentMemberAssignmentValue,
-    >,
+    pub members: std::collections::HashMap<String, ShareGroupMemberMetadataValue>,
+    pub target_per_member: std::collections::HashMap<String, ShareGroupTargetAssignmentMemberValue>,
+    pub current_per_member:
+        std::collections::HashMap<String, ShareGroupCurrentMemberAssignmentValue>,
     /// KIP-932 `ShareGroupStatePartitionMetadata`, key v15. It holds the
     /// `(topic_id, partition)` share-states this group has already
     /// initialized, and the topic ids whose share-state the broker deletes.
@@ -75,7 +87,8 @@ pub struct ShareGroupSeed {
 ///
 /// All fields come from streams-group records decoded out of
 /// `__consumer_offsets`.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, krabka_macros::ReplayMemberMaps)]
+#[replay_member_maps(protocol = "streams")]
 pub struct StreamsGroupSeed {
     pub group_epoch: i32,
     /// The `MetadataHash` of the last group metadata record.
@@ -94,117 +107,13 @@ pub struct StreamsGroupSeed {
     /// The `AssignmentTimestamp` of the last target assignment metadata
     /// record, 0 when unknown.
     pub assignment_timestamp_ms: i64,
-    pub topology: Option<streams::persistence::StreamsGroupTopologyValue>,
-    pub members:
-        std::collections::HashMap<String, streams::persistence::StreamsGroupMemberMetadataValue>,
-    pub target_per_member: std::collections::HashMap<
-        String,
-        streams::persistence::StreamsGroupTargetAssignmentMemberValue,
-    >,
-    pub current_per_member: std::collections::HashMap<
-        String,
-        streams::persistence::StreamsGroupCurrentMemberAssignmentValue,
-    >,
+    pub topology: Option<StreamsGroupTopologyValue>,
+    pub members: std::collections::HashMap<String, StreamsGroupMemberMetadataValue>,
+    pub target_per_member:
+        std::collections::HashMap<String, StreamsGroupTargetAssignmentMemberValue>,
+    pub current_per_member:
+        std::collections::HashMap<String, StreamsGroupCurrentMemberAssignmentValue>,
 }
-
-// Each protocol owns its record types and placeholder factory; member-map replay is shared.
-macro_rules! replay_member_maps {
-    ($seed:ty, $metadata:ty, $current:ty, $kind:ident) => {
-        impl $seed {
-            pub(super) fn install_current_member(
-                &mut self,
-                member_id: &str,
-                value: $current,
-                uninitialized: impl FnOnce() -> $metadata,
-            ) {
-                self.members
-                    .entry(member_id.into())
-                    .or_insert_with(uninitialized);
-                self.current_per_member.insert(member_id.into(), value);
-            }
-
-            pub(super) fn member_tombstone(
-                &self,
-                member_id: &str,
-            ) -> Result<bool, crate::error::BrokerError> {
-                super::replay_policy::member_tombstone(
-                    super::replay_policy::ModernGroupType::$kind,
-                    member_id,
-                    self.members.contains_key(member_id).then(|| {
-                        self.current_per_member
-                            .get(member_id)
-                            .map_or(0, |current| current.member_epoch)
-                    }),
-                    self.target_per_member.contains_key(member_id),
-                )
-            }
-
-            pub(super) fn remove_replayed_member(&mut self, member_id: &str) {
-                self.members.remove(member_id);
-                self.current_per_member.remove(member_id);
-            }
-        }
-    };
-}
-
-replay_member_maps!(
-    GroupSeed,
-    persistence_next_gen::MemberMetadataValue,
-    persistence_next_gen::CurrentMemberAssignmentValue,
-    Consumer
-);
-replay_member_maps!(
-    ShareGroupSeed,
-    share::persistence::ShareGroupMemberMetadataValue,
-    share::persistence::ShareGroupCurrentMemberAssignmentValue,
-    Share
-);
-replay_member_maps!(
-    StreamsGroupSeed,
-    streams::persistence::StreamsGroupMemberMetadataValue,
-    streams::persistence::StreamsGroupCurrentMemberAssignmentValue,
-    Streams
-);
-
-/// Snapshot member metadata, current assignments, then the protocol's target map.
-macro_rules! snapshot_member_maps {
-    (
-        $state:ident;
-        $members:ident,
-        $current:ident,
-        $targets:ident;
-        $metadata:path,
-        $assignment:path; |
-        $id:ident,
-        $member:ident |
-        $target:block
-    ) => {
-        let mut $members = ::std::collections::HashMap::new();
-        let mut $targets = ::std::collections::HashMap::new();
-        let mut $current = ::std::collections::HashMap::new();
-        for ($id, $member) in &$state.members {
-            $members.insert($id.clone(), $metadata($member));
-            $current.insert($id.clone(), $assignment($member));
-            $target
-        }
-    };
-}
-pub(super) use snapshot_member_maps;
-
-/// Restore epochs only for members whose metadata survived replay, then apply
-/// the protocol's original assignment fields in the same iteration.
-macro_rules! hydrate_member_epochs {
-    ($state:ident, $seed:ident; $member:ident, $current:ident { $($assignment:tt)* }) => {
-        for (mid, $current) in $seed.current_per_member {
-            if let Some($member) = $state.members.get_mut(&mid) {
-                $member.member_epoch = $current.member_epoch;
-                $member.previous_member_epoch = $current.previous_member_epoch;
-                $($assignment)*
-            }
-        }
-    };
-}
-pub(super) use hydrate_member_epochs;
 
 impl GroupSeed {
     /// The consumer group that Kafka's replay creates for the first record of
@@ -245,5 +154,129 @@ impl StreamsGroupSeed {
             assignment_epoch: streams::state::INITIAL_EPOCH,
             ..Self::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod replay_member_maps_tests {
+    use {
+        super::{
+            GroupSeed, ShareGroupCurrentMemberAssignmentValue, ShareGroupSeed,
+            ShareGroupTargetAssignmentMemberValue, StreamsGroupCurrentMemberAssignmentValue,
+            StreamsGroupSeed, StreamsGroupTargetAssignmentMemberValue, TargetAssignmentMemberValue,
+        },
+        crate::{
+            coordinator::unified::test_support::{
+                next_current, next_member, share_member, streams_member,
+            },
+            error::BrokerError,
+        },
+        assert2::assert,
+        std::cell::Cell,
+    };
+
+    #[test]
+    fn share_replay_creates_metadata_lazily_and_removes_only_current_and_metadata() {
+        let mut seed = ShareGroupSeed::new_group();
+        let factories = Cell::new(0);
+        let current = |epoch| ShareGroupCurrentMemberAssignmentValue {
+            member_epoch: epoch,
+            ..Default::default()
+        };
+        let placeholder = || {
+            factories.set(factories.get() + 1);
+            share_member("placeholder")
+        };
+        seed.install_current_member("member", current(3), placeholder);
+        assert!(factories.get() == 1);
+        assert!(seed.members["member"].client_id == "placeholder");
+        seed.members
+            .insert("member".into(), share_member("persisted"));
+        seed.install_current_member("member", current(-1), placeholder);
+        assert!(factories.get() == 1);
+        assert!(seed.members["member"].client_id == "persisted");
+        assert!(seed.current_per_member["member"].member_epoch == -1);
+        assert!(seed.member_tombstone("member").unwrap());
+
+        seed.target_per_member.insert(
+            "member".into(),
+            ShareGroupTargetAssignmentMemberValue::default(),
+        );
+        let before = seed.clone();
+        assert!(
+            matches!(seed.member_tombstone("member"), Err(BrokerError::Startup(message))
+            if message.contains("member exists in target assignment"))
+        );
+        assert!(seed == before);
+        seed.remove_replayed_member("member");
+        assert!(seed.members.is_empty());
+        assert!(seed.current_per_member.is_empty());
+        assert!(seed.target_per_member == before.target_per_member);
+        seed.current_per_member.insert("member".into(), current(8));
+        assert!(!seed.member_tombstone("member").unwrap());
+    }
+
+    #[test]
+    fn consumer_and_streams_tombstones_keep_protocol_errors_and_require_current_tombstones() {
+        let mut consumer = GroupSeed::new_group();
+        consumer
+            .members
+            .insert("member".into(), next_member("consumer"));
+        let mut streams = StreamsGroupSeed::new_group();
+        streams
+            .members
+            .insert("member".into(), streams_member("streams"));
+        for (result, record) in [
+            (
+                consumer.member_tombstone("member"),
+                "ConsumerGroupCurrentMemberAssignmentValue",
+            ),
+            (
+                streams.member_tombstone("member"),
+                "StreamsGroupCurrentMemberAssignmentValue",
+            ),
+        ] {
+            assert!(
+                matches!(result, Err(BrokerError::Startup(message)) if message.contains(record))
+            );
+        }
+        consumer.install_current_member("member", next_current(-1), || panic!("existing metadata"));
+        streams.install_current_member(
+            "member",
+            StreamsGroupCurrentMemberAssignmentValue {
+                member_epoch: -1,
+                ..Default::default()
+            },
+            || panic!("existing streams metadata"),
+        );
+        assert!(consumer.member_tombstone("member").unwrap());
+        assert!(streams.member_tombstone("member").unwrap());
+        consumer
+            .target_per_member
+            .insert("member".into(), TargetAssignmentMemberValue::default());
+        streams.target_per_member.insert(
+            "member".into(),
+            StreamsGroupTargetAssignmentMemberValue::default(),
+        );
+        for (result, record) in [
+            (
+                consumer.member_tombstone("member"),
+                "ConsumerGroupTargetAssignmentMetadataValue",
+            ),
+            (
+                streams.member_tombstone("member"),
+                "StreamsGroupTargetAssignmentMetadataValue",
+            ),
+        ] {
+            assert!(
+                matches!(result, Err(BrokerError::Startup(message)) if message.contains(record))
+            );
+        }
+        consumer.remove_replayed_member("member");
+        streams.remove_replayed_member("member");
+        assert!(consumer.target_per_member.len() == 1);
+        assert!(streams.target_per_member.len() == 1);
+        assert!(!consumer.member_tombstone("member").unwrap());
+        assert!(!streams.member_tombstone("member").unwrap());
     }
 }

@@ -249,7 +249,9 @@ mod tests {
         std::sync::Arc,
     };
 
-    crate::test_support::context_helper!(client_id = "producer-client");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["producer-client"];
+    }
 
     /// A v4+ request comes from a broker, so a principal without
     /// `ClusterAction` gets Kafka's top-level `CLUSTER_AUTHORIZATION_FAILED`

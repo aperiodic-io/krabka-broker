@@ -8,97 +8,94 @@ const KEY_SHARE_HEARTBEAT_INTERVAL_MS: &str = "share.heartbeat.interval.ms";
 /// Kafka's `GroupConfig.SHARE_ASSIGNMENT_INTERVAL_MS_CONFIG`.
 const KEY_SHARE_ASSIGNMENT_INTERVAL_MS: &str = "share.assignment.interval.ms";
 
-crate::coordinator::unified::config::membership_config_type! {
-    /// The broker share-group settings: the share keys of Kafka's
-    /// `GroupCoordinatorConfig` and of its `ShareGroupConfig`.
-    ///
-    /// Kafka has no broker share isolation key. A group reads with its own
-    /// `share.isolation.level`, which defaults to `read_uncommitted`.
-    ///
-    /// Each `min_*` and `max_*` pair bounds the broker value beside it and the
-    /// matching per-group override. The `[runtime]` applier checks Kafka's
-    /// ranges and the order within each triple at startup.
-    #[derive(Debug, Clone, PartialEq, krabka_macros::FieldDefaults)]
-    pub struct ShareGroupConfig;
-    prefix {}
+/// The broker share-group settings: the share keys of Kafka's
+/// `GroupCoordinatorConfig` and of its `ShareGroupConfig`.
+///
+/// Kafka has no broker share isolation key. A group reads with its own
+/// `share.isolation.level`, which defaults to `read_uncommitted`.
+///
+/// Each `min_*` and `max_*` pair bounds the broker value beside it and the
+/// matching per-group override. The `[runtime]` applier checks Kafka's
+/// ranges and the order within each triple at startup.
+///
+/// The membership settings a share group runs with: each `share.*`
+/// override in the group's stored config over the broker value, clamped to
+/// the broker's `group.share.min.*` and `group.share.max.*` bounds.
+///
+/// This is Kafka's `GroupMetadataManager.shareGroupSessionTimeoutMs`,
+/// `shareGroupHeartbeatIntervalMs` and `shareGroupAssignmentIntervalMs`:
+/// `GroupConfigManager.groupConfig` over `GroupCoordinatorConfig`, with the
+/// stored config evaluated against the bounds (`GroupConfig.evaluate`). A
+/// group with no override borrows the broker value.
+#[krabka_macros::membership_defaults]
+#[derive(
+    Debug, Clone, PartialEq, krabka_macros::FieldDefaults, krabka_macros::GroupTimingConfig,
+)]
+#[group_timing(
+        session = KEY_SHARE_SESSION_TIMEOUT_MS,
+        heartbeat = KEY_SHARE_HEARTBEAT_INTERVAL_MS,
+        assignment = KEY_SHARE_ASSIGNMENT_INTERVAL_MS,
+    )]
+pub struct ShareGroupConfig {
     /// Kafka's `group.share.session.timeout.ms`.
-    session_timeout;
+    pub session_timeout: Duration,
     /// Kafka's `group.share.heartbeat.interval.ms`.
-    heartbeat_interval;
-    before_bounds {
-        /// Kafka's `group.share.assignment.interval.ms`: the least time between
-        /// two target assignments of a group. Zero does not wait.
-        #[default(DEFAULT_ASSIGNMENT_INTERVAL)]
-        pub assignment_interval: Duration,
-    }
-    bounds {
-        /// Kafka's `group.share.min.session.timeout.ms`.
-        min_session_timeout;
-        /// Kafka's `group.share.max.session.timeout.ms`.
-        max_session_timeout;
-        /// Kafka's `group.share.min.heartbeat.interval.ms`.
-        min_heartbeat_interval;
-        /// Kafka's `group.share.max.heartbeat.interval.ms`.
-        max_heartbeat_interval;
-    }
-    suffix {
-        /// Kafka's `group.share.max.size`.
-        #[default(200)]
-        pub max_size: usize,
-        /// Kafka's `group.share.record.lock.duration.ms`.
-        #[default(Duration::from_secs(30))]
-        pub record_lock_duration: Duration,
-        /// Kafka's `group.share.min.record.lock.duration.ms`.
-        #[default(Duration::from_secs(15))]
-        pub min_record_lock_duration: Duration,
-        /// Kafka's `group.share.max.record.lock.duration.ms`.
-        #[default(Duration::from_mins(1))]
-        pub max_record_lock_duration: Duration,
-        /// Kafka's `group.share.delivery.count.limit`: the delivery count at
-        /// which a record is archived.
-        #[default(5)]
-        pub max_delivery_attempts: i16,
-        /// Kafka's `group.share.min.delivery.count.limit`.
-        #[default(2)]
-        pub min_delivery_count_limit: i16,
-        /// Kafka's `group.share.max.delivery.count.limit`.
-        #[default(10)]
-        pub max_delivery_count_limit: i16,
-        /// Kafka's `group.share.partition.max.record.locks`: the most records a
-        /// share partition holds in flight.
-        #[default(2000)]
-        pub max_inflight_records: i32,
-        /// Kafka's `group.share.min.partition.max.record.locks`.
-        #[default(100)]
-        pub min_partition_max_record_locks: i32,
-        /// Kafka's `group.share.max.partition.max.record.locks`.
-        #[default(4000)]
-        pub max_partition_max_record_locks: i32,
-        #[default(Duration::from_secs(15))]
-        pub backlog_poll_interval: Duration,
-        #[default(64)]
-        pub actor_mailbox_capacity: usize,
-        /// Kafka's internal `group.share.initialize.retry.interval.ms`: how long a
-        /// partition may stay initializing before the group asks the persister to
-        /// initialize it again.
-        #[default(Duration::from_secs(30))]
-        pub initialize_retry_interval: Duration,
-    }
-}
+    pub heartbeat_interval: Duration,
+    /// Kafka's `group.share.assignment.interval.ms`: the least time between
+    /// two target assignments of a group. Zero does not wait.
+    #[default(DEFAULT_ASSIGNMENT_INTERVAL)]
+    pub assignment_interval: Duration,
 
-impl ShareGroupConfig {
-    crate::coordinator::unified::config::membership_config_methods! {
-    /// The membership settings a share group runs with: each `share.*`
-    /// override in the group's stored config over the broker value, clamped to
-    /// the broker's `group.share.min.*` and `group.share.max.*` bounds.
-    ///
-    /// This is Kafka's `GroupMetadataManager.shareGroupSessionTimeoutMs`,
-    /// `shareGroupHeartbeatIntervalMs` and `shareGroupAssignmentIntervalMs`:
-    /// `GroupConfigManager.groupConfig` over `GroupCoordinatorConfig`, with the
-    /// stored config evaluated against the bounds (`GroupConfig.evaluate`). A
-    /// group with no override borrows the broker value.
-        KEY_SHARE_SESSION_TIMEOUT_MS, KEY_SHARE_HEARTBEAT_INTERVAL_MS, KEY_SHARE_ASSIGNMENT_INTERVAL_MS
-    }
+    /// Kafka's `group.share.min.session.timeout.ms`.
+    pub min_session_timeout: Duration,
+    /// Kafka's `group.share.max.session.timeout.ms`.
+    pub max_session_timeout: Duration,
+    /// Kafka's `group.share.min.heartbeat.interval.ms`.
+    pub min_heartbeat_interval: Duration,
+    /// Kafka's `group.share.max.heartbeat.interval.ms`.
+    pub max_heartbeat_interval: Duration,
+
+    /// Kafka's `group.share.max.size`.
+    #[default(200)]
+    pub max_size: usize,
+    /// Kafka's `group.share.record.lock.duration.ms`.
+    #[default(Duration::from_secs(30))]
+    pub record_lock_duration: Duration,
+    /// Kafka's `group.share.min.record.lock.duration.ms`.
+    #[default(Duration::from_secs(15))]
+    pub min_record_lock_duration: Duration,
+    /// Kafka's `group.share.max.record.lock.duration.ms`.
+    #[default(Duration::from_mins(1))]
+    pub max_record_lock_duration: Duration,
+    /// Kafka's `group.share.delivery.count.limit`: the delivery count at
+    /// which a record is archived.
+    #[default(5)]
+    pub max_delivery_attempts: i16,
+    /// Kafka's `group.share.min.delivery.count.limit`.
+    #[default(2)]
+    pub min_delivery_count_limit: i16,
+    /// Kafka's `group.share.max.delivery.count.limit`.
+    #[default(10)]
+    pub max_delivery_count_limit: i16,
+    /// Kafka's `group.share.partition.max.record.locks`: the most records a
+    /// share partition holds in flight.
+    #[default(2000)]
+    pub max_inflight_records: i32,
+    /// Kafka's `group.share.min.partition.max.record.locks`.
+    #[default(100)]
+    pub min_partition_max_record_locks: i32,
+    /// Kafka's `group.share.max.partition.max.record.locks`.
+    #[default(4000)]
+    pub max_partition_max_record_locks: i32,
+    #[default(Duration::from_secs(15))]
+    pub backlog_poll_interval: Duration,
+    #[default(64)]
+    pub actor_mailbox_capacity: usize,
+    /// Kafka's internal `group.share.initialize.retry.interval.ms`: how long a
+    /// partition may stay initializing before the group asks the persister to
+    /// initialize it again.
+    #[default(Duration::from_secs(30))]
+    pub initialize_retry_interval: Duration,
 }
 
 #[cfg(test)]

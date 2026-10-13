@@ -14,7 +14,8 @@ use {
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            StartedBroker, create_topic as create_topic_from_test_support, share_fetch_wire,
+            StartedBroker, UNKNOWN_TOPIC_ID as UNKNOWN_ID,
+            create_topic as create_topic_from_test_support, share_fetch_wire,
         },
         test_support::start_broker_no_audit_with,
     },
@@ -32,9 +33,6 @@ use {
     },
     std::sync::Arc,
 };
-
-/// An id that no topic in these tests has.
-const UNKNOWN_ID: WireUuid = WireUuid([0x0b; 16]);
 
 /// The acquisition lock timeout of the test broker's share-group config.
 const LOCK_TIMEOUT_MS: i32 = 30_000;

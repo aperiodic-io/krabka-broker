@@ -6,7 +6,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A `.log.swap` is authoritative once it exists without its `.log.cleaned`.
 ///
 /// Kafka's `LocalLog.replaceSegments` renames `.cleaned` to `.swap` before it
@@ -14,7 +17,6 @@ open_logic! {
 /// swap rather than discarding it, because the old segments may be gone.
 pub fn swap_committed(facts: LocalRecoverySwapFacts) -> bool {
     pearlite! { facts.log_swap_exists && !facts.log_cleaned_exists }
-}
 }
 
 /// Classify one swap set: abort it only while it is uncommitted, and complete

@@ -174,10 +174,7 @@ impl Model for DpModel {
                     // obligation KIP-966's eligible-leader set is a claim about.
                     s.hwm = real_hwm(&s, self.base, self.min_isr);
                     let leader_log = &s.log[usize::from(s.leader)];
-                    while model_offset(s.committed.len()) < s.hwm {
-                        let off = s.committed.len();
-                        s.committed.push(leader_log[off]);
-                    }
+                    append_committed_prefix(&mut s.committed, leader_log, s.hwm);
                 }
                 Act::WalSync => {
                     // fsync makes the leader's appended prefix durable and releases
@@ -188,10 +185,7 @@ impl Model for DpModel {
                         s.wal_acked.push(leader_log[off]);
                     }
                     s.hwm = real_wal_hwm(s.leader, model_offset(s.wal_acked.len()), self.base);
-                    while model_offset(s.committed.len()) < s.hwm {
-                        let off = s.committed.len();
-                        s.committed.push(leader_log[off]);
-                    }
+                    append_committed_prefix(&mut s.committed, leader_log, s.hwm);
                 }
                 Act::ConsumerFetch {
                     read_committed,
@@ -491,5 +485,12 @@ impl Model for DpModel {
 
     fn within_boundary(&self, s: &Self::State) -> bool {
         s.log.iter().all(|l| l.len() <= self.max_len) && s.leader_epoch <= MAX_EPOCH + 1
+    }
+}
+
+fn append_committed_prefix<T: Copy>(committed: &mut Vec<T>, leader_log: &[T], hwm: i64) {
+    while model_offset(committed.len()) < hwm {
+        let offset = committed.len();
+        committed.push(leader_log[offset]);
     }
 }

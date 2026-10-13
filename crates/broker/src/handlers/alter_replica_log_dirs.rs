@@ -184,22 +184,42 @@ mod tests {
         },
     };
 
-    crate::test_support::codec_helpers!(AlterReplicaLogDirsRequest, AlterReplicaLogDirsResponse);
+    krabka_macros::wire_codec_helpers! {
+        encode_request(AlterReplicaLogDirsRequest);
+        decode_response(AlterReplicaLogDirsResponse);
+    }
 
     fn expected_partition_response(
         topic: &str,
         partition_index: i32,
         error_code: i16,
     ) -> AlterReplicaLogDirsResponse {
-        unthrottled_wire!(AlterReplicaLogDirsResponse {
-            results: vec![tagged_wire!(AlterReplicaLogDirTopicResult {
+        krabka_macros::unthrottled_wire!(AlterReplicaLogDirsResponse {
+            results: vec![krabka_macros::tagged_wire!(AlterReplicaLogDirTopicResult {
                 topic_name: topic.to_string(),
-                partitions: vec![tagged_wire!(AlterReplicaLogDirPartitionResult {
-                    partition_index,
-                    error_code,
-                })],
+                partitions: vec![krabka_macros::tagged_wire!(
+                    AlterReplicaLogDirPartitionResult {
+                        partition_index,
+                        error_code,
+                    }
+                )],
             })],
         })
+    }
+
+    async fn assert_partition_response(
+        broker: &Broker,
+        version: i16,
+        request: AlterReplicaLogDirsRequest,
+        topic: &str,
+        error_code: i16,
+        label: &str,
+    ) {
+        let bytes = handle(broker, version, 1, &encode_request(&request, version))
+            .await
+            .expect("handle");
+        let expected = expected_partition_response(topic, 0, error_code);
+        assert!(decode_response(&bytes, version) == expected, "{label}");
     }
 
     #[tokio::test]
@@ -228,13 +248,15 @@ mod tests {
             .expect("handle");
         let resp = decode_response(&bytes, version);
 
-        let expected = unthrottled_wire!(AlterReplicaLogDirsResponse {
-            results: vec![tagged_wire!(AlterReplicaLogDirTopicResult {
+        let expected = krabka_macros::unthrottled_wire!(AlterReplicaLogDirsResponse {
+            results: vec![krabka_macros::tagged_wire!(AlterReplicaLogDirTopicResult {
                 topic_name: "orders".to_string(),
-                partitions: vec![tagged_wire!(AlterReplicaLogDirPartitionResult {
-                    partition_index: 7,
-                    error_code: codes::LOG_DIR_NOT_FOUND,
-                })],
+                partitions: vec![krabka_macros::tagged_wire!(
+                    AlterReplicaLogDirPartitionResult {
+                        partition_index: 7,
+                        error_code: codes::LOG_DIR_NOT_FOUND,
+                    }
+                )],
             })],
         });
         assert!(resp == expected);
@@ -339,12 +361,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            let bytes = handle(&broker, version, 1, &encode_request(&req, version))
-                .await
-                .expect("handle");
-
-            let expected = expected_partition_response(topic, 0, error_code);
-            assert!(decode_response(&bytes, version) == expected, "case {label}");
+            assert_partition_response(&broker, version, req, topic, error_code, label).await;
         }
         broker_handle.shutdown().await;
     }
@@ -413,12 +430,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let bytes = handle(&broker, version, 1, &encode_request(&req, version))
-                .await
-                .expect("handle");
-
-            let expected = expected_partition_response("orders", 0, error_code);
-            assert!(decode_response(&bytes, version) == expected, "{name}");
+            assert_partition_response(&broker, version, req, "orders", error_code, name).await;
             // An empty partition moves within milliseconds once a move starts,
             // so a move that never starts is given a short look.
             let wait = if moves {

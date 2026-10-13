@@ -2,30 +2,30 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// How the incoming consume relates to the committed proposal image.
-    pub enum BreakGlassProposalState {
-        Missing,
-        Stale,
-        ExactPending,
-    }
+/// How the incoming consume relates to the committed proposal image.
+#[krabka_macros::model_type]
+pub enum BreakGlassProposalState {
+    Missing,
+    Stale,
+    ExactPending,
+}
 
-    /// Facts checked before a consumed proposal enters the metadata log.
-    pub struct BreakGlassConsumptionFacts {
-        pub proposal: BreakGlassProposalState,
-        pub consumed_at_ms: i64,
-        pub uncommitted_tail: bool,
-    }
+/// Facts checked before a consumed proposal enters the metadata log.
+#[krabka_macros::model_type]
+pub struct BreakGlassConsumptionFacts {
+    pub proposal: BreakGlassProposalState,
+    pub consumed_at_ms: i64,
+    pub uncommitted_tail: bool,
+}
 
-    /// Why a consumed proposal may or may not enter the metadata log.
-    pub enum BreakGlassConsumptionDecision {
-        Missing,
-        Malformed,
-        Stale,
-        InFlight,
-        Append,
-    }
+/// Why a consumed proposal may or may not enter the metadata log.
+#[krabka_macros::model_type]
+pub enum BreakGlassConsumptionDecision {
+    Missing,
+    Malformed,
+    Stale,
+    InFlight,
+    Append,
 }
 
 /// Admit only an exact, positive-timestamp mutation of the current pending
@@ -75,27 +75,27 @@ pub fn break_glass_consumption_decision(
     }
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Durable-spend state for an action outside the metadata log.
-    pub enum BreakGlassLocalSpendState {
-        Ungated,
-        MissingOrMismatched,
-        Pending,
-        Committed,
-    }
+/// Durable-spend state for an action outside the metadata log.
+#[krabka_macros::model_type]
+pub enum BreakGlassLocalSpendState {
+    Ungated,
+    MissingOrMismatched,
+    Pending,
+    Committed,
+}
 
-    /// Facts checked before an action outside the metadata log may start.
-    pub struct BreakGlassLocalActionFacts {
-        pub spend: BreakGlassLocalSpendState,
-        pub commit_succeeded: bool,
-    }
+/// Facts checked before an action outside the metadata log may start.
+#[krabka_macros::model_type]
+pub struct BreakGlassLocalActionFacts {
+    pub spend: BreakGlassLocalSpendState,
+    pub commit_succeeded: bool,
+}
 
-    /// Whether a privileged local action may start.
-    pub enum BreakGlassLocalActionDecision {
-        Reject,
-        Apply,
-    }
+/// Whether a privileged local action may start.
+#[krabka_macros::model_type]
+pub enum BreakGlassLocalActionDecision {
+    Reject,
+    Apply,
 }
 
 /// Permit an ungated action, a retry whose spend already committed, or an

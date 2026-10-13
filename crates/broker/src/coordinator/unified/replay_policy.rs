@@ -89,6 +89,24 @@ pub(crate) fn persisted_group(
     }
 }
 
+/// Look up a persisted group and initialize its seed when Kafka creates it.
+pub(crate) fn persisted_group_with_create(
+    group_id: &str,
+    wanted: ModernGroupType,
+    existing: Option<ExistingGroup>,
+    create_if_not_exists: bool,
+    create: impl FnOnce(),
+) -> Result<bool, BrokerError> {
+    match persisted_group(group_id, wanted, existing, create_if_not_exists)? {
+        GroupLookup::Absent => Ok(false),
+        GroupLookup::Found => Ok(true),
+        GroupLookup::Create => {
+            create();
+            Ok(true)
+        }
+    }
+}
+
 /// The record whose tombstone removes a member, for the message of a failed
 /// check.
 fn current_assignment_record(group: ModernGroupType) -> &'static str {

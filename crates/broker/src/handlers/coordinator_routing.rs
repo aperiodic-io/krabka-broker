@@ -33,6 +33,16 @@ pub(crate) fn group_coordinator_error(broker: &Broker, group_id: &str) -> Option
     }
 }
 
+/// Build a protocol response when the group is routed to another broker or
+/// its local offsets partition is still loading.
+pub(crate) fn group_coordinator_error_response<Response>(
+    broker: &Broker,
+    group_id: &str,
+    reply: impl FnOnce(i16, Option<String>) -> Response,
+) -> Option<Response> {
+    group_coordinator_error(broker, group_id).map(|error_code| reply(error_code, None))
+}
+
 /// `COORDINATOR_LOAD_IN_PROGRESS` while this broker still replays the offsets
 /// `partition` it leads, or has not yet taken up the leadership term the
 /// current image names, as Kafka's `CoordinatorRuntime` answers for a shard

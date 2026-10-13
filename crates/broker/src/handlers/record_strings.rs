@@ -98,99 +98,84 @@ fn longest<'a>(strings: impl IntoIterator<Item = &'a str>) -> usize {
     strings.into_iter().map(str::len).max().unwrap_or(0)
 }
 
-/// List the record strings of a request once, retaining required, optional
-/// and nested field traversal without repeating the bound-check implementation.
-macro_rules! record_string_fields {
-    ($request:ty, $receiver:ident; [$($required:ident),*]; [$($optional:ident),*] $(; $extra:expr)?) => {
-        impl RecordStrings for $request {
-            fn longest_record_string(&$receiver) -> usize {
-                longest(
-                    [$($receiver.$required.as_str(),)*].into_iter()
-                    $(.chain($receiver.$optional.as_deref()))*
-                    $(.chain($extra))?
-                )
-            }
+// Required fields precede optional fields, then the request's nested strings.
+krabka_macros::record_strings! {
+    JoinGroupRequest(self) {
+        required(group_id, member_id, protocol_type);
+        optional(group_instance_id, reason);
+        extra { self.protocols.iter().map(|protocol| protocol.name.as_str()) }
+    }
+    SyncGroupRequest(self) {
+        required(group_id, member_id);
+        optional(group_instance_id, protocol_type, protocol_name);
+        extra { self.assignments.iter().map(|assignment| assignment.member_id.as_str()) }
+    }
+    HeartbeatRequest(self) {
+        required(group_id, member_id);
+        optional(group_instance_id);
+    }
+    LeaveGroupRequest(self) {
+        required(group_id, member_id);
+        optional();
+        extra {
+            self.members.iter().flat_map(|member| {
+                std::iter::once(member.member_id.as_str())
+                    .chain(member.group_instance_id.as_deref())
+                    .chain(member.reason.as_deref())
+            })
         }
-    };
+    }
+    OffsetCommitRequest(self) {
+        required(group_id, member_id);
+        optional(group_instance_id);
+        offset_metadata(topics);
+    }
+    TxnOffsetCommitRequest(self) {
+        required(transactional_id, group_id, member_id);
+        optional(group_instance_id);
+        offset_metadata(topics);
+    }
+    ConsumerGroupHeartbeatRequest(self) {
+        required(group_id, member_id);
+        optional(instance_id, rack_id, subscribed_topic_regex, server_assignor);
+        extra { self.subscribed_topic_names.iter().flatten().map(String::as_str) }
+    }
+    ShareGroupHeartbeatRequest(self) {
+        required(group_id, member_id);
+        optional(rack_id);
+        extra { self.subscribed_topic_names.iter().flatten().map(String::as_str) }
+    }
+    StreamsGroupHeartbeatRequest(self) {
+        required(group_id, member_id);
+        optional(instance_id, rack_id, process_id);
+    }
+    DeleteGroupsRequest(self) {
+        required();
+        optional();
+        extra { self.groups_names.iter().map(String::as_str) }
+    }
+    AlterShareGroupOffsetsRequest(self) {
+        required(group_id);
+        optional();
+        extra { self.topics.iter().map(|topic| topic.topic_name.as_str()) }
+    }
+    DeleteShareGroupOffsetsRequest(self) {
+        required(group_id);
+        optional();
+        extra { self.topics.iter().map(|topic| topic.topic_name.as_str()) }
+    }
+    InitProducerIdRequest(self) {
+        required();
+        optional(transactional_id);
+    }
+
+    // The share-state requests carry only the group id of their record key.
+    InitializeShareGroupStateRequest(self) { required(group_id); optional(); }
+    ReadShareGroupStateRequest(self) { required(group_id); optional(); }
+    ReadShareGroupStateSummaryRequest(self) { required(group_id); optional(); }
+    WriteShareGroupStateRequest(self) { required(group_id); optional(); }
+    DeleteShareGroupStateRequest(self) { required(group_id); optional(); }
 }
-
-/// Both offset-commit APIs store topic names and each partition's metadata.
-macro_rules! offset_record_strings {
-    ($request:ident) => {
-        $request.topics.iter().flat_map(|topic| {
-            std::iter::once(topic.name.as_str()).chain(
-                topic
-                    .partitions
-                    .iter()
-                    .filter_map(|partition| partition.committed_metadata.as_deref()),
-            )
-        })
-    };
-}
-
-record_string_fields!(JoinGroupRequest, self;
-    [group_id, member_id, protocol_type]; [group_instance_id, reason];
-    self.protocols.iter().map(|protocol| protocol.name.as_str())
-);
-record_string_fields!(SyncGroupRequest, self;
-    [group_id, member_id]; [group_instance_id, protocol_type, protocol_name];
-    self.assignments.iter().map(|assignment| assignment.member_id.as_str())
-);
-record_string_fields!(HeartbeatRequest, self; [group_id, member_id]; [group_instance_id]);
-record_string_fields!(LeaveGroupRequest, self; [group_id, member_id]; [];
-    self.members.iter().flat_map(|member| {
-        std::iter::once(member.member_id.as_str())
-            .chain(member.group_instance_id.as_deref())
-            .chain(member.reason.as_deref())
-    })
-);
-record_string_fields!(OffsetCommitRequest, self;
-    [group_id, member_id]; [group_instance_id]; offset_record_strings!(self)
-);
-record_string_fields!(TxnOffsetCommitRequest, self;
-    [transactional_id, group_id, member_id]; [group_instance_id]; offset_record_strings!(self)
-);
-record_string_fields!(ConsumerGroupHeartbeatRequest, self;
-    [group_id, member_id]; [instance_id, rack_id, subscribed_topic_regex, server_assignor];
-    self.subscribed_topic_names.iter().flatten().map(String::as_str)
-);
-record_string_fields!(ShareGroupHeartbeatRequest, self;
-    [group_id, member_id]; [rack_id];
-    self.subscribed_topic_names.iter().flatten().map(String::as_str)
-);
-record_string_fields!(StreamsGroupHeartbeatRequest, self;
-    [group_id, member_id]; [instance_id, rack_id, process_id]
-);
-record_string_fields!(DeleteGroupsRequest, self; []; [];
-    self.groups_names.iter().map(String::as_str)
-);
-record_string_fields!(AlterShareGroupOffsetsRequest, self; [group_id]; [];
-    self.topics.iter().map(|topic| topic.topic_name.as_str())
-);
-record_string_fields!(DeleteShareGroupOffsetsRequest, self; [group_id]; [];
-    self.topics.iter().map(|topic| topic.topic_name.as_str())
-);
-record_string_fields!(InitProducerIdRequest, self; []; [transactional_id]);
-
-/// The share-state requests carry no string but the group id, which names the
-/// `__share_group_state` record key.
-macro_rules! share_state_group_id {
-    ($($request:ty),+ $(,)?) => {
-        $(impl RecordStrings for $request {
-            fn longest_record_string(&self) -> usize {
-                self.group_id.len()
-            }
-        })+
-    };
-}
-
-share_state_group_id!(
-    InitializeShareGroupStateRequest,
-    ReadShareGroupStateRequest,
-    ReadShareGroupStateSummaryRequest,
-    WriteShareGroupStateRequest,
-    DeleteShareGroupStateRequest,
-);
 
 #[cfg(test)]
 mod handler_tests;

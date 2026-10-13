@@ -98,7 +98,9 @@ fn request(
     }
 }
 
-crate::test_support::context_helper!(client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    test_context ["admin-client"];
+}
 
 use crate::test_support::start_broker_with_authorizer_no_audit as start_broker;
 
@@ -140,7 +142,7 @@ async fn check_trim_response(
     let response = drive(broker, request, context).await;
     assert!(
         response
-            == unthrottled_wire!(DeleteRecordsResponse {
+            == krabka_macros::unthrottled_wire!(DeleteRecordsResponse {
                 topics: expected_trim_rows()
                     .topic(expected.topic)
                     .indices(expected.indices)
@@ -485,10 +487,10 @@ async fn a_trim_stops_at_the_delivery_watermark_of_a_scheduled_topic() {
         )
         .await;
 
-        let expected = unthrottled_wire!(DeleteRecordsResponse {
-            topics: vec![tagged_wire!(DeleteRecordsTopicResult {
+        let expected = krabka_macros::unthrottled_wire!(DeleteRecordsResponse {
+            topics: vec![krabka_macros::tagged_wire!(DeleteRecordsTopicResult {
                 name: topic.into(),
-                partitions: vec![tagged_wire!(DeleteRecordsPartitionResult {
+                partitions: vec![krabka_macros::tagged_wire!(DeleteRecordsPartitionResult {
                     partition_index: 0,
                     low_watermark: expected_low_watermark,
                     error_code: codes::NONE,
@@ -520,9 +522,9 @@ async fn a_refused_trim_deletes_nothing() {
 
     let resp = drive_trim(&broker, &test_context(&principal, &peer), request().call()).await;
 
-    let expected = vec![tagged_wire!(DeleteRecordsTopicResult {
+    let expected = vec![krabka_macros::tagged_wire!(DeleteRecordsTopicResult {
         name: "orders".to_owned(),
-        partitions: vec![tagged_wire!(DeleteRecordsPartitionResult {
+        partitions: vec![krabka_macros::tagged_wire!(DeleteRecordsPartitionResult {
             partition_index: 0,
             low_watermark: -1,
             error_code: codes::POLICY_VIOLATION,
@@ -561,16 +563,18 @@ fn expected_trim_rows(
         low_watermark,
         error,
     };
-    vec![tagged_wire!(DeleteRecordsTopicResult {
+    vec![krabka_macros::tagged_wire!(DeleteRecordsTopicResult {
         name: setup.topic.to_owned(),
         partitions: setup
             .indices
             .iter()
-            .map(|index| tagged_wire!(DeleteRecordsPartitionResult {
-                partition_index: index.0,
-                low_watermark: setup.low_watermark.0,
-                error_code: setup.error.0,
-            }))
+            .map(
+                |index| krabka_macros::tagged_wire!(DeleteRecordsPartitionResult {
+                    partition_index: index.0,
+                    low_watermark: setup.low_watermark.0,
+                    error_code: setup.error.0,
+                })
+            )
             .collect(),
     })]
 }
@@ -807,15 +811,15 @@ async fn a_partition_hosted_elsewhere_answers_not_leader_or_follower() {
     )
     .await;
 
-    let expected = vec![tagged_wire!(DeleteRecordsTopicResult {
+    let expected = vec![krabka_macros::tagged_wire!(DeleteRecordsTopicResult {
         name: topic.to_owned(),
         partitions: vec![
-            tagged_wire!(DeleteRecordsPartitionResult {
+            krabka_macros::tagged_wire!(DeleteRecordsPartitionResult {
                 partition_index: 0,
                 low_watermark: -1,
                 error_code: codes::NOT_LEADER_OR_FOLLOWER,
             }),
-            tagged_wire!(DeleteRecordsPartitionResult {
+            krabka_macros::tagged_wire!(DeleteRecordsPartitionResult {
                 partition_index: 1,
                 low_watermark: -1,
                 error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,

@@ -297,7 +297,7 @@ mod tests {
         crate::{
             codes::CLUSTER_AUTHORIZATION_FAILED,
             network::auth::ConnectionAuth,
-            test_support::{DenyAll, codec_helpers, peer, principal, start_broker_with_authorizer},
+            test_support::{DenyAll, peer, principal, start_broker_with_authorizer},
         },
         krabka_protocol::owned::{
             alter_replica_log_dirs_request::{
@@ -312,7 +312,10 @@ mod tests {
         std::sync::Arc,
     };
 
-    codec_helpers!(AlterReplicaLogDirsRequest, AlterReplicaLogDirsResponse);
+    krabka_macros::wire_codec_helpers! {
+        encode_request(AlterReplicaLogDirsRequest);
+        decode_response(AlterReplicaLogDirsResponse);
+    }
 
     fn authed(name: &str) -> ConnectionAuth {
         ConnectionAuth::Authenticated {

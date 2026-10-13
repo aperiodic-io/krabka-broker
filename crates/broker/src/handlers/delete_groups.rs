@@ -8,7 +8,11 @@
 
 use {
     crate::{
-        broker::Broker, codes, coordinator::DeleteGroupError, handlers::group_coordinator_error,
+        broker::Broker,
+        codes,
+        coordinator::DeleteGroupError,
+        error::BrokerError,
+        handlers::{ApiVersion, RequestContext, acl_denied, group_coordinator_error},
     },
     krabka_metadata::{AclOperation, ResourceType},
     krabka_protocol::owned::{
@@ -18,59 +22,60 @@ use {
     std::collections::HashSet,
 };
 
-context_handler! {
-    // cargo-mutants: coordinator-backed request orchestration; integration-tested.
-    #[cfg_attr(test, mutants::skip)]
-    DeleteGroupsRequest => DeleteGroupsResponse,
-    (broker, req, _version, ctx),
-    {
-        // Kafka's `handleDeleteGroupsRequest` drops duplicate ids first
-        // (`groupsNames.distinct`), keeping the first-seen order, and then
-        // partitions the ids by the `Delete` grant on each group.
-        let mut seen = HashSet::with_capacity(req.groups_names.len());
-        let groups: Vec<String> = req
-            .groups_names
-            .into_iter()
-            .filter(|gid| seen.insert(gid.clone()))
-            .collect();
-        let (authorized, denied): (Vec<String>, Vec<String>) = {
-            let image = broker.controller.current_image();
-            groups.into_iter().partition(|gid| {
-                !crate::handlers::acl_denied(
-                    broker.config.authorizer.as_ref(),
-                    &image,
-                    ctx,
-                    ResourceType::Group,
-                    gid.as_str(),
-                    AclOperation::Delete,
-                )
-            })
-        };
+// cargo-mutants: coordinator-backed request orchestration; integration-tested.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: DeleteGroupsRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<DeleteGroupsResponse, BrokerError> {
+    // Kafka's `handleDeleteGroupsRequest` drops duplicate ids first
+    // (`groupsNames.distinct`), keeping the first-seen order, and then
+    // partitions the ids by the `Delete` grant on each group.
+    let mut seen = HashSet::with_capacity(req.groups_names.len());
+    let groups: Vec<String> = req
+        .groups_names
+        .into_iter()
+        .filter(|gid| seen.insert(gid.clone()))
+        .collect();
+    let (authorized, denied): (Vec<String>, Vec<String>) = {
+        let image = broker.controller.current_image();
+        groups.into_iter().partition(|gid| {
+            !acl_denied(
+                broker.config.authorizer.as_ref(),
+                &image,
+                ctx,
+                ResourceType::Group,
+                gid.as_str(),
+                AclOperation::Delete,
+            )
+        })
+    };
 
-        // The coordinator's results come first, and a `GROUP_AUTHORIZATION_FAILED`
-        // row for each denied group follows them.
-        let mut results: Vec<DeletableGroupResult> =
-            Vec::with_capacity(authorized.len() + denied.len());
-        for gid in authorized {
-            let error_code = delete_one(broker, &gid).await;
-            results.push(DeletableGroupResult {
-                group_id: gid,
-                error_code,
-                ..Default::default()
-            });
-        }
-        results.extend(denied.into_iter().map(|gid| DeletableGroupResult {
+    // The coordinator's results come first, and a `GROUP_AUTHORIZATION_FAILED`
+    // row for each denied group follows them.
+    let mut results: Vec<DeletableGroupResult> =
+        Vec::with_capacity(authorized.len() + denied.len());
+    for gid in authorized {
+        let error_code = delete_one(broker, &gid).await;
+        results.push(DeletableGroupResult {
             group_id: gid,
-            error_code: codes::GROUP_AUTHORIZATION_FAILED,
+            error_code,
             ..Default::default()
-        }));
-
-        let resp = DeleteGroupsResponse {
-            results,
-            ..Default::default()
-        };
-        Ok(resp)
+        });
     }
+    results.extend(denied.into_iter().map(|gid| DeletableGroupResult {
+        group_id: gid,
+        error_code: codes::GROUP_AUTHORIZATION_FAILED,
+        ..Default::default()
+    }));
+
+    let resp = DeleteGroupsResponse {
+        results,
+        ..Default::default()
+    };
+    Ok(resp)
 }
 
 /// Deletes one authorized group and returns its result's error code.
@@ -111,7 +116,9 @@ mod tests {
         }
     }
 
-    crate::test_support::context_helper!(client_id = "admin-client");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["admin-client"];
+    }
 
     async fn drive(
         broker: &Broker,
@@ -124,7 +131,7 @@ mod tests {
     }
 
     fn result(group_id: &str, error_code: i16) -> DeletableGroupResult {
-        tagged_wire!(DeletableGroupResult {
+        krabka_macros::tagged_wire!(DeletableGroupResult {
             group_id: group_id.to_owned(),
             error_code,
             error_message: None,
@@ -138,7 +145,7 @@ mod tests {
         results: Vec<DeletableGroupResult>,
     ) {
         let response = drive(broker, &request(groups), ctx).await;
-        let expected = unthrottled_wire!(DeleteGroupsResponse { results });
+        let expected = krabka_macros::unthrottled_wire!(DeleteGroupsResponse { results });
         assert!(response == expected);
     }
 
@@ -298,7 +305,7 @@ mod tests {
         }
 
         let denied = |group_id: &str| {
-            tagged_wire!(DeletableGroupResult {
+            krabka_macros::tagged_wire!(DeletableGroupResult {
                 group_id: group_id.to_string(),
                 error_code: codes::GROUP_AUTHORIZATION_FAILED,
                 error_message: None,

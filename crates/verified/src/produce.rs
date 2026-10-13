@@ -2,13 +2,11 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    pub enum ProduceBatchAdmission {
-        Admit,
-        InvalidRecord,
-        InvalidTimestamp,
-    }
+#[krabka_macros::model_type]
+pub enum ProduceBatchAdmission {
+    Admit,
+    InvalidRecord,
+    InvalidTimestamp,
 }
 
 /// Compute the exclusive durability frontier for an acknowledged Produce
@@ -69,7 +67,10 @@ pub fn produce_batch_admission(
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A data batch has a representable successor, exact positive cardinality and a valid producer sequence.
 fn record_header_valid(
     delta: Int,
@@ -80,7 +81,6 @@ fn record_header_valid(
 ) -> bool {
     pearlite! { 0 <= delta && delta < i32::MAX@ && count == delta + 1 && count > 0
     && !control && (producer < 0 || sequence >= 0) }
-}
 }
 
 #[cfg(test)]

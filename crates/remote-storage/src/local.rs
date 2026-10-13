@@ -8,10 +8,10 @@
 use {
     crate::{
         error::RemoteStorageError,
-        metadata::RemoteLogSegmentMetadata,
+        metadata::{CustomMetadata, RemoteLogSegmentMetadata},
         storage_manager::{
-            ArtifactBody, IndexType, RemoteStorageManager, SegmentArtifact, partition_dir_name,
-            remote_operation, segment_file_name, segment_suffixes,
+            ArtifactBody, IndexType, LogSegmentData, RemoteStorageManager, SegmentArtifact,
+            partition_dir_name, segment_file_name, segment_suffixes,
         },
     },
     std::{fs, path::PathBuf},
@@ -66,81 +66,93 @@ impl LocalTieredStorage {
 }
 
 impl RemoteStorageManager for LocalTieredStorage {
-    remote_operation! {
-        copy(self, metadata, data) {
-            let dir = self.partition_dir(metadata);
-            fs::create_dir_all(&dir)?;
+    #[krabka_macros::remote_operation]
+    fn copy_log_segment_data(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+        data: &LogSegmentData,
+    ) -> Result<Option<CustomMetadata>, RemoteStorageError> {
+        let dir = self.partition_dir(metadata);
+        fs::create_dir_all(&dir)?;
 
-            for SegmentArtifact { suffix, body } in data.artifacts() {
-                let path = self.segment_path(metadata, suffix);
-                match body {
-                    ArtifactBody::File(source) => {
-                        fs::copy(source, path)?;
-                    }
-                    ArtifactBody::Memory(bytes) => fs::write(path, bytes)?,
+        for SegmentArtifact { suffix, body } in data.artifacts() {
+            let path = self.segment_path(metadata, suffix);
+            match body {
+                ArtifactBody::File(source) => {
+                    fs::copy(source, path)?;
                 }
+                ArtifactBody::Memory(bytes) => fs::write(path, bytes)?,
             }
-            // A local store needs no opaque key echoed back.
-            Ok(None)
         }
+        // A local store needs no opaque key echoed back.
+        Ok(None)
     }
 
-    remote_operation! {
-        fetch(self, metadata, start_position, end_position) {
-            let path = self.log_path(metadata);
-            if !path.exists() {
-                return Err(RemoteStorageError::SegmentNotFound(
-                    metadata.remote_log_segment_id().clone(),
-                ));
-            }
-            let bytes = fs::read(&path)?;
-            let len = bytes.len();
-            let start = usize::try_from(start_position).expect("u32 fits usize");
-            if start > len {
-                return Err(RemoteStorageError::InvalidArgument(format!(
-                    "start_position {start} exceeds segment length {len}"
-                )));
-            }
-            let end_exclusive = match end_position {
-                Some(end) => {
-                    let end = usize::try_from(end).expect("u32 fits usize");
-                    if end < start {
-                        return Err(RemoteStorageError::InvalidArgument(format!(
-                            "end_position {end} < start_position {start}"
-                        )));
-                    }
-                    // `end` is inclusive; clamp to the segment length.
-                    end.saturating_add(1).min(len)
-                }
-                None => len,
-            };
-            Ok(bytes[start..end_exclusive].to_vec())
+    #[krabka_macros::remote_operation]
+    fn fetch_log_segment(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+        start_position: u32,
+        end_position: Option<u32>,
+    ) -> Result<Vec<u8>, RemoteStorageError> {
+        let path = self.log_path(metadata);
+        if !path.exists() {
+            return Err(RemoteStorageError::SegmentNotFound(
+                metadata.remote_log_segment_id().clone(),
+            ));
         }
+        let bytes = fs::read(&path)?;
+        let len = bytes.len();
+        let start = usize::try_from(start_position).expect("u32 fits usize");
+        if start > len {
+            return Err(RemoteStorageError::InvalidArgument(format!(
+                "start_position {start} exceeds segment length {len}"
+            )));
+        }
+        let end_exclusive = match end_position {
+            Some(end) => {
+                let end = usize::try_from(end).expect("u32 fits usize");
+                if end < start {
+                    return Err(RemoteStorageError::InvalidArgument(format!(
+                        "end_position {end} < start_position {start}"
+                    )));
+                }
+                // `end` is inclusive; clamp to the segment length.
+                end.saturating_add(1).min(len)
+            }
+            None => len,
+        };
+        Ok(bytes[start..end_exclusive].to_vec())
     }
 
-    remote_operation! {
-        index(self, metadata, index_type) {
-            let path = self.index_path(metadata, index_type);
-            if !path.exists() {
-                return Err(RemoteStorageError::SegmentNotFound(
-                    metadata.remote_log_segment_id().clone(),
-                ));
-            }
-            Ok(fs::read(&path)?)
+    #[krabka_macros::remote_operation]
+    fn fetch_index(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+        index_type: IndexType,
+    ) -> Result<Vec<u8>, RemoteStorageError> {
+        let path = self.index_path(metadata, index_type);
+        if !path.exists() {
+            return Err(RemoteStorageError::SegmentNotFound(
+                metadata.remote_log_segment_id().clone(),
+            ));
         }
+        Ok(fs::read(&path)?)
     }
 
-    remote_operation! {
-        delete(self, metadata) {
-            for path in segment_suffixes().map(|suffix| self.segment_path(metadata, suffix)) {
-                match fs::remove_file(path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(RemoteStorageError::Io(error)),
-                }
+    #[krabka_macros::remote_operation]
+    fn delete_log_segment_data(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+    ) -> Result<(), RemoteStorageError> {
+        for path in segment_suffixes().map(|suffix| self.segment_path(metadata, suffix)) {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(RemoteStorageError::Io(error)),
             }
-            Ok(())
         }
+        Ok(())
     }
 }
 

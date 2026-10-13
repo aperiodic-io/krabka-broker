@@ -13,11 +13,11 @@ use {
     std::sync::Arc,
 };
 
-crate::test_support::codec_helpers!(
-    UnregisterControllerRequest,
-    UnregisterControllerResponse,
-    version = MAX_VERSION
-);
+krabka_macros::wire_codec_helpers! {
+    encode_request(UnregisterControllerRequest);
+    decode_response(UnregisterControllerResponse);
+    version [MAX_VERSION];
+}
 
 fn registration(node_id: u64) -> MetadataRecord {
     MetadataRecord::V1ControllerRegistration(ControllerRegistrationRecord {

@@ -4,14 +4,12 @@ use creusot_std::prelude::ensures;
 #[cfg(creusot)]
 use creusot_std::prelude::{DeepModel, logic};
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Whether an in-memory quorum state can be represented exactly by Kafka's
-    /// signed, versioned JSON fields.
-    pub enum QuorumStateWriteDecision {
-        Reject,
-        Accept,
-    }
+/// Whether an in-memory quorum state can be represented exactly by Kafka's
+/// signed, versioned JSON fields.
+#[krabka_macros::model_type]
+pub enum QuorumStateWriteDecision {
+    Reject,
+    Accept,
 }
 
 /// The in-memory quorum state has an exact representation in Kafka's
@@ -75,14 +73,12 @@ pub fn quorum_state_write_decision(
     }
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// How a parsed quorum-state record may restore the durable vote.
-    pub enum QuorumStateLoadDecision {
-        Reject,
-        RestoreNoVote,
-        RestoreVote,
-    }
+/// How a parsed quorum-state record may restore the durable vote.
+#[krabka_macros::model_type]
+pub enum QuorumStateLoadDecision {
+    Reject,
+    RestoreNoVote,
+    RestoreVote,
 }
 
 /// Admit only schema v0 or v1 records with a nonnegative term, the exact vote

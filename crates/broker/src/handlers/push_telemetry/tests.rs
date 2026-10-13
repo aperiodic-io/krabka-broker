@@ -26,11 +26,11 @@ use {
     uuid::Uuid,
 };
 
-crate::test_support::codec_helpers!(
-    PushTelemetryRequest,
-    PushTelemetryResponse,
-    version = push_telemetry_response::MAX_VERSION
-);
+krabka_macros::wire_codec_helpers! {
+    encode_request(PushTelemetryRequest);
+    decode_response(PushTelemetryResponse);
+    version [push_telemetry_response::MAX_VERSION];
+}
 
 const GZIP: i8 = 1;
 const NONE: i8 = 0;

@@ -23,62 +23,12 @@ use {
     },
 };
 
-// Keep the open span consistent for every on-disk index and checkpoint.
-macro_rules! open_index {
-    ($(#[$doc:meta])* $visibility:vis fn open($path:ident: $path_type:ty) -> $result:ty $body:block) => {
-        $(#[$doc])*
-        #[tracing::instrument(
-            level = "debug",
-            skip_all,
-            fields(path = %$path.display(), entries = tracing::field::Empty),
-            err,
-        )]
-        $visibility fn open($path: $path_type) -> $result $body
-    };
-}
-
-pub(crate) use open_index;
-
 /// A fixed-width big-endian key and its unsigned coordinate, in Kafka field order.
 #[derive(Debug, Clone, Copy, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 #[repr(C)]
 struct IndexEntryRaw<Key> {
     key: Key,
     coordinate: U32<BigEndian>,
-}
-
-macro_rules! index_constructor {
-    ($raw:ty, $invariant:literal, $decode:expr; $(#[$doc:meta])*) => {
-        open_index! {
-            $(#[$doc])*
-            pub fn open(path: &Path) -> Result<Self, LogError> {
-                let crate::index::OpenedIndex { file, entries } =
-                    crate::index::load_index::<$raw, _>(path, $invariant, $decode)?;
-                Ok(Self { file, io: crate::io::file_io(), entries })
-            }
-        }
-    };
-}
-
-// Both index files expose the same memory count and file operations.
-macro_rules! index_methods {
-    ($target:expr) => {
-        #[cfg(not(target_os = "wasi"))]
-        pub(crate) fn flush_handle(&self) -> std::io::Result<File> { self.file.try_clone() }
-
-        /// The number of entries the index holds, which decides when the
-        /// segment is full under `segment.index.bytes`.
-        #[must_use]
-        pub fn entry_count(&self) -> usize { self.entries.len() }
-
-        #[tracing::instrument(level = "debug", skip_all, err)]
-        pub fn flush(&mut self) -> Result<(), LogError> {
-            self.io.sync_file($target, &self.file).map_err(LogError::Io)
-        }
-
-        /// Route this index's writes and syncs through `io`.
-        pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn crate::io::LogIo>) { self.io = io; }
-    };
 }
 
 /// An explicit sparse-index entry a test writes: a key and its coordinate.
@@ -317,4 +267,75 @@ pub(crate) fn rewrite_sidecar_file(path: &Path) -> Result<File, LogError> {
         .truncate(true)
         .open(path)
         .map_err(LogError::Io)
+}
+
+#[cfg(test)]
+mod derived_operations_tests {
+    use {
+        super::{OffsetIndex, TimeIndex},
+        crate::{
+            error::LogError,
+            io::{IoTarget, LogIo},
+        },
+        assert2::assert,
+        std::{
+            fs::File,
+            sync::{
+                Arc, Mutex,
+                atomic::{AtomicBool, Ordering},
+            },
+        },
+    };
+
+    #[derive(Debug, Default)]
+    struct SyncProbe {
+        calls: Mutex<Vec<IoTarget>>,
+        fail: AtomicBool,
+    }
+
+    impl LogIo for SyncProbe {
+        fn sync_file(&self, target: IoTarget, _: &File) -> std::io::Result<()> {
+            self.calls.lock().unwrap().push(target);
+            if self.fail.load(Ordering::Relaxed) {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "index sync refused",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn derived_flush_uses_the_installed_io_target_and_preserves_sync_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut offset = OffsetIndex::open(&directory.path().join("probe.index")).unwrap();
+        let mut time = TimeIndex::open(&directory.path().join("probe.timeindex")).unwrap();
+        let probe = Arc::new(SyncProbe::default());
+        offset.set_io(probe.clone());
+        time.set_io(probe.clone());
+        for fail in [false, true] {
+            probe.fail.store(fail, Ordering::Relaxed);
+            for result in [offset.flush(), time.flush()] {
+                if fail {
+                    assert!(matches!(result, Err(LogError::Io(error))
+                        if error.kind() == std::io::ErrorKind::PermissionDenied
+                            && error.to_string() == "index sync refused"));
+                } else {
+                    assert!(result.is_ok());
+                }
+            }
+        }
+        assert!(
+            *probe.calls.lock().unwrap()
+                == [
+                    IoTarget::OffsetIndex,
+                    IoTarget::TimeIndex,
+                    IoTarget::OffsetIndex,
+                    IoTarget::TimeIndex,
+                ]
+        );
+        assert!(offset.entry_count() == 0 && time.entry_count() == 0);
+    }
 }

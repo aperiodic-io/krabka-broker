@@ -137,14 +137,16 @@ pub fn transaction_pid_install_decision(
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn registration_generation_ready(facts: TransactionRegistrationFacts) -> bool {
     pearlite! { facts.ownership.is_coordinator
     && facts.ownership.producer_id_valid
     && facts.ownership.entry_exists
     && facts.identity.matching.transactional_id_matches
     && !facts.identity.pending_transition }
-}
 }
 
 /// Fence a partition registration against coordinator ownership and one exact
@@ -213,7 +215,10 @@ pub fn transaction_partition_registration(
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The partition matches and both producer-ID pairs are well formed before ownership checks.
 fn pid_install_input_valid(
     partition_matches: bool,
@@ -224,5 +229,4 @@ fn pid_install_input_valid(
 ) -> bool {
     pearlite! { partition_matches && producer >= 0 && epoch >= 0
     && ((next_producer == -1 && next_epoch == -1) || (next_producer >= 0 && next_epoch >= 0)) }
-}
 }

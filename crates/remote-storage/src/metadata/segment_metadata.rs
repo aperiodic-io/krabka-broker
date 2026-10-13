@@ -252,12 +252,10 @@ pub struct RemoteLogSegmentMetadataUpdate {
 mod tests {
     use {
         super::*,
-        crate::metadata::TopicIdPartition,
+        crate::metadata::{TopicIdPartition, test_topic_partition as tp},
         assert2::{assert, check},
         uuid::Uuid,
     };
-
-    fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "orders", 0) }
 
     fn seg_id() -> RemoteLogSegmentId { RemoteLogSegmentId::new(tp(), Uuid::from_u128(99)) }
 

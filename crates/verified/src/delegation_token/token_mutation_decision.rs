@@ -101,13 +101,15 @@ pub fn token_api_admission(
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn token_generation_live(facts: TokenMutationFacts) -> bool {
     pearlite! { facts.now_ms@ >= 0
     && facts.expected_expiry_ms@ >= facts.now_ms@
     && facts.max_timestamp_ms@ >= facts.now_ms@
     && facts.expected_expiry_ms@ <= facts.max_timestamp_ms@ }
-}
 }
 
 /// Fence a token mutation against its exact committed generation.

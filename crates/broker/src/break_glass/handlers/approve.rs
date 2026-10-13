@@ -46,8 +46,11 @@ use {
             config::BreakGlassPolicy,
             handlers::{PrivilegedAudit, Refusal, audit_privileged, from_wire_uuid},
         },
+        broker::Broker,
         codes,
-        handlers::{cluster_alter_denied, encode_response},
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, cluster_alter_denied, encode_response,
+        },
     },
     krabka_audit::AuditOutcome,
     krabka_protocol::krabka::break_glass::{ApproveBreakGlassRequest, ApproveBreakGlassResponse},
@@ -60,67 +63,70 @@ mod settlement;
 #[cfg(test)]
 mod tests;
 
-wire_handler!(
-    handle,
-    "handle_approve_break_glass",
-    "ApproveBreakGlass",
-    "info",
-    ApproveBreakGlassRequest,
-    |broker, version, req, ctx| {
-        let policy = BreakGlassPolicy::new(&broker.config.break_glass);
-        let image = broker.controller.current_image();
-        let stored = image.break_glass_proposal(from_wire_uuid(req.proposal_id));
+#[krabka_macros::extension_wire(
+    name = "handle_approve_break_glass",
+    api = "ApproveBreakGlass",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ApproveBreakGlassRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let policy = BreakGlassPolicy::new(&broker.config.break_glass);
+    let image = broker.controller.current_image();
+    let stored = image.break_glass_proposal(from_wire_uuid(req.proposal_id));
 
-        let outcome = if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            Err(Refusal::new(
-                codes::CLUSTER_AUTHORIZATION_FAILED,
-                "approve-break-glass denied",
-            ))
-        } else {
-            settle(broker, ctx, policy, stored, &req).await
-        };
+    let outcome = if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        Err(Refusal::new(
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            "approve-break-glass denied",
+        ))
+    } else {
+        settle(broker, ctx, policy, stored, &req).await
+    };
 
-        let report = Report::of(stored, outcome.as_ref().ok(), policy);
-        audit_privileged(
-            broker.audit_log.as_ref(),
-            ctx,
-            policy.fingerprint(),
-            &PrivilegedAudit {
-                outcome: if outcome.is_ok() {
-                    AuditOutcome::Success
-                } else {
-                    AuditOutcome::Failure
-                },
-                phase: phase_of(&outcome, req.withdraw),
-                action: report.action,
-                target: report.target,
-                proposal_id: report.proposal_id,
-                counterparties: &report.counterparties,
-                key_id: &req.key_id,
-                signature: &req.signature,
-                signature_verified: outcome.is_ok() && !req.key_id.is_empty(),
-                reason: reason(&outcome),
+    let report = Report::of(stored, outcome.as_ref().ok(), policy);
+    audit_privileged(
+        broker.audit_log.as_ref(),
+        ctx,
+        policy.fingerprint(),
+        &PrivilegedAudit {
+            outcome: if outcome.is_ok() {
+                AuditOutcome::Success
+            } else {
+                AuditOutcome::Failure
             },
-        );
+            phase: phase_of(&outcome, req.withdraw),
+            action: report.action,
+            target: report.target,
+            proposal_id: report.proposal_id,
+            counterparties: &report.counterparties,
+            key_id: &req.key_id,
+            signature: &req.signature,
+            signature_verified: outcome.is_ok() && !req.key_id.is_empty(),
+            reason: reason(&outcome),
+        },
+    );
 
-        let response = match outcome {
-            Ok(_) => ApproveBreakGlassResponse {
-                throttle_time_ms: 0,
-                error_code: codes::NONE,
-                error_message: None,
-                approvals_held: report.held,
-                approvals_required: report.required,
-                ..ApproveBreakGlassResponse::default()
-            },
-            Err(refusal) => ApproveBreakGlassResponse {
-                throttle_time_ms: 0,
-                error_code: refusal.code,
-                error_message: Some(refusal.message),
-                approvals_held: report.held,
-                approvals_required: report.required,
-                ..ApproveBreakGlassResponse::default()
-            },
-        };
-        encode_response(&response, version)
-    }
-);
+    let response = match outcome {
+        Ok(_) => ApproveBreakGlassResponse {
+            throttle_time_ms: 0,
+            error_code: codes::NONE,
+            error_message: None,
+            approvals_held: report.held,
+            approvals_required: report.required,
+            ..ApproveBreakGlassResponse::default()
+        },
+        Err(refusal) => ApproveBreakGlassResponse {
+            throttle_time_ms: 0,
+            error_code: refusal.code,
+            error_message: Some(refusal.message),
+            approvals_held: report.held,
+            approvals_required: report.required,
+            ..ApproveBreakGlassResponse::default()
+        },
+    };
+    encode_response(&response, version)
+}

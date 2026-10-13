@@ -7,31 +7,47 @@
 
 use {
     super::S3RemoteStorage,
-    crate::storage_manager::{RemoteStorageManager, remote_operation},
+    crate::{
+        error::RemoteStorageError,
+        metadata::{CustomMetadata, RemoteLogSegmentMetadata},
+        storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
+    },
 };
 
 impl RemoteStorageManager for S3RemoteStorage {
-    remote_operation! {
-        copy(self, metadata, data) {
-            self.copy_segment_objects(metadata, data)
-        }
+    #[krabka_macros::remote_operation]
+    fn copy_log_segment_data(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+        data: &LogSegmentData,
+    ) -> Result<Option<CustomMetadata>, RemoteStorageError> {
+        self.copy_segment_objects(metadata, data)
     }
 
-    remote_operation! {
-        fetch(self, metadata, start_position, end_position) {
-            self.fetch_segment_range(metadata, start_position, end_position)
-        }
+    #[krabka_macros::remote_operation]
+    fn fetch_log_segment(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+        start_position: u32,
+        end_position: Option<u32>,
+    ) -> Result<Vec<u8>, RemoteStorageError> {
+        self.fetch_segment_range(metadata, start_position, end_position)
     }
 
-    remote_operation! {
-        index(self, metadata, index_type) {
-            self.fetch_index_bytes(metadata, index_type)
-        }
+    #[krabka_macros::remote_operation]
+    fn fetch_index(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+        index_type: IndexType,
+    ) -> Result<Vec<u8>, RemoteStorageError> {
+        self.fetch_index_bytes(metadata, index_type)
     }
 
-    remote_operation! {
-        delete(self, metadata) {
-            self.delete_segment_objects(metadata)
-        }
+    #[krabka_macros::remote_operation]
+    fn delete_log_segment_data(
+        &self,
+        metadata: &RemoteLogSegmentMetadata,
+    ) -> Result<(), RemoteStorageError> {
+        self.delete_segment_objects(metadata)
     }
 }

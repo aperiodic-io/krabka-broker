@@ -24,9 +24,8 @@ mod lifecycle;
 mod open;
 mod read;
 mod read_raw;
-crate::sendfile_cfg! {
-    mod read_raw_desc;
-}
+#[krabka_macros::sendfile_cfg]
+mod read_raw_desc;
 #[cfg(test)]
 mod test_support;
 mod timestamp_scan;
@@ -108,48 +107,44 @@ pub struct RawSegmentRead {
     pub bytes: Bytes,
 }
 
-crate::sendfile_cfg! {
-    /// Descriptor form of [`Segment::read_raw`] for the zero-copy fetch path,
-    /// Increments D + E.
-    ///
-    /// This type carries the same offset and boundary metadata, but the
-    /// records run is a [`krabka_protocol::records::FileRegion`] descriptor of
-    /// the form `(Arc<File>, offset, len)`, not an owned `Bytes` slice. The
-    /// broker can therefore `sendfile(2)` the run straight from the page cache
-    /// with no userspace copy. This type is compiled on the SENDFILE alias:
-    /// Linux, Apple, and FreeBSD/DragonFly.
-    #[derive(Debug, Clone)]
-    pub struct RawSegmentDesc {
-        /// `base_offset` of the first included batch (≤ requested offset).
-        pub start_offset: Offset,
-        /// Last absolute offset covered by the region (`start_offset - 1` if empty).
-        pub last_offset: Offset,
-        /// The records run, as a file-backed descriptor. `None` when the walk
-        /// found no complete batch in range.
-        pub region: Option<krabka_protocol::records::FileRegion>,
-    }
+#[krabka_macros::sendfile_cfg]
+/// Descriptor form of [`Segment::read_raw`] for the zero-copy fetch path,
+/// Increments D + E.
+///
+/// This type carries the same offset and boundary metadata, but the
+/// records run is a [`krabka_protocol::records::FileRegion`] descriptor of
+/// the form `(Arc<File>, offset, len)`, not an owned `Bytes` slice. The
+/// broker can therefore `sendfile(2)` the run straight from the page cache
+/// with no userspace copy. This type is compiled on the SENDFILE alias:
+/// Linux, Apple, and FreeBSD/DragonFly.
+#[derive(Debug, Clone)]
+pub struct RawSegmentDesc {
+    /// `base_offset` of the first included batch (≤ requested offset).
+    pub start_offset: Offset,
+    /// Last absolute offset covered by the region (`start_offset - 1` if empty).
+    pub last_offset: Offset,
+    /// The records run, as a file-backed descriptor. `None` when the walk
+    /// found no complete batch in range.
+    pub region: Option<krabka_protocol::records::FileRegion>,
+}
 
-    impl RawSegmentDesc {
-        fn empty() -> Self {
-            Self {
-                start_offset: Offset(0),
-                last_offset: Offset(-1),
-                region: None,
-            }
-        }
-
-        /// Byte length of the region. It is 0 when the region is empty.
-        #[must_use]
-        pub fn len(&self) -> usize {
-            self.region.as_ref().map_or(0, |r| r.len)
-        }
-
-        /// `true` when no batch bytes were described.
-        #[must_use]
-        pub fn is_empty(&self) -> bool {
-            self.region.is_none()
+#[krabka_macros::sendfile_cfg]
+impl RawSegmentDesc {
+    fn empty() -> Self {
+        Self {
+            start_offset: Offset(0),
+            last_offset: Offset(-1),
+            region: None,
         }
     }
+
+    /// Byte length of the region. It is 0 when the region is empty.
+    #[must_use]
+    pub fn len(&self) -> usize { self.region.as_ref().map_or(0, |r| r.len) }
+
+    /// `true` when no batch bytes were described.
+    #[must_use]
+    pub fn is_empty(&self) -> bool { self.region.is_none() }
 }
 
 impl RawSegmentRead {

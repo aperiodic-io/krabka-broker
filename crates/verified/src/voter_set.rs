@@ -2,16 +2,14 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Admission outcome for one voter carried by a `VotersRecord`.
-    pub enum VoterWireDecision {
-        NegativeId,
-        DirectoryMismatch,
-        InvalidEndpoint,
-        InvalidVersionRange,
-        Accept,
-    }
+/// Admission outcome for one voter carried by a `VotersRecord`.
+#[krabka_macros::model_type]
+pub enum VoterWireDecision {
+    NegativeId,
+    DirectoryMismatch,
+    InvalidEndpoint,
+    InvalidVersionRange,
+    Accept,
 }
 
 /// Validate the signed voter identity, exact directory translation, endpoint
@@ -59,15 +57,13 @@ pub fn voter_wire_decision(
     }
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Admission outcome for the outer `VotersRecord` collection.
-    pub enum VoterSetWireDecision {
-        UnsupportedRecordVersion,
-        Empty,
-        DuplicateId,
-        Accept,
-    }
+/// Admission outcome for the outer `VotersRecord` collection.
+#[krabka_macros::model_type]
+pub enum VoterSetWireDecision {
+    UnsupportedRecordVersion,
+    Empty,
+    DuplicateId,
+    Accept,
 }
 
 /// Require the supported record version and a nonempty collection with one

@@ -23,7 +23,7 @@ impl RuntimeFileConfig {
         cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_millis_i64_time: producer_id_expiration;
             positive_time: producer_id_expiration_scan_interval;
@@ -33,7 +33,7 @@ impl RuntimeFileConfig {
         // `STATIC_BROKER_CONFIG` when the operator named it, whatever the value.
         cfg.static_config_origins.log.min_insync_replicas |=
             runtime.default_min_insync_replicas.is_some();
-        set_runtime! { runtime => cfg; positive_i32: default_min_insync_replicas; }
+        krabka_macros::set_runtime! { runtime => cfg; positive_i32: default_min_insync_replicas; }
         // `DescribeConfigs` reports these two as `STATIC_BROKER_CONFIG` when
         // the operator named them, so the loader records the provenance.
         if let Some(value) = runtime.num_partitions {
@@ -46,7 +46,7 @@ impl RuntimeFileConfig {
                 .topic_creation
                 .default_replication_factor = true;
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_bytes_usize: future_log_move_read_chunk;
             positive_i32: share_state_num_partitions => share_coordinator.state_topic_num_partitions;
@@ -67,7 +67,7 @@ impl RuntimeFileConfig {
             cfg.share_coordinator.snapshot_update_records_per_snapshot = value;
         }
         // Kafka's `atLeast(1)` milliseconds, as an `INT`.
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_millis_i32_duration: share_coordinator_write_timeout
                     => share_coordinator.write_timeout,
@@ -108,7 +108,7 @@ impl RuntimeFileConfig {
                 }
             };
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             // Kafka's `atLeast(512 * 1024)` over an `INT`.
             cached_buffer_max_bytes: share_coordinator_cached_buffer_max_bytes
@@ -127,7 +127,7 @@ impl RuntimeFileConfig {
             cfg.offsets_retention_check_interval_override =
                 Some(positive_time("offsets_retention_check_interval", value)?);
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             positive_i32: transaction_state_num_partitions;
             whole_bytes_usize: transaction_recovery_read_max;
@@ -147,7 +147,7 @@ impl RuntimeFileConfig {
     /// refuses one below this value.
     pub(super) fn apply_barrier(&mut self, cfg: &mut BrokerConfig) -> Result<(), FileConfigError> {
         let runtime = self;
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             positive_i32: barrier_state_num_partitions;
             positive_i16: barrier_state_replication_factor;

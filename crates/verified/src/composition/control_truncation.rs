@@ -6,7 +6,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A complete ordered batch sequence begins after its nonnegative physical floor.
 pub fn physical_batch_sequence_valid(ends: Seq<i64>, start: Int, floor: Int) -> bool {
     pearlite! {
@@ -15,9 +18,11 @@ pub fn physical_batch_sequence_valid(ends: Seq<i64>, start: Int, floor: Int) -> 
         && (crate::sequence::strictly_increasing(ends))
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn physical_truncation_input_valid(
     ends: Seq<i64>,
     start: Int,
@@ -28,7 +33,6 @@ pub(super) fn physical_truncation_input_valid(
         physical_batch_sequence_valid(ends, start, cut)
         && 0 <= hwm && hwm <= if ends.len() == 0 { start } else { ends[ends.len() - 1]@ }
     }
-}
 }
 
 // Retained batches, actual end, HWM, retained/committed history lengths,
@@ -87,11 +91,13 @@ pub(super) fn whole_batch_truncation_bounds_controls(
     (kept, end, hwm, retained, committed, present, ready)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The physical frontier is the greatest whole batch end at or below the truncation cut.
 pub(super) fn whole_batch_frontier(ends: Seq<i64>, start: i64, cut: Int, frontier: i64) -> bool {
     pearlite! { start@ <= frontier@ && frontier@ <= cut
     && (frontier == start || exists<i: Int> 0 <= i && i < ends.len() && ends[i] == frontier)
     && (forall<i: Int> 0 <= i && i < ends.len() && ends[i]@ <= cut ==> ends[i]@ <= frontier@) }
-}
 }

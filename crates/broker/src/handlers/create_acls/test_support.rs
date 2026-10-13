@@ -35,7 +35,9 @@ pub(super) fn request(creations: Vec<AclCreation>) -> CreateAclsRequest {
     }
 }
 
-crate::test_support::context_helper!(pub(super) client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    pub(super) test_context ["admin-client"];
+}
 
 pub(super) use crate::handlers::acl_test_support::all_acls;
 

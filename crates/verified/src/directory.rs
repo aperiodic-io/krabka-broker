@@ -2,14 +2,12 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Change selected for one reported topic-partition replica.
-    pub enum DirectoryAssignmentDecision {
-        Ignore,
-        NoOp,
-        Assign(usize),
-    }
+/// Change selected for one reported topic-partition replica.
+#[krabka_macros::model_type]
+pub enum DirectoryAssignmentDecision {
+    Ignore,
+    NoOp,
+    Assign(usize),
 }
 
 /// Select only the reporting broker's exact replica slot, and suppress an
@@ -31,14 +29,12 @@ pub fn directory_assignment_decision(
     }
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Classification of an assignment report's controller response.
-    pub enum DirectoryResponseDecision {
-        ControllerError,
-        StaleController,
-        Accept,
-    }
+/// Classification of an assignment report's controller response.
+#[krabka_macros::model_type]
+pub enum DirectoryResponseDecision {
+    ControllerError,
+    StaleController,
+    Accept,
 }
 
 /// Accept success only while the controller identity that answered remains

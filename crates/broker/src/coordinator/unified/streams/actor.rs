@@ -23,6 +23,7 @@
 //! tasks.
 
 use {
+    crate::coordinator::unified::commit_validation_reply,
     krabka_protocol::owned::{
         streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
         streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
@@ -265,11 +266,8 @@ async fn send_validate_commit(
     {
         return Some(codes::UNKNOWN_SERVER_ERROR);
     }
-    match rx.await {
-        Ok(Ok(())) => None,
-        Ok(Err(code)) => Some(code),
-        Err(_) => Some(codes::UNKNOWN_SERVER_ERROR),
-    }
+    let result = rx.await;
+    commit_validation_reply(&result)
 }
 
 /// The first `OffsetCommit` version that a member of the streams protocol may

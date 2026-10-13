@@ -58,7 +58,7 @@ pub use {
 use {
     krabka_metadata::{AclOperation, ResourceType},
     krabka_security::Principal,
-    std::net::SocketAddr,
+    std::{collections::HashMap, net::SocketAddr},
 };
 
 /// What the caller asks `authorize`: which principal wants to do which
@@ -180,83 +180,79 @@ pub trait Authorizer: Send + Sync + std::fmt::Debug {
     }
 }
 
-// Batch spans record only shared request context; inner decisions retain their child spans.
-macro_rules! topic_authorization_batch {
-    (
-        $(#[$doc:meta])*
-        $name:ident($authorizer:ident, $source:ident, $principal:ident, $host:ident,
-            $operation:ident, $topic_names:ident $(, $log_denied:ident)?) $body:block
-    ) => {
-        $(#[$doc])*
-        #[must_use]
-        #[tracing::instrument(
-            level = "debug", skip_all,
-            fields(principal = %$principal.name, operation = ?$operation, host = %$host.ip())
-        )]
-        pub fn $name<'a>(
-            $authorizer: &dyn Authorizer,
-            $source: &dyn AclSource,
-            $principal: &Principal,
-            $host: &SocketAddr,
-            $operation: AclOperation,
-            $topic_names: impl IntoIterator<Item = &'a str>
-            $(, $log_denied: bool)?
-        ) -> std::collections::HashMap<&'a str, AuthorizationResult> $body
-    };
+/// Batch-authorize a set of topic names against the same principal, host, and
+/// operation.
+///
+/// The `Produce`, `Fetch`, and `Metadata` per-topic enforcement paths call this
+/// function. The returned map borrows its keys from the input iterator, so
+/// callers can avoid a copy of the topic strings.
+// Batch entry point for per-topic enforcement. skip_all keeps the borrowed
+// principal/host out of span fields; only the shared operation + principal
+// name are recorded. Each inner `authorize` opens its own child span, so this
+// is a batch-level span, not a per-entry loop span.
+#[must_use]
+#[tracing::instrument(
+    level = "debug", skip_all,
+    fields(principal = %principal.name, operation = ?operation, host = %host.ip())
+)]
+pub fn authorize_topics<'a>(
+    authorizer: &dyn Authorizer,
+    source: &dyn AclSource,
+    principal: &Principal,
+    host: &SocketAddr,
+    operation: AclOperation,
+    topic_names: impl IntoIterator<Item = &'a str>,
+) -> HashMap<&'a str, AuthorizationResult> {
+    authorize_topics_logged(
+        authorizer,
+        source,
+        principal,
+        host,
+        operation,
+        topic_names,
+        true,
+    )
 }
 
-topic_authorization_batch! {
-    /// Batch-authorize a set of topic names against the same principal, host, and
-    /// operation.
-    ///
-    /// The `Produce`, `Fetch`, and `Metadata` per-topic enforcement paths call this
-    /// function. The returned map borrows its keys from the input iterator, so
-    /// callers can avoid a copy of the topic strings.
-    // Batch entry point for per-topic enforcement. skip_all keeps the borrowed
-    // principal/host out of span fields; only the shared operation + principal
-    // name are recorded. Each inner `authorize` opens its own child span, so this
-    // is a batch-level span, not a per-entry loop span.
-    authorize_topics(authorizer, source, principal, host, operation, topic_names) {
-        authorize_topics_logged(
-            authorizer,
-            source,
-            principal,
-            host,
-            operation,
-            topic_names,
-            true,
-        )
-    }
-}
-
-topic_authorization_batch! {
-    /// [`authorize_topics`] with Kafka's `logIfDenied` flag. With `log_denied` off
-    /// each name goes through [`Authorizer::authorize_quiet`], and a Deny leaves
-    /// no audit record and no counter behind.
-    ///
-    /// `Metadata` is the caller that turns it off: for all topics it filters every
-    /// topic by `Describe` and hides the denied ones, so a Deny there is not a
-    /// refusal (`logIfDenied = !metadataRequest.isAllTopics`).
-    authorize_topics_logged(authorizer, source, principal, host, operation, topic_names, log_denied) {
-        topic_names
-            .into_iter()
-            .map(|name| {
-                let req = AuthorizationRequest {
-                    principal,
-                    host,
-                    resource_type: ResourceType::Topic,
-                    resource_name: name,
-                    operation,
-                };
-                let decision = if log_denied {
-                    authorizer.authorize(source, &req)
-                } else {
-                    authorizer.authorize_quiet(source, &req)
-                };
-                (name, decision)
-            })
-            .collect()
-    }
+/// [`authorize_topics`] with Kafka's `logIfDenied` flag. With `log_denied` off
+/// each name goes through [`Authorizer::authorize_quiet`], and a Deny leaves
+/// no audit record and no counter behind.
+///
+/// `Metadata` is the caller that turns it off: for all topics it filters every
+/// topic by `Describe` and hides the denied ones, so a Deny there is not a
+/// refusal (`logIfDenied = !metadataRequest.isAllTopics`).
+#[must_use]
+#[tracing::instrument(
+    level = "debug", skip_all,
+    fields(principal = %principal.name, operation = ?operation, host = %host.ip())
+)]
+pub fn authorize_topics_logged<'a>(
+    authorizer: &dyn Authorizer,
+    source: &dyn AclSource,
+    principal: &Principal,
+    host: &SocketAddr,
+    operation: AclOperation,
+    topic_names: impl IntoIterator<Item = &'a str>,
+    log_denied: bool,
+) -> HashMap<&'a str, AuthorizationResult> {
+    topic_names
+        .into_iter()
+        .map(|name| {
+            let req = AuthorizationRequest {
+                principal,
+                host,
+                resource_type: ResourceType::Topic,
+                resource_name: name,
+                operation,
+            };
+            let decision = if log_denied {
+                authorizer.authorize(source, &req)
+            } else {
+                authorizer.authorize_quiet(source, &req)
+            };
+            (name, decision)
+        })
+        .collect()
 }
 
 #[cfg(test)]

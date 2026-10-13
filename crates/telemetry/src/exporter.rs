@@ -15,32 +15,18 @@ use {
     opentelemetry_sdk::{Resource, trace::Sampler},
 };
 
-macro_rules! exporter_method {
-    ($(#[$doc:meta])* fn $method:ident -> $exporter:ident) => {
-        $(#[$doc])*
-        pub(crate) fn $method(&self) -> Result<$exporter, TelemetryError> {
-            let builder = $exporter::builder();
-            let exporter = match self.protocol {
-                OtlpProtocol::Grpc => self.configure_exporter(builder.with_tonic()).build()?,
-                OtlpProtocol::HttpProtobuf => self
-                    .configure_exporter(builder.with_http().with_protocol(Protocol::HttpBinary))
-                    .build()?,
-            };
-            Ok(exporter)
-        }
-    };
-}
-
 impl OtlpConfig {
-    exporter_method!(fn build_exporter -> SpanExporter);
+    krabka_macros::otlp_exporter! {
+        pub(crate) fn build_exporter(&self) -> Result<SpanExporter, TelemetryError>;
+    }
 
-    exporter_method! {
+    krabka_macros::otlp_exporter! {
         /// Build the OTLP **log** exporter.
         ///
         /// This function mirrors [`Self::build_exporter`], which builds the span
         /// exporter. Services can thus send their `tracing` logs over OTLP to the
         /// logs pipeline, and they do not depend on container-stdout tailing.
-        fn build_log_exporter -> LogExporter
+        pub(crate) fn build_log_exporter(&self) -> Result<LogExporter, TelemetryError>;
     }
 
     fn configure_exporter<B: WithExportConfig>(&self, builder: B) -> B {

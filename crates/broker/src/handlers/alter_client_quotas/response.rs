@@ -95,10 +95,10 @@ mod tests {
         let entity: EntityKey = vec![("user".into(), Some("alice".into()))];
 
         let ok = ok_entry(&entity);
-        let expected_ok = tagged_wire!(RespEntry {
+        let expected_ok = krabka_macros::tagged_wire!(RespEntry {
             error_code: 0,
             error_message: None,
-            entity: vec![tagged_wire!(RespEntity {
+            entity: vec![krabka_macros::tagged_wire!(RespEntity {
                 entity_type: "user".into(),
                 entity_name: Some("alice".into()),
             })],
@@ -106,10 +106,10 @@ mod tests {
         assert!(ok == expected_ok);
 
         let err = err_entry(&entity, INVALID_REQUEST, "bad quota".into());
-        let expected_err = tagged_wire!(RespEntry {
+        let expected_err = krabka_macros::tagged_wire!(RespEntry {
             error_code: INVALID_REQUEST,
             error_message: Some("bad quota".into()),
-            entity: vec![tagged_wire!(RespEntity {
+            entity: vec![krabka_macros::tagged_wire!(RespEntity {
                 entity_type: "user".into(),
                 entity_name: Some("alice".into()),
             })],
@@ -131,18 +131,18 @@ mod tests {
         apply_submit_error(&mut results, "raft unavailable");
 
         let expected = vec![
-            tagged_wire!(RespEntry {
+            krabka_macros::tagged_wire!(RespEntry {
                 error_code: COORDINATOR_NOT_AVAILABLE,
                 error_message: Some("submit failed: raft unavailable".into()),
-                entity: vec![tagged_wire!(RespEntity {
+                entity: vec![krabka_macros::tagged_wire!(RespEntity {
                     entity_type: "user".into(),
                     entity_name: Some("alice".into()),
                 })],
             }),
-            tagged_wire!(RespEntry {
+            krabka_macros::tagged_wire!(RespEntry {
                 error_code: INVALID_REQUEST,
                 error_message: Some("invalid bob quota".into()),
-                entity: vec![tagged_wire!(RespEntity {
+                entity: vec![krabka_macros::tagged_wire!(RespEntity {
                     entity_type: "user".into(),
                     entity_name: Some("bob".into()),
                 })],

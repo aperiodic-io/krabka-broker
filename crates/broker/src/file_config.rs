@@ -7,16 +7,12 @@
 //!
 //! [`FileConfig`] is the whole document; each `[section]` it names has its own
 //! module below, holding that section's TOML shape and the code that applies
-//! it. `runtime_macros` is declared first and with `#[macro_use]`, because
-//! `macro_rules!` is textually scoped and every `runtime_*` module expands the
-//! `set_runtime_*` macros it defines.
+//! it. The runtime appliers use `krabka_macros::set_runtime!` to apply optional
+//! fields in table order through their named validators.
 
 use {
     krabka_security::ListenerProtocol, krabka_units::Time, schemars::JsonSchema, serde::Deserialize,
 };
-
-#[macro_use]
-mod runtime_macros;
 
 mod apply;
 mod audit;

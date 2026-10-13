@@ -2,23 +2,21 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// How one broker heartbeat relates to the broker's registration.
-    ///
-    /// Fencing and shutdown are not decided here: the controller's heartbeat
-    /// state machine derives them from the current broker state, as Kafka's
-    /// `BrokerHeartbeatManager.calculateNextBrokerState` does.
-    pub enum BrokerHeartbeatDecision {
-        /// No registration exists for the broker id.
-        Missing,
-        /// The heartbeat carries another broker epoch.
-        Stale,
-        /// The heartbeat carries the registered epoch. The broker has caught up
-        /// once its metadata offset reaches its registration record, whose offset
-        /// is the broker epoch.
-        Current { caught_up: bool },
-    }
+/// How one broker heartbeat relates to the broker's registration.
+///
+/// Fencing and shutdown are not decided here: the controller's heartbeat
+/// state machine derives them from the current broker state, as Kafka's
+/// `BrokerHeartbeatManager.calculateNextBrokerState` does.
+#[krabka_macros::model_type]
+pub enum BrokerHeartbeatDecision {
+    /// No registration exists for the broker id.
+    Missing,
+    /// The heartbeat carries another broker epoch.
+    Stale,
+    /// The heartbeat carries the registered epoch. The broker has caught up
+    /// once its metadata offset reaches its registration record, whose offset
+    /// is the broker epoch.
+    Current { caught_up: bool },
 }
 
 /// Fence an absent or stale registration, as Kafka's

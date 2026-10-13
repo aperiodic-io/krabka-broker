@@ -20,9 +20,8 @@ use {
 };
 
 impl SendfileSink for DuplexStream {
-    crate::sendfile_cfg! {
-        fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> { None }
-    }
+    #[krabka_macros::sendfile_cfg]
+    fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> { None }
 
     fn is_sendfile_capable(&self) -> bool { false }
 }
@@ -68,30 +67,50 @@ async fn disabled_idle_window_leaves_a_stalled_write_pending() {
     );
 }
 
-crate::sendfile_cfg! {
-    #[tokio::test]
-    async fn stalled_sendfile_obeys_the_same_idle_window() {
-        use std::{io::Write as _, sync::Arc};
-        use krabka_protocol::records::FileRegion;
-        use crate::{
+#[krabka_macros::sendfile_cfg]
+#[tokio::test]
+async fn stalled_sendfile_obeys_the_same_idle_window() {
+    use {
+        crate::{
             error::BrokerError,
             metrics::BrokerMetrics,
-            network::{fetch_writer::{WriteOp, write_fetch_plan}, test_support::tcp_pair},
-        };
+            network::{
+                fetch_writer::{WriteOp, write_fetch_plan},
+                test_support::tcp_pair,
+            },
+        },
+        krabka_protocol::records::FileRegion,
+        std::{io::Write as _, sync::Arc},
+    };
 
-        let (server, _nonreading_client) = tcp_pair().await;
-        socket2::SockRef::from(&server).set_send_buffer_size(4096).expect("small send buffer");
-        let mut file = tempfile::NamedTempFile::new().expect("source file");
-        let bytes = vec![7; 8 * 1024 * 1024];
-        file.write_all(&bytes).expect("file contents");
-        let region = FileRegion { file: Arc::new(file.reopen().expect("file handle")), offset: 0, len: bytes.len() };
-        let mut stream = WriteIdle::new(server, Some(Duration::from_millis(50)));
-        let error = tokio::time::timeout(Duration::from_secs(2), write_fetch_plan(
-            &mut stream, vec![WriteOp::File(region)], &BrokerMetrics::new()
-        )).await.expect("idle timeout bounds sendfile").expect_err("nonreading peer stalls");
-        let BrokerError::Io(error) = error else { panic!("expected I/O timeout") };
-        assert!(error.kind() == std::io::ErrorKind::TimedOut);
-    }
+    let (server, _nonreading_client) = tcp_pair().await;
+    socket2::SockRef::from(&server)
+        .set_send_buffer_size(4096)
+        .expect("small send buffer");
+    let mut file = tempfile::NamedTempFile::new().expect("source file");
+    let bytes = vec![7; 8 * 1024 * 1024];
+    file.write_all(&bytes).expect("file contents");
+    let region = FileRegion {
+        file: Arc::new(file.reopen().expect("file handle")),
+        offset: 0,
+        len: bytes.len(),
+    };
+    let mut stream = WriteIdle::new(server, Some(Duration::from_millis(50)));
+    let error = tokio::time::timeout(
+        Duration::from_secs(2),
+        write_fetch_plan(
+            &mut stream,
+            vec![WriteOp::File(region)],
+            &BrokerMetrics::new(),
+        ),
+    )
+    .await
+    .expect("idle timeout bounds sendfile")
+    .expect_err("nonreading peer stalls");
+    let BrokerError::Io(error) = error else {
+        panic!("expected I/O timeout")
+    };
+    assert!(error.kind() == std::io::ErrorKind::TimedOut);
 }
 
 #[tokio::test]

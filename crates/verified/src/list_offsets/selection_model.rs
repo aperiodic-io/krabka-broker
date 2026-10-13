@@ -141,7 +141,10 @@ pub const fn list_offsets_earliest(facts: ListOffsetsEarliestFacts) -> Option<i6
     Some(offset)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The Kafka rule for one partition row's final `ListOffsets` value.
 ///
 /// A malformed input fails closed, and a lookup that found nothing (`-1`) is
@@ -192,5 +195,4 @@ pub fn list_offsets_selection_model(
             ListOffsetsSelectionDecision::Unknown
         }
     }
-}
 }

@@ -9,8 +9,9 @@
 //! why they sit apart from the configuration itself.
 
 use {
-    crate::error::RaftError,
+    crate::{config::kafka_4_3_1_max, error::RaftError},
     bytes::Bytes,
+    krabka_protocol::ProtocolRequest,
     std::{future::Future, net::SocketAddr, pin::Pin},
 };
 
@@ -178,6 +179,19 @@ pub struct ControllerApiVersion {
 }
 
 impl ControllerApiVersion {
+    /// The request schema's full decodable range and flexible-header boundary,
+    /// with the default maximum taken from Kafka 4.3.1's advertised range.
+    #[must_use]
+    pub const fn for_request<R: ProtocolRequest>() -> Self {
+        Self {
+            api_key: R::API_KEY,
+            min_version: R::MIN_VERSION,
+            max_version: R::MAX_VERSION,
+            released_max: kafka_4_3_1_max(R::API_KEY),
+            flexible_min: R::FLEXIBLE_MIN,
+        }
+    }
+
     /// The highest version the listener advertises and accepts under
     /// `unstable`, or `None` when it neither advertises nor accepts the api
     /// key at all.

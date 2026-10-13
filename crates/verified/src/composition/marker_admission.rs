@@ -10,7 +10,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn pending_marker_admitted(
     version: i16,
     request: TransactionMarkerRequest,
@@ -22,20 +25,26 @@ pub(super) fn pending_marker_admitted(
     && (version@ < 2 || request.producer_epoch != current.producer_epoch
         || request.producer_epoch@ == i16::MAX@) }
 }
-}
 
 #[cfg(creusot)]
 mod progress;
 #[cfg(creusot)]
 use progress::lemma_maximal_prefix_advances;
 
-open_logic! {
-fn marker_prefix_maximal(bounds: (i64, i64), marker_end: Int, starts: Seq<i64>, limit: Int) -> bool {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
+fn marker_prefix_maximal(
+    bounds: (i64, i64),
+    marker_end: Int,
+    starts: Seq<i64>,
+    limit: Int,
+) -> bool {
     pearlite! { forall<v: Int> v <= bounds.0@ && v <= bounds.1@
-        && v <= marker_end + 1
-        && (forall<i: Int> 0 <= i && i < starts.len() ==> v <= starts[i]@)
-        ==> v <= limit }
-}
+    && v <= marker_end + 1
+    && (forall<i: Int> 0 <= i && i < starts.len() ==> v <= starts[i]@)
+    ==> v <= limit }
 }
 
 type AdmittedMarkerFetch = (Decision, i64, i64, Option<(i64, i64)>);

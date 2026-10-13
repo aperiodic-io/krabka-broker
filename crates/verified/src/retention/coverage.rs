@@ -1,15 +1,19 @@
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn remote_ranges_valid(ranges: Seq<(i64, i64)>) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < ranges.len() ==> ranges[i].0@ <= ranges[i].1@ }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn remote_covers_offset(ranges: Seq<(i64, i64)>, offset: Int) -> bool {
     pearlite! { exists<i: Int> 0 <= i && i < ranges.len() && ranges[i].0@ <= offset && offset <= ranges[i].1@ }
-}
 }
 
 /// Find the greatest contiguous inclusive coverage rooted at `local_start`.

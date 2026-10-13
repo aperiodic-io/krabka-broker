@@ -7,6 +7,7 @@
 use crate::test_support::FakeMetadataSource;
 use {
     crate::{delegation_token_cleanup::DelegationTokenController, metadata_source::MetadataSource},
+    krabka_raft::NodeId,
     std::sync::Arc,
 };
 
@@ -23,9 +24,10 @@ use {
 ///
 /// Every broker runs both expiry sweeps. Raft serializes duplicate
 /// tombstones, so each one after the first is a no-op on the apply path.
+#[derive(krabka_macros::BackgroundControllers)]
 pub(super) struct ControllerAdapter {
     pub(super) handle: Arc<dyn MetadataSource>,
-    pub(super) node_id: krabka_raft::NodeId,
+    pub(super) node_id: NodeId,
 }
 
 impl ControllerAdapter {
@@ -42,34 +44,6 @@ impl ControllerAdapter {
     }
 }
 
-/// Metadata task traits share the same authority and submit error conversion.
-macro_rules! controller_adapter {
-    ($trait:path, $($extra:item),* $(,)?) => {
-        #[async_trait::async_trait]
-        impl $trait for ControllerAdapter {
-            fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> {
-                self.handle.current_image()
-            }
-            async fn submit_change(&self, records: Vec<krabka_metadata::MetadataRecord>) -> Result<(), String> {
-                self.submit(records).await
-            }
-            $($extra)*
-        }
-    };
-}
-
-controller_adapter!(
-    crate::leader_rebalance::ControllerLike,
-    fn is_leader(&self) -> bool { self.holds_leadership() }
-);
-controller_adapter!(
-    crate::reassignment::ReassignmentController,
-    fn is_leader(&self) -> bool { self.holds_leadership() },
-    fn watch_image(&self) -> tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>> {
-        self.handle.watch_image()
-    }
-);
-
 #[async_trait::async_trait]
 impl DelegationTokenController for ControllerAdapter {
     fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> { self.handle.current_image() }
@@ -85,8 +59,6 @@ impl DelegationTokenController for ControllerAdapter {
             .map_err(|e| e.to_string())
     }
 }
-
-controller_adapter!(crate::break_glass::sweep::BreakGlassController,);
 
 #[cfg(test)]
 mod tests {
@@ -112,10 +84,11 @@ mod tests {
 
     #[test]
     fn controller_adapter_reports_leadership_from_leader_watch() {
-        let source: Arc<dyn MetadataSource> = Arc::new(fake_source(
+        let fake = Arc::new(fake_source(
             krabka_metadata::MetadataImage::new(uuid::Uuid::from_u128(1)),
             Some(krabka_raft::NodeId(7)),
         ));
+        let source: Arc<dyn MetadataSource> = fake.clone();
         let leader = adapter(&source, 7);
         let follower = adapter(&source, 8);
 
@@ -129,15 +102,24 @@ mod tests {
         assert!(!crate::reassignment::ReassignmentController::is_leader(
             &follower
         ));
+        fake.set_leader(Some(NodeId(8)));
+        assert!(!ControllerLike::is_leader(&leader));
+        assert!(!ReassignmentController::is_leader(&leader));
+        assert!(ControllerLike::is_leader(&follower));
+        assert!(ReassignmentController::is_leader(&follower));
+        fake.set_leader(None);
+        assert!(!ControllerLike::is_leader(&follower));
+        assert!(!ReassignmentController::is_leader(&follower));
     }
 
-    #[test]
-    fn controller_adapter_forwards_current_image() {
+    #[tokio::test]
+    async fn controller_adapter_forwards_current_image() {
         let cluster_id = uuid::Uuid::from_u128(0x5150);
-        let source: Arc<dyn MetadataSource> = Arc::new(fake_source(
+        let fake = Arc::new(fake_source(
             krabka_metadata::MetadataImage::new(cluster_id),
             Some(krabka_raft::NodeId(1)),
         ));
+        let source: Arc<dyn MetadataSource> = fake.clone();
         let adapter = adapter(&source, 1);
 
         let images = [
@@ -148,9 +130,56 @@ mod tests {
         ];
         for image in images {
             assert!(image.cluster_id() == cluster_id);
+            assert!(Arc::ptr_eq(&image, &source.current_image()));
         }
-        let reassignment_rx = ReassignmentController::watch_image(&adapter);
+        let mut reassignment_rx = ReassignmentController::watch_image(&adapter);
         assert!(reassignment_rx.borrow().cluster_id() == cluster_id);
+        let applied = Arc::new(krabka_metadata::MetadataImage::new(uuid::Uuid::from_u128(
+            0x5151,
+        )));
+        fake.set_image(Arc::clone(&applied));
+        reassignment_rx
+            .changed()
+            .await
+            .expect("the forwarded watch sees the applied image");
+        assert!(Arc::ptr_eq(&reassignment_rx.borrow_and_update(), &applied));
+        for image in [
+            ControllerLike::current_image(&adapter),
+            ReassignmentController::current_image(&adapter),
+            DelegationTokenController::current_image(&adapter),
+            BreakGlassController::current_image(&adapter),
+        ] {
+            assert!(Arc::ptr_eq(&image, &applied));
+        }
+    }
+
+    #[tokio::test]
+    async fn controller_adapter_forwards_successful_batches_in_order() {
+        let fake = Arc::new(fake_source(
+            krabka_metadata::MetadataImage::new(uuid::Uuid::from_u128(1)),
+            Some(NodeId(1)),
+        ));
+        let source: Arc<dyn MetadataSource> = fake.clone();
+        let adapter = adapter(&source, 1);
+        let records = [
+            metadata_topic_record("rebalance", uuid::Uuid::from_u128(1)),
+            metadata_topic_record("reassignment", uuid::Uuid::from_u128(2)),
+            metadata_topic_record("sweep", uuid::Uuid::from_u128(3)),
+        ];
+        for result in [
+            ControllerLike::submit_change(&adapter, vec![records[0].clone()]).await,
+            ReassignmentController::submit_change(&adapter, vec![records[1].clone()]).await,
+            BreakGlassController::submit_change(&adapter, vec![records[2].clone()]).await,
+        ] {
+            assert!(result == Ok(()));
+        }
+        assert!(
+            fake.submitted()
+                == records
+                    .into_iter()
+                    .map(|record| vec![record])
+                    .collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
@@ -174,10 +203,19 @@ mod tests {
             ControllerLike::submit_change(&adapter, vec![record.clone()]).await,
             ReassignmentController::submit_change(&adapter, vec![record.clone()]).await,
             BreakGlassController::submit_change(&adapter, vec![record]).await,
-            DelegationTokenController::submit_mutations(&adapter, Vec::new()).await,
         ];
+        let expected = krabka_raft::RaftError::Unsupported("adapter test").to_string();
         for result in results {
-            assert!(result.is_err());
+            assert!(result == Err(expected.clone()));
         }
+        let expected = source
+            .submit_delegation_token_mutations(Vec::new())
+            .await
+            .expect_err("the fake source does not support token mutations")
+            .to_string();
+        assert!(
+            DelegationTokenController::submit_mutations(&adapter, Vec::new()).await
+                == Err(expected)
+        );
     }
 }

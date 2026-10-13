@@ -7,7 +7,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// What a snapshot at `snapshot_offset` can truthfully say about one
 /// producer: a real producer identity, a coordinator epoch that is real or
 /// Kafka's `-1`, and last-record and transaction fields that describe only
@@ -21,7 +24,6 @@ pub fn snapshot_entry_valid_model(snapshot_offset: Int, entry: ProducerSnapshotE
             && snapshot_last_record_valid(snapshot_offset, entry)
             && snapshot_transaction_valid(snapshot_offset, entry)
     }
-}
 }
 
 /// Validate one decoded producer entry against its snapshot's exclusive

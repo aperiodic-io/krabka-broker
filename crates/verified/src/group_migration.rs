@@ -2,34 +2,36 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    pub enum GroupMigrationDirection {
-        Upgrade,
-        Downgrade,
-    }
-
-    pub enum GroupMigrationRecordAction {
-        Write,
-        Tombstone,
-    }
-
-    pub struct GroupMigrationRecordPlan {
-        pub classic_group: GroupMigrationRecordAction,
-        pub next_gen_group: GroupMigrationRecordAction,
-        pub next_gen_target: GroupMigrationRecordAction,
-        pub member_metadata: GroupMigrationRecordAction,
-        pub target_member: GroupMigrationRecordAction,
-        pub current_member: GroupMigrationRecordAction,
-        pub member_count: usize,
-    }
+#[krabka_macros::model_type]
+pub enum GroupMigrationDirection {
+    Upgrade,
+    Downgrade,
 }
 
-open_logic! {
+#[krabka_macros::model_type]
+pub enum GroupMigrationRecordAction {
+    Write,
+    Tombstone,
+}
+
+#[krabka_macros::model_type]
+pub struct GroupMigrationRecordPlan {
+    pub classic_group: GroupMigrationRecordAction,
+    pub next_gen_group: GroupMigrationRecordAction,
+    pub next_gen_target: GroupMigrationRecordAction,
+    pub member_metadata: GroupMigrationRecordAction,
+    pub target_member: GroupMigrationRecordAction,
+    pub current_member: GroupMigrationRecordAction,
+    pub member_count: usize,
+}
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn migration_epoch_matches(input: Int, output: Int) -> bool {
     pearlite! { output >= 0 &&
-        ((input >= 0 && output == input) || (input < 0 && output == 0)) }
-}
+    ((input >= 0 && output == input) || (input < 0 && output == 0)) }
 }
 
 /// Admit a classic-to-consumer upgrade exactly when the protocol and every

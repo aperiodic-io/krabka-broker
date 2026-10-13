@@ -20,8 +20,15 @@
 //! above. They share the group-level gate in `authz` and the coordinator read
 //! in `committed`. This file holds only the entry point that picks the shape.
 
-use krabka_protocol::owned::{
-    offset_fetch_request::OffsetFetchRequest, offset_fetch_response::OffsetFetchResponse,
+use {
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::{ApiVersion, RequestContext},
+    },
+    krabka_protocol::owned::{
+        offset_fetch_request::OffsetFetchRequest, offset_fetch_response::OffsetFetchResponse,
+    },
 };
 
 mod authz;
@@ -34,21 +41,22 @@ mod unstable;
 
 use self::{groups::handle_groups, legacy::handle_legacy};
 
-context_handler! {
-    // cargo-mutants: coordinator-backed response projection; integration-tested.
-    #[cfg_attr(test, mutants::skip)]
-    OffsetFetchRequest => OffsetFetchResponse,
-    (broker, req, version, ctx),
-    {
-        // ── KIP-516 (v8+): per-group `groups[]` request/response shape ──
-        // v8 moved from a single (group_id, topics) pair to an array of
-        // groups, and v10 keys topics by `topic_id`. Internal offset storage
-        // stays name-keyed, so resolve id→name at the boundary and echo the
-        // id back. The legacy v0–v7 single-group path is preserved below.
-        if version >= 8 {
-            return Ok(handle_groups(broker, version, &req, ctx).await);
-        }
-
-        Ok(handle_legacy(broker, &req, ctx).await)
+// cargo-mutants: coordinator-backed response projection; integration-tested.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: OffsetFetchRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<OffsetFetchResponse, BrokerError> {
+    // ── KIP-516 (v8+): per-group `groups[]` request/response shape ──
+    // v8 moved from a single (group_id, topics) pair to an array of
+    // groups, and v10 keys topics by `topic_id`. Internal offset storage
+    // stays name-keyed, so resolve id→name at the boundary and echo the
+    // id back. The legacy v0–v7 single-group path is preserved below.
+    if version >= 8 {
+        return Ok(handle_groups(broker, version, &req, ctx).await);
     }
+
+    Ok(handle_legacy(broker, &req, ctx).await)
 }

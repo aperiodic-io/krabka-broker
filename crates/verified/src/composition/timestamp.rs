@@ -8,23 +8,27 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Record offsets remain strictly increasing even when their timestamps do not.
 pub(super) fn record_offsets_ordered(offsets: Seq<u32>) -> bool {
     pearlite! {
         crate::sequence::strictly_increasing(offsets)
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Validated archive cursors agree on the preceding indexed offset.
 pub(super) fn time_cursor_matches(entries: Seq<(i64, u32)>, cursor: (usize, u32, u32)) -> bool {
     pearlite! {
         cursor.1 == cursor.2 && cursor.0@ <= entries.len()
             && cursor.1 == if cursor.0@ == 0 { 0u32 } else { entries[cursor.0@ - 1].1 }
     }
-}
 }
 
 /// Construct a sparse row from the actual prefix maximum. The indexed record
@@ -53,7 +57,10 @@ pub(super) fn running_maximum_index_entry(
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn sparse_maxima_bound_prefix(
     entries: Seq<(i64, u32)>,
     offsets: Seq<u32>,
@@ -63,7 +70,6 @@ pub(super) fn sparse_maxima_bound_prefix(
         (forall<i: Int, j: Int> 0 <= i && i < j && j < entries.len() ==> entries[i].0@ <= entries[j].0@)
         && (sparse_rows_bound_records(entries, offsets, timestamps))
     }
-}
 }
 
 /// A strict-predecessor sparse start followed by the existing record selector
@@ -139,13 +145,15 @@ pub(super) fn remote_timestamp_scan_preserves_first(
     (count, relative, matched)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn time_archive_valid(entries: Seq<(i64, u32)>, max_relative: Int) -> bool {
     pearlite! {
         (forall<i: Int> 0 <= i && i < entries.len() ==> entries[i].1@ <= max_relative)
         && (time_rows_ordered(entries, entries.len()))
     }
-}
 }
 
 krabka_macros::validate_archive_rows! {
@@ -227,23 +235,30 @@ pub(super) fn constructed_time_index_preserves_first(
     (entries, selected)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The prefix preserves timestamp order and distinct increasing record offsets.
 pub fn time_rows_ordered(entries: Seq<(i64, u32)>, count: Int) -> bool {
     pearlite! { forall<left: Int, right: Int> 0 <= left && left < right && right < count
     ==> entries[left].0@ <= entries[right].0@ && entries[left].1@ < entries[right].1@ }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The archive prefix contains timestamps below the target and stops at the first eligible row.
 pub(super) fn timestamp_archive_prefix(entries: Seq<(i64, u32)>, target: Int, count: Int) -> bool {
     pearlite! { (forall<i: Int> 0 <= i && i < count ==> entries[i].0@ < target)
     && (count < entries.len() ==> entries[count].0@ >= target) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every sparse maximum bounds timestamps of decoded records before its relative offset.
 pub fn sparse_rows_bound_records(
     entries: Seq<(i64, u32)>,
@@ -253,11 +268,12 @@ pub fn sparse_rows_bound_records(
     pearlite! { forall<i: Int, j: Int> 0 <= i && i < entries.len() && 0 <= j && j < offsets.len()
     && offsets[j]@ < entries[i].1@ ==> times[j]@ <= entries[i].0@ }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A timestamp lies outside the requested closed interval.
 pub fn outside_timestamp_interval(time: Int, targets: (i64, i64)) -> bool {
     pearlite! { time < targets.0@ || time > targets.1@ }
-}
 }

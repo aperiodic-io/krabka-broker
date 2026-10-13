@@ -29,7 +29,9 @@ use {
     std::sync::Arc,
 };
 
-crate::test_support::context_helper!(client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    test_context ["admin-client"];
+}
 
 use crate::test_support::start_broker_with_authorizer_no_audit as start_broker;
 

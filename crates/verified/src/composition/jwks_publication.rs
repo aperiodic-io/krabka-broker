@@ -57,7 +57,10 @@ pub(super) fn publication_trace(initial: u64, fetches: &[bool]) -> (u64, u64) {
     (generation, published)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn initial_session_input_valid(
     facts: OAuthSessionFacts,
     cache: JwksCacheFacts,
@@ -71,7 +74,6 @@ pub(super) fn initial_session_input_valid(
         && facts.expiry == OAuthExpiryPresence::Present && facts.token_expires_at_ms@ > completed
         && facts.authentication == OAuthAuthenticationKind::Initial && facts.cap == OAuthSessionCap::Disabled
     }
-}
 }
 
 /// For a valid initial controller credential and a stable starting generation,
@@ -120,7 +122,10 @@ pub(super) fn published_keys_bound_oauth_session(
     (oauth_session_admission(facts), trace)
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Any key publication, unfinished writer or hard-expiry overrun invalidates this credential.
 pub(super) fn publication_invalidates_credential(
     cache: JwksCacheFacts,
@@ -130,5 +135,4 @@ pub(super) fn publication_invalidates_credential(
 ) -> bool {
     pearlite! { published > 0 || (writer_unfinished && cache.generation_before@ < u64::MAX@ - 1)
     || (cache.expiry_enabled && completed - cache.last_successful_fetch_ms@ > cache.expiry_ms@) }
-}
 }

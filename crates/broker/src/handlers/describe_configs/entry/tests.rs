@@ -78,7 +78,7 @@ fn the_chain_head_decides_the_value_and_the_source() {
 
     assert!(
         entry
-            == tagged_wire!(DescribeConfigsResourceResult {
+            == krabka_macros::tagged_wire!(DescribeConfigsResourceResult {
                 name: "log.retention.ms".to_owned(),
                 value: Some("90000".to_owned()),
                 read_only: false,
@@ -244,19 +244,19 @@ fn a_sensitive_key_reports_no_value_anywhere_in_the_chain() {
 
     assert!(
         entry
-            == tagged_wire!(DescribeConfigsResourceResult {
+            == krabka_macros::tagged_wire!(DescribeConfigsResourceResult {
                 name: SECRET.name.to_owned(),
                 value: None,
                 read_only: false,
                 config_source: CONFIG_SOURCE_STATIC_BROKER,
                 is_sensitive: true,
                 synonyms: vec![
-                    tagged_wire!(DescribeConfigsSynonym {
+                    krabka_macros::tagged_wire!(DescribeConfigsSynonym {
                         name: SECRET.name.to_owned(),
                         value: None,
                         source: CONFIG_SOURCE_STATIC_BROKER,
                     }),
-                    tagged_wire!(DescribeConfigsSynonym {
+                    krabka_macros::tagged_wire!(DescribeConfigsSynonym {
                         name: SECRET.name.to_owned(),
                         value: None,
                         source: CONFIG_SOURCE_DEFAULT,
@@ -290,7 +290,7 @@ fn a_key_with_no_registry_row_is_treated_as_one_the_broker_may_not_disclose() {
     check!(entry.documentation == None);
     check!(
         entry.synonyms
-            == vec![tagged_wire!(DescribeConfigsSynonym {
+            == vec![krabka_macros::tagged_wire!(DescribeConfigsSynonym {
                 name: "some.key.no.row.covers".to_owned(),
                 value: None,
                 source: CONFIG_SOURCE_DYNAMIC_BROKER,

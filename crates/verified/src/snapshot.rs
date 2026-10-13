@@ -2,21 +2,20 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Pure decision for one snapshot response chunk.
-    pub enum SnapshotChunkDecision {
-        Restart,
-        Continue { next_position: i64 },
-        Complete,
-    }
+/// Pure decision for one snapshot response chunk.
+#[krabka_macros::model_type]
+pub enum SnapshotChunkDecision {
+    Restart,
+    Continue { next_position: i64 },
+    Complete,
+}
 
-    /// Admission result for a fully assembled snapshot at the controller boundary.
-    pub enum SnapshotInstallDecision {
-        Reject,
-        Stale,
-        Install,
-    }
+/// Admission result for a fully assembled snapshot at the controller boundary.
+#[krabka_macros::model_type]
+pub enum SnapshotInstallDecision {
+    Reject,
+    Stale,
+    Install,
 }
 
 /// Classify a decoded, fully assembled snapshot against live controller state.
@@ -114,7 +113,10 @@ pub fn snapshot_chunk_admission(
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A chunk continues one fixed identity and declared size at the exact received position.
 fn snapshot_chunk_shape_valid(
     identity_matches: bool,
@@ -128,7 +130,6 @@ fn snapshot_chunk_shape_valid(
     pearlite! { identity_matches && received >= 0 && chunk_len >= 0 && max_size >= 0
     && declared_size >= 0 && declared_size <= max_size && position == received
     && match fixed_size { Some(size) => size@ == declared_size, None => true, } }
-}
 }
 
 #[cfg(test)]

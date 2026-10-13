@@ -42,6 +42,10 @@
 //! [`last_fetchable_offset`](self::bound::last_fetchable_offset).
 
 use {
+    crate::{
+        config_keys::resolve_remote_list_offsets_timeout,
+        handlers::{ApiVersion, DispatchResult, encode_response},
+    },
     krabka_metadata::{AclOperation, ResourceType},
     krabka_protocol::{
         Decode,
@@ -179,105 +183,106 @@ fn partition_topics_by_describe<T>(
     DescribeSplit { authorized, denied }
 }
 
-wire_handler! {
-    async (broker, version, req_bytes, ctx), {
-        if version == 0 {
-            return v0::handle(broker, req_bytes, ctx).await;
-        }
+pub(crate) async fn handle(
+    broker: &Broker,
+    version: ApiVersion,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    if version == 0 {
+        return v0::handle(broker, req_bytes, ctx).await;
+    }
 
-        let controller = broker.controller.clone();
-        {
-            let req = ListOffsetsRequest::decode(&mut &*req_bytes, version)?;
-            // `isolation_level` decodes only from v2 up; v1 leaves it at 0, which
-            // is `read_uncommitted`, exactly as Kafka treats a v1 request.
-            let bound = fetch_bound(req.replica_id, req.isolation_level);
+    let controller = broker.controller.clone();
+    {
+        let req = ListOffsetsRequest::decode(&mut &*req_bytes, version)?;
+        // `isolation_level` decodes only from v2 up; v1 leaves it at 0, which
+        // is `read_uncommitted`, exactly as Kafka treats a v1 request.
+        let bound = fetch_bound(req.replica_id, req.isolation_level);
 
-            // ── ACL preamble ────────────────────────────────────────────
-            // Per-topic `Describe` on `Topic(name)`. A denied topic gets
-            // `TOPIC_AUTHORIZATION_FAILED (29)` on every partition row it
-            // requested. Kafka's `handleListOffsetRequest` splits topics into
-            // authorized and unauthorized up front (`AuthHelper.
-            // partitionMapToAuthorizedPartitionsAndErrors`), processes only the
-            // authorized ones, and appends the unauthorized rows after them
-            // (`mergedResponses.addAll(unauthorizedResponseStatus)`) rather than
-            // interleaving them in request order.
-            let acl_image = controller.current_image();
+        // ── ACL preamble ────────────────────────────────────────────
+        // Per-topic `Describe` on `Topic(name)`. A denied topic gets
+        // `TOPIC_AUTHORIZATION_FAILED (29)` on every partition row it
+        // requested. Kafka's `handleListOffsetRequest` splits topics into
+        // authorized and unauthorized up front (`AuthHelper.
+        // partitionMapToAuthorizedPartitionsAndErrors`), processes only the
+        // authorized ones, and appends the unauthorized rows after them
+        // (`mergedResponses.addAll(unauthorizedResponseStatus)`) rather than
+        // interleaving them in request order.
+        let acl_image = controller.current_image();
 
-            let timeout = remote_timeout(
-                version,
-                req.timeout_ms,
-                crate::config_keys::resolve_remote_list_offsets_timeout(
-                    &acl_image,
-                    broker.config.node_id,
-                ),
-            );
-            // Kafka's `ListOffsetRequest.duplicatePartitions()` is computed once
-            // over the whole request, ahead of authorization and resolution, and
-            // every row of a topic-partition it names more than once is answered
-            // `INVALID_REQUEST` instead of being resolved. See
-            // `ReplicaManager.scala:1473-1478`.
-            let duplicates = duplicate_partition_keys(req.topics.iter().map(|topic| {
-                TopicPartitions {
-                    name: topic.name.as_str(),
-                    partitions: topic.partitions.iter().map(|part| part.partition_index),
-                }
-            }));
+        let timeout = remote_timeout(
+            version,
+            req.timeout_ms,
+            resolve_remote_list_offsets_timeout(&acl_image, broker.config.node_id),
+        );
+        // Kafka's `ListOffsetRequest.duplicatePartitions()` is computed once
+        // over the whole request, ahead of authorization and resolution, and
+        // every row of a topic-partition it names more than once is answered
+        // `INVALID_REQUEST` instead of being resolved. See
+        // `ReplicaManager.scala:1473-1478`.
+        let duplicates = duplicate_partition_keys(req.topics.iter().map(|topic| TopicPartitions {
+            name: topic.name.as_str(),
+            partitions: topic.partitions.iter().map(|part| part.partition_index),
+        }));
 
-            let DescribeSplit {
-                authorized: authorized_topics,
-                denied: denied_topics,
-            } = partition_topics_by_describe(req.topics, |topic| &topic.name, broker, &acl_image, ctx);
+        let DescribeSplit {
+            authorized: authorized_topics,
+            denied: denied_topics,
+        } = partition_topics_by_describe(req.topics, |topic| &topic.name, broker, &acl_image, ctx);
 
-            let mut topics_out =
-                concurrently(authorized_topics.into_iter().map(|IndexedTopic { index: topic_index, topic }| {
-                    let duplicates = &duplicates;
-                    async move {
-                        let name = topic.name;
-                        let partitions = concurrently(topic.partitions.into_iter().map(|part| {
-                            let is_duplicate =
-                                duplicates.contains(&PartitionRow {
-                                    topic_index,
-                                    partition: part.partition_index,
-                                });
-                            let name = name.clone();
-                            async move {
-                                if is_duplicate {
-                                    error_response(part.partition_index, codes::INVALID_REQUEST)
-                                } else {
-                                    resolve_partition(broker, &name, part, version, timeout, bound)
-                                        .await
-                                }
+        let mut topics_out = concurrently(authorized_topics.into_iter().map(
+            |IndexedTopic {
+                 index: topic_index,
+                 topic,
+             }| {
+                let duplicates = &duplicates;
+                async move {
+                    let name = topic.name;
+                    let partitions = concurrently(topic.partitions.into_iter().map(|part| {
+                        let is_duplicate = duplicates.contains(&PartitionRow {
+                            topic_index,
+                            partition: part.partition_index,
+                        });
+                        let name = name.clone();
+                        async move {
+                            if is_duplicate {
+                                error_response(part.partition_index, codes::INVALID_REQUEST)
+                            } else {
+                                resolve_partition(broker, &name, part, version, timeout, bound)
+                                    .await
                             }
-                        }))
-                        .await;
-                        ListOffsetsTopicResponse {
-                            name,
-                            partitions,
-                            ..Default::default()
                         }
+                    }))
+                    .await;
+                    ListOffsetsTopicResponse {
+                        name,
+                        partitions,
+                        ..Default::default()
                     }
-                }))
-                .await;
-
-            topics_out.extend(denied_topics.into_iter().map(|IndexedTopic { topic, .. }| {
-                let partitions = topic
-                    .partitions
-                    .into_iter()
-                    .map(|part| error_response(part.partition_index, codes::TOPIC_AUTHORIZATION_FAILED))
-                    .collect();
-                ListOffsetsTopicResponse {
-                    name: topic.name,
-                    partitions,
-                    ..Default::default()
                 }
-            }));
+            },
+        ))
+        .await;
 
-            let resp = ListOffsetsResponse {
-                throttle_time_ms: 0,
-                topics: topics_out,
+        topics_out.extend(denied_topics.into_iter().map(|IndexedTopic { topic, .. }| {
+            let partitions = topic
+                .partitions
+                .into_iter()
+                .map(|part| error_response(part.partition_index, codes::TOPIC_AUTHORIZATION_FAILED))
+                .collect();
+            ListOffsetsTopicResponse {
+                name: topic.name,
+                partitions,
                 ..Default::default()
-            };
-            crate::handlers::encode_response(&resp, version)
-        }
+            }
+        }));
+
+        let resp = ListOffsetsResponse {
+            throttle_time_ms: 0,
+            topics: topics_out,
+            ..Default::default()
+        };
+        encode_response(&resp, version)
     }
 }

@@ -9,28 +9,24 @@
 //! `oldestVersion()..latestVersion()`. A request at a version outside the range
 //! does not decode, and the connection closes.
 
-use crate::config::ControllerApiVersion;
 #[cfg(test)]
 use crate::server::test_support::begin_quorum_epoch_request as begin_quorum_epoch_request_setup;
-
-/// One advertised controller-listener range, taken whole from the generated
-/// `krabka_protocol::owned::$request` message.
-///
-/// This table and the broker's KIP-919 Admin table in
-/// `crates/broker/src/controller_admin.rs` both build their entries with it.
-#[macro_export]
-macro_rules! controller_api_version {
-    ($request:ident) => {
-        $crate::ControllerApiVersion {
-            api_key: ::krabka_protocol::owned::$request::API_KEY,
-            min_version: ::krabka_protocol::owned::$request::MIN_VERSION,
-            max_version: ::krabka_protocol::owned::$request::MAX_VERSION,
-            released_max: $crate::kafka_4_3_1_max(::krabka_protocol::owned::$request::API_KEY),
-            flexible_min: ::krabka_protocol::owned::$request::FLEXIBLE_MIN,
-        }
-    };
-}
-use crate::controller_api_version as api_version;
+use {
+    crate::config::ControllerApiVersion,
+    krabka_protocol::owned::{
+        add_raft_voter_request::AddRaftVoterRequest, api_versions_request::ApiVersionsRequest,
+        begin_quorum_epoch_request::BeginQuorumEpochRequest,
+        controller_registration_request::ControllerRegistrationRequest,
+        describe_cluster_request::DescribeClusterRequest,
+        describe_quorum_request::DescribeQuorumRequest,
+        end_quorum_epoch_request::EndQuorumEpochRequest, fetch_request::FetchRequest,
+        fetch_snapshot_request::FetchSnapshotRequest,
+        remove_raft_voter_request::RemoveRaftVoterRequest,
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_handshake_request::SaslHandshakeRequest,
+        update_raft_voter_request::UpdateRaftVoterRequest, vote_request::VoteRequest,
+    },
+};
 
 /// Every API the controller listener serves itself, ordered by API key.
 ///
@@ -41,20 +37,20 @@ use crate::controller_api_version as api_version;
 /// crate holds the heartbeat registry that answering them reads and maintains,
 /// so they are declared and served there rather than listed below.
 pub(in crate::server) const CONTROLLER_LISTENER_APIS: &[ControllerApiVersion] = &[
-    api_version!(fetch_request),
-    api_version!(sasl_handshake_request),
-    api_version!(api_versions_request),
-    api_version!(sasl_authenticate_request),
-    api_version!(vote_request),
-    api_version!(begin_quorum_epoch_request),
-    api_version!(end_quorum_epoch_request),
-    api_version!(describe_quorum_request),
-    api_version!(fetch_snapshot_request),
-    api_version!(describe_cluster_request),
-    api_version!(controller_registration_request),
-    api_version!(add_raft_voter_request),
-    api_version!(remove_raft_voter_request),
-    api_version!(update_raft_voter_request),
+    ControllerApiVersion::for_request::<FetchRequest>(),
+    ControllerApiVersion::for_request::<SaslHandshakeRequest>(),
+    ControllerApiVersion::for_request::<ApiVersionsRequest>(),
+    ControllerApiVersion::for_request::<SaslAuthenticateRequest>(),
+    ControllerApiVersion::for_request::<VoteRequest>(),
+    ControllerApiVersion::for_request::<BeginQuorumEpochRequest>(),
+    ControllerApiVersion::for_request::<EndQuorumEpochRequest>(),
+    ControllerApiVersion::for_request::<DescribeQuorumRequest>(),
+    ControllerApiVersion::for_request::<FetchSnapshotRequest>(),
+    ControllerApiVersion::for_request::<DescribeClusterRequest>(),
+    ControllerApiVersion::for_request::<ControllerRegistrationRequest>(),
+    ControllerApiVersion::for_request::<AddRaftVoterRequest>(),
+    ControllerApiVersion::for_request::<RemoveRaftVoterRequest>(),
+    ControllerApiVersion::for_request::<UpdateRaftVoterRequest>(),
 ];
 
 /// The version from which requests for `api_key` carry tagged fields, if this

@@ -16,8 +16,8 @@ use {
         group_coordinator::GroupCoordinator,
         persistence_next_gen::{self, CurrentMemberAssignmentValue, MemberAssignmentState},
         replay_policy::{
-            ExistingGroup, GroupLookup, LEAVE_GROUP_MEMBER_EPOCH, ModernGroupType, group_tombstone,
-            persisted_group, target_metadata, target_metadata_tombstone,
+            ExistingGroup, LEAVE_GROUP_MEMBER_EPOCH, ModernGroupType, group_tombstone,
+            persisted_group_with_create, target_metadata, target_metadata_tombstone,
         },
         seeds::GroupSeed,
     },
@@ -83,21 +83,17 @@ impl GroupCoordinator {
         group_id: &str,
         create_if_not_exists: bool,
     ) -> Result<bool, BrokerError> {
-        match persisted_group(
+        persisted_group_with_create(
             group_id,
             ModernGroupType::Consumer,
             self.replayed_modern_group(group_id),
             create_if_not_exists,
-        )? {
-            GroupLookup::Absent => Ok(false),
-            GroupLookup::Found => Ok(true),
-            GroupLookup::Create => {
+            || {
                 self.seeds.insert(group_id.into(), GroupSeed::new_group());
                 self.seeds_cache
                     .insert(group_id.into(), GroupSeed::new_group());
-                Ok(true)
-            }
-        }
+            },
+        )
     }
 
     /// Applies `update` to the replayed group and to its cached copy.

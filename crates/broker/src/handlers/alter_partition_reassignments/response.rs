@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn row_builders_preserve_non_default_fields() {
         let ok = ok_row(7);
-        let expected_ok = tagged_wire!(ReassignablePartitionResponse {
+        let expected_ok = krabka_macros::tagged_wire!(ReassignablePartitionResponse {
             partition_index: 7,
             error_code: 0,
             error_message: None,
@@ -90,7 +90,7 @@ mod tests {
         assert!(ok == expected_ok);
 
         let err = err_row(8, UNKNOWN_TOPIC_OR_PARTITION, "missing partition".into());
-        let expected_err = tagged_wire!(ReassignablePartitionResponse {
+        let expected_err = krabka_macros::tagged_wire!(ReassignablePartitionResponse {
             partition_index: 8,
             error_code: UNKNOWN_TOPIC_OR_PARTITION,
             error_message: Some("missing partition".into()),

@@ -113,12 +113,12 @@ mod tests {
         apply_submit_error(&mut results, "not controller");
 
         let expected_results = vec![
-            tagged_wire!(DeleteAclsFilterResult {
+            krabka_macros::tagged_wire!(DeleteAclsFilterResult {
                 error_code: codes::COORDINATOR_NOT_AVAILABLE,
                 error_message: Some("submit failed: not controller".into()),
                 matching_acls: vec![matched],
             }),
-            tagged_wire!(DeleteAclsFilterResult {
+            krabka_macros::tagged_wire!(DeleteAclsFilterResult {
                 error_code: codes::INVALID_REQUEST,
                 error_message: Some("Unknown entryFilter.".into()),
                 matching_acls: Vec::new(),

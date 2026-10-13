@@ -60,12 +60,12 @@ async fn handle_denies_cluster_alter_for_each_filter() {
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
-    let denied = tagged_wire!(DeleteAclsFilterResult {
+    let denied = krabka_macros::tagged_wire!(DeleteAclsFilterResult {
         error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
         error_message: Some("Request DeleteAcls needs ALTER permission.".into()),
         matching_acls: Vec::new(),
     });
-    let expected = unthrottled_wire!(DeleteAclsResponse {
+    let expected = krabka_macros::unthrottled_wire!(DeleteAclsResponse {
         filter_results: vec![denied.clone(), denied],
     });
     assert!(resp == expected);
@@ -85,8 +85,8 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
-    let expected = unthrottled_wire!(DeleteAclsResponse {
-        filter_results: vec![tagged_wire!(DeleteAclsFilterResult {
+    let expected = krabka_macros::unthrottled_wire!(DeleteAclsResponse {
+        filter_results: vec![krabka_macros::tagged_wire!(DeleteAclsFilterResult {
             error_code: codes::NONE,
             error_message: None,
             matching_acls: vec![crate::handlers::acl_test_support::expected_deleted_orders_acl()],
@@ -119,12 +119,12 @@ async fn handle_answers_security_disabled_for_each_filter_when_no_authorizer_is_
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
-    let disabled = tagged_wire!(DeleteAclsFilterResult {
+    let disabled = krabka_macros::tagged_wire!(DeleteAclsFilterResult {
         error_code: codes::SECURITY_DISABLED,
         error_message: Some("No Authorizer is configured.".into()),
         matching_acls: Vec::new(),
     });
-    let expected = unthrottled_wire!(DeleteAclsResponse {
+    let expected = krabka_macros::unthrottled_wire!(DeleteAclsResponse {
         filter_results: vec![disabled.clone(), disabled],
     });
     assert!(resp == expected);
@@ -315,8 +315,8 @@ async fn handle_deletes_exactly_what_kafka_matches() {
         });
 
         let want_deleted = sorted(want_deleted);
-        let expected = unthrottled_wire!(DeleteAclsResponse {
-            filter_results: vec![tagged_wire!(DeleteAclsFilterResult {
+        let expected = krabka_macros::unthrottled_wire!(DeleteAclsResponse {
+            filter_results: vec![krabka_macros::tagged_wire!(DeleteAclsFilterResult {
                 error_code: codes::NONE,
                 error_message: None,
                 matching_acls: want_deleted
@@ -356,12 +356,12 @@ async fn handle_lists_an_acl_under_every_filter_that_matches_it() {
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
-    let row = tagged_wire!(DeleteAclsFilterResult {
+    let row = krabka_macros::tagged_wire!(DeleteAclsFilterResult {
         error_code: codes::NONE,
         error_message: None,
         matching_acls: vec![super::response::matching_acl_result(&shared)],
     });
-    let expected = unthrottled_wire!(DeleteAclsResponse {
+    let expected = krabka_macros::unthrottled_wire!(DeleteAclsResponse {
         filter_results: vec![row.clone(), row],
     });
     assert!(resp == expected);
@@ -437,7 +437,7 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
     let mut filter_results: Vec<DeleteAclsFilterResult> = cases
         .iter()
         .map(|UndefinedByteCase { message, .. }| {
-            tagged_wire!(DeleteAclsFilterResult {
+            krabka_macros::tagged_wire!(DeleteAclsFilterResult {
                 error_code: if message.is_some() {
                     codes::INVALID_REQUEST
                 } else {
@@ -448,12 +448,12 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
             })
         })
         .collect();
-    filter_results.push(tagged_wire!(DeleteAclsFilterResult {
+    filter_results.push(krabka_macros::tagged_wire!(DeleteAclsFilterResult {
         error_code: codes::NONE,
         error_message: None,
         matching_acls: vec![super::response::matching_acl_result(&doomed)],
     }));
-    let expected = unthrottled_wire!(DeleteAclsResponse { filter_results });
+    let expected = krabka_macros::unthrottled_wire!(DeleteAclsResponse { filter_results });
     assert!(resp == expected);
     assert!(all_acls(&broker_handle).is_empty());
     broker_handle.shutdown().await;
@@ -527,14 +527,14 @@ async fn handle_bounds_a_request_to_ten_thousand_removals() {
             .await
             .expect("handle");
 
-        let bound = tagged_wire!(DeleteAclsFilterResult {
+        let bound = krabka_macros::tagged_wire!(DeleteAclsFilterResult {
             error_code: codes::INVALID_REQUEST,
             error_message: Some(
                 "Cannot remove more than 10000 acls in a single delete operation.".into(),
             ),
             matching_acls: Vec::new(),
         });
-        let expected = unthrottled_wire!(DeleteAclsResponse {
+        let expected = krabka_macros::unthrottled_wire!(DeleteAclsResponse {
             filter_results: vec![bound; filter_count],
         });
         check!(resp == expected, "{seeded} acls, {filter_count} filters");

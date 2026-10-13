@@ -41,6 +41,12 @@ use {
     std::{future::Future, path::Path, sync::Arc},
 };
 
+/// An id that no topic in topic-resolution tests has.
+pub(crate) const UNKNOWN_TOPIC_ID: WireUuid = WireUuid([0x0b; 16]);
+
+/// A second id that no topic in topic-resolution tests has.
+pub(crate) const OTHER_UNKNOWN_TOPIC_ID: WireUuid = WireUuid([0x0c; 16]);
+
 pub(crate) mod transaction_admin_tests {
     #[allow(unused_imports)]
     pub(crate) use assert2::assert;
@@ -98,7 +104,7 @@ pub(crate) fn duplicate_config_resource_response(
     resource_type: i8,
     resource_name: &str,
 ) -> krabka_protocol::owned::alter_configs_response::AlterConfigsResourceResponse {
-    tagged_wire!(
+    krabka_macros::tagged_wire!(
         krabka_protocol::owned::alter_configs_response::AlterConfigsResourceResponse {
             resource_type,
             resource_name: resource_name.to_owned(),
@@ -1467,6 +1473,10 @@ pub(crate) fn acquired_share_records(
         .iter()
         .map(|range| OffsetRun::new(range.first_offset, range.last_offset))
         .collect()
+}
+
+pub(crate) fn share_topic_uuid(topic_id: krabka_protocol::primitives::uuid::Uuid) -> uuid::Uuid {
+    uuid::Uuid::from_bytes(topic_id.0)
 }
 
 pub(crate) fn metadata_version_gated(level: Option<i16>, minimum: i16) -> bool {

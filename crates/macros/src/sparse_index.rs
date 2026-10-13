@@ -1,0 +1,230 @@
+//! Sparse-index construction and file operations, with shared open instrumentation.
+
+use {
+    crate::meta::{compact, impl_block, item_body, named_fields},
+    moxy::{
+        ast::{Attributed, FnParam, FromMeta, ItemFn, ItemStruct, Meta, ParseError},
+        token::{LitStr, Spanner, TokenStream, TokenTree},
+    },
+    proc_macro::TokenStream as NativeTokenStream,
+};
+
+enum Kind {
+    Offset,
+    Time,
+}
+
+impl FromMeta for Kind {
+    fn from_meta(meta: &Meta) -> Result<Self, ParseError> {
+        match String::from_meta(meta)?.as_str() {
+            "offset" => Ok(Self::Offset),
+            "time" => Ok(Self::Time),
+            _ => Err(ParseError::new(
+                meta.span(),
+                "expected offset or time index kind",
+            )),
+        }
+    }
+}
+
+#[derive(moxy::FromMeta)]
+struct IndexArgs {
+    kind: Kind,
+}
+
+fn open_instrumentation() -> TokenStream {
+    moxy::template! {
+        #[tracing::instrument(
+            level = "debug",
+            skip_all,
+            fields(path = %path.display(), entries = tracing::field::Empty),
+            err,
+        )]
+    }
+}
+
+pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
+    let options = item
+        .parse_meta::<IndexArgs>("sparse_index")?
+        .ok_or_else(|| {
+            ParseError::new(
+                item.ident.span(),
+                "`SparseIndex` needs `#[sparse_index(kind = \"offset\" | \"time\")]`",
+            )
+        })?;
+    let fields = named_fields(&item, "SparseIndex")?;
+    for required in ["file", "io", "entries"] {
+        if !fields
+            .iter()
+            .any(|field| field.ident.as_ref().is_some_and(|name| name == required))
+        {
+            return Err(ParseError::new(
+                item.ident.span(),
+                format!("`SparseIndex` needs a `{required}` field"),
+            ));
+        }
+    }
+    let (raw, invariant, target, documentation) = match options.kind {
+        Kind::Offset => (
+            moxy::template! { OffsetEntryRaw },
+            "length is a multiple of OFFSET_ENTRY_SIZE and OffsetEntryRaw is Unaligned",
+            moxy::template! { crate::io::IoTarget::OffsetIndex },
+            Some(
+                "Open or create an offset-index file. If the file exists, this method\nloads its entries into memory. If it does not exist, this method\ncreates an empty file.",
+            ),
+        ),
+        Kind::Time => (
+            moxy::template! { TimeEntryRaw },
+            "length is a multiple of TIME_ENTRY_SIZE and TimeEntryRaw is Unaligned",
+            moxy::template! { crate::io::IoTarget::TimeIndex },
+            None,
+        ),
+    };
+    let invariant = LitStr::new(invariant, item.ident.span());
+    let documentation = documentation.map(|text| LitStr::new(text, item.ident.span()));
+    let instrumentation = open_instrumentation();
+    let methods = moxy::template! {
+        @if let Some(documentation) = &documentation { #[doc = {{ documentation }}] }
+        {{ instrumentation }}
+        pub fn open(path: &Path) -> Result<Self, crate::error::LogError> {
+            let crate::index::OpenedIndex { file, entries } =
+                crate::index::load_index::<{{ raw }}, _>(
+                    path, {{ invariant }}, |raw| (raw.key.get(), raw.coordinate.get()),
+                )?;
+            Ok(Self { file, io: crate::io::file_io(), entries })
+        }
+
+        #[cfg(not(target_os = "wasi"))]
+        pub(crate) fn flush_handle(&self) -> ::std::io::Result<::std::fs::File> {
+            self.file.try_clone()
+        }
+
+        /// The number of entries the index holds, which decides when the
+        /// segment is full under `segment.index.bytes`.
+        #[must_use]
+        pub fn entry_count(&self) -> usize { self.entries.len() }
+
+        #[tracing::instrument(level = "debug", skip_all, err)]
+        pub fn flush(&mut self) -> Result<(), crate::error::LogError> {
+            self.io.sync_file({{ target }}, &self.file).map_err(crate::error::LogError::Io)
+        }
+
+        /// Route this index's writes and syncs through `io`.
+        pub(crate) fn set_io(&mut self, io: ::std::sync::Arc<dyn crate::io::LogIo>) {
+            self.io = io;
+        }
+    };
+    Ok(impl_block(item, &TokenStream::new(), &methods))
+}
+
+fn validate_open(meta: &TokenStream, input: &TokenStream) -> Result<(), ParseError> {
+    if !meta.is_empty() {
+        return Err(ParseError::new(
+            meta.span(),
+            "`index_open` takes no arguments",
+        ));
+    }
+    let (mut tokens, body) = item_body(input.clone(), "index_open", TokenTree::is_keyword_fn)?;
+    if body + 1 != tokens.len() {
+        return Err(ParseError::new(
+            input.span(),
+            "expected one index open method",
+        ));
+    }
+    let TokenTree::Group(group) = &mut tokens[body] else {
+        unreachable!()
+    };
+    group.tokens = TokenStream::new();
+    let function: ItemFn = moxy::parse!({ TokenStream::from(tokens) })?;
+    let parameters = &function.sig.params.inner.inputs;
+    if function.sig.ident != "open"
+        || function.sig.asyncness.is_some()
+        || parameters.len() != 1
+        || !matches!(parameters.first(), Some(FnParam::Typed(parameter))
+            if compact(&moxy::template! { {{ parameter.pat }} }) == "path")
+    {
+        return Err(ParseError::new(
+            function.sig.ident.span(),
+            "expected fn open(path: ...)",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn index_open(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    validate_open(&meta.into(), &TokenStream::from(item.clone()))?;
+    let mut output: NativeTokenStream = open_instrumentation().into();
+    // Preserve the original method and its nested expressions without AST round-tripping.
+    output.extend(item);
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::{expand, validate_open},
+        assert2::assert,
+        moxy::{
+            ast::{ItemImpl, ItemStruct},
+            token::TokenStream,
+        },
+    };
+
+    #[test]
+    fn generates_the_complete_file_index_contract_for_both_kinds() {
+        for kind in ["offset", "time"] {
+            let source = format!(
+                "#[sparse_index(kind = \"{kind}\")] struct DiskIndex {{ entries: Vec<(i64, u32)>, io: Arc<dyn LogIo>, file: File }}"
+            );
+            let declaration: ItemStruct = moxy::parse!({ source }).unwrap();
+            let implementation: ItemImpl = moxy::parse!({ expand(declaration).unwrap() }).unwrap();
+            let contract = ["open", "flush_handle", "entry_count", "flush", "set_io"];
+            assert!(implementation.items.len() == contract.len());
+            assert!(
+                contract
+                    .into_iter()
+                    .all(|name| implementation.items.iter().any(|member| member
+                        .as_fn()
+                        .is_some_and(|method| method.sig.ident == name)))
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_kind_layout_and_absent_fields() {
+        for source in [
+            "struct MissingOptions {}",
+            "#[sparse_index()] struct MissingKind {}",
+            "#[sparse_index(kind = \"stamp\")] struct OtherKind {}",
+            "#[sparse_index(kind = 1)] struct WrongType {}",
+            "#[sparse_index(kind = \"time\")] struct Tuple(File);",
+            "#[sparse_index(kind = \"offset\")] struct NoFile { io: Arc<dyn LogIo>, entries: Vec<(u32, u32)> }",
+            "#[sparse_index(kind = \"time\")] struct NoIo { file: File, entries: Vec<(i64, u32)> }",
+            "#[sparse_index(kind = \"offset\")] struct NoEntries { file: File, io: Arc<dyn LogIo> }",
+        ] {
+            let declaration: ItemStruct = moxy::parse!({ source }).unwrap();
+            assert!(expand(declaration).is_err());
+        }
+    }
+
+    #[test]
+    fn instrumentation_checks_only_the_header_and_rejects_extra_input() {
+        let empty = TokenStream::new();
+        let valid: TokenStream = "pub fn open(path: PathBuf) -> Result<Self, Error> { let rows = values.map(|&value| nested!(value)); unknown_syntax!(); Ok(rows) }".parse().unwrap();
+        assert!(validate_open(&empty, &valid).is_ok());
+        assert!(validate_open(&"unused".parse().unwrap(), &valid).is_err());
+        for source in [
+            "fn load(path: PathBuf) {}",
+            "fn open(other: PathBuf) {}",
+            "fn open(&self, path: &Path) {}",
+            "async fn open(path: PathBuf) {}",
+            "struct Index {}",
+            "fn open(path: PathBuf) {} fn extra() {}",
+        ] {
+            assert!(validate_open(&empty, &source.parse().unwrap()).is_err());
+        }
+    }
+}

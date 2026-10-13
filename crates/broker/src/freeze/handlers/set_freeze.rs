@@ -42,12 +42,13 @@ use {
         response::{FREEZE_ACTION, THAW_ACTION, respond},
     },
     crate::{
+        broker::Broker,
         codes,
         freeze::{
             freeze_target,
             handlers::{FreezeAudit, pattern_type_concrete, require_freeze},
         },
-        handlers::encode_response,
+        handlers::{ApiVersion, DispatchResult, RequestContext, encode_response},
     },
     krabka_protocol::krabka::freeze::SetTopicFreezeRequest,
     uuid::Uuid,
@@ -61,56 +62,59 @@ mod response;
 #[cfg(test)]
 mod tests;
 
-wire_handler!(
-    handle,
-    "handle_set_topic_freeze",
-    "SetTopicFreeze",
-    "info",
-    SetTopicFreezeRequest,
-    |broker, version, req, ctx| {
-        let image = broker.controller.current_image();
-        let env = FreezeEnv {
-            config: &broker.config,
-            image: &image,
-            ctx,
-        };
-        let outcome = match prepare(&env, &req) {
-            Err(refusal) => Err(refusal),
-            Ok(accepted) => {
-                let target = pattern_type_concrete(req.pattern_type)
-                    .map_or_else(|| req.scope.clone(), |kind| freeze_target(kind, &req.scope));
-                let audit = FreezeAudit {
-                    action: if req.frozen {
-                        FREEZE_ACTION
-                    } else {
-                        THAW_ACTION
-                    },
-                    target,
-                    proposal_id: Uuid::from_bytes(req.proposal_id.0),
-                    key_id: &req.key_id,
-                    signature: &req.signature,
+#[krabka_macros::extension_wire(
+    name = "handle_set_topic_freeze",
+    api = "SetTopicFreeze",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: SetTopicFreezeRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let image = broker.controller.current_image();
+    let env = FreezeEnv {
+        config: &broker.config,
+        image: &image,
+        ctx,
+    };
+    let outcome = match prepare(&env, &req) {
+        Err(refusal) => Err(refusal),
+        Ok(accepted) => {
+            let target = pattern_type_concrete(req.pattern_type)
+                .map_or_else(|| req.scope.clone(), |kind| freeze_target(kind, &req.scope));
+            let audit = FreezeAudit {
+                action: if req.frozen {
+                    FREEZE_ACTION
+                } else {
+                    THAW_ACTION
+                },
+                target,
+                proposal_id: Uuid::from_bytes(req.proposal_id.0),
+                key_id: &req.key_id,
+                signature: &req.signature,
+                signature_verified: accepted.signature_verified,
+                set_at_ms: accepted.record.set_at_ms,
+                reason: req.reason.clone(),
+            };
+            match require_freeze(
+                broker.audit_log.as_ref(),
+                ctx,
+                &audit,
+                &broker.config.break_glass.approvers,
+            )
+            .await
+            {
+                Ok(()) => submit(broker, accepted).await,
+                Err(error) => Err(Refusal {
+                    code: codes::POLICY_VIOLATION,
+                    message: format!("privileged action refused: {error}"),
                     signature_verified: accepted.signature_verified,
-                    set_at_ms: accepted.record.set_at_ms,
-                    reason: req.reason.clone(),
-                };
-                match require_freeze(
-                    broker.audit_log.as_ref(),
-                    ctx,
-                    &audit,
-                    &broker.config.break_glass.approvers,
-                )
-                .await
-                {
-                    Ok(()) => submit(broker, accepted).await,
-                    Err(error) => Err(Refusal {
-                        code: codes::POLICY_VIOLATION,
-                        message: format!("privileged action refused: {error}"),
-                        signature_verified: accepted.signature_verified,
-                    }),
-                }
+                }),
             }
-        };
-        let response = respond(broker, ctx, &req, &outcome);
-        encode_response(&response, version)
-    }
-);
+        }
+    };
+    let response = respond(broker, ctx, &req, &outcome);
+    encode_response(&response, version)
+}

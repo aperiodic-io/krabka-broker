@@ -86,10 +86,12 @@ pub fn retention_delete_target(last_offset: Option<i64>) -> Option<i64> {
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Each deleted row breaches the floor or time policy, or fits the charged size debt.
 fn retention_prefix_funded(segments: Seq<RemoteRetentionSegment>, debt: Int, count: Int) -> bool {
     pearlite! { forall<i: Int> 0 <= i && i < count ==> !segments[i].blocked && (segments[i].log_start_breached
     || segments[i].time_expired || (super::remote_charge_funded(debt, remote_prefix_charge(segments, i), remote_prefix_charge(segments, i + 1)))) }
-}
 }

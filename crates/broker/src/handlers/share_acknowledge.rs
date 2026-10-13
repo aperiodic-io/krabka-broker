@@ -22,8 +22,9 @@ use {
     crate::{
         broker::Broker,
         codes,
+        error::BrokerError,
         handlers::{
-            ErrorResponse as _, RequestContext, acl_denied, leader_endpoints,
+            ApiVersion, ErrorResponse as _, RequestContext, acl_denied, leader_endpoints,
             share_fetch::{
                 AckApplication, Renewal, acknowledgement_batches_are_valid, apply_acknowledgements,
                 current_leader, names_the_leader, share_request_identity,
@@ -42,55 +43,56 @@ use {
     std::time::Instant,
 };
 
-context_handler! {
-    ShareAcknowledgeRequest => ShareAcknowledgeResponse,
-    (broker, req, version, ctx),
-    {
-        share_request_identity!(
-            (cfg, image, group, settings, lock_timeout_ms, member),
-            ShareAcknowledgeResponse,
-            broker,
-            req,
-            ctx
-        );
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ShareAcknowledgeRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<ShareAcknowledgeResponse, BrokerError> {
+    share_request_identity!(
+        (cfg, image, group, settings, lock_timeout_ms, member),
+        ShareAcknowledgeResponse,
+        broker,
+        req,
+        ctx
+    );
 
-        let released = match broker.share_partition_leaders.update_acknowledge_session(
-            &group,
-            &member,
-            req.share_session_epoch,
-        ) {
-            Ok(released) => released,
-            Err(code) => return Ok(ShareAcknowledgeResponse::error(code, None)),
-        };
+    let released = match broker.share_partition_leaders.update_acknowledge_session(
+        &group,
+        &member,
+        req.share_session_epoch,
+    ) {
+        Ok(released) => released,
+        Err(code) => return Ok(ShareAcknowledgeResponse::error(code, None)),
+    };
 
-        let now = Instant::now();
-        let mut responses = process_topics(&AcknowledgeContext {
-            broker,
-            version,
-            req: &req,
-            ctx,
-            settings,
-            group: &group,
-            member: &member,
-            now,
-        })
+    let now = Instant::now();
+    let mut responses = process_topics(&AcknowledgeContext {
+        broker,
+        version,
+        req: &req,
+        ctx,
+        settings,
+        group: &group,
+        member: &member,
+        now,
+    })
+    .await;
+    broker
+        .share_partition_leaders
+        .release_session_partitions(&group, &member, &released)
         .await;
-        broker
-            .share_partition_leaders
-            .release_session_partitions(&group, &member, &released)
-            .await;
 
-        let node_endpoints = hint_current_leaders(broker, ctx, &mut responses);
-        Ok(ShareAcknowledgeResponse {
-            throttle_time_ms: 0,
-            error_code: codes::NONE,
-            error_message: None,
-            acquisition_lock_timeout_ms: lock_timeout_ms,
-            responses,
-            node_endpoints,
-            ..Default::default()
-        })
-    }
+    let node_endpoints = hint_current_leaders(broker, ctx, &mut responses);
+    Ok(ShareAcknowledgeResponse {
+        throttle_time_ms: 0,
+        error_code: codes::NONE,
+        error_message: None,
+        acquisition_lock_timeout_ms: lock_timeout_ms,
+        responses,
+        node_endpoints,
+        ..Default::default()
+    })
 }
 
 /// Kafka's `processShareAcknowledgeResponse`: sets the current leader on
@@ -307,7 +309,9 @@ mod tests {
         },
     };
 
-    crate::test_support::context_helper!(client_id = "client-a");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["client-a"];
+    }
 
     fn request(topic_id: ProtoUuid, partitions: &[i32]) -> ShareAcknowledgeRequest {
         ShareAcknowledgeRequest {
@@ -344,7 +348,7 @@ mod tests {
             .await
             .expect("handle");
 
-        let expected = unthrottled_wire!(ShareAcknowledgeResponse {
+        let expected = krabka_macros::unthrottled_wire!(ShareAcknowledgeResponse {
             error_code: codes::UNSUPPORTED_VERSION,
             error_message: None,
             acquisition_lock_timeout_ms: 0,

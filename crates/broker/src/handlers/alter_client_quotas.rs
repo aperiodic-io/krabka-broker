@@ -6,6 +6,14 @@
 //! it produces live in `entries`; the response rows live in `response`.
 
 use {
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::{
+            ApiVersion, RequestContext, audit_admin_success, audit_resource,
+            cluster_alter_configs_denied,
+        },
+    },
     krabka_metadata::MetadataRecord,
     krabka_protocol::owned::{
         alter_client_quotas_request::AlterClientQuotasRequest,
@@ -27,74 +35,75 @@ use {
         entries::{Alteration, alter_client_quotas},
         response::{apply_submit_error, err_entry, ok_entry, whole_request_error},
     },
-    crate::{codes::CLUSTER_AUTHORIZATION_FAILED, quota::parse_ip_literal},
+    crate::{
+        codes::{CLUSTER_AUTHORIZATION_FAILED, NONE},
+        quota::parse_ip_literal,
+    },
 };
 
-context_handler! {
-    AlterClientQuotasRequest => AlterClientQuotasResponse,
-    (broker, req, _version, ctx),
-    {
-        let image = broker.controller.current_image();
-        // Kafka's `ControllerApis.handleAlterClientQuotas` authorizes
-        // `AlterConfigs` on the cluster. `Alter` does not imply it. A denial
-        // answers `AlterClientQuotasRequest.getErrorResponse`: every entry
-        // carries the error code and the default message of the error.
-        if crate::handlers::cluster_alter_configs_denied(
-            broker.config.authorizer.as_ref(), &image, ctx,
-        ) {
-            return Ok(whole_request_error(
-                &req,
-                CLUSTER_AUTHORIZATION_FAILED,
-                "Cluster authorization failed.",
-            ));
-        }
-
-        let resolvable = resolve_ip_names(&req).await;
-        let ip_is_valid =
-            |name: &str| crate::quota::parse_ip_literal(name).is_some() || resolvable.contains(name);
-        let Alteration { results, records } =
-            alter_client_quotas(&req.entries, image.client_quotas(), &ip_is_valid);
-        let mut entry_results: Vec<_> = results
-            .iter()
-            .map(|(entity, outcome)| match outcome {
-                Ok(()) => ok_entry(entity),
-                Err((code, msg)) => err_entry(entity, *code, msg.clone()),
-            })
-            .collect();
-        // Kafka's `QuorumController.alterClientQuotas` drops the records of a
-        // `validate_only` request and keeps its results.
-        let to_submit: Vec<MetadataRecord> = if req.validate_only {
-            Vec::new()
-        } else {
-            records
-        };
-
-        if !to_submit.is_empty()
-            && let Err(e) = broker.controller.submit_change(to_submit).await
-        {
-            tracing::warn!(error = %e, "alter-client-quotas submit failed");
-            apply_submit_error(&mut entry_results, e);
-        }
-
-        if !req.validate_only {
-            crate::handlers::audit_admin_success(
-                broker.audit_log.as_ref(),
-                ctx,
-                "AlterClientQuotas",
-                entry_results
-                    .iter()
-                    .filter(|entry| entry.error_code == crate::codes::NONE)
-                    .map(|entry| {
-                        crate::handlers::audit_resource("ClientQuotaEntity", quota_entity_name(entry))
-                    })
-                    .collect(),
-            );
-        }
-
-        Ok(unthrottled_wire!(AlterClientQuotasResponse {
-            entries: entry_results,
-        }))
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: AlterClientQuotasRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<AlterClientQuotasResponse, BrokerError> {
+    let image = broker.controller.current_image();
+    // Kafka's `ControllerApis.handleAlterClientQuotas` authorizes
+    // `AlterConfigs` on the cluster. `Alter` does not imply it. A denial
+    // answers `AlterClientQuotasRequest.getErrorResponse`: every entry
+    // carries the error code and the default message of the error.
+    if cluster_alter_configs_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        return Ok(whole_request_error(
+            &req,
+            CLUSTER_AUTHORIZATION_FAILED,
+            "Cluster authorization failed.",
+        ));
     }
+
+    let resolvable = resolve_ip_names(&req).await;
+    let ip_is_valid = |name: &str| parse_ip_literal(name).is_some() || resolvable.contains(name);
+    let Alteration { results, records } =
+        alter_client_quotas(&req.entries, image.client_quotas(), &ip_is_valid);
+    let mut entry_results: Vec<_> = results
+        .iter()
+        .map(|(entity, outcome)| match outcome {
+            Ok(()) => ok_entry(entity),
+            Err((code, msg)) => err_entry(entity, *code, msg.clone()),
+        })
+        .collect();
+    // Kafka's `QuorumController.alterClientQuotas` drops the records of a
+    // `validate_only` request and keeps its results.
+    let to_submit: Vec<MetadataRecord> = if req.validate_only {
+        Vec::new()
+    } else {
+        records
+    };
+
+    if !to_submit.is_empty()
+        && let Err(e) = broker.controller.submit_change(to_submit).await
+    {
+        tracing::warn!(error = %e, "alter-client-quotas submit failed");
+        apply_submit_error(&mut entry_results, e);
+    }
+
+    if !req.validate_only {
+        audit_admin_success(
+            broker.audit_log.as_ref(),
+            ctx,
+            "AlterClientQuotas",
+            entry_results
+                .iter()
+                .filter(|entry| entry.error_code == NONE)
+                .map(|entry| audit_resource("ClientQuotaEntity", quota_entity_name(entry)))
+                .collect(),
+        );
+    }
+
+    Ok(krabka_macros::unthrottled_wire!(
+        AlterClientQuotasResponse {
+            entries: entry_results,
+        }
+    ))
 }
 
 /// Resolves every named `ip` entity that is not an IP literal.

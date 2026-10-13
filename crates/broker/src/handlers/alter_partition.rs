@@ -8,6 +8,7 @@
 //! guarded image submission. Admission is rebuilt after a conflicting commit.
 
 use {
+    crate::{error::BrokerError, handlers::ApiVersion},
     krabka_metadata::{MetadataImage, MetadataRecord, NodeId},
     krabka_protocol::{
         owned::{
@@ -44,30 +45,34 @@ use {
     },
 };
 
-context_handler! {
-    AlterPartitionRequest => AlterPartitionResponse,
-    (broker, req, _version, ctx),
-    {
-        let result = guarded_operation_on_source(
-            broker.controller.as_ref(),
-            tokio::time::Instant::now() + Duration::from_secs(5),
-            |image| alter_partition_once(broker, &req, ctx, image),
-        ).await;
-        let response = match result {
-            Ok(Ok(response)) => response,
-            Ok(Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown)) => refusal(codes::NOT_CONTROLLER),
-            Err(_) => refusal(codes::REQUEST_TIMED_OUT),
-            Ok(Err(error)) => {
-                tracing::error!(%error, "AlterPartition guarded submission failed");
-                refusal(codes::UNKNOWN_SERVER_ERROR)
-            }
-        };
-        Ok(response)
-    }
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: AlterPartitionRequest,
+    _version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<AlterPartitionResponse, BrokerError> {
+    let result = guarded_operation_on_source(
+        broker.controller.as_ref(),
+        tokio::time::Instant::now() + Duration::from_secs(5),
+        |image| alter_partition_once(broker, &req, ctx, image),
+    )
+    .await;
+    let response = match result {
+        Ok(Ok(response)) => response,
+        Ok(Err(RaftError::NotLeader { .. } | RaftError::LeaderUnknown)) => {
+            refusal(codes::NOT_CONTROLLER)
+        }
+        Err(_) => refusal(codes::REQUEST_TIMED_OUT),
+        Ok(Err(error)) => {
+            tracing::error!(%error, "AlterPartition guarded submission failed");
+            refusal(codes::UNKNOWN_SERVER_ERROR)
+        }
+    };
+    Ok(response)
 }
 
 fn refusal(error_code: i16) -> AlterPartitionResponse {
-    unthrottled_wire!(AlterPartitionResponse {
+    krabka_macros::unthrottled_wire!(AlterPartitionResponse {
         error_code,
         topics: Vec::new()
     })
@@ -97,7 +102,7 @@ async fn alter_partition_once(
         Some(codes::NOT_CONTROLLER)
     };
     if let Some(error_code) = refusal {
-        return Ok(unthrottled_wire!(AlterPartitionResponse {
+        return Ok(krabka_macros::unthrottled_wire!(AlterPartitionResponse {
             error_code,
             topics: Vec::new(),
         }));
@@ -111,7 +116,7 @@ async fn alter_partition_once(
         .ok()
         .and_then(|id| image.broker_epoch(NodeId(id)));
     if sender_epoch != Some(req.broker_epoch) {
-        return Ok(unthrottled_wire!(AlterPartitionResponse {
+        return Ok(krabka_macros::unthrottled_wire!(AlterPartitionResponse {
             error_code: codes::STALE_BROKER_EPOCH,
             topics: Vec::new(),
         }));
@@ -165,7 +170,7 @@ async fn alter_partition_once(
                 .collect(),
         };
 
-        resp_topics.push(tagged_wire!(RespTopicData {
+        resp_topics.push(krabka_macros::tagged_wire!(RespTopicData {
             topic_id: req_topic.topic_id,
             partitions: resp_partitions,
         }));
@@ -182,7 +187,7 @@ async fn alter_partition_once(
         return Err(e);
     }
 
-    Ok(unthrottled_wire!(AlterPartitionResponse {
+    Ok(krabka_macros::unthrottled_wire!(AlterPartitionResponse {
         error_code: codes::NONE,
         topics: resp_topics,
     }))

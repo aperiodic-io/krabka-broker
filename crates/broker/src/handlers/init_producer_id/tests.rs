@@ -249,11 +249,13 @@ async fn handler_refuses_a_timeout_kafka_refuses_and_stores_the_rest_as_sent() {
     // `EndTxn` v2 and above.
     assert!(
         fenced_end_response
-            == unthrottled_wire!(krabka_protocol::owned::end_txn_response::EndTxnResponse {
-                error_code: codes::PRODUCER_FENCED,
-                producer_id: -1,
-                producer_epoch: -1,
-            })
+            == krabka_macros::unthrottled_wire!(
+                krabka_protocol::owned::end_txn_response::EndTxnResponse {
+                    error_code: codes::PRODUCER_FENCED,
+                    producer_id: -1,
+                    producer_epoch: -1,
+                }
+            )
     );
 
     let end_request = krabka_protocol::owned::end_txn_request::EndTxnRequest {
@@ -268,11 +270,13 @@ async fn handler_refuses_a_timeout_kafka_refuses_and_stores_the_rest_as_sent() {
         .expect("complete recovered transaction");
     assert!(
         end_response
-            == unthrottled_wire!(krabka_protocol::owned::end_txn_response::EndTxnResponse {
-                error_code: codes::NONE,
-                producer_id: second_recovery_response.producer_id,
-                producer_epoch: second_recovery_response.producer_epoch + 1,
-            })
+            == krabka_macros::unthrottled_wire!(
+                krabka_protocol::owned::end_txn_response::EndTxnResponse {
+                    error_code: codes::NONE,
+                    producer_id: second_recovery_response.producer_id,
+                    producer_epoch: second_recovery_response.producer_epoch + 1,
+                }
+            )
     );
 
     let retry_response = end_txn_handle(&broker, end_request, end_version, &context)

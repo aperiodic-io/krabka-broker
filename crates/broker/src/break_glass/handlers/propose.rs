@@ -23,7 +23,9 @@ use {
         },
         broker::Broker,
         codes,
-        handlers::{RequestContext, cluster_alter_denied, encode_response},
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, cluster_alter_denied, encode_response,
+        },
         time_util::now_ms,
     },
     krabka_audit::{AuditOutcome, PrivilegedPhase},
@@ -36,81 +38,84 @@ use {
 /// The `ttl_ms` value that asks for the configured lifetime.
 pub(crate) const TTL_CONFIGURED: i64 = 0;
 
-wire_handler!(
-    handle,
-    "handle_propose_break_glass",
-    "ProposeBreakGlass",
-    "info",
-    ProposeBreakGlassRequest,
-    |broker, version, req, ctx| {
-        let policy = BreakGlassPolicy::new(&broker.config.break_glass);
-        let image = broker.controller.current_image();
-        let action = action_from_wire(req.action);
-        let action_label = action.map_or(UNKNOWN_ACTION, action_name);
+#[krabka_macros::extension_wire(
+    name = "handle_propose_break_glass",
+    api = "ProposeBreakGlass",
+    level = "info"
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: ProposeBreakGlassRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let policy = BreakGlassPolicy::new(&broker.config.break_glass);
+    let image = broker.controller.current_image();
+    let action = action_from_wire(req.action);
+    let action_label = action.map_or(UNKNOWN_ACTION, action_name);
 
-        let outcome = if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-            Err(Refusal::new(
-                codes::CLUSTER_AUTHORIZATION_FAILED,
-                "propose-break-glass denied",
-            ))
-        } else {
-            propose(broker, ctx, policy, action, &req).await
-        };
+    let outcome = if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+        Err(Refusal::new(
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            "propose-break-glass denied",
+        ))
+    } else {
+        propose(broker, ctx, policy, action, &req).await
+    };
 
-        let (proposal, refusal) = match outcome {
-            Ok(proposal) => (Some(proposal), None),
-            Err(refusal) => (None, Some(refusal)),
-        };
-        audit_privileged(
-            broker.audit_log.as_ref(),
-            ctx,
-            policy.fingerprint(),
-            &PrivilegedAudit {
-                outcome: if refusal.is_some() {
-                    AuditOutcome::Failure
-                } else {
-                    AuditOutcome::Success
-                },
-                phase: if refusal.is_some() {
-                    PrivilegedPhase::Refused
-                } else {
-                    PrivilegedPhase::Proposed
-                },
-                action: action_label,
-                target: &req.target,
-                proposal_id: proposal.as_ref().map(|p| p.proposal_id),
-                counterparties: &[],
-                key_id: "",
-                signature: &[],
-                signature_verified: false,
-                reason: refusal.as_ref().map_or(req.reason.as_str(), |r| &r.message),
+    let (proposal, refusal) = match outcome {
+        Ok(proposal) => (Some(proposal), None),
+        Err(refusal) => (None, Some(refusal)),
+    };
+    audit_privileged(
+        broker.audit_log.as_ref(),
+        ctx,
+        policy.fingerprint(),
+        &PrivilegedAudit {
+            outcome: if refusal.is_some() {
+                AuditOutcome::Failure
+            } else {
+                AuditOutcome::Success
             },
-        );
+            phase: if refusal.is_some() {
+                PrivilegedPhase::Refused
+            } else {
+                PrivilegedPhase::Proposed
+            },
+            action: action_label,
+            target: &req.target,
+            proposal_id: proposal.as_ref().map(|p| p.proposal_id),
+            counterparties: &[],
+            key_id: "",
+            signature: &[],
+            signature_verified: false,
+            reason: refusal.as_ref().map_or(req.reason.as_str(), |r| &r.message),
+        },
+    );
 
-        let response = match (proposal, refusal) {
-            (Some(proposal), _) => ProposeBreakGlassResponse {
+    let response = match (proposal, refusal) {
+        (Some(proposal), _) => ProposeBreakGlassResponse {
+            throttle_time_ms: 0,
+            error_code: codes::NONE,
+            error_message: None,
+            proposal_id: to_wire_uuid(proposal.proposal_id),
+            expires_at_ms: proposal.expires_at_ms,
+            ..ProposeBreakGlassResponse::default()
+        },
+        (None, refusal) => {
+            let refusal = refusal.unwrap_or_else(|| {
+                Refusal::new(codes::UNKNOWN_SERVER_ERROR, "the proposal did not open")
+            });
+            ProposeBreakGlassResponse {
                 throttle_time_ms: 0,
-                error_code: codes::NONE,
-                error_message: None,
-                proposal_id: to_wire_uuid(proposal.proposal_id),
-                expires_at_ms: proposal.expires_at_ms,
+                error_code: refusal.code,
+                error_message: Some(refusal.message),
                 ..ProposeBreakGlassResponse::default()
-            },
-            (None, refusal) => {
-                let refusal = refusal.unwrap_or_else(|| {
-                    Refusal::new(codes::UNKNOWN_SERVER_ERROR, "the proposal did not open")
-                });
-                ProposeBreakGlassResponse {
-                    throttle_time_ms: 0,
-                    error_code: refusal.code,
-                    error_message: Some(refusal.message),
-                    ..ProposeBreakGlassResponse::default()
-                }
             }
-        };
-        encode_response(&response, version)
-    }
-);
+        }
+    };
+    encode_response(&response, version)
+}
 
 /// Build the proposal, write it to the metadata log, and return it.
 async fn propose(

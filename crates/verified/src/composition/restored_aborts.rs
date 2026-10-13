@@ -9,7 +9,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub(super) fn restored_abort_index_valid(
     entries: Seq<RestoreAbortedTxn>,
     owner: RestoreSegmentExtent,
@@ -20,15 +23,19 @@ pub(super) fn restored_abort_index_valid(
         && owner.base_offset@ <= entries[i].last_offset@ && entries[i].last_offset@ <= owner.last_offset@
         && (i > 0 ==> entries[i - 1].last_offset@ < entries[i].last_offset@) }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn abort_intersects_fetch(entry: RestoreAbortedTxn, from: Int, end: Int) -> bool {
     pearlite! { from < end && entry.start_offset@ < end && entry.last_offset@ >= from }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Every required source interval has its producer/start pair in the wire rows.
 pub(super) fn wire_aborts_cover_source(
     source: Seq<RestoreAbortedTxn>,
@@ -43,9 +50,11 @@ pub(super) fn wire_aborts_cover_source(
                 && rows[j] == (source[i].producer_id, source[i].start_offset)
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A returned producer/start pair comes from an interval intersecting Fetch.
 pub(super) fn wire_abort_from_source(
     source: Seq<RestoreAbortedTxn>,
@@ -58,7 +67,6 @@ pub(super) fn wire_abort_from_source(
             && row == (source[j].producer_id, source[j].start_offset)
             && abort_intersects_fetch(source[j], from, end)
     }
-}
 }
 
 /// Admit the complete index and return every selected original row index.

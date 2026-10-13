@@ -4,29 +4,64 @@ use creusot_std::prelude::*;
 #[cfg(not(creusot))]
 use derive_more::{Display, From, Into};
 
-model_types! {
-    @derives (derive(DeepModel))
-        (derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into));
-    /// Tokens currently sitting in the bucket, available to grant.
-    pub struct AvailableTokens(pub u64);
+/// Tokens currently sitting in the bucket, available to grant.
+#[krabka_macros::model_type(
+    proof(DeepModel),
+    runtime(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into
+    )
+)]
+pub struct AvailableTokens(pub u64);
 
-    /// Tokens accrued since the last refill, to be added to `available` this call.
-    pub struct RefillTokens(pub u64);
+/// Tokens accrued since the last refill, to be added to `available` this call.
+#[krabka_macros::model_type(
+    proof(DeepModel),
+    runtime(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into
+    )
+)]
+pub struct RefillTokens(pub u64);
 
-    /// The burst cap: the maximum the bucket may hold after a refill.
-    pub struct BurstCapacity(pub u64);
+/// The burst cap: the maximum the bucket may hold after a refill.
+#[krabka_macros::model_type(
+    proof(DeepModel),
+    runtime(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into
+    )
+)]
+pub struct BurstCapacity(pub u64);
 
-    /// Tokens the caller is asking to consume.
-    pub struct RequestedTokens(pub u64);
+/// Tokens the caller is asking to consume.
+#[krabka_macros::model_type(
+    proof(DeepModel),
+    runtime(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into
+    )
+)]
+pub struct RequestedTokens(pub u64);
 
-    /// Tokens actually granted by a consume call (`<= requested`).
-    pub struct GrantedTokens(pub u64);
+/// Tokens actually granted by a consume call (`<= requested`).
+#[krabka_macros::model_type(
+    proof(DeepModel),
+    runtime(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into
+    )
+)]
+pub struct GrantedTokens(pub u64);
 
-    /// The bucket's new `available` count after a consume call commits.
-    pub struct NewAvailable(pub u64);
-}
+/// The bucket's new `available` count after a consume call commits.
+#[krabka_macros::model_type(
+    proof(DeepModel),
+    runtime(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display, From, Into
+    )
+)]
+pub struct NewAvailable(pub u64);
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// `min(available + refill, burst)` in unbounded integers.
 ///
 /// This equals the executable `available.saturating_add(refill).min(burst)`
@@ -40,7 +75,6 @@ pub fn capped(available: Int, refill: Int, burst: Int) -> Int {
     } else {
         burst
     }
-}
 }
 
 /// Caps a refill, grants at most the request, and returns the new balance.

@@ -149,40 +149,40 @@ impl RawRead {
     }
 }
 
-crate::sendfile_cfg! {
-    /// Descriptor form of [`Log::read_raw`] for the zero-copy `sendfile` fetch
-    /// path, Increments D + E.
-    ///
-    /// One [`krabka_protocol::records::FileRegion`] describes the records run
-    /// for each contributing segment. A multi-segment fetch therefore goes
-    /// out as several `sendfile` regions with **no** coalescing copy.
-    /// `read_raw` instead concatenates cross-segment chunks into a fresh
-    /// `BytesMut`. This type is compiled on the SENDFILE alias: Linux, Apple,
-    /// and FreeBSD/DragonFly.
-    #[derive(Debug, Clone)]
-    pub struct RawReadDesc {
-        /// Absolute offset of the first batch in the regions, or the requested
-        /// offset when no bytes were returned.
-        pub start_offset: Offset,
-        /// One file-backed region per contributing segment, in wire order.
-        pub regions: Vec<krabka_protocol::records::FileRegion>,
-        /// Total byte length across all regions.
-        pub total: usize,
-    }
+#[krabka_macros::sendfile_cfg]
+/// Descriptor form of [`Log::read_raw`] for the zero-copy `sendfile` fetch
+/// path, Increments D + E.
+///
+/// One [`krabka_protocol::records::FileRegion`] describes the records run
+/// for each contributing segment. A multi-segment fetch therefore goes
+/// out as several `sendfile` regions with **no** coalescing copy.
+/// `read_raw` instead concatenates cross-segment chunks into a fresh
+/// `BytesMut`. This type is compiled on the SENDFILE alias: Linux, Apple,
+/// and FreeBSD/DragonFly.
+#[derive(Debug, Clone)]
+pub struct RawReadDesc {
+    /// Absolute offset of the first batch in the regions, or the requested
+    /// offset when no bytes were returned.
+    pub start_offset: Offset,
+    /// One file-backed region per contributing segment, in wire order.
+    pub regions: Vec<krabka_protocol::records::FileRegion>,
+    /// Total byte length across all regions.
+    pub total: usize,
+}
 
-    impl RawReadDesc {
-        fn empty(off: Offset) -> Self {
-            Self {
-                start_offset: off,
-                regions: Vec::new(),
-                total: 0,
-            }
+#[krabka_macros::sendfile_cfg]
+impl RawReadDesc {
+    fn empty(off: Offset) -> Self {
+        Self {
+            start_offset: off,
+            regions: Vec::new(),
+            total: 0,
         }
     }
 }
 
 impl Log {
-    crate::sendfile_cfg! {
+    #[krabka_macros::sendfile_cfg]
     /// Descriptor variant of [`Log::read_raw`] for the zero-copy `sendfile`
     /// fetch path.
     ///
@@ -195,11 +195,11 @@ impl Log {
     /// The selected byte ranges are byte-identical to what `read_raw` would
     /// have returned for the same `(fetch_offset, limit_offset, max_size)`.
     #[instrument(
-        level = "debug",
-        skip(self),
-        fields(regions = tracing::field::Empty, total = tracing::field::Empty),
-        err,
-    )]
+    level = "debug",
+    skip(self),
+    fields(regions = tracing::field::Empty, total = tracing::field::Empty),
+    err,
+)]
     /// # Errors
     /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
     /// # Panics
@@ -224,8 +224,12 @@ impl Log {
             limit_offset,
             max_size,
             |segment, next, budget| {
-                let read =
-                    segment.read_raw_desc_with_policy(next, limit_offset, budget, read_ahead_max)?;
+                let read = segment.read_raw_desc_with_policy(
+                    next,
+                    limit_offset,
+                    budget,
+                    read_ahead_max,
+                )?;
                 Ok(read.region.map(|region| RawChunk {
                     len: region.len,
                     data: region,
@@ -244,7 +248,6 @@ impl Log {
             regions,
             total,
         })
-    }
     }
 
     /// Reject an offset no local segment can answer.

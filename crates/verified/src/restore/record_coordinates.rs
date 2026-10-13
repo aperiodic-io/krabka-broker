@@ -6,7 +6,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Exclusion predicates are OR-combined: any one match drops the record.
 pub fn restore_excluded(exclusions: RestoreExclusions) -> bool {
     pearlite! {
@@ -15,7 +18,6 @@ pub fn restore_excluded(exclusions: RestoreExclusions) -> bool {
             || exclusions.content.key
             || exclusions.content.header
     }
-}
 }
 
 /// Keep one record exactly when it is inside both bounds and no exclusion
@@ -146,7 +148,10 @@ pub fn restore_batch_step(minimum_base: i64, base: i64, last_delta: i32) -> Opti
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The timestamp Kafka reports for a record: `baseTimestamp + timestampDelta`
 /// under `CreateTime`, and the batch `maxTimestamp` under `LogAppendTime`,
 /// whose record deltas stay as the producer wrote them
@@ -160,9 +165,11 @@ pub fn kafka_record_timestamp(frame: RestoreBatchFrame, record: RestoreRecordDel
         }
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A record lies inside its batch's declared offset span, and both its
 /// absolute offset and its Kafka timestamp are representable as `i64`.
 pub fn restore_record_placeable(frame: RestoreBatchFrame, record: RestoreRecordDeltas) -> bool {
@@ -174,7 +181,6 @@ pub fn restore_record_placeable(frame: RestoreBatchFrame, record: RestoreRecordD
             && kafka_record_timestamp(frame, record) >= i64::MIN@
             && kafka_record_timestamp(frame, record) <= i64::MAX@
     }
-}
 }
 
 /// Compute one record's absolute offset and Kafka timestamp within its batch.

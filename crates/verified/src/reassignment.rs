@@ -2,22 +2,21 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// The next safe phase of one in-flight partition reassignment.
-    pub enum ReassignmentAction {
-        WaitForReplication,
-        WaitForLeader,
-        Handoff(usize),
-        Complete,
-    }
+/// The next safe phase of one in-flight partition reassignment.
+#[krabka_macros::model_type]
+pub enum ReassignmentAction {
+    WaitForReplication,
+    WaitForLeader,
+    Handoff(usize),
+    Complete,
+}
 
-    /// Pointwise membership in a reassignment's union, additions, and removals.
-    pub struct ReassignmentSetMembership {
-        pub in_union: bool,
-        pub adding: bool,
-        pub removing: bool,
-    }
+/// Pointwise membership in a reassignment's union, additions, and removals.
+#[krabka_macros::model_type]
+pub struct ReassignmentSetMembership {
+    pub in_union: bool,
+    pub adding: bool,
+    pub removing: bool,
 }
 
 /// Classify one unique replica against the current and requested assignments.

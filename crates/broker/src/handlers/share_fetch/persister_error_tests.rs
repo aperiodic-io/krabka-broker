@@ -18,7 +18,8 @@ use {
             AcknowledgementCode, AcknowledgementPartitionSetup, OffsetRun,
             acknowledge_batches_request, create_topic as create_topic_from_test_support,
             metadata_topic_record, produce_records, send_acknowledgements,
-            share_fetch_partition_rows, share_fetch_wire, single_replica_partition,
+            share_fetch_partition_rows, share_fetch_wire, share_topic_uuid,
+            single_replica_partition,
         },
         share_coordinator::bootstrap::TOPIC,
         test_support::initialize_share_state,
@@ -154,10 +155,8 @@ async fn share_acknowledge(
 
 use crate::handlers::test_support::acquired_share_records as acquired;
 
-fn topic_uuid(topic_id: WireUuid) -> uuid::Uuid { uuid::Uuid::from_bytes(topic_id.0) }
-
 async fn initialize_state(broker: &BrokerHandle, group: &str, topic_id: WireUuid) {
-    initialize_share_state(broker, group, topic_uuid(topic_id), 0).await;
+    initialize_share_state(broker, group, share_topic_uuid(topic_id), 0).await;
 }
 
 /// What a client and the partition cache show after an acknowledgement
@@ -204,7 +203,7 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
 
         let state_epoch = shared
             .share_partition_leaders
-            .peek_for_test(&name, topic_uuid(topic_id), 0)
+            .peek_for_test(&name, share_topic_uuid(topic_id), 0)
             .expect("the fetch cached the share partition")
             .lock()
             .await
@@ -214,7 +213,7 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
             .initialize(
                 &shared.controller.current_image(),
                 &name,
-                topic_uuid(topic_id),
+                share_topic_uuid(topic_id),
                 0,
                 state_epoch + 1,
                 Offset(0),
@@ -235,7 +234,7 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
         };
         let cached = shared
             .share_partition_leaders
-            .peek_for_test(&name, topic_uuid(topic_id), 0)
+            .peek_for_test(&name, share_topic_uuid(topic_id), 0)
             .is_some();
         let next = share_fetch(&broker, &name, 3, topic_id, None).await;
 
@@ -308,7 +307,7 @@ async fn a_failed_state_read_fails_the_partition_and_caches_nothing() {
     let fetch = share_fetch(&broker, "fetch-group", 0, topic_id, None).await;
     let fetch_cached = shared
         .share_partition_leaders
-        .peek_for_test("fetch-group", topic_uuid(topic_id), 0)
+        .peek_for_test("fetch-group", share_topic_uuid(topic_id), 0)
         .is_some();
     let _ = share_fetch(&broker, "acknowledge-group", 0, topic_id, None).await;
     let acknowledge = share_acknowledge(
@@ -321,7 +320,7 @@ async fn a_failed_state_read_fails_the_partition_and_caches_nothing() {
     .await;
     let acknowledge_cached = shared
         .share_partition_leaders
-        .peek_for_test("acknowledge-group", topic_uuid(topic_id), 0)
+        .peek_for_test("acknowledge-group", share_topic_uuid(topic_id), 0)
         .is_some();
 
     assert!(
@@ -357,12 +356,12 @@ async fn a_read_of_an_uninitialized_state_fails_until_the_state_is_initialized()
     let cached = || {
         shared
             .share_partition_leaders
-            .peek_for_test(GROUP, topic_uuid(topic_id), 0)
+            .peek_for_test(GROUP, share_topic_uuid(topic_id), 0)
             .is_some()
     };
 
     let read_code = match persister
-        .read_state(GROUP, topic_uuid(topic_id), 0, 0)
+        .read_state(GROUP, share_topic_uuid(topic_id), 0, 0)
         .await
     {
         Err(BrokerError::SharePartitionState { code, .. }) => Some(code),

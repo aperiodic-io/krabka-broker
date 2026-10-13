@@ -35,7 +35,10 @@ pub(super) fn contains(values: &[u64], value: u64) -> bool {
     false
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A `(node, rack)` candidate may not become a WAL voter when its node or its
 /// rack is already used, or when only the local broker is eligible and the
 /// candidate is another broker.
@@ -51,7 +54,6 @@ fn voter_blocked(
             || (exists<j: Int> 0 <= j && j < used_racks.len() && used_racks[j] == candidate.1)
             || (require_local && candidate.0 != local_node)
     }
-}
 }
 
 /// Select the first candidate, in the caller's order, whose node and rack are

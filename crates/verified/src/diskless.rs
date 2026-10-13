@@ -2,36 +2,33 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Whether and where to advance one diskless partition's local log start.
-    pub struct DisklessTrimDecision {
-        pub should_trim: bool,
-        pub target: i64,
-    }
-
-    /// One decoded-batch step in a diskless cold-read run.
-    pub enum DisklessBatchStep {
-        Invalid,
-        Skip(usize),
-        Start(usize),
-        Continue(usize),
-        Stop,
-    }
+/// Whether and where to advance one diskless partition's local log start.
+#[krabka_macros::model_type]
+pub struct DisklessTrimDecision {
+    pub should_trim: bool,
+    pub target: i64,
 }
 
-model_types! {
-    @copy_only
-    /// One diskless partition's retention configuration and floor, read at `now_ms`.
-    pub struct DisklessRetentionPolicy {
-        /// `retention.ms`, or `None` for Kafka's unlimited sentinel.
-        pub retention_ms: Option<i64>,
-        /// `retention.bytes`, or `None` for Kafka's unlimited sentinel.
-        pub retention_bytes: Option<u64>,
-        /// The `DeleteRecords` floor.
-        pub log_start_offset: i64,
-        pub now_ms: i64,
-    }
+/// One decoded-batch step in a diskless cold-read run.
+#[krabka_macros::model_type]
+pub enum DisklessBatchStep {
+    Invalid,
+    Skip(usize),
+    Start(usize),
+    Continue(usize),
+    Stop,
+}
+
+/// One diskless partition's retention configuration and floor, read at `now_ms`.
+#[krabka_macros::model_type(proof(std::clone::Clone, Copy))]
+pub struct DisklessRetentionPolicy {
+    /// `retention.ms`, or `None` for Kafka's unlimited sentinel.
+    pub retention_ms: Option<i64>,
+    /// `retention.bytes`, or `None` for Kafka's unlimited sentinel.
+    pub retention_bytes: Option<u64>,
+    /// The `DeleteRecords` floor.
+    pub log_start_offset: i64,
+    pub now_ms: i64,
 }
 
 mod logical_range;

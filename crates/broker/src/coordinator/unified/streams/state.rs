@@ -103,7 +103,8 @@ pub struct StoredTopologyHandle {
 
 /// Full in-memory state of one streams group. Exactly one
 /// `actor::GroupActor` task owns it, and it is never shared.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, krabka_macros::GroupLifecycle)]
+#[group_lifecycle(protocol = "streams")]
 pub struct StreamsGroupState {
     pub group_id: String,
     pub group_epoch: i32,
@@ -148,28 +149,6 @@ pub struct StreamsGroupState {
 pub const INITIAL_EPOCH: i32 = INITIAL_GROUP_EPOCH;
 
 impl StreamsGroupState {
-    crate::coordinator::unified::member_helpers::bump_group_epoch! {
-        /// Increments the group epoch. This mirrors the share and consumer state
-        /// machines: a fresh epoch makes the assignment stale, so the method marks
-        /// the group dirty.
-        self; self.dirty = true;
-    }
-
-    crate::coordinator::unified::member_helpers::expired_members_method!();
-
-    crate::coordinator::unified::member_helpers::evict_expired! {
-        /// Removes members whose `last_seen` is older than `session_timeout` and
-        /// returns the evicted member ids. The method marks the group dirty if it
-        /// removed any member.
-    }
-
-    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
-    /// Removes every member whose rebalance timeout fired at `now` while it
-    /// was still at the epoch that armed it, and returns the removed ids,
-    /// sorted. This is the fence of Kafka's
-    /// `scheduleStreamsGroupRebalanceTimeout`.
-    }
-
     pub fn new(group_id: impl Into<String>) -> Self {
         Self {
             group_id: group_id.into(),
@@ -626,12 +605,19 @@ mod tests {
 
     #[test]
     fn bump_epoch_rejects_exhaustion() {
-        assert_group_epoch_exhaustion(
-            StreamsGroupState::new("g"),
-            |group| group.group_epoch = i32::MAX,
-            StreamsGroupState::bump_epoch,
-            |group| group.group_epoch,
-        );
+        for dirty in [false, true] {
+            let mut group = StreamsGroupState::new("g");
+            group.dirty = dirty;
+            assert_group_epoch_exhaustion(
+                group,
+                |group| group.group_epoch = i32::MAX,
+                StreamsGroupState::bump_epoch,
+                |group| {
+                    assert!(group.dirty == dirty);
+                    group.group_epoch
+                },
+            );
+        }
     }
 
     #[test]

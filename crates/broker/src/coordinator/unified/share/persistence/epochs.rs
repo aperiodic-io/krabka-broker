@@ -21,11 +21,11 @@
 //! Both records end with the message's tagged-field count.
 
 use {
-    crate::coordinator::unified::persistence::{
-        flex::{epoch_value, value_codec},
-        get_i32, get_i64,
+    crate::{
+        coordinator::unified::persistence::{get_i32, get_i64},
+        error::BrokerError,
     },
-    bytes::BufMut,
+    bytes::{BufMut, BytesMut},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,13 +36,14 @@ pub struct ShareGroupMetadataValue {
     pub metadata_hash: i64,
 }
 
-value_codec! {
-    ShareGroupMetadataValue("ShareGroupMetadataValue"),
-    encode(self) -> buf {
+#[krabka_macros::flexible_value(record = "ShareGroupMetadataValue")]
+impl ShareGroupMetadataValue {
+    fn encode_fields(self, buf: &mut BytesMut) {
         buf.put_i32(self.epoch);
         buf.put_i64(self.metadata_hash);
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let epoch = get_i32(buf)?;
         let metadata_hash = get_i64(buf)?;
         Ok(Self {
@@ -52,14 +53,14 @@ value_codec! {
     }
 }
 
-epoch_value!(
-    ShareGroupTargetAssignmentMetadataValue("ShareGroupTargetAssignmentMetadataValue") {
-        assignment_epoch,
-        /// Kafka's `AssignmentTimestamp`: the wall-clock time in milliseconds at
-        /// which the assignment calculation finished, or 0 when it is unknown.
-        assignment_timestamp_ms,
-    }
-);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, krabka_macros::FlexibleEpochValue)]
+#[epoch_value(record = "ShareGroupTargetAssignmentMetadataValue")]
+pub struct ShareGroupTargetAssignmentMetadataValue {
+    pub assignment_epoch: i32,
+    /// Kafka's `AssignmentTimestamp`: the wall-clock time in milliseconds at
+    /// which the assignment calculation finished, or 0 when it is unknown.
+    pub assignment_timestamp_ms: i64,
+}
 
 #[cfg(test)]
 mod tests {

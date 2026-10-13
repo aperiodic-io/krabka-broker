@@ -18,7 +18,10 @@ use spec::{copy_admitted, reference_valid};
 type WalCopyObservation = (Option<u64>, i32, bool, Vec<WalCopyBatch>);
 type ByteQuorum = (i64, i64, Vec<(u64, i64)>, Vec<i64>);
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn complete_copy(
     observation: WalCopyObservation,
     voter: u64,
@@ -32,7 +35,6 @@ fn complete_copy(
         && (forall<j: Int> 0 <= j && j < source.len() ==>
             super::wal_copy::copy_batch_equal(observation.3@[j], source[j]))
     }
-}
 }
 
 /// Derive explicit votes from admitted actual copies, then consume installed

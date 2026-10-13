@@ -62,11 +62,9 @@ mod test_support;
 mod tests;
 
 pub(crate) use self::body_plan::records_to_serve;
+#[krabka_macros::sendfile_cfg]
+pub use self::resolve::resolve_records_sendfile;
 pub use self::{drain::write_fetch_plan, resolve::resolve_records_inline, sink::SendfileSink};
-
-crate::sendfile_cfg! {
-    pub use self::resolve::resolve_records_sendfile;
-}
 
 /// One ordered segment of the fetch response wire frame.
 #[derive(Debug)]

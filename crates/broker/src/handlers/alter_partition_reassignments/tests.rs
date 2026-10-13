@@ -197,13 +197,13 @@ async fn handle_preserves_unknown_partition_response_shape() {
     .await
     .expect("handle");
 
-    let expected = unthrottled_wire!(AlterPartitionReassignmentsResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterPartitionReassignmentsResponse {
         allow_replication_factor_change: false,
         error_code: 0,
         error_message: None,
-        responses: vec![tagged_wire!(ReassignableTopicResponse {
+        responses: vec![krabka_macros::tagged_wire!(ReassignableTopicResponse {
             name: "payments".into(),
-            partitions: vec![tagged_wire!(ReassignablePartitionResponse {
+            partitions: vec![krabka_macros::tagged_wire!(ReassignablePartitionResponse {
                 partition_index: 8,
                 error_code: UNKNOWN_TOPIC_OR_PARTITION,
                 error_message: Some("Unable to find a topic named payments.".into()),
@@ -247,13 +247,13 @@ async fn handle_denies_cluster_alter_with_top_level_cluster_authorization_failed
             .await
             .expect("handle");
 
-            let expected = unthrottled_wire!(AlterPartitionReassignmentsResponse {
+            let expected = krabka_macros::unthrottled_wire!(AlterPartitionReassignmentsResponse {
                 allow_replication_factor_change: true,
                 error_code: CLUSTER_AUTHORIZATION_FAILED,
                 error_message: Some("alter-reassignment denied".into()),
-                responses: vec![tagged_wire!(ReassignableTopicResponse {
+                responses: vec![krabka_macros::tagged_wire!(ReassignableTopicResponse {
                     name: "payments".into(),
-                    partitions: vec![tagged_wire!(ReassignablePartitionResponse {
+                    partitions: vec![krabka_macros::tagged_wire!(ReassignablePartitionResponse {
                         partition_index: 8,
                         error_code: CLUSTER_AUTHORIZATION_FAILED,
                         error_message: Some("alter-reassignment denied".into()),
@@ -287,13 +287,13 @@ async fn handle_submits_successful_reassignment_records() {
     .await
     .expect("handle");
 
-    let expected = unthrottled_wire!(AlterPartitionReassignmentsResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterPartitionReassignmentsResponse {
         allow_replication_factor_change: true,
         error_code: 0,
         error_message: None,
-        responses: vec![tagged_wire!(ReassignableTopicResponse {
+        responses: vec![krabka_macros::tagged_wire!(ReassignableTopicResponse {
             name: "orders".into(),
-            partitions: vec![tagged_wire!(ReassignablePartitionResponse {
+            partitions: vec![krabka_macros::tagged_wire!(ReassignablePartitionResponse {
                 partition_index: 7,
                 error_code: 0,
                 error_message: None,

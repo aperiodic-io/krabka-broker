@@ -43,7 +43,9 @@ const VERSION: i16 = elect_leaders_response::MAX_VERSION;
 
 mod commit_fencing;
 
-crate::test_support::context_helper!(client_id = "kafka-leader-election");
+krabka_macros::wire_codec_helpers! {
+    test_context ["kafka-leader-election"];
+}
 
 fn gated_config() -> BreakGlassConfig {
     BreakGlassConfig {

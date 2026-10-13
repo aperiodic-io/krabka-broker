@@ -146,12 +146,11 @@ impl Segment {
     }
 }
 
-crate::sendfile_cfg! {
-    impl Segment {
-        /// Where the bytes this segment holds in memory begin, when it writes
-        /// directly. A read at or past it is served from memory.
-        pub(super) fn cached_from(&self) -> Option<u64> {
-            self.direct.as_ref().map(|mode| mode.cache.start())
-        }
+#[krabka_macros::sendfile_cfg]
+impl Segment {
+    /// Where the bytes this segment holds in memory begin, when it writes
+    /// directly. A read at or past it is served from memory.
+    pub(super) fn cached_from(&self) -> Option<u64> {
+        self.direct.as_ref().map(|mode| mode.cache.start())
     }
 }

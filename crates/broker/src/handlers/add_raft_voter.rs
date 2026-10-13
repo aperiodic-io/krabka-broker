@@ -20,7 +20,15 @@
 #[cfg(test)]
 use crate::handlers::raft_voter::add_voter_request;
 use {
-    crate::{broker::Broker, codes, handlers::raft_voter::respond},
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{
+            ApiVersion, DispatchResult, RequestContext, audit_admin_success, audit_resource,
+            cluster_alter_denied,
+            raft_voter::{Refusals, respond},
+        },
+    },
     krabka_metadata::{Voter, VoterEndpoint},
     krabka_protocol::owned::{
         add_raft_voter_request::AddRaftVoterRequest, add_raft_voter_response::AddRaftVoterResponse,
@@ -29,79 +37,76 @@ use {
     krabka_raft::{reconfig::AddVoter, voter_requests},
 };
 
-crate::handlers::raft_voter::leader_handler!(
-    (broker, version, req_bytes, ctx),
-    (
-        AddRaftVoterRequest,
-        AddRaftVoterResponse,
-        80,
-        "add-raft-voter denied"
-    ),
-    (req, image, quorum),
-    {
-        let (voter_id, directory_id) = (req.voter_id, req.voter_directory_id);
-        let id = u64::try_from(voter_id).unwrap_or_default();
-        let voter = Voter {
-            id: krabka_raft::NodeId(id),
-            directory_id: uuid::Uuid::from_bytes(directory_id.0),
-            endpoints: req
-                .listeners
-                .iter()
-                .map(|l| VoterEndpoint {
-                    name: l.name.clone(),
-                    host: l.host.clone(),
-                    port: l.port,
-                })
-                .collect(),
-            kraft_version: krabka_metadata::KRaftVersionRange::default(),
+#[krabka_macros::voter_admission(
+    request = AddRaftVoterRequest,
+    api = 80,
+    gate = cluster_alter_denied,
+    refusals = Refusals::<AddRaftVoterResponse>::leader_only("add-raft-voter denied"),
+)]
+pub(crate) async fn handle(
+    broker: &Broker,
+    version: ApiVersion,
+    req_bytes: &[u8],
+    ctx: &RequestContext<'_>,
+) -> DispatchResult {
+    let (voter_id, directory_id) = (req.voter_id, req.voter_directory_id);
+    let id = u64::try_from(voter_id).unwrap_or_default();
+    let voter = Voter {
+        id: krabka_raft::NodeId(id),
+        directory_id: uuid::Uuid::from_bytes(directory_id.0),
+        endpoints: req
+            .listeners
+            .iter()
+            .map(|l| VoterEndpoint {
+                name: l.name.clone(),
+                host: l.host.clone(),
+                port: l.port,
+            })
+            .collect(),
+        kraft_version: krabka_metadata::KRaftVersionRange::default(),
+    };
+    let add = AddVoter {
+        voter,
+        ack_when_committed: version == 0 || req.ack_when_committed,
+    };
+    let refusal =
+        match voter_requests::add_voter_refusal(&req, &image.cluster_id().to_string(), &quorum) {
+            Some(refusal) => Some(refusal),
+            // `AddVoterHandler` answers from the leader's own state (a pending
+            // change, the high watermark, `kraft.version`, an uncommitted voters
+            // record, a duplicate id) before it sends the candidate anything, so
+            // a retried or refused add never probes an unreachable candidate.
+            None => match voter_requests::reconfiguration_refusal(
+                broker.controller.check_add_voter(add.clone()).await,
+                voter_requests::VoterOperation::Add,
+                voter_id,
+                directory_id,
+            ) {
+                (codes::NONE, _) => probe_candidate(broker, &req, image.kraft_version())
+                    .await
+                    .err(),
+                refusal => Some(refusal),
+            },
         };
-        let add = AddVoter {
-            voter,
-            ack_when_committed: version == 0 || req.ack_when_committed,
-        };
-        let refusal =
-            match voter_requests::add_voter_refusal(&req, &image.cluster_id().to_string(), &quorum)
-            {
-                Some(refusal) => Some(refusal),
-                // `AddVoterHandler` answers from the leader's own state (a pending
-                // change, the high watermark, `kraft.version`, an uncommitted voters
-                // record, a duplicate id) before it sends the candidate anything, so
-                // a retried or refused add never probes an unreachable candidate.
-                None => match voter_requests::reconfiguration_refusal(
-                    broker.controller.check_add_voter(add.clone()).await,
-                    voter_requests::VoterOperation::Add,
-                    voter_id,
-                    directory_id,
-                ) {
-                    (codes::NONE, _) => probe_candidate(broker, &req, image.kraft_version())
-                        .await
-                        .err(),
-                    refusal => Some(refusal),
-                },
-            };
-        if let Some((error_code, error_message)) = refusal {
-            return respond::<AddRaftVoterResponse>(version, error_code, error_message);
-        }
-
-        let (error_code, error_message) = voter_requests::reconfiguration_refusal(
-            broker.controller.add_voter(add).await,
-            voter_requests::VoterOperation::Add,
-            voter_id,
-            directory_id,
-        );
-
-        if error_code == codes::NONE {
-            crate::handlers::audit_admin_success(
-                broker.audit_log.as_ref(),
-                ctx,
-                "AddRaftVoter",
-                vec![crate::handlers::audit_resource("RaftVoter", id.to_string())],
-            );
-        }
-
-        respond::<AddRaftVoterResponse>(version, error_code, error_message)
+    if let Some((error_code, error_message)) = refusal {
+        return respond::<AddRaftVoterResponse>(version, error_code, error_message);
     }
-);
+
+    let (error_code, error_message) = voter_requests::reconfiguration_refusal(
+        broker.controller.add_voter(add).await,
+        voter_requests::VoterOperation::Add,
+        voter_id,
+        directory_id,
+    );
+
+    if error_code == codes::NONE {
+        audit_admin_success(broker.audit_log.as_ref(), ctx, "AddRaftVoter", vec![
+            audit_resource("RaftVoter", id.to_string()),
+        ]);
+    }
+
+    respond::<AddRaftVoterResponse>(version, error_code, error_message)
+}
 
 /// Asks the candidate for its `ApiVersions` over the controller listener, as
 /// `AddVoterHandler` does, and refuses it when it cannot answer or does not

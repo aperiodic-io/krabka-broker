@@ -217,9 +217,11 @@ fn finalize_decision(
     })
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Decision helpers receive a nonempty set using a supported KRaft version.
 fn decision_voter_set_valid(voters: CurrentVoterSet) -> bool {
     pearlite! { voters.voter_count@ > 0 && voters.kraft_version@ <= 1 }
-}
 }

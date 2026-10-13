@@ -35,13 +35,16 @@
 //! `shareGroupBuildPartitionDeleteRequest` and
 //! `completeDeleteShareGroupOffsets` do.
 
-use crate::{
-    coordinator::unified::persistence::flex::{
-        get_compact_array, get_compact_string, get_i32_array, get_uuid, put_compact_array,
-        put_compact_string, put_empty_tagged_fields, put_i32_array, put_uuid, skip_tagged_fields,
-        value_codec,
+use {
+    crate::{
+        coordinator::unified::persistence::flex::{
+            get_compact_array, get_compact_string, get_i32_array, get_uuid, put_compact_array,
+            put_compact_string, put_empty_tagged_fields, put_i32_array, put_uuid,
+            skip_tagged_fields,
+        },
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::BytesMut,
 };
 
 /// The `TopicName` written for a topic id the metadata image cannot resolve,
@@ -77,9 +80,9 @@ pub struct ShareGroupStatePartitionMetadataValue {
     pub deleting: Vec<DeletingTopic>,
 }
 
-value_codec! {
-    ShareGroupStatePartitionMetadataValue("ShareGroupStatePartitionMetadataValue"),
-    encode(&self) -> buf {
+#[krabka_macros::flexible_value(record = "ShareGroupStatePartitionMetadataValue")]
+impl ShareGroupStatePartitionMetadataValue {
+    fn encode_fields(&self, buf: &mut BytesMut) {
         for topics in [&self.initializing, &self.initialized] {
             put_compact_array(buf, topics.iter(), |buf, topic| {
                 put_uuid(buf, *topic.topic_id.as_bytes());
@@ -94,7 +97,8 @@ value_codec! {
             put_empty_tagged_fields(buf);
         });
     }
-    decode(buf) {
+
+    fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let initializing = get_topic_partitions_infos(buf)?;
         let initialized = get_topic_partitions_infos(buf)?;
         let deleting = get_compact_array(buf, |buf| {

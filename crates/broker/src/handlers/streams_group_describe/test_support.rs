@@ -257,14 +257,14 @@ pub(super) fn describe_member() -> StreamsDescribeMember {
 }
 
 pub(super) fn expected_task_ids(subtopology_id: &str, partitions: Vec<i32>) -> TaskIds {
-    tagged_wire!(TaskIds {
+    krabka_macros::tagged_wire!(TaskIds {
         subtopology_id: subtopology_id.into(),
         partitions,
     })
 }
 
 fn expected_key_value(key: &str, value: &str) -> KeyValue {
-    tagged_wire!(KeyValue {
+    krabka_macros::tagged_wire!(KeyValue {
         key: key.into(),
         value: value.into(),
     })
@@ -274,7 +274,7 @@ fn expected_key_value(key: &str, value: &str) -> KeyValue {
 /// `error_code` and, for `GROUP_ID_NOT_FOUND`, Kafka's message are set, and
 /// every other field holds its wire default.
 pub(super) fn error_group(group_id: &str, error_code: i16) -> DescribedGroup {
-    tagged_wire!(DescribedGroup {
+    krabka_macros::tagged_wire!(DescribedGroup {
         error_code,
         error_message: (error_code == GROUP_ID_NOT_FOUND)
             .then(|| format!("Streams group {group_id} not found.")),
@@ -340,19 +340,19 @@ pub(super) async fn heartbeat(
 ///
 /// [`render_topology`]: super::render::render_topology
 pub(super) fn expected_rendered_topology() -> Topology {
-    tagged_wire!(Topology {
+    krabka_macros::tagged_wire!(Topology {
         epoch: 9,
-        subtopologies: Some(vec![tagged_wire!(Subtopology {
+        subtopologies: Some(vec![krabka_macros::tagged_wire!(Subtopology {
             subtopology_id: "sub-a".into(),
             source_topics: vec!["input-a".into(), "input-b".into()],
             repartition_sink_topics: vec!["sink-a".into()],
-            state_changelog_topics: vec![tagged_wire!(TopicInfo {
+            state_changelog_topics: vec![krabka_macros::tagged_wire!(TopicInfo {
                 name: "store-a-changelog".into(),
                 partitions: 3,
                 replication_factor: 2,
                 topic_configs: vec![expected_key_value("cleanup.policy", "compact")],
             })],
-            repartition_source_topics: vec![tagged_wire!(TopicInfo {
+            repartition_source_topics: vec![krabka_macros::tagged_wire!(TopicInfo {
                 name: "source-repartition".into(),
                 partitions: 4,
                 replication_factor: 1,

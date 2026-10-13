@@ -106,7 +106,9 @@ mod tests {
         std::{collections::HashSet, sync::Arc},
     };
 
-    crate::test_support::context_helper!(client_id = "producer-client");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["producer-client"];
+    }
 
     /// The transactional id every freeze case drives.
     const TID: &str = "tid-freeze";

@@ -90,7 +90,7 @@ mod tests {
     }
 
     fn none_row(feature: &str) -> UpdatableFeatureResult {
-        tagged_wire!(UpdatableFeatureResult {
+        krabka_macros::tagged_wire!(UpdatableFeatureResult {
             feature: feature.into(),
             error_code: codes::NONE,
             error_message: Some("NONE".into()),
@@ -106,7 +106,7 @@ mod tests {
             (2, vec![]),
         ];
         for (version, results) in cases {
-            let expected = unthrottled_wire!(UpdateFeaturesResponse {
+            let expected = krabka_macros::unthrottled_wire!(UpdateFeaturesResponse {
                 error_code: codes::NONE,
                 error_message: None,
                 results,
@@ -126,7 +126,7 @@ mod tests {
                       only supports versions 0-1"
                 .into(),
         };
-        let expected = unthrottled_wire!(UpdateFeaturesResponse {
+        let expected = krabka_macros::unthrottled_wire!(UpdateFeaturesResponse {
             error_code: codes::INVALID_UPDATE_VERSION,
             error_message: Some(
                 "The update failed for all features since the following feature had an error: \
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn top_level_error_has_no_rows() {
-        let expected = unthrottled_wire!(UpdateFeaturesResponse {
+        let expected = krabka_macros::unthrottled_wire!(UpdateFeaturesResponse {
             error_code: codes::NOT_CONTROLLER,
             error_message: Some("not the controller".into()),
             results: vec![],

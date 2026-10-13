@@ -23,7 +23,10 @@ pub struct EpochEntry {
     pub start_offset: Offset,
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// `h` is the position of Kafka's `epochs.higherEntry(requested)`: the least
 /// recorded epoch strictly above `requested`. Over entries in increasing
 /// epoch order that is the first entry above `requested`, and the entry just
@@ -35,9 +38,11 @@ pub fn higher_entry_at(entries: Seq<EpochEntry>, requested: Int, h: Int) -> bool
             && forall<j: Int> 0 <= j && j < h ==> entries[j].epoch.0@ <= requested
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Kafka's `epochs.higherEntry(requested)` is `null`: no recorded epoch is
 /// above `requested`. An empty cache has none.
 pub fn no_higher_entry(entries: Seq<EpochEntry>, requested: Int) -> bool {
@@ -45,9 +50,11 @@ pub fn no_higher_entry(entries: Seq<EpochEntry>, requested: Int) -> bool {
         forall<i: Int> 0 <= i && i < entries.len() ==> entries[i].epoch.0@ <= requested
     }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Kafka's `LeaderEpochFileCache.endOffsetFor(requestedEpoch, logEndOffset)`
 /// case table, in Kafka's order, as the relation between the inputs and the
 /// answer `(found, end)`:
@@ -82,7 +89,6 @@ pub fn kafka_end_offset_for(
                 && found == if h == 0 { requested } else { entries[h - 1].epoch.0@ }
         }
     }
-}
 }
 
 /// Resolve a requested leader epoch to `(found_epoch, end_offset)`, exactly as

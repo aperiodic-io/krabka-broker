@@ -5,7 +5,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn offset_seek_input_valid(
     rows: Seq<(u32, u32)>,
     batches: Seq<(u32, u32)>,
@@ -20,7 +23,6 @@ fn offset_seek_input_valid(
                 && forall<i: Int> 0 <= i && i < rows.len()
                     ==> exists<j: Int> 0 <= j && j < batches.len() && rows[i] == batches[j] }
     }
-}
 }
 
 /// Validate sparse rows against complete decoded (last-relative-offset, byte

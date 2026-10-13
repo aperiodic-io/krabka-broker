@@ -262,7 +262,7 @@ mod tests {
                 produce::test_support::image_with_topic, test_support::seed_partition_replicas,
             },
             test_support::{
-                append_partition_batch, peer, principal, start_broker_no_audit,
+                append_partition_batch, peer, principal, record_values, start_broker_no_audit,
                 start_broker_with_authorizer_no_audit, temporary_partition,
             },
         },
@@ -548,18 +548,11 @@ mod tests {
 
         partition.test_set_leader_epoch(leader_epoch.0);
 
+        let records = record_values(&[&b"first"[..], &b"second"[..]]);
         let mut batch = krabka_protocol::records::RecordBatch {
             last_offset_delta: 1,
             partition_leader_epoch: leader_epoch.0,
-            records: [&b"first"[..], &b"second"[..]]
-                .iter()
-                .zip(0..)
-                .map(|(value, offset_delta)| krabka_protocol::records::Record {
-                    offset_delta,
-                    value: Some(bytes::Bytes::from_static(value)),
-                    ..Default::default()
-                })
-                .collect(),
+            records,
             ..Default::default()
         };
         append_partition_batch(&partition, &mut batch);

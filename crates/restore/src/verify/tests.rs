@@ -411,6 +411,12 @@ fn segment_bytes(batch1_max_ts: i64, batch2_max_ts: i64) -> SegmentBytes {
 
 fn valid_segment_bytes() -> SegmentBytes { segment_bytes(1020, 1040) }
 
+fn write_valid_segment(dir: &std::path::Path) -> (SegmentBytes, SegmentInventory) {
+    let fixture = valid_segment_bytes();
+    let segment = write_segment(dir, &fixture, &[]);
+    (fixture, segment)
+}
+
 fn write_segment(dir: &std::path::Path, bytes: &SegmentBytes, omit: &[&str]) -> SegmentInventory {
     let present = |name: &str| !omit.contains(&name);
     SegmentInventory {
@@ -437,6 +443,22 @@ fn write_segment(dir: &std::path::Path, bytes: &SegmentBytes, omit: &[&str]) -> 
     }
 }
 
+async fn expect_truncated_segment(
+    dir: &std::path::Path,
+    store: &ArchiveStore,
+    partition: &TopicIdPartition,
+    fixture: &SegmentBytes,
+) {
+    let segment = write_segment(dir, fixture, &[]);
+    let error = verify_segment(store, partition, &segment)
+        .await
+        .expect_err("invalid sparse index");
+    check!(
+        matches!(error, RestoreError::TruncatedSegment { .. }),
+        "{error:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_clean_segment_verifies_and_reports_its_facts() {
     let VerificationContext {
@@ -444,8 +466,7 @@ async fn a_clean_segment_verifies_and_reports_its_facts() {
         store,
         partition,
     } = verification_context();
-    let fixture = valid_segment_bytes();
-    let segment = write_segment(dir.path(), &fixture, &[]);
+    let (fixture, segment) = write_valid_segment(dir.path());
 
     let verified = verify_segment(&store, &partition, &segment)
         .await
@@ -474,8 +495,7 @@ async fn authenticated_fetch_rejects_object_replacement() {
         store,
         partition,
     } = verification_context();
-    let fixture = valid_segment_bytes();
-    let segment = write_segment(dir.path(), &fixture, &[]);
+    let (fixture, segment) = write_valid_segment(dir.path());
     let objects = segment
         .artifacts()
         .map(|artifact| {
@@ -699,59 +719,53 @@ async fn a_batch_whose_exclusive_end_overflows_is_rejected() {
     check!(matches!(err, RestoreError::TruncatedSegment { .. }));
 }
 
-#[tokio::test]
-async fn an_offset_index_entry_past_the_log_end_is_rejected() {
-    let VerificationContext {
-        dir,
-        store,
-        partition,
-    } = verification_context();
-    let mut fixture = valid_segment_bytes();
-
-    let log_len = u32::try_from(fixture.log.len()).unwrap();
-    fixture.offset_index = offset_index_bytes(&[
-        OffsetIndexRow {
-            relative_offset: 0,
-            position: 0,
-        },
-        OffsetIndexRow {
-            relative_offset: 3,
-            position: log_len + 1_000,
-        },
-    ]);
-
-    let segment = write_segment(dir.path(), &fixture, &[]);
-    let error = verify_segment(&store, &partition, &segment)
-        .await
-        .expect_err("index entry past the log end");
-    check!(matches!(error, RestoreError::TruncatedSegment { .. }));
+#[derive(Clone, Copy)]
+enum InvalidIndex {
+    OffsetPastLogEnd,
+    NonMonotonicTime,
 }
 
-#[tokio::test]
-async fn a_non_monotonic_time_index_is_rejected() {
+#[yare::parameterized(
+    offset_past_log_end = { InvalidIndex::OffsetPastLogEnd },
+    non_monotonic_time = { InvalidIndex::NonMonotonicTime },
+)]
+#[test_macro(tokio::test)]
+async fn invalid_indexes_are_rejected(index: InvalidIndex) {
     let VerificationContext {
         dir,
         store,
         partition,
     } = verification_context();
     let mut fixture = valid_segment_bytes();
+    match index {
+        InvalidIndex::OffsetPastLogEnd => {
+            let log_len = u32::try_from(fixture.log.len()).unwrap();
+            fixture.offset_index = offset_index_bytes(&[
+                OffsetIndexRow {
+                    relative_offset: 0,
+                    position: 0,
+                },
+                OffsetIndexRow {
+                    relative_offset: 3,
+                    position: log_len + 1_000,
+                },
+            ]);
+        }
+        InvalidIndex::NonMonotonicTime => {
+            fixture.time_index = time_index_bytes(&[
+                TimeIndexRow {
+                    timestamp: 1_030,
+                    relative_offset: 3,
+                },
+                TimeIndexRow {
+                    timestamp: 1_000,
+                    relative_offset: 0,
+                },
+            ]);
+        }
+    }
 
-    fixture.time_index = time_index_bytes(&[
-        TimeIndexRow {
-            timestamp: 1_030,
-            relative_offset: 3,
-        },
-        TimeIndexRow {
-            timestamp: 1_000,
-            relative_offset: 0,
-        },
-    ]);
-
-    let segment = write_segment(dir.path(), &fixture, &[]);
-    let error = verify_segment(&store, &partition, &segment)
-        .await
-        .expect_err("non-monotonic time index");
-    check!(matches!(error, RestoreError::TruncatedSegment { .. }));
+    expect_truncated_segment(dir.path(), &store, &partition, &fixture).await;
 }
 
 #[tokio::test]
@@ -854,14 +868,7 @@ async fn sparse_indexes_require_complete_strict_bounded_entries() {
             Sidecar::Transaction(bytes) => fixture.transaction_index = Some(bytes),
         }
 
-        let segment = write_segment(dir.path(), &fixture, &[]);
-        let error = verify_segment(&store, &partition, &segment)
-            .await
-            .expect_err("invalid sparse index");
-        check!(
-            matches!(error, RestoreError::TruncatedSegment { .. }),
-            "{error:?}"
-        );
+        expect_truncated_segment(dir.path(), &store, &partition, &fixture).await;
     }
 }
 

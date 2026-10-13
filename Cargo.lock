@@ -3623,6 +3623,7 @@ name = "krabka-macros"
 version = "1.0.3"
 dependencies = [
  "assert2",
+ "bytes",
  "clap",
  "krabka-units",
  "moxy",

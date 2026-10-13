@@ -63,7 +63,9 @@ fn request(groups: &[RequestGroup<'_>]) -> DescribeShareGroupOffsetsRequest {
     }
 }
 
-crate::test_support::context_helper!(client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    test_context ["admin-client"];
+}
 
 #[tokio::test]
 async fn handle_error_scenarios_preserve_expected_rows() {
@@ -96,15 +98,15 @@ async fn handle_error_scenarios_preserve_expected_rows() {
                     }],
                 },
             ],
-            unthrottled_wire!(DescribeShareGroupOffsetsResponse {
+            krabka_macros::unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![
-                    tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
+                    krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
                         group_id: "g1".into(),
                         topics: Vec::new(),
                         error_code: codes::UNSUPPORTED_VERSION,
                         error_message: None,
                     }),
-                    tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
+                    krabka_macros::tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
                         group_id: "g2".into(),
                         topics: Vec::new(),
                         error_code: codes::UNSUPPORTED_VERSION,
@@ -124,13 +126,15 @@ async fn handle_error_scenarios_preserve_expected_rows() {
                     partitions: vec![0],
                 }],
             }],
-            unthrottled_wire!(DescribeShareGroupOffsetsResponse {
-                groups: vec![tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
-                    group_id: "g1".into(),
-                    topics: Vec::new(),
-                    error_code: codes::GROUP_AUTHORIZATION_FAILED,
-                    error_message: None,
-                })],
+            krabka_macros::unthrottled_wire!(DescribeShareGroupOffsetsResponse {
+                groups: vec![krabka_macros::tagged_wire!(
+                    DescribeShareGroupOffsetsResponseGroup {
+                        group_id: "g1".into(),
+                        topics: Vec::new(),
+                        error_code: codes::GROUP_AUTHORIZATION_FAILED,
+                        error_message: None,
+                    }
+                )],
             }),
         ),
         (
@@ -144,34 +148,42 @@ async fn handle_error_scenarios_preserve_expected_rows() {
                     partitions: vec![3, 5],
                 }],
             }],
-            unthrottled_wire!(DescribeShareGroupOffsetsResponse {
-                groups: vec![tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
-                    group_id: "g1".into(),
-                    topics: vec![tagged_wire!(DescribeShareGroupOffsetsResponseTopic {
-                        topic_name: "missing-topic".into(),
-                        topic_id: Uuid::default(),
-                        partitions: vec![
-                            tagged_wire!(DescribeShareGroupOffsetsResponsePartition {
-                                partition_index: 3,
-                                start_offset: -1,
-                                leader_epoch: 0,
-                                lag: -1,
-                                error_code: codes::NONE,
-                                error_message: None,
-                            }),
-                            tagged_wire!(DescribeShareGroupOffsetsResponsePartition {
-                                partition_index: 5,
-                                start_offset: -1,
-                                leader_epoch: 0,
-                                lag: -1,
-                                error_code: codes::NONE,
-                                error_message: None,
-                            }),
-                        ],
-                    })],
-                    error_code: codes::NONE,
-                    error_message: None,
-                })],
+            krabka_macros::unthrottled_wire!(DescribeShareGroupOffsetsResponse {
+                groups: vec![krabka_macros::tagged_wire!(
+                    DescribeShareGroupOffsetsResponseGroup {
+                        group_id: "g1".into(),
+                        topics: vec![krabka_macros::tagged_wire!(
+                            DescribeShareGroupOffsetsResponseTopic {
+                                topic_name: "missing-topic".into(),
+                                topic_id: Uuid::default(),
+                                partitions: vec![
+                                    krabka_macros::tagged_wire!(
+                                        DescribeShareGroupOffsetsResponsePartition {
+                                            partition_index: 3,
+                                            start_offset: -1,
+                                            leader_epoch: 0,
+                                            lag: -1,
+                                            error_code: codes::NONE,
+                                            error_message: None,
+                                        }
+                                    ),
+                                    krabka_macros::tagged_wire!(
+                                        DescribeShareGroupOffsetsResponsePartition {
+                                            partition_index: 5,
+                                            start_offset: -1,
+                                            leader_epoch: 0,
+                                            lag: -1,
+                                            error_code: codes::NONE,
+                                            error_message: None,
+                                        }
+                                    ),
+                                ],
+                            }
+                        )],
+                        error_code: codes::NONE,
+                        error_message: None,
+                    }
+                )],
             }),
         ),
     ];

@@ -58,14 +58,21 @@ pub const fn compute_horizon(now_ms: i64, delete_retention_ms: i64) -> i64 {
     now_ms.saturating_add(delete_retention_ms)
 }
 
-open_logic! {
-fn horizon_decision_matches(existing: Option<i64>, now: i64, retention: i64, decision: RetainDecision) -> bool {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
+fn horizon_decision_matches(
+    existing: Option<i64>,
+    now: i64,
+    retention: i64,
+    decision: RetainDecision,
+) -> bool {
     pearlite! { match existing {
         None => exists<h: i64> decision == RetainDecision::SetHorizon(h)
             && h@ == compute_horizon_model(now, retention),
         Some(h) => decision == if now@ >= h@ { RetainDecision::Delete } else { RetainDecision::Keep },
     } }
-}
 }
 
 #[ensures(horizon_decision_matches(existing, now_ms, delete_retention_ms, result))]

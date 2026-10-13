@@ -25,7 +25,7 @@ impl RuntimeFileConfig {
         cfg: &mut BrokerConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             // Zero is a valid `partition_disk_scan_interval`: it disables the
             // scanner, so this one is not held to `positive_time`.
@@ -53,7 +53,7 @@ impl RuntimeFileConfig {
         if let Some(value) = runtime.controlled_shutdown_drain_timeout {
             positive_time("controlled_shutdown_drain_timeout", value)?;
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             whole_bytes_u64: metadata_max_bytes_between_snapshots;
             // Zero disables the time-based snapshot cap, so it is not held to
@@ -68,7 +68,7 @@ impl RuntimeFileConfig {
         }
         runtime.apply_metadata_log(&mut cfg.metadata_log)?;
         // Zero disables the reaper, so it is not held to `positive_time`.
-        set_runtime! { runtime => cfg; nonnegative_time: txn_abort_cleanup_interval; }
+        krabka_macros::set_runtime! { runtime => cfg; nonnegative_time: txn_abort_cleanup_interval; }
         // Both KIP-98 expiry knobs are `ConfigDef.Type::INT` in Kafka and
         // `DescribeConfigs` reports them as such, so neither may hold a value
         // wider than an `i32` of milliseconds. The expiry itself must run, as
@@ -86,7 +86,7 @@ impl RuntimeFileConfig {
                 disableable_millis_i32_time("txn_id_expiration_cleanup_interval", value)?;
             cfg.static_config_origins.txn_id_expiration_cleanup_interval = true;
         }
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => cfg;
             positive_time: leader_imbalance_check_interval;
             // Zero disables the periodic TLS watcher, so it is not held to
@@ -118,7 +118,7 @@ impl RuntimeFileConfig {
         metadata_log: &mut krabka_raft::MetadataLogConfig,
     ) -> Result<(), FileConfigError> {
         let runtime = self;
-        set_runtime! {
+        krabka_macros::set_runtime! {
             runtime => metadata_log;
             metadata_log_segment_bytes: metadata_log_segment_bytes => segment_size;
             whole_millis_i64_time: metadata_log_segment_roll_interval => segment_roll_interval;

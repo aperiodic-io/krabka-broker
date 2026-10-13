@@ -66,7 +66,7 @@ pub(super) fn logger_configs(
         .into_iter()
         .filter(|(name, _)| wanted(name))
         .map(|(name, level)| {
-            tagged_wire!(DescribeConfigsResourceResult {
+            krabka_macros::tagged_wire!(DescribeConfigsResourceResult {
                 name,
                 value: Some(level.kafka_name().to_owned()),
                 read_only: false,

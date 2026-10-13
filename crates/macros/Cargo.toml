@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["krabka", "derive", "metrics", "proc-macro"]
 categories = ["development-tools::procedural-macro-helpers"]
 # `krabka-log` derives with these macros, so they publish with it.
-include = ["src/**/*.rs", "README.md", "CHANGELOG.md"]
+include = ["build.rs", "src/**/*.rs", "README.md", "CHANGELOG.md"]
 [lints]
 workspace = true
 
@@ -24,6 +24,7 @@ moxy = { workspace = true }
 
 [dev-dependencies]
 assert2 = { workspace = true }
+bytes = { workspace = true }
 clap = { workspace = true, features = ["env"] }
 krabka-units = { workspace = true }
 prometheus-client = { workspace = true }
@@ -31,7 +32,7 @@ refined_type = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 yare = { workspace = true }

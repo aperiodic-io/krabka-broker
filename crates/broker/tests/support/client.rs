@@ -227,12 +227,10 @@ pub async fn produce_batch(
     response.responses[0].partition_responses[0].clone()
 }
 
-krabka_macros::metric_registry_fixture!(render_registry);
-
 /// Read one rendered Prometheus series; a missing series has value zero.
 pub async fn metric_value(handle: &BrokerHandle, series: &str) -> f64 {
     let rendered = {
-        render_registry!(handle.metrics(), rendered, registry; expect("encode registry"));
+        krabka_macros::metric_registry_fixture!(handle.metrics(), rendered, registry; expect("encode registry"));
         rendered
     };
     rendered

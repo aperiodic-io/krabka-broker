@@ -2,21 +2,20 @@
 
 use creusot_std::prelude::*;
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    pub struct ProducerIdBlockPlan {
-        pub first: i64,
-        pub len: i32,
-        pub next: i64,
-    }
+#[krabka_macros::model_type]
+pub struct ProducerIdBlockPlan {
+    pub first: i64,
+    pub len: i32,
+    pub next: i64,
+}
 
-    pub enum ProducerIdBlockAllocationDecision {
-        BrokerNotRegistered,
-        StaleBrokerEpoch,
-        InvalidFrontier,
-        Exhausted,
-        Allocate(ProducerIdBlockPlan),
-    }
+#[krabka_macros::model_type]
+pub enum ProducerIdBlockAllocationDecision {
+    BrokerNotRegistered,
+    StaleBrokerEpoch,
+    InvalidFrontier,
+    Exhausted,
+    Allocate(ProducerIdBlockPlan),
 }
 
 /// Fence one broker generation and construct its exact positive contiguous

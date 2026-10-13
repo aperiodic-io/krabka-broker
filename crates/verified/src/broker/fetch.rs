@@ -6,7 +6,10 @@ use {
     creusot_std::prelude::*,
 };
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// A row answers a request this follower no longer stands behind: the epoch
 /// moved while it was in flight, the replication target changed, or the leader
 /// names a different target than the one this follower fetched from.
@@ -16,7 +19,6 @@ pub fn replica_fetch_fenced(facts: ReplicaFetchFacts) -> bool {
             || !facts.target_matches
             || !facts.reported_target_matches
     }
-}
 }
 
 /// Fence one follower Fetch response row against its in-flight request epoch,
@@ -55,7 +57,10 @@ pub fn replica_fetch_mutation(facts: ReplicaFetchFacts) -> ReplicaFetchMutation 
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// KIP-460's preferred election: leadership moves to the first assigned
 /// replica, and only when that replica is alive, in the ISR, and able to lead.
 pub fn preferred_change_eligible(change: PreferredLeaderChange) -> bool {
@@ -65,7 +70,6 @@ pub fn preferred_change_eligible(change: PreferredLeaderChange) -> bool {
             && change.leader_alive
             && !change.leader_is_witness
     }
-}
 }
 
 /// Admit one preferred-leader rebalance batch only when it is nonempty, within
@@ -115,14 +119,19 @@ pub fn preferred_rebalance_admission(
     true
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The lower of two offsets.
 pub fn offset_min(a: Int, b: Int) -> Int {
     pearlite! { if a <= b { a } else { b } }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The exclusive upper offset one fetch may read.
 ///
 /// A follower reads to the leader's log end (Kafka's `FetchIsolation.LOG_END`).
@@ -139,7 +148,6 @@ pub fn fetch_limit_model(is_follower: bool, read_committed: bool, w: FetchWaterm
             offset_min(w.hw@, w.deliverable@)
         }
     }
-}
 }
 
 /// Compute Kafka's consumer/follower Fetch visibility window.

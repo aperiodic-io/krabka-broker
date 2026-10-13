@@ -41,13 +41,13 @@ mod tests {
 
     #[test]
     fn encode_resp_preserves_encoded_body() {
-        let resp = unthrottled_wire!(AssignReplicasToDirsResponse {
+        let resp = krabka_macros::unthrottled_wire!(AssignReplicasToDirsResponse {
             error_code: codes::NONE,
-            directories: vec![tagged_wire!(RespDirData {
+            directories: vec![krabka_macros::tagged_wire!(RespDirData {
                 id: ProtocolUuid(uuid::Uuid::from_u128(0xAA).into_bytes()),
-                topics: vec![tagged_wire!(RespTopicData {
+                topics: vec![krabka_macros::tagged_wire!(RespTopicData {
                     topic_id: ProtocolUuid(uuid::Uuid::from_u128(0xBB).into_bytes()),
-                    partitions: vec![tagged_wire!(RespPartData {
+                    partitions: vec![krabka_macros::tagged_wire!(RespPartData {
                         partition_index: 3,
                         error_code: codes::UNKNOWN_TOPIC_ID,
                     })],

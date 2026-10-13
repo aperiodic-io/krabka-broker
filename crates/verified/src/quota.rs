@@ -64,68 +64,72 @@ pub fn quota_charge(
     (new_available.0, new_debt)
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Selected user/client quota candidate, in Kafka's precedence order.
-    ///
-    /// The order is `DefaultQuotaCallback`'s in Kafka's `ClientQuotaManager`:
-    /// every `user=U` level ranks above every `user=<default>` level, and both
-    /// rank above the `client-id`-only levels.
-    pub enum UserClientQuotaPrecedence {
-        /// 1. `user=U, client-id=C`
-        ExactPair,
-        /// 2. `user=U, client-id=<default>`
-        ExactUserDefaultClient,
-        /// 3. `user=U`
-        ExactUser,
-        /// 4. `user=<default>, client-id=C`
-        DefaultUserExactClient,
-        /// 5. `user=<default>, client-id=<default>`
-        DefaultPair,
-        /// 6. `user=<default>`
-        DefaultUser,
-        /// 7. `client-id=C`
-        ExactClient,
-        /// 8. `client-id=<default>`
-        DefaultClient,
-        None,
-    }
-
-    /// Whether one canonical quota candidate exists in the metadata image.
-    pub enum QuotaCandidatePresence {
-        Absent,
-        Present,
-    }
-
-    /// Presence of each canonical user/client quota candidate, in Kafka's
-    /// precedence order.
-    pub struct UserClientQuotaFacts {
-        pub exact_pair: QuotaCandidatePresence,
-        pub exact_user_default_client: QuotaCandidatePresence,
-        pub exact_user: QuotaCandidatePresence,
-        pub default_user_exact_client: QuotaCandidatePresence,
-        pub default_pair: QuotaCandidatePresence,
-        pub default_user: QuotaCandidatePresence,
-        pub exact_client: QuotaCandidatePresence,
-        pub default_client: QuotaCandidatePresence,
-    }
+/// Selected user/client quota candidate, in Kafka's precedence order.
+///
+/// The order is `DefaultQuotaCallback`'s in Kafka's `ClientQuotaManager`:
+/// every `user=U` level ranks above every `user=<default>` level, and both
+/// rank above the `client-id`-only levels.
+#[krabka_macros::model_type]
+pub enum UserClientQuotaPrecedence {
+    /// 1. `user=U, client-id=C`
+    ExactPair,
+    /// 2. `user=U, client-id=<default>`
+    ExactUserDefaultClient,
+    /// 3. `user=U`
+    ExactUser,
+    /// 4. `user=<default>, client-id=C`
+    DefaultUserExactClient,
+    /// 5. `user=<default>, client-id=<default>`
+    DefaultPair,
+    /// 6. `user=<default>`
+    DefaultUser,
+    /// 7. `client-id=C`
+    ExactClient,
+    /// 8. `client-id=<default>`
+    DefaultClient,
+    None,
 }
 
-open_logic! {
+/// Whether one canonical quota candidate exists in the metadata image.
+#[krabka_macros::model_type]
+pub enum QuotaCandidatePresence {
+    Absent,
+    Present,
+}
+
+/// Presence of each canonical user/client quota candidate, in Kafka's
+/// precedence order.
+#[krabka_macros::model_type]
+pub struct UserClientQuotaFacts {
+    pub exact_pair: QuotaCandidatePresence,
+    pub exact_user_default_client: QuotaCandidatePresence,
+    pub exact_user: QuotaCandidatePresence,
+    pub default_user_exact_client: QuotaCandidatePresence,
+    pub default_pair: QuotaCandidatePresence,
+    pub default_user: QuotaCandidatePresence,
+    pub exact_client: QuotaCandidatePresence,
+    pub default_client: QuotaCandidatePresence,
+}
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn exact_user_quota_absent(facts: UserClientQuotaFacts) -> bool {
     pearlite! { facts.exact_pair == QuotaCandidatePresence::Absent
     && facts.exact_user_default_client == QuotaCandidatePresence::Absent
     && facts.exact_user == QuotaCandidatePresence::Absent }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 fn all_user_quota_absent(facts: UserClientQuotaFacts) -> bool {
     pearlite! { exact_user_quota_absent(facts)
     && facts.default_user_exact_client == QuotaCandidatePresence::Absent
     && facts.default_pair == QuotaCandidatePresence::Absent
     && facts.default_user == QuotaCandidatePresence::Absent }
-}
 }
 
 /// Select Kafka's first present user/client quota candidate.
@@ -195,14 +199,12 @@ pub fn user_client_quota_precedence(facts: UserClientQuotaFacts) -> UserClientQu
     }
 }
 
-model_types! {
-    @proof (derive(std::clone::Clone, Copy, DeepModel));
-    /// Selected IP quota candidate.
-    pub enum IpQuotaPrecedence {
-        Exact,
-        Default,
-        None,
-    }
+/// Selected IP quota candidate.
+#[krabka_macros::model_type]
+pub enum IpQuotaPrecedence {
+    Exact,
+    Default,
+    None,
 }
 
 /// Select an exact IP quota before the IP default.
@@ -220,11 +222,13 @@ pub fn ip_quota_precedence(exact: bool, default: bool) -> IpQuotaPrecedence {
     }
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// Spendable credit is bounded by the burst and is absent while debt remains.
 pub(crate) fn balance_within_burst(available: Int, debt: Int, burst: Int) -> bool {
     pearlite! { available <= burst && (available == 0 || debt == 0) }
-}
 }
 
 #[cfg(test)]

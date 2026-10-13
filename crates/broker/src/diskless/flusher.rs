@@ -894,7 +894,7 @@ mod tests {
                 .is_ok()
         );
 
-        crate::metrics::test_support::render_registry!(context.metrics, body, registry; unwrap());
+        krabka_macros::metric_registry_fixture!(context.metrics, body, registry; unwrap());
         assert!(body.contains("krabka_broker_diskless_wal_expired_ranges_total 1"));
     }
 

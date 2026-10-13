@@ -2,13 +2,18 @@ use super::*;
 #[cfg(creusot)]
 use creusot_std::prelude::*;
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn epoch_window_valid(base: Int, start: Int, end: Int) -> bool {
     pearlite! { 0 <= base && base <= end && 0 <= start && start <= end }
 }
-}
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 pub fn epoch_archive_valid(entries: Seq<EpochEntry>, base: Int, end: Int) -> bool {
     pearlite! {
         (forall<i: Int> 0 <= i && i < entries.len() ==> entries[i].epoch.0@ >= 0
@@ -18,6 +23,13 @@ pub fn epoch_archive_valid(entries: Seq<EpochEntry>, base: Int, end: Int) -> boo
                 && entries[i].start_offset.0@ < entries[j].start_offset.0@)
     }
 }
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
+pub fn epoch_input_valid(entries: Seq<EpochEntry>, base: Int, start: Int, end: Int) -> bool {
+    pearlite! { epoch_window_valid(base, start, end) && epoch_archive_valid(entries, base, end) }
 }
 
 type EpochTruncation = Result<Option<(i32, FetchWatermarks, FetchVisibility)>, ()>;
@@ -27,10 +39,8 @@ type EpochTruncation = Result<Option<(i32, FetchWatermarks, FetchVisibility)>, (
 /// epoch. Cuts below retained floors require the host's reset path. Applying
 /// the cut durably and faithfully decoded, batch-aligned history are external.
 #[ensures(match result {
-    Err(()) => !epoch_window_valid(segment_base@, w.log_start@, w.log_end@)
-        || !epoch_archive_valid(entries@, segment_base@, w.log_end@),
-    Ok(None) => epoch_window_valid(segment_base@, w.log_start@, w.log_end@)
-        && epoch_archive_valid(entries@, segment_base@, w.log_end@)
+    Err(()) => !epoch_input_valid(entries@, segment_base@, w.log_start@, w.log_end@),
+    Ok(None) => epoch_input_valid(entries@, segment_base@, w.log_start@, w.log_end@)
         && kafka_end_offset_for(entries@, requested@, w.log_end@, -1, -1),
     Ok(Some((found, bounded, visibility))) => resolved_epoch_cut(entries@, segment_base@, w, requested@, found@, bounded.log_end@)
         && segment_base@ <= bounded.log_end@ && bounded.log_end@ <= w.log_end@ && found@ <= requested@
@@ -86,7 +96,10 @@ pub(super) fn validated_epochs_bound_truncated_fetch(
     Ok(Some((found.0, bounded, visibility)))
 }
 
-open_logic! {
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open)]
 /// The validated epoch history resolves this exact bounded cut.
 pub(super) fn resolved_epoch_cut(
     entries: Seq<EpochEntry>,
@@ -96,8 +109,6 @@ pub(super) fn resolved_epoch_cut(
     found: Int,
     cut: Int,
 ) -> bool {
-    pearlite! { epoch_window_valid(base, window.log_start@, window.log_end@)
-    && epoch_archive_valid(entries, base, window.log_end@)
+    pearlite! { epoch_input_valid(entries, base, window.log_start@, window.log_end@)
     && kafka_end_offset_for(entries, requested, window.log_end@, found, cut) }
-}
 }

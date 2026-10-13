@@ -10,7 +10,7 @@ use {
         RESOURCE_TYPE_TOPIC, dispatch,
         test_support::{
             broker_resource, client_metrics_resource, drive_many, drive_one, group_resource,
-            resource,
+            resource, test_context,
         },
     },
     crate::{
@@ -28,9 +28,7 @@ use {
                 assert_dispatch_response, duplicate_config_resource_response, ordered_rows,
             },
         },
-        test_support::{
-            DenyAll, context_helper, start_broker_with_authorizer as start_broker, test_ctx,
-        },
+        test_support::{DenyAll, start_broker_with_authorizer as start_broker, test_ctx},
         throttle::LEADER_THROTTLED_RATE_KEY,
     },
     assert2::{assert, check},
@@ -41,8 +39,6 @@ use {
     std::sync::Arc,
 };
 
-context_helper!(client_id = "admin-client");
-
 /// Local preprocessing errors retain their positions among controller results,
 /// including both occurrences of a duplicate resource.
 #[tokio::test]
@@ -52,7 +48,7 @@ async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
     let rows = [
         (
             broker_resource("2", &[]),
-            tagged_wire!(AlterConfigsResourceResponse {
+            krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
                 resource_type: RESOURCE_TYPE_BROKER,
                 resource_name: "2".into(),
                 error_code: codes::INVALID_REQUEST,
@@ -61,7 +57,7 @@ async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
         ),
         (
             broker_resource("1", &[]),
-            tagged_wire!(AlterConfigsResourceResponse {
+            krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
                 resource_type: RESOURCE_TYPE_BROKER,
                 resource_name: "1".into(),
                 error_code: codes::NONE,
@@ -71,7 +67,7 @@ async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
         (topic_resource("duplicate", &[]), duplicate_topic.clone()),
         (
             resource(77, "unsupported"),
-            tagged_wire!(AlterConfigsResourceResponse {
+            krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
                 resource_type: 77,
                 resource_name: "unsupported".into(),
                 error_code: codes::INVALID_REQUEST,
@@ -80,7 +76,7 @@ async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
         ),
         (
             topic_resource("missing", &[]),
-            tagged_wire!(AlterConfigsResourceResponse {
+            krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
                 resource_type: RESOURCE_TYPE_TOPIC,
                 resource_name: "missing".into(),
                 error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
@@ -127,8 +123,8 @@ async fn handle_preserves_resource_identity_for_unsupported_type() {
     ))
     .await;
 
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
+        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
             error_code: codes::INVALID_REQUEST,
             error_message: Some("Unknown resource type 77".to_string()),
             resource_type: 77,
@@ -190,8 +186,8 @@ async fn denied_resources_report_their_authorization_error(case: DeniedResourceC
     };
     let resp = drive_one(Arc::new(DenyAll), request).await;
 
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
+        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
             error_code,
             error_message: Some(error_message.to_string()),
             resource_type,
@@ -209,8 +205,8 @@ async fn authorized_group_resource_is_applied() {
     ))
     .await;
 
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
+        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
             error_code: codes::NONE,
             error_message: None,
             resource_type: RESOURCE_TYPE_GROUP,
@@ -228,8 +224,8 @@ async fn authorized_client_metrics_resource_is_applied() {
     ))
     .await;
 
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
+        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
             error_code: codes::NONE,
             error_message: None,
             resource_type: RESOURCE_TYPE_CLIENT_METRICS,
@@ -335,8 +331,8 @@ async fn authorized_broker_resource_is_applied() {
     ))
     .await;
 
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
+    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
+        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
             error_code: codes::NONE,
             error_message: None,
             resource_type: RESOURCE_TYPE_BROKER,

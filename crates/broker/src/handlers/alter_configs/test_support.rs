@@ -22,7 +22,9 @@ use {
     std::sync::Arc,
 };
 
-crate::test_support::context_helper!(client_id = "admin-client");
+krabka_macros::wire_codec_helpers! {
+    pub(super) test_context ["admin-client"];
+}
 
 pub(super) fn resource(resource_type: i8, resource_name: &str) -> AlterConfigsResource {
     scoped_resource(resource_type, resource_name, &[("retention.ms", "60000")])

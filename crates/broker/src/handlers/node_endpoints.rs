@@ -6,7 +6,13 @@ use {crate::handlers::metadata::pick_endpoint_host_port, krabka_metadata::Metada
 pub(crate) mod test_support;
 
 /// One `NodeEndpoints` entry, in the shape the four responses share.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, krabka_macros::NodeEndpoints)]
+#[node_endpoints(targets(
+    krabka_protocol::owned::fetch_response::NodeEndpoint,
+    krabka_protocol::owned::produce_response::NodeEndpoint,
+    krabka_protocol::owned::share_acknowledge_response::NodeEndpoint,
+    krabka_protocol::owned::share_fetch_response::NodeEndpoint,
+))]
 pub(crate) struct LeaderEndpoint {
     node_id: i32,
     host: String,
@@ -52,26 +58,3 @@ pub(crate) fn leader_endpoints<R: From<LeaderEndpoint>>(
         })
         .collect()
 }
-
-macro_rules! impl_node_endpoint {
-    ($($response:ident),* $(,)?) => {
-        $(impl From<LeaderEndpoint> for krabka_protocol::owned::$response::NodeEndpoint {
-            fn from(endpoint: LeaderEndpoint) -> Self {
-                Self {
-                    node_id: endpoint.node_id,
-                    host: endpoint.host,
-                    port: endpoint.port,
-                    rack: endpoint.rack,
-                    ..Self::default()
-                }
-            }
-        })*
-    };
-}
-
-impl_node_endpoint!(
-    fetch_response,
-    produce_response,
-    share_acknowledge_response,
-    share_fetch_response,
-);

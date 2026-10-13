@@ -13,8 +13,15 @@
 
 use {
     crate::{
+        broker::Broker,
         codes,
         coordinator::unified::streams::actor::{StreamsGroupActorMessage, response::error_resp},
+        error::BrokerError,
+        handlers::{
+            ApiVersion, RequestContext, acl_gates::group_protocol_refusal,
+            any_topic_describe_denied, coordinator_routing::group_actor_error_code,
+            group_coordinator_error_response, streams_protocol_enabled,
+        },
         task_util::ask,
         time_util::now_ms,
     },
@@ -28,118 +35,111 @@ mod creation;
 pub(super) mod topic_authz;
 mod validation;
 
-context_handler! {
-    StreamsGroupHeartbeatRequest => StreamsGroupHeartbeatResponse,
-    (broker, req, version, ctx),
-    {
-        let image = broker.controller.current_image();
-        let ng = broker.group_coordinator.clone();
+pub(crate) async fn handle(
+    broker: &Broker,
+    req: StreamsGroupHeartbeatRequest,
+    version: ApiVersion,
+    ctx: &RequestContext<'_>,
+) -> Result<StreamsGroupHeartbeatResponse, BrokerError> {
+    let image = broker.controller.current_image();
+    let ng = broker.group_coordinator.clone();
 
-        // KafkaApis answers UNSUPPORTED_VERSION before the group ACL when the
-        // streams protocol is off: KIP-1071 gates it on a finalized
-        // streams.version >= 1 (early access, default-disabled), and krabka
-        // also on the `streams_group.enable` config kill-switch.
+    // KafkaApis answers UNSUPPORTED_VERSION before the group ACL when the
+    // streams protocol is off: KIP-1071 gates it on a finalized
+    // streams.version >= 1 (early access, default-disabled), and krabka
+    // also on the `streams_group.enable` config kill-switch.
 
-        // ── ACL preamble ────────────────────────────────────────────
-        // `Read` on `Group(group_id)`. On Deny → whole-response
-        // `error_code = GROUP_AUTHORIZATION_FAILED (30)`.
-        if let Some(error_code) = crate::handlers::acl_gates::group_protocol_refusal(
-            crate::handlers::streams_protocol_enabled(broker, &image),
-            broker,
-            &image,
-            ctx,
-            &req.group_id,
-        ) {
-            return Ok(reply(error_code, None));
-        }
-
-        // Kafka's `KafkaApis.handleStreamsGroupHeartbeat` reads the topology
-        // straight off the wire, before the group coordinator ever sees the
-        // request: a topology that names a Kafka internal topic or an
-        // invalid topic name is `STREAMS_INVALID_TOPOLOGY`, and a required
-        // topic (source, repartition sink, repartition source or changelog)
-        // that `Describe` denies fails the whole request with
-        // `TOPIC_AUTHORIZATION_FAILED` -- no partial disclosure, and the
-        // group coordinator never runs.
-        if let Some(topology) = req.topology.as_ref() {
-            let required = topic_authz::required_topics(topology);
-            if let Some(message) = topic_authz::invalid_topology_message(broker, &required) {
-                return Ok(reply(codes::STREAMS_INVALID_TOPOLOGY, Some(message)));
-            }
-            if !required.is_empty()
-                && crate::handlers::any_topic_describe_denied(
-                    broker.config.authorizer.as_ref(),
-                    &image,
-                    ctx,
-                    &required,
-                )
-            {
-                return Ok(reply(codes::TOPIC_AUTHORIZATION_FAILED, None));
-            }
-        }
-
-        // Kafka's `GroupCoordinatorService` checks the request before it
-        // schedules the write on the coordinator, so a refused request changes
-        // no group and never gets NOT_COORDINATOR.
-        if let Some(validation::RequestError {
-            code: error_code,
-            message,
-        }) = validation::request_error(&req, broker.config.features.unstable_api_versions)
-        {
-            return Ok(reply(error_code, Some(message)));
-        }
-
-        if let Some(error_code) = crate::handlers::group_coordinator_error(broker, &req.group_id) {
-            return Ok(reply(error_code, None));
-        }
-
-        // Kafka creates a streams group only on a join, in place of nothing or of
-        // an empty classic group (a KIP-1071 cold upgrade converts it here), and
-        // answers GROUP_ID_NOT_FOUND to anything else.
-        if let Some(message) = ng
-            .streams_group_lookup_error(&req.group_id, req.member_epoch, now_ms())
-            .await?
-        {
-            return Ok(reply(codes::GROUP_ID_NOT_FOUND, Some(message)));
-        }
-
-        let group_id = req.group_id.clone();
-        ng.mark_streams(&group_id);
-        let handle = ng.get_or_create_streams(&group_id);
-        let asked = ask(&handle.tx, |reply| StreamsGroupActorMessage::Heartbeat {
-            request: Box::new(req),
-            version,
-            client_id: ctx.client_id.unwrap_or_default().to_owned(),
-            client_host: ctx.client_host(),
-            reply,
-        })
-        .await;
-        let result = match asked {
-            Ok(result) => result,
-            Err(error) => {
-                return Ok(reply(
-                    crate::handlers::coordinator_routing::group_actor_error_code(error),
-                    None,
-                ));
-            }
-        };
-        let mut resp = result.response;
-        // KafkaApis hands the internal topics that the coordinator asks for to
-        // `AutoTopicCreationManager.createStreamsInternalTopics`, with the
-        // principal of the caller.
-        if !result.creatable_topics.is_empty() {
-            creation::create_internal_topics(
-                broker,
-                &creation::Heartbeat {
-                    ctx,
-                    group_id: &group_id,
-                },
-                &mut resp,
-                &result.creatable_topics,
-            );
-        }
-        Ok(resp)
+    // ── ACL preamble ────────────────────────────────────────────
+    // `Read` on `Group(group_id)`. On Deny → whole-response
+    // `error_code = GROUP_AUTHORIZATION_FAILED (30)`.
+    if let Some(error_code) = group_protocol_refusal(
+        streams_protocol_enabled(broker, &image),
+        broker,
+        &image,
+        ctx,
+        &req.group_id,
+    ) {
+        return Ok(reply(error_code, None));
     }
+
+    // Kafka's `KafkaApis.handleStreamsGroupHeartbeat` reads the topology
+    // straight off the wire, before the group coordinator ever sees the
+    // request: a topology that names a Kafka internal topic or an
+    // invalid topic name is `STREAMS_INVALID_TOPOLOGY`, and a required
+    // topic (source, repartition sink, repartition source or changelog)
+    // that `Describe` denies fails the whole request with
+    // `TOPIC_AUTHORIZATION_FAILED` -- no partial disclosure, and the
+    // group coordinator never runs.
+    if let Some(topology) = req.topology.as_ref() {
+        let required = topic_authz::required_topics(topology);
+        if let Some(message) = topic_authz::invalid_topology_message(broker, &required) {
+            return Ok(reply(codes::STREAMS_INVALID_TOPOLOGY, Some(message)));
+        }
+        if !required.is_empty()
+            && any_topic_describe_denied(broker.config.authorizer.as_ref(), &image, ctx, &required)
+        {
+            return Ok(reply(codes::TOPIC_AUTHORIZATION_FAILED, None));
+        }
+    }
+
+    // Kafka's `GroupCoordinatorService` checks the request before it
+    // schedules the write on the coordinator, so a refused request changes
+    // no group and never gets NOT_COORDINATOR.
+    if let Some(validation::RequestError {
+        code: error_code,
+        message,
+    }) = validation::request_error(&req, broker.config.features.unstable_api_versions)
+    {
+        return Ok(reply(error_code, Some(message)));
+    }
+
+    if let Some(response) = group_coordinator_error_response(broker, &req.group_id, reply) {
+        return Ok(response);
+    }
+
+    // Kafka creates a streams group only on a join, in place of nothing or of
+    // an empty classic group (a KIP-1071 cold upgrade converts it here), and
+    // answers GROUP_ID_NOT_FOUND to anything else.
+    if let Some(message) = ng
+        .streams_group_lookup_error(&req.group_id, req.member_epoch, now_ms())
+        .await?
+    {
+        return Ok(reply(codes::GROUP_ID_NOT_FOUND, Some(message)));
+    }
+
+    let group_id = req.group_id.clone();
+    ng.mark_streams(&group_id);
+    let handle = ng.get_or_create_streams(&group_id);
+    let asked = ask(&handle.tx, |reply| StreamsGroupActorMessage::Heartbeat {
+        request: Box::new(req),
+        version,
+        client_id: ctx.client_id.unwrap_or_default().to_owned(),
+        client_host: ctx.client_host(),
+        reply,
+    })
+    .await;
+    let result = match asked {
+        Ok(result) => result,
+        Err(error) => {
+            return Ok(reply(group_actor_error_code(error), None));
+        }
+    };
+    let mut resp = result.response;
+    // KafkaApis hands the internal topics that the coordinator asks for to
+    // `AutoTopicCreationManager.createStreamsInternalTopics`, with the
+    // principal of the caller.
+    if !result.creatable_topics.is_empty() {
+        creation::create_internal_topics(
+            broker,
+            &creation::Heartbeat {
+                ctx,
+                group_id: &group_id,
+            },
+            &mut resp,
+            &result.creatable_topics,
+        );
+    }
+    Ok(resp)
 }
 
 /// Kafka's error response: the code, message and generated defaults.
@@ -711,7 +711,9 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
-    crate::test_support::context_helper!(client_id = "streams-client");
+    krabka_macros::wire_codec_helpers! {
+        test_context ["streams-client"];
+    }
 
     /// A started streams broker, its directory and a shared reference to it.
     struct ConfiguredBroker {
