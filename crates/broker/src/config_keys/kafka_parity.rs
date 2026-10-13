@@ -56,6 +56,7 @@
 
 use {
     super::{
+        dedup::{DEDUP_KEY_HEADER, DEDUP_WINDOW_MS},
         delivery::{DELIVERY_MAX_DELAY_MS, DELIVERY_MODE, DELIVERY_SCHEDULE_MONOTONIC},
         diskless::DISKLESS,
         docs::topic_config_docs,
@@ -179,6 +180,8 @@ const KRABKA_TOPIC_CONFIGS: &[&str] = &[
     SCHEMA_VALIDATION_KEY,
     SCHEMA_VALIDATION_VALUE,
     SCHEMA_VALIDATION_MODE,
+    DEDUP_WINDOW_MS,
+    DEDUP_KEY_HEADER,
     WRITE_FREEZE,
 ];
 

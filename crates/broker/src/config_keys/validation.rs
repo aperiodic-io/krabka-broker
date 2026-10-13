@@ -16,6 +16,7 @@ use {
         MESSAGE_TIMESTAMP_TYPE_LOG_APPEND, MIN_CLEANABLE_DIRTY_RATIO, MIN_COMPACTION_LAG_MS,
         REMOTE_COPY_LAG_BYTES, REMOTE_COPY_LAG_MS, REMOTE_LOG_COPY_DISABLE,
         REMOTE_LOG_DELETE_ON_DISABLE, REMOTE_STORAGE_ENABLE, RETENTION_BYTES, RETENTION_MS,
+        dedup::{DEDUP_KEY_HEADER, DEDUP_WINDOW_MS, parse_dedup_key_header, parse_dedup_window},
         delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED},
         diskless::validate_diskless_combination,
         parse::{
@@ -135,6 +136,8 @@ pub(crate) fn canonical_value(row: &ConfigKey, value: &str) -> Result<String, St
             COMPRESSION_TYPE => parse_compression_type(value).map(|_| java_trim(value).to_owned()),
             COMPRESSION_GZIP_LEVEL => parse_gzip_level(value).map(|level| level.to_string()),
             MIN_CLEANABLE_DIRTY_RATIO => parse_ratio_value(value).map(java_double),
+            DEDUP_WINDOW_MS => parse_dedup_window(value).map(|millis| millis.to_string()),
+            DEDUP_KEY_HEADER => parse_dedup_key_header(value).map(str::to_owned),
             LEADER_THROTTLED_REPLICAS_KEY | FOLLOWER_THROTTLED_REPLICAS_KEY => {
                 let values = list_value(value);
                 ThrottledReplicas::parse(&values.join(","))
@@ -228,9 +231,11 @@ pub(crate) fn canonical_topic_config_map(
 /// would silently deliver every record at once, and the schedule the producer
 /// wrote would be unrecoverable, because the overwrite destroys it.
 ///
-/// The other two are the data-path rules in [`validate_diskless_combination`]:
-/// `krabka.diskless=true` excludes both `remote.storage.enable=true` and
-/// `delivery.mode=scheduled`.
+/// The other three are the data-path rules in [`validate_diskless_combination`]:
+/// `krabka.diskless=true` excludes `remote.storage.enable=true`,
+/// `delivery.mode=scheduled`, and a KFC-10 `dedup.window.ms` other than `-1`.
+/// `dedup.key.header` alone is accepted on any topic, because it does nothing
+/// while the window is off.
 pub(crate) fn validate_config_combination(
     overrides: &BTreeMap<String, String>,
     defaults: &TopicDefaults,

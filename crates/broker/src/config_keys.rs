@@ -58,14 +58,20 @@
 //! turn the check on for record keys and for record values. The mode selects
 //! how much of each record the check reads.
 //!
-//! Four pairs of keys exclude each other: a `cleanup.policy` containing
+//! Two keys carry KFC-10 produce-time deduplication: `dedup.window.ms` and
+//! `dedup.key.header`. Neither reaches `Log.config`. The leader's produce path
+//! reads both through [`resolve_dedup_topic_config`]. The window turns the
+//! check on, and the header name, when set, replaces the record key as the
+//! dedup identity.
+//!
+//! Five pairs of keys exclude each other: a `cleanup.policy` containing
 //! `compact` with each of `delivery.mode=scheduled` and
 //! `remote.storage.enable=true` (Kafka's
 //! `validateNoRemoteStorageForCompactedTopic`), and `krabka.diskless=true`
-//! with each of `remote.storage.enable=true` and `delivery.mode=scheduled`.
-//! [`validate_topic_config`] sees one pair at a time and cannot see any of
-//! them, so [`validate_config_combination`] checks all four rules over a whole
-//! override map.
+//! with each of `remote.storage.enable=true`, `delivery.mode=scheduled` and a
+//! `dedup.window.ms` other than `-1`. [`validate_topic_config`] sees one pair
+//! at a time and cannot see any of them, so [`validate_config_combination`]
+//! checks all five rules over a whole override map.
 //!
 //! KFC-9's [`WRITE_FREEZE`] sits outside the whitelist because only the
 //! controller writes it. It is synthesised for `DescribeConfigs` and never
@@ -86,6 +92,7 @@
 mod broker_defaults;
 pub(crate) mod broker_dynamic;
 mod broker_scope;
+mod dedup;
 mod delivery;
 mod diskless;
 mod docs;
@@ -118,6 +125,7 @@ pub(crate) use self::{
         resolve_broker_witness, resolve_preferred_leader_site, resolve_remote_list_offsets_timeout,
         witness_node_ids,
     },
+    dedup::{DedupTopicConfig, dedup_topic_config, resolve_dedup_topic_config},
     delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, resolve_delivery_max_delay},
     diskless::{DISKLESS, resolve_diskless, validate_diskless_unchanged},
     log_config::apply_to_log_config,

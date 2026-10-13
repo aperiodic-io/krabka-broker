@@ -27,7 +27,8 @@ impl RuntimeFileConfig {
             runtime => cfg;
             whole_millis_i64_time: producer_id_expiration;
             positive_time: producer_id_expiration_scan_interval;
-            positive_usize: max_produce_group, partition_writer_queue_depth;
+            positive_usize: max_produce_group, partition_writer_queue_depth,
+                dedup_max_entries_per_partition, dedup_max_entries;
         }
         // A topic reports a static `min.insync.replicas` at
         // `STATIC_BROKER_CONFIG` when the operator named it, whatever the value.
@@ -241,6 +242,31 @@ barrier_max_topics_per_group = 16
             let mut cfg = BrokerConfig::default();
 
             assert!(file.apply_to(&mut cfg).is_err(), "{case}");
+        }
+    }
+
+    /// The two KFC-10 dedup bounds land in the broker config, keep their
+    /// defaults when unset, and refuse zero. The per-partition ceiling is
+    /// `BrokerConfig::validate`'s, with the other cross-field bounds.
+    #[test]
+    fn dedup_runtime_keys_land_in_the_broker_config() {
+        for (body, expected) in [
+            ("", Some((1_000_000, 16_000_000))),
+            (
+                "dedup_max_entries_per_partition = 5000\ndedup_max_entries = 20000",
+                Some((5_000, 20_000)),
+            ),
+            ("dedup_max_entries_per_partition = 0", None),
+            ("dedup_max_entries = 0", None),
+        ] {
+            let file: FileConfig =
+                toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
+            let mut cfg = BrokerConfig::default();
+            let applied = file
+                .apply_to(&mut cfg)
+                .ok()
+                .map(|()| (cfg.dedup_max_entries_per_partition, cfg.dedup_max_entries));
+            assert!(applied == expected, "{body:?}");
         }
     }
 

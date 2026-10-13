@@ -110,6 +110,10 @@ pub struct RuntimeArgs {
     #[overlay(refined)]
     pub partition_writer_queue_depth: Option<PositiveCount>,
     #[overlay(refined)]
+    pub dedup_max_entries_per_partition: Option<PositiveCount>,
+    #[overlay(refined)]
+    pub dedup_max_entries: Option<PositiveCount>,
+    #[overlay(refined)]
     pub default_min_insync_replicas: Option<PositiveI32>,
     #[overlay(refined)]
     pub num_partitions: Option<PositiveI32>,
@@ -383,6 +387,8 @@ mod tests {
         producer-id-expiration-scan-interval KRABKA_PRODUCER_ID_EXPIRATION_SCAN_INTERVAL None -------+-----\n\
         max-produce-group KRABKA_MAX_PRODUCE_GROUP None -+--++-------\n\
         partition-writer-queue-depth KRABKA_PARTITION_WRITER_QUEUE_DEPTH None -+--++-------\n\
+        dedup-max-entries-per-partition KRABKA_DEDUP_MAX_ENTRIES_PER_PARTITION None -+--++-------\n\
+        dedup-max-entries KRABKA_DEDUP_MAX_ENTRIES None -+--++-------\n\
         default-min-insync-replicas KRABKA_DEFAULT_MIN_INSYNC_REPLICAS None -+--+--------\n\
         num-partitions KRABKA_NUM_PARTITIONS None -+--+--------\n\
         default-replication-factor KRABKA_DEFAULT_REPLICATION_FACTOR None -+-----------\n\

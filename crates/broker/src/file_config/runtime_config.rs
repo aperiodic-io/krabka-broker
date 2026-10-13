@@ -177,6 +177,19 @@ pub struct RuntimeFileConfig {
     pub max_produce_group: Option<usize>,
     /// Capacity of each partition-writer request queue.
     pub partition_writer_queue_depth: Option<usize>,
+    /// Maximum number of KFC-10 dedup index entries, one for each distinct
+    /// identity, that one partition replica holds. At the limit the index
+    /// trims its oldest entries. If it can free none, it admits new identities
+    /// without indexing them. The broker reads it at startup. The default is
+    /// 1000000, and the value must be within 1..=10000000.
+    pub dedup_max_entries_per_partition: Option<usize>,
+    /// Maximum number of KFC-10 dedup index entries that all partition
+    /// replicas on this broker hold together. An entry takes about 64 B, so
+    /// the default of 16000000 takes about 1 GiB of memory. The partitions
+    /// share this budget, and a partition that inserts while the broker is
+    /// near the limit trims its own index. The broker reads it at startup. The
+    /// value must be at least 1.
+    pub dedup_max_entries: Option<usize>,
     /// Broker default for a topic's `min.insync.replicas`, Kafka's
     /// `min.insync.replicas`. A topic override wins over it.
     pub default_min_insync_replicas: Option<i32>,
