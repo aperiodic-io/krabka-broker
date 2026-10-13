@@ -56,6 +56,7 @@ pub mod consumer_groups;
 mod containers;
 pub mod controller_listener;
 mod coordinator;
+pub mod dedup;
 pub mod discovery;
 pub mod diskless;
 pub mod durability;
