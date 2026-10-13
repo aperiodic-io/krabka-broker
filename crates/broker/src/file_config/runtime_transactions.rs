@@ -192,6 +192,15 @@ mod tests {
         krabka_units::{mebibytes, secs},
     };
 
+    /// What `read` sees in a default config after a `[runtime]` section of
+    /// `body` is applied, or `None` when the section is refused.
+    fn applied_runtime<T>(body: &str, read: impl FnOnce(&BrokerConfig) -> T) -> Option<T> {
+        let file: FileConfig =
+            toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
+        let mut cfg = BrokerConfig::default();
+        file.apply_to(&mut cfg).ok().map(|()| read(&cfg))
+    }
+
     #[test]
     fn barrier_runtime_keys_land_in_the_broker_config() {
         let cfg = configured(
@@ -259,13 +268,9 @@ barrier_max_topics_per_group = 16
             ("dedup_max_entries_per_partition = 0", None),
             ("dedup_max_entries = 0", None),
         ] {
-            let file: FileConfig =
-                toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
-            let mut cfg = BrokerConfig::default();
-            let applied = file
-                .apply_to(&mut cfg)
-                .ok()
-                .map(|()| (cfg.dedup_max_entries_per_partition, cfg.dedup_max_entries));
+            let applied = applied_runtime(body, |cfg| {
+                (cfg.dedup_max_entries_per_partition, cfg.dedup_max_entries)
+            });
             assert!(applied == expected, "{body:?}");
         }
     }
@@ -400,13 +405,7 @@ barrier_max_topics_per_group = 16
             expected,
         } in rows
         {
-            let file: FileConfig =
-                toml::from_str(&format!("[runtime]\n{body}\n")).expect("parse runtime config");
-            let mut cfg = BrokerConfig::default();
-            let applied = file
-                .apply_to(&mut cfg)
-                .ok()
-                .map(|()| *cfg.share_coordinator);
+            let applied = applied_runtime(body, |cfg| (*cfg.share_coordinator).clone());
             assert!(applied == expected, "{label}");
         }
         let file: FileConfig =

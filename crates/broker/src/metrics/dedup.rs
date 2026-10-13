@@ -150,6 +150,15 @@ mod tests {
         m.dedup_index_entries.get(&label()).map(|gauge| gauge.get())
     }
 
+    /// Every dedup counter family holds no series for the test partition.
+    fn assert_no_counter_series(m: &BrokerMetrics) {
+        let want: Vec<(&str, Option<u64>)> = counter_families(m)
+            .into_iter()
+            .map(|(name, _)| (name, None))
+            .collect();
+        assert!(counter_values(m) == want);
+    }
+
     fn heap_bytes(m: &BrokerMetrics) -> Option<i64> {
         m.dedup_index_heap_bytes
             .get(&label())
@@ -212,11 +221,7 @@ mod tests {
         let m = BrokerMetrics::new();
         m.record_dedup_partition(&topic(), PARTITION, DedupCounterDelta::default(), 0);
 
-        let want: Vec<(&str, Option<u64>)> = counter_families(&m)
-            .into_iter()
-            .map(|(name, _)| (name, None))
-            .collect();
-        assert!(counter_values(&m) == want);
+        assert_no_counter_series(&m);
         assert!(index_entries(&m) == Some(0));
     }
 
@@ -281,11 +286,7 @@ mod tests {
 
         m.evict_partition_series(&label());
 
-        let want: Vec<(&str, Option<u64>)> = counter_families(&m)
-            .into_iter()
-            .map(|(name, _)| (name, None))
-            .collect();
-        assert!(counter_values(&m) == want);
+        assert_no_counter_series(&m);
         assert!(index_entries(&m).is_none());
         assert!(heap_bytes(&m).is_none());
     }

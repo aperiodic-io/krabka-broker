@@ -120,32 +120,18 @@ mod tests {
     };
 
     /// A config key and its value.
-    #[derive(Debug)]
-    struct ConfigPair<'a> {
-        key: &'a str,
-        value: &'a str,
-    }
+    type ConfigPair<'a> = (&'a str, &'a str);
 
     fn map(pairs: &[ConfigPair<'_>]) -> BTreeMap<String, String> {
         pairs
             .iter()
-            .map(|ConfigPair { key, value }| ((*key).to_owned(), (*value).to_owned()))
+            .map(|&(key, value)| (key.to_owned(), value.to_owned()))
             .collect()
     }
 
-    fn window(value: &str) -> ConfigPair<'_> {
-        ConfigPair {
-            key: DEDUP_WINDOW_MS,
-            value,
-        }
-    }
+    fn window(value: &str) -> ConfigPair<'_> { (DEDUP_WINDOW_MS, value) }
 
-    fn header(value: &str) -> ConfigPair<'_> {
-        ConfigPair {
-            key: DEDUP_KEY_HEADER,
-            value,
-        }
-    }
+    fn header(value: &str) -> ConfigPair<'_> { (DEDUP_KEY_HEADER, value) }
 
     #[test]
     fn both_keys_are_recognized() {
@@ -233,10 +219,7 @@ mod tests {
 
     #[test]
     fn a_diskless_topic_refuses_a_dedup_window_but_not_an_inert_header() {
-        let diskless = || ConfigPair {
-            key: DISKLESS,
-            value: "true",
-        };
+        let diskless = || (DISKLESS, "true");
         for (label, pairs) in [
             ("diskless with a header and no window", vec![
                 diskless(),
