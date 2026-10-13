@@ -62,6 +62,9 @@ hex = "0.4"
 # advertises, as Kafka resolves a wildcard listener host to
 # `InetAddress.getLocalHost().getCanonicalHostName()`.
 hostname = "0.4"
+# Dense insertion-ordered map with O(1) swap-remove by position. The dedup
+# index's sweep cursor walks that dense order.
+indexmap = "2.14"
 # KIP-664's ListTransactions filter accepts the full java.util.regex Pattern
 # grammar (including lookaround and backreferences).
 jsonpath-rust = "1.0"
@@ -172,7 +175,7 @@ tracing = "0.1"
 tracing-core = "0.1"
 tracing-opentelemetry = { version = "0.34", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_64"] }
+twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_64", "xxhash3_128"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 yare = "3"
 # wincode + serde-wincode replace bincode for serde-derived wire shapes.
@@ -210,6 +213,7 @@ krabka-connect = { git = "https://github.com/krabka-io/krabka-connect", rev = "e
 krabka-connect-derive = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
 krabka-connect-postgres = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
 krabka-connect-worker = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
+krabka-dedup = { path = "crates/dedup" }
 krabka-docgen = { path = "crates/docgen" }
 krabka-format = { path = "crates/format" }
 krabka-gateway = { git = "https://github.com/krabka-io/krabka-gateway", rev = "49870fd8e5f708274ff69a3e64a092844e2f8809" }

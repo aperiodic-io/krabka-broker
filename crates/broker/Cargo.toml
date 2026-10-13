@@ -64,6 +64,7 @@ krabka-remote-storage-topic = { version = "1.0.3", path = "../remote-storage-top
 krabka-object-store = { version = "1.0.3", path = "../object-store" }
 krabka-client-core = { version = "0.6.0" }
 krabka-throttle = { version = "1.0.3", path = "../throttle" }
+krabka-dedup = { version = "1.0.3", path = "../dedup" }
 krabka-units = { workspace = true }
 krabka-security.workspace = true
 qubit-clock = { workspace = true }

@@ -3271,6 +3271,7 @@ dependencies = [
  "krabka-client-core",
  "krabka-client-producer",
  "krabka-compression",
+ "krabka-dedup",
  "krabka-format",
  "krabka-ids",
  "krabka-kraft-core",
@@ -3461,6 +3462,16 @@ dependencies = [
  "snap",
  "thiserror 2.0.21",
  "zstd",
+]
+
+[[package]]
+name = "krabka-dedup"
+version = "1.0.3"
+dependencies = [
+ "assert2",
+ "indexmap 2.14.2",
+ "proptest",
+ "twox-hash",
 ]
 
 [[package]]

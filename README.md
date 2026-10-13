@@ -68,6 +68,7 @@ bounds, caller preconditions, and the I/O or orchestration outside its scope.
 | `krabka-format` | Formats a fresh log directory: Kafka's `meta.properties`, bootstrap records, the singleton `VotersRecord`. |
 | `krabka-restore` | Offline point-in-time restore of a bootable log directory from a KIP-405 archive. |
 | `krabka-throttle` | Quota token buckets (Creusot-verified). |
+| `krabka-dedup` | The windowed first-wins index behind produce-time record deduplication (KFC-10). |
 | `krabka-verified` | Formally verified pure kernels shared by consensus and log. |
 | `krabka-telemetry` | OTLP pipeline, metrics registry, and the debug/pprof routes. |
 | `krabka-logfmt` | logfmt encoder for structured logs. |

@@ -1,0 +1,24 @@
+[package]
+name = "krabka-dedup"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Produce-time windowed first-wins record deduplication index for Krabka"
+repository = "https://github.com/robot-head/crabka"
+homepage = "https://github.com/robot-head/crabka"
+documentation = "https://docs.rs/krabka-dedup"
+keywords = ["dedup", "kafka", "krabka"]
+categories = ["data-structures"]
+
+[lints]
+workspace = true
+
+[dependencies]
+indexmap = { workspace = true }
+twox-hash = { workspace = true }
+
+[dev-dependencies]
+assert2 = { workspace = true }
+proptest = { workspace = true }
