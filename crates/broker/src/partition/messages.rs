@@ -163,9 +163,12 @@ pub enum WriterMessage {
     /// Append a leader's already-encoded data batch without decoding or
     /// recompressing it. Control batches cannot use this arm because their
     /// marker record is needed for transaction bookkeeping.
+    ///
+    /// One message carries every data batch of a fetch response row, in
+    /// offset order, so a follower pays one writer round trip per partition
+    /// per fetch rather than one per batch.
     ReplicateVerbatim {
-        batch: VerbatimBatch,
-        base_offset: Offset,
+        batches: Vec<ReplicatedBatch>,
         ack: oneshot::Sender<Result<(), BrokerError>>,
     },
     /// Truncate the log so no records at offset `>= offset` remain. Used
@@ -285,4 +288,14 @@ mod tests {
 
         check!(data.record_count() == 4);
     }
+}
+
+/// One leader-encoded data batch a follower appends, and the offset the
+/// leader assigned it.
+#[derive(Debug)]
+pub struct ReplicatedBatch {
+    /// The batch as the leader wrote it.
+    pub batch: VerbatimBatch,
+    /// The leader's base offset for the batch.
+    pub base_offset: Offset,
 }

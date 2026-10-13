@@ -8,7 +8,9 @@
 
 use {
     crate::{
-        blocking::spawn_blocking, error::BrokerError, log_dir_status::LogDirRegistry,
+        blocking::{run_page_cache_io, spawn_blocking},
+        error::BrokerError,
+        log_dir_status::LogDirRegistry,
         replica_state::ReplicaState,
     },
     arc_swap::ArcSwap,
@@ -95,6 +97,24 @@ pub(super) async fn run_log_mutation<T: Send + 'static>(
     let result = match spawn_blocking(operation).await {
         Ok(value) => value,
         Err(join_err) => Err(storage_failure_error(panic_context, join_err)),
+    };
+    if let Err(err) = &result {
+        flag_storage_failure(err, storage.log_dir, storage.registry);
+    }
+    result
+}
+
+/// [`run_log_mutation`] for an append, which only writes into the page cache:
+/// it runs on the calling task instead of the blocking pool, whose thread
+/// handoff costs more than the append. The failure handling is the same.
+pub(super) async fn run_log_append<T: Send + 'static>(
+    operation: impl FnOnce() -> Result<T, BrokerError> + Send + 'static,
+    panic_context: &'static str,
+    storage: StorageStatus<'_>,
+) -> Result<T, BrokerError> {
+    let result = match run_page_cache_io(operation).await {
+        Ok(value) => value,
+        Err(panic) => Err(storage_failure_error(panic_context, panic)),
     };
     if let Err(err) = &result {
         flag_storage_failure(err, storage.log_dir, storage.registry);

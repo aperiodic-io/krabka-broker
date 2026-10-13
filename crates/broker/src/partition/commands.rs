@@ -7,7 +7,9 @@ use {
         blocking::run_blocking,
         config_keys::apply_to_log_config,
         error::BrokerError,
-        partition::{Partition, ProduceData, ProduceJob, ProducerAppendCheck, WriterMessage},
+        partition::{
+            Partition, ProduceData, ProduceJob, ProducerAppendCheck, ReplicatedBatch, WriterMessage,
+        },
         task_util::{AskError, ask},
     },
     krabka_log::Offset,
@@ -128,17 +130,15 @@ impl Partition {
             .await?
     }
 
-    pub async fn replicate_verbatim(
+    /// Append leader-assigned data batches, in offset order, through one
+    /// writer round trip. A batch that fails stops the run: the batches
+    /// before it stay appended, and the error is returned.
+    pub async fn replicate_verbatim_batches(
         &self,
-        batch: krabka_log::VerbatimBatch,
-        base_offset: Offset,
+        batches: Vec<ReplicatedBatch>,
     ) -> Result<(), BrokerError> {
-        self.ask_writer(|ack| WriterMessage::ReplicateVerbatim {
-            batch,
-            base_offset,
-            ack,
-        })
-        .await?
+        self.ask_writer(|ack| WriterMessage::ReplicateVerbatim { batches, ack })
+            .await?
     }
 
     /// Truncate the log to `offset` and drop all records at offsets
@@ -427,8 +427,8 @@ mod tests {
         let producer = oversized(1);
         let mut wire = bytes::BytesMut::new();
         producer.encode(&mut wire).expect("encode the batch");
-        p.replicate_verbatim(
-            krabka_log::VerbatimBatch {
+        p.replicate_verbatim_batches(vec![ReplicatedBatch {
+            batch: krabka_log::VerbatimBatch {
                 bytes: wire.freeze(),
                 last_offset_delta: producer.last_offset_delta,
                 max_timestamp: producer.max_timestamp,
@@ -438,8 +438,8 @@ mod tests {
                 base_sequence: -1,
                 is_transactional: false,
             },
-            Offset(1),
-        )
+            base_offset: Offset(1),
+        }])
         .await
         .expect("the verbatim batch is taken");
         assert!(p.log.lock().expect("partition log lock").log_end_offset() == 2);

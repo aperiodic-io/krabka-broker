@@ -13,12 +13,16 @@
 //! on that target the work runs inline on the runtime thread, and every other
 //! task waits for the length of one call.
 //!
-//! [`run_blocking`], [`run_blocking_catching`] and [`spawn_blocking`] are the
-//! three shapes the broker uses; nothing else in the crate calls
+//! [`run_blocking`] and [`spawn_blocking`] are the two shapes the broker uses
+//! for work that may block; nothing else in the crate calls
 //! `block_in_place` or `spawn_blocking` on a runtime path. A test makes a
 //! native thread run its blocking work inline too, with
 //! [`inline_blocking_on_this_thread`], and so drives the WASI path on every
 //! target.
+//!
+//! [`run_page_cache_io`] is the exception: file work that only touches the
+//! page cache runs on the calling task, because handing it off costs more
+//! than the work.
 
 use {
     std::{
@@ -36,9 +40,6 @@ use {
 /// Blocking work that did not return its value.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum BlockingError {
-    /// The work panicked in place, on a multi-thread runtime.
-    #[error("block_in_place panic")]
-    PanickedInPlace,
     /// The work panicked inline, on the runtime thread.
     #[error("inline blocking panic")]
     PanickedInline,
@@ -57,12 +58,6 @@ enum Placement {
     Pool,
     /// On the calling thread, which stalls its runtime for the duration.
     Inline,
-}
-
-#[derive(Clone, Copy)]
-enum InPlacePanicHandling {
-    Propagate,
-    ReturnError,
 }
 
 impl Placement {
@@ -94,47 +89,34 @@ pub(crate) async fn run_blocking<R>(
 where
     R: Send + 'static,
 {
-    run_blocking_placed(work, InPlacePanicHandling::Propagate).await
-}
-
-/// [`run_blocking`], with a panic in place returned as an error rather than
-/// unwound into the caller.
-///
-/// # Errors
-///
-/// Returns [`BlockingError::PanickedInPlace`] or
-/// [`BlockingError::PanickedInline`] when the work panics on the calling
-/// thread, and [`BlockingError::Join`] when the blocking pool does not return
-/// the value.
-pub(crate) async fn run_blocking_catching<R>(
-    work: impl FnOnce() -> R + Send + 'static,
-) -> Result<R, BlockingError>
-where
-    R: Send + 'static,
-{
-    run_blocking_placed(work, InPlacePanicHandling::ReturnError).await
-}
-
-async fn run_blocking_placed<R>(
-    work: impl FnOnce() -> R + Send + 'static,
-    in_place_panic: InPlacePanicHandling,
-) -> Result<R, BlockingError>
-where
-    R: Send + 'static,
-{
     match Placement::for_current_runtime() {
-        Placement::InPlace => match in_place_panic {
-            InPlacePanicHandling::Propagate => Ok(tokio::task::block_in_place(work)),
-            InPlacePanicHandling::ReturnError => {
-                catch_unwind(AssertUnwindSafe(|| tokio::task::block_in_place(work)))
-                    .map_err(|_| BlockingError::PanickedInPlace)
-            }
-        },
+        Placement::InPlace => Ok(tokio::task::block_in_place(work)),
         Placement::Pool => tokio::task::spawn_blocking(work)
             .await
             .map_err(BlockingError::Join),
         Placement::Inline => run_inline(work),
     }
+}
+
+/// Run page-cache file work on the calling task and return its value, with
+/// a panic returned as an error rather than unwound into the caller.
+///
+/// This is for the log's hot paths: a produce append, a fetch read, and a
+/// follower's replicated append. None of them fsyncs, so each is a memcpy
+/// into or out of the page cache that takes microseconds. Handing that to
+/// another thread, as [`run_blocking`] does, costs a thread handoff and a
+/// futex wake per call, which is more than the work itself.
+///
+/// # Errors
+///
+/// Returns [`BlockingError::PanickedInline`] when the work panics.
+pub(crate) async fn run_page_cache_io<R>(
+    work: impl FnOnce() -> R + Send + 'static,
+) -> Result<R, BlockingError>
+where
+    R: Send + 'static,
+{
+    run_inline(work)
 }
 
 /// Start `work` on tokio's blocking pool, or run it inline on
@@ -345,9 +327,7 @@ mod tests {
         let guard = inline_blocking_on_this_thread();
         let values = runtime.block_on(async {
             let ran = run_blocking(|| 1).await.expect("run_blocking");
-            let caught = run_blocking_catching(|| 2)
-                .await
-                .expect("run_blocking_catching");
+            let caught = run_page_cache_io(|| 2).await.expect("run_page_cache_io");
             let spawned = spawn_blocking(|| 3).await.expect("spawn_blocking");
             [ran, caught, spawned]
         });
@@ -370,7 +350,7 @@ mod tests {
         let outcomes = runtime.block_on(async {
             [
                 run_blocking(panics).await,
-                run_blocking_catching(panics).await,
+                run_page_cache_io(panics).await,
                 spawn_blocking(panics).await,
             ]
         });
@@ -380,8 +360,8 @@ mod tests {
     }
 
     /// Natively a panic keeps the shape each placement always gave it: an
-    /// error from the pool, and from `run_blocking_catching` in place an error
-    /// with the message the callers already log.
+    /// error from the pool, and from `run_page_cache_io` on the calling task
+    /// an error with the message the callers log.
     #[test]
     fn a_native_panic_keeps_its_shape() {
         let CountingRuntime {
@@ -395,9 +375,9 @@ mod tests {
             runtime: multi_thread,
             ..
         } = counting_runtime(true);
-        let in_place = multi_thread.block_on(run_blocking_catching(panics));
+        let in_place = multi_thread.block_on(run_page_cache_io(panics));
         let error = in_place.expect_err("the panic is caught");
-        check!(error.to_string() == "block_in_place panic");
+        check!(error.to_string() == "inline blocking panic");
     }
 
     /// The guard sets the flag for its own thread only, and restores what was

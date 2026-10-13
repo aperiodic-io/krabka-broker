@@ -8,11 +8,13 @@
 use {
     super::{
         WriterPartition,
-        storage::{StorageStatus, flag_storage_failure, lock_log, run_log_mutation},
+        storage::{
+            StorageStatus, flag_storage_failure, lock_log, run_log_append, run_log_mutation,
+        },
     },
     crate::{
-        error::BrokerError, log_dir_status::LogDirRegistry, producer_state::ProducerState,
-        replica_state::ReplicaState, wal::SharedWal,
+        error::BrokerError, log_dir_status::LogDirRegistry, partition::ReplicatedBatch,
+        producer_state::ProducerState, replica_state::ReplicaState, wal::SharedWal,
     },
     arc_swap::ArcSwap,
     krabka_log::{Log, Offset},
@@ -75,7 +77,7 @@ pub(super) async fn handle_replicate(
     // catching up on replicated markers across many partitions at once, that
     // can starve this broker's own heartbeat-sending task past the
     // controller's liveness timeout.
-    let result = run_log_mutation(
+    let result = run_log_append(
         move || {
             let mut guard = lock_log(&log_for_blocking);
             if let Some(high_watermark) = high_watermark {
@@ -116,18 +118,20 @@ pub(super) async fn handle_replicate_verbatim(
     log: &Arc<Mutex<Log>>,
     log_dir: &Arc<ArcSwap<PathBuf>>,
     log_dir_status: &LogDirRegistry,
-    batch: krabka_log::VerbatimBatch,
-    base_offset: Offset,
+    batches: Vec<ReplicatedBatch>,
     ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
 ) {
     let log_for_blocking = Arc::clone(log);
-    let result = run_log_mutation(
+    let result = run_log_append(
         move || {
-            lock_log(&log_for_blocking)
-                .append_verbatim_at(&batch, base_offset)
-                .map(|_| ())
-                .map_err(BrokerError::from)
+            let mut guard = lock_log(&log_for_blocking);
+            for ReplicatedBatch { batch, base_offset } in &batches {
+                guard
+                    .append_verbatim_at(batch, *base_offset)
+                    .map_err(BrokerError::from)?;
+            }
+            Ok(())
         },
         "replicate verbatim task panicked",
         StorageStatus {

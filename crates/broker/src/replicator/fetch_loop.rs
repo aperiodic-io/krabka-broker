@@ -415,7 +415,7 @@ fn build_fetch_request(
         },
         max_wait_ms,
         min_bytes: replication.fetch_min.bytes_i32(),
-        max_bytes: replication.fetch_max.bytes_i32(),
+        max_bytes: replication.fetch_response_max.bytes_i32(),
         session_id: session_request.session_id,
         session_epoch: session_request.session_epoch,
         topics: session_request.topics,
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn the_first_request_carries_every_partition_and_the_configured_envelope() {
         let (mut cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
-        cfg.connection.replication.fetch_max = bytes(2_345_678);
+        cfg.connection.replication.fetch_response_max = bytes(2_345_678);
         cfg.connection.replication.fetch_max_wait = millis(321);
         cfg.connection.replication.fetch_min = bytes(17);
         let fetcher = test_fetcher(&cfg, FollowedPartitions::default());

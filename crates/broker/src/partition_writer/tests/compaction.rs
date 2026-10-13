@@ -11,7 +11,7 @@ use {
     super::*,
     crate::{
         config::BrokerConfig,
-        partition::{ProduceData, ProduceJob},
+        partition::{ProduceData, ProduceJob, ReplicatedBatch},
         replica_state::ReplicaState,
         test_support::UnixMillis,
         time_util::now_ms,
@@ -331,8 +331,10 @@ async fn append(
             };
             let (ack, ack_rx) = oneshot::channel();
             tx.send(WriterMessage::ReplicateVerbatim {
-                batch: verbatim,
-                base_offset: Offset(offset),
+                batches: vec![ReplicatedBatch {
+                    batch: verbatim,
+                    base_offset: Offset(offset),
+                }],
                 ack,
             })
             .await

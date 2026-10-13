@@ -7,7 +7,7 @@
 use {
     super::storage::{lock_log, storage_failure_error},
     crate::{
-        blocking::run_blocking_catching,
+        blocking::run_page_cache_io,
         error::BrokerError,
         partition::{AppendedBatch, ProduceData, ProducerAppendCheck},
     },
@@ -315,7 +315,7 @@ pub(crate) async fn run_produce_append_batch(
     high_watermark: Option<Offset>,
     datas: CheckedBatches,
 ) -> Result<AppendOutcome, BrokerError> {
-    run_blocking_catching(move || append_produce_batch(&log, high_watermark, datas))
+    run_page_cache_io(move || append_produce_batch(&log, high_watermark, datas))
         .await
         .map_err(|error| storage_failure_error("append task panicked", error))
 }
@@ -326,7 +326,7 @@ pub(crate) async fn run_produce_append_batch_at(
     high_watermark: Option<Offset>,
     datas: CheckedBatches,
 ) -> Result<AppendOutcome, BrokerError> {
-    run_blocking_catching(move || append_produce_batch_at(&log, base, high_watermark, datas))
+    run_page_cache_io(move || append_produce_batch_at(&log, base, high_watermark, datas))
         .await
         .map_err(|error| storage_failure_error("append task panicked", error))
 }

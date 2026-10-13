@@ -5,8 +5,8 @@
 use {
     super::{FetchWatermarks, VisibilityWindow, compute_visibility_window, plan::refused_read},
     crate::{
-        blocking::run_blocking_catching, codes, diskless::hot_tail::HotTailCache,
-        error::BrokerError, log_dir_status::LogDirRegistry, partition::Partition,
+        blocking::run_page_cache_io, codes, diskless::hot_tail::HotTailCache, error::BrokerError,
+        log_dir_status::LogDirRegistry, partition::Partition,
     },
     krabka_log::{Log, LogError, Offset},
     krabka_protocol::{
@@ -322,7 +322,7 @@ async fn run_blocking_read(
 ) -> Result<ServedRecords, BrokerError> {
     let log = Arc::clone(log);
     let read = BlockingRead { ..*read };
-    let served = run_blocking_catching(move || read_records(&log, &read))
+    let served = run_page_cache_io(move || read_records(&log, &read))
         .await
         .map_err(|error| read_task_panicked(&error))?;
     let RawServed { records, aborted } = served?;

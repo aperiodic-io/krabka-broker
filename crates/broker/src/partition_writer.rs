@@ -222,17 +222,12 @@ pub async fn run_with_sequencer(
                 )
                 .await;
             }
-            WriterMessage::ReplicateVerbatim {
-                batch,
-                base_offset,
-                ack,
-            } => {
+            WriterMessage::ReplicateVerbatim { batches, ack } => {
                 mutations::handle_replicate_verbatim(
                     &log,
                     &log_dir,
                     &log_dir_status,
-                    batch,
-                    base_offset,
+                    batches,
                     ack,
                     &append_notify,
                 )
