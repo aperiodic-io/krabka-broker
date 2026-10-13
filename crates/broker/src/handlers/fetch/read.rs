@@ -408,6 +408,16 @@ fn read_records(log: &Mutex<Log>, read: &BlockingRead) -> Result<RawServed, Brok
             let desc = log.read_raw_desc(fetch_offset, limit_offset, read_max)?;
             if should_use_sendfile(desc.total, !desc.regions.is_empty(), sendfile_min_bytes) {
                 chosen = Some(RecordsPayload::FileRegions(desc.regions));
+            } else if !desc.regions.is_empty() {
+                // The walk has already found the run. Copying it costs one
+                // `pread` per region, where `read_raw` would look it up again
+                // from the offset index: a second header scan, readahead hint
+                // and read for every small fetch, the common case of a
+                // follower or consumer at the tail.
+                chosen = Some(RecordsPayload::Raw(read_regions(
+                    &desc.regions,
+                    desc.total,
+                )?));
             }
         }
         if let Some(p) = chosen {
@@ -646,6 +656,34 @@ fn plan_read(
     }
 }
 
+/// The bytes of `regions`, in order, which a `read_raw` of the same window
+/// would have returned. `total` is their summed length.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+))]
+fn read_regions(
+    regions: &[krabka_protocol::records::FileRegion],
+    total: usize,
+) -> std::io::Result<bytes::Bytes> {
+    use std::os::unix::fs::FileExt as _;
+
+    let mut bytes = vec![0_u8; total];
+    let mut at = 0;
+    for region in regions {
+        region
+            .file
+            .read_exact_at(&mut bytes[at..at + region.len], region.offset)?;
+        at += region.len;
+    }
+    Ok(bytes.into())
+}
+
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn should_use_sendfile(total_bytes: usize, has_regions: bool, minimum_bytes: usize) -> bool {
     total_bytes >= minimum_bytes && has_regions
@@ -854,6 +892,35 @@ mod tests {
         assert!(let RecordsPayload::FileRegions(_) = &described.records);
         assert!(described.records.payload_len() == raw.len());
         assert!(described.aborted.is_empty());
+        assert!(
+            copied
+                == RawServed {
+                    records: RecordsPayload::Raw(raw),
+                    aborted: Vec::new(),
+                }
+        );
+    }
+    }
+
+    krabka_macros::sendfile_platform! {
+    /// A read below the `sendfile` threshold copies the run the descriptor
+    /// walk found, one region per segment, and serves the bytes a `read_raw`
+    /// of the same window serves.
+    #[test]
+    fn a_small_read_across_segments_copies_the_described_run() {
+        let LogInDir { dir: _dir, mut log } = two_record_log();
+        assert!(log.roll().expect("roll the active segment"));
+        log.append(&mut default_records_batch(&[b"third"]))
+            .expect("append a batch to the second segment");
+        let RawLog { log, raw, limit } = locked_raw_log(log);
+
+        let copied = super::read_records(&log, &super::BlockingRead {
+            sendfile_capable: true,
+            sendfile_min_bytes: raw.len() + 1,
+            ..whole_log_read(limit)
+        })
+        .expect("the blocking read succeeds");
+
         assert!(
             copied
                 == RawServed {
