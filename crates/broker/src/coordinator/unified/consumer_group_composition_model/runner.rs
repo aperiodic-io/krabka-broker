@@ -5,7 +5,7 @@
 
 use {
     super::config::CgcModel,
-    crate::coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
+    crate::model_check::{assert_pinned_count, run_bfs},
 };
 
 const MAX_STATES: usize = 2_000_000;
@@ -21,6 +21,9 @@ const MAX_DEPTH: usize = 80;
 pub(super) const PINNED_UNIQUE_STATES_BASIC: usize = 6_328;
 pub(super) const PINNED_UNIQUE_STATES_WIDE: usize = 29_647;
 
-pinned_model_runner! {
-    pub(super) fn run(CgcModel); MAX_DEPTH, MAX_STATES; properties_last
+krabka_macros::model_runner! {
+
+    pub(super) fn run(model: CgcModel, label: &str, pinned_unique_states: usize)
+    [bfs = run_bfs, pin = assert_pinned_count, depth = MAX_DEPTH, states = MAX_STATES, order = "properties_last", checker = checker]
+    {}
 }

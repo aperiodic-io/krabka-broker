@@ -216,13 +216,13 @@ pub(crate) fn entity_matches_filter(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
             authorizer::AllowAllAuthorizer,
             broker::BrokerHandle,
             quota::test_support::{QuotaRecordSetup, QuotaValue},
-            test_support::DenyAll,
         },
         assert2::{assert, check},
         krabka_metadata::MetadataRecord,
@@ -330,8 +330,8 @@ mod tests {
     }
 
     use crate::test_support::{
-        describe_configs_acl_cases, grant_cluster_operation,
-        start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+        describe_configs_acl_cases, grant_optional_cluster_operation,
+        start_broker_with_authorizer_no_audit as start_broker,
     };
 
     async fn seed_quota(handle: &BrokerHandle, setup: QuotaRecordSetup<'_>) {
@@ -472,11 +472,11 @@ mod tests {
 
     #[tokio::test]
     async fn denied_response_preserves_error_fields() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            deny_all,
-            context(ctx, "alice")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] deny_all;
+            user ["alice"];
+        };
 
         let resp = handle(
             &broker,
@@ -517,10 +517,11 @@ mod tests {
         });
 
         for (user, grant, expected) in describe_configs_acl_cases(&allowed, &denied) {
-            if let Some(operation) = grant {
-                grant_cluster_operation(&broker_handle, user, operation).await;
-            }
-            test_ctx!(ctx, user);
+            grant_optional_cluster_operation(&broker_handle, user, grant).await;
+            krabka_macros::request_test_identity! {
+                bind(ctx);
+                user [user];
+            };
 
             let resp = handle(
                 &broker,
@@ -550,7 +551,10 @@ mod tests {
         })
         .await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let resp = handle(
             &broker,
@@ -608,7 +612,10 @@ mod tests {
         })
         .await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let error = |code: i16, message: &str| {
             krabka_macros::unthrottled_wire!(DescribeClientQuotasResponse {
@@ -760,11 +767,11 @@ mod tests {
 
     #[tokio::test]
     async fn successful_empty_match_uses_some_empty_entries() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
 
         let resp = handle(
             &broker,

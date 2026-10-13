@@ -262,8 +262,8 @@ mod tests {
                 produce::test_support::image_with_topic, test_support::seed_partition_replicas,
             },
             test_support::{
-                append_partition_batch, peer, principal, record_values, start_broker_no_audit,
-                start_broker_with_authorizer_no_audit, temporary_partition,
+                self as broker_fixture_support, append_partition_batch, record_values,
+                start_broker_no_audit, start_broker_with_authorizer_no_audit, temporary_partition,
             },
         },
         assert2::assert,
@@ -416,16 +416,12 @@ mod tests {
                 cluster_action,
                 payments_describe,
             });
-            broker_fixture!(
-                (broker_handle, _dir, broker),
-                start_broker_with_authorizer_no_audit(authorizer)
-            );
-
-            request_identity!(
-                (p, peer, ctx),
-                principal("follower"),
-                client_id = "follower-client"
-            );
+            krabka_macros::broker_test_setup! {
+                bind(broker_handle, _dir, broker, p, peer, ctx);
+                boot [start_broker_with_authorizer_no_audit(authorizer)];
+                user ["follower"];
+                client ["follower-client"];
+            };
             let resp = handle(&broker, &request(), VERSION, &ctx);
 
             let expected = OffsetForLeaderEpochResponse {
@@ -590,12 +586,11 @@ mod tests {
         request: &OffsetForLeaderEpochRequest,
     ) -> EpochEndOffset {
         let shared = broker_handle.broker_arc_for_test();
-        request_identity!(
-            (user, address, ctx),
-            crate::test_support::principal("client"),
-            client_id = "ofle-client",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(user, address, ctx);
+            user ["client"];
+            client ["ofle-client"];
+        };
         let decoded = handle(&shared, request, version, &ctx);
         decoded
             .topics
@@ -777,10 +772,10 @@ mod tests {
     /// first.
     #[tokio::test]
     async fn hosting_outcomes_are_decided_before_the_epoch_fence() {
-        broker_fixture!(
-            (broker, _dir, shared),
-            crate::test_support::start_broker_no_audit()
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker, _dir, shared);
+            boot [broker_fixture_support::start_broker_no_audit()];
+        };
 
         let offline = seeded_topic()
             .broker_handle(&broker)

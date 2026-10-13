@@ -12,7 +12,7 @@ use {
         authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
         broker::BrokerHandle,
         codes,
-        test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
+        test_support::{dispatch_wire, start_broker_no_audit_with},
     },
     assert2::assert,
     krabka_metadata::{AclOperation, ResourceType},
@@ -167,11 +167,11 @@ async fn metadata(
     request: &MetadataRequest,
 ) -> MetadataResponse {
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("describer"),
-        client_id = "metadata-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["describer"];
+        client ["metadata-client"];
+    };
     dispatch_wire(
         &shared,
         krabka_protocol::api_key::ApiKey::Metadata as i16,

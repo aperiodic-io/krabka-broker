@@ -1,7 +1,7 @@
 //! The asymmetric read/write conversions of a locally owned share-state batch.
 
 use {
-    crate::meta::Tokens,
+    crate::meta::{Tokens, plain_path},
     moxy::{
         ast::{ItemStruct, ParseError},
         token::TokenStream,
@@ -17,10 +17,7 @@ struct WireArgs {
 pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     use {
         crate::meta::named_fields,
-        moxy::{
-            ast::{Attributed, Parse, Parser, Path, PathArguments},
-            token::{Spanner, ToTokenStream},
-        },
+        moxy::{ast::Attributed, token::ToTokenStream},
     };
     let fields = named_fields(&item, "WireStateBatch")?;
     if !item.generics.params.is_empty()
@@ -56,19 +53,11 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         })?;
     let mut targets = Vec::new();
     for argument in [&args.read.0, &args.write.0] {
-        let parser = Parser::from_tokens(argument);
-        let path = Path::parse(&parser)?;
-        if !parser.is_empty()
-            || path.is_empty()
-            || path
-                .iter()
-                .any(|segment| !matches!(segment.args, PathArguments::None))
-        {
-            return Err(ParseError::new(
-                path.span(),
-                "batch targets must be type paths without arguments",
-            ));
-        }
+        let path = plain_path(
+            argument,
+            argument.span(),
+            "batch targets must be type paths without arguments",
+        )?;
         targets.push(path);
     }
     if targets[0].to_token_stream().to_string() == targets[1].to_token_stream().to_string() {

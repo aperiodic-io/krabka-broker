@@ -274,7 +274,7 @@ mod tests {
             authorizer::AllowAllAuthorizer,
             broker::BrokerHandle,
             handlers::list_offsets::test_support::{client_for, create_topic, test_context},
-            test_support::{peer, principal, start_broker_with_authorizer_no_audit},
+            test_support::start_broker_with_authorizer_no_audit,
         },
         assert2::assert,
         krabka_protocol::primitives::{
@@ -359,13 +359,14 @@ mod tests {
 
     #[tokio::test]
     async fn denied_topic_row_is_appended_last_regardless_of_request_order() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker_with_authorizer_no_audit(Arc::new(DenyNamed(
-                std::collections::HashSet::from(["denied"]),
-            )))
-        );
-        request_identity!((admin, socket), principal("admin"));
+        krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, socket);
+                    boot [start_broker_with_authorizer_no_audit(Arc::new(DenyNamed(
+                                std::collections::HashSet::from(["denied"]),
+                            )))];
+
+        user ["admin"];
+        };
 
         let mut request = BytesMut::new();
         put_i32(&mut request, -1);
@@ -441,7 +442,10 @@ mod tests {
     }
     async fn answer(broker: &BrokerHandle, request: &[u8]) -> Bytes {
         let shared = broker.broker_arc_for_test();
-        request_identity!((admin, socket), principal("admin"));
+        krabka_macros::request_test_identity! {
+            bind(admin, socket);
+            user ["admin"];
+        };
         handle(&shared, request, &test_context(&admin, &socket))
             .await
             .expect("ListOffsets v0")

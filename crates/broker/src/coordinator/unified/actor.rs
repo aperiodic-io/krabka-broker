@@ -14,7 +14,7 @@
 //! path lives in its own submodule.
 
 use {
-    std::{collections::HashMap, sync::Arc, time::Instant},
+    std::{borrow::Cow, collections::HashMap, sync::Arc, time::Instant},
     tokio::{
         sync::{mpsc, oneshot},
         task::JoinHandle,
@@ -74,7 +74,7 @@ use {
     crate::{
         coordinator::unified::{
             GroupCoordinator,
-            config::NextGenConfig,
+            config::{NextGenConfig, resolve_group_config},
             group::{ConsumerState, CoordinatorGroup},
             offsets_log::OffsetsLog,
             reconciler::ReconcileInput,
@@ -382,15 +382,19 @@ async fn run_actor(
     group
 }
 
-crate::coordinator::unified::config::effective_group_config! {
-    /// The settings `group_id` runs with: the `consumer.*` overrides of its group
-    /// config in the current metadata image over the broker's `config`.
-    ///
-    /// A classic group and a classic member ignore them: Kafka's classic groups
-    /// read only the broker-wide `group.min.session.timeout.ms` and
-    /// `group.max.session.timeout.ms`, and a coordinator with no metadata source
-    /// runs every group with the broker values.
-    fn effective_config(NextGenConfig);
+/// The settings `group_id` runs with: the `consumer.*` overrides of its group
+/// config in the current metadata image over the broker's `config`.
+///
+/// A classic group and a classic member ignore them: Kafka's classic groups
+/// read only the broker-wide `group.min.session.timeout.ms` and
+/// `group.max.session.timeout.ms`, and a coordinator with no metadata source
+/// runs every group with the broker values.
+fn effective_config<'a>(
+    config: &'a NextGenConfig,
+    coordinator: &GroupCoordinator,
+    group_id: &str,
+) -> Cow<'a, NextGenConfig> {
+    resolve_group_config(config, coordinator, group_id, NextGenConfig::for_group)
 }
 
 /// The classic rebalance-completion deadline, if a rebalance is open.

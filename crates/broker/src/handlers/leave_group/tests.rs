@@ -4,7 +4,7 @@ use {
     super::*,
     crate::{
         broker::Broker,
-        test_support::{DenyAll, peer, principal, start_broker_no_audit_with},
+        test_support::{DenyAll, start_broker_no_audit_with},
     },
     assert2::assert,
     krabka_protocol::owned::{
@@ -14,11 +14,11 @@ use {
 };
 
 async fn leave(broker: &Broker, request: &LeaveGroupRequest, version: i16) -> LeaveGroupResponse {
-    request_identity!(
-        (principal, peer, context),
-        principal("alice"),
-        client_id = "leave-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, context);
+        user ["alice"];
+        client ["leave-client"];
+    };
     handle(broker, request.clone(), version, &context)
         .await
         .expect("LeaveGroup")

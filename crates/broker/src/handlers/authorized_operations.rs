@@ -36,6 +36,10 @@ use {
         codes,
     },
     krabka_metadata::{AclOperation, MetadataImage, ResourceType},
+    krabka_protocol::owned::{
+        consumer_group_describe_response, describe_groups_response, share_group_describe_response,
+        streams_group_describe_response,
+    },
 };
 
 /// Returns the operations whose Allow decision adds to the
@@ -130,39 +134,12 @@ pub(crate) trait DescribedGroupRow {
     fn set_authorized_operations(&mut self, bits: i32);
 }
 
-macro_rules! impl_described_group_row {
-    ($($ty:path),* $(,)?) => {
-        $(impl DescribedGroupRow for $ty {
-            fn error_row(group_id: &str, error_code: i16, error_message: Option<String>) -> Self {
-                Self {
-                    group_id: group_id.into(),
-                    error_code,
-                    error_message,
-                    ..Self::default()
-                }
-            }
-
-            fn group_id(&self) -> &str {
-                &self.group_id
-            }
-
-            fn error_code(&self) -> i16 {
-                self.error_code
-            }
-
-            fn set_authorized_operations(&mut self, bits: i32) {
-                self.authorized_operations = bits;
-            }
-        })*
-    };
+krabka_macros::described_group_rows! {
+    consumer_group_describe_response::DescribedGroup,
+    describe_groups_response::DescribedGroup,
+    share_group_describe_response::DescribedGroup,
+    streams_group_describe_response::DescribedGroup,
 }
-
-impl_described_group_row!(
-    krabka_protocol::owned::consumer_group_describe_response::DescribedGroup,
-    krabka_protocol::owned::describe_groups_response::DescribedGroup,
-    krabka_protocol::owned::share_group_describe_response::DescribedGroup,
-    krabka_protocol::owned::streams_group_describe_response::DescribedGroup,
-);
 
 /// KIP-430: when `include` is set, gives every row whose error is `NONE` the
 /// bitfield of the group operations the principal of `ctx` holds. Every other
@@ -234,26 +211,38 @@ mod tests {
 
     fn bit(op: AclOperation) -> i32 { 1_i32 << operation_to_wire(op) }
 
-    /// Bind the empty ACL authorizer and Alice's existing test identity before
-    /// calculating one resource's bitfield, retaining their caller lifetimes.
-    macro_rules! alice_acl_bits {
-        (
-            ($auth:ident, $principal:ident, $host:ident, $bits:ident),
-            $image:expr,
-            $resource:expr,
-            $name:expr
-        ) => {
-            let $auth = SimpleAclAuthorizer::new(HashSet::new());
-            let $principal = principal("alice");
-            let $host = addr();
-            let $bits = authorized_operations_bits(
-                &$auth,
-                $image,
-                &ctx(&$principal, &$host),
-                $resource,
-                $name,
-            );
-        };
+    fn alice_acl_bits(image: &MetadataImage, resource: ResourceType, name: &str) -> i32 {
+        let auth = SimpleAclAuthorizer::new(HashSet::new());
+        let principal = principal("alice");
+        let host = addr();
+        authorized_operations_bits(&auth, image, &ctx(&principal, &host), resource, name)
+    }
+
+    #[test]
+    fn every_describe_schema_preserves_error_fields_and_default_operation_bits() {
+        fn check_row<Row: DescribedGroupRow>(fields: impl Fn(&Row) -> (Option<&str>, i32)) {
+            let mut row = Row::error_row("group", -1, Some("refusal".into()));
+            assert!(row.group_id() == "group");
+            assert!(row.error_code() == -1);
+            assert!(fields(&row) == (Some("refusal"), i32::MIN));
+            row.set_authorized_operations(1 << 8);
+            assert!(fields(&row) == (Some("refusal"), 1 << 8));
+            assert!(row.group_id() == "group");
+            assert!(row.error_code() == -1);
+        }
+
+        check_row::<consumer_group_describe_response::DescribedGroup>(|row| {
+            (row.error_message.as_deref(), row.authorized_operations)
+        });
+        check_row::<describe_groups_response::DescribedGroup>(|row| {
+            (row.error_message.as_deref(), row.authorized_operations)
+        });
+        check_row::<share_group_describe_response::DescribedGroup>(|row| {
+            (row.error_message.as_deref(), row.authorized_operations)
+        });
+        check_row::<streams_group_describe_response::DescribedGroup>(|row| {
+            (row.error_message.as_deref(), row.authorized_operations)
+        });
     }
 
     #[test]
@@ -381,7 +370,7 @@ mod tests {
     #[test]
     fn read_allow_on_topic_sets_read_and_describe_bits_only() {
         let img = acl_image().resource_name("foo").call();
-        alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Topic, "foo");
+        let bits = alice_acl_bits(&img, ResourceType::Topic, "foo");
         // Read ACL grants Read directly and Describe via implication.
         // No other supported op should be set.
         let expected = bit(AclOperation::Read) | bit(AclOperation::Describe);
@@ -394,7 +383,7 @@ mod tests {
             .resource_name("foo")
             .operation(AclOperation::Write)
             .call();
-        alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Topic, "foo");
+        let bits = alice_acl_bits(&img, ResourceType::Topic, "foo");
         let expected = bit(AclOperation::Write) | bit(AclOperation::Describe);
         assert!(bits == expected);
     }
@@ -437,7 +426,7 @@ mod tests {
                 .resource_name("cg")
                 .operation(granted)
                 .call();
-            alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Group, "cg");
+            let bits = alice_acl_bits(&img, ResourceType::Group, "cg");
             assert!(bits == expected, "{granted:?}");
         }
     }
@@ -449,7 +438,7 @@ mod tests {
             permission_type: PermissionType::Deny,
             ..allow_acl().resource_name("foo").call()
         }));
-        alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Topic, "foo");
+        let bits = alice_acl_bits(&img, ResourceType::Topic, "foo");
         // Read itself is denied: both ACL rows match the exact Read request,
         // and DENY wins precedence. But Kafka's operation-implication table
         // only ever widens what an ALLOW ACL matches -- a DENY Read ACL does

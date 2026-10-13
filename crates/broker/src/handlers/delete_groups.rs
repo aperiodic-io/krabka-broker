@@ -94,13 +94,15 @@ async fn delete_one(broker: &Broker, group_id: &str) -> i16 {
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
             authorizer::AuthorizationResult,
             handlers::RequestContext,
             test_support::{
-                DenyAll, dispatch_context, peer, principal, start_group_broker_no_audit, test_ctx,
+                self as broker_fixture_support, DenyAll, dispatch_context,
+                start_group_broker_no_audit,
             },
         },
         assert2::assert,
@@ -153,7 +155,10 @@ mod tests {
     async fn handle_denies_delete_for_each_group() {
         let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["alice"];
+        };
         let ctx = test_context(&p, &peer);
         assert_results(&broker, &ctx, &["group-a", "group-b"], vec![
             result("group-a", codes::GROUP_AUTHORIZATION_FAILED),
@@ -189,7 +194,10 @@ mod tests {
         let (broker_handle, _dir) =
             start_group_broker_no_audit(Arc::new(DenyGroupNamedDenied)).await;
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["alice"];
+        };
         let response = |rows: &[GroupRow]| DeleteGroupsResponse {
             results: rows
                 .iter()
@@ -262,8 +270,11 @@ mod tests {
 
     #[tokio::test]
     async fn handle_allowed_missing_group_returns_not_found() {
-        broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-        request_identity!((p, peer), principal("admin"));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, p, peer);
+            boot [broker_fixture_support::start_group_broker_no_audit] allow_all;
+            user ["admin"];
+        };
         let ctx = test_context(&p, &peer);
         assert_results(&broker, &ctx, &["missing"], vec![result(
             "missing",
@@ -284,7 +295,10 @@ mod tests {
 
         let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
         let req = request(&["group-a", "group-b"]);
 
         let mut answers = Vec::new();

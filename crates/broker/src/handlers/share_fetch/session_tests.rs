@@ -20,8 +20,7 @@ use {
         },
         share_partition::state::RecordState::{self, Acquired, Available},
         test_support::{
-            decode_response, encode_request, peer, principal, start_broker_no_audit_with,
-            try_dispatch_context,
+            decode_response, encode_request, start_broker_no_audit_with, try_dispatch_context,
         },
     },
     assert2::assert,
@@ -652,11 +651,11 @@ async fn fetch_with_limits(
         ..Default::default()
     };
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("share-consumer"),
-        client_id = "share-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["share-consumer"];
+        client ["share-client"];
+    };
     let started = Instant::now();
     let response = try_dispatch_context(
         &shared,

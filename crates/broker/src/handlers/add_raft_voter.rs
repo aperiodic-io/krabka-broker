@@ -176,11 +176,10 @@ async fn probe_candidate(
 
 #[cfg(test)]
 mod tests {
+
     use {
-        crate::test_support::{DenyAll, round_trip_response},
-        assert2::assert,
+        crate::test_support::round_trip_response, assert2::assert,
         krabka_protocol::owned::add_raft_voter_response,
-        std::sync::Arc,
     };
 
     fn request(voter_id: i32) -> AddRaftVoterRequest {
@@ -189,10 +188,7 @@ mod tests {
 
     crate::handlers::raft_voter::test_dispatch!(80, AddRaftVoterRequest, AddRaftVoterResponse);
 
-    use {
-        super::*,
-        crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx},
-    };
+    use {super::*, crate::test_support::start_broker_with_authorizer as start_broker};
 
     /// Decode→encode round-trip at min and max versions. Guards against
     /// the response failing to encode at either end of the version range
@@ -239,11 +235,11 @@ mod tests {
     #[tokio::test]
     async fn handle_reports_reconfig_error_from_controller() {
         let version = 1;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let mut request = request(2);
         stamp_voter_request!(request, broker);
         let resp = answer(&broker, version, &request, &ctx).await;

@@ -39,11 +39,10 @@ pub(super) async fn handle_allowed(
     broker: &Broker,
     req: AssignReplicasToDirsRequest,
 ) -> Result<AssignReplicasToDirsResponse, BrokerError> {
-    request_identity!(
-        (user, address, ctx),
-        crate::test_support::principal("ANONYMOUS"),
-        client_id = "assign-replicas-test",
-        address = crate::test_support::peer()
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["ANONYMOUS"];
+        client ["assign-replicas-test"];
+    };
     handle(broker, req, VERSION, &ctx).await
 }

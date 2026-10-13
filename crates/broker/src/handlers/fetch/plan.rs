@@ -978,13 +978,13 @@ mod tests {
     /// read row, because a witness never leads the partition.
     macro_rules! rack_aware_fixture {
         (($handle:ident, $directory:ident, $broker:ident, $partition:ident)) => {
-            broker_fixture!(
-                ($handle, $directory, $broker),
-                crate::handlers::test_support::start_broker_with(|config| {
-                    config.replica_selector =
-                        crate::replica_selector::ReplicaSelectorKind::RackAware;
-                })
-            );
+            krabka_macros::broker_test_setup! {
+                bind($handle, $directory, $broker);
+                boot [crate::handlers::test_support::start_broker_with(|config| {
+                                config.replica_selector =
+                                    crate::replica_selector::ReplicaSelectorKind::RackAware;
+                            })];
+            };
             let $partition = crate::handlers::test_support::local_partition(
                 &$broker,
                 $directory.path(),

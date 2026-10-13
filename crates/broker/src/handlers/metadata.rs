@@ -658,7 +658,11 @@ pub(crate) fn pick_endpoint_host_port(
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::test_support::broker_registration, assert2::assert};
+    use {
+        super::*,
+        crate::{test_support as broker_fixture_support, test_support::broker_registration},
+        assert2::assert,
+    };
 
     fn endpoint(name: &str, host: &str, port: u16) -> krabka_metadata::BrokerEndpoint {
         krabka_metadata::BrokerEndpoint {
@@ -745,13 +749,13 @@ mod tests {
     /// .toString()` produces for the same 16 bytes.
     #[tokio::test]
     async fn reports_cluster_id_in_kafka_base64_form() {
-        known_cluster_fixture!((known_cluster_id, broker_handle, _dir, broker));
-        request_identity!(
-            (p, peer, ctx),
-            crate::test_support::principal("describer"),
-            client_id = "metadata-client",
-            address = crate::test_support::peer()
-        );
+        let known_cluster_id = uuid::Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, p, peer, ctx);
+            boot [broker_fixture_support::start_broker_with(|config| config.cluster_id = Some(known_cluster_id))];
+            user ["describer"];
+            client ["metadata-client"];
+        };
         let resp = handle(&broker, MetadataRequest::default(), 9, &ctx)
             .await
             .expect("handle");

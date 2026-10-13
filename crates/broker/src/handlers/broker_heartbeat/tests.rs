@@ -13,8 +13,8 @@ use {
         features::METADATA_VERSION,
         handlers::test_support::replicated_partition,
         test_support::{
-            broker_registration, finalize_elr_version_on, peer, principal,
-            start_broker_with_authorizer as start_broker, test_ctx,
+            self as broker_fixture_support, broker_registration, finalize_elr_version_on, peer,
+            principal, start_broker_with_authorizer as start_broker,
         },
     },
     assert2::{assert, check},
@@ -56,11 +56,11 @@ krabka_macros::wire_codec_helpers! {
 /// it gets the heartbeat answer.
 #[tokio::test]
 async fn every_heartbeat_needs_cluster_action() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(Arc::new(crate::test_support::GrantsInPrincipalName)),
-        controller_leader
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(Arc::new(broker_fixture_support::GrantsInPrincipalName))];
+        ready controller_leader;
+    };
     let peer = peer();
     let version = krabka_protocol::owned::broker_heartbeat_request::MAX_VERSION;
     let broker_epoch = broker
@@ -92,12 +92,12 @@ async fn every_heartbeat_needs_cluster_action() {
 
 #[tokio::test]
 async fn handle_leader_success_preserves_response_shape() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        allow_all,
-        context(ctx, "ANONYMOUS"),
-        controller_leader
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] allow_all;
+        ready controller_leader;
+        user ["ANONYMOUS"];
+    };
     let version = krabka_protocol::owned::broker_heartbeat_request::MAX_VERSION;
     let image = broker.controller.current_image();
     let broker_epoch = image
@@ -183,7 +183,11 @@ impl Cluster {
     async fn start() -> Self {
         use krabka_metadata::{LeaderEpoch, MetadataRecord, PartitionRecord, TopicRecord};
 
-        broker_fixture!((handle, dir, broker), allow_all, controller_leader);
+        krabka_macros::broker_test_setup! {
+            bind(handle, dir, broker);
+            boot [start_broker] allow_all;
+            ready controller_leader;
+        };
         let partition = |index: i32, leader: u64, isr: &[u64]| {
             MetadataRecord::V1Partition(PartitionRecord {
                 topic: "t".into(),
@@ -230,7 +234,10 @@ impl Cluster {
     }
 
     async fn heartbeat(&self, broker_id: i32, epoch: i64, offset: i64, shut_down: bool) -> Answer {
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let version = krabka_protocol::owned::broker_heartbeat_request::MAX_VERSION;
         let req = BrokerHeartbeatRequest {
             broker_id,

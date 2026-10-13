@@ -21,7 +21,14 @@
 //! The broker writes the key-4 record only as a tombstone, as Kafka 4.3.1
 //! does; see [`partition_metadata`](super::partition_metadata).
 
-use crate::coordinator::unified::persistence::group_record_keys;
+use {
+    crate::{
+        coordinator::unified::persistence::{encode_string_key, get_string},
+        error::BrokerError,
+    },
+    bytes::Bytes,
+    krabka_protocol::ProtocolError,
+};
 
 pub const KEY_GROUP_METADATA: i16 = 3;
 pub const KEY_PARTITION_METADATA: i16 = 4;
@@ -31,32 +38,39 @@ pub const KEY_TARGET_ASSIGNMENT_MEMBER: i16 = 7;
 pub const KEY_CURRENT_MEMBER_ASSIGNMENT: i16 = 8;
 pub const KEY_REGULAR_EXPRESSION: i16 = 16;
 
-group_record_keys! {
-    pub enum NextGenKey {
-        GroupMetadata => KEY_GROUP_METADATA,
-        /// The deprecated `ConsumerGroupPartitionMetadataKey`.
-        PartitionMetadata => KEY_PARTITION_METADATA,
-        MemberMetadata(member_id) => KEY_MEMBER_METADATA,
-        TargetAssignmentMetadata => KEY_TARGET_ASSIGNMENT_METADATA,
-        TargetAssignmentMember(member_id) => KEY_TARGET_ASSIGNMENT_MEMBER,
-        CurrentMemberAssignment(member_id) => KEY_CURRENT_MEMBER_ASSIGNMENT,
-        RegularExpression(regex) => KEY_REGULAR_EXPRESSION,
-    }
-
-    /// # Errors
-    /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
-    fn parse_key;
-
-    /// Encodes a [`NextGenKey`] with its leading `i16` key version.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::error::BrokerError::Protocol`] when a string of the key is longer than
-    /// 32767 bytes, which a non-flexible key string cannot carry.
-    fn encode_key;
-
-    invalid "unknown next-gen key version";
+#[derive(Debug, Clone, PartialEq, Eq, krabka_macros::GroupRecordKey)]
+#[group_key(invalid = "unknown next-gen key version")]
+pub enum NextGenKey {
+    #[group_key(version = KEY_GROUP_METADATA)]
+    GroupMetadata { group_id: String },
+    /// The deprecated `ConsumerGroupPartitionMetadataKey`.
+    #[group_key(version = KEY_PARTITION_METADATA)]
+    PartitionMetadata { group_id: String },
+    #[group_key(version = KEY_MEMBER_METADATA)]
+    MemberMetadata { group_id: String, member_id: String },
+    #[group_key(version = KEY_TARGET_ASSIGNMENT_METADATA)]
+    TargetAssignmentMetadata { group_id: String },
+    #[group_key(version = KEY_TARGET_ASSIGNMENT_MEMBER)]
+    TargetAssignmentMember { group_id: String, member_id: String },
+    #[group_key(version = KEY_CURRENT_MEMBER_ASSIGNMENT)]
+    CurrentMemberAssignment { group_id: String, member_id: String },
+    #[group_key(version = KEY_REGULAR_EXPRESSION)]
+    RegularExpression { group_id: String, regex: String },
 }
+
+/// # Errors
+/// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
+pub fn parse_key(version: i16, buf: &[u8]) -> Result<NextGenKey, BrokerError> {
+    NextGenKey::parse(version, buf)
+}
+
+/// Encodes a [`NextGenKey`] with its leading `i16` key version.
+///
+/// # Errors
+///
+/// Returns [`crate::error::BrokerError::Protocol`] when a string of the key is longer than
+/// 32767 bytes, which a non-flexible key string cannot carry.
+pub fn encode_key(key: &NextGenKey) -> Result<Bytes, BrokerError> { key.encode() }
 
 #[cfg(test)]
 mod tests {

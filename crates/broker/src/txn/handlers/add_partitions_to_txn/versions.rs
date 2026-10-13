@@ -228,12 +228,13 @@ pub(super) async fn handle_v3(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
             test_support::{
                 ControllerPeerAllowed, DenyAll,
-                start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+                start_broker_with_authorizer_no_audit as start_broker,
             },
             txn::handlers::add_partitions_to_txn::{
                 handle,
@@ -259,7 +260,10 @@ mod tests {
     #[tokio::test]
     async fn handle_v4_without_cluster_action_returns_the_top_level_error() {
         let (broker_handle, _dir) = start_broker(Arc::new(DenyAll)).await;
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let req = AddPartitionsToTxnRequest {
             transactions: vec![AddPartitionsToTxnTransaction {
                 transactional_id: "tid-4".into(),
@@ -428,7 +432,10 @@ mod tests {
             dir: _dir,
         } = start_coordinator(Arc::new(ControllerPeerAllowed(DenyAll))).await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         for (index, case) in (0_i64..).zip(&cases) {
             let tid = format!("dup-tid-{index}");
             let producer_id = 100 + index;
@@ -483,7 +490,10 @@ mod tests {
     #[tokio::test]
     async fn handle_v3_transactional_id_deny_returns_topic_rows() {
         let (broker_handle, _dir) = start_broker(Arc::new(DenyAll)).await;
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let req = AddPartitionsToTxnRequest {
             v3_and_below_transactional_id: "tid-3".into(),
             v3_and_below_producer_id: 11,

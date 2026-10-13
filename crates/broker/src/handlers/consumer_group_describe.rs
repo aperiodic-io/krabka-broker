@@ -312,6 +312,7 @@ mod tests {
                 group_heartbeat_test_support::{
                     GroupFeatureLevel, acl_authorizer, image_with_group_version, set_group_version,
                 },
+                test_support as handler_fixture_support,
             },
             test_support::{allow_acl, start_group_broker_no_audit, start_group_broker_with},
         },
@@ -620,12 +621,11 @@ mod tests {
             allow_acl().operation(AclOperation::Describe).call(),
         ));
         let authorizer = acl_authorizer();
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("alice"),
-            client_id = "alice-client",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            client ["alice-client"];
+        };
 
         let orders = || topic(ORDERS, "orders", &[0]);
         let payments = || topic(PAYMENTS, "payments", &[0]);
@@ -680,12 +680,11 @@ mod tests {
         broker.group_coordinator.mark_share("share-group");
         broker.group_coordinator.mark_streams("streams-group");
         let _share_actor = broker.group_coordinator.get_or_create_share("share-actor");
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("admin"),
-            client_id = "admin-client",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["admin"];
+            client ["admin-client"];
+        };
         // (requested id, expected row)
         let rows = [
             (
@@ -769,17 +768,16 @@ mod tests {
     #[tokio::test]
     async fn handle_protocol_gate_precedes_group_acl_for_every_row() {
         let authorizer = acl_authorizer();
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            group_controller_peer(authorizer)
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_group_with_controller_peer(authorizer)];
+        };
         set_group_version(&broker, GroupFeatureLevel(0)).await;
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("nobody"),
-            client_id = "consumer-client",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["nobody"];
+            client ["consumer-client"];
+        };
         let req = request(vec!["denied-group", "also-denied"]);
 
         let resp = describe_groups(&broker, req, &ctx).await;
@@ -808,10 +806,10 @@ mod tests {
     #[tokio::test]
     async fn handle_orders_denied_rows_before_allowed_rows() {
         let authorizer = acl_authorizer();
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            group_controller_peer(authorizer)
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_group_with_controller_peer(authorizer)];
+        };
         // Grant "alice" Describe on "allowed" only; "denied" has no matching
         // ACL and stays denied under SimpleAclAuthorizer's default-deny.
         broker
@@ -825,12 +823,11 @@ mod tests {
             )])
             .await
             .expect("grant alice Describe on allowed");
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("alice"),
-            client_id = "alice-client",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            client ["alice-client"];
+        };
         let req = request(vec!["allowed", "denied"]);
 
         let resp = describe_groups(&broker, req, &ctx).await;
@@ -868,12 +865,11 @@ mod tests {
         let _ = broker
             .group_coordinator
             .get_or_create_consumer("live-group");
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("admin"),
-            client_id = "admin-client",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["admin"];
+            client ["admin-client"];
+        };
 
         let expected_bits = authorized_operations_bits(
             authorizer.as_ref(),

@@ -30,7 +30,7 @@ use {
                 share_fetch_topics, share_fetch_wire, share_topic_uuid,
             },
         },
-        test_support::{initialize_share_state, peer, principal, start_broker_no_audit_with},
+        test_support::{initialize_share_state, start_broker_no_audit_with},
     },
     assert2::assert,
     krabka_protocol::{
@@ -119,11 +119,11 @@ async fn delete_records(
         ..Default::default()
     };
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("admin"),
-        client_id = "admin-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["admin"];
+        client ["admin-client"];
+    };
     let response = handle(&shared, request, DELETE_RECORDS_VERSION, &ctx)
         .await
         .expect("handle delete records");

@@ -1,10 +1,13 @@
 //! Static broker config for the KIP-848 next-gen consumer group protocol.
 
 use {
-    super::assignor::{Assignor, RangeAssignor, UniformAssignor},
+    super::{
+        GroupCoordinator,
+        assignor::{Assignor, RangeAssignor, UniformAssignor},
+    },
     crate::time_util::system_timer,
     qubit_clock::Timer,
-    std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration},
+    std::{borrow::Cow, collections::BTreeMap, str::FromStr, sync::Arc, time::Duration},
 };
 
 /// `group.consumer.migration.policy` governs classic ↔ next-gen consumer
@@ -198,22 +201,17 @@ pub(crate) fn group_millis(
 }
 
 /// Resolve a protocol's group overrides from one current image, or borrow broker defaults.
-macro_rules! effective_group_config {
-    ($(#[$doc:meta])* fn $name:ident($config_type:ty);) => {
-        $(#[$doc])*
-        fn $name<'a>(
-            config: &'a $config_type,
-            coordinator: &$crate::coordinator::unified::GroupCoordinator,
-            group_id: &str,
-        ) -> ::std::borrow::Cow<'a, $config_type> {
-            match coordinator.metadata_source() {
-                Some(source) => config.for_group(source.current_image().group_config(group_id)),
-                None => ::std::borrow::Cow::Borrowed(config),
-            }
-        }
-    };
+pub(super) fn resolve_group_config<'a, C: Clone>(
+    config: &'a C,
+    coordinator: &GroupCoordinator,
+    group_id: &str,
+    apply: impl FnOnce(&'a C, Option<&BTreeMap<String, String>>) -> Cow<'a, C>,
+) -> Cow<'a, C> {
+    match coordinator.metadata_source() {
+        Some(source) => apply(config, source.current_image().group_config(group_id)),
+        None => Cow::Borrowed(config),
+    }
 }
-pub(crate) use effective_group_config;
 
 /// Lower bound on the negotiated session timeout: 45 s, matching Kafka's
 /// `group.consumer.min.session.timeout.ms`.
@@ -324,9 +322,16 @@ const KEY_CONSUMER_ASSIGNMENT_INTERVAL_MS: &str = "consumer.assignment.interval.
 mod tests {
     use {
         super::*,
-        crate::coordinator::unified::assignor::{Assignment, GroupSpec, TopicMetadata},
+        crate::{
+            coordinator::unified::{
+                assignor::{Assignment, GroupSpec, TopicMetadata},
+                share::config::ShareGroupConfig,
+                test_support::{group_config_image, make_coord},
+            },
+            test_support::FakeMetadataSource,
+        },
         assert2::assert,
-        std::{borrow::Cow, collections::HashMap},
+        std::{borrow::Cow, collections::HashMap, ptr},
     };
 
     #[derive(Debug)]
@@ -337,6 +342,63 @@ mod tests {
         fn assign(&self, _group: &GroupSpec, _topics: &TopicMetadata) -> Assignment {
             HashMap::new()
         }
+    }
+
+    #[test]
+    fn effective_config_without_a_source_borrows_defaults_without_applying_overrides() {
+        let broker = NextGenConfig::default();
+        let coordinator = make_coord();
+        let effective = resolve_group_config(&broker, &coordinator, "group", |_, _| {
+            panic!("no metadata source must not run the override callback")
+        });
+        assert!(matches!(effective, Cow::Borrowed(_)));
+        assert!(ptr::eq(
+            ptr::from_ref(effective.as_ref()),
+            ptr::from_ref(&broker)
+        ));
+    }
+
+    #[test]
+    fn effective_config_observes_one_current_image_per_lookup_and_protocol_overrides() {
+        let source = Arc::new(FakeMetadataSource::static_image(group_config_image(&[(
+            "group",
+            &[
+                ("consumer.heartbeat.interval.ms", "7000"),
+                ("share.heartbeat.interval.ms", "9000"),
+            ],
+        )])));
+        let coordinator = make_coord();
+        coordinator.set_metadata_source(source.clone());
+        let consumer = NextGenConfig::default();
+        let effective =
+            resolve_group_config(&consumer, &coordinator, "group", NextGenConfig::for_group);
+        assert!(source.current_image_calls() == 1);
+        assert!(matches!(effective, Cow::Owned(_)));
+        assert!(effective.heartbeat_interval == Duration::from_secs(7));
+
+        let share = ShareGroupConfig::default();
+        let shared =
+            resolve_group_config(&share, &coordinator, "group", ShareGroupConfig::for_group);
+        assert!(source.current_image_calls() == 2);
+        assert!(shared.heartbeat_interval == Duration::from_secs(9));
+        let defaults =
+            resolve_group_config(&consumer, &coordinator, "unknown", NextGenConfig::for_group);
+        assert!(source.current_image_calls() == 3);
+        assert!(matches!(defaults, Cow::Borrowed(_)));
+        assert!(ptr::eq(
+            ptr::from_ref(defaults.as_ref()),
+            ptr::from_ref(&consumer)
+        ));
+
+        source.set_image(group_config_image(&[("group", &[(
+            "consumer.heartbeat.interval.ms",
+            "8000",
+        )])]));
+        let refreshed =
+            resolve_group_config(&consumer, &coordinator, "group", NextGenConfig::for_group);
+        assert!(source.current_image_calls() == 4);
+        assert!(refreshed.heartbeat_interval == Duration::from_secs(8));
+        assert!(effective.heartbeat_interval == Duration::from_secs(7));
     }
 
     #[test]

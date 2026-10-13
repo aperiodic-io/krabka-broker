@@ -515,6 +515,7 @@ fn serve_empty_rather_than_null_records(resp: &mut FetchResponse) {
 #[cfg(test)]
 mod tests {
     use {
+        crate::test_support as broker_fixture_support,
         assert2::assert,
         bytes::{Bytes, BytesMut},
         krabka_ids::PartitionIndex,
@@ -808,10 +809,11 @@ mod tests {
         request
             .encode(&mut encoded, KIP_595_FETCH_VERSION)
             .expect("encode WAL fetch");
-        request_identity!(
-            (principal, peer),
-            crate::test_support::sasl_principal("broker-2")
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer);
+            identity [broker_fixture_support::sasl_principal("broker-2")];
+            address [peer()];
+        };
         let context = RequestContext::new(&principal, &peer, "wal-fetch", "test", false, "");
 
         let (response, _) = super::handle(&broker, KIP_595_FETCH_VERSION, 1, &encoded, &context)

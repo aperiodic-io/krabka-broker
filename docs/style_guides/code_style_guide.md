@@ -316,6 +316,14 @@ Handler fixtures use one `wire_codec_helpers!` declaration with explicit encode,
 
 Seed snapshots and hydration use `snapshot_member_maps!` and `hydrate_member_epochs!` with explicit bindings and native protocol operations. Request string traversal uses one `record_strings!` table with required fields, optional fields, and a native extra iterator or offset metadata policy. Timer loops use `sweep_loop!` with named cadence, sweep, and shutdown clauses. Transaction reapers keep ordinary async signatures and sweep bodies under `reaper_task`.
 
+Load-task collections use `ScheduledLoads` on a visible tuple struct and select their failure message. The derive logs each failed join under the caller's module target. Group config functions share `resolve_group_config`, which reads one metadata image or borrows the broker defaults. External group-describe responses use a `described_group_rows!` type table. Writer fixtures call the existing writer function with explicit argument tuples.
+
+Broker tests use `broker_test_setup!` with explicit resource bindings and a startup expression or authorizer policy. Bind the handle, directory, and broker first. Additional bindings retain either a context, a principal and peer, or all three. The `user` clause selects the principal, and `client` selects the context's client ID. Readiness stays visible in its own clause. `request_test_identity!` supplies identity resources without starting a broker. `share_refusal_matrix!` expands each refusal case with its own broker cleanup.
+
+Reconciliation projections use `reconciliation_fields` for common fields and `ReconciliationMember`, `ReconciliationGroup`, or `ReconciliationAction` for their operations. Extra fields remain in the declaration. `model_properties!` keeps property order and oracle bodies visible. `model_runner!` declares its bounds and the order of property checks and state-count checks.
+
+Group-record key enums use `GroupRecordKey` with a version constant on each variant. Group and member fields stay visible and retain their legacy string order. Public codec functions remain ordinary wrappers, and streams key encoders call the shared string codec directly.
+
 For parallel work, give each subagent one macro family and its callers. Keep shared exports with one owner. Review the combined diff for scope, spans, and caller behavior before running the checks.
 
 ## Logging and Observability

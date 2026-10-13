@@ -18,9 +18,8 @@ use {
             find_coordinator::handle as find_coordinator_handle,
         },
         test_support::{
-            ControllerPeerAllowed, peer, principal, start_broker_no_audit,
-            start_broker_no_audit_with, start_broker_with_authorizer_no_audit,
-            wait_for_controller_leader,
+            ControllerPeerAllowed, start_broker_no_audit, start_broker_no_audit_with,
+            start_broker_with_authorizer_no_audit, wait_for_controller_leader,
         },
         txn::{
             coordinator::TxnCoordinator,
@@ -78,6 +77,11 @@ async fn wait_for_transaction_version_2(broker_handle: &BrokerHandle) {
         crate::txn::version::resolve_txn_version(&image)
             == crate::txn::version::TxnVersion::Verified
     );
+}
+
+async fn wait_for_transaction_v2_coordinator(handle: &BrokerHandle) {
+    wait_for_transaction_version_2(handle).await;
+    handle.wait_until_transaction_coordinator_ready().await;
 }
 
 /// The timeout table of Kafka's `validateTransactionTimeoutMs`, checked
@@ -144,34 +148,31 @@ async fn check_timeout_answers(
 
 macro_rules! transaction_v2_broker {
     (($handle:ident, $directory:ident, $broker:ident)) => {
-        broker_fixture!(
-            ($handle, $directory, $broker),
-            start_broker_no_audit_with(|config| {
-                config.transaction_state_num_partitions = 7;
-                config.transaction_max_timeout = secs(8);
-                config.features.transaction_two_phase_commit_enable = true;
-                config.features.unstable_api_versions =
-                    crate::api_catalog::UnstableApiVersions::Enabled;
-            })
-        );
+        krabka_macros::broker_test_setup! {
+            bind($handle, $directory, $broker);
+            boot [start_broker_no_audit_with(|config| {
+                        config.transaction_state_num_partitions = 7;
+                        config.transaction_max_timeout = secs(8);
+                        config.features.transaction_two_phase_commit_enable = true;
+                        config.features.unstable_api_versions =
+                            crate::api_catalog::UnstableApiVersions::Enabled;
+                    })];
+        };
     };
 }
 
 #[tokio::test]
 async fn handler_refuses_a_timeout_kafka_refuses_and_stores_the_rest_as_sent() {
     transaction_v2_broker!((broker_handle, _dir, broker));
-    request_identity!(
-        (principal, peer, context),
-        principal("admin"),
-        client_id = "txn-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, context);
+        user ["admin"];
+        client ["txn-client"];
+    };
     let tids = ["txn-small", "txn-above-max", "txn-2pc", "txn-zero"];
 
     let version = krabka_protocol::owned::init_producer_id_response::MAX_VERSION;
-    wait_for_transaction_version_2(&broker_handle).await;
-    broker_handle
-        .wait_until_transaction_coordinator_ready()
-        .await;
+    wait_for_transaction_v2_coordinator(&broker_handle).await;
 
     let find_version = krabka_protocol::owned::find_coordinator_response::MAX_VERSION;
     let find_request = krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest {
@@ -346,11 +347,11 @@ async fn kip939_fields_follow_the_two_phase_commit_config_at_transaction_version
         .await;
         wait_for_transaction_version_2(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!(
-            (principal, peer, context),
-            principal("admin"),
-            client_id = "txn-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, context);
+            user ["admin"];
+            client ["txn-client"];
+        };
         let version = krabka_protocol::owned::init_producer_id_response::MAX_VERSION;
         // No FindCoordinator ran, so this broker coordinates nothing.
         let request = InitProducerIdRequest {
@@ -375,15 +376,12 @@ async fn kip939_fields_follow_the_two_phase_commit_config_at_transaction_version
 #[tokio::test]
 async fn keep_prepared_txn_without_enable_2pc_preserves_finite_timeout() {
     transaction_v2_broker!((broker_handle, _dir, broker));
-    wait_for_transaction_version_2(&broker_handle).await;
-    broker_handle
-        .wait_until_transaction_coordinator_ready()
-        .await;
-    request_identity!(
-        (principal, peer, context),
-        principal("admin"),
-        client_id = "txn-client"
-    );
+    wait_for_transaction_v2_coordinator(&broker_handle).await;
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, context);
+        user ["admin"];
+        client ["txn-client"];
+    };
     let tid = "txn-recover-finite";
 
     let response = find_transaction_coordinator(&broker, &context, tid)
@@ -441,11 +439,11 @@ async fn the_timeout_check_runs_before_the_coordinator_check() {
         start_broker_no_audit_with(|config| config.transaction_max_timeout = secs(8)).await;
     let broker = broker_handle.broker_arc_for_test();
     wait_for_transaction_version_2(&broker_handle).await;
-    request_identity!(
-        (principal, peer, context),
-        principal("admin"),
-        client_id = "txn-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, context);
+        user ["admin"];
+        client ["txn-client"];
+    };
     let version = krabka_protocol::owned::init_producer_id_response::MAX_VERSION;
     // No FindCoordinator ran, so `__transaction_state` does not exist and this
     // broker coordinates nothing.
@@ -493,15 +491,12 @@ async fn the_timeout_check_runs_before_the_coordinator_check() {
 async fn half_an_identity_is_invalid_and_an_old_client_gets_invalid_producer_epoch() {
     let (broker_handle, _dir) = start_broker_no_audit().await;
     let broker = broker_handle.broker_arc_for_test();
-    wait_for_transaction_version_2(&broker_handle).await;
-    broker_handle
-        .wait_until_transaction_coordinator_ready()
-        .await;
-    request_identity!(
-        (principal, peer, context),
-        principal("admin"),
-        client_id = "txn-client"
-    );
+    wait_for_transaction_v2_coordinator(&broker_handle).await;
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, context);
+        user ["admin"];
+        client ["txn-client"];
+    };
     let tid = "txn-half-identity";
     let max = krabka_protocol::owned::init_producer_id_response::MAX_VERSION;
     let found = find_transaction_coordinator(&broker, &context, tid)
@@ -734,19 +729,19 @@ async fn acl_preamble_for_null_and_empty_transactional_id() {
     let mut expected = Vec::new();
     let mut actual = Vec::new();
     for case in cases {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker_with_authorizer_no_audit(Arc::new(SimpleAclAuthorizer::new(
-                HashSet::new()
-            ),))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker_with_authorizer_no_audit(Arc::new(SimpleAclAuthorizer::new(
+                        HashSet::new()
+                    ),))];
+        };
         crate::handlers::acl_test_support::seed_case_acls!(broker, case.acls);
 
-        request_identity!(
-            (principal, peer, context),
-            principal("alice"),
-            client_id = "idempotent-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, context);
+            user ["alice"];
+            client ["idempotent-client"];
+        };
         let version = krabka_protocol::owned::init_producer_id_response::MAX_VERSION;
         let request = InitProducerIdRequest {
             transactional_id: case.transactional_id.map(ToString::to_string),
@@ -815,10 +810,7 @@ async fn two_phase_commit_gate_is_scoped_to_enable_2pc_not_keep_prepared_txn() {
         })
         .await;
         let broker = broker_handle.broker_arc_for_test();
-        wait_for_transaction_version_2(&broker_handle).await;
-        broker_handle
-            .wait_until_transaction_coordinator_ready()
-            .await;
+        wait_for_transaction_v2_coordinator(&broker_handle).await;
 
         let mut acls = vec![acl(
             PermissionType::Allow,
@@ -846,11 +838,11 @@ async fn two_phase_commit_gate_is_scoped_to_enable_2pc_not_keep_prepared_txn() {
             .await
             .expect("seed acls");
 
-        request_identity!(
-            (principal, peer, context),
-            principal("alice"),
-            client_id = "txn-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, context);
+            user ["alice"];
+            client ["txn-client"];
+        };
 
         let find_response = find_transaction_coordinator(&broker, &context, case.tid)
             .await
@@ -899,11 +891,11 @@ async fn a_failed_block_allocation_answers_coordinator_load_in_progress() {
     broker_handle
         .wait_until_transaction_coordinator_ready()
         .await;
-    request_identity!(
-        (principal, peer, context),
-        principal("admin"),
-        client_id = "txn-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, context);
+        user ["admin"];
+        client ["txn-client"];
+    };
     let tid = "txn-no-block";
 
     let find_response = find_transaction_coordinator(&broker, &context, tid)

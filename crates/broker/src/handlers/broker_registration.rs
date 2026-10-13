@@ -636,6 +636,7 @@ mod wire_tests {
     use {
         super::*,
         crate::{
+            authorizer as fixture_authorizers,
             clean_shutdown::UNPROVEN,
             config_keys::MIN_INSYNC_REPLICAS,
             elr::{
@@ -644,7 +645,7 @@ mod wire_tests {
             },
             handlers::forward_to_controller::is_active_controller,
             test_support::{
-                dispatch_wire, end_heartbeat_session, finalized_broker_features, peer,
+                dispatch_wire, end_heartbeat_session, finalized_broker_features,
                 start_broker_with_authorizer,
             },
         },
@@ -757,10 +758,10 @@ mod wire_tests {
     /// `previous_broker_epoch` as its proof, and return what the partition
     /// looks like afterwards.
     async fn restart(version: i16, offer: Offer, seed: Vec<MetadataRecord>) -> Restarted {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker_with_authorizer(Arc::new(crate::authorizer::AllowAllAuthorizer))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker_with_authorizer(Arc::new(fixture_authorizers::AllowAllAuthorizer))];
+        };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !is_active_controller(&broker) {
             assert!(
@@ -802,11 +803,11 @@ mod wire_tests {
             previous_broker_epoch,
             ..Default::default()
         };
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("broker"),
-            client_id = "broker-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["broker"];
+            client ["broker-client"];
+        };
         // Through the dispatch registry: `previous_broker_epoch` only rides
         // the wire from version 3.
         let response: BrokerRegistrationResponse = dispatch_wire(

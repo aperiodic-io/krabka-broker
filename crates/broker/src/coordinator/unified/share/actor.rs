@@ -16,7 +16,7 @@ use {
         share_group_heartbeat_request::ShareGroupHeartbeatRequest,
         share_group_heartbeat_response::ShareGroupHeartbeatResponse,
     },
-    std::sync::Arc,
+    std::{borrow::Cow, sync::Arc},
     tokio::{
         sync::{mpsc, oneshot},
         task::JoinHandle,
@@ -61,7 +61,10 @@ use {
     crate::{
         coordinator::{
             DeleteGroupError,
-            unified::{actor::MetadataProvider, offsets_log::write_failure_code},
+            unified::{
+                GroupCoordinator, actor::MetadataProvider, config::resolve_group_config,
+                offsets_log::write_failure_code,
+            },
         },
         task_util::spawn_mailbox,
     },
@@ -121,12 +124,16 @@ impl ShareGroupActorHandle {
     }
 }
 
-crate::coordinator::unified::config::effective_group_config! {
-    /// The settings `group_id` runs with: the `share.*` overrides of its group
-    /// config in the current metadata image over the broker's `config`. A
-    /// coordinator with no metadata source runs every group with the broker
-    /// values.
-    fn effective_config(ShareGroupConfig);
+/// The settings `group_id` runs with: the `share.*` overrides of its group
+/// config in the current metadata image over the broker's `config`. A
+/// coordinator with no metadata source runs every group with the broker
+/// values.
+fn effective_config<'a>(
+    config: &'a ShareGroupConfig,
+    coordinator: &GroupCoordinator,
+    group_id: &str,
+) -> Cow<'a, ShareGroupConfig> {
+    resolve_group_config(config, coordinator, group_id, ShareGroupConfig::for_group)
 }
 
 async fn actor_loop(

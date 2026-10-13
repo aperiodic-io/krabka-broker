@@ -21,7 +21,7 @@ use {
                 VERSION, acl, configured_authorizer, filter, named_filters, request, test_context,
             },
         },
-        test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx},
+        test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker},
     },
     assert2::{assert, check},
     krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType},
@@ -212,11 +212,11 @@ async fn handle_deletes_exactly_what_kafka_matches() {
         want_deleted: Vec<AclEntry>,
     }
 
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(configured_authorizer())
-    );
-    test_ctx!(ctx, "admin");
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker(configured_authorizer())];
+        user ["admin"];
+    };
 
     let literal_foo = topic_acl().name("foo").call();
     let wildcard_deny = topic_acl()
@@ -348,7 +348,10 @@ async fn handle_lists_an_acl_under_every_filter_that_matches_it() {
     let other = acl().resource_name("payments").principal("User:bob").call();
     seed_acls(&broker_handle, vec![shared.clone(), other.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
     let req = request(vec![
         topic_filter(PATTERN_TYPE_ANY, Some("orders"), None),
         topic_filter(PATTERN_TYPE_MATCH, Some("orders"), Some("User:alice")),
@@ -388,7 +391,10 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
     let doomed = acl().call();
     seed_acls(&broker_handle, vec![doomed.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
 
     let cases: [UndefinedByteCase; 7] = [
         UndefinedByteCase {
@@ -520,7 +526,10 @@ async fn handle_bounds_a_request_to_ten_thousand_removals() {
         let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
         seed_many_acls(&broker_handle, seeded).await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         let filter_count = filters.len();
 
         let resp = handle(&broker, request(filters), VERSION, &ctx)

@@ -116,6 +116,7 @@ pub(crate) async fn handle(
 
 #[cfg(test)]
 mod tests {
+
     use {
         crate::{
             handlers::{
@@ -123,8 +124,7 @@ mod tests {
                 remove_raft_voter::handle,
             },
             test_support::{
-                DenyAll, decode_response as decode_other_response,
-                encode_request as encode_other_request,
+                decode_response as decode_other_response, encode_request as encode_other_request,
             },
         },
         assert2::assert,
@@ -171,10 +171,7 @@ mod tests {
         UpdateRaftVoterResponse
     );
 
-    use {
-        super::*,
-        crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx},
-    };
+    use {super::*, crate::test_support::start_broker_with_authorizer as start_broker};
 
     /// Decode and encode round-trip at the min and max versions.
     #[test]
@@ -208,11 +205,11 @@ mod tests {
     #[tokio::test]
     async fn handle_rejects_negative_voter_id_before_reconfig() {
         let version = 0;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let mut request = request(-7);
         stamp_voter_request!(request, broker, leader_epoch);
         let resp = answer(&broker, version, &request, &ctx).await;
@@ -234,11 +231,11 @@ mod tests {
     #[tokio::test]
     async fn handle_reports_the_kafka_code_for_each_rejected_field() {
         let version = 0;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let cluster_id = broker.controller.current_image().cluster_id().to_string();
         let epoch = i32::try_from(broker.controller.quorum_state().current_term)
             .expect("the test quorum's term fits an i32");
@@ -313,11 +310,11 @@ mod tests {
     #[tokio::test]
     async fn handle_accepts_a_request_that_names_no_cluster() {
         let version = 0;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let mut named = request(2);
         // Kafka's `UpdateVoterHandler` checks the voter's kraft.version range
         // against the cluster's before it looks the voter up, so the range
@@ -428,11 +425,11 @@ mod tests {
             want_cluster_authorization_failed,
         } in cases
         {
-            broker_fixture!(
-                (broker_handle, _dir, broker),
-                start_broker(Arc::new(GrantOnly(grant)))
-            );
-            test_ctx!(ctx, "alice");
+            krabka_macros::broker_test_setup! {
+                bind(broker_handle, _dir, broker, ctx);
+                boot [start_broker(Arc::new(GrantOnly(grant)))];
+                user ["alice"];
+            };
 
             let error_code = match api {
                 Api::Update => {
@@ -477,11 +474,11 @@ mod tests {
     #[tokio::test]
     async fn handle_reports_reconfig_error_from_controller() {
         let version = 0;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let mut request = request(2);
         // The range covers the cluster's kraft.version, so Kafka's handler
         // reaches the voter lookup.

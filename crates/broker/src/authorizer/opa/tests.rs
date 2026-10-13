@@ -68,16 +68,12 @@ fn authorizer(super_users: HashSet<String>, url: String, allow_on_error: bool) -
     OpaAuthorizer::new(super_users, url, allow_on_error, 100, minutes(1), secs(5)).unwrap()
 }
 
-macro_rules! request_fixture {
-    ($image:ident, $principal:ident, $host:ident, $name:literal) => {
-        let $image = img();
-        let $principal = test_principal($name);
-        let $host = host();
-    };
+fn request_fixture(name: &str) -> (MetadataImage, Principal, SocketAddr) {
+    (img(), test_principal(name), host())
 }
 
 fn check_alice_authorization(auth: &OpaAuthorizer, expected: AuthorizationResult) {
-    request_fixture!(image, p, h, "alice");
+    let (image, p, h) = request_fixture("alice");
     assert!(auth.authorize(&image, &req(&p, &h, "t")) == expected);
 }
 
@@ -93,7 +89,7 @@ async fn super_user_bypasses_opa_call() {
         .await;
 
     let auth = authorizer(supers(&["admin"]), opa_url(&mock), false);
-    request_fixture!(image, p, h, "admin");
+    let (image, p, h) = request_fixture("admin");
     assert!(auth.authorize(&image, &req(&p, &h, "anything")) == AuthorizationResult::Allow);
 }
 
@@ -116,7 +112,7 @@ async fn check_cached_decision(topic: &str, allow: bool, expected: Authorization
     let mock = MockServer::start().await;
     mount_decision().mock(&mock).allow(allow).call().await;
     let auth = authorizer(HashSet::new(), opa_url(&mock), false);
-    request_fixture!(image, principal, host, "alice");
+    let (image, principal, host) = request_fixture("alice");
     // The second call must preserve the decision and use the cache: expect(1)
     // verifies that only the initial authorization reached HTTP.
     for _ in 0..2 {
@@ -146,7 +142,7 @@ async fn cache_entry_expires_after_ttl() {
         timeline.clone(),
     )
     .unwrap();
-    request_fixture!(image, p, h, "alice");
+    let (image, p, h) = request_fixture("alice");
     // Cache miss -> HTTP call #1; caches the decision with expires_at = now+10ms.
     assert!(auth.authorize(&image, &req(&p, &h, "t")) == AuthorizationResult::Allow);
     // The exact deadline is stale: freshness is a strict comparison.
@@ -281,7 +277,7 @@ async fn published_kafka_plugin_policy_receives_action_and_context() {
         .call()
         .await;
     let auth = authorizer(HashSet::new(), opa_url(&mock), false);
-    request_fixture!(image, principal, host, "alice");
+    let (image, principal, host) = request_fixture("alice");
     assert!(
         auth.authorize(&image, &req(&principal, &host, "orders")) == AuthorizationResult::Allow
     );

@@ -213,6 +213,7 @@ fn stage_upsertion(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -224,12 +225,10 @@ mod tests {
                     test_context, valid_upsertion, valid_upsertion_for_mechanism,
                 },
             },
-            test_support::test_ctx,
         },
         assert2::assert,
         krabka_metadata::ScramCredentialRecord,
         krabka_security::scram::MIN_SCRAM_ITERATIONS,
-        std::sync::Arc,
     };
 
     /// Check the response and unchanged credential image for a refused request.
@@ -248,7 +247,10 @@ mod tests {
 
     #[tokio::test]
     async fn plan_emits_one_record_per_success_and_is_retry_stable() {
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         let mut overflow = valid_upsertion("overflow");
         overflow.iterations = i32::MAX;
         let req = AlterUserScramCredentialsRequest {
@@ -280,12 +282,12 @@ mod tests {
 
     #[tokio::test]
     async fn handle_duplicate_username_across_upsertion_mechanisms_returns_one_error_row() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin"),
-            controller_leader
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            ready controller_leader;
+            user ["admin"];
+        };
         let req = AlterUserScramCredentialsRequest {
             upsertions: vec![
                 valid_upsertion_for_mechanism("alice", 1, SaslMechanism::ScramSha256),
@@ -300,7 +302,11 @@ mod tests {
 
     #[tokio::test]
     async fn handle_duplicate_username_between_deletion_and_upsertion_returns_one_error_row() {
-        broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+            ready controller_leader;
+        };
         broker
             .controller
             .submit_change(vec![MetadataRecord::V1ScramCredential(
@@ -322,7 +328,10 @@ mod tests {
                     .is_some()
             })
             .await;
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         let req = mixed_mechanisms("alice");
 
         check_refusal!((resp, expected, image), broker, req, ctx, KAFKA_DUPLICATE_RESOURCE, "A user credential cannot be altered twice in the same request", [SaslMechanism::ScramSha512 => is_some, SaslMechanism::ScramSha256 => is_none]);
@@ -331,12 +340,12 @@ mod tests {
 
     #[tokio::test]
     async fn handle_duplicate_username_after_missing_deletion_preserves_resource_not_found() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin"),
-            controller_leader
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            ready controller_leader;
+            user ["admin"];
+        };
         let req = mixed_mechanisms("alice");
 
         check_refusal!((resp, expected, image), broker, req, ctx, codes::RESOURCE_NOT_FOUND, "Attempt to delete a user credential that does not exist", [SaslMechanism::ScramSha256 => is_none, SaslMechanism::ScramSha512 => is_none]);

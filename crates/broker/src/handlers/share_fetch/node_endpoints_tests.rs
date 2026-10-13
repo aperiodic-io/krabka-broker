@@ -270,11 +270,11 @@ async fn share_acknowledge_on_a_remote_leader_answers_unknown_partition_without_
     let local = create_local_topic(&broker).await;
     seed_remote_leaders(&broker).await;
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("share-consumer"),
-        client_id = "share-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["share-consumer"];
+        client ["share-client"];
+    };
     shared
         .share_partition_leaders
         .update_fetch_session(

@@ -5,11 +5,7 @@
 
 use {
     super::config::ShareModel,
-    crate::{
-        coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
-        model_check::run_bfs,
-    },
-    stateright::Checker,
+    crate::model_check::{assert_pinned_count, run_bfs},
 };
 
 /// Hard backstop on generated states. It bounds host memory even if
@@ -35,14 +31,13 @@ pub(super) const PINNED_UNIQUE_STATES_DEFERRAL: usize = 1_118;
 pub(super) const PINNED_UNIQUE_STATES_DEFERRAL_WIDE: usize = 5_012;
 pub(super) const PINNED_UNIQUE_STATES_LOG_START_ADVANCE: usize = 6_477;
 
-pinned_model_runner! {
-    @checked
+krabka_macros::model_runner! {
+
     /// Run one bounded config to completion. Assert that the run was exhaustive,
     /// that is, that no cap truncated it, and that all properties hold.
-    pub(super) fn run(ShareModel);
-    run_bfs, crate::model_check::assert_pinned_count;
-    MAX_DEPTH, MAX_STATES; properties_last;
-    |checker, label| {
+    pub(super) fn run(model: ShareModel, label: &str, pinned_unique_states: usize)
+    [bfs = run_bfs, pin = assert_pinned_count, depth = MAX_DEPTH, states = MAX_STATES, order = "properties_last", checker = checker]
+    {
 
     }
 }

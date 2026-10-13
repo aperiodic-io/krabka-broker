@@ -469,6 +469,7 @@ async fn process_resource_once(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -478,7 +479,7 @@ mod tests {
                 },
                 test_support::{assert_dispatch_response, ordered_rows},
             },
-            test_support::{start_broker_with_authorizer as start_broker, test_ctx},
+            test_support::start_broker_with_authorizer as start_broker,
         },
     };
 
@@ -490,7 +491,11 @@ mod tests {
     /// controller results in the original order, keeping duplicate rows.
     #[tokio::test]
     async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
-        broker_fixture!((handle, _dir, broker), allow_all, context(ctx, "admin"));
+        krabka_macros::broker_test_setup! {
+            bind(handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let resource = |kind, name| make_scoped_resource(kind, name, vec![]);
         let duplicate_topic = krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
             resource_type: RESOURCE_TYPE_TOPIC,

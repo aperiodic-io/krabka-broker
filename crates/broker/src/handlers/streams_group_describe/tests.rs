@@ -59,7 +59,10 @@ async fn grant(
 
 #[tokio::test]
 async fn disabled_feature_returns_requested_group_error_rows() {
-    broker_fixture!((broker_handle, _dir, broker), start_broker(true));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(true)];
+    };
     unfinalize_streams_version(&broker).await;
 
     let resp = describe(&broker, &["g-disabled-a", "g-disabled-b"]).await;
@@ -76,7 +79,10 @@ async fn disabled_feature_returns_requested_group_error_rows() {
 
 #[tokio::test]
 async fn enabled_missing_group_returns_not_found_rows() {
-    broker_fixture!((broker_handle, _dir, broker), start_broker(true));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(true)];
+    };
     finalize_streams_version(&broker).await;
 
     let resp = describe(&broker, &["missing-a", "missing-b"]).await;
@@ -93,7 +99,10 @@ async fn enabled_missing_group_returns_not_found_rows() {
 
 #[tokio::test]
 async fn closed_streams_actor_returns_load_in_progress_row() {
-    broker_fixture!((broker_handle, _dir, broker), start_broker(true));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(true)];
+    };
     finalize_streams_version(&broker).await;
 
     let actor = broker.group_coordinator.get_or_create_streams("stopped");
@@ -128,7 +137,10 @@ async fn closed_streams_actor_returns_load_in_progress_row() {
 async fn disabled_protocol_answers_every_requested_group_with_unsupported_version() {
     let cases: [&[&str]; 2] = [&["solo"], &["g-a", "g-b", "g-c"]];
     for group_ids in cases {
-        broker_fixture!((broker_handle, _dir, broker), start_broker(true));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(true)];
+        };
         // `streams.version` is unfinalized, so the protocol gate is off.
         unfinalize_streams_version(&broker).await;
 
@@ -151,10 +163,10 @@ async fn disabled_protocol_answers_every_requested_group_with_unsupported_versio
 /// the protocol is off.
 #[tokio::test]
 async fn protocol_gate_runs_before_the_group_acl_check() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker_with_authorizer(Arc::new(DenyAll))
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker_with_authorizer(Arc::new(DenyAll))];
+    };
     // Unfinalized: the protocol is off regardless of the authorizer.
     unfinalize_streams_version(&broker).await;
     let alice = principal("alice");
@@ -174,10 +186,10 @@ async fn protocol_gate_runs_before_the_group_acl_check() {
 #[tokio::test]
 async fn denied_group_rows_sort_first_regardless_of_request_order() {
     let empty_acls = HashSet::new();
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker_with_authorizer(Arc::new(SimpleAclAuthorizer::new(empty_acls)))
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker_with_authorizer(Arc::new(SimpleAclAuthorizer::new(empty_acls)))];
+    };
     finalize_streams_version(&broker).await;
     grant(
         &broker_handle,
@@ -208,10 +220,10 @@ async fn denied_group_rows_sort_first_regardless_of_request_order() {
 /// only an authorized topic is unaffected.
 #[tokio::test]
 async fn topology_topic_denied_for_describe_hides_only_that_group() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker_with_authorizer(Arc::new(SimpleAclAuthorizer::new(HashSet::new())))
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker_with_authorizer(Arc::new(SimpleAclAuthorizer::new(HashSet::new())))];
+    };
     finalize_streams_version(&broker).await;
     grant(
         &broker_handle,
@@ -282,10 +294,10 @@ async fn topology_topic_denied_for_describe_hides_only_that_group() {
 #[tokio::test]
 async fn include_authorized_operations_fills_the_bitfield_only_on_opt_in() {
     let authorizer = Arc::new(AllowAllAuthorizer);
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker_with_authorizer(authorizer.clone() as _)
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker_with_authorizer(authorizer.clone() as _)];
+    };
     finalize_streams_version(&broker).await;
     seed_streams_group_topology(&broker, "g1", topology_with_source_topic("t")).await;
     let alice = principal("alice");
@@ -499,7 +511,10 @@ async fn empty_group_is_empty_and_another_group_type_is_not_found() {
         },
     };
 
-    broker_fixture!((broker_handle, _dir, broker), start_broker(true));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(true)];
+    };
     finalize_streams_version(&broker).await;
     broker.group_coordinator.mark_share("share");
     let join = streams_request_with_topology()
@@ -562,7 +577,10 @@ async fn empty_group_is_empty_and_another_group_type_is_not_found() {
 /// error row carries neither at any version.
 #[tokio::test]
 async fn version_1_names_the_assignor_and_the_topology_description_status() {
-    broker_fixture!((broker_handle, _dir, broker), start_broker(true));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(true)];
+    };
     finalize_streams_version(&broker).await;
     seed_streams_group_topology(&broker, "app", topology_with_source_topic("in")).await;
     let baseline = describe_at(&broker, 0, false, &["app", "missing"]).await;

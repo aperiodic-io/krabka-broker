@@ -22,8 +22,7 @@ use {
             },
         },
         test_support::{
-            decode_response, encode_request, initialize_share_state, peer, principal,
-            start_broker_no_audit_with,
+            decode_response, encode_request, initialize_share_state, start_broker_no_audit_with,
         },
     },
     assert2::assert,
@@ -102,11 +101,11 @@ async fn produce_batches(broker: &BrokerHandle, topic: &str) {
 /// Appends one batch of [`RECORDS_PER_BATCH`] records to `partition`.
 async fn produce_batch(broker: &BrokerHandle, topic: &str, partition: i32) {
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("producer"),
-        client_id = "producer-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["producer"];
+        client ["producer-client"];
+    };
     let request = produce_partition_request()
         .topic(topic.to_owned())
         .partition(partition)

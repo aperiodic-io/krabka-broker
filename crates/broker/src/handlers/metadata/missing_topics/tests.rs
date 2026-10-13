@@ -6,7 +6,7 @@ use {
     crate::{
         codes,
         coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
-        test_support::{peer, principal, start_broker_no_audit_with},
+        test_support::start_broker_no_audit_with,
     },
     assert2::{assert, check},
     krabka_protocol::{
@@ -38,11 +38,11 @@ async fn a_coordinator_topic_is_created_with_its_configured_shape_unless_in_flig
     })
     .await;
     let broker = handle.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("alice"),
-        client_id = "metadata-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["alice"];
+        client ["metadata-client"];
+    };
 
     assert!(broker.auto_topic_creation.hold_for_test(OFFSETS_TOPIC));
     let skipped = missing_topic_rows(&broker, &ctx, &["bad name", OFFSETS_TOPIC], true);

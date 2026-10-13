@@ -22,7 +22,7 @@ use {
     },
     crate::{
         coordinator::unified::{
-            actor::{MetadataProvider, reconciliation_model_support::model_properties},
+            actor::MetadataProvider,
             assignor::TopicIdPartition,
             reconciler::ReconcileInput,
             share::state::{ShareGroupState, ShareMemberState},
@@ -30,7 +30,7 @@ use {
         model_check::run_bfs,
     },
     krabka_protocol::primitives::uuid::Uuid,
-    stateright::{Checker, Model},
+    stateright::{Checker, Model, Property},
     std::{
         collections::{HashMap, HashSet},
         time::{Duration, Instant},
@@ -425,18 +425,20 @@ impl Model for ShareModel {
         Some(state)
     }}
 
-    model_properties! {
-        @method State;
-        always "ownership_coordinate_uniqueness" => |state| assignment_coordinates_unique(&state.group),
-        always "member_epoch_fencing" => |state| epochs_fenced(&state.group),
-        always "assignment_within_metadata" => |state| assignments_in_metadata(state),
-        sometimes "stale_epoch_rejected" => |state| state.witnesses & WITNESS_STALE_FENCED != 0,
-        sometimes "forward_epoch_rejected" => |state| state.witnesses & WITNESS_FORWARD_FENCED != 0,
-        sometimes "timeout_evicted_member" => |state| state.witnesses & WITNESS_TIMEOUT != 0,
-        sometimes "metadata_changed_assignment" => |state| state.witnesses & WITNESS_METADATA != 0,
-        sometimes "state_replayed" => |state| state.witnesses & WITNESS_REPLAY != 0,
-        sometimes "unknown_member_rejected" => |state| state.witnesses & WITNESS_UNKNOWN != 0,
-        sometimes "two_members_joined" => |state| state.group.members.len() == 2,
+    fn properties(&self) -> Vec<Property<Self>> {
+        krabka_macros::model_properties! { State;
+        always "ownership_coordinate_uniqueness" => |state| { assignment_coordinates_unique(&state.group) },
+        always "member_epoch_fencing" => |state| { epochs_fenced(&state.group) },
+        always "assignment_within_metadata" => |state| { assignments_in_metadata(state) },
+        sometimes "stale_epoch_rejected" => |state| { state.witnesses & WITNESS_STALE_FENCED != 0 },
+        sometimes "forward_epoch_rejected" => |state| { state.witnesses & WITNESS_FORWARD_FENCED != 0 },
+        sometimes "timeout_evicted_member" => |state| { state.witnesses & WITNESS_TIMEOUT != 0 },
+        sometimes "metadata_changed_assignment" => |state| { state.witnesses & WITNESS_METADATA != 0 },
+        sometimes "state_replayed" => |state| { state.witnesses & WITNESS_REPLAY != 0 },
+        sometimes "unknown_member_rejected" => |state| { state.witnesses & WITNESS_UNKNOWN != 0 },
+        sometimes "two_members_joined" => |state| { state.group.members.len() == 2 },
+
+        }
     }
 
     fn init_states(&self) -> Vec<Self::State> {

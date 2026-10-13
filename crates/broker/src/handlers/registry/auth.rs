@@ -408,10 +408,10 @@ mod tests {
                 vec![topic_result("widgets", &[0]), topic_result("orders", &[0])],
             ),
         ] {
-            broker_fixture!(
-                (broker_handle, _dir, broker),
-                start_broker_with_authorizer(Arc::new(DenyAll))
-            );
+            krabka_macros::broker_test_setup! {
+                bind(broker_handle, _dir, broker);
+                boot [start_broker_with_authorizer(Arc::new(DenyAll))];
+            };
             let auth = authed("alice");
             let peer = peer();
             let req = AlterReplicaLogDirsRequest {

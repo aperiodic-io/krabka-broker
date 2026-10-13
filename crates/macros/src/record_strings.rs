@@ -1,12 +1,12 @@
 //! Flat request declarations for coordinator record-string traversal.
 
 use {
-    crate::meta::edit_native_body,
+    crate::meta::{edit_native_body, native_braced_bodies},
     moxy::{
         ast::{Attributes, List, Parse, ParseError, Parser, Path, PathArguments, Token},
         token::{Delim, Group, Ident, Span, Spanner, ToTokenStream, TokenStream},
     },
-    proc_macro::{Delimiter, TokenStream as NativeTokenStream, TokenTree},
+    proc_macro::{TokenStream as NativeTokenStream, TokenTree},
 };
 
 enum Tail {
@@ -159,13 +159,7 @@ impl Request {
 
 pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
     let requests = requests(&input.clone().into())?;
-    let native_bodies: Vec<_> = input
-        .into_iter()
-        .filter_map(|token| match token {
-            TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => Some(group),
-            _ => None,
-        })
-        .collect();
+    let native_bodies = native_braced_bodies(input);
     if native_bodies.len() != requests.len() {
         return Err(ParseError::new(
             Span::call_site(),

@@ -70,15 +70,14 @@ use {
         version::TxnVersion,
     },
     crate::{
-        coordinator::unified::actor::reconciliation_model_support::{
-            model_properties, pinned_model_runner,
-        },
+        coordinator::unified::actor::reconciliation_model_support::record_epoch_regression,
+        model_check::{assert_pinned_count, run_bfs},
         txn::decision_model_support::{
             begin_transaction, complete_prepared, fenced_as_kafka, initialize,
         },
     },
     krabka_log::ProducerId,
-    stateright::Model,
+    stateright::{Model, Property},
     std::collections::BTreeSet,
 };
 
@@ -167,7 +166,7 @@ enum Witness {
     SparedAtTimeout,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, krabka_macros::ModelEpochLedger)]
 struct TwoPcProj {
     pid: i64,
     epoch: i16,
@@ -350,14 +349,12 @@ impl Model for TwoPcModel {
                 s.clock += 1;
             }
         }
-        if s.epoch < last.epoch {
-            s.violations.insert(Violation::EpochRegressed);
-        }
+        s.observe_prior_epoch(last.epoch);
         Some(s)
     }}
 
-    model_properties! {
-        @method TwoPcProj;
+    fn properties(&self) -> Vec<Property<Self>> {
+        krabka_macros::model_properties! { TwoPcProj;
         // HEADLINE (KIP-939): the timeout reaper never aborts a 2PC txn.
         always "two_pc_never_reaped" => |s| {
             !s.violations.contains(&Violation::ReapedTwoPc)
@@ -403,6 +400,8 @@ impl Model for TwoPcModel {
         sometimes "can_commit" => |s| {
             s.witnesses.contains(&Witness::Committed)
         },
+
+        }
     }
 
     fn init_states(&self) -> Vec<Self::State> {
@@ -450,8 +449,11 @@ impl Model for TwoPcModel {
     fn within_boundary(&self, state: &Self::State) -> bool { state.epoch <= self.max_epoch }
 }
 
-pinned_model_runner! {
-    fn run(TwoPcModel); MAX_DEPTH, MAX_STATES; properties_first
+krabka_macros::model_runner! {
+
+    fn run(model: TwoPcModel, label: &str, pinned_unique_states: usize)
+    [bfs = run_bfs, pin = assert_pinned_count, depth = MAX_DEPTH, states = MAX_STATES, order = "properties_first", checker = checker]
+    {}
 }
 
 #[test]

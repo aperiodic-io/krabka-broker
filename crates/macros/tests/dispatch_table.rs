@@ -220,32 +220,46 @@ fn reply(parts: &[&dyn std::fmt::Display]) -> Result<Bytes, BrokerError> {
 
 fn text(body: &[u8]) -> String { String::from_utf8_lossy(body).into_owned() }
 
-macro_rules! context_bytes_handler {
-    ($name:literal) => {
-        pub fn handle<'a>(
-            broker: &'a crate::Broker,
-            version: crate::ApiVersion,
-            body: &'a [u8],
-            ctx: &'a crate::RequestContext<'a>,
-        ) -> crate::BoxFuture<'a, Result<crate::Bytes, crate::BrokerError>> {
-            use crate::{reply, text};
-
-            Box::pin(std::future::ready(reply(&[
-                &$name,
-                &broker.name,
-                &version,
-                &ctx.correlation_id,
-                &ctx.client_id,
-                &text(body),
-            ])))
-        }
-    };
+#[derive(Clone, Copy)]
+enum ContextReply {
+    Metadata,
+    Transaction,
 }
 
+const fn context_handler(kind: ContextReply) -> ContextHandler {
+    match kind {
+        ContextReply::Metadata => context_bytes_handler::<false>,
+        ContextReply::Transaction => context_bytes_handler::<true>,
+    }
+}
+
+fn context_bytes_handler<'a, const TRANSACTION: bool>(
+    broker: &'a Broker,
+    version: ApiVersion,
+    body: &'a [u8],
+    ctx: &'a RequestContext<'a>,
+) -> BoxFuture<'a, Result<Bytes, BrokerError>> {
+    let name = if TRANSACTION {
+        "txn::add_partitions_to_txn"
+    } else {
+        "metadata"
+    };
+    Box::pin(std::future::ready(reply(&[
+        &name,
+        &broker.name,
+        &version,
+        &ctx.correlation_id,
+        &ctx.client_id,
+        &text(body),
+    ])))
+}
 mod handlers {
     use {
         super::reply,
-        crate::{ApiVersion, BrokerError, Bytes, krabka_protocol::Decode},
+        crate::{
+            ApiVersion, Broker, BrokerError, Bytes, RequestContext,
+            krabka_protocol::{Decode, Text},
+        },
     };
 
     /// The `typed` adapters' encoder: the response, then the version it was
@@ -279,39 +293,67 @@ mod handlers {
         reply(parts).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    macro_rules! typed_handlers {
-        ($($module:ident: $schema:ident::$request:ident),* $(,)?) => {
-            $(pub mod $module {
-                use crate::{
-                    ApiVersion, Broker, BrokerError, RequestContext,
-                    krabka_protocol::owned::$schema::$request,
-                };
-
-                pub fn handle(
-                    broker: &Broker,
-                    request: $request,
-                    version: ApiVersion,
-                    ctx: &RequestContext<'_>,
-                ) -> std::future::Ready<Result<String, BrokerError>> {
-                    let $request(text) = request;
-                    std::future::ready(super::typed_reply(&[
-                        &stringify!($module),
-                        &broker.name,
-                        &version,
-                        &ctx.client_id,
-                        &text,
-                    ]))
-                }
-            })*
+    fn typed_context_reply(
+        name: &str,
+        broker: &Broker,
+        request: Text,
+        version: ApiVersion,
+        ctx: &RequestContext<'_>,
+    ) -> std::future::Ready<Result<String, BrokerError>> {
+        let Text(text) = request;
+        std::future::ready(typed_reply(&[
+            &name,
+            &broker.name,
+            &version,
+            &ctx.client_id,
+            &text,
+        ]))
+    }
+    pub mod list_groups {
+        use crate::{
+            ApiVersion, Broker, BrokerError, RequestContext,
+            krabka_protocol::owned::list_groups_request::ListGroupsRequest,
         };
-    }
 
-    typed_handlers! {
-        list_groups: list_groups_request::ListGroupsRequest,
-        heartbeat: heartbeat_request::HeartbeatRequest,
-        update_features: update_features_request::UpdateFeaturesRequest,
+        pub fn handle(
+            broker: &Broker,
+            request: ListGroupsRequest,
+            version: ApiVersion,
+            ctx: &RequestContext<'_>,
+        ) -> std::future::Ready<Result<String, BrokerError>> {
+            super::typed_context_reply("list_groups", broker, request, version, ctx)
+        }
     }
+    pub mod heartbeat {
+        use crate::{
+            ApiVersion, Broker, BrokerError, RequestContext,
+            krabka_protocol::owned::heartbeat_request::HeartbeatRequest,
+        };
 
+        pub fn handle(
+            broker: &Broker,
+            request: HeartbeatRequest,
+            version: ApiVersion,
+            ctx: &RequestContext<'_>,
+        ) -> std::future::Ready<Result<String, BrokerError>> {
+            super::typed_context_reply("heartbeat", broker, request, version, ctx)
+        }
+    }
+    pub mod update_features {
+        use crate::{
+            ApiVersion, Broker, BrokerError, RequestContext,
+            krabka_protocol::owned::update_features_request::UpdateFeaturesRequest,
+        };
+
+        pub fn handle(
+            broker: &Broker,
+            request: UpdateFeaturesRequest,
+            version: ApiVersion,
+            ctx: &RequestContext<'_>,
+        ) -> std::future::Ready<Result<String, BrokerError>> {
+            super::typed_context_reply("update_features", broker, request, version, ctx)
+        }
+    }
     pub mod list_config_resources {
         use crate::{
             ApiVersion, Broker, BrokerError, RequestContext,
@@ -357,7 +399,9 @@ mod handlers {
     }
 
     pub mod metadata {
-        context_bytes_handler!("metadata");
+        use crate::{ContextHandler, ContextReply, context_handler};
+        pub const HANDLER: ContextHandler = context_handler(ContextReply::Metadata);
+        pub use HANDLER as handle;
     }
 
     pub mod describe_configs {
@@ -407,7 +451,9 @@ mod handlers {
 /// The `=> path` override: a handler outside `crate::handlers`.
 mod txn {
     pub mod add_partitions_to_txn {
-        context_bytes_handler!("txn::add_partitions_to_txn");
+        use crate::{ContextHandler, ContextReply, context_handler};
+        pub const HANDLER: ContextHandler = context_handler(ContextReply::Transaction);
+        pub use HANDLER as handle;
     }
 }
 

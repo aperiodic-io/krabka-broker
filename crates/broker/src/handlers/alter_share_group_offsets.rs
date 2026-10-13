@@ -281,13 +281,16 @@ mod tests {
             handlers::{
                 RequestContext,
                 create_topics::handle as create_topics_handle,
-                test_support::{CreateTopicSetup, configured_topic_request_from},
+                test_support::{
+                    self as handler_fixture_support, CreateTopicSetup,
+                    configured_topic_request_from,
+                },
             },
             share_coordinator::{
                 coordinator::message::UNKNOWN_TOPIC_OR_PARTITION,
                 handlers::test_support::lead_share_state_partitions,
             },
-            test_support::{DenyAll, ShareApiSupport, start_share_broker, test_ctx},
+            test_support::{DenyAll, ShareApiSupport, start_share_broker},
         },
         assert2::assert,
         krabka_protocol::{
@@ -412,6 +415,18 @@ mod tests {
             .await;
     }
 
+    async fn create_default_topic(
+        handle: &BrokerHandle,
+        context: &RequestContext<'_>,
+        topic: &str,
+    ) {
+        create_topic(handle, context, CreateTopicSetup {
+            topic,
+            ..Default::default()
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn handle_error_scenarios_preserve_expected_rows() {
         type Case<'a> = (
@@ -486,11 +501,11 @@ mod tests {
                 }),
             ),
         ];
-        share_refusal_cases!(
-            (case, authorizer, share_enabled, [topic_name, partitions], expected) in cases;
-            (broker_handle, _dir, broker, ctx, resp);
-            alter_share_group_offsets_handle(request("g1", topic_name, &partitions), version)
-        );
+        krabka_macros::share_refusal_matrix! {
+            case(case, authorizer, share_enabled, topic_name, partitions, expected) [cases];
+            bind(broker_handle, _dir, broker, ctx, resp);
+            invoke [alter_share_group_offsets_handle(&broker, request("g1", topic_name, &partitions), version, &ctx)];
+        };
     }
 
     /// Issue #727: krabka checked `Alter` on the group and never checked
@@ -574,7 +589,10 @@ mod tests {
             });
             let (broker_handle, _dir) = start_share_broker().authorizer(authorizer).call().await;
             let broker = broker_handle.broker_arc_for_test();
-            test_ctx!(ctx, "alice");
+            krabka_macros::request_test_identity! {
+                bind(ctx);
+                user ["alice"];
+            };
             let topic_exists = topic != TopicState::Unknown;
             if topic_exists {
                 create_topic(&broker_handle, &ctx, CreateTopicSetup {
@@ -645,11 +663,11 @@ mod tests {
     /// refused with `GROUP_ID_NOT_FOUND` (69), before any actor is touched.
     #[tokio::test]
     async fn invalid_and_wrong_type_group_ids_are_refused() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            share_allow_all,
-            context(ctx, "alice")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [handler_fixture_support::start_share_allow_all()];
+            user ["alice"];
+        };
 
         let empty_id_resp = alter_share_group_offsets_handle(
             &broker,
@@ -687,16 +705,12 @@ mod tests {
     /// change its start offset back.
     #[tokio::test]
     async fn alter_creates_and_persists_a_new_share_group() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            share_allow_all,
-            context(ctx, "alice")
-        );
-        create_topic(&broker_handle, &ctx, CreateTopicSetup {
-            topic: "new-topic",
-            ..Default::default()
-        })
-        .await;
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [handler_fixture_support::start_share_allow_all()];
+            user ["alice"];
+        };
+        create_default_topic(&broker_handle, &ctx, "new-topic").await;
         lead_share_state_partitions(&broker).await;
         let topic_id = broker
             .controller
@@ -769,7 +783,10 @@ mod tests {
 
     #[tokio::test]
     async fn active_group_rejects_the_whole_reset_batch() {
-        broker_fixture!((broker_handle, _dir, broker), share_allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_share_allow_all()];
+        };
         let coordinator = broker.group_coordinator.clone();
 
         coordinator.mark_share("busy");
@@ -777,7 +794,10 @@ mod tests {
         joining_share_member!((tx, rx, resp), actor, "busy", "member-1", Vec::new());
         assert!(resp.error_code == codes::NONE, "{resp:?}");
 
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
         let response = alter_share_group_offsets_handle(
             &broker,
             request("busy", "missing", &[0]),
@@ -800,16 +820,12 @@ mod tests {
     /// answers `UNKNOWN_TOPIC_OR_PARTITION` and is never initialized.
     #[tokio::test]
     async fn reset_initializes_requested_valid_partitions_at_the_group_epoch() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            share_allow_all,
-            context(ctx, "alice")
-        );
-        create_topic(&broker_handle, &ctx, CreateTopicSetup {
-            topic: "reset-topic",
-            ..Default::default()
-        })
-        .await;
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [handler_fixture_support::start_share_allow_all()];
+            user ["alice"];
+        };
+        create_default_topic(&broker_handle, &ctx, "reset-topic").await;
         lead_share_state_partitions(&broker).await;
         let persister = broker
             .group_coordinator

@@ -76,10 +76,9 @@ pub(crate) async fn handle(
 #[cfg(test)]
 mod tests {
     use {
-        crate::test_support::{DenyAll, round_trip_response},
+        crate::test_support::round_trip_response,
         assert2::assert,
         krabka_protocol::{owned::remove_raft_voter_response, primitives::uuid::Uuid as ProtoUuid},
-        std::sync::Arc,
     };
 
     fn request(voter_id: i32) -> RemoveRaftVoterRequest {
@@ -97,10 +96,7 @@ mod tests {
         RemoveRaftVoterResponse
     );
 
-    use {
-        super::*,
-        crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx},
-    };
+    use {super::*, crate::test_support::start_broker_with_authorizer as start_broker};
 
     /// Decode and encode round trip at the minimum and maximum versions.
     #[test]

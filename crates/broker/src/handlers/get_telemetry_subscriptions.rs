@@ -69,7 +69,7 @@ mod tests {
                 manager::{ComputedSubscription, subscription_id},
             },
             codes,
-            test_support::peer,
+            test_support::{self as broker_fixture_support, peer},
         },
         assert2::assert,
         krabka_protocol::owned::get_telemetry_subscriptions_response,
@@ -86,10 +86,10 @@ mod tests {
     /// gets `THROTTLING_QUOTA_EXCEEDED` with `throttle_time_ms` 0 (#672).
     #[tokio::test]
     async fn get_answers_with_the_instance_id_and_throttles_without_delay() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::test_support::start_broker_with(|_cfg| {})
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_broker_with(|_cfg| {})];
+        };
         let peer = peer();
         let ctx = TelemetryContext {
             connection_id: "connection-a",

@@ -25,19 +25,16 @@ use {
     krabka_ids::PartitionIndex,
     krabka_metadata::MetadataImage,
     std::{sync::Arc, time::Duration},
+    tokio::task::JoinHandle,
     tracing::{info, warn},
 };
 
-crate::task_util::scheduled_tasks_type! {
-    /// The load tasks that one refresh started.
-    ///
-    /// A caller that does not wait drops this value. The tasks run on.
-    pub(crate) struct ScheduledLoads;
-    /// Waits until every load task of this refresh has ended.
-    |error| {
-        warn!(%error, "__transaction_state load task failed");
-    }
-}
+/// The load tasks that one refresh started.
+///
+/// A caller that does not wait drops this value. The tasks run on.
+#[derive(Debug, Default, krabka_macros::ScheduledLoads)]
+#[scheduled_loads(failure_message = "__transaction_state load task failed")]
+pub(crate) struct ScheduledLoads(Vec<JoinHandle<()>>);
 
 impl TxnCoordinator {
     /// Applies the `__transaction_state` leadership of `image`, and starts the

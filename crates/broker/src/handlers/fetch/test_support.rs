@@ -140,12 +140,11 @@ pub(super) async fn fetch_wire(
     } = setup;
     let version = version.0;
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, peer, context),
-        crate::test_support::principal(user),
-        client_id = client_id,
-        address = crate::test_support::peer()
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, peer, context);
+        user [user];
+        client [client_id];
+    };
     let bytes = encode_request(request, version);
     let (response, response_version) = super::handle(&shared, version, 7, &bytes, &context)
         .await

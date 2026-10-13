@@ -14,26 +14,42 @@ use {
         state::{CgcAction, CgcState, EpochKind, committed_map, committed_of, member},
     },
     crate::coordinator::unified::actor::reconciliation_model_support::{
-        advertised_disjoint, enqueue_member_actions, exclusive_ownership, handoff_witness,
-        member_next_state, model_properties, overlaps_others,
+        advertised_disjoint, apply_client_move, apply_member_heartbeat, client_moves,
+        exclusive_ownership, overlaps_others, owned_map,
     },
-    stateright::Model,
+    stateright::{Model, Property},
+    std::collections::BTreeMap,
 };
 
 impl Model for CgcModel {
     type Action = CgcAction;
     type State = CgcState;
 
-    member_next_state! {
-        fn next_state(self, last, action; CgcAction);
-        helpers(member, rebuild_group, assert_epoch_monotonic, project);
-        setup { let committed = committed_map(last); }
-        actions { CgcAction::Commit(id, part, kind) => return do_commit(last, &id, part, kind), }
-        project(&committed)
+    krabka_macros::reconciliation_next_state! {
+        fn next_state(&self, last: &Self::State, action: Self::Action) -> Option<Self::State>
+        [action = CgcAction, lookup = member, rebuild = rebuild_group, check = assert_epoch_monotonic, project = project]
+        { setup { let committed = committed_map(last); } actions { CgcAction::Commit(id, part, kind) => return do_commit(last, &id, part, kind), } project { &committed } }
     }
 
-    model_properties! {
-        @method CgcState;
+    krabka_macros::reconciliation_actions! {
+        fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>)
+        [action = CgcAction, lookup = member, member = m]
+        {
+            // Offset commit: offered with EACH epoch kind (current / stale /
+            // forward) so the real epoch fence — not a precondition — is what's
+            // exercised; the committed counter is bounded by MAX_OFFSET.
+            for part in 0..self.partitions {
+                if committed_of(state, part) < MAX_OFFSET {
+                    for kind in [EpochKind::Current, EpochKind::Stale, EpochKind::Forward] {
+                        actions.push(CgcAction::Commit(m.id.clone(), part, kind));
+                    }
+                }
+            }
+        }
+    }
+
+    fn properties(&self) -> Vec<Property<Self>> {
+        krabka_macros::model_properties! { CgcState;
         // HEADLINE: no two members ever simultaneously own the same partition
         // (the real reconciliation's withholding — re-verified in the composed
         // context, with offset traffic interleaved).
@@ -77,26 +93,13 @@ impl Model for CgcModel {
         // A handoff state: a partition is in one member's target while another
         // member currently owns it (the baton is mid-pass).
         sometimes "handoff_witness" => |s| {
-            handoff_witness!(s)
+            overlaps_others(s.members.iter().map(|member| (&member.id, &member.target)), &s.client_owned)
         },
+
+        }
     }
 
     fn init_states(&self) -> Vec<Self::State> { vec![CgcState::empty(vec![])] }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        enqueue_member_actions!(self, state, actions, CgcAction, member; |m| {
-            // Offset commit: offered with EACH epoch kind (current / stale /
-            // forward) so the real epoch fence — not a precondition — is what's
-            // exercised; the committed counter is bounded by MAX_OFFSET.
-            for part in 0..self.partitions {
-                if committed_of(state, part) < MAX_OFFSET {
-                    for kind in [EpochKind::Current, EpochKind::Stale, EpochKind::Forward] {
-                        actions.push(CgcAction::Commit(m.id.clone(), part, kind));
-                    }
-                }
-            }
-        });
-    }
 
     fn within_boundary(&self, state: &Self::State) -> bool {
         state.group_epoch <= self.max_epoch && state.committed.iter().all(|&(_, o)| o <= MAX_OFFSET)

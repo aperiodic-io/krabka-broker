@@ -20,9 +20,9 @@ use {
                 TargetAssignmentMemberValue,
             },
         },
-        handlers::test_support::configured_topic_request,
+        handlers::{RequestContext, test_support::configured_topic_request},
         test_support::{
-            dispatch_context, dispatch_wire, encode_request, peer, principal,
+            dispatch_context, dispatch_wire, encode_request, peer, principal, request_context,
             start_group_broker_no_audit,
         },
     },
@@ -37,11 +37,30 @@ use {
             OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
         },
     },
-    std::sync::Arc,
+    krabka_security::Principal,
+    std::{net::SocketAddr, sync::Arc},
 };
 
 const TOPIC: &str = "group-validation";
 const MEMBER: &str = "m1";
+
+/// Keep the shared consumer's request resources alive across each validation table.
+struct ConsumerIdentity {
+    address: SocketAddr,
+    user: Principal,
+}
+
+fn consumer_identity() -> ConsumerIdentity {
+    let user = principal("consumer");
+    let address = peer();
+    ConsumerIdentity { address, user }
+}
+
+impl ConsumerIdentity {
+    fn context(&self) -> RequestContext<'_> {
+        request_context(&self.user, &self.address, "consumer-client")
+    }
+}
 const GENERATION: i32 = 3;
 
 fn offset_commit_request(
@@ -88,11 +107,11 @@ const KIP_1251_TOPIC_PARTITIONS: i32 = 3;
 async fn create_topic(broker: &Broker) { create_topic_with_partitions(broker, 1).await; }
 
 async fn create_topic_with_partitions(broker: &Broker, num_partitions: i32) {
-    request_identity!(
-        (admin, address, ctx),
-        principal("admin"),
-        client_id = "group-validation-admin"
-    );
+    krabka_macros::request_test_identity! {
+        bind(admin, address, ctx);
+        user ["admin"];
+        client ["group-validation-admin"];
+    };
     let request = configured_topic_request()
         .topic(TOPIC)
         .num_partitions(num_partitions)
@@ -148,11 +167,8 @@ async fn drive(broker: &BrokerHandle, row: usize, case: Case) -> Driven {
     let request = offset_commit_request(group_id.clone(), case.generation, case.member_id, vec![
         super::test_topic_row().name(TOPIC.to_string()).call(),
     ]);
-    request_identity!(
-        (user, address, ctx),
-        principal("consumer"),
-        client_id = "consumer-client"
-    );
+    let identity = consumer_identity();
+    let ctx = identity.context();
     let response = dispatch_wire(
         &shared,
         krabka_protocol::owned::offset_commit_request::API_KEY,
@@ -326,11 +342,8 @@ async fn topic_read_is_checked_before_the_group() {
             codes::TOPIC_AUTHORIZATION_FAILED,
         )]),
     ];
-    request_identity!(
-        (user, address, ctx),
-        principal("consumer"),
-        client_id = "consumer-client"
-    );
+    let identity = consumer_identity();
+    let ctx = identity.context();
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (group_id, topics, answers) in cases {
@@ -386,11 +399,8 @@ async fn oversized_metadata_is_refused_through_the_handler() {
         }],
         ..Default::default()
     };
-    request_identity!(
-        (user, address, ctx),
-        principal("consumer"),
-        client_id = "consumer-client"
-    );
+    let identity = consumer_identity();
+    let ctx = identity.context();
     let response: OffsetCommitResponse = dispatch_wire(
         &shared,
         krabka_protocol::owned::offset_commit_request::API_KEY,
@@ -588,11 +598,8 @@ async fn consumer_group_commit_follows_kip_1251() {
             .topic_id
             .into_bytes(),
     );
-    request_identity!(
-        (user, address, ctx),
-        principal("consumer"),
-        client_id = "consumer-client"
-    );
+    let identity = consumer_identity();
+    let ctx = identity.context();
 
     let mut actual = Vec::new();
     let mut expected = Vec::new();

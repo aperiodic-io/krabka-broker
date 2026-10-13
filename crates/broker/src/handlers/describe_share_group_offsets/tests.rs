@@ -9,9 +9,8 @@ use {
     super::*,
     crate::{
         authorizer::Authorizer,
-        test_support::{DenyAll, ShareApiSupport, test_ctx},
+        test_support::{DenyAll, ShareApiSupport},
     },
-    assert2::assert,
     krabka_protocol::{
         owned::{
             describe_share_group_offsets_request::{
@@ -187,9 +186,9 @@ async fn handle_error_scenarios_preserve_expected_rows() {
             }),
         ),
     ];
-    share_refusal_cases!(
-        (case, authorizer, share_enabled, [groups], expected) in cases;
-        (broker_handle, _dir, broker, ctx, resp);
-        handle(request(&groups), version)
-    );
+    krabka_macros::share_refusal_matrix! {
+        case(case, authorizer, share_enabled, groups, expected) [cases];
+        bind(broker_handle, _dir, broker, ctx, resp);
+        invoke [handle(&broker, request(&groups), version, &ctx)];
+    };
 }

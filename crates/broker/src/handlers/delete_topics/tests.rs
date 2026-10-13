@@ -21,7 +21,7 @@ use {
         },
         metrics::AuthorizationDeniedLabel,
         test_support::{
-            DenyAll, allow_acl, dispatch_wire, peer, principal, start_broker_no_audit_with,
+            allow_acl, dispatch_wire, start_broker_no_audit_with,
             start_broker_with_authorizer_no_audit as start_broker,
         },
     },
@@ -79,8 +79,11 @@ fn response(rows: Vec<DeletableTopicResult>) -> DeleteTopicsResponse {
 
 #[tokio::test]
 async fn handle_denied_topic_returns_authorization_failure() {
-    broker_fixture!((broker_handle, _dir, broker), deny_all);
-    request_identity!((p, peer), principal("alice"));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, p, peer);
+        boot [start_broker] deny_all;
+        user ["alice"];
+    };
     let req = request(vec![named_state("secret")]);
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
@@ -96,8 +99,11 @@ async fn handle_denied_topic_returns_authorization_failure() {
 
 #[tokio::test]
 async fn handle_unknown_name_and_id_preserve_error_rows() {
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, p, peer);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let bogus_id = WireUuid([8; 16]);
     let req = request(vec![named_state("missing"), id_state(bogus_id)]);
 
@@ -135,7 +141,10 @@ async fn delete_doomed(break_glass: BreakGlassConfig) -> DoomedOutcome {
     })
     .await;
     let broker = broker_handle.broker_arc_for_test();
-    request_identity!((principal, peer), principal("admin"));
+    krabka_macros::request_test_identity! {
+        bind(principal, peer);
+        user ["admin"];
+    };
     let ctx = test_context(&principal, &peer);
     seed_topic(&broker, &ctx, CreateTopicSetup {
         topic: DOOMED,
@@ -253,7 +262,10 @@ async fn invalid_topic_rows_answer_invalid_request_and_delete_nothing() {
             .into_bytes(),
     );
     let broker = broker_handle.broker_arc_for_test();
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::request_test_identity! {
+        bind(p, peer);
+        user ["admin"];
+    };
 
     let invalid = |name: Option<&str>, id, message: &str| {
         krabka_macros::tagged_wire!(DeletableTopicResult {
@@ -413,8 +425,11 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
     ];
 
     for (label, case) in cases {
-        broker_fixture!((broker_handle, _dir, broker), controller_peer_acls);
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, p, peer);
+            boot [start_broker] controller_peer;
+            user ["alice"];
+        };
 
         // Setup: grant alice cluster-wide Create so the fixture topics can
         // be seeded, then create them. The Create ACL plays no part in the
@@ -632,8 +647,11 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for case in cases {
-        broker_fixture!((broker_handle, _dir, broker), controller_peer_acls);
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, p, peer);
+            boot [start_broker] controller_peer;
+            user ["alice"];
+        };
         let cluster_create = alice_acl(
             ResourceType::Cluster,
             CLUSTER_RESOURCE_NAME,
@@ -713,7 +731,10 @@ async fn delete_topic_enable_false_refuses_every_row() {
         })
         .await;
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!((p, peer), principal("admin"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["admin"];
+        };
         let ctx = test_context(&p, &peer);
         let topic_id = seeded_topic_id(&broker, &ctx, CreateTopicSetup {
             topic: TOPIC,

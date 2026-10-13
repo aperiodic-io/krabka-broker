@@ -10,12 +10,12 @@ use {
         *,
     },
     crate::{
+        authorizer as fixture_authorizers,
         broker::{Broker, BrokerHandle},
         codes::INVALID_REQUEST,
         handlers::RequestContext,
         test_support::{
-            DenyAll, grant_cluster_operation, peer, principal,
-            start_broker_with_authorizer as start_broker, test_ctx,
+            grant_cluster_operation, peer, principal, start_broker_with_authorizer as start_broker,
         },
     },
     assert2::assert,
@@ -102,11 +102,11 @@ fn whole_request_error_answers_every_entry() {
 #[tokio::test]
 async fn handle_denies_cluster_alter_for_each_entry() {
     let version = 1;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        deny_all,
-        context(ctx, "alice")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] deny_all;
+        user ["alice"];
+    };
     let req = request(
         vec![entry(vec![part("user", Some("alice"))], vec![op(
             "producer_byte_rate",
@@ -138,12 +138,12 @@ async fn handle_denies_cluster_alter_for_each_entry() {
 async fn cluster_alter_configs_gates_the_quota_write() {
     let version = 1;
     let empty_super_users = std::collections::HashSet::new();
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(Arc::new(crate::authorizer::SimpleAclAuthorizer::new(
-            empty_super_users,
-        ),))
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(Arc::new(fixture_authorizers::SimpleAclAuthorizer::new(
+                empty_super_users,
+            ),))];
+    };
     let peer = peer();
 
     for (user, grant, allowed) in [
@@ -206,11 +206,11 @@ async fn cluster_alter_configs_gates_the_quota_write() {
 #[test_macro(tokio::test)]
 async fn handle_reports_entry_results_and_obeys_validate_only(validate_only: bool) {
     let version = 1;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        allow_all,
-        context(ctx, "admin")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let (entries, expected_entries, stored) = if validate_only {
         (
             vec![entry(vec![part("user", Some("carol"))], vec![op(
@@ -265,7 +265,10 @@ async fn handle_reports_entry_results_and_obeys_validate_only(validate_only: boo
 #[tokio::test]
 async fn repeated_entity_answers_one_row_with_and_without_validate_only() {
     let version = 1;
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
     let row = |name: &str, code: i16, message: Option<&str>| {
         expected_entry(part("user", Some(name)), code, message.map(Into::into))
     };
@@ -279,7 +282,10 @@ async fn repeated_entity_answers_one_row_with_and_without_validate_only() {
     ]);
 
     for (validate_only, stored) in [(true, [None, None]), (false, [Some(1024.0), Some(4.0)])] {
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         let req = request(
             vec![
                 entry(vec![part("user", Some("dave"))], vec![op(

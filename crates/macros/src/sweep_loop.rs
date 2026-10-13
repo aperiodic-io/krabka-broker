@@ -1,9 +1,10 @@
 //! One cadence loop with native expressions and caller-owned sweep/shutdown blocks.
 
 use {
+    crate::meta::{expect_name, grouped_value},
     moxy::{
         ast::{Parse, ParseError, Parser, Token},
-        token::{Ident, Spanner, TokenStream},
+        token::{Spanner, TokenStream},
     },
     proc_macro::{Delimiter, Group, TokenStream as NativeTokenStream, TokenTree},
 };
@@ -20,19 +21,8 @@ const CLAUSES: [(&str, bool); 6] = [
 fn validate(input: &TokenStream) -> Result<(), ParseError> {
     let parser = Parser::from_tokens(input);
     for (expected, block) in CLAUSES {
-        let name = Ident::parse(&parser)?;
-        if name.text() != expected {
-            return Err(ParseError::new(
-                name.span(),
-                format!("expected {expected} clause"),
-            ));
-        }
-        let token = parser
-            .advance()
-            .ok_or_else(|| parser.error("expected grouped clause value"))?;
-        let group = token
-            .as_group()
-            .ok_or_else(|| ParseError::new(token.span(), "expected grouped clause value"))?;
+        expect_name(&parser, expected, &format!("expected {expected} clause"))?;
+        let group = grouped_value(&parser, "expected grouped clause value")?;
         if (block && !group.delim.is_brace())
             || (!block && (!group.delim.is_bracket() || group.tokens.is_empty()))
         {

@@ -70,13 +70,14 @@ pub(super) fn topic_refusal(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
             authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
             broker::Broker,
             test_support::{
-                configure_single_partition_transactions, start_broker_no_audit_with, test_ctx,
+                configure_single_partition_transactions, start_broker_no_audit_with,
                 topic_freeze_record,
             },
             txn::{
@@ -378,7 +379,10 @@ mod tests {
     }
 
     async fn anonymous_freeze_request(broker: &Broker, version: i16) -> AddPartitionsToTxnResponse {
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         handle(broker, freeze_case_request(version), version, &ctx)
             .await
             .expect("handle")

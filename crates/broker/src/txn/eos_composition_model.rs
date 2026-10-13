@@ -55,9 +55,8 @@ use {
         version::TxnVersion,
     },
     crate::{
-        coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
         handlers::fetch::{FetchWatermarks, compute_visibility_window},
-        model_check::run_bfs,
+        model_check::{assert_pinned_count, run_bfs},
     },
     krabka_log::{Offset, ProducerId},
     stateright::{Checker, Model, Property},
@@ -518,12 +517,12 @@ impl Model for EosModel {
     fn within_boundary(&self, s: &Self::State) -> bool { s.log.len() <= self.max_log }
 }
 
-pinned_model_runner! {
-    @checked
-    fn run(EosModel);
-    run_bfs, crate::model_check::assert_pinned_count;
-    MAX_DEPTH, TARGET_STATE_COUNT; properties_first;
-    |checker, label| {
+krabka_macros::model_runner! {
+
+
+    fn run(model: EosModel, label: &str, pinned_unique_states: usize)
+    [bfs = run_bfs, pin = assert_pinned_count, depth = MAX_DEPTH, states = TARGET_STATE_COUNT, order = "properties_first", checker = checker]
+    {
         assert2::assert!(
             checker.unique_state_count() < MAX_UNIQUE_STATES,
             "[{label}] unique bound exceeded ({})",

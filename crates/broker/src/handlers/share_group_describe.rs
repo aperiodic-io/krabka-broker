@@ -146,10 +146,11 @@ mod tests {
         super::*,
         crate::{
             broker::Broker,
-            handlers::group_heartbeat_test_support::{acl as group_acl, topic_with_partitions},
-            test_support::{
-                DenyAll, ShareApiSupport, peer, principal, start_share_broker, test_ctx,
+            handlers::{
+                group_heartbeat_test_support::{acl as group_acl, topic_with_partitions},
+                test_support as handler_fixture_support,
             },
+            test_support::{DenyAll, ShareApiSupport, start_share_broker},
         },
         assert2::assert,
         krabka_metadata::{AclOperation, ResourceType},
@@ -177,7 +178,10 @@ mod tests {
             .call()
             .await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
         let resp = handle(&broker, request(&["g1", "g2"]), version, &ctx)
             .await
             .expect("handle");
@@ -209,7 +213,10 @@ mod tests {
         let broker = broker_handle.broker_arc_for_test();
         broker.group_coordinator.mark_share("g1");
         let _actor = broker.group_coordinator.get_or_create_share("g1");
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
         let resp = handle(&broker, request(&["g1"]), version, &ctx)
             .await
             .expect("handle");
@@ -331,11 +338,11 @@ mod tests {
             .expect("ACLs and topics");
         seed_group(&broker, "g", &[visible]).await;
         seed_group(&broker, "h", &[visible, hidden]).await;
-        request_identity!(
-            (principal, peer, ctx),
-            principal("alice"),
-            client_id = "admin-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            client ["admin-client"];
+        };
         let req = ShareGroupDescribeRequest {
             group_ids: vec!["g".into(), "denied".into(), "h".into(), "missing".into()],
             include_authorized_operations: true,
@@ -398,9 +405,15 @@ mod tests {
     #[tokio::test]
     async fn handle_refuses_empty_and_foreign_group_ids() {
         let version = share_group_describe_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), share_allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_share_allow_all()];
+        };
         let _classic = broker.group_coordinator.get_or_create_classic("classic");
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
 
         let resp = handle(&broker, request(&["classic", ""]), version, &ctx)
             .await

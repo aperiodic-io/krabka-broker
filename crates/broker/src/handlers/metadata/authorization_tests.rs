@@ -12,7 +12,7 @@ use {
         broker::BrokerHandle,
         codes,
         handlers::{acl_wire::CLUSTER_RESOURCE_NAME, test_support::configured_topic_request},
-        test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
+        test_support::{dispatch_wire, start_broker_no_audit_with},
     },
     assert2::assert,
     krabka_metadata::{AclOperation, ResourceType},
@@ -133,11 +133,11 @@ async fn start(auto_create_topics_enable: bool) -> Fixture {
 impl Fixture {
     async fn metadata(&self, version: i16, request: &MetadataRequest) -> MetadataResponse {
         let shared = self.broker.broker_arc_for_test();
-        request_identity!(
-            (user, address, ctx),
-            principal(TESTER),
-            client_id = "metadata-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(user, address, ctx);
+            user [TESTER];
+            client ["metadata-client"];
+        };
         dispatch_wire(
             &shared,
             krabka_protocol::api_key::ApiKey::Metadata as i16,

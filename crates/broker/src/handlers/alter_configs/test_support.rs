@@ -10,9 +10,7 @@ use {
     crate::{
         authorizer::Authorizer,
         handlers::test_support::metadata_topic_record,
-        test_support::{
-            broker_registration, start_broker_with_authorizer as start_broker, test_ctx,
-        },
+        test_support::{broker_registration, start_broker_with_authorizer as start_broker},
     },
     krabka_metadata::MetadataRecord,
     krabka_protocol::owned::{
@@ -137,7 +135,10 @@ pub(super) async fn drive_many(
     let version = 2;
     let (broker_handle, _dir) = start_broker(authorizer).await;
     let broker = broker_handle.broker_arc_for_test();
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
     let req = AlterConfigsRequest {
         resources,
         validate_only: false,

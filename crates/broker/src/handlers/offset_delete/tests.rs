@@ -22,7 +22,7 @@ use {
             },
         },
         handlers::test_support::create_topic as create_topic_from_test_support,
-        test_support::{DenyAll, peer, start_group_broker_no_audit},
+        test_support::{DenyAll, start_group_broker_no_audit},
         time_util::now_ms,
     },
     assert2::check,
@@ -219,11 +219,11 @@ async fn offset_delete_matches_kafka_whole_responses() {
         },
     ];
 
-    request_identity!(
-        (principal, peer, ctx),
-        crate::test_support::principal("alice"),
-        client_id = "offset-delete-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        user ["alice"];
+        client ["offset-delete-client"];
+    };
     let version = offset_delete_response::MAX_VERSION;
     let before_ms = now_ms();
     for Case {

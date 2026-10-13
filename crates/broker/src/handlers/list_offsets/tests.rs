@@ -13,9 +13,7 @@ use {
         handlers::{
             list_offsets::test_support::test_context, test_support::configured_topic_request,
         },
-        test_support::{
-            DenyAll, peer, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
-        },
+        test_support::{empty_acl_image, start_broker_with_authorizer_no_audit as start_broker},
     },
     assert2::assert,
     bytes::BytesMut,
@@ -38,13 +36,13 @@ fn topic_describe_denied_yields_topic_authorization_failed_rows() {
         ListOffsetsPartitionResponse, ListOffsetsResponse, ListOffsetsTopicResponse,
     };
 
-    empty_acl_fixture!(
-        (authorizer, image),
-        (principal, peer, ctx),
-        crate::test_support::principal("ANONYMOUS"),
-        client_id = "client-a",
-        connection_id = "connection-a"
-    );
+    let (authorizer, image) = empty_acl_image();
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        user ["ANONYMOUS"];
+        client ["client-a"];
+        connection ["connection-a"];
+    };
     assert!(crate::handlers::acl_denied(
         &authorizer,
         &image,
@@ -95,11 +93,11 @@ macro_rules! answer_request {
 #[tokio::test]
 async fn denied_handler_preserves_topic_and_partition_response_fields() {
     let version = krabka_protocol::owned::list_offsets_response::MAX_VERSION;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        deny_all,
-        context(ctx, "alice")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] deny_all;
+        user ["alice"];
+    };
     let req = ListOffsetsRequest {
         replica_id: -1,
         isolation_level: 0,
@@ -185,13 +183,13 @@ async fn denied_topic_rows_are_appended_after_authorized_rows_regardless_of_requ
     ];
 
     for case in cases {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(DenyNamed(std::collections::HashSet::from([
-                case.denied
-            ]))))
-        );
-        test_ctx!(ctx, "alice");
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker(Arc::new(DenyNamed(std::collections::HashSet::from([
+                        case.denied
+                    ]))))];
+            user ["alice"];
+        };
 
         let req = ListOffsetsRequest {
             replica_id: -1,

@@ -199,6 +199,7 @@ fn described_classic(view: ClassicView) -> DescribedGroup {
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -208,8 +209,8 @@ mod tests {
                 acl_wire::operation_to_wire, authorized_operations::authorized_operations_bits,
             },
             test_support::{
-                DenyAll, KafkaErrorCode, allow_acl, peer, principal, request_context,
-                start_group_broker_no_audit, test_ctx,
+                self as broker_fixture_support, DenyAll, KafkaErrorCode, allow_acl, peer,
+                principal, request_context, start_group_broker_no_audit,
             },
         },
         assert2::assert,
@@ -274,7 +275,10 @@ mod tests {
         version: krabka_ids::ApiVersion,
         req: &DescribeGroupsRequest,
     ) -> DescribeGroupsResponse {
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         handle(broker, req.clone(), version.0, &ctx)
             .await
             .expect("handle")
@@ -406,7 +410,10 @@ mod tests {
                     .call(),
             ),
         ];
-        broker_fixture!((broker_handle, _dir, broker), group_allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_group_broker_no_audit] allow_all;
+        };
         let _ = broker.group_coordinator.get_or_create_consumer("next-gen");
 
         for (version, group, include_ops, expected) in rows {
@@ -499,7 +506,10 @@ mod tests {
     /// separates this row from `the_authorized_operations_bitfield_is_filled_only_on_opt_in`.
     #[tokio::test]
     async fn a_classic_group_is_projected_without_the_kip430_bitfield() {
-        broker_fixture!((broker_handle, _dir, broker), group_allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_group_broker_no_audit] allow_all;
+        };
         let _ = broker.group_coordinator.get_or_create_classic("classic-a");
 
         let resp = drive(&broker, VERSION, &request().call()).await;
@@ -538,7 +548,10 @@ mod tests {
         )
         .await;
 
-        request_identity!((p, peer), principal("admin"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["admin"];
+        };
         let expected = authorized_operations_bits(
             authorizer.as_ref(),
             &broker.controller.current_image(),

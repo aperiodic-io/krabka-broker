@@ -144,7 +144,11 @@ fn response(error_code: i16, error_message: Option<String>) -> ControllerRegistr
 #[cfg(test)]
 mod tests {
     use {
-        super::*, crate::test_support::principal,
+        super::*,
+        crate::{
+            authorizer as fixture_authorizers,
+            test_support::{self as broker_fixture_support, principal},
+        },
         krabka_protocol::owned::controller_registration_request::Listener,
         krabka_security::ListenerProtocol,
     };
@@ -172,12 +176,12 @@ mod tests {
     async fn a_controller_that_is_not_a_voter_registers() {
         use std::{net::SocketAddr, sync::Arc};
 
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::test_support::start_broker_with_authorizer(Arc::new(
-                crate::authorizer::AllowAllAuthorizer,
-            ))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_broker_with_authorizer(Arc::new(
+                        fixture_authorizers::AllowAllAuthorizer,
+                    ))];
+        };
         let principal = principal("controller");
         let peer: SocketAddr = "127.0.0.1:9093".parse().unwrap();
         let ctx = test_context(&principal, &peer);

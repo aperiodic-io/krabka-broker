@@ -40,9 +40,19 @@ use {
     krabka_protocol::{
         Decode as _, Encode as _, ProtocolError, UnknownTaggedFields,
         owned::{
+            add_raft_voter_request, allocate_producer_ids_request, alter_client_quotas_request,
+            alter_configs_request, alter_partition_reassignments_request,
+            alter_user_scram_credentials_request, create_acls_request,
+            create_delegation_token_request, create_partitions_request, create_topics_request,
             default_principal_data::{self, DefaultPrincipalData},
+            delete_acls_request, delete_topics_request, describe_quorum_request,
+            elect_leaders_request,
             envelope_request::EnvelopeRequest,
             envelope_response::EnvelopeResponse,
+            expire_delegation_token_request, incremental_alter_configs_request,
+            list_partition_reassignments_request, remove_raft_voter_request,
+            renew_delegation_token_request, unregister_broker_request,
+            unregister_controller_request, update_features_request,
         },
         primitives::string_bytes::put_nullable_string,
         tagged_fields::read_tagged_fields,
@@ -82,39 +92,7 @@ impl EnvelopeError {
     }
 }
 
-/// Declares the forwardable api keys with the request type each one carries,
-/// as the key list [`FORWARDABLE_API_KEYS`] and the body check
-/// [`embedded_body_decodes`] that `EnvelopeUtils` runs through
-/// `RequestContext.parseRequest`.
-macro_rules! forwardable_apis {
-    ($($key:literal => $module:ident::$request:ident,)*) => {
-        /// `ApiKeys.forwardable`, read out of `kafka-clients-4.3.1.jar`, plus
-        /// `UnregisterController`, which Kafka trunk's `ApiKeys` declares
-        /// forwardable.
-        ///
-        /// KIP-590 lets a broker wrap only these api keys, and
-        /// `EnvelopeUtils.handleEnvelopeRequest` refuses any other embedded key
-        /// with `InvalidRequestException`. Accepting a key outside the set would
-        /// let a forwarding hop launder a request the client could not have sent
-        /// itself.
-        const FORWARDABLE_API_KEYS: &[ApiKeyCode] = &[$($key,)*];
-
-        /// Whether `body` decodes as the request of `api_key` at `version`.
-        ///
-        /// `RequestContext.parseRequest` decodes the body and nothing checks
-        /// what is left after it, so neither does this. A key outside the
-        /// forwardable set decodes as nothing.
-        fn embedded_body_decodes(api_key: ApiKeyCode, version: ApiVersion, body: &[u8]) -> bool {
-            let mut cur = body;
-            match api_key {
-                $($key => krabka_protocol::owned::$module::$request::decode(&mut cur, version).is_ok(),)*
-                _ => false,
-            }
-        }
-    };
-}
-
-forwardable_apis! {
+krabka_macros::forwardable_requests! {
     19 => create_topics_request::CreateTopicsRequest, // CreateTopics
     20 => delete_topics_request::DeleteTopicsRequest, // DeleteTopics
     30 => create_acls_request::CreateAclsRequest, // CreateAcls

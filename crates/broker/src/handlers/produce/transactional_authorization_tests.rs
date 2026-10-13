@@ -18,7 +18,7 @@ use {
         codes,
         handlers::test_support::{StartedBroker, configured_topic_request},
         test_support::{
-            KafkaErrorCode, decode_response, dispatch_context, encode_request, peer, principal,
+            KafkaErrorCode, decode_response, dispatch_context, encode_request,
             repeated_records_batch, start_transaction_grant_broker,
         },
     },
@@ -83,11 +83,11 @@ async fn boot() -> StartedBroker {
 }
 
 async fn create_topic(broker: &Broker, name: &str) {
-    request_identity!(
-        (admin, address, ctx),
-        principal(ADMIN_GRANTS),
-        client_id = "produce-txn-authz-admin"
-    );
+    krabka_macros::request_test_identity! {
+        bind(admin, address, ctx);
+        user [ADMIN_GRANTS];
+        client ["produce-txn-authz-admin"];
+    };
     let request = configured_topic_request().topic(name).call();
     dispatch_context(
         broker,
@@ -109,11 +109,11 @@ async fn create_topic(broker: &Broker, name: &str) {
 async fn open_transaction(broker: &Broker) -> TransactionalBatchSetup {
     use crate::handlers::init_producer_id::handle as init_producer_id_handle;
 
-    request_identity!(
-        (grantee, address, ctx),
-        principal("TransactionalId:Write"),
-        client_id = "produce-txn-authz-open"
-    );
+    krabka_macros::request_test_identity! {
+        bind(grantee, address, ctx);
+        user ["TransactionalId:Write"];
+        client ["produce-txn-authz-open"];
+    };
 
     let init_request = InitProducerIdRequest {
         transactional_id: Some(TXN_ID.to_string()),
@@ -219,11 +219,11 @@ async fn drive(
         .maybe_transactional_id(setup.transactional_id)
         .records(setup.records)
         .call();
-    request_identity!(
-        (user, address, ctx),
-        principal(grants),
-        client_id = "produce-txn-authz"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user [grants];
+        client ["produce-txn-authz"];
+    };
     let request_bytes = encode_request(&request, version);
     let response_bytes = handle(broker, version, &request_bytes, request_bytes.clone(), &ctx)
         .await

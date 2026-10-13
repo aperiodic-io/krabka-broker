@@ -18,8 +18,8 @@ use {
             test_support::replicated_partition,
         },
         test_support::{
-            DenyAll, broker_registration, finalize_elr_version_on,
-            start_broker_with_authorizer as start_broker, test_ctx,
+            broker_registration, finalize_elr_version_on,
+            start_broker_with_authorizer as start_broker,
         },
     },
     assert2::{assert, check},
@@ -28,7 +28,6 @@ use {
         TopicRecord,
     },
     krabka_raft::NodeId,
-    std::sync::Arc,
     uuid::Uuid,
 };
 
@@ -147,10 +146,17 @@ async fn seed_cancellable_partition(broker: &Broker) {
 #[tokio::test]
 async fn a_cancel_publishes_the_eligible_leader_state_the_revert_implies() {
     let version = 1;
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker] allow_all;
+        ready controller_leader;
+    };
     finalize_elr_version_on(&broker).await;
     seed_cancellable_partition(&broker).await;
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
 
     let resp = handle(
         &broker,
@@ -182,11 +188,11 @@ async fn a_cancel_publishes_the_eligible_leader_state_the_revert_implies() {
 #[tokio::test]
 async fn handle_preserves_unknown_partition_response_shape() {
     let version = 1;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        allow_all,
-        context(ctx, "admin")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
 
     let resp = handle(
         &broker,
@@ -228,11 +234,11 @@ async fn handle_denies_cluster_alter_with_top_level_cluster_authorization_failed
             ReplicationFactorPolicy::Maintain,
             ReplicationFactorPolicy::PermitChange,
         ] {
-            broker_fixture!(
-                (broker_handle, _dir, broker),
-                deny_all,
-                context(ctx, "admin")
-            );
+            krabka_macros::broker_test_setup! {
+                bind(broker_handle, _dir, broker, ctx);
+                boot [start_broker] deny_all;
+                user ["admin"];
+            };
 
             let resp = handle(
                 &broker,
@@ -272,9 +278,16 @@ async fn handle_denies_cluster_alter_with_top_level_cluster_authorization_failed
 #[tokio::test]
 async fn handle_submits_successful_reassignment_records() {
     let version = 1;
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker] allow_all;
+        ready controller_leader;
+    };
     seed_reassignable_partition(&broker).await;
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
 
     let resp = handle(
         &broker,
@@ -312,7 +325,11 @@ async fn handle_submits_successful_reassignment_records() {
 #[tokio::test]
 async fn handle_refuses_a_frozen_reassignment_without_mutating_the_partition() {
     let version = 1;
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker] allow_all;
+        ready controller_leader;
+    };
     seed_reassignable_partition(&broker).await;
     broker
         .controller
@@ -328,7 +345,10 @@ async fn handle_refuses_a_frozen_reassignment_without_mutating_the_partition() {
         .partition("orders", 7)
         .expect("seeded partition")
         .clone();
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
 
     let response = handle(
         &broker,

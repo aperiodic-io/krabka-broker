@@ -6,23 +6,41 @@
 //! and compares each state, so the representation has to be canonical.
 
 use {
-    crate::coordinator::unified::actor::reconciliation_model_support::{
-        group_projection, member_projection, model_actions,
+    crate::coordinator::unified::{
+        INITIAL_GROUP_EPOCH,
+        actor::reconciliation_model_support::{
+            MemberHeartbeat, assert_member_epochs, owned_to_vec, parts_of,
+        },
+        consumer_state::{GroupState, MemberState},
+        persistence_next_gen::MemberAssignmentState,
     },
     krabka_log::Offset,
     std::collections::BTreeMap,
 };
 
-member_projection! { pub(super) struct MemberProj {
+#[krabka_macros::reconciliation_fields(member)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, krabka_macros::ReconciliationMember)]
+pub(super) struct MemberProj {
     /// `(partition, assignment epoch)` of every held partition, sorted.
-    assignment_epochs: Vec<(i32, i32)>,
-} }
+    #[reconciliation(extra)]
+    pub(super) assignment_epochs: Vec<(i32, i32)>,
+    /// The member's sorted target assignment.
+    pub(super) target: Vec<i32>,
+}
 
-group_projection! { pub(super) struct CgcState {
-    members: Vec<MemberProj>,
+#[krabka_macros::reconciliation_fields(group)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, krabka_macros::ReconciliationGroup)]
+pub(super) struct CgcState {
+    /// Coordinator-side members, sorted by id.
+    pub(super) members: Vec<MemberProj>,
     /// Modeled per-partition committed offsets, sorted.
-    committed: Vec<(i32, Offset)>,
-} }
+    #[reconciliation(extra)]
+    pub(super) committed: Vec<(i32, Offset)>,
+}
+
+pub(super) fn member<'a>(state: &'a CgcState, id: &str) -> Option<&'a MemberProj> {
+    state.members.iter().find(|member| member.id == id)
+}
 
 /// Which epoch a member presents on an `OffsetCommit`: its current epoch (the
 /// legitimate owner), one behind (a zombie from before the last rebalance), or
@@ -35,9 +53,17 @@ pub(super) enum EpochKind {
     Forward,
 }
 
-model_actions! { pub(super) enum CgcAction {
+#[derive(Clone, PartialEq, Eq, Hash, Debug, krabka_macros::ReconciliationAction)]
+pub(super) enum CgcAction {
+    Join(String),
+    Leave(String),
+    Heartbeat(String),
+    /// A heartbeat without owned partitions, as the unchanged Java client sends.
+    Keepalive(String),
+    ClientAdd(String, i32),
+    ClientRevoke(String, i32),
     Commit(String, i32, EpochKind), // (member, partition, presented-epoch) — fenced commit
-} }
+}
 
 pub(super) fn committed_map(s: &CgcState) -> BTreeMap<i32, Offset> {
     s.committed.iter().copied().collect()

@@ -186,12 +186,15 @@ pub(crate) async fn handle(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
             authorizer::{AllowAllAuthorizer, Authorizer},
             broker::{Broker, BrokerHandle},
-            test_support::{ControllerPeerAllowed, DenyAll, broker_registration, peer, principal},
+            test_support::{
+                self as broker_fixture_support, ControllerPeerAllowed, DenyAll, broker_registration,
+            },
         },
         assert2::assert,
         krabka_metadata::{AclOperation, BrokerEndpoint, BrokerRegistrationRecord, MetadataRecord},
@@ -205,7 +208,7 @@ mod tests {
         test_context ["admin-client"];
     }
 
-    use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
+    use crate::test_support::start_broker_with_authorizer_no_audit as start_broker;
 
     fn request(include_ops: bool) -> DescribeClusterRequest {
         DescribeClusterRequest {
@@ -247,7 +250,10 @@ mod tests {
         let (broker_handle, _dir) = start_broker(Arc::new(ControllerPeerAllowed(DenyAll))).await;
         seed_broker(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
 
         let resp = handle(&broker, request(false), VERSION, &ctx)
             .await
@@ -267,7 +273,10 @@ mod tests {
         let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_broker(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let resp = handle(&broker, request(false), VERSION, &ctx)
             .await
@@ -325,11 +334,11 @@ mod tests {
         ];
 
         for case in cases {
-            broker_fixture!(
-                (broker_handle, _dir, broker),
-                deny_all,
-                context(ctx, "alice")
-            );
+            krabka_macros::broker_test_setup! {
+                bind(broker_handle, _dir, broker, ctx);
+                boot [start_broker] deny_all;
+                user ["alice"];
+            };
             let req = DescribeClusterRequest {
                 endpoint_type: case.endpoint_type,
                 ..Default::default()
@@ -359,8 +368,12 @@ mod tests {
     /// 0x090a0b0c0d0e0f10L).toString()` produces for the same 16 bytes.
     #[tokio::test]
     async fn reports_cluster_id_in_kafka_base64_form() {
-        known_cluster_fixture!((known_cluster_id, broker_handle, _dir, broker));
-        test_ctx!(ctx, "describer");
+        let known_cluster_id = uuid::Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [broker_fixture_support::start_broker_with(|config| config.cluster_id = Some(known_cluster_id))];
+            user ["describer"];
+        };
 
         let resp = handle(&broker, request(false), VERSION, &ctx)
             .await
@@ -378,11 +391,11 @@ mod tests {
     #[tokio::test]
     async fn the_authorized_operations_bitfield_is_filled_only_on_opt_in() {
         let authorizer = Arc::new(AllowAllAuthorizer);
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::clone(&authorizer) as _)
-        );
-        test_ctx!(ctx, "admin");
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker(Arc::clone(&authorizer) as _)];
+            user ["admin"];
+        };
 
         let resp = handle(&broker, request(true), VERSION, &ctx)
             .await
@@ -423,7 +436,10 @@ mod tests {
             .await
             .expect("seed ACL");
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
 
         let resp = handle(&broker, request(true), VERSION, &ctx)
             .await
@@ -448,7 +464,10 @@ mod tests {
         let broker = broker_handle.broker_arc_for_test();
         broker.liveness.record_fenced_heartbeat(42).await;
         assert!(broker.liveness.apply_fencing(42, true, true).await);
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let response = handle(&broker, request(false), VERSION, &ctx)
             .await
@@ -544,7 +563,10 @@ mod tests {
             .await
             .expect("seed broker registrations");
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!((p, peer), principal("admin"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["admin"];
+        };
 
         for ListenerCase {
             listener,

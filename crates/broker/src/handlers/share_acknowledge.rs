@@ -294,10 +294,7 @@ mod tests {
                 StartedBroker, create_topic as create_topic_from_test_support,
             },
             share_partition::session::FetchPartitions,
-            test_support::{
-                ShareApiSupport, dispatch_wire, peer, principal, start_broker_with,
-                start_share_broker, test_ctx,
-            },
+            test_support::{ShareApiSupport, dispatch_wire, start_broker_with, start_share_broker},
         },
         assert2::assert,
         krabka_protocol::{
@@ -342,7 +339,10 @@ mod tests {
             .call()
             .await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "alice");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["alice"];
+        };
 
         let resp = handle(&broker, request(ProtoUuid([7; 16]), &[0]), version, &ctx)
             .await
@@ -381,11 +381,11 @@ mod tests {
         topic_id: ProtoUuid,
     ) -> ShareAcknowledgeResponse {
         let shared = broker.broker_arc_for_test();
-        request_identity!(
-            (principal, peer, ctx),
-            principal("alice"),
-            client_id = "client-a"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            client ["client-a"];
+        };
         let id = uuid::Uuid::from_bytes(topic_id.0);
         shared
             .share_partition_leaders

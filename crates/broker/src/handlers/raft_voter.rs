@@ -73,7 +73,11 @@ pub(crate) fn add_voter_request(
 #[cfg(test)]
 macro_rules! check_denied_reconfiguration {
     (($handle:ident, $directory:ident, $broker:ident, $context:ident, $response:ident), $version:expr $(, $message:expr)?) => {
-        broker_fixture!(($handle, $directory, $broker), deny_all, context($context, "alice"));
+        krabka_macros::broker_test_setup! {
+            bind($handle, $directory, $broker, $context);
+            boot [start_broker] deny_all;
+            user ["alice"];
+        };
         let $response = answer(&$broker, $version, &request(2), &$context).await;
         assert!($response.error_code == crate::codes::CLUSTER_AUTHORIZATION_FAILED);
         $(assert!($response.error_message.as_deref() == Some($message));)?
@@ -99,11 +103,11 @@ macro_rules! check_invalid_voter {
         $response_type:ident,
         $message:expr
     ) => {
-        broker_fixture!(
-            ($handle, $directory, $broker),
-            allow_all,
-            context($context, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind($handle, $directory, $broker, $context);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let mut $request = request(-7);
         stamp_voter_request!($request, $broker);
         let $response = answer(&$broker, $version, &$request, &$context).await;

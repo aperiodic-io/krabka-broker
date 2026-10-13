@@ -89,7 +89,10 @@ mod tests {
             authorizer::AllowAllAuthorizer,
             broker::Broker,
             handlers::{RequestContext, join_group::handle as join_group_handle},
-            test_support::{DenyAll, request_context, start_group_broker_no_audit},
+            test_support::{
+                self as broker_fixture_support, DenyAll, request_context,
+                start_group_broker_no_audit,
+            },
         },
         assert2::assert,
         bytes::Bytes,
@@ -175,20 +178,17 @@ mod tests {
 
     use {
         super::*,
-        crate::{
-            handlers::group_read_denied,
-            test_support::{peer, principal},
-        },
+        crate::{handlers::group_read_denied, test_support::empty_acl_image},
     };
 
     #[test]
     fn group_read_denied_yields_group_authorization_failed() {
-        empty_acl_fixture!(
-            (authorizer, image),
-            (principal, peer, ctx),
-            crate::test_support::principal("ANONYMOUS"),
-            client_id = "sync-client"
-        );
+        let (authorizer, image) = empty_acl_image();
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["ANONYMOUS"];
+            client ["sync-client"];
+        };
 
         assert!(group_read_denied(&authorizer, &image, &ctx, "g"));
     }
@@ -267,7 +267,11 @@ mod tests {
         let (denied_handle, _denied_dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let (allowed_handle, _allowed_dir) =
             start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
-        request_identity!((principal, peer, ctx), principal("alice"), context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            context [context];
+        };
 
         for r in rows {
             let broker = if r.allowed {
@@ -303,7 +307,11 @@ mod tests {
         let version = sync_group_response::MAX_VERSION;
         let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!((principal, peer, ctx), principal("alice"), context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            context [context];
+        };
         let req = sync_request()
             .member_id("member-a".into())
             .generation_id(1)
@@ -326,8 +334,15 @@ mod tests {
     #[tokio::test]
     async fn handle_success_preserves_assignment_and_kip559_protocol_fields() {
         let version = sync_group_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-        request_identity!((principal, peer, ctx), principal("alice"), context);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_group_broker_no_audit] allow_all;
+        };
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            context [context];
+        };
         let JoinedMember {
             member_id,
             generation_id,

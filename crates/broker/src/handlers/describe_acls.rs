@@ -160,6 +160,7 @@ fn build_filter(req: &DescribeAclsRequest) -> Result<AclBindingFilter, UnknownEl
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -174,11 +175,9 @@ mod tests {
                 },
                 acl_wire::PATTERN_MATCHING_FIXTURE,
             },
-            test_support::DenyAll,
         },
         assert2::{assert, check},
         krabka_metadata::AclOperation,
-        std::sync::Arc,
     };
     const VERSION: i16 = 3;
 
@@ -240,7 +239,7 @@ mod tests {
 
     use crate::{
         handlers::acl_test_support::{configured_authorizer, seed_acls},
-        test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx},
+        test_support::start_broker_with_authorizer_no_audit as start_broker,
     };
 
     #[test]
@@ -344,11 +343,11 @@ mod tests {
 
     #[tokio::test]
     async fn handle_denies_cluster_describe() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            deny_all,
-            context(ctx, "alice")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] deny_all;
+            user ["alice"];
+        };
 
         let resp = describe_alice_orders(&broker, &ctx);
 
@@ -381,11 +380,11 @@ mod tests {
     /// principal that would be denied gets the same close.
     #[tokio::test]
     async fn handle_closes_the_connection_on_an_unknown_element() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            deny_all,
-            context(ctx, "alice")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] deny_all;
+            user ["alice"];
+        };
         let mut req = request(Some("orders"), Some("User:alice"), OPERATION_READ);
         req.operation = 0;
 
@@ -483,7 +482,10 @@ mod tests {
         )
         .await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let all: &[ListedPattern] = &[
             ListedPattern {

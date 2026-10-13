@@ -3632,6 +3632,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "stateright",
  "tokio",
  "tracing",
  "tracing-subscriber",

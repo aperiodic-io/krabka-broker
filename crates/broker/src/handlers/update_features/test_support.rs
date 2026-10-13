@@ -12,7 +12,7 @@ use {
         broker::{Broker, BrokerHandle},
         features::{ELR_VERSION, METADATA_VERSION},
         handlers::RequestContext,
-        test_support::{peer, principal, request_context, start_broker_no_audit_with},
+        test_support::{request_context, start_broker_no_audit_with},
     },
     krabka_protocol::owned::{
         update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
@@ -86,7 +86,11 @@ pub(super) async fn call(
     version: i16,
 ) -> UpdateFeaturesResponse {
     let broker = broker_handle.broker_arc_for_test();
-    request_identity!((principal, peer, ctx), principal("admin"), context);
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        user ["admin"];
+        context [context];
+    };
     answer(&broker, req, version, &ctx).await
 }
 

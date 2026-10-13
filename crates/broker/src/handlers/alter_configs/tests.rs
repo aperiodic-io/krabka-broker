@@ -28,7 +28,7 @@ use {
                 assert_dispatch_response, duplicate_config_resource_response, ordered_rows,
             },
         },
-        test_support::{DenyAll, start_broker_with_authorizer as start_broker, test_ctx},
+        test_support::{DenyAll, start_broker_with_authorizer as start_broker},
         throttle::LEADER_THROTTLED_RATE_KEY,
     },
     assert2::{assert, check},
@@ -43,7 +43,11 @@ use {
 /// including both occurrences of a duplicate resource.
 #[tokio::test]
 async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
-    broker_fixture!((handle, _dir, broker), allow_all, context(ctx, "admin"));
+    krabka_macros::broker_test_setup! {
+        bind(handle, _dir, broker, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let duplicate_topic = duplicate_config_resource_response(RESOURCE_TYPE_TOPIC, "duplicate");
     let rows = [
         (

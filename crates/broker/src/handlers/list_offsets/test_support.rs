@@ -4,8 +4,11 @@
 use {
     super::sentinels::UNKNOWN_EPOCH,
     crate::{
-        broker::BrokerHandle, codes, config::RemoteStorageBackend,
-        test_support::start_broker_no_audit_with, testing::list_offsets_request,
+        broker::BrokerHandle,
+        codes,
+        config::RemoteStorageBackend,
+        test_support::{start_broker_no_audit, start_broker_no_audit_with},
+        testing::list_offsets_request,
     },
     assert2::assert,
     krabka_protocol::owned::{
@@ -58,6 +61,19 @@ pub(super) struct ClientBroker<Dirs> {
     pub(super) broker: BrokerHandle,
     pub(super) client: krabka_client_core::Client,
     pub(super) dirs: Dirs,
+}
+
+/// A default local topic whose log is ready for timestamp and sentinel queries.
+pub(super) async fn local_topic(topic: &str) -> ClientBroker<tempfile::TempDir> {
+    let (broker, directory) = start_broker_no_audit().await;
+    let client = client_for(&broker).await;
+    create_topic(&client, topic, Vec::new()).await;
+    broker.wait_until_partition_present(topic, 0).await;
+    ClientBroker {
+        broker,
+        client,
+        dirs: directory,
+    }
 }
 
 /// A topic whose remote-storage configuration has reached the local log.

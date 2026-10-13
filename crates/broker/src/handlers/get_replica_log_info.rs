@@ -142,10 +142,18 @@ mod tests {
     use {
         super::*,
         crate::{
+            authorizer as fixture_authorizers,
             log_dir::partition_dir,
-            test_support::{encode_request, peer, spawn_standalone_partition},
+            test_support::{
+                self as broker_fixture_support, empty_acl_image, encode_request,
+                spawn_standalone_partition,
+            },
         },
         assert2::assert,
+        krabka_protocol::owned::{
+            get_replica_log_info_request::{self, GetReplicaLogInfoRequest, TopicPartitions},
+            get_replica_log_info_response::GetReplicaLogInfoResponse,
+        },
     };
 
     /// A locally hosted partition answers with its cached
@@ -155,22 +163,17 @@ mod tests {
     #[tokio::test]
     async fn hosted_partition_reports_current_leader_epoch() {
         use {
-            crate::test_support::{peer, principal},
             krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord},
-            krabka_protocol::owned::{
-                get_replica_log_info_request::{self, GetReplicaLogInfoRequest, TopicPartitions},
-                get_replica_log_info_response::GetReplicaLogInfoResponse,
-            },
             std::sync::{Arc, atomic::Ordering},
         };
 
         let topic_uuid = uuid::Uuid::from_u128(0xABCD);
-        broker_fixture!(
-            (broker_handle, dir, broker),
-            crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(
-                crate::authorizer::AllowAllAuthorizer
-            ),)
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, dir, broker);
+            boot [broker_fixture_support::start_broker_with_authorizer_no_audit(Arc::new(
+                        fixture_authorizers::AllowAllAuthorizer
+                    ),)];
+        };
 
         // Seed the topic so the handler resolves topic_id → name.
         broker
@@ -219,11 +222,11 @@ mod tests {
         };
         let req_buf = encode_request(&req, version);
 
-        request_identity!(
-            (p, peer, ctx),
-            principal("admin"),
-            client_id = "inter-broker"
-        );
+        krabka_macros::request_test_identity! {
+            bind(p, peer, ctx);
+            user ["admin"];
+            client ["inter-broker"];
+        };
         let bytes = handle(&broker, version, &req_buf, &ctx).expect("handle");
         let mut cur: &[u8] = &bytes;
         let resp = GetReplicaLogInfoResponse::decode(&mut cur, version).unwrap();
@@ -244,18 +247,13 @@ mod tests {
     /// `CLUSTER_AUTHORIZATION_FAILED`.
     #[test]
     fn cluster_action_denied_yields_cluster_authorization_failed() {
-        use krabka_protocol::owned::{
-            get_replica_log_info_request::{self, GetReplicaLogInfoRequest, TopicPartitions},
-            get_replica_log_info_response::GetReplicaLogInfoResponse,
+        let (authorizer, image) = empty_acl_image();
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["ANONYMOUS"];
+            client ["client-a"];
+            connection ["connection-a"];
         };
-
-        empty_acl_fixture!(
-            (authorizer, image),
-            (principal, peer, ctx),
-            crate::test_support::principal("ANONYMOUS"),
-            client_id = "client-a",
-            connection_id = "connection-a"
-        );
 
         assert!(cluster_action_denied(&authorizer, &image, &ctx));
 

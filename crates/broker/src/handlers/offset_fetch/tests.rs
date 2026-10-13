@@ -16,7 +16,10 @@ use {
             classic_state::OffsetEntry,
             regex_resolver::no_topic_regex_resolver,
         },
-        test_support::{dispatch_wire, peer, principal, start_group_broker_no_audit},
+        handlers::test_support::allow_all_authorizer,
+        test_support::{
+            self as broker_fixture_support, dispatch_wire, start_group_broker_no_audit,
+        },
         time_util::now_ms,
     },
     assert2::assert,
@@ -73,6 +76,14 @@ async fn seed_committed_offset(
     rx.await.expect("UpdateCommitted ack");
 }
 
+/// Retain broker resources after the group actor acknowledges its default offset.
+async fn start_seeded_offset_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+    let (handle, directory) = start_group_broker_no_audit(allow_all_authorizer()).await;
+    let broker = handle.broker_arc_for_test();
+    seed_committed_offset().broker(&broker).call().await;
+    (handle, directory, broker)
+}
+
 fn named_topic_request(group: &str, topic: &str, partitions: Vec<i32>) -> OffsetFetchRequest {
     OffsetFetchRequest {
         group_id: group.into(),
@@ -94,10 +105,13 @@ fn named_topic_request(group: &str, topic: &str, partitions: Vec<i32>) -> Offset
 #[tokio::test]
 async fn named_topic_fetch_returns_committed_offset() {
     const VERSION: i16 = 7; // legacy single-group path (< 8)
-    broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-    seed_committed_offset().broker(&broker).call().await;
+    let (broker_handle, _dir, broker) = start_seeded_offset_broker().await;
 
-    request_identity!((p, peer, ctx), principal("admin"), client_id = "consumer");
+    krabka_macros::request_test_identity! {
+        bind(p, peer, ctx);
+        user ["admin"];
+        client ["consumer"];
+    };
     let req = named_topic_request("grp", "orders", vec![0]);
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
@@ -209,7 +223,11 @@ async fn fetch(
     version: i16,
     req: &OffsetFetchRequest,
 ) -> krabka_protocol::owned::offset_fetch_response::OffsetFetchResponse {
-    request_identity!((p, peer, ctx), principal("admin"), client_id = "consumer");
+    krabka_macros::request_test_identity! {
+        bind(p, peer, ctx);
+        user ["admin"];
+        client ["consumer"];
+    };
     // The response shape changes with the version (KIP-516 moves it into
     // `groups[]` at v8), so this reads it back off the wire.
     dispatch_wire(
@@ -263,8 +281,7 @@ async fn require_stable_reports_unstable_offsets_on_each_wire_shape(
 async fn a_mark_for_records_below_an_applied_marker_does_not_strand_the_partition() {
     const VERSION: i16 = 7;
     const PRODUCER_ID: i64 = 91;
-    broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-    seed_committed_offset().broker(&broker).call().await;
+    let (broker_handle, _dir, broker) = start_seeded_offset_broker().await;
 
     let request = OffsetFetchRequest {
         require_stable: true,
@@ -1047,7 +1064,10 @@ async fn offset_fetch_creates_no_group_and_checks_the_member_epoch() {
     ];
 
     for row in rows {
-        broker_fixture!((broker_handle, _dir, broker), group_allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_group_broker_no_audit] allow_all;
+        };
         let epoch = join_consumer_group(&broker, "grp", "m1").await;
         seed_committed_offset().broker(&broker).call().await;
 
@@ -1088,7 +1108,10 @@ async fn offset_fetch_creates_no_group_and_checks_the_member_epoch() {
 /// The legacy single-group shape (v0-v7) creates no group for an unknown id.
 #[tokio::test]
 async fn legacy_offset_fetch_creates_no_group() {
-    broker_fixture!((broker_handle, _dir, broker), group_allow_all);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [broker_fixture_support::start_group_broker_no_audit] allow_all;
+    };
     let request = named_topic_request("typo", "orders", vec![0]);
     let response = fetch(&broker, 7, &request).await;
     assert!(response.topics[0].partitions[0].committed_offset == -1);
@@ -1099,8 +1122,7 @@ async fn legacy_offset_fetch_creates_no_group() {
 /// Exercise the same transaction phases against both KIP-447 wire shapes.
 async fn require_stable(version: i16, shape: RequireStableShape) {
     const PRODUCER_ID: i64 = 91;
-    broker_fixture!((broker_handle, _dir, broker), group_allow_all);
-    seed_committed_offset().broker(&broker).call().await;
+    let (broker_handle, _dir, broker) = start_seeded_offset_broker().await;
     seed_committed_offset()
         .broker(&broker)
         .partition(1)

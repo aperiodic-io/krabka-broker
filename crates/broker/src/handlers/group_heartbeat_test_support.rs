@@ -1,7 +1,7 @@
 //! Shared group-handler fixtures and subscription authorization cases.
 
 use {
-    crate::test_support::principal as make_principal,
+    crate::{test_support as broker_fixture_support, test_support::principal as make_principal},
     assert2::assert,
     krabka_metadata::{
         AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
@@ -190,15 +190,20 @@ pub(super) fn topic_with_partitions(
 /// The SASL/PLAIN principal `User:alice` that the ACLs above name.
 pub(super) fn alice() -> krabka_security::Principal { sasl_principal("alice") }
 
+/// The authenticated user and host used together by subscription ACL probes.
+pub(super) fn alice_peer() -> (krabka_security::Principal, std::net::SocketAddr) {
+    (alice(), peer())
+}
+
 /// Kafka's explicit-name Describe check, shared by consumer and share heartbeats.
 pub(super) fn subscribed_names_describe_denied_table() {
     let authorizer = acl_authorizer();
-    request_identity!(
-        (principal, peer, ctx),
-        alice(),
-        client_id = "c",
-        address = crate::test_support::peer()
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        identity [alice()];
+        address [broker_fixture_support::peer()];
+        client ["c"];
+    };
     for (label, granted, names, expected_denied) in [
         ("no subscription", &[][..], None, false),
         ("empty subscription", &[][..], Some(&[][..]), false),

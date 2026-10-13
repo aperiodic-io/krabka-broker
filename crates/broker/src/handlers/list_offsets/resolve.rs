@@ -678,26 +678,22 @@ pub(super) async fn resolve_partition(
 mod tests {
     use crate::{
         broker::BrokerHandle,
-        handlers::list_offsets::test_support::{ClientBroker, remote_topic, test_context},
+        handlers::list_offsets::test_support::{
+            ClientBroker, local_topic, remote_topic, test_context,
+        },
         partition::Partition,
     };
     mod timestamp_visibility;
 
     use {
         super::*,
-        crate::{
-            handlers::list_offsets::{
-                handle,
-                sentinels::{
-                    EARLIEST_LOCAL_TIMESTAMP, EARLIEST_PENDING_UPLOAD_TIMESTAMP,
-                    EARLIEST_TIMESTAMP, LATEST_TIERED_TIMESTAMP, LATEST_TIMESTAMP, MAX_TIMESTAMP,
-                },
-                test_support::{
-                    client_for, create_topic, decode_response, encode_request, list_one,
-                    list_one_at_epoch,
-                },
+        crate::handlers::list_offsets::{
+            handle,
+            sentinels::{
+                EARLIEST_LOCAL_TIMESTAMP, EARLIEST_PENDING_UPLOAD_TIMESTAMP, EARLIEST_TIMESTAMP,
+                LATEST_TIERED_TIMESTAMP, LATEST_TIMESTAMP, MAX_TIMESTAMP,
             },
-            test_support::test_ctx,
+            test_support::{decode_response, encode_request, list_one, list_one_at_epoch},
         },
         assert2::assert,
         krabka_protocol::owned::create_topics_request::CreatableTopicConfig,
@@ -715,7 +711,11 @@ mod tests {
         const CURRENT_EPOCH: i32 = 3;
         const RECORDS: usize = 4;
 
-        list_offsets_topic_fixture!((broker, _dir, client), TOPIC);
+        let ClientBroker {
+            broker,
+            client,
+            dirs: _dir,
+        } = local_topic(TOPIC).await;
         broker
             .produce_records_for_test(TOPIC, 0, RECORDS)
             .await
@@ -784,7 +784,11 @@ mod tests {
     async fn non_tiered_sentinels_use_ordinary_earliest_and_unknown_remote_offsets() {
         const TOPIC: &str = "list-offsets-local";
 
-        list_offsets_topic_fixture!((broker, _dir, client), TOPIC);
+        let ClientBroker {
+            broker,
+            client,
+            dirs: _dir,
+        } = local_topic(TOPIC).await;
         broker
             .produce_records_for_test(TOPIC, 0, 8)
             .await
@@ -1049,7 +1053,10 @@ mod tests {
         version: i16,
     ) -> ListOffsetsPartitionResponse {
         let broker_arc = broker.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         let req = encode_request(
             &krabka_protocol::owned::list_offsets_request::ListOffsetsRequest {
                 replica_id: -1,
@@ -1227,7 +1234,11 @@ mod tests {
         const READ_UNCOMMITTED: i8 = 0;
         const READ_COMMITTED: i8 = 1;
 
-        list_offsets_topic_fixture!((broker, _dir, client), TOPIC);
+        let ClientBroker {
+            broker,
+            client,
+            dirs: _dir,
+        } = local_topic(TOPIC).await;
         let broker_arc = broker.broker_arc_for_test();
         let partition = broker_arc
             .partitions

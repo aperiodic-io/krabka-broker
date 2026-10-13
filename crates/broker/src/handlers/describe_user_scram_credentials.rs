@@ -220,16 +220,12 @@ mod tests {
             ),
             $authorizer:expr
         ) => {
-            broker_fixture!(
-                ($handle, $directory, $broker),
-                crate::test_support::start_broker_with_authorizer($authorizer)
-            );
-            request_identity!(
-                ($principal, $peer, $context),
-                crate::test_support::principal("alice"),
-                client_id = "scram-describe-test",
-                address = crate::test_support::peer()
-            );
+            krabka_macros::broker_test_setup! {
+                bind($handle, $directory, $broker, $principal, $peer, $context);
+                boot [crate::test_support::start_broker_with_authorizer($authorizer)];
+                user ["alice"];
+                client ["scram-describe-test"];
+            };
             let $response = handle(
                 &$broker,
                 &DescribeUserScramCredentialsRequest::default(),

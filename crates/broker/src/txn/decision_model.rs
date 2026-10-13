@@ -82,13 +82,12 @@ use {
         CompletionDecision, decide_end_txn_completion, decide_phase1_transition,
     },
     crate::{
-        coordinator::unified::actor::reconciliation_model_support::{
-            model_properties, pinned_model_runner,
-        },
+        coordinator::unified::actor::reconciliation_model_support::record_epoch_regression,
+        model_check::{assert_pinned_count, run_bfs},
         txn::decision_model_support::{begin_transaction, complete_prepared, initialize},
     },
     krabka_log::ProducerId,
-    stateright::Model,
+    stateright::{Model, Property},
     std::collections::BTreeSet,
 };
 
@@ -162,7 +161,7 @@ enum Violation {
     FenceDiverged,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, krabka_macros::ModelEpochLedger)]
 struct TxnProj {
     pid: i64,
     epoch: i16,
@@ -324,14 +323,12 @@ impl Model for TxnModel {
         if action == TxnAction::Init && is_prepared(st(last.state)) {
             s.violations.insert(Violation::InitOverwrotePrepared);
         }
-        if s.epoch < last.epoch {
-            s.violations.insert(Violation::EpochRegressed);
-        }
+        s.observe_prior_epoch(last.epoch);
         Some(s)
     }}
 
-    model_properties! {
-        @method TxnProj;
+    fn properties(&self) -> Vec<Property<Self>> {
+        krabka_macros::model_properties! { TxnProj;
         // HEADLINE: a fenced or overtaken EndTxn never writes Complete*.
         always "fenced_end_txn_never_finalizes" => |s| {
             !s.violations.contains(&Violation::FencedEndTxnFinalized)
@@ -373,6 +370,8 @@ impl Model for TxnModel {
         sometimes "fence_in_window" => |s| {
             s.pending.is_some_and(|p| p.expected_epoch < s.epoch)
         },
+
+        }
     }
 
     fn init_states(&self) -> Vec<Self::State> {
@@ -404,8 +403,11 @@ impl Model for TxnModel {
     fn within_boundary(&self, state: &Self::State) -> bool { state.epoch <= self.max_epoch }
 }
 
-pinned_model_runner! {
-    fn run(TxnModel); MAX_DEPTH, MAX_STATES; properties_first
+krabka_macros::model_runner! {
+
+    fn run(model: TxnModel, label: &str, pinned_unique_states: usize)
+    [bfs = run_bfs, pin = assert_pinned_count, depth = MAX_DEPTH, states = MAX_STATES, order = "properties_first", checker = checker]
+    {}
 }
 
 #[test]

@@ -168,25 +168,42 @@ fn wire_to_mech(wire: MechanismWireByte) -> Option<SaslMechanism> {
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
-            handlers::alter_user_scram_credentials::{
-                answer,
-                test_support::{
-                    KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
-                    KAFKA_UNSUPPORTED_SASL_MECHANISM, deletion, expected_response, expected_result,
-                    process_deletion, process_upsertion, start_broker, test_context,
-                    valid_upsertion,
+            broker::{Broker, BrokerHandle},
+            handlers::{
+                alter_user_scram_credentials::{
+                    answer,
+                    test_support::{
+                        KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
+                        KAFKA_UNSUPPORTED_SASL_MECHANISM, deletion, expected_response,
+                        expected_result, process_deletion, process_upsertion, start_broker,
+                        test_context, valid_upsertion,
+                    },
                 },
+                test_support::allow_all_authorizer,
             },
-            test_support::test_ctx,
         },
         assert2::assert,
         krabka_metadata::{MetadataRecord, ScramCredentialRecord},
         krabka_protocol::owned::alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
         std::sync::Arc,
     };
+
+    /// Deletion validation starts with an empty pending-record buffer.
+    async fn deletion_fixture() -> (
+        BrokerHandle,
+        tempfile::TempDir,
+        Arc<Broker>,
+        Vec<MetadataRecord>,
+    ) {
+        let (handle, directory) = start_broker(allow_all_authorizer()).await;
+        let broker = handle.broker_arc_for_test();
+        let records = Vec::new();
+        (handle, directory, broker, records)
+    }
 
     #[test]
     fn wire_to_mech_maps_both_scram_variants() {
@@ -304,8 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_deletion_rejects_missing_credentials() {
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
-        let mut records = Vec::new();
+        let (broker_handle, _dir, broker, mut records) = deletion_fixture().await;
 
         let r = process_deletion(&broker, deletion("alice"), true, &mut records);
         assert!(
@@ -325,8 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_deletion_rejects_unauthorized_users() {
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
-        let mut records = Vec::new();
+        let (broker_handle, _dir, broker, mut records) = deletion_fixture().await;
 
         let r = process_deletion(&broker, deletion("alice"), false, &mut records);
         let expected = expected_result(
@@ -341,8 +356,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_deletion_rejects_unknown_mechanism_with_unsupported_sasl_mechanism() {
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
-        let mut records = Vec::new();
+        let (broker_handle, _dir, broker, mut records) = deletion_fixture().await;
         let mut deletion = deletion("alice");
         deletion.mechanism = 99;
 
@@ -378,12 +392,12 @@ mod tests {
     }
 
     async fn check_empty_username(req: AlterUserScramCredentialsRequest) {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin"),
-            controller_leader
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            ready controller_leader;
+            user ["admin"];
+        };
         let resp = answer(&broker, req, &ctx).await;
         let expected = expected_response(vec![expected_result(
             "",

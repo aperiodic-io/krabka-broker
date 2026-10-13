@@ -7,20 +7,21 @@ use {
     crate::{
         api_catalog::UnstableApiVersions,
         authorizer::{AllowAllAuthorizer, AuthorizationResult},
-        broker::BrokerHandle,
+        broker::{Broker, BrokerHandle},
         config::{BrokerConfig, RemoteStorageBackend},
         config_keys::{DISKLESS, serves_topic_key},
         handlers::{
             RequestContext,
             describe_configs::effective_topic_configs,
             test_support::{
-                ALL_BROKERS_FENCED_PARTITION_ERROR, TopicPartitionCount, TopicReplicationFactor,
-                acl, assigned_partition_record, cluster_acl, invalid_manual_assignment,
-                replica_availability, seed_controller_quota as seed_controller_quota_helper,
+                self as handler_fixture_support, ALL_BROKERS_FENCED_PARTITION_ERROR,
+                TopicPartitionCount, TopicReplicationFactor, acl, assigned_partition_record,
+                cluster_acl, invalid_manual_assignment, replica_availability,
+                seed_controller_quota as seed_controller_quota_helper,
             },
         },
         test_support::{
-            DenyAll, KafkaErrorCode, allow_acl, begin_controlled_shutdown, broker_registration,
+            KafkaErrorCode, allow_acl, begin_controlled_shutdown, broker_registration,
             described_creation_configs, dispatch_wire, fence_remote_broker, make_witness, peer,
             principal, seed_remote_broker, start_broker_no_audit_with,
         },
@@ -45,8 +46,11 @@ macro_rules! creation_fixture {
         $authorizer:ident,
         $user:expr
     ) => {
-        broker_fixture!(($handle, $directory, $broker), $authorizer);
-        request_identity!(($principal, $peer), principal($user));
+        krabka_macros::broker_test_setup! {
+            bind($handle, $directory, $broker, $principal, $peer);
+            boot [start_broker] $authorizer;
+            user [$user];
+        };
     };
 }
 
@@ -282,7 +286,7 @@ krabka_macros::wire_codec_helpers! {
     test_context ["admin-client"];
 }
 
-use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
+use crate::test_support::start_broker_with_authorizer_no_audit as start_broker;
 
 async fn drive(
     broker: &Broker,
@@ -833,7 +837,10 @@ async fn handle_creates_a_diskless_topic_and_opens_its_partitions_on_the_wal_pat
     })
     .await;
     let broker = broker_handle.broker_arc_for_test();
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::request_test_identity! {
+        bind(p, peer);
+        user ["admin"];
+    };
     let req = request(vec![topic_with_configs("events", &[ConfigPair {
         name: "krabka.diskless",
         value: "true",
@@ -866,13 +873,22 @@ async fn handle_creates_a_diskless_topic_and_opens_its_partitions_on_the_wal_pat
     broker_handle.shutdown().await;
 }
 
+async fn start_local_object_store_broker() -> (
+    tempfile::TempDir,
+    BrokerHandle,
+    tempfile::TempDir,
+    Arc<Broker>,
+) {
+    let object_store = tempfile::TempDir::new().expect("object store dir");
+    let (handle, directory) =
+        handler_fixture_support::start_with_local_object_store(&object_store).await;
+    let broker = handle.broker_arc_for_test();
+    (object_store, handle, directory, broker)
+}
+
 #[tokio::test]
 async fn handle_rejects_diskless_topic_without_a_rack_safe_wal_quorum() {
-    let object_store = tempfile::TempDir::new().expect("object store dir");
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        local_object_store(object_store)
-    );
+    let (_object_store, broker_handle, _dir, broker) = start_local_object_store_broker().await;
     let req = request(vec![topic_with_configs("unplaceable-diskless", &[
         ConfigPair {
             name: "krabka.diskless",
@@ -904,11 +920,7 @@ async fn handle_rejects_diskless_topic_without_a_rack_safe_wal_quorum() {
 /// the first listed one.
 #[tokio::test]
 async fn diskless_wal_validation_names_the_active_leader_of_a_manual_assignment() {
-    let object_store = tempfile::TempDir::new().expect("object store dir");
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        local_object_store(object_store)
-    );
+    let (_object_store, broker_handle, _dir, broker) = start_local_object_store_broker().await;
     for node_id in [2, 3] {
         seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
     }
@@ -1104,7 +1116,10 @@ async fn strict_create_topics_rejects_after_quota_exhaustion() {
     let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
     seed_controller_quota(&broker_handle, 2.0).await;
     let broker = broker_handle.broker_arc_for_test();
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::request_test_identity! {
+        bind(p, peer);
+        user ["admin"];
+    };
     let req = request(vec![topic("throttled", 5, 1)]);
 
     let charged_no_earlier_than = std::time::Instant::now();
@@ -1232,11 +1247,11 @@ async fn created_topic_configs_match_describe_configs_for_the_same_topic() {
 /// `AdminClient` fails every accessor on the row once the code is set.
 #[tokio::test]
 async fn create_without_describe_configs_withholds_the_configs_but_creates_the_topic() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(Arc::new(DenyDescribeConfigs))
-    );
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, p, peer);
+        boot [start_broker(Arc::new(DenyDescribeConfigs))];
+        user ["admin"];
+    };
     let req = request(vec![topic_with_config("undescribable")]);
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
@@ -1264,12 +1279,15 @@ async fn create_without_describe_configs_withholds_the_configs_but_creates_the_t
 async fn v4_response_encodes_without_the_kip_525_fields() {
     const V4: i16 = 4;
 
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(Arc::new(DenyDescribeConfigs))
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker(Arc::new(DenyDescribeConfigs))];
+    };
     let req = request(vec![topic_with_config("legacy")]);
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
 
     let resp: CreateTopicsResponse = dispatch_wire(
         &broker,
@@ -1328,7 +1346,10 @@ async fn handle_refuses_invalid_and_colliding_topic_names() {
     })
     .await;
     let broker = broker_handle.broker_arc_for_test();
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::request_test_identity! {
+        bind(p, peer);
+        user ["admin"];
+    };
     let existing = drive(
         &broker,
         &request(vec![topic("a_b", 1, 1)]),
@@ -1511,7 +1532,10 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
     ];
 
     for (fenced, witnesses, lists, error_code, error_message, partitions) in rows {
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         for node_id in [2, 3, 4] {
             seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
         }
@@ -1538,7 +1562,10 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
                 .collect(),
             ..Default::default()
         };
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let resp: CreateTopicsResponse = dispatch_wire(
             &broker,
@@ -1653,7 +1680,10 @@ async fn automatic_placement_takes_fenced_brokers_last_and_shrinks_the_isr() {
         outcome,
     } in rows
     {
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         for node_id in [2, 3] {
             seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
         }
@@ -1663,7 +1693,10 @@ async fn automatic_placement_takes_fenced_brokers_last_and_shrinks_the_isr() {
         for &node_id in shutting_down {
             begin_controlled_shutdown(&broker_handle, node_id).await;
         }
-        request_identity!((p, peer), principal("admin"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["admin"];
+        };
 
         let resp = drive(
             &broker,
@@ -1804,10 +1837,16 @@ async fn handle_authorizes_create_per_topic_when_cluster_create_is_denied() {
     ];
 
     for (label, case) in cases {
-        broker_fixture!((broker_handle, _dir, broker), controller_peer_acls);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] controller_peer;
+        };
         crate::handlers::acl_test_support::seed_case_acls!(broker, case.acls);
 
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["alice"];
+        };
         let req = request(vec![
             topic("a", 1, 1),
             topic("app-x", 1, 1),
@@ -1947,7 +1986,10 @@ async fn cluster_create_and_describe_configs_probes_leave_no_denial_behind() {
     ];
 
     for (label, acls, error_code, (cluster_create, describe_configs, topic_create)) in cases {
-        broker_fixture!((broker_handle, _dir, broker), controller_peer_acls);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] controller_peer;
+        };
         if !acls.is_empty() {
             broker
                 .controller
@@ -2302,7 +2344,10 @@ async fn a_config_value_over_short_max_value_answers_invalid_config() {
     let key = LEADER_THROTTLED_REPLICAS_KEY;
     let fits = vec!["0:1"; 8_000].join(",");
     let too_long = vec!["0:1"; 8_200].join(",");
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker] allow_all;
+    };
 
     let resp = drive(
         &broker,

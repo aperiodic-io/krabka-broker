@@ -15,8 +15,8 @@ use {
             request, test_context,
         },
         test_support::{
-            DenyAll, allow_acl, start_broker_no_audit_with,
-            start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+            allow_acl, start_broker_no_audit_with,
+            start_broker_with_authorizer_no_audit as start_broker,
         },
     },
     assert2::{assert, check},
@@ -25,7 +25,6 @@ use {
         ResourceType,
     },
     krabka_protocol::owned::create_acls_response::{AclCreationResult, CreateAclsResponse},
-    std::sync::Arc,
 };
 
 /// The row Kafka's `AclApis.handleCreateAcls` sends for a committed
@@ -52,11 +51,11 @@ async fn check_no_acls_created(
 /// binding far past any fixed ceiling is accepted and stored as sent.
 #[tokio::test]
 async fn handle_stores_long_resource_names_and_principals() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(configured_authorizer())
-    );
-    test_ctx!(ctx, "admin");
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker(configured_authorizer())];
+        user ["admin"];
+    };
     let long_name = "r".repeat(4096);
     let long_principal = format!("User:{}", "a".repeat(4096));
     let req = request(vec![
@@ -84,11 +83,11 @@ async fn handle_stores_long_resource_names_and_principals() {
 
 #[tokio::test]
 async fn handle_denies_cluster_alter_for_each_creation() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        deny_all,
-        context(ctx, "alice")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] deny_all;
+        user ["alice"];
+    };
     let req = request(vec![
         creation("topic-a", "User:bob", OPERATION_READ),
         creation("topic-b", "User:carol", OPERATION_WRITE),
@@ -108,11 +107,11 @@ async fn handle_denies_cluster_alter_for_each_creation() {
 
 #[tokio::test]
 async fn handle_submits_valid_creations_and_reports_invalid_creations_in_order() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(configured_authorizer())
-    );
-    test_ctx!(ctx, "admin");
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker(configured_authorizer())];
+        user ["admin"];
+    };
     let mut invalid = creation("", "User:bob", OPERATION_WRITE);
     invalid.resource_name.clear();
     let req = request(vec![
@@ -149,11 +148,11 @@ async fn handle_submits_valid_creations_and_reports_invalid_creations_in_order()
 /// that state.
 #[tokio::test]
 async fn handle_answers_security_disabled_for_each_creation_when_no_authorizer_is_configured() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        allow_all,
-        context(ctx, "admin")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let req = request(vec![
         creation("topic-a", "User:alice", OPERATION_READ),
         creation("topic-b", "User:bob", OPERATION_WRITE),
@@ -193,11 +192,11 @@ struct TrunkBroker {
 /// `validateHostPattern` (KIP-1276) would refuse both.
 #[tokio::test]
 async fn handle_stores_any_host_by_default() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(configured_authorizer())
-    );
-    test_ctx!(ctx, "admin");
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker(configured_authorizer())];
+        user ["admin"];
+    };
     let hosts = ["10.0.0.0/8", "not/a/cidr", ""];
     let creations = hosts
         .iter()
@@ -294,11 +293,11 @@ async fn handle_rejects_cidr_host_below_the_cidr_metadata_version() {
 /// `UNKNOWN_SERVER_ERROR` with no message, and nothing is stored.
 #[tokio::test]
 async fn handle_fails_every_creation_when_one_carries_a_filter_only_value() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(configured_authorizer())
-    );
-    test_ctx!(ctx, "admin");
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker(configured_authorizer())];
+        user ["admin"];
+    };
     let mut any_operation = creation("topic-b", "User:bob", OPERATION_READ);
     any_operation.operation = 1;
     let req = request(vec![
@@ -325,11 +324,11 @@ async fn handle_fails_every_creation_when_one_carries_a_filter_only_value() {
 /// closes it here, and it comes before authorization, as a parse does.
 #[tokio::test]
 async fn handle_errors_so_the_connection_closes_on_an_unknown_element() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        deny_all,
-        context(ctx, "alice")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] deny_all;
+        user ["alice"];
+    };
     let mut unknown_permission = creation("topic-a", "User:bob", OPERATION_READ);
     unknown_permission.permission_type = 0;
     let req = request(vec![unknown_permission]);
@@ -345,11 +344,11 @@ async fn handle_errors_so_the_connection_closes_on_an_unknown_element() {
 /// with Kafka's message, and a non-`User` principal type is stored.
 #[tokio::test]
 async fn handle_pins_the_cluster_name_and_accepts_other_principal_types() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_broker(configured_authorizer())
-    );
-    test_ctx!(ctx, "admin");
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker(configured_authorizer())];
+        user ["admin"];
+    };
     let mut wrong_cluster = creation("my-cluster", "User:alice", OPERATION_READ);
     wrong_cluster.resource_type = 4;
     let req = request(vec![
@@ -435,11 +434,11 @@ async fn handle_bounds_a_request_to_ten_thousand_new_acls() {
         ),
     ];
     for (label, creations, results, stored) in cases {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(configured_authorizer())
-        );
-        test_ctx!(ctx, "admin");
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker(configured_authorizer())];
+            user ["admin"];
+        };
 
         let resp = handle(&broker, request(creations), VERSION, &ctx)
             .await
@@ -496,7 +495,10 @@ fn count_new_acls_counts_distinct_new_acls_in_linear_time() {
 }
 
 async fn drive_cidr_request(broker: &Broker) -> CreateAclsResponse {
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
     handle(broker, cidr_request(), VERSION, &ctx)
         .await
         .expect("handle")

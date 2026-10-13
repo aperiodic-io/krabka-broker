@@ -38,79 +38,83 @@ fn position<R: Response>(response: &R, version: ApiVersion, json: &Json) -> Thro
     }
 }
 
-/// A response schema with an `error_code` and either no `throttle_time_ms`, or
-/// one that the schema gains at `$from` and puts first when `$leads`.
-macro_rules! response {
-    ($module:ident, $ty:ident, $(api_key: $api_key:literal,)? throttle: $from:literal, $leads:literal) => {
-        pub mod $module {
-            $(pub const API_KEY: i16 = $api_key;)?
+/// The version at which a throttle field appears, and its position in the schema.
+#[derive(Default)]
+pub struct TimedSchema<const FROM: i16, const LEADING: bool> {
+    pub error_code: i16,
+    pub throttle_time_ms: i32,
+}
 
-            #[derive(Default)]
-            pub struct $ty {
-                pub error_code: i16,
-                pub throttle_time_ms: i32,
-            }
-
-            impl crate::Response for $ty {
-                fn encode(&self, version: i16) -> Vec<i32> {
-                    let error_code = i32::from(self.error_code);
-                    match (version >= $from, $leads) {
-                        (false, _) => vec![error_code],
-                        (true, true) => vec![self.throttle_time_ms, error_code],
-                        (true, false) => vec![error_code, self.throttle_time_ms],
-                    }
-                }
-            }
-
-            pub fn default_json(version: i16) -> crate::Json {
-                crate::Json {
-                    throttle_time_ms: version >= $from,
-                }
-            }
+impl<const FROM: i16, const LEADING: bool> Response for TimedSchema<FROM, LEADING> {
+    fn encode(&self, version: ApiVersion) -> Vec<i32> {
+        let error_code = i32::from(self.error_code);
+        match (version >= FROM, LEADING) {
+            (false, _) => vec![error_code],
+            (true, true) => vec![self.throttle_time_ms, error_code],
+            (true, false) => vec![error_code, self.throttle_time_ms],
         }
-    };
-    ($module:ident, $ty:ident, api_key: $api_key:literal, no_throttle) => {
-        pub mod $module {
-            pub const API_KEY: i16 = $api_key;
+    }
+}
 
-            #[derive(Default)]
-            pub struct $ty {
-                pub error_code: i16,
-            }
-
-            impl crate::Response for $ty {
-                fn encode(&self, _: i16) -> Vec<i32> {
-                    vec![i32::from(self.error_code)]
-                }
-            }
-
-            pub fn default_json(_: i16) -> crate::Json {
-                crate::Json {
-                    throttle_time_ms: false,
-                }
-            }
+impl<const FROM: i16, const LEADING: bool> TimedSchema<FROM, LEADING> {
+    fn default_json(version: ApiVersion) -> Json {
+        Json {
+            throttle_time_ms: version >= FROM,
         }
-    };
+    }
+}
+
+#[derive(Default)]
+pub struct UnthrottledSchema {
+    pub error_code: i16,
+}
+
+impl Response for UnthrottledSchema {
+    fn encode(&self, _: ApiVersion) -> Vec<i32> { vec![i32::from(self.error_code)] }
 }
 
 mod krabka_protocol {
     pub mod owned {
-        // Leads with `ThrottleTimeMs` from v3, and has none before.
-        response!(metadata_response, MetadataResponse, api_key: 3, throttle: 3, true);
-        // Has no `ThrottleTimeMs` at any version.
-        response!(sasl_handshake_response, SaslHandshakeResponse, api_key: 17, no_throttle);
-        // Leads with `ThrottleTimeMs` at every version.
-        response!(produce_response, ProduceResponse, api_key: 0, throttle: 0, true);
+        pub mod metadata_response {
+            use crate::{Json, TimedSchema};
+            pub const API_KEY: i16 = 3;
+            // Leads with `ThrottleTimeMs` from v3, and has none before.
+            pub type MetadataResponse = TimedSchema<3, true>;
+            pub fn default_json(version: i16) -> Json { MetadataResponse::default_json(version) }
+        }
+
+        pub mod sasl_handshake_response {
+            use crate::{Json, UnthrottledSchema};
+            pub const API_KEY: i16 = 17;
+            // Has no `ThrottleTimeMs` at any version.
+            pub type SaslHandshakeResponse = UnthrottledSchema;
+            pub fn default_json(_: i16) -> Json {
+                Json {
+                    throttle_time_ms: false,
+                }
+            }
+        }
+
+        pub mod produce_response {
+            use crate::{Json, TimedSchema};
+            pub const API_KEY: i16 = 0;
+            // Leads with `ThrottleTimeMs` at every version.
+            pub type ProduceResponse = TimedSchema<0, true>;
+            pub fn default_json(version: i16) -> Json { ProduceResponse::default_json(version) }
+        }
     }
 
     pub mod kafka_3_6_2 {
         pub mod owned {
-            // Carries `ThrottleTimeMs` behind another field.
-            response!(produce_response, ProduceResponse, throttle: 0, false);
+            pub mod produce_response {
+                use crate::{Json, TimedSchema};
+                // Carries `ThrottleTimeMs` behind another field.
+                pub type ProduceResponse = TimedSchema<0, false>;
+                pub fn default_json(version: i16) -> Json { ProduceResponse::default_json(version) }
+            }
         }
     }
 }
-
 /// Where one API's response puts the throttle at one version.
 #[derive(Debug, PartialEq, Eq)]
 struct Observation {

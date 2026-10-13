@@ -89,7 +89,12 @@ async fn serve(
 mod tests {
     use {
         super::*,
-        crate::test_support::{dispatch_wire, peer, principal, request_context},
+        crate::{
+            handlers::test_support as handler_fixture_support,
+            test_support::{
+                self as broker_fixture_support, dispatch_wire, peer, principal, request_context,
+            },
+        },
         assert2::{assert, check},
     };
 
@@ -99,21 +104,20 @@ mod tests {
         broker: &Broker,
         request: AllocateProducerIdsRequest,
     ) -> AllocateProducerIdsResponse {
-        request_identity!(
-            (user, address, ctx),
-            crate::test_support::principal("ANONYMOUS"),
-            client_id = "allocate-test",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(user, address, ctx);
+            user ["ANONYMOUS"];
+            client ["allocate-test"];
+        };
         handle(broker, request, 0, &ctx).await.expect("handle")
     }
 
     #[tokio::test]
     async fn allocates_consecutive_durable_blocks_and_fences_stale_epochs() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::test_support::start_broker_no_audit()
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_broker_no_audit()];
+        };
         let broker_id = i32::try_from(broker.config.node_id.0).unwrap();
         let broker_epoch = broker
             .controller
@@ -221,7 +225,10 @@ mod tests {
     /// the next block start does not move.
     #[tokio::test]
     async fn allocation_needs_cluster_action() {
-        broker_fixture!((broker_handle, _dir, broker), principal_grants);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_with_principal_grants()];
+        };
         let request = AllocateProducerIdsRequest {
             broker_id: i32::try_from(broker.config.node_id.0).unwrap(),
             broker_epoch: broker

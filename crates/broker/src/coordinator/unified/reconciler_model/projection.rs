@@ -10,20 +10,26 @@
 use {
     super::state::{MemberProj, ReconState},
     crate::coordinator::unified::{
-        actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
+        actor::reconciliation_model_support::{insert_modeled_member, modeled_member},
         consumer_state::GroupState,
     },
-    std::collections::{BTreeMap, BTreeSet},
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        time::Instant,
+    },
 };
 
-crate::coordinator::unified::actor::reconciliation_model_support::rebuild_model_group! {
+krabka_macros::rebuild_reconciliation_group! {
     /// Rebuilds a real `GroupState` from the projection, so that the next real
     /// call behaves exactly as it does in a live run.
     ///
     /// The fields that the projection does not hold get faithful constants. The
     /// subscription is fixed to the one topic, `last_seen` is constant, and
     /// `previous_member_epoch` affects no decision.
-    pub(super) fn rebuild_group(s: &ReconState); |m, ms|
+
+    pub(super) fn rebuild_group(s: &ReconState) -> GroupState
+    [member = m, built = ms]
+    { ms }
 }
 
 /// Projects a real `GroupState`, the client ledger, and the advertised map
@@ -42,7 +48,7 @@ pub(super) fn project(
     ReconState::from_group(g, members, owned, advertised)
 }
 
-model_epoch_assertion! {
 /// Per-member epoch must never regress across a real step.
-    pub(super) fn assert_epoch_monotonic(ReconState, GroupState)
+pub(super) fn assert_epoch_monotonic(pre: &ReconState, post: &GroupState) {
+    pre.assert_epochs_against(post);
 }

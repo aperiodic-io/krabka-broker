@@ -420,6 +420,7 @@ fn resolve_names(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -465,7 +466,7 @@ mod tests {
         test_context ["admin-client"];
     }
 
-    use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
+    use crate::test_support::start_broker_with_authorizer_no_audit as start_broker;
 
     async fn seed_topic_with_epoch(handle: &BrokerHandle, leader_epoch: LeaderEpoch) {
         handle
@@ -660,7 +661,10 @@ mod tests {
                 seed_topic(&$handle, setup).await;
             }
             let $broker = $handle.broker_arc_for_test();
-            test_ctx!($ctx, "admin");
+            krabka_macros::request_test_identity! {
+                bind($ctx);
+                user ["admin"];
+            };
         };
     }
 
@@ -729,7 +733,10 @@ mod tests {
         })
         .await;
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         let cursor = Some(RequestCursor {
             topic_name: "a".into(),
             partition_index: 2,
@@ -911,7 +918,10 @@ mod tests {
             .await;
         }
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         let req = one_partition_request(&["a", "b"]);
 
         let resp = describe(&broker, req, &ctx).await;
@@ -980,11 +990,11 @@ mod tests {
                 is_internal: false,
             },
         ];
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
 
         for MissingTopicCase {
             name,
@@ -1127,7 +1137,10 @@ mod tests {
         broker_handle.shutdown().await;
     }
     async fn orders_topic(broker: &Broker) -> DescribeTopicPartitionsResponseTopic {
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         let req = DescribeTopicPartitionsRequest {
             topics: vec![
                 krabka_protocol::owned::describe_topic_partitions_request::TopicRequest {

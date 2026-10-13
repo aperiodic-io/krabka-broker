@@ -99,27 +99,38 @@ pub(crate) async fn finish_tasks(
     }
 }
 
-/// Declare a concrete task collection whose join errors are logged at its caller.
-macro_rules! scheduled_tasks_type {
-    ($(#[$doc:meta])* $vis:vis struct $name:ident;
-        $(#[$finished_doc:meta])* |$error:ident| $on_error:block) => {
-        $(#[$doc])*
-        #[derive(Debug, Default)]
-        $vis struct $name(Vec<tokio::task::JoinHandle<()>>);
-
-        impl $name {
-            $(#[$finished_doc])*
-            $vis async fn finished(self) {
-                $crate::task_util::finish_tasks(self.0, |$error| $on_error).await;
-            }
-        }
-    };
-}
-pub(crate) use scheduled_tasks_type;
-
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert, std::time::Duration};
+    use {
+        super::*,
+        assert2::assert,
+        std::{future::pending, time::Duration},
+    };
+
+    #[tokio::test]
+    async fn finish_tasks_reports_failures_in_order_and_waits_for_remaining_tasks() {
+        finish_tasks(Vec::new(), |_| panic!("empty loads cannot fail")).await;
+        let first = tokio::spawn(pending::<()>());
+        let second = tokio::spawn(pending::<()>());
+        let failed = [first.id(), second.id()];
+        first.abort();
+        second.abort();
+        let (release, completion) = oneshot::channel();
+        let last = tokio::spawn(async move { completion.await.expect("released final load") });
+        let mut failures = Vec::new();
+        {
+            let finished =
+                finish_tasks(vec![first, second, last], |error| failures.push(error.id()));
+            tokio::pin!(finished);
+            tokio::select! {
+                () = &mut finished => panic!("must await the final load after earlier failures"),
+                () = tokio::task::yield_now() => {}
+            }
+            release.send(()).unwrap();
+            finished.await;
+        }
+        assert!(failures == failed);
+    }
 
     #[tokio::test]
     async fn ask_returns_the_reply() {

@@ -125,9 +125,10 @@ fn wire_node_ids(nodes: &[krabka_metadata::NodeId]) -> Vec<i32> {
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
-        crate::{authorizer::AllowAllAuthorizer, test_support::DenyAll},
+        crate::authorizer::AllowAllAuthorizer,
         assert2::assert,
         krabka_metadata::{MetadataRecord, NodeId, TopicRecord},
         krabka_protocol::owned::list_partition_reassignments_request::ListPartitionReassignmentsTopics,
@@ -141,7 +142,7 @@ mod tests {
         test_context ["admin-client"];
     }
 
-    use crate::test_support::{start_broker_with_authorizer_no_audit as start_broker, test_ctx};
+    use crate::test_support::start_broker_with_authorizer_no_audit as start_broker;
 
     fn expected_empty_partition(partition_index: i32) -> OngoingPartitionReassignment {
         krabka_macros::tagged_wire!(OngoingPartitionReassignment {
@@ -218,11 +219,11 @@ mod tests {
         ];
 
         for case in cases {
-            broker_fixture!(
-                (broker_handle, _dir, broker),
-                deny_all,
-                context(ctx, "alice")
-            );
+            krabka_macros::broker_test_setup! {
+                bind(broker_handle, _dir, broker, ctx);
+                boot [start_broker] deny_all;
+                user ["alice"];
+            };
 
             let resp = handle(
                 &broker,
@@ -291,7 +292,10 @@ mod tests {
             .await
             .expect("seed reassignments");
         let broker = broker_handle.broker_arc_for_test();
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let row = |partition_index: i32| {
             krabka_macros::tagged_wire!(OngoingPartitionReassignment {

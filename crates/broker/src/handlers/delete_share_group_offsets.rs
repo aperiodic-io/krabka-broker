@@ -256,12 +256,15 @@ mod tests {
                     persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
                 },
             },
-            handlers::{RequestContext, create_topics::handle as create_topics_handle},
+            handlers::{
+                RequestContext, create_topics::handle as create_topics_handle,
+                test_support as handler_fixture_support,
+            },
             share_coordinator::{
                 handlers::test_support::lead_share_state_partitions,
                 persister_client::SharePersister,
             },
-            test_support::{DenyAll, ShareApiSupport, start_share_broker, test_ctx},
+            test_support::{DenyAll, ShareApiSupport, start_share_broker},
         },
         assert2::assert,
         krabka_metadata::{AclOperation, ResourceType},
@@ -447,11 +450,11 @@ mod tests {
                 }),
             ),
         ];
-        share_refusal_cases!(
-            (case, authorizer, share_enabled, [topics], expected) in cases;
-            (broker_handle, _dir, broker, ctx, resp);
-            handle(request("g1", &topics), version)
-        );
+        krabka_macros::share_refusal_matrix! {
+            case(case, authorizer, share_enabled, topics, expected) [cases];
+            bind(broker_handle, _dir, broker, ctx, resp);
+            invoke [handle(&broker, request("g1", &topics), version, &ctx)];
+        };
     }
 
     /// Kafka's `deleteShareGroupOffsets` and `initiateDeleteShareGroupOffsets`:
@@ -462,11 +465,11 @@ mod tests {
     /// `UNKNOWN_TOPIC_OR_PARTITION` with Kafka's message, in request order.
     #[tokio::test]
     async fn handle_refuses_what_kafka_refuses() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            share_allow_all,
-            context(ctx, "alice")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [handler_fixture_support::start_share_allow_all()];
+            user ["alice"];
+        };
         create_topics()
             .broker_handle(&broker_handle)
             .ctx(&ctx)
@@ -566,11 +569,11 @@ mod tests {
 
     #[tokio::test]
     async fn delete_removes_only_requested_state_and_a_retry_finds_none() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            share_allow_all,
-            context(ctx, "alice")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [handler_fixture_support::start_share_allow_all()];
+            user ["alice"];
+        };
         let persister = create_share_topics()
             .handle(&broker_handle)
             .ctx(&ctx)
@@ -695,7 +698,10 @@ mod tests {
                 .call()
                 .await;
             let broker = broker_handle.broker_arc_for_test();
-            test_ctx!(ctx, "alice");
+            krabka_macros::request_test_identity! {
+                bind(ctx);
+                user ["alice"];
+            };
             let persister = create_share_topics()
                 .handle(&broker_handle)
                 .ctx(&ctx)

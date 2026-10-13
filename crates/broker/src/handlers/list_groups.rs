@@ -260,13 +260,14 @@ fn filter_groups(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
             authorizer::AllowAllAuthorizer,
             coordinator::unified::classic_state::GroupState,
             handlers::acl_wire::CLUSTER_RESOURCE_NAME,
-            test_support::{allow_acl, start_broker_no_audit_with, test_ctx},
+            test_support::{allow_acl, start_broker_no_audit_with},
         },
         assert2::assert,
         krabka_metadata::{AclOperation, MetadataRecord, ResourceType},
@@ -308,7 +309,10 @@ mod tests {
         let _consumer = coordinator.get_or_create_consumer("consumer-a");
         coordinator.mark_share("share-a");
         let _share = coordinator.get_or_create_share("share-a");
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         let resp = handle(&broker, ListGroupsRequest::default(), VERSION, &ctx)
             .await
@@ -384,7 +388,10 @@ mod tests {
             }
             let _a = broker.group_coordinator.get_or_create_classic("g-a");
             let _b = broker.group_coordinator.get_or_create_classic("g-b");
-            test_ctx!(ctx, user);
+            krabka_macros::request_test_identity! {
+                bind(ctx);
+                user [user];
+            };
 
             let resp = handle(&broker, ListGroupsRequest::default(), VERSION, &ctx)
                 .await

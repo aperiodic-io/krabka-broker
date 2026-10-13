@@ -239,7 +239,10 @@ mod tests {
             cfg.default_replication_factor = 1;
         })
         .await;
-        request_identity!((principal, peer, ctx), principal("alice"), test_context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+        };
         let config = |name: &str, value: &str| KeyValue {
             key: name.into(),
             value: value.into(),
@@ -352,13 +355,15 @@ mod tests {
             ($version:ident, $handle:ident, $directory:ident, $broker:ident),($principal:ident, $peer:ident, $context:ident)
         ) => {
             let $version = streams_group_heartbeat_response::MAX_VERSION;
-            broker_fixture!(($handle, $directory, $broker), start_broker(true));
+            krabka_macros::broker_test_setup! {
+                bind($handle, $directory, $broker);
+                boot [start_broker(true)];
+            };
             set_streams_version(&$broker, 1).await;
-            request_identity!(
-                ($principal, $peer, $context),
-                principal("alice"),
-                test_context
-            );
+            krabka_macros::request_test_identity! {
+                bind($principal, $peer, $context);
+                user ["alice"];
+            };
         };
     }
 
@@ -640,10 +645,16 @@ mod tests {
         };
 
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), start_broker(true));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(true)];
+        };
         set_streams_version(&broker, 1).await;
         create_source_topic(&broker, "in").await;
-        request_identity!((principal, peer, ctx), principal("alice"), test_context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+        };
         let with_subtopology = |group_id: &str, subtopology: Subtopology| {
             let mut req = request(group_id);
             req.topology
@@ -741,9 +752,15 @@ mod tests {
 
     async fn check_protocol_disabled(enabled: bool, level: i16, group_id: &str) {
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), start_broker(enabled));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(enabled)];
+        };
         set_streams_version(&broker, level).await;
-        request_identity!((principal, peer, ctx), principal("alice"), test_context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+        };
         let resp = handle(&broker, request(group_id), version, &ctx)
             .await
             .expect("handle");
@@ -797,7 +814,10 @@ mod tests {
             cfg.streams_group.acceptable_recovery_lag = LAG;
         })
         .await;
-        request_identity!((principal, peer, ctx), principal("alice"), test_context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+        };
         // Through the dispatch registry: v0 drops the int64 lag on the wire.
         let heartbeat = |req: StreamsGroupHeartbeatRequest, version: i16| {
             wire_heartbeat(&broker, &ctx, req, version)
@@ -872,7 +892,10 @@ mod tests {
             )])
             .await
             .expect("store the group override");
-        request_identity!((principal, peer, ctx), principal("alice"), test_context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+        };
         // Through the dispatch registry: v0 drops the status the v1 adds.
         let heartbeat = |group_id: &str, version: i16| {
             let req = request(group_id);

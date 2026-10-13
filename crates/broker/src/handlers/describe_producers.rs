@@ -247,7 +247,7 @@ mod tests {
             broker::Broker,
             handlers::RequestContext,
             partition::Partition,
-            test_support::{DenyAll, KafkaErrorCode, peer, principal},
+            test_support::{DenyAll, KafkaErrorCode},
             txn::marker::{MarkerType, build_marker_batch},
         },
         assert2::assert,
@@ -363,8 +363,11 @@ mod tests {
             expected_message,
         } in cases
         {
-            broker_fixture!((broker_handle, _dir, broker), start_broker(authorizer));
-            request_identity!((p, peer), principal("alice"));
+            krabka_macros::broker_test_setup! {
+                bind(broker_handle, _dir, broker, p, peer);
+                boot [start_broker(authorizer)];
+                user ["alice"];
+            };
             let req = request(name, &[0]);
 
             let resp = drive(&broker, &req, &test_context(&p, &peer));
@@ -425,10 +428,10 @@ mod tests {
     /// with no message.
     #[tokio::test]
     async fn handle_gives_the_message_only_for_a_topic_the_image_lacks() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(AllowAllAuthorizer))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(Arc::new(AllowAllAuthorizer))];
+        };
         broker
             .controller
             .submit_change(vec![
@@ -449,7 +452,10 @@ mod tests {
             ])
             .await
             .expect("seed the known topic");
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["alice"];
+        };
 
         // (topic, expected error message)
         let cases = [
@@ -476,11 +482,11 @@ mod tests {
     /// partition, not only the first.
     #[tokio::test]
     async fn handle_invalid_topic_name_marks_every_requested_partition() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(AllowAllAuthorizer))
-        );
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, p, peer);
+            boot [start_broker(Arc::new(AllowAllAuthorizer))];
+            user ["alice"];
+        };
         let req = request("a/b", &[0, 1, 4]);
 
         let resp = drive(&broker, &req, &test_context(&p, &peer));
@@ -691,10 +697,10 @@ mod tests {
     /// `KAFKA_STORAGE_ERROR`.
     #[tokio::test]
     async fn handle_answers_from_the_log_of_every_hosted_replica() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(AllowAllAuthorizer))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(Arc::new(AllowAllAuthorizer))];
+        };
         let local = broker.config.node_id;
         let remote = krabka_metadata::NodeId(local.0 + 1);
 
@@ -772,7 +778,10 @@ mod tests {
             .await
             .expect("replicate an open transaction");
 
-        request_identity!((p, peer), principal("alice"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["alice"];
+        };
         let request = DescribeProducersRequest {
             topics: ["leads", "follows", "moved"]
                 .into_iter()

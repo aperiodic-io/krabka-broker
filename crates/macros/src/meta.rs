@@ -2,10 +2,10 @@
 
 use moxy::{
     ast::{
-        Attributes, Field, FnParam, ItemStruct, List, Parse, ParseError, Parser, Pattern,
-        Signature, Token, Type, Visibility,
+        Attributes, Field, FnParam, ItemStruct, List, Parse, ParseError, Parser, Path,
+        PathArguments, Pattern, Signature, Token, Type, Visibility,
     },
-    token::{Ident, Span, Spanner, TokenStream, TokenTree},
+    token::{Group, Ident, Span, Spanner, TokenStream, TokenTree},
 };
 
 #[cfg(test)]
@@ -53,6 +53,25 @@ pub(crate) fn function_signature(item: &TokenStream) -> Result<Signature, ParseE
     Ok(signature)
 }
 
+/// Parse a complete path without generic arguments for a concrete type or constant.
+pub(crate) fn plain_path(
+    tokens: &TokenStream,
+    span: Span,
+    message: &str,
+) -> Result<Path, ParseError> {
+    let parser = Parser::from_tokens(tokens);
+    let path = Path::parse(&parser)?;
+    if !parser.is_empty()
+        || path.is_empty()
+        || path
+            .iter()
+            .any(|segment| !matches!(segment.args, PathArguments::None))
+    {
+        return Err(ParseError::new(span, message));
+    }
+    Ok(path)
+}
+
 /// Consume the final native body without parsing its operations.
 pub(crate) fn finish_braced_body(parser: &Parser, message: &str) -> Result<(), ParseError> {
     if !parser
@@ -63,6 +82,87 @@ pub(crate) fn finish_braced_body(parser: &Parser, message: &str) -> Result<(), P
         return Err(parser.error(message));
     }
     Ok(())
+}
+
+/// Split a complete declaration's trailing metadata and operation body as native tokens.
+pub(crate) fn bracketed_function(
+    input: proc_macro::TokenStream,
+    macro_name: &str,
+) -> Result<
+    (
+        proc_macro::TokenStream,
+        proc_macro::TokenStream,
+        proc_macro::Group,
+    ),
+    ParseError,
+> {
+    use proc_macro::{Delimiter, TokenTree};
+
+    let mut tokens: Vec<_> = input.into_iter().collect();
+    let Some(TokenTree::Group(body)) = tokens.pop() else {
+        return Err(ParseError::new(
+            Span::call_site(),
+            format!("{macro_name} needs a braced body"),
+        ));
+    };
+    if body.delimiter() != Delimiter::Brace {
+        return Err(ParseError::new(
+            body.span().into(),
+            format!("{macro_name} needs a braced body"),
+        ));
+    }
+    let Some(TokenTree::Group(metadata)) = tokens.pop() else {
+        return Err(ParseError::new(
+            body.span().into(),
+            format!("{macro_name} needs bracketed metadata before its body"),
+        ));
+    };
+    if metadata.delimiter() != Delimiter::Bracket {
+        return Err(ParseError::new(
+            metadata.span().into(),
+            format!("{macro_name} needs bracketed metadata before its body"),
+        ));
+    }
+    Ok((tokens.into_iter().collect(), metadata.stream(), body))
+}
+
+/// Collect top-level native declaration bodies without traversing caller operations.
+pub(crate) fn native_braced_bodies(input: proc_macro::TokenStream) -> Vec<proc_macro::Group> {
+    native_groups(input)
+        .filter(|group| group.delimiter() == proc_macro::Delimiter::Brace)
+        .collect()
+}
+
+/// Yield top-level native groups without looking inside a caller's expressions.
+pub(crate) fn native_groups(
+    input: proc_macro::TokenStream,
+) -> impl Iterator<Item = proc_macro::Group> {
+    input.into_iter().filter_map(|token| match token {
+        proc_macro::TokenTree::Group(group) => Some(group),
+        _ => None,
+    })
+}
+
+/// Read a named declaration clause and retain its identifier span for errors.
+pub(crate) fn expect_name(
+    parser: &Parser,
+    expected: &str,
+    message: &str,
+) -> Result<Ident, ParseError> {
+    let name = Ident::parse(parser)?;
+    if name != expected {
+        return Err(ParseError::new(name.span(), message));
+    }
+    Ok(name)
+}
+
+/// Read an opaque clause group; each caller validates its delimiter and emptiness.
+pub(crate) fn grouped_value(parser: &Parser, message: &str) -> Result<Group, ParseError> {
+    let token = parser.advance().ok_or_else(|| parser.error(message))?;
+    token
+        .as_group()
+        .cloned()
+        .ok_or_else(|| ParseError::new(token.span(), message))
 }
 
 /// The named fields of a struct, or an error naming the derive.

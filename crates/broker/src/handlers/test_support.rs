@@ -3,10 +3,10 @@
 use {
     crate::{
         api_catalog::UnstableApiVersions,
-        authorizer::AllowAllAuthorizer,
+        authorizer::{AllowAllAuthorizer, Authorizer, SimpleAclAuthorizer},
         broker::{Broker, BrokerHandle, spawn_partition as spawn_broker_partition},
         codes,
-        config::BrokerConfig,
+        config::{BreakGlassConfig, BrokerConfig, RemoteStorageBackend, RlmmKind},
         config_keys::broker_dynamic::BrokerConfigContext,
         error::BrokerError,
         features::{METADATA_VERSION, STREAMS_VERSION, require_feature},
@@ -19,10 +19,11 @@ use {
         producer_state::ProducerState,
         share_partition::state::RecordState,
         test_support::{
-            StandalonePartitionSetup, StorageMode, broker_registration, decode_response,
-            encode_request, initialize_share_state, peer, principal, request_context,
-            sasl_principal, start_broker_no_audit_with,
-            start_broker_with as start_test_broker_with, try_dispatch_context,
+            ControllerPeerAllowed, DenyAll, GrantsInPrincipalName, StandalonePartitionSetup,
+            StorageMode, broker_registration, decode_response, encode_request,
+            initialize_share_state, peer, principal, request_context, sasl_principal,
+            start_broker_no_audit_with, start_broker_with as start_test_broker_with,
+            start_group_broker_no_audit, start_share_broker, try_dispatch_context,
         },
         topic_policy::TopicPolicy,
     },
@@ -38,7 +39,7 @@ use {
         primitives::uuid::Uuid as WireUuid,
         records::{Record, RecordBatch, RecordsPayload},
     },
-    std::{future::Future, path::Path, sync::Arc},
+    std::{collections::HashSet, future::Future, path::Path, sync::Arc},
 };
 
 /// An id that no topic in topic-resolution tests has.
@@ -54,7 +55,7 @@ pub(crate) mod transaction_admin_tests {
         crate::{
             test_support::{
                 lead_transaction_state_partitions,
-                start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+                start_broker_with_authorizer_no_audit as start_broker,
             },
             txn::version::TxnVersion,
         },
@@ -131,110 +132,6 @@ pub(crate) async fn assert_dispatch_response<Request, Response, Handler, Handler
     assert!(&actual == expected);
 }
 
-/// Retains a broker's handle, directory, and shared runtime in their original order.
-/// The calling test supplies its own start expression, including authorizer and config.
-macro_rules! broker_fixture {
-    ($bindings:tt, $setup:ident, context($context:ident, $user:expr) $(, $ready:ident)?) => {
-        broker_fixture!($bindings, $setup $(, $ready)?);
-        test_ctx!($context, $user);
-    };
-    (($handle:ident, $directory:ident, $broker:ident, $partition:ident), local_follower_partition($topic:expr)) => {
-        broker_fixture!(($handle, $directory, $broker, $partition), local_partition($topic));
-        $partition.install_replication_target(None, $broker.config.node_id.0, 0).await;
-    };
-    (($handle:ident, $directory:ident, $broker:ident, $persister:ident), share_persister($authorizer:expr, $enabled:expr)) => {
-        broker_fixture!(
-            ($handle, $directory, $broker),
-            crate::test_support::start_share_broker()
-                .authorizer($authorizer)
-                .support($enabled)
-                .call()
-        );
-        let $persister = $broker.group_coordinator.share_persister().cloned().expect("share persister");
-    };
-    ($bindings:tt, extra_log_dir($extra:ident)) => {
-        broker_fixture!($bindings, crate::test_support::start_broker_with({
-            let extra_dir = $extra.clone();
-            move |config| config.extra_log_dirs = vec![extra_dir]
-        }));
-    };
-    ($bindings:tt, local_remote_storage($object_dir:ident)) => {
-        broker_fixture!($bindings, crate::handlers::test_support::start_broker_with(|config| {
-            config.remote_storage_backend = Some(crate::config::RemoteStorageBackend::Local {
-                dir: $object_dir.path().to_path_buf(),
-            });
-            config.remote_log_metadata = crate::config::RlmmKind::InMemory;
-        }));
-    };
-    (($handle:ident, $directory:ident, $broker:ident, $partition:ident), local_partition($topic:expr)) => {
-        broker_fixture!(
-            ($handle, $directory, $broker),
-            crate::handlers::test_support::start_broker()
-        );
-        let $partition = crate::handlers::test_support::local_partition(&$broker, $directory.path(), $topic);
-    };
-    ($bindings:tt, local_object_store($object_dir:ident)) => {
-        broker_fixture!($bindings, crate::test_support::start_broker_no_audit_with(|config| {
-            config.authorizer = std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer);
-            config.remote_storage_backend = Some(crate::config::RemoteStorageBackend::Local {
-                dir: $object_dir.path().to_path_buf(),
-            });
-        }));
-    };
-    ($bindings:tt, controller_peer_acls) => {
-        broker_fixture!($bindings, start_broker(std::sync::Arc::new(crate::test_support::ControllerPeerAllowed(
-            crate::authorizer::SimpleAclAuthorizer::new(std::collections::HashSet::new()),
-        ))));
-    };
-    ($bindings:tt, break_glass($config:expr)) => {
-        broker_fixture!($bindings, crate::test_support::start_broker_no_audit_with(|config| {
-            config.authorizer = std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer);
-            config.break_glass = $config;
-        }));
-    };
-    ($bindings:tt, principal_grants) => {
-        broker_fixture!($bindings, crate::test_support::start_broker_no_audit_with(|config| {
-            config.authorizer = std::sync::Arc::new(crate::test_support::GrantsInPrincipalName);
-        }));
-    };
-    ($bindings:tt, group_controller_peer($authorizer:expr)) => {
-        broker_fixture!($bindings, crate::test_support::start_group_broker_no_audit(
-            std::sync::Arc::new(crate::test_support::ControllerPeerAllowed($authorizer)),
-        ));
-    };
-    ($bindings:tt, group_allow_all) => {
-        broker_fixture!($bindings, crate::test_support::start_group_broker_no_audit(
-            std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer)
-        ));
-    };
-    ($bindings:tt, share_allow_all) => {
-        broker_fixture!(
-            $bindings,
-            crate::test_support::start_share_broker()
-                .authorizer(std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer))
-                .call()
-        );
-    };
-    ($bindings:tt, allow_all $(, $ready:ident)?) => {
-        broker_fixture!(
-            $bindings,
-            start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer))
-            $(, $ready)?
-        );
-    };
-    ($bindings:tt, deny_all $(, $ready:ident)?) => {
-        broker_fixture!($bindings, start_broker(Arc::new(DenyAll)) $(, $ready)?);
-    };
-    (($handle:ident, $directory:ident, $broker:ident), $start:expr $(, $ready:ident)?) => {
-        let ($handle, $directory) = $start.await;
-        let $broker = $handle.broker_arc_for_test();
-        $(broker_fixture!(@$ready $broker);)?
-    };
-    (@controller_leader $broker:ident) => {
-        crate::test_support::wait_for_controller_leader(&$broker).await;
-    };
-}
-
 /// Define config-image input fixtures with their record fields and starting image explicit.
 macro_rules! config_image_fixture {
     ($(#[$attr:meta])* $vis:vis fn $name:ident($key:ident, $pairs:ident)
@@ -248,85 +145,6 @@ macro_rules! config_image_fixture {
             }));
             image
         }
-    };
-}
-
-/// Run the share-offset refusal matrices with identical resource and assertion order.
-macro_rules! share_refusal_cases {
-    (($case:ident, $authorizer:ident, $enabled:ident, [$($input:ident),*], $expected:ident) in $cases:expr;
-     ($handle:ident, $directory:ident, $broker:ident, $ctx:ident, $response:ident);
-     $handler:ident($request:expr, $version:expr)) => {
-        for ($case, $authorizer, $enabled, $($input,)* $expected) in $cases {
-            broker_fixture!(($handle, $directory, $broker),
-                crate::test_support::start_share_broker()
-                    .authorizer($authorizer)
-                    .support($enabled)
-                    .call());
-            test_ctx!($ctx, "alice");
-            let $response = $handler(&$broker, $request, $version, &$ctx)
-                .await.expect("handle");
-            assert!($response == $expected, "case: {}", $case);
-            $handle.shutdown().await;
-        }
-    };
-}
-
-/// Bind a request principal, peer, and optional context in the caller's scope.
-/// Explicit expressions retain the caller's authentication and context policy.
-macro_rules! request_identity {
-    (
-        ($principal:ident, $peer:ident, $context:ident), $identity:expr,client_id = $client_id:expr
-    ) => {
-        request_identity!(
-            ($principal, $peer, $context),
-            $identity,
-            client_id = $client_id,
-            address = peer()
-        );
-    };
-    (
-        ($principal:ident, $peer:ident, $context:ident),
-        $identity:expr,client_id =
-        $client_id:expr,address =
-        $address:expr
-    ) => {
-        request_identity!(($principal, $peer), $identity, $address);
-        let $context = crate::test_support::request_context(&$principal, &$peer, $client_id);
-    };
-    (($principal:ident, $peer:ident), $identity:expr) => {
-        request_identity!(($principal, $peer), $identity, peer());
-    };
-    (($principal:ident, $peer:ident), $identity:expr, $address:expr) => {
-        let $principal = $identity;
-        let $peer = $address;
-    };
-    (($principal:ident, $peer:ident, $context:ident), $identity:expr, $builder:path) => {
-        request_identity!(($principal, $peer, $context), $identity, $builder, peer());
-    };
-    (
-        ($principal:ident, $peer:ident, $context:ident),
-        $identity:expr,
-        $builder:path,
-        $address:expr
-    ) => {
-        request_identity!(($principal, $peer), $identity, $address);
-        let $context = $builder(&$principal, &$peer);
-    };
-}
-
-/// Empty ACL metadata and a bound caller for synchronous authorization checks.
-macro_rules! empty_acl_fixture {
-    (($authorizer:ident, $image:ident), ($principal:ident, $peer:ident, $context:ident), $identity:expr, client_id = $client_id:expr $(, connection_id = $connection_id:expr)?) => {
-        let $authorizer = crate::authorizer::SimpleAclAuthorizer::new(std::collections::HashSet::new());
-        let $image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-        request_identity!(($principal, $peer), $identity);
-        empty_acl_fixture!(@context $context, $principal, $peer, $client_id $(, $connection_id)?);
-    };
-    (@context $context:ident, $principal:ident, $peer:ident, $client_id:expr) => {
-        let $context = crate::test_support::request_context(&$principal, &$peer, $client_id);
-    };
-    (@context $context:ident, $principal:ident, $peer:ident, $client_id:expr, $connection_id:expr) => {
-        let $context = crate::handlers::RequestContext::new(&$principal, &$peer, $client_id, $connection_id, false, "PLAINTEXT");
     };
 }
 
@@ -641,6 +459,78 @@ pub(crate) async fn start_allow_all_no_audit() -> (BrokerHandle, tempfile::TempD
         config.authorizer = Arc::new(AllowAllAuthorizer);
     })
     .await
+}
+
+/// The policy is independent of whether the caller's starter enables audit.
+pub(crate) fn allow_all_authorizer() -> Arc<dyn Authorizer> { Arc::new(AllowAllAuthorizer) }
+
+pub(crate) fn deny_all_authorizer() -> Arc<dyn Authorizer> { Arc::new(DenyAll) }
+
+pub(crate) async fn start_share_allow_all() -> (BrokerHandle, tempfile::TempDir) {
+    start_share_broker()
+        .authorizer(allow_all_authorizer())
+        .call()
+        .await
+}
+
+pub(crate) fn controller_peer_authorizer() -> Arc<dyn Authorizer> {
+    Arc::new(ControllerPeerAllowed(SimpleAclAuthorizer::new(
+        HashSet::new(),
+    )))
+}
+
+pub(crate) async fn start_with_extra_log_dir(extra: &Path) -> (BrokerHandle, tempfile::TempDir) {
+    start_test_broker_with({
+        let extra_dir = extra.to_path_buf();
+        move |config| config.extra_log_dirs = vec![extra_dir]
+    })
+    .await
+}
+
+fn set_local_storage(config: &mut BrokerConfig, directory: &Path) {
+    config.remote_storage_backend = Some(RemoteStorageBackend::Local {
+        dir: directory.to_path_buf(),
+    });
+}
+
+pub(crate) async fn start_with_local_remote_storage(
+    directory: &tempfile::TempDir,
+) -> (BrokerHandle, tempfile::TempDir) {
+    start_broker_with(|config| {
+        set_local_storage(config, directory.path());
+        config.remote_log_metadata = RlmmKind::InMemory;
+    })
+    .await
+}
+
+pub(crate) async fn start_with_local_object_store(
+    directory: &tempfile::TempDir,
+) -> (BrokerHandle, tempfile::TempDir) {
+    start_broker_no_audit_with(|config| {
+        config.authorizer = Arc::new(AllowAllAuthorizer);
+        set_local_storage(config, directory.path());
+    })
+    .await
+}
+
+pub(crate) async fn start_with_break_glass(
+    configure: impl FnOnce() -> BreakGlassConfig,
+) -> (BrokerHandle, tempfile::TempDir) {
+    start_broker_no_audit_with(|config| {
+        config.authorizer = Arc::new(AllowAllAuthorizer);
+        config.break_glass = configure();
+    })
+    .await
+}
+
+pub(crate) async fn start_with_principal_grants() -> (BrokerHandle, tempfile::TempDir) {
+    start_broker_no_audit_with(|config| config.authorizer = Arc::new(GrantsInPrincipalName)).await
+}
+
+pub(crate) async fn start_group_with_controller_peer(
+    authorizer: impl Authorizer + 'static,
+) -> (BrokerHandle, tempfile::TempDir) {
+    start_group_broker_no_audit(Arc::new(ControllerPeerAllowed(authorizer))).await
 }
 
 pub(crate) async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
@@ -1543,16 +1433,6 @@ pub(crate) fn invalid_manual_assignment(
     )
 }
 
-/// Start the canonical `ListOffsets` client, create its topic, then await the log.
-macro_rules! list_offsets_topic_fixture {
-    (($broker:ident, $directory:ident, $client:ident), $topic:expr) => {
-        let ($broker, $directory) = crate::test_support::start_broker_no_audit().await;
-        let $client = client_for(&$broker).await;
-        create_topic(&$client, $topic, Vec::new()).await;
-        $broker.wait_until_partition_present($topic, 0).await;
-    };
-}
-
 /// A config refusal must retain its Kafka error and name the rejected key.
 pub(crate) fn check_config_result<T>(
     result: Result<T, (i16, String)>,
@@ -1634,17 +1514,6 @@ pub(crate) async fn initialize_earliest_share(
     for partition in partitions {
         initialize_share_state(broker, group, uuid::Uuid::from_bytes(topic_id.0), partition).await;
     }
-}
-
-/// A fixed cluster id used to pin Kafka's independent base64-form expectations.
-macro_rules! known_cluster_fixture {
-    (($id:ident, $handle:ident, $directory:ident, $broker:ident)) => {
-        let $id = uuid::Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
-        broker_fixture!(
-            ($handle, $directory, $broker),
-            crate::test_support::start_broker_with(|config| config.cluster_id = Some($id))
-        );
-    };
 }
 
 /// Bind the shared runtime before waiting for a candidate that satisfies the caller's predicate.

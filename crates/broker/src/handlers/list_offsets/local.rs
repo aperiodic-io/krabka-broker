@@ -84,6 +84,7 @@ pub(super) fn epoch_start_offset(partition: &Partition) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -103,9 +104,7 @@ mod tests {
                 },
                 test_support::replicated_partition,
             },
-            test_support::{
-                UnixMillis, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
-            },
+            test_support::{UnixMillis, start_broker_with_authorizer_no_audit as start_broker},
         },
         assert2::{assert, check},
         krabka_protocol::owned::{
@@ -252,7 +251,10 @@ mod tests {
         const IMMEDIATE: &str = "list-offsets-delivery-immediate";
         const SCHEDULED: &str = "list-offsets-delivery-scheduled";
 
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         let logs = tempfile::tempdir().expect("log root");
         register_delivery_partition(
             &broker_handle,
@@ -270,7 +272,10 @@ mod tests {
             DeliveryPolicy::Scheduled,
         )
         .await;
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         // Both topics hold the same records, so every sentinel but LATEST
         // answers the same on both. KFC-1 moves where a seek to end lands and
@@ -363,7 +368,10 @@ mod tests {
         };
 
         const TOPIC: &str = "scheduled-latest-retention";
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         let logs = tempfile::tempdir().unwrap();
         let remote = tempfile::tempdir().unwrap();
         let TieredDelivery {
@@ -420,7 +428,10 @@ mod tests {
             ) == 1
         );
         assert!(partition.log.lock().unwrap().local_log_start_offset() == Offset(2));
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
         timeline
             .advance(std::time::Duration::from_millis(
@@ -510,7 +521,10 @@ mod tests {
                 &partition,
             ));
             assert!(partition.high_watermark().await == Offset(6));
-            test_ctx!(ctx, "admin");
+            krabka_macros::request_test_identity! {
+                bind(ctx);
+                user ["admin"];
+            };
             assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
             assert!(
                 latest_offsets_for_test(&broker, TOPIC).await
@@ -572,7 +586,10 @@ mod tests {
         // matching what `ListOffsets` now also requires of the image.
         const OTHER_BROKER: u64 = 7;
 
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         assert!(broker.config.node_id.get() != OTHER_BROKER);
         let logs = tempfile::tempdir().expect("log root");
         let timeline = qubit_clock::ManualMonotonicClock::new_shared();
@@ -592,7 +609,10 @@ mod tests {
         partition
             .install_leader_change(broker.config.node_id.get(), 0)
             .await;
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
 
         check!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
 

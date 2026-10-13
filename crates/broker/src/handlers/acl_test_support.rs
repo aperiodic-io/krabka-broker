@@ -140,7 +140,10 @@ macro_rules! seeded_acl_fixture {
         let ($handle, $directory) = $start.await;
         crate::handlers::acl_test_support::seed_acls(&$handle, $entries).await;
         let $broker = $handle.broker_arc_for_test();
-        test_ctx!($context, $user);
+        krabka_macros::request_test_identity! {
+            bind($context);
+            user [$user];
+        };
     };
 }
 

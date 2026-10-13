@@ -199,9 +199,10 @@ pub(crate) async fn handle(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
-        crate::test_support::{DenyAll, start_broker_with_authorizer, test_ctx},
+        crate::test_support::{DenyAll, start_broker_with_authorizer},
         assert2::assert,
         krabka_protocol::owned::describe_log_dirs_response,
         std::sync::Arc,
@@ -216,11 +217,11 @@ mod tests {
     #[tokio::test]
     async fn handle_denies_cluster_describe_for_whole_request() {
         let version = describe_log_dirs_response::MAX_VERSION;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker_with_authorizer(Arc::new(DenyAll))
-        );
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker_with_authorizer(Arc::new(DenyAll))];
+            user ["ANONYMOUS"];
+        };
 
         let resp = handle(&broker, DescribeLogDirsRequest::default(), version, &ctx)
             .await

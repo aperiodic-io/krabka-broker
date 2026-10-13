@@ -153,14 +153,17 @@ mod tests {
         super::*,
         crate::{
             authorizer::{AuthorizationResult, Authorizer},
+            broker::BrokerHandle,
             coordinator::unified::share::persistence::{
                 ShareGroupMetadataValue, ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
             },
             handlers::{
                 RequestContext,
                 describe_share_group_offsets::test_support::{image_with_topic, register_topic},
+                test_support as handler_fixture_support,
             },
-            test_support::peer,
+            share_coordinator::persister_client::SharePersister,
+            test_support as broker_fixture_support,
         },
         assert2::assert,
         krabka_ids::PartitionIndex,
@@ -293,12 +296,11 @@ mod tests {
         image: &krabka_metadata::MetadataImage,
         request: DescribeShareGroupOffsetsRequestGroup,
     ) -> DescribeShareGroupOffsetsResponseGroup {
-        request_identity!(
-            (principal, peer, context),
-            crate::test_support::principal("alice"),
-            client_id = "admin-client",
-            address = peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, context);
+            user ["alice"];
+            client ["admin-client"];
+        };
         describe_initialized_group(broker, image, &context, request).await
     }
 
@@ -349,6 +351,29 @@ mod tests {
     /// row with no partitions: `KafkaApis.describeShareGroupOffsetsForGroup`
     /// builds one `TOPIC_AUTHORIZATION_FAILED` row per partition the request
     /// named, and does not look the group's initialized partitions up.
+    /// Retain this enabled share broker and its installed state persister together.
+    async fn start_with_share_persister(
+        authorizer: Arc<dyn Authorizer>,
+    ) -> (
+        BrokerHandle,
+        tempfile::TempDir,
+        Arc<Broker>,
+        Arc<SharePersister>,
+    ) {
+        let (handle, directory) = broker_fixture_support::start_share_broker()
+            .authorizer(authorizer)
+            .support(broker_fixture_support::ShareApiSupport::Enabled)
+            .call()
+            .await;
+        let broker = handle.broker_arc_for_test();
+        let persister = broker
+            .group_coordinator
+            .share_persister()
+            .cloned()
+            .expect("share persister");
+        (handle, directory, broker, persister)
+    }
+
     #[tokio::test]
     async fn a_denied_topic_named_with_no_partitions_has_no_partition_rows() {
         orders_and_secret_image!(
@@ -356,13 +381,13 @@ mod tests {
             crate::handlers::test_support::TopicPartitionCount(2)
         );
 
-        broker_fixture!(
-            (broker_handle, _dir, broker, persister),
-            share_persister(
-                Arc::new(DenyDescribeOnTopic("secret")),
-                crate::test_support::ShareApiSupport::Enabled
-            )
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_share_broker().authorizer(Arc::new(DenyDescribeOnTopic("secret"))).support(broker_fixture_support::ShareApiSupport::Enabled).call()];
+            ready {
+                let persister = broker.group_coordinator.share_persister().cloned().expect("share persister");
+            };
+        };
         register_topic(&broker, "orders", orders_id).await;
         persister
             .initialize("g3", orders_id, 0, 1, Offset(5))
@@ -443,13 +468,8 @@ mod tests {
         ];
 
         for case in cases {
-            broker_fixture!(
-                (broker_handle, _dir, broker, persister),
-                share_persister(
-                    case.authorizer,
-                    crate::test_support::ShareApiSupport::Enabled
-                )
-            );
+            let (broker_handle, _dir, broker, persister) =
+                start_with_share_persister(case.authorizer).await;
             let image = image_with_topic("orders", topic_id);
             register_topic(&broker, "orders", topic_id).await;
             persister
@@ -462,12 +482,11 @@ mod tests {
                 requested.push(topic("secret", vec![PartitionIndex(0), PartitionIndex(1)]));
             }
 
-            request_identity!(
-                (principal, peer, ctx),
-                crate::test_support::principal("alice"),
-                client_id = "admin-client",
-                address = peer()
-            );
+            krabka_macros::request_test_identity! {
+                bind(principal, peer, ctx);
+                user ["alice"];
+                client ["admin-client"];
+            };
 
             let result = describe_initialized_group(
                 &broker,
@@ -512,13 +531,8 @@ mod tests {
         ];
 
         for case in cases {
-            broker_fixture!(
-                (broker_handle, _dir, broker, persister),
-                share_persister(
-                    case.authorizer,
-                    crate::test_support::ShareApiSupport::Enabled
-                )
-            );
+            let (broker_handle, _dir, broker, persister) =
+                start_with_share_persister(case.authorizer).await;
 
             orders_and_secret_image!(
                 (orders_id, secret_id, image),
@@ -565,15 +579,17 @@ mod tests {
     /// failing this assertion.
     #[tokio::test]
     async fn empty_topic_list_never_reaches_the_coordinator() {
-        broker_fixture!((broker_handle, _dir, broker), share_allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_share_allow_all()];
+        };
         let image = image_with_topic("orders", uuid::Uuid::from_u128(1));
 
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("alice"),
-            client_id = "admin-client",
-            address = peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["alice"];
+            client ["admin-client"];
+        };
 
         let result = describe_group(
             &broker,

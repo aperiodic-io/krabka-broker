@@ -10,11 +10,11 @@ use {
         *,
     },
     crate::{
-        broker::Broker,
-        handlers::RequestContext,
+        broker::{Broker, BrokerHandle},
+        handlers::{RequestContext, test_support as handler_fixture_support},
         test_support::{
-            DenyAll, KafkaErrorCode, dispatch_wire, start_broker_with_authorizer as start_broker,
-            test_ctx,
+            self as broker_fixture_support, KafkaErrorCode, dispatch_wire,
+            start_broker_with_authorizer as start_broker,
         },
     },
     assert2::assert,
@@ -56,13 +56,22 @@ async fn check_empty_alter_partition(
     assert!(response == expected);
 }
 
+/// Seed the controller's partition image after this broker becomes leader.
+async fn start_seeded_partition_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+    let (handle, directory) = start_broker(handler_fixture_support::allow_all_authorizer()).await;
+    let broker = handle.broker_arc_for_test();
+    broker_fixture_support::wait_for_controller_leader(&broker).await;
+    seed_partition(&broker).await;
+    (handle, directory, broker)
+}
+
 #[tokio::test]
 async fn handle_denies_cluster_action_for_whole_request() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        deny_all,
-        context(ctx, "replica")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] deny_all;
+        user ["replica"];
+    };
     check_empty_alter_partition()
         .broker(&broker)
         .ctx(&ctx)
@@ -74,12 +83,12 @@ async fn handle_denies_cluster_action_for_whole_request() {
 
 #[tokio::test]
 async fn leader_accepts_empty_alter_partition_request() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        allow_all,
-        context(ctx, "replica"),
-        controller_leader
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] allow_all;
+        ready controller_leader;
+        user ["replica"];
+    };
     check_empty_alter_partition()
         .broker(&broker)
         .ctx(&ctx)
@@ -91,9 +100,11 @@ async fn leader_accepts_empty_alter_partition_request() {
 #[tokio::test]
 async fn handle_returns_topic_partition_response_and_commits_isr_change() {
     let version = 2;
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
-    seed_partition(&broker).await;
-    test_ctx!(ctx, "replica");
+    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["replica"];
+    };
     let req = single_partition_request(&broker);
     let resp = super::handle(&broker, req, version, &ctx)
         .await
@@ -112,9 +123,11 @@ async fn handle_returns_topic_partition_response_and_commits_isr_change() {
 /// the other must rebuild admission after the first commit and be fenced.
 #[tokio::test]
 async fn concurrent_isr_updates_revalidate_the_partition_epoch_at_append() {
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
-    seed_partition(&broker).await;
-    test_ctx!(ctx, "replica");
+    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["replica"];
+    };
     let request = single_partition_request(&broker);
     let (first, second) = tokio::join!(
         super::handle(&broker, request.clone(), 2, &ctx),
@@ -180,9 +193,11 @@ async fn topic_row_error_follows_version_and_topic_id() {
         (3, TopicIdKind::Unknown),
         (3, TopicIdKind::Zero),
     ];
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
-    seed_partition(&broker).await;
-    test_ctx!(ctx, "replica");
+    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["replica"];
+    };
 
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
@@ -269,9 +284,11 @@ async fn topic_row_error_follows_version_and_topic_id() {
 #[tokio::test]
 async fn a_stale_sender_broker_epoch_refuses_the_whole_request() {
     let version = alter_partition_response::MAX_VERSION;
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
-    seed_partition(&broker).await;
-    test_ctx!(ctx, "replica");
+    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["replica"];
+    };
     let current = request_with_topics(&broker, Vec::new()).broker_epoch;
 
     for (broker_id, broker_epoch) in [(1, current + 1), (1, -1), (99, current)] {

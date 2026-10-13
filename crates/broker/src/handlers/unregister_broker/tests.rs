@@ -13,14 +13,19 @@ use {
         break_glass::gate::tests::{approved_proposal, image_of},
         broker::Broker,
         config::BreakGlassConfig,
-        handlers::{RequestContext, test_support::replicated_partition as partition_fixture},
+        handlers::{
+            RequestContext,
+            test_support::{
+                self as handler_fixture_support, replicated_partition as partition_fixture,
+            },
+        },
         metrics::{
             BreakGlassAction as MetricBreakGlassAction, BreakGlassActionLabel, BrokerMetrics,
         },
         test_support::{
-            DenyAll, PartitionCount, PartitionEpoch, broker_registration,
-            decode_response as test_decode_response, encode_request as test_encode_request, peer,
-            principal, request_context,
+            self as broker_fixture_support, DenyAll, PartitionCount, PartitionEpoch,
+            broker_registration, decode_response as test_decode_response,
+            encode_request as test_encode_request, principal, request_context,
             start_broker_with_authorizer_no_audit as start_authorizer_broker,
         },
     },
@@ -73,10 +78,10 @@ fn response_preserves_error_fields_and_throttle() {
 #[tokio::test]
 async fn handle_denies_cluster_alter_with_message_and_throttle() {
     let version = unregister_broker_response::MAX_VERSION;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_authorizer_broker(Arc::new(DenyAll))
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_authorizer_broker(Arc::new(DenyAll))];
+    };
     let resp = answer(&broker, version, 1).await;
 
     let expected = krabka_macros::unthrottled_wire!(UnregisterBrokerResponse {
@@ -93,11 +98,15 @@ async fn handle_denies_cluster_alter_with_message_and_throttle() {
 #[tokio::test]
 async fn handle_answers_broker_id_not_registered_for_unknown_ids() {
     let version = unregister_broker_response::MAX_VERSION;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_authorizer_broker(Arc::new(AllowAllAuthorizer),)
-    );
-    request_identity!((principal, peer, ctx), principal("admin"), context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_authorizer_broker(Arc::new(AllowAllAuthorizer),)];
+    };
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        user ["admin"];
+        context [context];
+    };
 
     for broker_id in [-1, 0, 999] {
         let req = UnregisterBrokerRequest {
@@ -121,10 +130,10 @@ async fn handle_answers_broker_id_not_registered_for_unknown_ids() {
 #[tokio::test]
 async fn handle_unregisters_registered_broker_with_success_shape() {
     let version = unregister_broker_response::MAX_VERSION;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_authorizer_broker(Arc::new(AllowAllAuthorizer),)
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_authorizer_broker(Arc::new(AllowAllAuthorizer),)];
+    };
     let resp = answer(&broker, version, 1).await;
 
     let expected = krabka_macros::unthrottled_wire!(UnregisterBrokerResponse {
@@ -227,7 +236,10 @@ fn refusals(metrics: &BrokerMetrics) -> u64 {
 #[tokio::test]
 async fn the_wire_handler_refuses_an_unregistration_that_no_proposal_covers() {
     let version = unregister_broker_response::MAX_VERSION;
-    broker_fixture!((broker_handle, _dir, broker), break_glass(gated_config()));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [handler_fixture_support::start_with_break_glass(gated_config)];
+    };
     let resp = answer(&broker, version, 1).await;
 
     check!(resp.error_code == codes::POLICY_VIOLATION);
@@ -351,11 +363,11 @@ fn topic(partitions: PartitionCount) -> MetadataRecord {
 #[tokio::test]
 async fn handle_removes_the_broker_from_every_isr_in_the_unregistering_append() {
     let version = unregister_broker_response::MAX_VERSION;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer),),
-        controller_leader
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [broker_fixture_support::start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer),)];
+        ready controller_leader;
+    };
     broker
         .controller
         .submit_change(vec![
@@ -453,11 +465,11 @@ fn a_node_that_is_not_the_active_controller_refuses_with_kafkas_message() {
 #[tokio::test]
 async fn a_request_on_the_controller_listener_is_answered_in_place() {
     let version = unregister_broker_response::MAX_VERSION;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        start_authorizer_broker(Arc::new(AllowAllAuthorizer),),
-        controller_leader
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_authorizer_broker(Arc::new(AllowAllAuthorizer),)];
+        ready controller_leader;
+    };
     let principal = principal("admin");
     let peer: SocketAddr = "127.0.0.1:9093".parse().unwrap();
     let ctx = RequestContext::new(
@@ -519,7 +531,11 @@ fn the_isr_departures_sit_between_the_consume_and_the_unregister_record() {
 }
 
 async fn answer(broker: &Broker, version: i16, broker_id: i32) -> UnregisterBrokerResponse {
-    request_identity!((principal, peer, ctx), principal("admin"), context);
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        user ["admin"];
+        context [context];
+    };
     let req = UnregisterBrokerRequest {
         broker_id,
         ..Default::default()

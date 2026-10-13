@@ -115,6 +115,7 @@ fn without_metadata_log(req: &FetchSnapshotRequest) -> FetchSnapshotResponse {
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -378,12 +379,11 @@ mod tests {
             },
         ];
 
-        request_identity!(
-            (principal, address, ctx),
-            crate::test_support::principal("admin"),
-            client_id = "snapshot-test",
-            address = crate::test_support::peer()
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, address, ctx);
+            user ["admin"];
+            client ["snapshot-test"];
+        };
         for Case {
             what,
             edit,

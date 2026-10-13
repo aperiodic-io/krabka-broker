@@ -19,8 +19,7 @@ use {
             create_topic as create_topic_from_test_support,
         },
         test_support::{
-            DenyAll, decode_response, encode_request, peer, principal,
-            start_broker_with_authorizer_no_audit,
+            DenyAll, decode_response, encode_request, start_broker_with_authorizer_no_audit,
         },
     },
     std::sync::Arc,
@@ -126,11 +125,11 @@ async fn drive(broker: &BrokerHandle, known: Option<&str>, case: Case) -> CaseOu
     };
 
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("producer"),
-        client_id = "producer-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["producer"];
+        client ["producer-client"];
+    };
     let request_bytes = encode_request(&request, case.version);
     let response_bytes = handle(
         &shared,

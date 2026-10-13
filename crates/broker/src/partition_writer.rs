@@ -39,12 +39,6 @@ mod swap;
 #[cfg(test)]
 mod test_support;
 
-// `run_writer!` must be in textual scope before the test modules that expand
-// it, because a `macro_rules!` macro is only visible after its definition.
-#[cfg(test)]
-#[macro_use]
-mod writer_macros;
-
 #[cfg(test)]
 mod tests;
 

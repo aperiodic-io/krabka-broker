@@ -183,6 +183,7 @@ mod tests {
     use {
         super::*,
         crate::{
+            authorizer as fixture_authorizers,
             handlers::test_support::transaction_admin_tests::*,
             test_support::{grant_topic_operation, peer, principal},
             txn::state::TopicPartition,
@@ -239,9 +240,15 @@ mod tests {
         use krabka_log::ProducerId;
 
         let version = krabka_protocol::owned::describe_transactions_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         let coordinator = &broker.txn_coordinator;
-        test_ctx!(context, "admin");
+        krabka_macros::request_test_identity! {
+            bind(context);
+            user ["admin"];
+        };
 
         // Two ids this broker coordinates, and one it does not.
         let (ongoing_id, dead_id) = ("tx-ongoing", "tx-dead");
@@ -352,12 +359,12 @@ mod tests {
         use krabka_log::ProducerId;
 
         let version = krabka_protocol::owned::describe_transactions_response::MAX_VERSION;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(crate::authorizer::SimpleAclAuthorizer::new(
-                std::collections::HashSet::new()
-            ),))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(Arc::new(fixture_authorizers::SimpleAclAuthorizer::new(
+                        std::collections::HashSet::new()
+                    ),))];
+        };
         let coordinator = &broker.txn_coordinator;
         let peer = peer();
         let tid = "tx";

@@ -113,8 +113,14 @@ mod tests {
         },
         crate::{
             broker::Broker,
-            handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup,
-            test_support::{peer, principal, request_context, wait_for_controller_leader},
+            handlers::{
+                assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup,
+                test_support as handler_fixture_support,
+            },
+            test_support::{
+                self as broker_fixture_support, peer, principal, request_context,
+                wait_for_controller_leader,
+            },
         },
         assert2::assert,
         krabka_metadata::{FeatureLevelRecord, MetadataRecord, PartitionRecord, TopicRecord},
@@ -138,11 +144,11 @@ mod tests {
                 $topic_id:ident
             )
         ) => {
-            broker_fixture!(
-                ($handle, $directory, $broker),
-                crate::test_support::start_broker_with(|_| {}),
-                controller_leader
-            );
+            krabka_macros::broker_test_setup! {
+                bind($handle, $directory, $broker);
+                boot [crate::test_support::start_broker_with(|_| {})];
+                ready controller_leader;
+            };
             let $epoch = own_broker_epoch(&$broker);
             let $dir_id = uuid::Uuid::from_u128(0xAA);
             let $topic_id = uuid::Uuid::from_u128(0xBB);
@@ -261,11 +267,11 @@ mod tests {
 
     #[tokio::test]
     async fn handle_leader_commits_known_directory_assignment() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::test_support::start_broker_with(|_| {}),
-            controller_leader
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_broker_with(|_| {})];
+            ready controller_leader;
+        };
         let dir_uuid = uuid::Uuid::from_u128(0xAA);
         let topic_uuid = uuid::Uuid::from_u128(0xBB);
         seed_topic(&broker, topic_uuid).await;
@@ -288,11 +294,11 @@ mod tests {
 
     #[tokio::test]
     async fn handle_rejects_directory_assignment_below_kip_858_metadata_version() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::test_support::start_broker_with(|_| {}),
-            controller_leader
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_broker_with(|_| {})];
+            ready controller_leader;
+        };
         let topic_uuid = uuid::Uuid::from_u128(0xBB);
         broker
             .controller
@@ -337,7 +343,10 @@ mod tests {
     /// commits nothing.
     #[tokio::test]
     async fn handle_needs_cluster_action() {
-        broker_fixture!((broker_handle, _dir, broker), principal_grants);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_with_principal_grants()];
+        };
         wait_for_controller_leader(&broker).await;
         let broker_epoch = own_broker_epoch(&broker);
         let dir_uuid = uuid::Uuid::from_u128(0xAA);
@@ -466,11 +475,11 @@ mod tests {
             AssignReplicasToDirsRequest, DirectoryData as ReqDirData,
         };
 
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::test_support::start_broker_with(|_| {}),
-            controller_leader
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_broker_with(|_| {})];
+            ready controller_leader;
+        };
 
         for broker_id in [99i32, -1] {
             let req = AssignReplicasToDirsRequest {

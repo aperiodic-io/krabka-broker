@@ -17,7 +17,7 @@ use {
             },
         },
         handlers::push_telemetry::test_support::{gauge_metric, metrics_data},
-        test_support::{KafkaErrorCode, peer, start_broker_with},
+        test_support::{self as broker_fixture_support, KafkaErrorCode, peer, start_broker_with},
     },
     assert2::assert,
     bytes::Bytes,
@@ -276,10 +276,10 @@ async fn push_after_get_checks(unstable: UnstableApiVersions) {
 /// `INVALID_REQUEST` only for `Uuid.RESERVED` (#673).
 #[tokio::test]
 async fn push_without_a_get_builds_the_instance() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with(|_cfg| {})
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [broker_fixture_support::start_broker_with(|_cfg| {})];
+    };
     let peer_addr = peer();
     let client_ctx = TelemetryContext {
         connection_id: "connection-a",

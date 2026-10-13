@@ -12,12 +12,11 @@ use {
             deletion, expected_response, expected_result, low_metadata_version, start_broker,
             test_context, valid_upsertion,
         },
-        test_support::{DenyAll, test_ctx, wait_for_controller_leader},
+        test_support::wait_for_controller_leader,
     },
     assert2::assert,
     krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialDeletion,
     krabka_security::{SaslMechanism, scram::MIN_SCRAM_ITERATIONS},
-    std::sync::Arc,
 };
 
 fn valid_request(user: &str) -> AlterUserScramCredentialsRequest {
@@ -64,12 +63,12 @@ async fn handle_denies_invalid_rows_before_scram_validation() { denied_invalid_r
 
 #[tokio::test]
 async fn handle_authorizes_and_persists_valid_upsertion() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        allow_all,
-        context(ctx, "admin"),
-        controller_leader
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] allow_all;
+        ready controller_leader;
+        user ["admin"];
+    };
     let req = valid_request("alice");
 
     let resp = answer(&broker, req, &ctx).await;
@@ -87,11 +86,11 @@ async fn handle_authorizes_and_persists_valid_upsertion() {
 
 #[tokio::test]
 async fn handle_denies_valid_upsertion_without_cluster_alter() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        deny_all,
-        context(ctx, "admin")
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, ctx);
+        boot [start_broker] deny_all;
+        user ["admin"];
+    };
     let req = valid_request("alice");
 
     let resp = answer(&broker, req, &ctx).await;
@@ -130,12 +129,18 @@ async fn handle_low_metadata_version_authorized_request_deduplicates_unsupported
 }
 
 async fn denied_invalid_rows(use_low_metadata_version: bool) {
-    broker_fixture!((broker_handle, _dir, broker), deny_all);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker] deny_all;
+    };
     if use_low_metadata_version {
         wait_for_controller_leader(&broker).await;
         low_metadata_version(&broker).await;
     }
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
     let mut invalid_upsertion = valid_upsertion("bob");
     invalid_upsertion.iterations = MIN_SCRAM_ITERATIONS - 1;
     let req = AlterUserScramCredentialsRequest {
@@ -160,9 +165,16 @@ async fn check_unsupported_users(
         krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialUpsertion,
     >,
 ) {
-    broker_fixture!((broker_handle, _dir, broker), allow_all, controller_leader);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker);
+        boot [start_broker] allow_all;
+        ready controller_leader;
+    };
     low_metadata_version(&broker).await;
-    test_ctx!(ctx, "admin");
+    krabka_macros::request_test_identity! {
+        bind(ctx);
+        user ["admin"];
+    };
     let req = AlterUserScramCredentialsRequest {
         deletions: vec![deletion("alice")],
         upsertions: upsertions(),

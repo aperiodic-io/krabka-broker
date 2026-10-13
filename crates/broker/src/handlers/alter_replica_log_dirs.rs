@@ -177,7 +177,10 @@ pub(crate) fn handle(
 mod tests {
     use {
         super::*,
-        crate::{broker::spawn_partition, log_dir::partition_dir},
+        crate::{
+            broker::spawn_partition, handlers::test_support as handler_fixture_support,
+            log_dir::partition_dir, test_support as broker_fixture_support,
+        },
         assert2::assert,
         krabka_protocol::owned::alter_replica_log_dirs_request::{
             AlterReplicaLogDir, AlterReplicaLogDirTopic,
@@ -225,10 +228,10 @@ mod tests {
     #[tokio::test]
     async fn handle_preserves_unknown_target_response_shape() {
         let version = 2;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::test_support::start_broker_with(|_| {})
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [broker_fixture_support::start_broker_with(|_| {})];
+        };
         let req = AlterReplicaLogDirsRequest {
             dirs: vec![AlterReplicaLogDir {
                 path: "/tmp/krabka-missing-log-dir".into(),
@@ -286,7 +289,10 @@ mod tests {
             .expect("tempdir has a name")
             .to_string_lossy()
             .to_string();
-        broker_fixture!((broker_handle, _dir, broker), extra_log_dir(extra_dir));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_with_extra_log_dir(&extra_dir)];
+        };
 
         // A topic of 213 characters gives Kafka's future directory name,
         // `<topic>-0.<32 hex>-future`, exactly 255 characters.
@@ -375,7 +381,10 @@ mod tests {
         let version = 2;
         let extra = tempfile::tempdir().expect("extra log dir");
         let extra_dir = extra.path().to_path_buf();
-        broker_fixture!((broker_handle, _dir, broker), extra_log_dir(extra_dir));
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_with_extra_log_dir(&extra_dir)];
+        };
         let primary = broker.config.log_dir.clone();
         let partition_dir = partition_dir(&primary, "orders", 0);
         std::fs::create_dir_all(&partition_dir).expect("partition dir");

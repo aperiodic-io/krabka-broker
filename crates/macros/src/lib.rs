@@ -1814,6 +1814,124 @@ pub fn reaper_task(
 }
 
 mod archive_rows;
+mod broker_test_setup;
+mod described_group_rows;
+mod forwardable_requests;
+mod group_record_key;
+mod model_properties;
+mod model_runner;
+mod reconciliation_fields;
+mod reconciliation_operations;
+mod reconciliation_projection;
+mod request_test_identity;
+mod scheduled_loads;
+mod share_refusal_matrix;
+
+/// Declare forwardable API keys and decode each embedded body with its selected request type.
+#[moxy::function]
+pub fn forwardable_requests(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    forwardable_requests::expand(&input.into()).map(Into::into)
+}
+/// Add the selected common projection fields around the visible protocol-specific fields.
+#[moxy::attribute]
+pub fn reconciliation_fields(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    reconciliation_fields::expand(&meta.into(), item)
+}
+/// Run share-offset refusal cases with direct startup, identity, assertions and shutdown.
+#[moxy::function]
+pub fn share_refusal_matrix(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    share_refusal_matrix::expand(input)
+}
+/// Derive projection construction from the member declaration's visible fields.
+#[moxy::derive(ReconciliationMember, attributes(reconciliation))]
+pub fn reconciliation_member(item: ItemStruct) -> Result<TokenStream, ParseError> {
+    reconciliation_projection::member(item)
+}
+
+/// Encode and parse a visible group-record key enum with explicit version constants.
+#[moxy::derive(GroupRecordKey, attributes(group_key))]
+pub fn group_record_key(item: ItemEnum) -> Result<TokenStream, ParseError> {
+    group_record_key::expand(item)
+}
+
+/// Derive group projection construction and epoch checks from its visible fields.
+#[moxy::derive(ReconciliationGroup, attributes(reconciliation))]
+pub fn reconciliation_group(item: ItemStruct) -> Result<TokenStream, ParseError> {
+    reconciliation_projection::group(item)
+}
+
+/// Derive heartbeat conversion from a visible reconciliation action enum.
+#[moxy::derive(ReconciliationAction)]
+pub fn reconciliation_action(item: ItemEnum) -> Result<TokenStream, ParseError> {
+    reconciliation_projection::action(item)
+}
+
+/// Observe a projected model epoch using its visible epoch field and violation ledger.
+#[moxy::derive(ModelEpochLedger)]
+pub fn model_epoch_ledger(item: ItemStruct) -> Result<TokenStream, ParseError> {
+    reconciliation_projection::epoch(item)
+}
+
+/// Build ordered model properties around their original native oracle blocks.
+#[moxy::function]
+pub fn model_properties(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    model_properties::expand(input)
+}
+
+/// Run a model with explicit search bounds and pinned state counts.
+#[moxy::function]
+pub fn model_runner(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    model_runner::expand(input)
+}
+
+/// Rebuild a reconciliation group around explicit native setup and projection operations.
+#[moxy::function]
+pub fn rebuild_reconciliation_group(
+    input: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    reconciliation_operations::rebuild(input)
+}
+
+/// Apply an explicit member action and project the resulting reconciliation state.
+#[moxy::function]
+pub fn reconciliation_next_state(
+    input: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    reconciliation_operations::next_state(input)
+}
+
+/// Emit reconciliation action scheduling with explicit caller predicates and extensions.
+#[moxy::function]
+pub fn reconciliation_actions(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    reconciliation_operations::actions(input)
+}
+
+/// Retain the broker handle and directory before native readiness operations.
+#[moxy::function]
+pub fn broker_test_setup(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    broker_test_setup::expand(input)
+}
+
+/// Retain principal and peer values for an explicitly selected borrowed request context.
+#[moxy::function]
+pub fn request_test_identity(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    request_test_identity::expand(input)
+}
+
+/// Join the visible task collection in order and log its selected failure message.
+#[moxy::derive(ScheduledLoads, attributes(scheduled_loads))]
+pub fn scheduled_loads(item: ItemStruct) -> Result<TokenStream, ParseError> {
+    scheduled_loads::expand(item)
+}
+
+/// Implement group-describe row access for an explicit table of external response types.
+#[moxy::function]
+pub fn described_group_rows(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    described_group_rows::expand(&input.into()).map(Into::into)
+}
 
 /// Generate one annotated archive-validation walk with coherent proof bindings.
 #[moxy::function(name = "validate_archive_rows")]

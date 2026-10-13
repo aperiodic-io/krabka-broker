@@ -16,8 +16,7 @@ use {
             test_support::configured_topic_request,
         },
         test_support::{
-            decode_response, dispatch_context, encode_request, peer, principal,
-            start_broker_no_audit_with,
+            decode_response, dispatch_context, encode_request, start_broker_no_audit_with,
         },
         txn::{bootstrap::TOPIC as TXN_BOOTSTRAP_TOPIC, state::TopicPartition},
     },
@@ -45,11 +44,11 @@ async fn a_produce_that_starts_a_transaction_on_many_partitions_makes_one_coordi
     let broker = handle_.broker_arc_for_test();
     handle_.wait_until_transaction_coordinator_ready().await;
 
-    request_identity!(
-        (user, address, ctx),
-        principal("client"),
-        client_id = "one-check"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["client"];
+        client ["one-check"];
+    };
     let create = configured_topic_request()
         .topic(TOPIC)
         .num_partitions(PARTITIONS)

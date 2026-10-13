@@ -202,6 +202,7 @@ pub(crate) async fn handle(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -314,7 +315,10 @@ mod tests {
         use {crate::txn::state::TxnEntry, krabka_log::ProducerId};
 
         let max_ver = krabka_protocol::owned::list_transactions_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
 
         // Lead the __transaction_state partition this tid hashes to so the
         // coordinator can persist the seeded entry.
@@ -328,7 +332,10 @@ mod tests {
             .await
             .expect("seed txn entry");
 
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         // Filter on the seeded pid → the matching entry must be kept.
         let req = ListTransactionsRequest {
             producer_id_filters: vec![100],
@@ -409,11 +416,11 @@ mod tests {
     #[tokio::test]
     async fn handler_reports_unknown_state_filters_and_top_level_fields() {
         let version = krabka_protocol::owned::list_transactions_response::MAX_VERSION;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
         let req = ListTransactionsRequest {
             state_filters: vec!["Ongoing".into(), "MysteryState".into()],
             producer_id_filters: vec![42],
@@ -441,7 +448,10 @@ mod tests {
         use {crate::txn::state::TxnEntry, krabka_log::ProducerId};
 
         let version = krabka_protocol::owned::list_transactions_response::MAX_VERSION;
-        broker_fixture!((broker_handle, _dir, broker), allow_all);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker] allow_all;
+        };
         let coordinator = &broker.txn_coordinator;
         // Two transactions in one state partition: one ongoing, one dying.
         let (ongoing_id, dead_id) = ("txn-list-ongoing", "txn-list-dead");
@@ -466,7 +476,10 @@ mod tests {
                 .expect("seed the transaction");
         }
 
-        test_ctx!(ctx, "admin");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["admin"];
+        };
         // (state filters, listed ids, unknown filters)
         let cases = [
             (Vec::new(), vec![ongoing_id.to_string()], Vec::new()),
@@ -510,11 +523,11 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_pattern_is_rejected_only_when_present_on_the_wire() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "admin")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["admin"];
+        };
 
         for (version, expected_error) in [(1, codes::NONE), (2, codes::INVALID_REGULAR_EXPRESSION)]
         {

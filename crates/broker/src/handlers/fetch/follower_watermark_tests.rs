@@ -24,7 +24,7 @@ use {
         fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
         handlers::test_support::{StartedBroker, seed_partition_replicas},
         partition::Partition,
-        test_support::{encode_request, peer, principal},
+        test_support::encode_request,
     },
     assert2::assert,
     bytes::Bytes,
@@ -161,11 +161,11 @@ fn request(topic: &str, case: Case) -> FetchRequest {
 
 async fn fetch(broker: &BrokerHandle, request: &FetchRequest) -> FetchResponse {
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("replicator"),
-        client_id = "fetch-follower"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["replicator"];
+        client ["fetch-follower"];
+    };
     let request_bytes = encode_request(request, VERSION);
     let (response, response_version) = handle(&shared, VERSION, 7, &request_bytes, &ctx)
         .await

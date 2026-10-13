@@ -14,13 +14,16 @@ use {
     crate::coordinator::{
         test_support::sorted_epoch_pairs,
         unified::{
-            actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
+            actor::reconciliation_model_support::{insert_modeled_member, modeled_member},
             consumer_state::GroupState,
         },
     },
     krabka_log::Offset,
     krabka_protocol::primitives::uuid::Uuid,
-    std::collections::{BTreeMap, BTreeSet, HashMap},
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap},
+        time::Instant,
+    },
 };
 
 fn epochs_of(map: &HashMap<Uuid, HashMap<i32, i32>>) -> Vec<(i32, i32)> {
@@ -35,10 +38,14 @@ fn epochs_to_map(epochs: &[(i32, i32)]) -> HashMap<Uuid, HashMap<i32, i32>> {
     }
 }
 
-crate::coordinator::unified::actor::reconciliation_model_support::rebuild_model_group! {
-    pub(super) fn rebuild_group(s: &CgcState); |m, ms|; mutate(updated) {
+krabka_macros::rebuild_reconciliation_group! {
+
+    pub(super) fn rebuild_group(s: &CgcState) -> GroupState
+    [member = m, built = ms]
+    { let mut updated = ms;
         updated.assignment_epochs = epochs_to_map(&m.assignment_epochs);
-    }
+
+updated }
 }
 
 pub(super) fn project(
@@ -68,6 +75,6 @@ pub(super) fn project(
     )
 }
 
-model_epoch_assertion! {
-    pub(super) fn assert_epoch_monotonic(CgcState, GroupState)
+pub(super) fn assert_epoch_monotonic(pre: &CgcState, post: &GroupState) {
+    pre.assert_epochs_against(post);
 }

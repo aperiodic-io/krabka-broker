@@ -625,10 +625,13 @@ mod tests {
     use {
         super::super::{plan::FetchMode, response::GroupedResponses},
         crate::{
-            broker::{Broker, spawn_partition},
+            broker::{Broker, BrokerHandle, spawn_partition},
             codes::{NONE, OFFSET_OUT_OF_RANGE},
             diskless::wal_index::WalFlushRecord,
-            handlers::{fetch::test_support::append_epoch_batches, test_support::partition},
+            handlers::{
+                fetch::test_support::append_epoch_batches,
+                test_support::{self as handler_fixture_support, partition},
+            },
             metrics::RequestPhases,
             partition::{Partition, test_support::test_partition},
             producer_state::ProducerState,
@@ -643,7 +646,39 @@ mod tests {
             records::{Record, RecordBatch, RecordsPayload},
         },
         object_store::{ObjectStoreExt as _, PutPayload, path::Path},
+        std::sync::Arc,
+        tempfile::TempDir,
     };
+
+    /// Keep a live broker and its log directory around one local read partition.
+    struct ReadSetup {
+        broker_handle: BrokerHandle,
+        dir: TempDir,
+        broker: Arc<Broker>,
+        part: Arc<Partition>,
+    }
+
+    async fn local_read_setup(topic: &str) -> ReadSetup {
+        let (broker_handle, dir) = handler_fixture_support::start_broker().await;
+        let broker = broker_handle.broker_arc_for_test();
+        let part = handler_fixture_support::local_partition(&broker, dir.path(), topic);
+        ReadSetup {
+            broker_handle,
+            dir,
+            broker,
+            part,
+        }
+    }
+
+    /// A follower request needs this broker to lead the partition at epoch zero.
+    async fn leader_read_setup(topic: &str) -> ReadSetup {
+        let setup = local_read_setup(topic).await;
+        setup
+            .part
+            .install_replication_target(None, setup.broker.config.node_id.0, 0)
+            .await;
+        setup
+    }
 
     fn wide_partition_fetch_request() -> super::EffectivePartition {
         super::EffectivePartition {
@@ -851,10 +886,10 @@ mod tests {
         const TOPIC_B: &str = "budget-progress-b";
         const PAYLOAD: &[u8; 512] = &[b'x'; 512];
 
-        broker_fixture!(
-            (broker_handle, dir, broker),
-            crate::handlers::test_support::start_broker()
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, dir, broker);
+            boot [handler_fixture_support::start_broker()];
+        };
 
         let part_a = nonempty_local_partition()
             .broker(&broker)
@@ -896,10 +931,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_fitting_first_batch_spends_the_exception_for_initial_and_replacement_reads() {
-        broker_fixture!(
-            (broker_handle, dir, broker),
-            crate::handlers::test_support::start_broker()
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, dir, broker);
+            boot [handler_fixture_support::start_broker()];
+        };
         let first = nonempty_local_partition()
             .broker(&broker)
             .dir(dir.path())
@@ -1058,10 +1093,10 @@ mod tests {
     async fn a_metadata_only_row_carries_an_empty_reads_aborted_transactions() {
         let cases = aborted_isolation_cases!();
 
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::handlers::test_support::start_broker()
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_broker()];
+        };
 
         for (name, read_committed, want_aborted) in cases {
             // The first partition spends the response's one progress
@@ -1157,10 +1192,10 @@ mod tests {
         const TOPIC_B: &str = "budget-cold-b";
 
         let object_dir = tempfile::tempdir().expect("object tempdir");
-        broker_fixture!(
-            (broker_handle, dir, broker),
-            local_remote_storage(object_dir)
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, dir, broker);
+            boot [handler_fixture_support::start_with_local_remote_storage(&object_dir)];
+        };
 
         let topic_a = uuid::Uuid::from_u128(0xA0);
         let topic_b = uuid::Uuid::from_u128(0xB0);
@@ -1298,10 +1333,10 @@ mod tests {
     #[tokio::test]
     async fn cold_tier_fallback_charges_the_object_store_read_to_the_remote_phase() {
         let object_dir = tempfile::tempdir().expect("object tempdir");
-        broker_fixture!(
-            (broker_handle, dir, broker),
-            local_remote_storage(object_dir)
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, dir, broker);
+            boot [handler_fixture_support::start_with_local_remote_storage(&object_dir)];
+        };
 
         let topic_id = uuid::Uuid::from_u128(0xC01D);
         let mut flushed = BytesMut::new();
@@ -1392,10 +1427,12 @@ mod tests {
         const TOPIC: &str = "long-poll-epoch";
 
         // A follower fetch reads only from the leader.
-        broker_fixture!(
-            (broker_handle, dir, broker, part),
-            local_follower_partition(TOPIC)
-        );
+        let ReadSetup {
+            broker_handle,
+            dir: _dir,
+            broker,
+            part,
+        } = leader_read_setup(TOPIC).await;
         let mut pending = [follower_read(TOPIC, &part, NONE)];
 
         part.install_leader_change(1, 1).await;
@@ -1436,10 +1473,12 @@ mod tests {
         const TOPIC: &str = "long-poll-error";
 
         // A follower fetch reads only from the leader.
-        broker_fixture!(
-            (broker_handle, dir, broker, part),
-            local_follower_partition(TOPIC)
-        );
+        let ReadSetup {
+            broker_handle,
+            dir: _dir,
+            broker,
+            part,
+        } = leader_read_setup(TOPIC).await;
         let mut pending = [follower_read(TOPIC, &part, OFFSET_OUT_OF_RANGE)];
 
         // Nothing will ever append, and the floor is unreachable: only the
@@ -1465,7 +1504,12 @@ mod tests {
     async fn a_leader_change_completes_a_parked_follower_fetch() {
         const TOPIC: &str = "long-poll-leader-change";
 
-        broker_fixture!((broker_handle, dir, broker, part), local_partition(TOPIC));
+        let ReadSetup {
+            broker_handle,
+            dir: _dir,
+            broker,
+            part,
+        } = local_read_setup(TOPIC).await;
         let node_id = broker.config.node_id.0;
         part.install_replication_target(None, node_id, 0).await;
         let request = super::EffectivePartition {
@@ -1512,10 +1556,10 @@ mod tests {
     /// the (here empty) list its read found.
     #[tokio::test]
     async fn a_reread_carries_aborted_transactions_only_for_read_committed() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            crate::handlers::test_support::start_broker()
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [handler_fixture_support::start_broker()];
+        };
 
         for (name, read_committed, want_aborted) in aborted_isolation_cases!() {
             let ConsumerPartition {
@@ -1553,7 +1597,12 @@ mod tests {
     async fn a_diverging_recheck_carries_null_aborted_transactions() {
         const TOPIC: &str = "recheck-diverge";
 
-        broker_fixture!((broker_handle, dir, broker, part), local_partition(TOPIC));
+        let ReadSetup {
+            broker_handle,
+            dir: _dir,
+            broker,
+            part,
+        } = local_read_setup(TOPIC).await;
         {
             let mut log = part.log.lock().expect("log mutex poisoned");
             append_epoch_batches(&mut log, &[0, 0, 1, 1]);
@@ -1691,10 +1740,12 @@ mod tests {
         const PAYLOAD: &[u8; 64] = &[b'x'; 64];
 
         // A follower fetch reads only from the leader.
-        broker_fixture!(
-            (broker_handle, dir, broker, part),
-            local_follower_partition(TOPIC)
-        );
+        let ReadSetup {
+            broker_handle,
+            dir: _dir,
+            broker,
+            part,
+        } = leader_read_setup(TOPIC).await;
 
         // One batch's worth of bytes, so the floor can be set between two
         // appends and three.
@@ -1757,10 +1808,12 @@ mod tests {
         const TOPIC: &str = "append-before-park";
 
         // A follower fetch reads only from the leader.
-        broker_fixture!(
-            (broker_handle, dir, broker, part),
-            local_follower_partition(TOPIC)
-        );
+        let ReadSetup {
+            broker_handle,
+            dir: _dir,
+            broker,
+            part,
+        } = leader_read_setup(TOPIC).await;
 
         let mut pending = [follower_read(TOPIC, &part, NONE)];
 

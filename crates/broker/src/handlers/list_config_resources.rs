@@ -188,9 +188,10 @@ fn collect_resources(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
-        crate::{broker::BrokerHandle, test_support::DenyAll},
+        crate::broker::BrokerHandle,
         assert2::assert,
         krabka_metadata::{BrokerRegistrationRecord, MetadataImage, MetadataRecord, TopicRecord},
         std::sync::Arc,
@@ -309,7 +310,10 @@ mod tests {
                 start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
             seed_topic(&$handle, $topic).await;
             let $broker = $handle.broker_arc_for_test();
-            test_ctx!($context, "admin");
+            krabka_macros::request_test_identity! {
+                bind($context);
+                user ["admin"];
+            };
         };
     }
 
@@ -397,8 +401,8 @@ mod tests {
     }
 
     use crate::test_support::{
-        broker_registration, describe_configs_acl_cases, grant_cluster_operation,
-        start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+        broker_registration, describe_configs_acl_cases, grant_optional_cluster_operation,
+        start_broker_with_authorizer_no_audit as start_broker,
     };
 
     async fn seed_topic(handle: &BrokerHandle, name: &str) {
@@ -478,11 +482,11 @@ mod tests {
 
     #[tokio::test]
     async fn denied_handler_response_preserves_error_fields() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            deny_all,
-            context(ctx, "alice")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] deny_all;
+            user ["alice"];
+        };
         let req = ListConfigResourcesRequest {
             resource_types: vec![RESOURCE_TYPE_TOPIC],
             ..Default::default()
@@ -527,10 +531,11 @@ mod tests {
         let mut cases = describe_configs_acl_cases(&allowed, &denied);
         cases.insert(3, ("read", Some(AclOperation::Read), &denied));
         for (user, grant, expected) in cases {
-            if let Some(operation) = grant {
-                grant_cluster_operation(&broker_handle, user, operation).await;
-            }
-            test_ctx!(ctx, user);
+            grant_optional_cluster_operation(&broker_handle, user, grant).await;
+            krabka_macros::request_test_identity! {
+                bind(ctx);
+                user [user];
+            };
 
             let resp = handle(&broker, &req, VERSION, &ctx);
 

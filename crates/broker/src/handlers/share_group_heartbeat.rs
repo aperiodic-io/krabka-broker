@@ -205,6 +205,7 @@ fn stopped_actor_code(broker: &Broker, group_id: &str) -> i16 {
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -212,7 +213,7 @@ mod tests {
             handlers::{
                 encode_response,
                 group_heartbeat_test_support::{
-                    acl_authorizer, alice, describe_acl, grant_group_read, group_read_acl,
+                    acl_authorizer, alice_peer, describe_acl, grant_group_read, group_read_acl,
                     subscribed_names_describe_denied_table as denied_table_fixture,
                     topic_with_partitions,
                 },
@@ -220,8 +221,8 @@ mod tests {
             },
             task_util::ask,
             test_support::{
-                ControllerPeerAllowed, finalize_share_version, peer, principal, request_context,
-                start_broker_with_authorizer as start_broker, test_ctx,
+                ControllerPeerAllowed, finalize_share_version, request_context,
+                start_broker_with_authorizer as start_broker,
             },
         },
         assert2::assert,
@@ -251,11 +252,11 @@ mod tests {
     fn group_read_denied_yields_group_authorization_failed() {
         let authorizer = acl_authorizer();
         let image = MetadataImage::new(uuid::Uuid::nil());
-        request_identity!(
-            (principal, peer, ctx),
-            crate::test_support::principal("ANONYMOUS"),
-            client_id = "share-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["ANONYMOUS"];
+            client ["share-client"];
+        };
 
         assert!(group_read_denied(&authorizer, &image, &ctx, "g"));
         assert!(!group_read_denied(
@@ -309,7 +310,10 @@ mod tests {
         let broker_handle = Broker::start(cfg).await.expect("start broker");
         let broker = broker_handle.broker_arc_for_test();
         finalize_share_version(&broker, 0).await;
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let req = request("g1", vec!["t1"]);
 
         let resp = handle(&broker, req, version, &ctx).await.expect("handle");
@@ -328,7 +332,10 @@ mod tests {
     /// still gets `UNSUPPORTED_VERSION`, not `GROUP_AUTHORIZATION_FAILED`,
     /// when the protocol itself is unavailable.
     async fn handle_denied_group_heartbeat(broker: &Broker) -> ShareGroupHeartbeatResponse {
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let req = request("denied-group", vec!["t1"]);
         handle(broker, req, VERSION, &ctx)
             .await
@@ -337,10 +344,10 @@ mod tests {
 
     #[tokio::test]
     async fn handle_protocol_gate_precedes_group_acl() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(acl_authorizer()))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(Arc::new(acl_authorizer()))];
+        };
         finalize_share_version(&broker, 0).await;
         let resp = handle_denied_group_heartbeat(&broker).await;
 
@@ -351,10 +358,10 @@ mod tests {
 
     #[tokio::test]
     async fn handle_group_read_denied_preserves_error_response() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(acl_authorizer()))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(Arc::new(acl_authorizer()))];
+        };
         let resp = handle_denied_group_heartbeat(&broker).await;
 
         assert!(
@@ -372,17 +379,13 @@ mod tests {
     /// `TOPIC_AUTHORIZATION_FAILED`.
     #[tokio::test]
     async fn handle_malformed_member_id_precedes_topic_authorization() {
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(acl_authorizer()))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(Arc::new(acl_authorizer()))];
+        };
         grant_group_read(&broker, "g").await;
-        request_identity!(
-            (principal, peer, ctx),
-            alice(),
-            client_id = "c",
-            address = peer()
-        );
+        let (principal, peer) = alice_peer();
+        let ctx = request_context(&principal, &peer, "c");
         // No Describe grant for "topic-b" -- if the malformed-request check
         // did not run first, this would answer `TOPIC_AUTHORIZATION_FAILED`.
         let req = ShareGroupHeartbeatRequest {
@@ -408,11 +411,11 @@ mod tests {
     #[tokio::test]
     async fn handle_refuses_malformed_heartbeats_as_kafka_does() {
         let version = VERSION;
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            allow_all,
-            context(ctx, "ANONYMOUS")
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker] allow_all;
+            user ["ANONYMOUS"];
+        };
         let valid = heartbeat_request()
             .group_id("g".into())
             .member_id("member-1".into())
@@ -523,21 +526,17 @@ mod tests {
     #[tokio::test]
     async fn handle_subscribed_name_describe_denied_refuses_whole_heartbeat_no_member_created() {
         // Deliberately no Describe grant for "topic-b".
-        broker_fixture!(
-            (broker_handle, _dir, broker),
-            start_broker(Arc::new(acl_authorizer()))
-        );
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker);
+            boot [start_broker(Arc::new(acl_authorizer()))];
+        };
         broker
             .controller
             .submit_change(vec![group_read_acl("g"), describe_acl("topic-a")])
             .await
             .expect("grant group Read and Describe(topic-a)");
-        request_identity!(
-            (principal, peer, ctx),
-            alice(),
-            client_id = "c",
-            address = peer()
-        );
+        let (principal, peer) = alice_peer();
+        let ctx = request_context(&principal, &peer, "c");
         let req = request("g", vec!["topic-a", "topic-b"]);
 
         let resp = handle(&broker, req, VERSION, &ctx)
@@ -579,12 +578,8 @@ mod tests {
             .submit_change(records)
             .await
             .expect("grant ACLs and create topic");
-        request_identity!(
-            (principal, peer, ctx),
-            alice(),
-            client_id = "c",
-            address = peer()
-        );
+        let (principal, peer) = alice_peer();
+        let ctx = request_context(&principal, &peer, "c");
         let req = request("g", vec!["topic-a"]);
 
         let resp = handle(&broker, req, VERSION, &ctx)
@@ -604,7 +599,10 @@ mod tests {
         let (broker_handle, _dir) = start_broker(std::sync::Arc::new(AllowAllAuthorizer)).await;
         broker_handle.wait_until_group_coordinator_ready().await;
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!((principal, peer, ctx), principal("ANONYMOUS"), test_context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["ANONYMOUS"];
+        };
         let heartbeat_req = heartbeat_request()
             .group_id("identity-group".into())
             .member_id("member-1".into())
@@ -668,7 +666,10 @@ mod tests {
         let _classic = coordinator.get_or_create_classic("classic");
         let _consumer = coordinator.get_or_create_group("consumer", GroupKindTag::Consumer);
         coordinator.mark_streams("streams");
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let not_found = |message: &str| {
             Some(ShareGroupHeartbeatResponse {
                 error_code: codes::GROUP_ID_NOT_FOUND,

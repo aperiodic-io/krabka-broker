@@ -21,20 +21,17 @@ use {
         records::{apply_seed, snapshot_seed},
     },
     crate::{
-        coordinator::unified::{
-            actor::reconciliation_model_support::model_properties,
-            streams::{
-                config::{StreamsAssignorKind, StreamsGroupConfig},
-                persistence::{StoredSubtopology, StreamsGroupTopologyValue},
-                state::{
-                    INITIAL_EPOCH, OwnedTasks, RoleTasks, StreamsGroupState,
-                    StreamsGroupStatePhase, StreamsMemberAssignmentState, StreamsMemberState,
-                },
+        coordinator::unified::streams::{
+            config::{StreamsAssignorKind, StreamsGroupConfig},
+            persistence::{StoredSubtopology, StreamsGroupTopologyValue},
+            state::{
+                INITIAL_EPOCH, OwnedTasks, RoleTasks, StreamsGroupState, StreamsGroupStatePhase,
+                StreamsMemberAssignmentState, StreamsMemberState,
             },
         },
         model_check::run_bfs,
     },
-    stateright::{Checker, Model},
+    stateright::{Checker, Model, Property},
     std::{
         collections::{BTreeMap, HashSet},
         time::{Duration, Instant},
@@ -577,22 +574,24 @@ impl Model for StreamsModel {
         Some(state)
     }}
 
-    model_properties! {
-        @method State;
-        always "active_task_exclusivity" => |state| active_task_exclusive(&state.actor.state),
-        always "target_active_task_exclusivity" => |state| target_active_exclusive(&state.actor.state),
-        always "assignment_within_topology" => |state| assignments_in_topology(state),
-        always "member_epoch_fencing" => |state| epochs_fenced(&state.actor.state),
-        always "reconciliation_phase_coherence" => |state| phase_coherent(&state.actor.state),
-        sometimes "stale_epoch_rejected" => |state| state.witnesses & WITNESS_STALE_FENCED != 0,
-        sometimes "forward_epoch_rejected" => |state| state.witnesses & WITNESS_FORWARD_FENCED != 0,
-        sometimes "unknown_member_rejected" => |state| state.witnesses & WITNESS_UNKNOWN_FENCED != 0,
-        sometimes "timeout_evicted_member" => |state| state.witnesses & WITNESS_TIMEOUT != 0,
-        sometimes "topology_changed" => |state| state.witnesses & WITNESS_TOPOLOGY != 0,
-        sometimes "state_replayed" => |state| state.witnesses & WITNESS_REPLAY != 0,
-        sometimes "active_task_withheld" => |state| state.witnesses & WITNESS_WITHHELD != 0,
-        sometimes "active_task_released" => |state| state.witnesses & WITNESS_RELEASED != 0,
-        sometimes "two_members_joined" => |state| state.actor.state.members.len() == 2,
+    fn properties(&self) -> Vec<Property<Self>> {
+        krabka_macros::model_properties! { State;
+        always "active_task_exclusivity" => |state| { active_task_exclusive(&state.actor.state) },
+        always "target_active_task_exclusivity" => |state| { target_active_exclusive(&state.actor.state) },
+        always "assignment_within_topology" => |state| { assignments_in_topology(state) },
+        always "member_epoch_fencing" => |state| { epochs_fenced(&state.actor.state) },
+        always "reconciliation_phase_coherence" => |state| { phase_coherent(&state.actor.state) },
+        sometimes "stale_epoch_rejected" => |state| { state.witnesses & WITNESS_STALE_FENCED != 0 },
+        sometimes "forward_epoch_rejected" => |state| { state.witnesses & WITNESS_FORWARD_FENCED != 0 },
+        sometimes "unknown_member_rejected" => |state| { state.witnesses & WITNESS_UNKNOWN_FENCED != 0 },
+        sometimes "timeout_evicted_member" => |state| { state.witnesses & WITNESS_TIMEOUT != 0 },
+        sometimes "topology_changed" => |state| { state.witnesses & WITNESS_TOPOLOGY != 0 },
+        sometimes "state_replayed" => |state| { state.witnesses & WITNESS_REPLAY != 0 },
+        sometimes "active_task_withheld" => |state| { state.witnesses & WITNESS_WITHHELD != 0 },
+        sometimes "active_task_released" => |state| { state.witnesses & WITNESS_RELEASED != 0 },
+        sometimes "two_members_joined" => |state| { state.actor.state.members.len() == 2 },
+
+        }
     }
 
     fn init_states(&self) -> Vec<Self::State> {

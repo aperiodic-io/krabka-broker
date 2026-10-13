@@ -57,7 +57,10 @@ use {
             atomic::{AtomicU64, Ordering},
         },
     },
-    tokio::sync::{Mutex, OwnedMutexGuard, RwLock, RwLockReadGuard},
+    tokio::{
+        sync::{Mutex, OwnedMutexGuard, RwLock, RwLockReadGuard},
+        task::JoinHandle,
+    },
 };
 
 pub(crate) mod jobs;
@@ -249,17 +252,13 @@ pub(super) struct Active<'a> {
     pub(super) term: Term,
 }
 
-crate::task_util::scheduled_tasks_type! {
-    /// The load tasks that one [`ShareCoordinator::refresh_leader_partitions`]
-    /// call started.
-    ///
-    /// A caller that does not wait drops this value. The tasks run on.
-    pub(crate) struct ScheduledLoads;
-    /// Waits until every load task of this refresh has ended.
-    |error| {
-        tracing::warn!(%error, "__share_group_state load task failed");
-    }
-}
+/// The load tasks that one [`ShareCoordinator::refresh_leader_partitions`]
+/// call started.
+///
+/// A caller that does not wait drops this value. The tasks run on.
+#[derive(Debug, Default, krabka_macros::ScheduledLoads)]
+#[scheduled_loads(failure_message = "__share_group_state load task failed")]
+pub(crate) struct ScheduledLoads(Vec<JoinHandle<()>>);
 
 /// Per-broker share-state coordinator.
 ///

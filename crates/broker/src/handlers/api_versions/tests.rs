@@ -13,12 +13,14 @@ use {
         api_catalog::{
             ClientMetricsReceiver, ListenerKind, UnstableApiVersions, VersionGates, supported_apis,
         },
+        broker::{Broker, BrokerHandle},
         cluster_id::encode,
         codes,
         config::ListenerSpec,
         handlers::RequestContext,
         test_support::{
-            decode_response as decode_wire_response, peer, principal, start_broker_with,
+            self as broker_fixture_support, decode_response as decode_wire_response, peer,
+            principal, request_context, start_broker_with,
         },
     },
     assert2::{assert, check},
@@ -30,6 +32,8 @@ use {
             api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
         },
     },
+    krabka_security::Principal,
+    std::{net::SocketAddr, sync::Arc},
 };
 
 const API_VERSIONS_V3: i16 = 3;
@@ -71,21 +75,33 @@ fn decode_response(version: i16, bytes: &Bytes) -> ApiVersionsResponse {
 /// below reports `throttle_time_ms = 0`.
 fn anonymous_principal() -> krabka_security::Principal { principal("ANONYMOUS") }
 
-/// The anonymous handshake fixture, retaining resource and identity bindings.
-macro_rules! anonymous_handshake_fixture {
-    (($handle:ident, $dir:ident, $broker:ident, $principal:ident, $peer:ident, $context:ident) $(, $ready:ident)?) => {
-        broker_fixture!(
-            ($handle, $dir, $broker),
-            crate::test_support::start_broker_with(|_| {})
-        );
-        request_identity!(
-            ($principal, $peer, $context),
-            anonymous_principal(),
-            client_id = "krabka-test",
-            address = crate::test_support::peer()
-        );
-        $(broker_fixture!(@$ready $broker);)?
-    };
+/// Retain the broker directory and the anonymous handshake's borrowed resources.
+async fn anonymous_handshake() -> (
+    BrokerHandle,
+    tempfile::TempDir,
+    Arc<Broker>,
+    Principal,
+    SocketAddr,
+) {
+    let (handle, directory) = start_broker_with(|_| {}).await;
+    let broker = handle.broker_arc_for_test();
+    let principal = anonymous_principal();
+    let peer = peer();
+    (handle, directory, broker, principal, peer)
+}
+
+/// Metadata-driven handshakes submit their setup only after this controller leads.
+async fn submit_handshake_metadata(
+    broker: &Broker,
+    records: impl FnOnce() -> Vec<MetadataRecord>,
+    message: &str,
+) {
+    broker_fixture_support::wait_for_controller_leader(broker).await;
+    broker
+        .controller
+        .submit_change(records())
+        .await
+        .expect(message);
 }
 
 macro_rules! api_version_wire {
@@ -309,7 +325,8 @@ fn api_versions_advertises_kip853_rpcs_and_describe_quorum_v2() {
 
 #[tokio::test]
 async fn handle_rejects_each_invalid_v3_client_info_field() {
-    anonymous_handshake_fixture!((broker_handle, _dir, broker, principal, peer, context));
+    let (broker_handle, _dir, broker, principal, peer) = anonymous_handshake().await;
+    let context = request_context(&principal, &peer, "krabka-test");
 
     for (name, version) in [("", "1.0.0"), ("krabka-test", "")] {
         let req = request(name, version);
@@ -326,7 +343,8 @@ async fn handle_rejects_each_invalid_v3_client_info_field() {
 
 #[tokio::test]
 async fn handle_accepts_legacy_request_without_client_info() {
-    anonymous_handshake_fixture!((broker_handle, _dir, broker, principal, peer, context));
+    let (broker_handle, _dir, broker, principal, peer) = anonymous_handshake().await;
+    let context = request_context(&principal, &peer, "krabka-test");
     let req = ApiVersionsRequest::default();
     let mut req_bytes = BytesMut::with_capacity(req.encoded_len(0));
     req.encode(&mut req_bytes, 0)
@@ -345,18 +363,19 @@ async fn handle_accepts_legacy_request_without_client_info() {
 
 #[tokio::test]
 async fn handle_accepts_valid_v3_and_surfaces_catalog_and_features() {
-    anonymous_handshake_fixture!(
-        (broker_handle, _dir, broker, principal, peer, context),
-        controller_leader
-    );
-    broker
-        .controller
-        .submit_change(vec![MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-            name: "metadata.version".into(),
-            level: 24,
-        })])
-        .await
-        .expect("submit finalized feature");
+    let (broker_handle, _dir, broker, principal, peer) = anonymous_handshake().await;
+    let context = request_context(&principal, &peer, "krabka-test");
+    submit_handshake_metadata(
+        &broker,
+        || {
+            vec![MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
+                name: "metadata.version".into(),
+                level: 24,
+            })]
+        },
+        "submit finalized feature",
+    )
+    .await;
     // #783: the epoch is the image's metadata offset, which every record
     // moves, not a count of feature records. Ten topic records after the last
     // feature record must move it.
@@ -428,16 +447,12 @@ async fn handle_accepts_valid_v3_and_surfaces_catalog_and_features() {
 
 #[tokio::test]
 async fn handle_applies_kip1242_routing_checks() {
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        crate::test_support::start_broker_with(|cfg| cfg.broker_id = 42)
-    );
-    request_identity!(
-        (principal, peer, context),
-        anonymous_principal(),
-        client_id = "krabka-test",
-        address = crate::test_support::peer()
-    );
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, principal, peer, context);
+        boot [broker_fixture_support::start_broker_with(|cfg| cfg.broker_id = 42)];
+        user ["ANONYMOUS"];
+        client ["krabka-test"];
+    };
     let raw_cluster_id = broker.controller.current_image().cluster_id();
     // A real KIP-1242 client learned this cluster id from a `Metadata` or
     // `DescribeCluster` response, which reports Kafka's base64 `Uuid` form
@@ -494,23 +509,23 @@ async fn handle_applies_kip1242_routing_checks() {
 async fn handle_reports_and_records_a_request_quota_throttle() {
     use krabka_metadata::{ClientQuotaRecord, EntityKey, MetadataRecord, QuotaEntity};
 
-    anonymous_handshake_fixture!(
-        (broker_handle, _dir, broker, principal, peer, context),
-        controller_leader
-    );
-
-    broker
-        .controller
-        .submit_change(vec![MetadataRecord::V1ClientQuota(ClientQuotaRecord {
-            entity: vec![QuotaEntity {
-                entity_type: "user".into(),
-                entity_name: Some(principal.name.clone()),
-            }],
-            config_key: "request_percentage".into(),
-            config_value: Some(0.0001),
-        })])
-        .await
-        .expect("seed the request quota");
+    let (broker_handle, _dir, broker, principal, peer) = anonymous_handshake().await;
+    let context = request_context(&principal, &peer, "krabka-test");
+    submit_handshake_metadata(
+        &broker,
+        || {
+            vec![MetadataRecord::V1ClientQuota(ClientQuotaRecord {
+                entity: vec![QuotaEntity {
+                    entity_type: "user".into(),
+                    entity_name: Some(principal.name.clone()),
+                }],
+                config_key: "request_percentage".into(),
+                config_value: Some(0.0001),
+            })]
+        },
+        "seed the request quota",
+    )
+    .await;
     broker_handle
         .wait_for_image(|image| {
             let key: EntityKey = vec![("user".into(), Some("ANONYMOUS".into()))];

@@ -18,17 +18,19 @@ use {
         fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
         freeze::resolve::resolve_topic_freeze,
         handlers::{
-            RequestContext, create_topics::handle as create_topics_handle,
-            delete_records::test_support::gated_config, fetch::handle as fetch_handle,
-            test_support::configured_topic_request,
+            RequestContext,
+            create_topics::handle as create_topics_handle,
+            delete_records::test_support::gated_config,
+            fetch::handle as fetch_handle,
+            test_support::{self as handler_fixture_support, configured_topic_request},
         },
         heartbeat::fencing::{RegistrationChange, registration_change},
         partition::Partition,
         replica_state::ReplicaState,
         share_coordinator::bootstrap::TOPIC as SHARE_COORDINATOR_TOPIC,
         test_support::{
-            DenyAll, KafkaErrorCode, append_partition_batch, broker_registration, encode_request,
-            peer, principal, start_broker_no_audit_with,
+            KafkaErrorCode, append_partition_batch, broker_registration, encode_request,
+            start_broker_no_audit_with,
         },
         txn::bootstrap::TOPIC,
     },
@@ -255,8 +257,11 @@ macro_rules! pending_partition_fixture {
 
 #[tokio::test]
 async fn handle_denied_topic_returns_topic_auth_rows() {
-    broker_fixture!((broker_handle, _dir, broker), deny_all);
-    request_identity!((p, peer), principal("alice"));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, p, peer);
+        boot [start_broker] deny_all;
+        user ["alice"];
+    };
     let req = request()
         .topic("secret")
         .partitions(&[
@@ -285,8 +290,11 @@ async fn handle_denied_topic_returns_topic_auth_rows() {
 
 #[tokio::test]
 async fn handle_unknown_partition_preserves_requested_index() {
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, p, peer);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let req = request()
         .topic("missing")
         .partitions(&[TrimTarget {
@@ -468,8 +476,11 @@ async fn a_trim_stops_at_the_delivery_watermark_of_a_scheduled_topic() {
         ),
     ];
 
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((admin, peer, ctx), principal("admin"), test_context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, peer, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
 
     for (topic, delivery_mode, expected_low_watermark) in cases {
         topic_holding_a_pending_batch()
@@ -507,8 +518,11 @@ async fn a_trim_stops_at_the_delivery_watermark_of_a_scheduled_topic() {
 
 #[tokio::test]
 async fn a_refused_trim_deletes_nothing() {
-    broker_fixture!((broker_handle, _dir, broker), break_glass(gated_config()));
-    request_identity!((principal, peer, ctx), principal("admin"), test_context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, principal, peer, ctx);
+        boot [handler_fixture_support::start_with_break_glass(gated_config)];
+        user ["admin"];
+    };
     topic_holding_a_pending_batch()
         .broker_handle(&broker_handle)
         .ctx(&ctx)
@@ -600,8 +614,11 @@ async fn a_trim_that_deletes_nothing_leaves_the_log_start_alone() {
         ),
     ];
 
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((admin, peer, ctx), principal("admin"), test_context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, peer, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
 
     for (topic, offset, low_watermark, error_code) in cases {
         pending_partition_fixture!((part, before), &broker_handle, &broker, topic, &ctx);
@@ -627,8 +644,11 @@ async fn a_trim_that_deletes_nothing_leaves_the_log_start_alone() {
 /// caller who could otherwise trim still cannot.
 #[tokio::test]
 async fn a_frozen_topic_refuses_a_trim() {
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((admin, peer, ctx), principal("admin"), test_context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, peer, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let topic = "delete-records-frozen";
     pending_partition_fixture!((part, before), &broker_handle, &broker, topic, &ctx);
 
@@ -667,8 +687,11 @@ async fn a_frozen_topic_refuses_a_trim() {
 /// client re-resolves the leader rather than deleting on a stale replica.
 #[tokio::test]
 async fn a_replica_that_is_not_the_leader_refuses_a_trim() {
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((admin, peer, ctx), principal("admin"), test_context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, peer, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let topic = "delete-records-follower";
     pending_partition_fixture!((part, before), &broker_handle, &broker, topic, &ctx);
     part.current_leader.store(
@@ -710,8 +733,11 @@ async fn a_compact_only_topic_refuses_a_trim() {
             2,
         ),
     ];
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((admin, peer, ctx), principal("admin"), test_context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, peer, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
 
     for (topic, policy, low_watermark, error_code, log_start) in cases {
         topic_with_configs_holding_a_pending_batch()
@@ -765,8 +791,11 @@ async fn a_compact_only_topic_refuses_a_trim() {
 /// partition the metadata does not hold answers `UNKNOWN_TOPIC_OR_PARTITION`.
 #[tokio::test]
 async fn a_partition_hosted_elsewhere_answers_not_leader_or_follower() {
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((admin, peer), principal("admin"));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, peer);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
     let topic = "delete-records-elsewhere";
     let elsewhere = krabka_metadata::NodeId(broker.config.node_id.0 + 1);
     broker
@@ -836,8 +865,11 @@ async fn a_partition_hosted_elsewhere_answers_not_leader_or_follower() {
 /// would move the log start.
 #[tokio::test]
 async fn an_internal_topic_refuses_a_trim() {
-    broker_fixture!((broker_handle, _dir, broker), allow_all);
-    request_identity!((admin, peer, ctx), principal("admin"), test_context);
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, admin, peer, ctx);
+        boot [start_broker] allow_all;
+        user ["admin"];
+    };
 
     broker_handle.wait_until_group_coordinator_ready().await;
     broker_handle
@@ -1050,11 +1082,11 @@ async fn follower_fetch(broker: &Broker, topic: &str, fetch_offset: i64, log_sta
         }],
         ..Default::default()
     };
-    request_identity!(
-        (replicator, peer, ctx),
-        principal("replicator"),
-        client_id = "replica-2"
-    );
+    krabka_macros::request_test_identity! {
+        bind(replicator, peer, ctx);
+        user ["replicator"];
+        client ["replica-2"];
+    };
     let (response, _) = fetch_handle(broker, VERSION, 1, &encode_request(&request, VERSION), &ctx)
         .await
         .expect("follower fetch");
@@ -1087,7 +1119,10 @@ async fn delete_to(
         offset,
         timeout,
     };
-    request_identity!((admin, peer, ctx), principal("admin"), test_context);
+    krabka_macros::request_test_identity! {
+        bind(admin, peer, ctx);
+        user ["admin"];
+    };
     let request = request()
         .topic(setup.topic)
         .partitions(&[TrimTarget {

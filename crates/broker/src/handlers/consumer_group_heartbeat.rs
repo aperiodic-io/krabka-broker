@@ -227,6 +227,7 @@ fn validate_request(
 
 #[cfg(test)]
 mod tests {
+
     use {
         super::*,
         crate::{
@@ -236,7 +237,7 @@ mod tests {
             handlers::{
                 encode_response,
                 group_heartbeat_test_support::{
-                    GroupFeatureLevel, acl_authorizer, alice, check_group_read_denied,
+                    GroupFeatureLevel, acl_authorizer, alice_peer, check_group_read_denied,
                     describe_acl, grant_group_read, group_read_acl, image_with_group_version,
                     set_group_version,
                     subscribed_names_describe_denied_table as subscribed_names_describe_denied_cases,
@@ -245,9 +246,7 @@ mod tests {
                 group_read_denied,
             },
             task_util::ask,
-            test_support::{
-                KafkaErrorCode, peer, principal, request_context, start_group_broker, test_ctx,
-            },
+            test_support::{KafkaErrorCode, request_context, start_group_broker},
         },
         assert2::assert,
         krabka_metadata::{MetadataImage, MetadataRecord},
@@ -487,11 +486,11 @@ mod tests {
     #[test]
     fn group_read_denied_allows_allow_all_authorizer() {
         let image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-        request_identity!(
-            (principal, peer, ctx),
-            principal("ANONYMOUS"),
-            client_id = "consumer-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["ANONYMOUS"];
+            client ["consumer-client"];
+        };
 
         assert!(!group_read_denied(
             &crate::authorizer::AllowAllAuthorizer,
@@ -502,7 +501,10 @@ mod tests {
     }
 
     async fn check_denied_group_response(broker: &Broker, expected: KafkaErrorCode) {
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let resp = handle(broker, request("denied-group"), VERSION, &ctx)
             .await
             .expect("ConsumerGroupHeartbeat handler");
@@ -544,7 +546,10 @@ mod tests {
     async fn handle_persists_request_client_identity() {
         let (broker_handle, _dir, broker) =
             versioned_group_broker(Arc::new(AllowAllAuthorizer), GroupFeatureLevel(1)).await;
-        request_identity!((principal, peer, ctx), principal("ANONYMOUS"), test_context);
+        krabka_macros::request_test_identity! {
+            bind(principal, peer, ctx);
+            user ["ANONYMOUS"];
+        };
 
         let resp = handle(&broker, request("identity-group"), VERSION, &ctx)
             .await
@@ -595,7 +600,10 @@ mod tests {
         coordinator.mark_share("share");
         coordinator.mark_streams("streams");
         let _share_actor = coordinator.get_or_create_share("share-actor");
-        test_ctx!(ctx, "ANONYMOUS");
+        krabka_macros::request_test_identity! {
+            bind(ctx);
+            user ["ANONYMOUS"];
+        };
         let not_found = |message: &str| {
             Some(ConsumerGroupHeartbeatResponse {
                 error_code: codes::GROUP_ID_NOT_FOUND,
@@ -692,12 +700,8 @@ mod tests {
         let (broker_handle, _dir, broker) =
             versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
         grant_group_read(&broker, "g").await;
-        request_identity!(
-            (principal, peer, ctx),
-            alice(),
-            client_id = "c",
-            address = peer()
-        );
+        let (principal, peer) = alice_peer();
+        let ctx = request_context(&principal, &peer, "c");
         let req = subscription_request("g", "", 0);
 
         let resp = handle(&broker, req, VERSION, &ctx)
@@ -752,12 +756,8 @@ mod tests {
             .submit_change(records)
             .await
             .expect("grant ACLs and create topics");
-        request_identity!(
-            (principal, peer, ctx),
-            alice(),
-            client_id = "c",
-            address = peer()
-        );
+        let (principal, peer) = alice_peer();
+        let ctx = request_context(&principal, &peer, "c");
         let req = ConsumerGroupHeartbeatRequest {
             group_id: "g".into(),
             member_id: "regex-member".into(),
@@ -825,12 +825,8 @@ mod tests {
         /// Sends one heartbeat as `alice`, with `regex` only when it is the
         /// join or when the pattern changes, as the Java client does.
         async fn heartbeat(&mut self, regex: Option<&str>) {
-            request_identity!(
-                (principal, peer, ctx),
-                alice(),
-                client_id = "c",
-                address = peer()
-            );
+            let (principal, peer) = alice_peer();
+            let ctx = request_context(&principal, &peer, "c");
             let joining = self.member_epoch == 0;
             let req = ConsumerGroupHeartbeatRequest {
                 group_id: "g".into(),

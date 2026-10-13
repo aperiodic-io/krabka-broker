@@ -19,7 +19,7 @@ use {
             },
         },
         test_support::{
-            DenyAll, begin_controlled_shutdown, fence_remote_broker, make_witness, peer, principal,
+            begin_controlled_shutdown, fence_remote_broker, make_witness, peer, principal,
             seed_remote_broker,
         },
     },
@@ -89,14 +89,20 @@ macro_rules! seeded_partition_topic {
 macro_rules! seeded_admin_partition_topic {
     (($handle:ident, $directory:ident, $broker:ident), ($principal:ident, $peer:ident), $name:expr $(, partitions = $partitions:expr)?) => {
         seeded_partition_topic!(($handle, $directory, $broker), $name $(, partitions = $partitions)?);
-        request_identity!(($principal, $peer), principal("admin"));
+        krabka_macros::request_test_identity! {
+            bind($principal, $peer);
+            user ["admin"];
+        };
     };
 }
 
 #[tokio::test]
 async fn handle_denies_topic_alter_for_each_topic() {
-    broker_fixture!((broker_handle, _dir, broker), deny_all);
-    request_identity!((p, peer), principal("alice"));
+    krabka_macros::broker_test_setup! {
+        bind(broker_handle, _dir, broker, p, peer);
+        boot [start_broker] deny_all;
+        user ["alice"];
+    };
     check_topic_rows()
         .broker(&broker)
         .ctx(&test_context(&p, &peer))
@@ -251,7 +257,10 @@ async fn handle_rejects_an_unplaceable_new_diskless_partition() {
 async fn strict_create_partitions_rejects_after_quota_exhaustion() {
     seeded_partition_topic!((broker_handle, _dir, broker), "metered");
     seed_controller_quota(&broker_handle, 2.0).await;
-    request_identity!((p, peer), principal("admin"));
+    krabka_macros::request_test_identity! {
+        bind(p, peer);
+        user ["admin"];
+    };
     check_topic_rows()
         .broker(&broker)
         .ctx(&test_context(&p, &peer))
@@ -705,7 +714,10 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
         let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_topic().handle(&broker_handle).call().await;
         let broker = broker_handle.broker_arc_for_test();
-        request_identity!((p, peer), principal("admin"));
+        krabka_macros::request_test_identity! {
+            bind(p, peer);
+            user ["admin"];
+        };
 
         let resp = drive(
             &broker,

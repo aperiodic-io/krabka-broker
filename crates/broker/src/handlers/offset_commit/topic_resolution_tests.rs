@@ -14,9 +14,7 @@ use {
         broker::BrokerHandle,
         codes,
         coordinator::unified::actor::GroupActorMessage,
-        test_support::{
-            DenyAll, dispatch_wire, peer, principal, request_context, start_group_broker_no_audit,
-        },
+        test_support::{DenyAll, dispatch_wire, request_context, start_group_broker_no_audit},
     },
     assert2::assert,
     krabka_protocol::{
@@ -121,7 +119,10 @@ macro_rules! consumer_commit {
         $request:ident
     ) => {
         let $shared = $broker.broker_arc_for_test();
-        request_identity!(($user, $address), principal("consumer"));
+        krabka_macros::request_test_identity! {
+            bind($user, $address);
+            user ["consumer"];
+        };
         let $context = request_context(&$user, &$address, "consumer-client");
         let $actual: OffsetCommitResponse = crate::test_support::dispatch_wire(
             &$shared,
@@ -353,11 +354,11 @@ async fn unknown_partition_answers_on_its_own_row() {
     let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let known_id = create_known_topic(&broker).await;
     let shared = broker.broker_arc_for_test();
-    request_identity!(
-        (user, address, ctx),
-        principal("consumer"),
-        client_id = "consumer-client"
-    );
+    krabka_macros::request_test_identity! {
+        bind(user, address, ctx);
+        user ["consumer"];
+        client ["consumer-client"];
+    };
     let partition = |partition_index| OffsetCommitRequestPartition {
         partition_index,
         committed_offset: 42,

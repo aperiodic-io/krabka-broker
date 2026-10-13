@@ -8,7 +8,11 @@ use {
 async fn timestamp_lookup_matches_the_first_record_in_the_isolation_prefix() {
     const TOPIC: &str = "list-offsets-timestamp-visibility";
     const TIMESTAMPS: [i64; 5] = [100, 300, 200, 400, 300];
-    list_offsets_topic_fixture!((broker, _dir, client), TOPIC);
+    let ClientBroker {
+        broker,
+        client,
+        dirs: _dir,
+    } = local_topic(TOPIC).await;
     let part_idx0 = krabka_ids::PartitionIndex(0);
     let partition = broker
         .broker_arc_for_test()

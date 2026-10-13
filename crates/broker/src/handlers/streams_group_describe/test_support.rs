@@ -159,12 +159,11 @@ pub(super) async fn describe_at(
     include_topology_description: bool,
     group_ids: &[&str],
 ) -> StreamsGroupDescribeResponse {
-    request_identity!(
-        (principal, peer, ctx),
-        principal("admin"),
-        client_id = "admin-client",
-        address = peer()
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        user ["admin"];
+        client ["admin-client"];
+    };
     let req = StreamsGroupDescribeRequest {
         include_topology_description,
         ..request(group_ids)
@@ -324,12 +323,11 @@ pub(super) async fn heartbeat(
 ) -> krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse {
     use krabka_protocol::owned::streams_group_heartbeat_response::MAX_VERSION;
 
-    request_identity!(
-        (principal, peer, ctx),
-        principal("admin"),
-        client_id = "streams-client",
-        address = peer()
-    );
+    krabka_macros::request_test_identity! {
+        bind(principal, peer, ctx);
+        user ["admin"];
+        client ["streams-client"];
+    };
     heartbeat_handle(broker, req.clone(), MAX_VERSION, &ctx)
         .await
         .expect("handle heartbeat")

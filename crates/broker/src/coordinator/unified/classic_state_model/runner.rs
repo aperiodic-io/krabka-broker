@@ -5,10 +5,7 @@
 
 use {
     super::config::ClassicModel,
-    crate::{
-        coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
-        model_check::run_bfs,
-    },
+    crate::model_check::{assert_pinned_count, run_bfs},
     stateright::Checker,
 };
 
@@ -32,12 +29,12 @@ const MAX_DEPTH: usize = 80;
 pub(super) const PINNED_UNIQUE_STATES_BASIC: usize = 3_853;
 pub(super) const PINNED_UNIQUE_STATES_WIDE: usize = 482_874;
 
-pinned_model_runner! {
-    @checked
-    pub(super) fn run(ClassicModel);
-    run_bfs, crate::model_check::assert_pinned_count;
-    MAX_DEPTH, TARGET_STATE_COUNT; properties_last;
-    |checker, label| {
+krabka_macros::model_runner! {
+
+
+    pub(super) fn run(model: ClassicModel, label: &str, pinned_unique_states: usize)
+    [bfs = run_bfs, pin = assert_pinned_count, depth = MAX_DEPTH, states = TARGET_STATE_COUNT, order = "properties_last", checker = checker]
+    {
         assert2::assert!(
             checker.unique_state_count() < MAX_UNIQUE_STATES,
             "[{label}] unique-state bound exceeded ({})",

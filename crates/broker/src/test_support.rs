@@ -51,6 +51,7 @@ use {
         api_catalog::UnstableApiVersions,
         authorizer::{
             AclSource, AllowAllAuthorizer, AuthorizationRequest, AuthorizationResult, Authorizer,
+            SimpleAclAuthorizer,
         },
         bootstrap::encode_bootstrap_records,
         broker::{Broker, BrokerHandle, spawn_partition},
@@ -1327,6 +1328,14 @@ pub(crate) fn sasl_principal(name: &str) -> Principal {
 /// requests to.
 pub(crate) fn peer() -> SocketAddr { "127.0.0.1:9092".parse().unwrap() }
 
+/// Empty ACL and metadata authorities for pure refusal checks.
+pub(crate) fn empty_acl_image() -> (SimpleAclAuthorizer, MetadataImage) {
+    (
+        SimpleAclAuthorizer::new(std::collections::HashSet::new()),
+        MetadataImage::new(uuid::Uuid::nil()),
+    )
+}
+
 /// Make this broker the leader of each `__transaction_state` partition in
 /// `partitions`, as the controller does when it creates the topic, and wait
 /// until the transaction coordinator loads each one.
@@ -1686,6 +1695,17 @@ pub(crate) async fn grant_cluster_operation(
         .expect("commit cluster acl");
 }
 
+/// Apply the optional grant selected by an authorization table row.
+pub(crate) async fn grant_optional_cluster_operation(
+    handle: &BrokerHandle,
+    user: &str,
+    operation: Option<krabka_metadata::AclOperation>,
+) {
+    if let Some(operation) = operation {
+        grant_cluster_operation(handle, user, operation).await;
+    }
+}
+
 /// Commit one literal `Allow` ACL for `User:<user>` on a `Topic` resource.
 ///
 /// `topic` is the literal resource name; pass `"*"` for Kafka's
@@ -1923,22 +1943,6 @@ pub(crate) async fn start_share_broker(
     }
     (handle, dir)
 }
-
-/// Bind `$ctx` to the calling module's `test_context` for a request from the
-/// anonymous principal named `$name` at [`peer`].
-///
-/// `test_ctx!(ctx, "admin");` stands for the three statements that build the
-/// principal, the peer, and the context. The principal and the peer live in
-/// hidden bindings for the rest of the enclosing block, so a test that reads
-/// either one again builds them itself.
-macro_rules! test_ctx {
-    ($ctx:ident, $name:expr) => {
-        let principal = crate::test_support::principal($name);
-        let peer = crate::test_support::peer();
-        let $ctx = test_context(&principal, &peer);
-    };
-}
-pub(crate) use test_ctx;
 
 /// The outcome a [`FakeMetadataSource`] returns from `submit_change`, as a
 /// function of the batch it was handed.

@@ -15,8 +15,8 @@ use {
         codes,
         handlers::{RequestContext, test_support::StartedBroker},
         test_support::{
-            decode_response, encode_request, peer, principal,
-            start_broker_with_authorizer_no_audit, try_dispatch_context,
+            decode_response, encode_request, start_broker_with_authorizer_no_audit,
+            try_dispatch_context,
         },
     },
     assert2::assert,
@@ -59,11 +59,11 @@ async fn start() -> StartedBroker {
 
 macro_rules! share_request_identity {
     (($user:ident, $address:ident, $ctx:ident)) => {
-        request_identity!(
-            ($user, $address, $ctx),
-            principal("share-consumer"),
-            client_id = "share-client"
-        );
+        krabka_macros::request_test_identity! {
+            bind($user, $address, $ctx);
+            user ["share-consumer"];
+            client ["share-client"];
+        };
     };
 }
 
